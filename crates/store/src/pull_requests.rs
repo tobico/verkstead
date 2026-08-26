@@ -64,7 +64,7 @@ pub enum Wrapping {
     Started,
 
     /// It is neither implementing nor grilling, so this is not a Conversation
-    /// with work to wrap up — it was aborted out from under the run, or it is
+    /// with work to wrap up — it was closed out from under the run, or it is
     /// wrapping already.
     NothingToWrap,
 

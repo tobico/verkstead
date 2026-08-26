@@ -71,8 +71,8 @@ use crate::store;
 /// wrapping up.
 ///
 /// Returns when there is nothing left to watch: the Conversation has moved on or
-/// gone, or driving that halted. Idle rather than looping, for the checks
-/// watcher's reason — nothing advances past a halt, and a
+/// gone, or driving that stopped. Idle rather than looping, for the checks
+/// watcher's reason — nothing advances past a stop, and a
 /// watcher that dispatched sessions behind one would be working on a run the
 /// human has stopped.
 ///
@@ -115,17 +115,17 @@ async fn once(state: &AppState, conversation_id: i64) -> Watching {
     };
 
     // The one thing that ends the watching by itself. Everything a Conversation
-    // leaves Wrapping for — Done, or aborted from the menu — arrives here as the
+    // leaves Wrapping for — Done, or closed from the menu — arrives here as the
     // same fact: this is not a wrap-up any more.
     if conversation.state != store::Lifecycle::Wrapping {
         return Watching::Done("the Conversation is not wrapping up any more");
     }
 
     // Asked before anything is dispatched, for the runner's reason: *the run does
-    // not advance past a halt* means no session is launched while the human is
-    // the only thing that can start one — a run waiting an account's window out
-    // included, see [`crate::halts::stopped`].
-    if crate::halts::stopped(state, conversation_id).await {
+    // not advance past a stop* means no session is launched while the human is
+    // the only thing that can start one — an account out of window included, see
+    // [`crate::stopping::stopped`].
+    if crate::stopping::stopped(state, conversation_id).await {
         return Watching::Done("driving has stopped");
     }
 

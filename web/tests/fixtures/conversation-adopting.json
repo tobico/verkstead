@@ -14,10 +14,10 @@
   "branch": "spring-otter",
   "direction": null,
   "grilling_pairing": null,
-  "held": null,
   "id": 1,
   "implementation_pairing": null,
   "pinned": [],
+  "ready_to_continue": false,
   "ready_to_grill": false,
   "ready_to_resume": false,
   "ready_to_stop": false,
@@ -27,6 +27,7 @@
     "name": "verkstead",
     "path": "/srv/repos/verkstead"
   },
+  "resets": null,
   "state": "Draft",
   "timeline": [
     {

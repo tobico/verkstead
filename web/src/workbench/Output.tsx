@@ -94,13 +94,8 @@ export function Output(props: {
   /// The Transcript to begin with, because it is what a reader usually came for:
   /// what the session *said*. The Screen is how it looked while it said it, and
   /// it is a click away rather than a scroll away.
-  ///
-  /// Except on the session whose keyboard the human has taken, which opens on
-  /// the Screen. That is what the *blocked on you* badge points at and what
-  /// handing back is pressed on — a Hold that opened behind the other tab would
-  /// be one the human had to go looking for.
   const [showing, setShowing] = createSignal<"transcript" | "screen">(
-    props.conversation.held === props.output.id ? "screen" : "transcript",
+    "transcript",
   );
 
   /// The record as far as this pane has read it, and whose it is.

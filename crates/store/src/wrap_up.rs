@@ -4,7 +4,7 @@
 //!
 //! Three small tables and one Timeline Event, which is the whole shape of this
 //! module. Everything else a human reads about wrap-up is already an Event — the
-//! pull request, the commits a fix session lands, the Notice of the halt where
+//! pull request, the commits a fix session lands, the Notice of the stop where
 //! it stops asking the machine. What is kept here is the bookkeeping underneath:
 //! facts that decide what Verkstead does next and that nobody would want a row
 //! on a Timeline for.
@@ -103,7 +103,7 @@ pub enum Finished {
     /// Something is still outstanding, so it stays where it is.
     StillWaiting,
 
-    /// It is not wrapping up any more — aborted out from under the watchers, or
+    /// It is not wrapping up any more — closed out from under the watchers, or
     /// finished by the poll before this one.
     NotWrapping,
 
@@ -379,7 +379,7 @@ pub async fn record_addressed_comments(
 /// over again, in a session as fresh as the first.
 ///
 /// Only ever called for a batch nothing is left running about — the session is
-/// gone and the run has halted with a Notice saying so — so there is nothing
+/// gone and the run has stopped with a Notice saying so — so there is nothing
 /// racing this to dispatch about them in the meantime.
 pub async fn forget_addressed_comments(
     pool: &SqlitePool,
@@ -478,10 +478,10 @@ pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<F
 /// Forget everything a Conversation's wrap-up has settled and everything its
 /// checks have been given, so a second round wraps up from nothing.
 ///
-/// What reopening does — see [`super::reopen_conversation`], whose transaction
-/// this runs in. A round that inherited the round before it would reach Wrapping
-/// with every one of the things wrap-up waits on already settled, and would be
-/// over the moment it arrived.
+/// What a steer into Grilling does — see [`super::steer_conversation`], whose
+/// transaction this runs in. A round that inherited the round before it would
+/// reach Wrapping with every one of the things wrap-up waits on already settled,
+/// and would be over the moment it arrived.
 ///
 /// The comments already addressed are deliberately left: a comment somebody
 /// wrote and a session answered stays answered, and forgetting it would
@@ -513,7 +513,7 @@ pub(crate) async fn forget_the_round(
 /// again from nothing.
 ///
 /// What Resume does. The human has read the Notice of what stopped and asked
-/// for another go, and a count left standing would be a watcher that halted all
+/// for another go, and a count left standing would be a watcher that stopped all
 /// over again on its next poll without dispatching anything.
 pub async fn forget_fix_attempts(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
     sqlx::query("DELETE FROM check_fix_attempts WHERE conversation_id = ?")

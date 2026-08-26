@@ -31,7 +31,6 @@ mod followers;
 pub mod github;
 /// Grilling a Conversation again, where the session that was grilling it died.
 mod grillings;
-mod halts;
 /// Where a Conversation's handoff document is written, and how it reaches the
 /// Timeline.
 ///
@@ -39,9 +38,7 @@ mod halts;
 /// session runs on — every sandbox binds one — so standing a router up that runs
 /// sessions means saying where they live.
 pub mod handoffs;
-mod hold;
 mod limits;
-mod manual;
 mod nudge;
 mod profiles;
 mod push;
@@ -82,6 +79,10 @@ mod stages;
 /// The check that says when a Conversation has Stalled: in a driven state,
 /// with nothing driving it and nothing asking the human about it.
 mod stalls;
+/// The human steering a Conversation: the click that stops the drive and opens
+/// the modal, and the submit that moves the work where they said.
+mod steering;
+mod stopping;
 /// The human stopping a Conversation on purpose: Stop, which waits for the step
 /// it is on, and Force stop, which does not.
 mod stops;
@@ -442,11 +443,6 @@ fn routed(
     // undriven after everything that resumes has resumed is what genuinely has
     // nobody — see [`stalls`].
     stalls::sweeping(&state, resumed);
-
-    // And the runs waiting an account's window out, whose windows go on coming
-    // back while the server is down: nothing holds a clock across the process,
-    // so the first sweep is what finds one already due — see [`limits`].
-    limits::sweeping(&state);
 
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up

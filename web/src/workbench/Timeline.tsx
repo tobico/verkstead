@@ -14,8 +14,8 @@
 //!
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one. Three of them
-//! are documents — the frozen Brief, the handoff and a Manual Task's
-//! instruction — and a document's summary is its own opening: the card shows
+//! are documents — the frozen Brief, the handoff and the instruction a steer
+//! carried — and a document's summary is its own opening: the card shows
 //! [`CLAMPED_LINES`] of it under a fade, and the pane holds the whole. The
 //! Brief is also the one Event that is written here as well as read: while the
 //! Conversation is drafting it is a field that saves itself rather than a card
@@ -25,11 +25,12 @@
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
 //! happened so far, which is exactly where the next thing to happen belongs.
-//! Two of them live there — `Start grilling` under the Brief it will freeze,
-//! and, on a conversation Verkstead has finished with, the press that opens a
-//! second round with a Brief of its own.
+//! One lives there — `Start grilling` under the Brief it will freeze. What to
+//! do about a conversation Verkstead has finished with is not there: a Steer is
+//! the way back into one, and it hangs off the header with everything else done
+//! to the conversation as a whole.
 //! Stopping the work is in neither place and not in the list: none of the three
-//! ways of doing it — stop after this task, stop now, abort the conversation —
+//! ways of doing it — stop after this task, stop now, close the conversation —
 //! is a step in the work, so all three hang off the header behind a menu, where
 //! what cannot be undone is not one stray click away.
 //!
@@ -51,14 +52,12 @@ import {
 } from "solid-js";
 
 import {
-  abortConversation,
+  closeConversation,
   forceStopConversation,
-  listProfiles,
-  reopenConversation,
   resume,
   saveBrief,
   startGrilling,
-  startManualTask,
+  steerConversation,
   stopConversation,
 } from "../api/client";
 import type {
@@ -66,15 +65,13 @@ import type {
   BriefEvent,
   BriefSaved,
   CommitEvent,
-  ConversationAborted,
-  ConversationReopened,
+  ConversationClosed,
   ConversationStopped,
   ConversationView,
   GrillingStarted,
   HandoffEvent,
   Lifecycle,
   ManualTaskEvent,
-  ManualTaskStarted,
   MovedEvent,
   NoticeEvent,
   PinnedEvent,
@@ -82,16 +79,15 @@ import type {
   QuestionSetEvent,
   Resumed,
   StageListEvent,
+  SteerEvent,
+  SteerOpened,
   TaskListEvent,
   TimelineEvent,
   UnreadableSetEvent,
 } from "../api/types";
 import app from "../App.module.css";
 import { Menu } from "../Menu";
-import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
-import * as pairing from "../pairing";
-import { Picker } from "../picking";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
 // from the page that draws the whole record rather than kept a second time
 // here: the row and the page are one record read at two distances.
@@ -99,8 +95,8 @@ import unreadable from "../set/Unreadable.module.css";
 import { Adoption } from "./Adoption";
 import { Mark } from "./Mark";
 import { PaneHead } from "./PaneHead";
-import { Pause } from "./Pause";
 import { Setup } from "./Setup";
+import { Steer } from "./Steer";
 import styles from "./Timeline.module.css";
 import shell from "./Workbench.module.css";
 import { keeping } from "./settling";
@@ -155,41 +151,20 @@ export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
 export const STOP_REFUSAL: Record<ConversationStopped, string> = {
   Stopped: "",
   Stopping: "",
-  AlreadyHalted:
+  AlreadyStopped:
     "This conversation has already stopped. Resume is what gets it going again.",
   NotDriven:
     "Nothing is supposed to be driving this conversation, so there is nothing to stop.",
   NoSuchConversation: "This conversation is gone.",
 };
 
-/// And each way of being refused an abort.
-export const ABORT_REFUSAL: Record<ConversationAborted, string> = {
-  Aborted: "",
-  AlreadyAborted: "",
+/// And each way of being refused a close.
+export const CLOSE_REFUSAL: Record<ConversationClosed, string> = {
+  Closed: "",
+  AlreadyClosed: "",
   NoSuchConversation: "This conversation is gone.",
   WorktreeStuck:
     "The worktree could not be removed, so nothing was changed. The server log says why.",
-};
-
-/// And each way of being refused a manual task.
-///
-/// `AlreadyRunning` is the one worth reading twice: the composer is drawn
-/// wherever nothing is running, so a submit that arrives to find something
-/// running was pressed against a page a moment out of date. Nothing is queued,
-/// because an instruction written against a worktree that has since moved may no
-/// longer be the thing to do.
-export const MANUAL_TASK_REFUSAL: Record<ManualTaskStarted, string> = {
-  Started: "",
-  NoSuchConversation: "This conversation is gone.",
-  NowhereToWork:
-    "This conversation has no worktree to run in — start the grilling first.",
-  AlreadyRunning:
-    "An agent is already running here, so nothing was started. Have a look at what it is doing and ask again after.",
-  EmptyInstruction: "Say what to do — the instruction is the whole of the task.",
-  NoSuchProfile: "That profile has been removed.",
-  NoSuchModel: "That profile no longer lists that model.",
-  NotStarted:
-    "The instruction is on the timeline and no session could be started for it. The server log says why.",
 };
 
 /// And each way of being refused a resume.
@@ -219,27 +194,16 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
     "Choose an implementation profile and model first, on the brief.",
 };
 
-/// And each way of being refused a second round.
-export const REOPEN_REFUSAL: Record<ConversationReopened, string> = {
-  Reopened: "",
-  NoSuchConversation: "This conversation is gone.",
-  NotDone:
-    "Only a finished conversation can be reopened, and this one is not finished.",
-  WorktreeRefused:
-    "The worktree is gone and git would not check the branch out again. The server log says why.",
-};
-
 /// Whether the event the *blocked on you* badge points at has a details pane
 /// behind it.
 ///
-/// Every other thing that stops a run does — a halt opens the Notice saying what
-/// stopped, a held session opens its screen — and a pause does not: what it has
-/// to say is three short facts and they are drawn whole in the list, with the
-/// press on them. So the badge selects it and stays put, rather than sending a
-/// narrow window away from the very thing there is to press.
+/// Every other thing that stops a run does — a held session opens its screen —
+/// and a Notice does not: what it has to say is drawn whole in the list, marked
+/// where it stands. So the badge selects it and stays put, rather than sending a
+/// narrow window away from the very thing there is to read.
 function opensAPane(conversation: ConversationView, event: number): boolean {
   return !conversation.timeline.some(
-    (entry) => "Pause" in entry && entry.Pause.id === event,
+    (entry) => "Notice" in entry && entry.Notice.id === event,
   );
 }
 
@@ -389,7 +353,14 @@ export function Timeline(props: {
               rather than only down in the list: a timeline is long by the time a
               run gets far enough to stop, and a badge the human had to go
               hunting behind would not be one. It points at the event that
-              stopped it, which is what makes it worth pressing. */}
+              stopped it, which is what makes it worth pressing.
+
+              Which is one kind of event now: whatever stopped a run — a session
+              that fell over, a press, an account out of window — the badge marks
+              the notice saying so, where it stands in the record. There is
+              nothing behind a pane for it, so a narrow window stays on the
+              record rather than being sent away from the very thing there is to
+              read. */}
           <Show when={props.conversation.blocked_on}>
             {(event) => (
               <button
@@ -458,6 +429,18 @@ export function Timeline(props: {
                     />
                   )}
                 </Match>
+                <Match when={"Steer" in event && event.Steer}>
+                  {(steer) => (
+                    <Steered
+                      steer={steer()}
+                      selected={props.selected === steer().id}
+                      open={() => {
+                        props.select(steer().id);
+                        props.details();
+                      }}
+                    />
+                  )}
+                </Match>
                 <Match when={"Handoff" in event && event.Handoff}>
                   {(handoff) => (
                     <Handoff
@@ -471,19 +454,15 @@ export function Timeline(props: {
                   )}
                 </Match>
                 <Match when={"Notice" in event && event.Notice}>
-                  {(notice) => <Notice notice={notice()} />}
-                </Match>
-                <Match when={"ManualTask" in event && event.ManualTask}>
-                  {(manual) => (
-                    <ManualTask
-                      manual={manual()}
-                      selected={props.selected === manual().id}
-                      open={() => {
-                        props.select(manual().id);
-                        props.details();
-                      }}
+                  {(notice) => (
+                    <Notice
+                      notice={notice()}
+                      selected={props.selected === notice().id}
                     />
                   )}
+                </Match>
+                <Match when={"ManualTask" in event && event.ManualTask}>
+                  {(manual) => <ManualTask manual={manual()} />}
                 </Match>
                 <Match when={"AgentOutput" in event && event.AgentOutput}>
                   {(output) => (
@@ -521,19 +500,6 @@ export function Timeline(props: {
                     />
                   )}
                 </Match>
-                {/* Drawn like a card with something to press inside it, and
-                    with nothing behind a pane: what a pause has to say is a
-                    profile, a time and the line the session printed, so there
-                    is nothing to open. */}
-                <Match when={"Pause" in event && event.Pause}>
-                  {(waiting) => (
-                    <Pause
-                      conversation={props.conversation}
-                      waiting={waiting()}
-                      selected={props.selected === waiting().id}
-                    />
-                  )}
-                </Match>
                 <Match when={"Commit" in event && event.Commit}>
                   {(commit) => (
                     <Commit
@@ -553,34 +519,28 @@ export function Timeline(props: {
       </ol>
 
       {/* After everything that has happened, because it is what happens next.
-          Drawn outside the list: none of them is an event, and any of them would
-          be an event that moved every time one landed. Only one is ever drawn —
-          each is for a different state — so they read as the one thing there is
-          to do from here. Adopting a stage is one state's, and the other two are
-          the two ends of the ladder: starting a draft grilling, and opening a
-          second round on a conversation that is finished. */}
+          Drawn outside the list: neither is an event, and either would be an
+          event that moved every time one landed. Only one is ever drawn — each
+          is for a different state — so they read as the one thing there is to do
+          from here. What to do about a conversation that is finished is not
+          here: a steer is the way back into one, and it is in the menu on the
+          header, drawn whatever state the conversation is in. */}
       <Show
         when={props.conversation.adopting}
-        fallback={
-          <>
-            <StartGrilling conversation={props.conversation} />
-            <Reopen conversation={props.conversation} />
-          </>
-        }
+        fallback={<StartGrilling conversation={props.conversation} />}
       >
         {(adopting) => (
           <Adoption conversation={props.conversation} adopting={adopting()} />
         )}
       </Show>
-      {/* And under that, the two ways to get a conversation moving again. Both
-          are offered *whenever nothing is running*, which is a quiet moment
-          between steps as much as it is a run that has stopped, so they sit
-          below whichever of the two above is drawn rather than instead of it.
+      {/* And under that, the way to get a conversation moving again. It is
+          offered *whenever nothing is running*, which is a quiet moment between
+          steps as much as it is a run that has stopped, so it sits below
+          whichever of the two above is drawn rather than instead of it.
 
-          Resume first, because it is the one that carries on what Verkstead was
-          already doing: the other is for the thing it was never going to do. */}
+          What Verkstead was never going to do is not here: a steer is what says
+          that, and it is in the menu on the header. */}
       <Resume conversation={props.conversation} />
-      <ManualTaskComposer conversation={props.conversation} />
     </>
   );
 }
@@ -596,8 +556,14 @@ export function Timeline(props: {
 ///
 /// It carries nothing. What to start is recomputed from the conversation's state
 /// and its branch at the moment of the press, which is the whole point of one
-/// button rather than one per way of stopping — steering the work is what the
-/// manual task below is for.
+/// button rather than one per way of stopping — saying something else should
+/// happen is what a steer is for.
+///
+/// Beside it, where the run stopped because an account ran out of window, the
+/// words the session printed about when that account comes back. Words to read
+/// and not a countdown: no stop resumes itself, so this one waits for the same
+/// press as every other, and what the reset time is for is deciding when to
+/// make it. The one thing that tells the two apart.
 function Resume(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
@@ -630,6 +596,14 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
           {press.isPending ? "Resuming…" : "Resume"}
         </button>
 
+        <Show when={props.conversation.resets}>
+          {(resets) => (
+            <p class={styles.resets}>
+              The account it was spending is out of window until {resets()}.
+            </p>
+          )}
+        </Show>
+
         <Note>
           Verkstead works out what should be running from where the work now
           stands, and starts it.
@@ -645,187 +619,6 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
         <Show when={press.isError}>
           <ErrorLine class={styles.failure}>
             The conversation could not be resumed: {press.error?.message}
-          </ErrorLine>
-        </Show>
-      </div>
-    </Show>
-  );
-}
-
-/// The way to move a conversation by hand: an instruction, a pairing to run it
-/// under, and a submit.
-///
-/// Drawn whenever there is a worktree to run in and no session is registered for
-/// it. That is the literal rule and it is deliberate: the gaps between an
-/// unattended run's steps, a wrapping lull, a grilling waiting on a pick, a
-/// finished conversation, a reopened one being written a second brief, and a
-/// conversation that has halted all show it, because the point of it is to get a
-/// stuck conversation moving. After a server restart nothing is running anywhere,
-/// so it shows everywhere, and that is wanted too.
-///
-/// A conversation that has never been grilled and one that was aborted have no
-/// worktree, so neither is ever offered it — there is nowhere for a session to
-/// run.
-///
-/// The pairing starts on the conversation's implementation one and picking
-/// another is one-off: it is what this task runs under, and it never becomes the
-/// conversation's own. Nothing here writes it back.
-function ManualTaskComposer(props: {
-  conversation: ConversationView;
-}): JSX.Element {
-  const queries = useQueryClient();
-
-  const [instruction, setInstruction] = createSignal("");
-  const [picked, setPicked] = createSignal<string | null>(null);
-  const [refused, setRefused] = createSignal<ManualTaskStarted | null>(null);
-
-  /// The profile list, read here rather than passed down, the way the setup's
-  /// pickers read it: the control is whole wherever it is drawn.
-  const profiles = useReading(() => ({
-    queryKey: ["profiles"],
-    queryFn: listProfiles,
-
-    // And the same merge, for the same picker — see the setup on the brief
-    // card. This one sits under a half-typed instruction while a session is
-    // talking above it, which is the loudest a Nudge ever gets.
-    freshness: { reconcile: "id" },
-  }));
-
-  /// Which pairing is selected: whatever the human picked, and the
-  /// conversation's implementation one until they pick anything.
-  ///
-  /// The empty string is nothing selected, which is where the composer opens on
-  /// a conversation whose implementation profile was chosen before models were
-  /// paired with them: there is no default model anywhere, so the pick is the
-  /// human's to make.
-  const running = () =>
-    picked() ?? pairing.chosen(props.conversation.implementation_pairing);
-
-  /// Whether the composer belongs on this conversation at all.
-  ///
-  /// A worktree to run in and nothing running is the whole of it: a conversation
-  /// that has never been grilled and one that was aborted have no worktree, so
-  /// neither is ever offered it, and a reopened one being written a second brief
-  /// has one and is exactly where the escape hatch belongs.
-  const offered = () =>
-    props.conversation.worktree !== null && !props.conversation.working;
-
-  const submit = useMutation(() => ({
-    mutationFn: (chosen: string) =>
-      startManualTask(
-        props.conversation.id,
-        instruction(),
-        pairing.choice(chosen),
-      ),
-    onSuccess: (outcome: ManualTaskStarted) => {
-      if (outcome !== "Started") {
-        setRefused(outcome);
-        // Refused against a picture of the world this page read a moment ago:
-        // reading it again is both the correction and the explanation.
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
-        void queries.invalidateQueries({ queryKey: ["profiles"] });
-        return;
-      }
-
-      // It is on the timeline now, which is where it is read back from: the box
-      // is emptied so what is in it is always something not yet asked for.
-      setRefused(null);
-      setInstruction("");
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
-    },
-  }));
-
-  return (
-    <Show when={offered()}>
-      <div class={styles.manualTaskComposer}>
-        <h2>Do something by hand</h2>
-
-        <label for="manual-task">What should the agent do?</label>
-        {/* A copy of what has been typed gives the field its height — see
-            `.grow` in `App.module.css`, which the brief's field uses for the
-            same reason. */}
-        <div class={app.grow} data-value={instruction()}>
-          <textarea
-            id="manual-task"
-            rows="1"
-            placeholder="Rebase this onto main and force-push"
-            value={instruction()}
-            onInput={(ev) => {
-              setInstruction(ev.currentTarget.value);
-              setRefused(null);
-            }}
-          />
-        </div>
-
-        {/* Drawn only once the list is here, the way the setup's pickers are:
-            a select whose value is set before its options exist is a select
-            showing nothing. */}
-        <div class={styles.manualTaskProfile}>
-          <label for="manual-task-pairing">Run it as</label>
-          <Show
-            when={profiles.data}
-            fallback={
-              <Note>
-                {profiles.isError
-                  ? `Could not read the agent profiles: ${profiles.error?.message}`
-                  : "Reading the agent profiles…"}
-              </Note>
-            }
-          >
-            {(saved) => (
-              /* A [`Picker`] rather than a `<select>`, the way the setup's
-                 pickers are: what this shows and what the press below runs the
-                 task as are the same pairing, list or no list — see
-                 `src/picking.tsx`. */
-              <Picker
-                id="manual-task-pairing"
-                options={pairing.pairings(saved())}
-                value={pairing.value}
-                label={pairing.label}
-                chosen={running()}
-                pick={setPicked}
-                // The one-off pick is gone from the list: it is dropped, and
-                // `running` falls back to the conversation's own implementation
-                // pairing — which is where the composer opened.
-                gone={() => setPicked(null)}
-                disabled={submit.isPending}
-              />
-            )}
-          </Show>
-        </div>
-
-        <button
-          type="button"
-          class={styles.startManualTask}
-          disabled={
-            submit.isPending || instruction().trim() === "" || running() === ""
-          }
-          onClick={() => {
-            const chosen = running();
-            if (chosen !== "") {
-              submit.mutate(chosen);
-            }
-          }}
-        >
-          {submit.isPending ? "Starting…" : "Set it going"}
-        </button>
-
-        <Note>
-          One session, outside the grilling and the implementation. Nothing about
-          the conversation moves — what it leaves behind is what it commits.
-        </Note>
-
-        <Show when={refused()}>
-          {(outcome) => (
-            <ErrorLine class={styles.failure}>
-              {MANUAL_TASK_REFUSAL[outcome()]}
-            </ErrorLine>
-          )}
-        </Show>
-        <Show when={submit.isError}>
-          <ErrorLine class={styles.failure}>
-            The manual task could not be started: {submit.error?.message}
           </ErrorLine>
         </Show>
       </div>
@@ -1241,50 +1034,51 @@ function Handoff(props: {
   );
 }
 
-/// Something Verkstead did on its own account: the stage it started and where
-/// the branch went, or a roadmap with nothing left to run.
+/// Something Verkstead did on its own account: the stage it started, where the
+/// branch went, a roadmap with nothing left to run — or a stop, which is what
+/// stopped the run, why, and what the evidence was.
 ///
 /// A line and not a card, unlike the handoff above it: it is a sentence rather
 /// than a document, and there is nothing to open and nothing to answer. It is
 /// rendered markdown all the same, because what it names — a branch, a stage, a
 /// file the repository records its process in — reads better set apart from the
 /// prose around it.
-function Notice(props: { notice: NoticeEvent }): JSX.Element {
+///
+/// Marked while it is what the conversation is blocked on, which is the whole of
+/// what the badge above does: a timeline is long by the time a run stops, and
+/// the badge is how the notice that stopped it is found. Nothing else selects
+/// one — there is no pane behind it to open.
+function Notice(props: {
+  notice: NoticeEvent;
+  selected: boolean;
+}): JSX.Element {
   return (
-    <div class={`${styles.notice} markdown`} innerHTML={props.notice.html} />
+    <div
+      class={`${styles.notice} markdown`}
+      classList={{ [styles.selected!]: props.selected }}
+      innerHTML={props.notice.html}
+    />
   );
 }
 
-/// What the human asked for by hand: the instruction a Manual Task was set
+/// What somebody asked for by hand, once: the instruction a manual task was set
 /// going with.
 ///
-/// A card and not a line, unlike the notice above it: it is what somebody asked
-/// for in their own words, and the words are the whole of it. Read-only, like
-/// the handoff — it is a moment on the record rather than a document to go back
-/// to, and what a second thought produces is a second Manual Task.
+/// Nothing sets another going. A steer into implementing carries the instruction
+/// now, and the session it starts drives the conversation rather than standing
+/// beside it — so this is a record of something that happened, kept and read
+/// rather than rewritten.
+///
+/// A line and not a card, like the notice above it: it is what was asked for, in
+/// somebody's own words, and there is nothing to open and nothing to answer. It
+/// is rendered markdown all the same, because that is what was typed.
 ///
 /// What the session it started went on to do is not drawn here. That arrives as
 /// the events any work arrives as — what it printed, what it asked, what it
 /// committed — under this one and in the order it happened.
-///
-/// Clamped and openable, as the handoff is: an instruction is as long as whoever
-/// typed it made it, and the events it set going belong directly under it.
-function ManualTask(props: {
-  manual: ManualTaskEvent;
-  selected: boolean;
-  open: () => void;
-}): JSX.Element {
+function ManualTask(props: { manual: ManualTaskEvent }): JSX.Element {
   return (
-    <Openable
-      kind={styles.manualTask!}
-      selected={props.selected}
-      open={props.open}
-    >
-      <div class={styles.eventHead}>
-        <h2>Manual task</h2>
-      </div>
-      <Clamped class={styles.manualTaskBody!} html={props.manual.html} />
-    </Openable>
+    <div class={`${styles.manualTask} markdown`} innerHTML={props.manual.html} />
   );
 }
 
@@ -1307,6 +1101,53 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
     >
       {props.from} → {props.moved.state}
     </p>
+  );
+}
+
+/// A steer: the human saying where the work goes.
+///
+/// A line and not a card, like the move directly under it, and drawn as the pair
+/// they are — this says who decided, and the move says what came of it. Which is
+/// the whole reason there are two: a timeline of moves alone could never be read
+/// back for the difference between the pipeline arriving somewhere and somebody
+/// putting it there.
+///
+/// Named rather than arrowed, unlike the move: where it came *from* is the move
+/// above this one and is already on the page, and what a steer adds is the
+/// deciding.
+///
+/// **A card where it carries an instruction**, which is a steer into
+/// implementing that wrote one: the instruction is what a session was sent off
+/// to do, so it is a document like the brief and the handoff and is read the
+/// same way — clamped here, whole in the details pane. A steer that carried
+/// nothing written stays the line it always was, there being nothing to open.
+function Steered(props: {
+  steer: SteerEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  const line = () => (
+    <p
+      class={styles.steered}
+      classList={{ [styles[props.steer.target.toLowerCase()]!]: true }}
+    >
+      You steered this into {props.steer.target}
+    </p>
+  );
+
+  return (
+    <Show when={props.steer.html} fallback={line()}>
+      {(html) => (
+        <Openable
+          kind={styles.steeredWith!}
+          selected={props.selected}
+          open={props.open}
+        >
+          {line()}
+          <Clamped class={styles.steerBody!} html={html()} />
+        </Openable>
+      )}
+    </Show>
   );
 }
 
@@ -1644,69 +1485,6 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// The button that opens a second round on a conversation Verkstead has finished
-/// with.
-///
-/// Drawn on `Done` and nowhere else. Aborted is off the ladder and stays there,
-/// and every other state is somewhere the work has got to — there is nothing to
-/// reopen about work that is still going on.
-///
-/// Where `Start grilling` sits, and for the same reason: it is the next thing to
-/// do about this conversation, and the end of everything that has happened is
-/// where the next thing belongs. What it leaves is a brief with nothing in it and
-/// a conversation drafting again, so the button pressed after this one is that
-/// one.
-function Reopen(props: { conversation: ConversationView }): JSX.Element {
-  const queries = useQueryClient();
-
-  const [refused, setRefused] = createSignal<ConversationReopened | null>(null);
-
-  const reopen = useMutation(() => ({
-    mutationFn: () => reopenConversation(props.conversation.id),
-    onSuccess: (outcome: ConversationReopened) => {
-      setRefused(outcome === "Reopened" ? null : outcome);
-
-      // Either way: reopened is a timeline that has moved, and refused is a
-      // picture of the world this page read a moment ago — reading it again is
-      // both the correction and the explanation.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
-    },
-  }));
-
-  return (
-    <Show when={props.conversation.state === "Done"}>
-      <div class={styles.reopen}>
-        <button
-          type="button"
-          class={styles.reopenConversation}
-          disabled={reopen.isPending}
-          onClick={() => reopen.mutate()}
-        >
-          {reopen.isPending ? "Reopening…" : "Reopen with a new brief"}
-        </button>
-        <Note>
-          A second round on the same branch. The brief above stays where it is —
-          this adds one to write, and the worktree comes back if it has gone.
-        </Note>
-
-        <Show when={refused()}>
-          {(outcome) => (
-            <ErrorLine class={styles.failure}>
-              {REOPEN_REFUSAL[outcome()]}
-            </ErrorLine>
-          )}
-        </Show>
-        <Show when={reopen.isError}>
-          <ErrorLine class={styles.failure}>
-            The conversation could not be reopened: {reopen.error?.message}
-          </ErrorLine>
-        </Show>
-      </div>
-    </Show>
-  );
-}
-
 /// What can be done to the conversation as a whole, rather than to any one
 /// event: a menu on the header, holding the three ways of ending what it is
 /// doing.
@@ -1718,7 +1496,7 @@ function Reopen(props: { conversation: ConversationView }): JSX.Element {
 /// component's to get right.
 ///
 /// In order of what each costs: stop, which waits for the task the run is on;
-/// force stop, which does not; and abort, which is not a stop at all but the end
+/// force stop, which does not; and close, which is not a stop at all but the end
 /// of the conversation. Each says what it does under it, because *stop* and
 /// *force stop* are two words apart and hours of work apart.
 ///
@@ -1728,8 +1506,19 @@ function Reopen(props: { conversation: ConversationView }): JSX.Element {
 function Actions(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
-  const [refused, setRefused] = createSignal<ConversationAborted | null>(null);
-  const [halting, setHalting] = createSignal<ConversationStopped | null>(null);
+  const [refused, setRefused] = createSignal<ConversationClosed | null>(null);
+  const [stopped, setStopped] = createSignal<ConversationStopped | null>(null);
+
+  /// What the click found, once it has answered, and `null` while the modal is
+  /// shut. Held out here rather than in the menu's rows, because the menu's rows
+  /// are built when it opens and thrown away when it closes — and the modal
+  /// outlives the menu that opened it by design: the press shuts the menu.
+  const [steering, setSteering] = createSignal<{ working: boolean } | null>(
+    null,
+  );
+
+  /// And what the click said when there was nothing to open a modal about.
+  const [unsteerable, setUnsteerable] = createSignal(false);
 
   // The menu's own way to shut, held here because what closes this one is the
   // press coming back rather than the press going out.
@@ -1751,7 +1540,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
   const pressing = (stopping: () => Promise<ConversationStopped>) => ({
     mutationFn: stopping,
     onSuccess: (outcome: ConversationStopped) => {
-      setHalting(outcome);
+      setStopped(outcome);
 
       if (outcome === "Stopped") {
         shut();
@@ -1769,15 +1558,40 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
     pressing(() => forceStopConversation(props.conversation.id)),
   );
 
-  const abort = useMutation(() => ({
-    mutationFn: () => abortConversation(props.conversation.id),
-    onSuccess: (outcome: ConversationAborted) => {
+  /// Clicking Steer, which is a press before it is a modal: it stops the drive,
+  /// so that nothing new is launched while the human composes and the world the
+  /// modal is drawn against is the world the submit arrives in.
+  ///
+  /// The menu shuts on the way through — what opens over it is the modal, and a
+  /// dropdown left hanging behind one is a menu nobody can see to close.
+  const click = useMutation(() => ({
+    mutationFn: () => steerConversation(props.conversation.id),
+    onSuccess: (outcome: SteerOpened) => {
+      if (outcome === "NoSuchConversation") {
+        setUnsteerable(true);
+        reread();
+        return;
+      }
+
+      setUnsteerable(false);
+      setSteering({ working: outcome.Opened.working });
+      shut();
+
+      // The conversation has stopped, whatever the human goes on to decide, so
+      // the page behind the modal is already out of date.
+      reread();
+    },
+  }));
+
+  const close = useMutation(() => ({
+    mutationFn: () => closeConversation(props.conversation.id),
+    onSuccess: (outcome: ConversationClosed) => {
       if (outcome === "NoSuchConversation" || outcome === "WorktreeStuck") {
         setRefused(outcome);
         return;
       }
 
-      // Aborted or already aborted: what was asked for holds either way.
+      // Closed or already closed: what was asked for holds either way.
       setRefused(null);
       shut();
       reread();
@@ -1785,99 +1599,144 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
   }));
 
   return (
-    <Menu
-      class={styles.conversationActions!}
-      label="Conversation actions"
-      name="Conversation actions"
-      closer={(close) => (shut = close)}
-      trigger="⋯"
-    >
-      {() => (
-        <>
-          <Show when={props.conversation.ready_to_stop}>
-            <div class={styles.action}>
-              <button
-                type="button"
-                role="menuitem"
-                class={styles.stop}
-                disabled={stop.isPending}
-                onClick={() => stop.mutate()}
-              >
-                {stop.isPending ? "Stopping…" : "Stop"}
-              </button>
-              <Note>Pause after the current task until you resume.</Note>
-              <Show when={halting() === "Stopping"}>
-                <Note class={styles.waiting}>
-                  The session running now finishes its task first. Nothing will
-                  be started after it.
-                </Note>
-              </Show>
-            </div>
-
-            <Show when={props.conversation.working}>
+    <>
+      <Menu
+        class={styles.conversationActions!}
+        label="Conversation actions"
+        name="Conversation actions"
+        closer={(close) => (shut = close)}
+        trigger="⋯"
+      >
+        {() => (
+          <>
+            <Show when={props.conversation.ready_to_stop}>
               <div class={styles.action}>
                 <button
                   type="button"
                   role="menuitem"
-                  class={styles.forceStop}
-                  disabled={force.isPending}
-                  onClick={() => force.mutate()}
+                  class={styles.stop}
+                  disabled={stop.isPending}
+                  onClick={() => stop.mutate()}
                 >
-                  {force.isPending ? "Stopping…" : "Force stop"}
+                  {stop.isPending ? "Stopping…" : "Stop"}
                 </button>
-                <Note>Halt any running tasks and stop immediately.</Note>
+                <Note>Stop after the current task until you resume.</Note>
+                <Show when={stopped() === "Stopping"}>
+                  <Note class={styles.waiting}>
+                    The session running now finishes its task first. Nothing will
+                    be started after it.
+                  </Note>
+                </Show>
               </div>
-            </Show>
-          </Show>
 
-          <Show
-            when={props.conversation.state !== "Aborted"}
-            fallback={<Note>This conversation has been aborted.</Note>}
-          >
+              <Show when={props.conversation.working}>
+                <div class={styles.action}>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class={styles.forceStop}
+                    disabled={force.isPending}
+                    onClick={() => force.mutate()}
+                  >
+                    {force.isPending ? "Stopping…" : "Force stop"}
+                  </button>
+                  <Note>End any running task and stop immediately.</Note>
+                </div>
+              </Show>
+            </Show>
+
+            {/* Drawn whatever state the conversation is in, unlike everything
+                around it: every state is somewhere to steer *from* — a draft
+                nothing has run in, a run in flight, work Verkstead has finished
+                with — and which states it can be steered *to* is the modal's to
+                offer. */}
             <div class={styles.action}>
               <button
                 type="button"
                 role="menuitem"
-                class={styles.abort}
-                disabled={abort.isPending}
-                onClick={() => abort.mutate()}
+                class={styles.steer}
+                disabled={click.isPending}
+                onClick={() => click.mutate()}
               >
-                {abort.isPending ? "Aborting…" : "Abort conversation"}
+                {click.isPending ? "Stopping…" : "Steer"}
               </button>
               <Note>
-                Permanently end the conversation and delete the worktree. The
-                branch stays where it is.
+                Stop the run and move this conversation somewhere else.
               </Note>
+              <Show when={unsteerable()}>
+                <ErrorLine class={styles.failure}>
+                  This conversation is gone.
+                </ErrorLine>
+              </Show>
+              <Show when={click.isError}>
+                <ErrorLine class={styles.failure}>
+                  The conversation could not be stopped to steer it:{" "}
+                  {click.error?.message}
+                </ErrorLine>
+              </Show>
             </div>
-          </Show>
 
-          <Show when={halting() && STOP_REFUSAL[halting()!]}>
-            <ErrorLine class={styles.failure}>
-              {STOP_REFUSAL[halting()!]}
-            </ErrorLine>
-          </Show>
-          <Show when={stop.isError || force.isError}>
-            <ErrorLine class={styles.failure}>
-              The conversation could not be stopped:{" "}
-              {stop.error?.message ?? force.error?.message}
-            </ErrorLine>
-          </Show>
+            <Show
+              when={props.conversation.state !== "Closed"}
+              fallback={<Note>This conversation has been closed.</Note>}
+            >
+              <div class={styles.action}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class={styles.close}
+                  disabled={close.isPending}
+                  onClick={() => close.mutate()}
+                >
+                  {close.isPending ? "Closing…" : "Close conversation"}
+                </button>
+                <Note>
+                  Permanently end the conversation and delete the worktree. The
+                  branch stays where it is.
+                </Note>
+              </div>
+            </Show>
 
-          <Show when={refused()}>
-            {(outcome) => (
+            <Show when={stopped() && STOP_REFUSAL[stopped()!]}>
               <ErrorLine class={styles.failure}>
-                {ABORT_REFUSAL[outcome()]}
+                {STOP_REFUSAL[stopped()!]}
               </ErrorLine>
-            )}
-          </Show>
-          <Show when={abort.isError}>
-            <ErrorLine class={styles.failure}>
-              The conversation could not be aborted: {abort.error?.message}
-            </ErrorLine>
-          </Show>
-        </>
-      )}
-    </Menu>
+            </Show>
+            <Show when={stop.isError || force.isError}>
+              <ErrorLine class={styles.failure}>
+                The conversation could not be stopped:{" "}
+                {stop.error?.message ?? force.error?.message}
+              </ErrorLine>
+            </Show>
+
+            <Show when={refused()}>
+              {(outcome) => (
+                <ErrorLine class={styles.failure}>
+                  {CLOSE_REFUSAL[outcome()]}
+                </ErrorLine>
+              )}
+            </Show>
+            <Show when={close.isError}>
+              <ErrorLine class={styles.failure}>
+                The conversation could not be closed: {close.error?.message}
+              </ErrorLine>
+            </Show>
+          </>
+        )}
+      </Menu>
+
+      {/* Outside the menu, because the press that opens it shuts the menu: what
+          the human is looking at from here is one card over the page. */}
+      <Show when={steering()}>
+        {(opened) => (
+          <Steer
+            conversation={props.conversation}
+            working={opened().working}
+            close={() => setSteering(null)}
+          />
+        )}
+      </Show>
+    </>
   );
 }
 
@@ -1927,9 +1786,9 @@ function Brief(props: {
   /// that cut a document off without offering the rest would be one that had
   /// hidden it.
   ///
-  /// The Brief's own flag rather than the Conversation's state, because a
-  /// reopened one has a frozen Brief and an open one on the same Timeline: what
-  /// froze is the round, and the server is what says which round each Brief
+  /// The Brief's own flag rather than the Conversation's state, because what
+  /// froze is the round and a Conversation steered into a second one has a Brief
+  /// per round on the same Timeline: the server is what says which round each
   /// belongs to. An adopting Conversation's stage brief comes down frozen from
   /// the start — it is nobody here's to write.
   const frozen = () => props.brief.frozen;
@@ -2074,11 +1933,9 @@ function Brief(props: {
           starts, so past that moment there is nothing here that could be
           changed.
 
-          Under *one* brief, though. A reopened conversation is drafting with a
-          frozen brief above its open one, and the setup belongs under the round
-          being set up rather than under both — while an adopting one is drafting
-          with a brief that is frozen from the start, because the stage brief is
-          nobody here's to write, and its setup is still the human's. */}
+          Under the brief being written, which on an adopting conversation is
+          one that is frozen: the stage brief is nobody here's to write, and its
+          setup is still the human's. */}
       <Show
         when={
           props.conversation.state === "Draft" &&

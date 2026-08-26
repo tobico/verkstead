@@ -22,20 +22,18 @@ import type {
   BriefEvent,
   Capture,
   CommitPane,
-  ConversationAborted,
+  ConversationClosed,
   ConversationEntry,
-  ConversationReopened,
+  ConversationSteered,
   ConversationStopped,
   ConversationView,
   GrillingStarted,
-  ManualTaskStarted,
-  PauseResumed,
   ProfileEntry,
   PullRequestDetails,
   Resumed,
   Screen,
   Shown,
-
+  SteerOpened,
   Submitted,
   TimelineEvent,
   TranscriptView,
@@ -75,7 +73,6 @@ import outputCss from "../src/workbench/Output.module.css?raw";
 import paneHead from "../src/workbench/PaneHead.module.css";
 import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The pause card, which is one of the record's and draws itself.
-import pausing from "../src/workbench/Pause.module.css";
 import prPane from "../src/workbench/PullRequest.module.css";
 // The Screen, both ways: it is the one pane with a height of its own, and the
 // rules that give it one are what jsdom cannot lay out.
@@ -85,6 +82,7 @@ import screenCss from "../src/workbench/Screen.module.css?raw";
 // deal of what it says about a card is a rule rather than an element.
 // What is still the human's to settle on the brief card.
 import setup from "../src/workbench/Setup.module.css";
+import steerModal from "../src/workbench/Steer.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
 import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // And the frame the three panes stand in, both ways: it holds the layout rules
@@ -93,11 +91,11 @@ import shell from "../src/workbench/Workbench.module.css";
 import shellCss from "../src/workbench/Workbench.module.css?raw";
 import {
   CLAMPED_LINES,
-  MANUAL_TASK_REFUSAL,
   RESUME_REFUSAL,
   STOP_REFUSAL,
   SWIPE,
 } from "../src/workbench/Timeline";
+import { STEER_REFUSAL } from "../src/workbench/Steer";
 import {
   BRANCHES,
   OPEN,
@@ -122,9 +120,11 @@ import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" }
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
-import halted from "./fixtures/conversation-halted.json" with { type: "json" };
+import stopped from "./fixtures/conversation-stopped.json" with { type: "json" };
 import paused from "./fixtures/conversation-paused.json" with { type: "json" };
-import reopened from "./fixtures/conversation-reopened.json" with { type: "json" };
+import secondRound from "./fixtures/conversation-second-round.json" with {
+  type: "json",
+};
 import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
 import unreadableSet from "./fixtures/set-unreadable.json" with { type: "json" };
@@ -627,8 +627,8 @@ describe("how a card says where its conversation has got to", () => {
 
   /// Which of the two it was is the details pane's to say. The sidebar's business
   /// is that there is nothing here to do.
-  it("dims finished and aborted work identically", async () => {
-    theSidebar({ state: "Done" }, { state: "Aborted" }, { state: "Wrapping" });
+  it("dims finished and closed work identically", async () => {
+    theSidebar({ state: "Done" }, { state: "Closed" }, { state: "Wrapping" });
     const { container } = mount();
 
     expect((await cards(container)).map((card) => card.className)).toEqual([
@@ -654,7 +654,7 @@ describe("how a card says where its conversation has got to", () => {
     ).not.toContain("box-shadow: inset 0.2rem");
   });
 
-  /// Dimmed and still a row to press: a Done Conversation can be reopened.
+  /// Dimmed and still a row to press: a Done Conversation can be steered.
   it("opens a dimmed conversation like any other", async () => {
     theSidebar({ state: "Done" });
     const { container, history } = mount();
@@ -2496,43 +2496,6 @@ function lay(element: Element, box: { at: number; wide: number }): void {
   Object.defineProperty(element, "offsetWidth", { value: box.wide });
 }
 
-/// Where the workbench hands this conversation's keyboard back.
-const HANDING_BACK = `/api/ui/conversations/${GRILLING.id}/hand-back`;
-
-/// The same conversation with the human at its session's keyboard: `running`
-/// says whether the session is still going, because a Hold outlives one.
-///
-/// A fixture has no Hold in it and never will — a Hold is a fact about a running
-/// server rather than a payload, and it is nowhere on the Timeline.
-function theHeld(running: boolean, ...answers: Parameters<typeof serving>) {
-  const altered: TimelineEvent[] = GRILLING.timeline.map((event) =>
-    "AgentOutput" in event
-      ? { AgentOutput: { ...event.AgentOutput, running } }
-      : event,
-  );
-
-  return serving(
-    whenever("/api/ui/conversations", json(SIDEBAR)),
-    whenever("/api/ui/repos", json(REPOS)),
-    whenever("/api/ui/profiles", json(PROFILES)),
-    whenever(
-      `/api/ui/conversations/${GRILLING.id}`,
-      json({
-        ...GRILLING,
-        timeline: altered,
-        held: OUTPUT.id,
-        blocked_on: OUTPUT.id,
-      }),
-    ),
-    whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
-    whenever(CAPTURE_OF_IT, json(CAPTURE)),
-    whenever(SCREEN_OF_IT, json(SCREEN)),
-    // Last, so a test can hold one of those paths to an answer of its own: a
-    // later answer for a path replaces the earlier.
-    ...answers,
-  );
-}
-
 /// The workbench with the opened conversation altered, for the states no fixture
 /// holds — a refusal from the server, a worktree that has gone.
 function theWorkbenchWith(
@@ -3064,28 +3027,9 @@ describe("a session's output on the timeline", () => {
   /// browser gives one origin six connections and the reads queue behind each
   /// other.
   ///
-  /// Asked of the held session, because that is the one that opens on the Screen
-  /// without a click: what is being proved is that the record is never read at
-  /// all, rather than that it is not read twice.
-  it("does not read the transcript while the screen is what is showing", async () => {
-    Attached.opened = [];
-    vi.stubGlobal("WebSocket", Attached);
-
-    const fetching = theHeld(true);
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    (await attached()).says(PAINTED);
-    await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
-
-    expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBe(0);
-    // And the Capture with it, which is the read the Transcript's own answer
-    // would have decided.
-    expect(askedFor(fetching, CAPTURE_OF_IT)).toBe(0);
-  });
-
-  /// And it is read the moment it is asked for, which is what makes the reading
-  /// above something the pane put off rather than something it dropped.
+  /// So it is read the moment it is asked for and not before, which is what
+  /// makes the reading something the pane put off rather than something it
+  /// dropped.
   it("reads the transcript when the reader switches back to it", async () => {
     const fetching = theSpeaking();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -3732,12 +3676,11 @@ describe("watching a live session's screen", () => {
       expect(grid.textContent).toContain("and then it went quiet"),
     );
 
-    // Watching, and saying what typing into it would cost: the first keystroke
-    // takes the Hold, and a pane that let one be typed without saying so would
-    // be one that stopped Verkstead by surprise.
+    // Watching, and saying what typing into it does and does not do: typing
+    // works in the session, and the press that holds the run off is Stop.
     const said = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.readOnly}`);
     expect(said.textContent).toContain("Watching");
-    expect(said.textContent).toContain("hand it back");
+    expect(said.textContent).toContain("press Stop first");
 
     // Nothing was fetched: a request for the grid as the store last had it
     // would be a request for what the repaint has already replaced.
@@ -3947,7 +3890,7 @@ describe("watching a live session's screen", () => {
   });
 });
 
-describe("taking a live session's keyboard", () => {
+describe("putting something into a live session's screen", () => {
   /// The terminal the pane drew, as the browser gives a keystroke to one: xterm
   /// takes typing through the hidden textarea it keeps focus in, and turns each
   /// keypress into the bytes a session expects before anything of ours sees it.
@@ -3961,10 +3904,7 @@ describe("taking a live session's keyboard", () => {
   }
 
   /// What a watcher said up the socket, of the kind named.
-  function said(
-    socket: Attached,
-    kind: "Typed" | "Moused" | "Resized",
-  ): unknown[] {
+  function said(socket: Attached, kind: "PutIn" | "Resized"): unknown[] {
     return socket.sent
       .map((wrote) => JSON.parse(wrote) as Record<string, unknown>)
       .filter((wrote) => kind in wrote)
@@ -4015,15 +3955,14 @@ describe("taking a live session's keyboard", () => {
 
     await typeInto(container, "Enter", 13);
 
-    await waitFor(() => expect(said(socket, "Typed")).toEqual(["\r"]));
+    await waitFor(() => expect(said(socket, "PutIn")).toEqual(["\r"]));
     expect(grid.textContent).toBe(before);
   });
 
-  /// A paste is the keyboard too. It arrives at the terminal as an event of its
+  /// A paste goes up the same way. It arrives at the terminal as an event of its
   /// own rather than as a keypress, and what it carries is exactly what somebody
-  /// meant to put into the session — so it goes up as typing, and takes the Hold
-  /// the way a keystroke does.
-  it("sends a paste as typing", async () => {
+  /// meant to put into the session.
+  it("sends a paste up the socket", async () => {
     const { container, socket } = await watching();
 
     const typing = await drawn<HTMLTextAreaElement>(
@@ -4035,108 +3974,43 @@ describe("taking a live session's keyboard", () => {
       clipboardData: { getData: () => "cargo test" },
     });
 
-    await waitFor(() => expect(said(socket, "Typed")).toEqual(["cargo test"]));
-    expect(said(socket, "Moused")).toEqual([]);
+    await waitFor(() => expect(said(socket, "PutIn")).toEqual(["cargo test"]));
   });
 
-  /// And the mouse is not. A session whose interface tracks it has the terminal
+  /// And so does the mouse. A session whose interface tracks it has the terminal
   /// report every move, click and scroll down the same callback a keystroke
-  /// comes out of — so a cursor crossing a live Screen would take the Hold, and
-  /// silently stop Verkstead ending anything, if the two were not told apart.
-  ///
-  /// Told apart by what the human touched rather than by the bytes: nothing
-  /// about a mouse report distinguishes it from an arrow key on the wire. What
+  /// comes out of, and the two are not told apart: neither commits Verkstead to
+  /// anything, so what is on the wire is bytes a terminal is being sent. What
   /// the wheel is turned into here is one of them.
-  it("sends what the mouse did as the mouse, which takes nothing", async () => {
+  it("sends what the mouse did up the same socket", async () => {
     const { container, socket } = await watching();
 
     const grid = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-screen`);
 
     fireEvent.wheel(grid, { deltaY: 120 });
 
-    await waitFor(() => expect(said(socket, "Moused")).not.toEqual([]));
-
-    // And nothing of it went up as typing, which is the whole of the claim: the
-    // server takes the Hold on the one kind and never on the other.
-    expect(said(socket, "Typed")).toEqual([]);
+    await waitFor(() => expect(said(socket, "PutIn")).not.toEqual([]));
   });
 
-  /// A Hold is the server's answer rather than this page's memory of having
-  /// typed: one Hold is one Conversation's, and a phone that took it is one this
-  /// window has to be able to see and end.
-  it("says who has the keyboard, and hands it back on one press", async () => {
-    Attached.opened = [];
-    vi.stubGlobal("WebSocket", Attached);
+  /// Typing into a driven session commits Verkstead to nothing: no press to
+  /// undo it, and no badge saying the work has stopped. Somebody who wants the
+  /// run held off presses Stop first, which is a stop like any other.
+  it("neither draws a hand-back nor blocks the conversation on one", async () => {
+    const { container } = await watching();
 
-    const fetching = theHeld(
-      true,
-      whenever(HANDING_BACK, json("HandedBack"), "POST"),
-    );
+    await typeInto(container, "Enter", 13);
 
-    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const note = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.readOnly}`);
+    expect(note.textContent).toContain("press Stop first");
 
-    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-
-    // Opened on the Screen rather than the Transcript, because that is what the
-    // badge points at and where the press is.
-    const socket = await attached();
-    socket.says(PAINTED);
-
-    const holding = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.holding}`);
-    expect(holding.textContent).toContain("You have the keyboard");
-
-    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${screenPane.handBack}`));
-
-    await waitFor(() =>
-      expect(
-        fetching.mock.calls.filter(
-          ([asked, init]) =>
-            String(asked) === HANDING_BACK && init?.method === "POST",
-        ),
-      ).toHaveLength(1),
-    );
-  });
-
-  /// And a session that exited while held still has the press. That is exactly
-  /// the case that is waiting to be judged: nothing about the run moves until
-  /// the keyboard goes back, so a pane that dropped the control once the session
-  /// went would be one the human could not get out of.
-  it("keeps the hand-back on a session that has ended", async () => {
-    Attached.opened = [];
-    vi.stubGlobal("WebSocket", Attached);
-
-    theHeld(false, whenever(HANDING_BACK, json("HandedBack"), "POST"));
-
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-
-    const holding = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.holding}`);
-    expect(holding.textContent).toContain("the session has exited");
-    expect(await drawn(container, `.${shell.detailsPane} .${screenPane.handBack}`)).toBeTruthy();
-
-    // Its Screen is the one it last stood on, fetched: there is nothing left to
-    // attach to, held or not.
-    expect(Attached.opened).toHaveLength(0);
-  });
-
-  /// The badge in the header says the work has stopped and points at the session
-  /// holding it up, which is the same badge a halt draws — a Hold is the other
-  /// thing the human can be blocked on, and the one that is nowhere on the
-  /// Timeline.
-  it("carries blocked on you while the hold lasts", async () => {
-    Attached.opened = [];
-    vi.stubGlobal("WebSocket", Attached);
-    theHeld(true);
-
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    const badge = await drawn(container, `.${shell.timelinePane} .${timeline.blocked}`);
-    expect(badge.textContent).toContain("Blocked on you");
+    expect(container.querySelector('[class*="handBack"]')).toBeNull();
+    expect(
+      container.querySelector(`.${shell.timelinePane} .${timeline.blocked}`),
+    ).toBeNull();
   });
 });
 
-describe("aborting a conversation", () => {
+describe("closing a conversation", () => {
   /// Behind a menu on the header, because it throws a worktree away and the
   /// header is somewhere the cursor passes on the way to everything else.
   it("is not one click away", async () => {
@@ -4147,31 +4021,31 @@ describe("aborting a conversation", () => {
 
     // Closed, so nothing in it is on the page at all — which is the whole of
     // what standing a destructive action behind a menu means.
-    expect(container.querySelector(`.${timeline.abort}`)).toBeNull();
+    expect(container.querySelector(`.${timeline.close}`)).toBeNull();
 
     const menu = await openActions(container);
-    expect(menu.querySelector(`.${timeline.abort}`)).toBeTruthy();
-    expect(container.querySelector(`.${paneHead.head} .${timeline.abort}`)).toBe(
-      menu.querySelector(`.${timeline.abort}`),
+    expect(menu.querySelector(`.${timeline.close}`)).toBeTruthy();
+    expect(container.querySelector(`.${paneHead.head} .${timeline.close}`)).toBe(
+      menu.querySelector(`.${timeline.close}`),
     );
   });
 
-  it("posts to the conversation's own abort route", async () => {
+  it("posts to the conversation's own close route", async () => {
     const fetching = theGrilling(
       whenever(
-        `/api/ui/conversations/${GRILLING.id}/abort`,
-        json("Aborted" satisfies ConversationAborted),
+        `/api/ui/conversations/${GRILLING.id}/close`,
+        json("Closed" satisfies ConversationClosed),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.abort}`));
+    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.close}`));
 
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${GRILLING.id}/abort`),
+        sent(fetching, `/api/ui/conversations/${GRILLING.id}/close`),
       ).toEqual({}),
     );
   });
@@ -4190,163 +4064,79 @@ describe("aborting a conversation", () => {
     expect(screen.getByText(/The branch stays where it is/)).toBeTruthy();
   });
 
-  it("offers nothing to abort on one that is aborted already", async () => {
-    theWorkbenchWith({ state: "Aborted", ready_to_grill: false });
+  it("offers nothing to close on one that is closed already", async () => {
+    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
 
-    await waitFor(() => screen.getByText("This conversation has been aborted."));
-    expect(container.querySelector(`.${timeline.conversationActions} .${timeline.abort}`)).toBeNull();
+    await waitFor(() => screen.getByText("This conversation has been closed."));
+    expect(container.querySelector(`.${timeline.conversationActions} .${timeline.close}`)).toBeNull();
   });
 
   it("says when the worktree could not be removed", async () => {
     theGrilling(
       whenever(
-        `/api/ui/conversations/${GRILLING.id}/abort`,
-        json("WorktreeStuck" satisfies ConversationAborted),
+        `/api/ui/conversations/${GRILLING.id}/close`,
+        json("WorktreeStuck" satisfies ConversationClosed),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.abort}`));
+    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.close}`));
 
     await waitFor(() => screen.getByText(/could not be removed/));
   });
 });
 
-/// A conversation Verkstead has finished with, opened again for a second brief
-/// round: the frozen brief above the round boundary, and the one being written
-/// under it.
-describe("reopening a conversation", () => {
-  const REOPENED = reopened as ConversationView;
+/// A conversation Verkstead had finished with, steered into a second round: the
+/// first round's brief above the boundary and the round steered into below it.
+///
+/// A steer is the one way back into work that is over — nothing under the
+/// timeline offers a second door — so what these ask is that the round it opens
+/// reads as one, and that a finished conversation still has the steer to press.
+describe("a second round", () => {
+  const SECOND = secondRound as ConversationView;
 
-  /// The workbench with the reopened conversation opened instead of the drafting
+  /// The workbench with the steered conversation opened instead of the drafting
   /// one.
-  function theReopened(...answers: Parameters<typeof serving>) {
+  function theSecondRound(...answers: Parameters<typeof serving>) {
     return theWorkbench(
-      whenever(`/api/ui/conversations/${REOPENED.id}`, json(REOPENED)),
+      whenever(`/api/ui/conversations/${SECOND.id}`, json(SECOND)),
       ...answers,
     );
   }
 
-  /// Where `Start grilling` sits, and for the same reason: it is the next thing
-  /// to do about this conversation, and the end of everything that has happened
-  /// is where the next thing belongs.
-  it("offers the press under the timeline once the work is finished", async () => {
-    theWorkbenchWith({ state: "Done" });
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    const press = await drawn(container, `.${timeline.reopen} .${timeline.reopenConversation}`);
-    expect(press.textContent).toContain("Reopen");
-
-    expect(
-      container.querySelector(`.${timeline.timeline}`)!.compareDocumentPosition(press) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  /// Done and nowhere else. Aborted is off the ladder and stays there, and every
-  /// other state is somewhere the work has got to.
-  it("is offered on done and on no other state", async () => {
-    for (const state of [
-      "Draft",
-      "Grilling",
-      "Implementing",
-      "Wrapping",
-      "Aborted",
-    ] as const) {
-      theWorkbenchWith({ state });
-      const { container, unmount } = mount(`/conversations/${OPEN.id}`);
-
-      await drawn(container, `.${timeline.timeline}`);
-      expect(container.querySelector(`.${timeline.reopen}`)).toBeNull();
-      unmount();
-    }
-  });
-
-  it("posts to the conversation's own reopen route", async () => {
-    const fetching = theWorkbenchWith(
-      { state: "Done" },
-      whenever(
-        `/api/ui/conversations/${OPEN.id}/reopen`,
-        json("Reopened" satisfies ConversationReopened),
-        "POST",
-      ),
-    );
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    fireEvent.click(await drawn(container, `.${timeline.reopen} .${timeline.reopenConversation}`));
-
-    await waitFor(() =>
-      expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/reopen`),
-      ).toEqual({}),
-    );
-  });
-
-  /// What the human is owed before pressing it: the frozen brief is not touched,
-  /// and the branch is the one the work is already on.
-  it("says the brief above it stays where it is", async () => {
-    theWorkbenchWith({ state: "Done" });
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    const panel = await drawn(container, `.${timeline.reopen}`);
-    expect(panel.textContent).toContain("second round on the same branch");
-    expect(panel.textContent).toContain("stays where it is");
-  });
-
-  it("says when the branch could not be checked out again", async () => {
-    theWorkbenchWith(
-      { state: "Done" },
-      whenever(
-        `/api/ui/conversations/${OPEN.id}/reopen`,
-        json("WorktreeRefused" satisfies ConversationReopened),
-        "POST",
-      ),
-    );
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    fireEvent.click(await drawn(container, `.${timeline.reopen} .${timeline.reopenConversation}`));
-
-    await waitFor(() => screen.getByText(/would not check the branch out again/));
-  });
-
-  /// One round's brief is a record and the next one's is the field. Both are on
-  /// the timeline, and only one of them is written in — which is the whole
-  /// reason a brief carries its own `frozen` rather than reading the
-  /// conversation's state, since both of these are on a conversation that is
-  /// drafting.
-  it("draws the frozen brief beside the one being written", async () => {
-    theReopened();
-    const { container } = mount(`/conversations/${REOPENED.id}`);
+  /// One brief per round, both of them a record: the round steered into is past
+  /// drafting from the moment it lands, so neither is a field. What the first
+  /// round was built from stays on the timeline beside what the second is.
+  it("draws a brief for each round, neither of them a field", async () => {
+    theSecondRound();
+    const { container } = mount(`/conversations/${SECOND.id}`);
 
     await drawn(container, `.${timeline.brief}`);
     const briefs = [...container.querySelectorAll(`.${timeline.brief}`)];
 
     expect(briefs).toHaveLength(2);
     expect(briefs[0]!.querySelector("textarea")).toBeNull();
-    expect(briefs[1]!.querySelector("textarea")).toBeTruthy();
+    expect(briefs[1]!.querySelector("textarea")).toBeNull();
 
-    // And the setup goes under the round being set up rather than under both.
-    expect(briefs[0]!.querySelector(`.${setup.conversationSetup}`)).toBeNull();
-    expect(briefs[1]!.querySelector(`.${setup.conversationSetup}`)).toBeTruthy();
+    // And no setup under either: the branch and the base commit were settled by
+    // the first round, and there is nothing here left to say about them.
+    expect(container.querySelector(`.${setup.conversationSetup}`)).toBeNull();
   });
 
   /// A reader has to be able to tell which brief the work under it was built
-  /// from, which is the whole of what the boundary is for.
+  /// from, which is the whole of what the boundary is for. The human's own line
+  /// and the move under it are the pair that says so.
   it("says where the round boundary falls", async () => {
-    theReopened();
-    const { container } = mount(`/conversations/${REOPENED.id}`);
+    theSecondRound();
+    const { container } = mount(`/conversations/${SECOND.id}`);
 
-    const boundary = await drawn(container, `.${timeline.timelineEvent} > .${timeline.moved}.${timeline.draft}`);
-    expect(
-      boundary.textContent,
-      "the move says both states, as every move does — and nothing moves *to* \
-       drafting except a second round",
-    ).toBe("Done → Draft");
+    const boundary = await drawn(container, `.${timeline.timelineEvent} > .${timeline.steered}`);
+    expect(boundary.textContent).toBe("You steered this into Grilling");
 
     // And it is drawn between the two briefs, which is where the rounds part.
     const briefs = [...container.querySelectorAll(`.${timeline.brief}`)];
@@ -4361,18 +4151,40 @@ describe("reopening a conversation", () => {
 
     // What the boundary looks like is the stylesheet's, and jsdom lays nothing
     // out.
+    expect(timelineCss).toContain(".timelineEvent > .steered,");
+  });
+
+  /// And the boundary on a timeline reopened before a steer was the way back
+  /// in. Nothing writes a move to drafting any more, but the records that carry
+  /// one are the record, and the rounds on them still have to be told apart.
+  it("keeps the boundary a reopened round was drawn with", async () => {
+    theBuilding({
+      state: "Draft",
+      timeline: [
+        ...BUILDING.timeline,
+        { Moved: { id: 9007, at: "2026-08-24T11:00:00Z", state: "Draft" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const boundary = await drawn(container, `.${timeline.timelineEvent} > .${timeline.moved}.${timeline.draft}`);
+    expect(boundary.textContent).toBe("Implementing → Draft");
+
     expect(timelineCss).toContain(".timelineEvent > .moved.draft {");
   });
 
-  /// The second round runs the ordinary pipeline from grilling onward, so what
-  /// stands under the new brief is the press every first round starts with.
-  it("offers the ordinary start grilling under the new brief", async () => {
-    theReopened();
-    const { container } = mount(`/conversations/${REOPENED.id}`);
+  /// And the finished end of the ladder still reads as having something to do
+  /// from here: nothing stands under the timeline, and the steer that opens a
+  /// round like this one is in the menu on the header.
+  it("offers the steer and nothing else on a finished conversation", async () => {
+    theWorkbenchWith({ state: "Done" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const start = await drawn(container, `.${timeline.startGrilling} .${timeline.start}`);
-    expect(start.textContent).toContain("Start grilling");
-    expect(container.querySelector(`.${timeline.reopen}`)).toBeNull();
+    await drawn(container, `.${timeline.timeline}`);
+    expect(container.querySelector(`.${timeline.startGrilling}`)).toBeNull();
+
+    await openActions(container);
+    await drawn(container, `.${timeline.conversationActions} .${timeline.steer}`);
   });
 });
 
@@ -4381,7 +4193,7 @@ const STOPPING = `/api/ui/conversations/${GRILLING.id}/stop`;
 const AT_ONCE = `/api/ui/conversations/${GRILLING.id}/force-stop`;
 
 /// The grilling conversation as the server would say it stands right now — a
-/// session running, or nothing running, or a run that has already halted.
+/// session running, or nothing running, or a run that has already stopped.
 function theGrillingStanding(
   over: Partial<ConversationView>,
   ...answers: Parameters<typeof serving>
@@ -4396,11 +4208,11 @@ function theGrillingStanding(
 }
 
 describe("stopping a conversation", () => {
-  /// The two stops sit in the same menu as the abort, in the order of what each
-  /// one costs: pause after this task, stop now, end the conversation. Each says
-  /// what it does, because *stop* and *force stop* are two words apart and hours
-  /// of work apart.
-  it("offers the three ways of stopping, each saying what it does", async () => {
+  /// The two stops sit in the same menu as the steer and the close, in the order
+  /// of what each one costs: pause after this task, stop now, move the work
+  /// somewhere else, end the conversation. Each says what it does, because
+  /// *stop* and *force stop* are two words apart and hours of work apart.
+  it("offers the four ways of stopping, each saying what it does", async () => {
     theGrillingStanding({ ready_to_stop: true, working: true });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -4409,13 +4221,22 @@ describe("stopping a conversation", () => {
       (button) => button.className,
     );
 
-    expect(offered).toEqual([timeline.stop, timeline.forceStop, timeline.abort]);
+    expect(offered).toEqual([
+      timeline.stop,
+      timeline.forceStop,
+      timeline.steer,
+      timeline.close,
+    ]);
 
     expect(
-      screen.getByText("Pause after the current task until you resume."),
+      screen.getByText("Stop after the current task until you resume."),
+
     ).toBeTruthy();
     expect(
-      screen.getByText("Halt any running tasks and stop immediately."),
+      screen.getByText("End any running task and stop immediately."),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Stop the run and move this conversation somewhere else."),
     ).toBeTruthy();
     expect(
       screen.getByText(/Permanently end the conversation and delete the/),
@@ -4423,7 +4244,7 @@ describe("stopping a conversation", () => {
   });
 
   /// Force stop ends a session, so it is offered where there is one. With
-  /// nothing running the ordinary stop halts the run at once anyway, and a
+  /// nothing running the ordinary stop stops the run at once anyway, and a
   /// second button promising the same thing would be one to think about for
   /// nothing.
   it("offers no force stop where nothing is running", async () => {
@@ -4440,13 +4261,13 @@ describe("stopping a conversation", () => {
 
   /// And neither is offered on a conversation that has already stopped. Getting
   /// one going again is what resume is for; there is nothing here left to stop.
-  it("offers neither stop on a conversation that has already halted", async () => {
+  it("offers neither stop on a conversation that has already stopped", async () => {
     theGrillingStanding({ ready_to_stop: false, working: false });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
 
-    await drawn(container, `.${timeline.conversationActions} .${timeline.abort}`);
+    await drawn(container, `.${timeline.conversationActions} .${timeline.close}`);
     expect(container.querySelector(`.${timeline.conversationActions} .${timeline.stop}`)).toBeNull();
     expect(
       container.querySelector(`.${timeline.conversationActions} .${timeline.forceStop}`),
@@ -4517,7 +4338,7 @@ describe("stopping a conversation", () => {
       { ready_to_stop: true, working: true },
       whenever(
         STOPPING,
-        json("AlreadyHalted" satisfies ConversationStopped),
+        json("AlreadyStopped" satisfies ConversationStopped),
         "POST",
       ),
     );
@@ -4528,8 +4349,592 @@ describe("stopping a conversation", () => {
 
     const refused = await drawn(container, `.${timeline.conversationActions} .${notices.error}`);
 
-    expect(refused.textContent).toBe(STOP_REFUSAL.AlreadyHalted);
+    expect(refused.textContent).toBe(STOP_REFUSAL.AlreadyStopped);
     expect(refused.textContent).toContain("Resume");
+  });
+});
+
+/// Where a steer is clicked, and where the modal it opens is submitted.
+const STEERING = `/api/ui/conversations/${GRILLING.id}/steer`;
+const STEER_SUBMIT = `/api/ui/conversations/${GRILLING.id}/steer/submit`;
+
+/// What the click answers with when it found a session still running, and when
+/// it found none — which is the whole of what the modal is drawn from.
+const OVER_A_SESSION = json({ Opened: { working: true } } satisfies SteerOpened);
+const OVER_NOTHING = json({ Opened: { working: false } } satisfies SteerOpened);
+
+/// Click Steer in the actions menu, and wait for the modal it opens.
+///
+/// The modal is looked for on the document rather than in the container: a
+/// native `dialog` opened with `showModal` is drawn in the top layer, which is
+/// not inside the page's own tree.
+async function openSteer(container: ParentNode): Promise<HTMLElement> {
+  const menu = await openActions(container);
+  fireEvent.click(await drawn(menu, `.${timeline.steer}`));
+  return drawn(document.body, `.${steerModal.steerConversation}`);
+}
+
+/// The states the modal is offering to send the conversation into, in the order
+/// it draws them.
+function targets(modal: ParentNode): string[] {
+  return [
+    ...modal.querySelectorAll<HTMLInputElement>(`.${steerModal.steerTarget} input`),
+  ].map((input) => input.value);
+}
+
+describe("steering a conversation", () => {
+  /// Every state is somewhere to steer *from* — a draft nothing has run in, a
+  /// run in flight, work Verkstead has finished with — so the row is drawn
+  /// wherever the menu is, unlike the two stops beside it. Which states it can
+  /// be steered *to* is the modal's to offer.
+  it("offers the row whatever state the conversation is in", async () => {
+    theGrillingStanding({ ready_to_stop: false, working: false });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+
+    await drawn(container, `.${timeline.conversationActions} .${timeline.steer}`);
+    expect(container.querySelector(`.${timeline.conversationActions} .${timeline.stop}`)).toBeNull();
+  });
+
+  /// The click is a press before it is a modal: it stops the drive, so nothing
+  /// new is launched while the human composes and the world the modal was drawn
+  /// against is the world the submit arrives in.
+  it("stops the drive on the click, and reads the conversation back", async () => {
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const before = askedFor(fetching, `/api/ui/conversations/${GRILLING.id}`);
+
+    await openSteer(container);
+
+    expect(sent(fetching, STEERING)).toEqual({});
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, `/api/ui/conversations/${GRILLING.id}`),
+      ).toBeGreaterThan(before),
+    );
+  });
+
+  /// Wrapping up is a move onto a pull request that is already there rather than
+  /// a way of opening one, so it is offered only where the record holds one. A
+  /// target that could only be refused by name is worse than one that was never
+  /// offered.
+  ///
+  /// Each says what it means, because the words between two of these are the
+  /// difference between an hour of work and none.
+  it("offers wrapping up only where the work is on a pull request", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
+
+    expect(targets(await openSteer(container))).toEqual([
+      "Grilling",
+      "Implementing",
+      "Done",
+    ]);
+    expect(screen.getByText(/Finished with. Nothing runs/)).toBeTruthy();
+    unmount();
+
+    theGrillingStanding(
+      { ready_to_stop: true, working: true, pinned: WRAPPING.pinned },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const wrapped = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(wrapped.container);
+
+    expect(targets(modal)).toEqual([
+      "Grilling",
+      "Implementing",
+      "Wrapping",
+      "Done",
+    ]);
+    expect(screen.getByText(/The branch looked at again/)).toBeTruthy();
+  });
+
+  /// Implementing either carries on what the branch already holds or does what
+  /// the human writes, so the instruction is required exactly where nothing
+  /// stands to be carried on — and the submit is held shut until it says
+  /// something rather than offered and then refused.
+  ///
+  /// The server says whether anything stands: what does includes the finish step
+  /// a list of ticked tasks still has to run, which no reading of the entries
+  /// here could see.
+  it("requires the instruction where nothing stands to be carried on", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
+
+    const bare = await openSteer(container);
+
+    fireEvent.click(await drawn(bare, `.${steerModal.steerTarget} input[value="Implementing"]`));
+
+    const held = (await drawn(
+      bare,
+      `.${steerModal.steerButtons} .${steerModal.steer}`,
+    )) as HTMLButtonElement;
+
+    await waitFor(() => expect(held.disabled).toBe(true));
+    expect(
+      (bare.querySelector("#steer-instruction") as HTMLTextAreaElement)
+        .placeholder,
+    ).toContain("nothing on this branch to carry on");
+
+    fireEvent.input(await drawn(bare, "#steer-instruction"), {
+      target: { value: "Rebase this onto main." },
+    });
+
+    await waitFor(() => expect(held.disabled).toBe(false));
+    unmount();
+
+    // And where something does stand, writing nothing means carry it on: the
+    // field is still there, and the submit was never held shut.
+    theGrillingStanding(
+      { ready_to_stop: true, working: true, ready_to_continue: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const standing = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(standing.container);
+
+    fireEvent.click(
+      await drawn(modal, `.${steerModal.steerTarget} input[value="Implementing"]`),
+    );
+
+    const press = (await drawn(
+      modal,
+      `.${steerModal.steerButtons} .${steerModal.steer}`,
+    )) as HTMLButtonElement;
+
+    await waitFor(() => expect(press.disabled).toBe(false));
+    expect(
+      (modal.querySelector("#steer-instruction") as HTMLTextAreaElement)
+        .placeholder,
+    ).toContain("carry on with what the branch already holds");
+  });
+
+  /// And a grilling starts from a brief, so the brief is required exactly where
+  /// none is written down — a draft nobody has typed into — and optional where
+  /// one is, empty there meaning grill the one that stands.
+  ///
+  /// The round's own brief is the newest on the timeline, which is what the
+  /// server refuses by too: a round steered into freezes the brief it lands
+  /// with, so an empty one is an interview about nothing that nothing can go
+  /// back and write into.
+  it("requires the brief where the conversation has none written", async () => {
+    theGrillingStanding(
+      {
+        ready_to_stop: true,
+        working: false,
+        timeline: GRILLING.timeline.map((event) =>
+          "Brief" in event
+            ? { Brief: { ...event.Brief, markdown: "", html: "" } }
+            : event,
+        ),
+      },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
+
+    const bare = await openSteer(container);
+
+    fireEvent.click(await drawn(bare, `.${steerModal.steerTarget} input[value="Grilling"]`));
+
+    const held = (await drawn(
+      bare,
+      `.${steerModal.steerButtons} .${steerModal.steer}`,
+    )) as HTMLButtonElement;
+
+    await waitFor(() => expect(held.disabled).toBe(true));
+    expect(
+      (bare.querySelector("#steer-brief") as HTMLTextAreaElement).placeholder,
+    ).toContain("Nothing is written down yet");
+
+    fireEvent.input(await drawn(bare, "#steer-brief"), {
+      target: { value: "# Retries\n\nThe backoff is wrong.\n" },
+    });
+
+    await waitFor(() => expect(held.disabled).toBe(false));
+    unmount();
+
+    // And where one stands, writing nothing means grill the one that is there:
+    // the field is still drawn, and the submit was never held shut.
+    theGrillingStanding(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const standing = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(standing.container);
+
+    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Grilling"]`));
+
+    const press = (await drawn(
+      modal,
+      `.${steerModal.steerButtons} .${steerModal.steer}`,
+    )) as HTMLButtonElement;
+
+    await waitFor(() => expect(press.disabled).toBe(false));
+    expect(
+      (modal.querySelector("#steer-brief") as HTMLTextAreaElement).placeholder,
+    ).toContain("brief that is already there");
+  });
+
+  /// And the instruction is drawn under implementing alone: what a hand-written
+  /// job under a wrap-up would mean is nothing at all.
+  it("draws the instruction only under implementing", async () => {
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: false, ready_to_continue: true },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+
+    expect(modal.querySelector("#steer-instruction")).toBeNull();
+
+    fireEvent.click(
+      await drawn(modal, `.${steerModal.steerTarget} input[value="Implementing"]`),
+    );
+
+    fireEvent.input(await drawn(modal, "#steer-instruction"), {
+      target: { value: "Note the window the count is against." },
+    });
+    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+
+    const building = GRILLING.implementation_pairing!;
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toEqual({
+        target: "Implementing",
+        interrupt: false,
+        pairing: { profile_id: building.profile.id, model: building.model },
+        // No round is being opened, so neither half of what one carries is
+        // sent.
+        brief: null,
+        digest: false,
+        instruction: "Note the window the count is against.",
+      }),
+    );
+  });
+
+  /// The pairing is the conversation's rather than one session's, so it is
+  /// prefilled from what the work already runs under and what is picked is sent
+  /// to be recorded as the conversation's own.
+  ///
+  /// Which of the two is prefilled follows the target: a grilling runs under the
+  /// grilling pairing whatever else has happened since, and everything that
+  /// builds runs under the other. Drawn only under a target something runs in:
+  /// done runs nothing, so there is nothing there to pick.
+  it("prefills the pairing of the role steered into", async () => {
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: false, pinned: WRAPPING.pinned },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    // It opens on grilling, that being the first target offered, so the picker
+    // is drawn from the start — filled in with what the conversation is grilled
+    // under.
+    const modal = await openSteer(container);
+
+    const picker = (await drawn(modal, "#steer-pairing")) as HTMLSelectElement;
+    const interviewing = GRILLING.grilling_pairing!;
+
+    await waitFor(() =>
+      expect(picker.value).toBe(
+        `${interviewing.profile.id}:${interviewing.model!}`,
+      ),
+    );
+
+    // Nothing runs in done, so there is nothing there to pick.
+    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Done"]`));
+    await waitFor(() =>
+      expect(modal.querySelector("#steer-pairing")).toBeNull(),
+    );
+
+    // And wrapping up is work being built, so it is the other pairing that is
+    // prefilled there — a different choice about different work.
+    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Wrapping"]`));
+
+    const building = GRILLING.implementation_pairing!;
+
+    await waitFor(() =>
+      expect(
+        (modal.querySelector("#steer-pairing") as HTMLSelectElement).value,
+      ).toBe(`${building.profile.id}:${building.model!}`),
+    );
+
+    fireEvent.change(await drawn(modal, "#steer-pairing"), {
+      target: { value: `${PROFILES[0]!.id}:${PROFILES[0]!.models[0]!}` },
+    });
+    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toEqual({
+        target: "Wrapping",
+        interrupt: false,
+        pairing: { profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0] },
+        // No round is being opened and no session is being written a job, so
+        // none of what those carry is sent: a brief under a wrap-up would be a
+        // document about nothing.
+        brief: null,
+        digest: false,
+        instruction: null,
+      }),
+    );
+  });
+
+  /// Grilling is the one target that carries a payload: a brief for the round it
+  /// opens, and a choice about how much of the last interview primes it. Both
+  /// are optional, and both default to the quietest thing they could mean.
+  it("sends the new round's brief and what it is primed with", async () => {
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    // It opens on grilling, so both are drawn from the start.
+    const modal = await openSteer(container);
+
+    fireEvent.input(await drawn(modal, "#steer-brief"), {
+      target: { value: "# Retries\n\nThe backoff is wrong.\n" },
+    });
+    fireEvent.click(await drawn(modal, `.${steerModal.steerDigest} input`));
+    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+
+    const own = GRILLING.grilling_pairing!;
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toEqual({
+        target: "Grilling",
+        interrupt: false,
+        pairing: { profile_id: own.profile.id, model: own.model },
+        brief: "# Retries\n\nThe backoff is wrong.\n",
+        digest: true,
+        instruction: null,
+      }),
+    );
+  });
+
+  /// And neither is drawn under a target that opens no round: what a brief under
+  /// a wrap-up would mean is nothing at all.
+  it("draws the brief only under grilling", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: false, pinned: WRAPPING.pinned },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    await drawn(modal, `.${steerModal.steerBrief}`);
+
+    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Wrapping"]`));
+
+    await waitFor(() => expect(modal.querySelector(`.${steerModal.steerBrief}`)).toBeNull());
+  });
+
+  /// The checkbox is about the world rather than about the move, so it is drawn
+  /// against what the click found: with nothing running it would promise
+  /// something about a session that is not there.
+  it("offers the interrupt only where a session is running", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
+
+    const over = await openSteer(container);
+    expect(over.querySelector(`.${steerModal.steerInterrupt}`)).toBeTruthy();
+    unmount();
+
+    theGrillingStanding(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const quiet = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(quiet.container);
+    expect(modal.querySelector(`.${steerModal.steerInterrupt}`)).toBeNull();
+  });
+
+  /// What the submit carries: where the work goes, and whether to end what is
+  /// running where it stands.
+  it("sends the target and the interrupt, and closes on the move", async () => {
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+
+    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Done"]`));
+    fireEvent.click(await drawn(modal, `.${steerModal.steerInterrupt} input`));
+    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toEqual({
+        target: "Done",
+        interrupt: true,
+        // Nothing runs in done and no round is opened there, so none of what
+        // those carry is sent.
+        pairing: null,
+        brief: null,
+        digest: false,
+        instruction: null,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(document.body.querySelector(`.${steerModal.steerConversation}`)).toBeNull(),
+    );
+  });
+
+  /// Cancel is no press at all: the conversation stays where the click left it,
+  /// stopped, with resume drawn on it. That is accepted rather than a bug — the
+  /// click is what froze the world while the human was composing.
+  it("sends nothing when it is cancelled, and leaves resume drawn", async () => {
+    // The conversation as the server says it stands once the click has landed:
+    // stopped, so there is nothing left to stop and one press that undoes it.
+    const fetching = theGrillingStanding(
+      { ready_to_stop: false, ready_to_resume: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.cancel}`));
+
+    await waitFor(() =>
+      expect(document.body.querySelector(`.${steerModal.steerConversation}`)).toBeNull(),
+    );
+
+    expect(
+      fetching.mock.calls.filter(([asked]) => String(asked) === STEER_SUBMIT),
+    ).toEqual([]);
+
+    const press = await drawn(container, `.${timeline.resume} .${timeline.resumeConversation}`);
+    expect(press.textContent).toContain("Resume");
+  });
+
+  /// And a submit the server refused says so where it was pressed, rather than
+  /// closing as though it had gone.
+  it("says in words when the move was refused", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("NoSuchConversation" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+
+    const refused = await drawn(document.body, `.${steerModal.steerConversation} .${steerModal.failure}`);
+
+    expect(refused.textContent).toBe(STEER_REFUSAL.NoSuchConversation);
+  });
+
+  /// The record of one: the human's own line, and the machine's plain move under
+  /// it. A timeline of moves alone could never be read back for the difference
+  /// between the pipeline arriving somewhere and somebody putting it there.
+  it("draws the steer beside the move it wrote", async () => {
+    theGrillingStanding({
+      state: "Done",
+      timeline: [
+        ...GRILLING.timeline,
+        {
+          Steer: {
+            id: 9001,
+            at: "2026-08-24T11:00:00Z",
+            target: "Done",
+            html: null,
+          },
+        },
+        { Moved: { id: 9002, at: "2026-08-24T11:00:00Z", state: "Done" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const steered = await drawn(container, `.${timeline.timelineEvent} > .${timeline.steered}`);
+
+    expect(steered.textContent).toBe("You steered this into Done");
+
+    const moved = [
+      ...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.moved}`),
+    ].map((line) => line.textContent);
+
+    expect(moved.at(-1)).toBe("Grilling → Done");
+  });
+
+  /// And where it carries an instruction it is a card rather than a line: what
+  /// the session was sent off to do is a document like the brief and the
+  /// handoff, and is read the same way — clamped beside the move, whole in the
+  /// details pane.
+  it("draws the instruction a steer carried, and opens the whole of it", async () => {
+    theGrillingStanding({
+      state: "Implementing",
+      timeline: [
+        ...GRILLING.timeline,
+        {
+          Steer: {
+            id: 9003,
+            at: "2026-08-24T11:00:00Z",
+            target: "Implementing",
+            html: "<p>Note the window the count is against.</p>",
+          },
+        },
+        { Moved: { id: 9004, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const card = await drawn(container, `.${timeline.timelineEvent} > .${timeline.steeredWith}`);
+
+    expect(card.textContent).toContain("You steered this into Implementing");
+    expect(card.querySelector(`.${timeline.steerBody}`)!.innerHTML).toBe(
+      "<p>Note the window the count is against.</p>",
+    );
+
+    fireEvent.click(card);
+
+    const pane = await drawn(container, `.${shell.detailsPane} .${documentPane.document}`);
+
+    expect(pane.textContent).toContain("Note the window the count is against.");
   });
 });
 
@@ -4965,15 +5370,15 @@ describe("a grilling that has handed over", () => {
     expect(moved).toEqual(["Draft → Grilling", "Grilling → Implementing"]);
   });
 
-  /// A move records only the state it went to, and an abort is off the ladder
+  /// A move records only the state it went to, and a close is off the ladder
   /// rather than on it — so what it stopped in is the move before it, which is
   /// the whole of what makes the line worth reading.
-  it("names the state an abort stopped in", async () => {
+  it("names the state a close stopped in", async () => {
     theBuilding({
-      state: "Aborted",
+      state: "Closed",
       timeline: [
         ...BUILDING.timeline,
-        { Moved: { id: 9001, at: "2026-08-24T11:00:00Z", state: "Aborted" } },
+        { Moved: { id: 9001, at: "2026-08-24T11:00:00Z", state: "Closed" } },
       ],
     });
     const { container } = mount(`/conversations/${BUILDING.id}`);
@@ -4984,7 +5389,7 @@ describe("a grilling that has handed over", () => {
       ...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.moved}`),
     ].map((line) => line.textContent);
 
-    expect(moved.at(-1)).toBe("Implementing → Aborted");
+    expect(moved.at(-1)).toBe("Implementing → Closed");
   });
 
   it("draws the handoff the grilling wrote as the document it is", async () => {
@@ -6001,14 +6406,14 @@ describe("the pinned stage list", () => {
   });
 });
 
-/// A conversation whose driving has halted, and the notice saying what stopped.
-const STOPPED = halted as ConversationView;
+/// A conversation whose driving has stopped, and the notice saying what stopped.
+const STOPPED = stopped as ConversationView;
 
 /// The notice itself, off that payload: what stopped, why, and the evidence.
 const SAID = (() => {
   const event = STOPPED.timeline.find((entry) => "Notice" in entry);
   if (!event || !("Notice" in event)) {
-    throw new Error("the fixture should carry the notice of a halt");
+    throw new Error("the fixture should carry the notice of a stop");
   }
   return event.Notice;
 })();
@@ -6030,7 +6435,7 @@ function theStopped(
   );
 }
 
-describe("the notice of a halt", () => {
+describe("the notice of a stop", () => {
   /// Inline and whole, unlike a capture or a diff: what a stop has to say is a
   /// paragraph and two blocks of terminal text, gathered when the run stopped
   /// because a worktree and a session's output both move on. So it is on the
@@ -6074,16 +6479,12 @@ describe("the notice of a halt", () => {
   });
 });
 
-/// A conversation waiting an account's window out, and the pause it stopped at.
+/// A conversation stopped because the account it was spending ran out of
+/// window, carrying a Pause a Verkstead of before left on its timeline.
 const WAITING = paused as ConversationView;
 
-const OUT_OF_WINDOW = (() => {
-  const event = WAITING.timeline.find((entry) => "Pause" in entry);
-  if (!event || !("Pause" in event)) {
-    throw new Error("the fixture should carry a pause");
-  }
-  return event.Pause;
-})();
+/// The line that session printed, off the notice the old Pause reads back as.
+const PRINTED = "Usage limit reached · continuing automatically at 3pm · esc to cancel";
 
 /// The workbench with that conversation open.
 function thePaused(
@@ -6102,153 +6503,119 @@ function thePaused(
   );
 }
 
-/// Where the human says not to wait for the window.
-const RESUME_PATH = `/api/ui/conversations/${WAITING.id}/pause/${OUT_OF_WINDOW.id}/resume`;
-
-describe("a pause on the timeline", () => {
-  /// The two facts that decide whether the human does anything about it: which
-  /// account ran out, and when it comes back.
-  it("names the account that ran out and when the window comes back", async () => {
+describe("a run stopped because an account ran out of window", () => {
+  /// One stopped shape: the notice saying what stopped and why, the badge
+  /// pointing at it, and the one Resume at the foot of the timeline. The same
+  /// three things a run stopped by a press draws — see the stop above.
+  it("draws the card, the badge and the button every stop draws", async () => {
     thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);
 
-    const waiting = await drawn(container, `.${timeline.timeline} .${pausing.pause}`);
+    await drawn(container, `.${timeline.timeline} .${timeline.notice}`);
 
-    expect(waiting.querySelector(`.${pausing.what}`)!.textContent).toContain(
-      `${OUT_OF_WINDOW.profile} is out of window`,
-    );
-    expect(waiting.querySelector(`.${pausing.what}`)!.textContent).toContain(
-      "2026-08-03 05:00 UTC",
+    const notice = [...container.querySelectorAll(`.${timeline.timeline} .${timeline.notice}`)].find(
+      (drawn) => drawn.textContent!.includes("stopped"),
     );
 
-    // And the backend's own sentence underneath, which is the record of why
-    // this was raised.
-    expect(waiting.querySelector(`.${pausing.how}`)!.textContent).toBe(OUT_OF_WINDOW.said);
+    expect(notice!.textContent).toContain("Implementing the work");
+    expect(notice!.textContent).toContain("opus");
+    expect(notice!.textContent).toContain("is out of window");
+
+
+    expect((await drawn(container, `.${timeline.blocked}`)).textContent).toBe(
+      "Blocked on you",
+    );
+    expect(
+      (await drawn(container, `.${timeline.resume} .${timeline.resumeConversation}`)).textContent,
+    ).toBe("Resume");
   });
 
-  /// A display may not carry one. The pause is still the whole record: the wait
-  /// is then the human's to end.
-  it("says only that the account ran out where no reset time could be read", async () => {
-    thePaused({
-      timeline: WAITING.timeline.map((entry) =>
-        "Pause" in entry
-          ? { Pause: { ...entry.Pause, resets_at: null } }
-          : entry,
-      ),
-    });
-    const { container } = mount(`/conversations/${WAITING.id}`);
-
-    const waiting = await drawn(container, `.${timeline.timeline} .${pausing.pause}`);
-
-    expect(waiting.querySelector(`.${pausing.what}`)!.textContent).toBe(
-      `${OUT_OF_WINDOW.profile} is out of window`,
-    );
-    expect(waiting.querySelector(`.${pausing.resume}`)).toBeTruthy();
-  });
-
-  /// One press rather than three remedies: Verkstead is not driving anything
-  /// here and has nothing to retry, so the only choice is whether to keep
-  /// waiting.
-  it("offers one press, and says the worktree is untouched", async () => {
+  /// And the one thing that tells it from any other stop: when the account
+  /// comes back, in the words the session printed them in — `3pm` stays `3pm`.
+  /// Words to read rather than a countdown: no stop resumes itself, so this one
+  /// waits for the same press, and the reset is what says when to make it.
+  it("says when the account comes back, beside the resume", async () => {
     thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);
 
-    const waiting = await drawn(container, `.${timeline.timeline} .${pausing.pause}`);
+    const resets = await drawn(container, `.${timeline.resume} .${timeline.resets}`);
 
-    expect(waiting.querySelector(`.${pausing.resume}`)!.textContent).toBe(
-      "Go on without waiting",
-    );
-    expect(waiting.querySelectorAll("button")).toHaveLength(1);
-    expect(waiting.textContent).toContain(
-      "the worktree is left exactly as the session left it",
-    );
+    expect(resets.textContent).toContain("out of window until 3pm");
+    expect(resets.closest(`.${timeline.resume}`)!.querySelector(`.${timeline.resumeConversation}`))
+      .not.toBeNull();
   });
 
-  it("sends the press with nothing beside it", async () => {
-    const fetching = thePaused(
-      {},
-      whenever(RESUME_PATH, json("Resumed" satisfies PauseResumed), "POST"),
-    );
-    const { container } = mount(`/conversations/${WAITING.id}`);
+  /// A conversation stopped by a press carries no such words, which is the
+  /// whole of the difference between the two.
+  it("is the only thing a conversation stopped by a press draws differently", async () => {
+    expect(STOPPED.resets).toBeNull();
 
-    const waiting = await drawn(container, `.${timeline.timeline} .${pausing.pause}`);
-    fireEvent.click(waiting.querySelector(`.${pausing.resume}`)!);
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
 
-    await waitFor(() => expect(sent(fetching, RESUME_PATH)).toEqual({}));
+    await drawn(container, `.${timeline.resume} .${timeline.resumeConversation}`);
 
-    // And nothing is said about a press that worked: the event reading back
-    // resumed is what says it.
-    expect(waiting.querySelector(`.${notices.error}`)).toBeNull();
+    expect(container.querySelector(`.${timeline.resets}`)).toBeNull();
   });
 
-  /// The record is what a timeline is: a long run against a busy account
-  /// collects one of these a day, each saying how that day's wait ended.
-  it("shows what ended the wait once something has, and stops offering", async () => {
-    thePaused({
-      blocked_on: null,
-      timeline: WAITING.timeline.map((entry) =>
-        "Pause" in entry
-          ? {
-              Pause: {
-                ...entry.Pause,
-                resumed: {
-                  by: "Reset" as const,
-                  at: "2026-08-03T05:00:04.000Z",
-                },
-              },
-            }
-          : entry,
-      ),
-    });
+  /// The record is kept and read rather than rewritten (ADR-0006): a Pause a
+  /// Verkstead of before wrote still says which account ran out and what the
+  /// session printed about it, drawn as the line every stop is said in.
+  it("still reads a pause written before this stage", async () => {
+    thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);
 
-    const waiting = await drawn(container, `.${timeline.timeline} .${pausing.pause}`);
+    await drawn(container, `.${timeline.timeline} .${timeline.notice}`);
 
-    expect(waiting.querySelector(`.${pausing.resumed}`)!.textContent).toBe(
-      "The window came back",
+    const notices = [...container.querySelectorAll(`.${timeline.timeline} .${timeline.notice}`)];
+    const wait = notices.find((notice) =>
+      notice.textContent!.includes(PRINTED),
     );
-    expect(waiting.querySelector(`.${pausing.resuming}`)).toBeNull();
-    expect(waiting.classList.contains(pausing.open!)).toBe(false);
+
+    expect(wait).toBeTruthy();
+    expect(wait!.textContent).toContain("opus");
   });
 
-  /// The window came back while the page was open, or a second press. Not an
-  /// error, and said in words rather than retried.
-  it("says so when the wait was already over", async () => {
-    thePaused(
-      {},
-      whenever(
-        RESUME_PATH,
-        json("AlreadyResumed" satisfies PauseResumed),
-        "POST",
-      ),
-    );
+  /// One press and one place to make it. Nothing on the record offers to go on
+  /// without waiting, and nothing in the viewer answers a pause by its event.
+  it("offers no way to go on without waiting", async () => {
+    const fetching = thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);
 
-    const waiting = await drawn(container, `.${timeline.timeline} .${pausing.pause}`);
-    fireEvent.click(waiting.querySelector(`.${pausing.resume}`)!);
+    await drawn(container, `.${timeline.timeline} .${timeline.notice}`);
+
+    expect(container.querySelector('[class*="pause"]')).toBeNull();
+    expect(container.textContent).not.toContain("Go on without waiting");
+
+    for (const notice of container.querySelectorAll(`.${timeline.timeline} .${timeline.notice}`)) {
+      expect(notice.querySelector("button")).toBeNull();
+    }
+
+    fireEvent.click(await drawn(container, `.${timeline.blocked}`));
 
     await waitFor(() =>
-      expect(waiting.querySelector(`.${notices.error}`)!.textContent).toContain(
-        "The first ending stands",
-      ),
+      expect(
+        fetching.mock.calls
+          .map(([asked]) => String(asked))
+          .filter((path) => path.includes("/pause/")),
+      ).toEqual([]),
     );
   });
 
-  /// A paused run is a run that has stopped, so it carries the same badge an
-  /// interruption does — and the badge stays put, because what there is to press
-  /// is drawn whole in the list and there is no pane behind it.
-  it("carries blocked on you, and the badge opens no pane", async () => {
+  /// The badge marks the notice where it stands in the record rather than
+  /// paging a narrow window away to a details level a notice has nothing to
+  /// show in.
+  it("marks the notice it is blocked on where the notice stands", async () => {
     thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);
 
-    const badge = await drawn<HTMLButtonElement>(container, `.${timeline.blocked}`);
-    expect(badge.textContent).toBe("Blocked on you");
+    fireEvent.click(await drawn(container, `.${timeline.blocked}`));
 
-    fireEvent.click(badge);
+    const marked = await drawn(container, `.${timeline.timeline} .${timeline.notice}.${timeline.selected}`);
 
-    const waiting = await drawn(container, `.${timeline.timeline} .${pausing.pause}.${pausing.selected}`);
-    expect(waiting).toBeTruthy();
+    expect(marked.textContent).toContain("Implementing the work");
     expect(frame(container).dataset.pane).toBe("timeline");
+
   });
 });
 
@@ -6657,8 +7024,9 @@ describe("the pinned carousel", () => {
 });
 });
 
-/// What the human asked for by hand, which the same conversation carries on the
-/// end of its record: a manual task, set going outside the pipeline.
+/// What somebody asked for by hand once, which the same conversation carries on
+/// the end of its record: a manual task, from before a steer was the way to set
+/// a session going.
 const ASKED_BY_HAND = (() => {
   const event = WRAPPING.timeline.find((entry) => "ManualTask" in entry);
   if (!event || !("ManualTask" in event)) {
@@ -6667,39 +7035,36 @@ const ASKED_BY_HAND = (() => {
   return event.ManualTask;
 })();
 
-describe("a manual task", () => {
-  /// A card in the record, like the brief and the handoff: it is a document
-  /// somebody wrote, and the words are the whole of it.
-  it("draws what was asked for as a card in the record", async () => {
+describe("a manual task on an old record", () => {
+  /// A line in the record, like the notice beside it: nothing sets another
+  /// going, so there is nothing to press and nothing to open.
+  it("draws what was asked for as a line in the record", async () => {
     theWrapping();
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     const asked = await drawn(container, `.${timeline.timelineEvent} > .${timeline.manualTask}`);
 
-    expect(asked.querySelector(`.${timeline.eventHead}`)!.textContent).toContain(
-      "Manual task",
-    );
     expect(asked.closest(`.${timeline.timeline}`)).not.toBeNull();
+    expect(asked.querySelector(`.${timeline.eventHead}`)).toBeNull();
+    expect(asked.classList.contains("openable")).toBe(false);
+    expect(asked.getAttribute("role")).toBeNull();
   });
 
   /// Put in the page as the server rendered it, like every other piece of
-  /// markdown on this wire — so what the human set in backticks reads as code
-  /// rather than as backticks.
+  /// markdown on this wire — so what was set in backticks reads as code rather
+  /// than as backticks.
   it("shows the instruction as the server rendered it", async () => {
     theWrapping();
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     const asked = await drawn(container, `.${timeline.timelineEvent} > .${timeline.manualTask}`);
 
-    expect(asked.querySelector(".markdown")!.innerHTML).toBe(
-      ASKED_BY_HAND.html,
-    );
+    expect(asked.innerHTML).toBe(ASKED_BY_HAND.html);
     expect(asked.querySelector("code")!.textContent).toBe("main");
   });
 
-  /// Read-only: what its session went on to do arrives as the events any work
-  /// arrives as, under this one. Opening it is not answering it — the card is a
-  /// way into the whole instruction and nothing more.
+  /// Read-only, and nothing to do about it: what its session went on to do
+  /// arrived as the events any work arrives as, under this one.
   it("asks the human for nothing", async () => {
     theWrapping();
     const { container } = mount(`/conversations/${WRAPPING.id}`);
@@ -6708,6 +7073,11 @@ describe("a manual task", () => {
 
     expect(asked.querySelectorAll("button")).toHaveLength(0);
     expect(asked.querySelectorAll("textarea")).toHaveLength(0);
+
+    fireEvent.click(asked);
+
+    await drawn(container, `.${timeline.timeline}`);
+    expect(container.querySelector(`.${shell.detailsPane} .${documentPane.document}`)).toBeNull();
   });
 });
 
@@ -6794,189 +7164,8 @@ describe("the resume button", () => {
   });
 });
 
-/// Where a manual task is submitted from.
-const SET_GOING = `/api/ui/conversations/${WRAPPING.id}/manual-task`;
-
-/// The conversation's own implementation pairing, which is what the composer
-/// starts on.
-const IMPLEMENTATION = WRAPPING.implementation_pairing!;
-
-/// And a pairing of another saved profile, which is what a one-off pick picks.
-const OTHER = PROFILES.find(
-  (profile) => profile.id !== IMPLEMENTATION.profile.id,
-)!;
-
-/// One row of a pairing picker, as the picker writes its value.
-const running = (profile: ProfileEntry, model: string) =>
-  `${profile.id}:${model}`;
-
-describe("the manual task composer", () => {
-  /// Offered wherever nothing is running: this conversation is wrapping up, and
-  /// a wrapping lull is exactly the quiet moment it is there for.
-  it("is drawn at the end of the timeline when nothing is running", async () => {
-    theWrapping();
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
-
-    await drawn(container, `.${timeline.manualTaskComposer} select`);
-    const composer = container.querySelector(`.${timeline.manualTaskComposer}`)!;
-
-    expect(composer.querySelector("textarea")).toBeTruthy();
-    expect(
-      composer.querySelector(`.${timeline.startManualTask}`)!.textContent,
-    ).toContain("Set it going");
-    expect(
-      composer.compareDocumentPosition(container.querySelector(`.${timeline.timeline}`)!) &
-        Node.DOCUMENT_POSITION_PRECEDING,
-    ).toBeTruthy();
-  });
-
-  /// And gone while one runs. The rule is the register and nothing else: an
-  /// agent is in the worktree, and a second one would be two editing each
-  /// other's files.
-  it("goes while a session is running", async () => {
-    theWrapping({ working: true });
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
-
-    await drawn(container, `.${timeline.timeline}`);
-
-    expect(container.querySelector(`.${timeline.manualTaskComposer}`)).toBeNull();
-  });
-
-  /// Drafting is one of the two states with no worktree, so there is nowhere
-  /// for a session to run and nothing to offer.
-  it("is not drawn on a conversation with no worktree", async () => {
-    theWorkbench();
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    await drawn(container, `.${timeline.startGrilling}`);
-
-    expect(container.querySelector(`.${timeline.manualTaskComposer}`)).toBeNull();
-  });
-
-  /// The dropdown starts on the conversation's implementation pairing, because
-  /// that is what its work runs under — but it is a start rather than a rule.
-  /// What it offers is every profile-and-model combination, one flat row each.
-  it("starts on the conversation's implementation pairing", async () => {
-    theWrapping();
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
-
-    const picker = await drawn<HTMLSelectElement>(
-      container,
-      `.${timeline.manualTaskComposer} select`,
-    );
-
-    expect(picker.value).toBe(
-      running(IMPLEMENTATION.profile, IMPLEMENTATION.model!),
-    );
-    expect([...picker.options].map((option) => option.textContent)).toEqual(
-      PROFILES.flatMap((profile) =>
-        profile.models.map((model) => `${profile.name} — ${model}`),
-      ),
-    );
-  });
-
-  /// The instruction and the pairing, on the wire together. One press does both:
-  /// what it says and what it runs as are the whole of a manual task.
-  it("sends what was typed and the pairing picked beside it", async () => {
-    const fetching = theWrapping(
-      {},
-      whenever(SET_GOING, json("Started" as ManualTaskStarted), "POST"),
-    );
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
-
-    const picker = await drawn<HTMLSelectElement>(
-      container,
-      `.${timeline.manualTaskComposer} select`,
-    );
-    const composer = container.querySelector(`.${timeline.manualTaskComposer}`)!;
-    fireEvent.input(composer.querySelector("textarea")!, {
-      target: { value: "Rebase onto main." },
-    });
-    fireEvent.change(picker, {
-      target: { value: running(OTHER, OTHER.models[0]!) },
-    });
-    fireEvent.click(composer.querySelector(`.${timeline.startManualTask}`)!);
-
-    await waitFor(() =>
-      expect(sent(fetching, SET_GOING)).toEqual({
-        instruction: "Rebase onto main.",
-        profile_id: OTHER.id,
-        model: OTHER.models[0],
-      }),
-    );
-
-    // The pick is one-off: it is what this task runs as, and nothing writes it
-    // back to the conversation.
-    expect(
-      askedFor(
-        fetching,
-        `/api/ui/conversations/${WRAPPING.id}/implementation-pairing`,
-      ),
-    ).toBe(0);
-  });
-
-  /// Emptied on the way out, because the instruction is on the timeline now:
-  /// what is left in the box would otherwise read as something still to ask for.
-  it("empties the box once the task is going", async () => {
-    theWrapping({}, whenever(SET_GOING, json("Started"), "POST"));
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
-
-    const composer = await drawn(container, `.${timeline.manualTaskComposer}`);
-    const typing = composer.querySelector<HTMLTextAreaElement>("textarea")!;
-    fireEvent.input(typing, { target: { value: "Rebase onto main." } });
-    fireEvent.click(composer.querySelector(`.${timeline.startManualTask}`)!);
-
-    await waitFor(() => expect(typing.value).toBe(""));
-  });
-
-  /// Nothing typed is nothing to ask for, and the button says so by not being
-  /// pressable rather than by refusing afterwards.
-  it("will not submit an empty instruction", async () => {
-    theWrapping();
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
-
-    const composer = await drawn(container, `.${timeline.manualTaskComposer}`);
-
-    expect(
-      composer.querySelector<HTMLButtonElement>(`.${timeline.startManualTask}`)!.disabled,
-    ).toBe(true);
-  });
-
-  /// A submit that raced a session loses, and the page says which of the named
-  /// refusals it was: the composer that was pressed was drawn a moment ago.
-  it("says in words that an agent was already running", async () => {
-    theWrapping(
-      {},
-      whenever(SET_GOING, json("AlreadyRunning" as ManualTaskStarted), "POST"),
-    );
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
-
-    const composer = await drawn(container, `.${timeline.manualTaskComposer}`);
-    fireEvent.input(composer.querySelector("textarea")!, {
-      target: { value: "Rebase onto main." },
-    });
-    fireEvent.click(composer.querySelector(`.${timeline.startManualTask}`)!);
-
-    const refused = await drawn(container, `.${timeline.manualTaskComposer} .${notices.error}`);
-
-    expect(refused.textContent).toBe(MANUAL_TASK_REFUSAL.AlreadyRunning);
-    expect(refused.textContent).toContain("already running");
-  });
-
-  /// Every named refusal has words of its own, because each of them is
-  /// something different to go and do about it.
-  it("has a sentence for every way of being refused", () => {
-    for (const [outcome, said] of Object.entries(MANUAL_TASK_REFUSAL)) {
-      if (outcome === "Started") {
-        continue;
-      }
-      expect(said, `${outcome} should say something`).not.toBe("");
-    }
-  });
-});
-
 /// The three documents on a timeline: the frozen brief, the handoff the grilling
-/// wrote, and the instruction a manual task was set going with.
+/// wrote, and the instruction a steer sent a session off with.
 ///
 /// Each of them is as long as whoever wrote it made it, so the card shows the
 /// first five lines under a fade and the whole of it is a press away. Where the
@@ -6987,6 +7176,10 @@ describe("the manual task composer", () => {
 describe("the documents on a timeline", () => {
   /// The details pane, and what it has drawn.
   const details = () => screen.getByLabelText("Details");
+
+  /// A one-paragraph instruction, for the document that is nowhere near long
+  /// enough to be cut off by the clamp.
+  const SHORT_INSTRUCTION = "<p>Note the window the count is against.</p>";
 
   it("puts the frozen brief in a clamp, and opens the whole of it", async () => {
     theGrilling();
@@ -7024,23 +7217,6 @@ describe("the documents on a timeline", () => {
     expect(details().querySelector(`.${timeline.clamp}`)).toBeNull();
   });
 
-  it("puts a manual task's instruction in a clamp, and opens the whole of it", async () => {
-    theWrapping();
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
-
-    const asked = await drawn(container, `.${timeline.timelineEvent} > .${timeline.manualTask}`);
-
-    expect(asked.querySelector(`.${timeline.clamp} > .${timeline.manualTaskBody}`)).toBeTruthy();
-
-    fireEvent.click(asked);
-
-    const opened = await drawn(details(), `.${documentPane.document}`);
-
-    expect(details().querySelector("h1")!.textContent).toBe("Manual task");
-    expect(opened.innerHTML).toBe(ASKED_BY_HAND.html);
-    expect(details().querySelector(`.${timeline.clamp}`)).toBeNull();
-  });
-
   /// The same affordance the events that are buttons have, said on an article
   /// because rendered markdown cannot live inside a button: the role, the
   /// keyboard, and the selection drawn on the card that is open.
@@ -7069,16 +7245,30 @@ describe("the documents on a timeline", () => {
   /// drawn, because a card the human has to judge the length of before pressing
   /// is a card they will not press.
   it("opens a document too short to be cut off", async () => {
-    theWrapping();
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
+    theGrillingStanding({
+      state: "Implementing",
+      timeline: [
+        ...GRILLING.timeline,
+        {
+          Steer: {
+            id: 9005,
+            at: "2026-08-24T11:00:00Z",
+            target: "Implementing",
+            html: SHORT_INSTRUCTION,
+          },
+        },
+        { Moved: { id: 9006, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const asked = await drawn(container, `.${timeline.timelineEvent} > .${timeline.manualTask}`);
+    const card = await drawn(container, `.${timeline.timelineEvent} > .${timeline.steeredWith}`);
 
     // One paragraph, which is nowhere near the clamp.
-    expect(ASKED_BY_HAND.html.split("\n").length).toBeLessThan(5);
-    expect(asked.getAttribute("role")).toBe("button");
+    expect(SHORT_INSTRUCTION.split("\n").length).toBeLessThan(5);
+    expect(card.getAttribute("role")).toBe("button");
 
-    fireEvent.click(asked);
+    fireEvent.click(card);
 
     await drawn(details(), `.${documentPane.document}`);
   });

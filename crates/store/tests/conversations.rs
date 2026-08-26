@@ -5,10 +5,9 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Aborting, Edited, Event, Grilling, Lifecycle, Reopening, abort_conversation, adopting,
-    conversations, load_conversation, open_database, register_repo, rename_branch,
-    reopen_conversation, save_brief, set_base_commit, set_state, start_adoption,
-    start_conversation, start_grilling, timeline,
+    Closing, Edited, Event, Grilling, Lifecycle, adopting, close_conversation, conversations,
+    load_conversation, open_database, register_repo, rename_branch, save_brief, set_base_commit,
+    set_state, start_adoption, start_conversation, start_grilling, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -33,8 +32,8 @@ async fn repo(pool: &SqlitePool, name: &str) -> i64 {
 ///
 /// Found rather than taken from the front, because a Timeline grows: the Brief
 /// is the first Event, but the moves that follow it are Events too. The first of
-/// them, which is the only one until a round is reopened — see [`briefs`] for
-/// the reading that tells one round from the next.
+/// them, which is the only one until a steer opens a second round — see
+/// [`briefs`] for the reading that tells one round from the next.
 async fn brief(pool: &SqlitePool, id: i64) -> String {
     briefs(pool, id)
         .await
@@ -464,11 +463,11 @@ async fn grilling_freezes_the_brief_and_the_branch_name() {
     assert_eq!(brief(&pool, id).await, "# Rate limiting\n");
 }
 
-/// Aborting forgets the worktree and keeps everything that says what the work
+/// Closing forgets the worktree and keeps everything that says what the work
 /// was: the branch it was on, the Brief it started from, the commit it branched
 /// from.
 #[tokio::test]
-async fn aborting_forgets_the_worktree_and_keeps_the_branch() {
+async fn closing_forgets_the_worktree_and_keeps_the_branch() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
     start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
@@ -476,67 +475,67 @@ async fn aborting_forgets_the_worktree_and_keeps_the_branch() {
         .unwrap();
 
     assert_eq!(
-        abort_conversation(&pool, id).await.unwrap(),
-        Aborting::Aborted
+        close_conversation(&pool, id).await.unwrap(),
+        Closing::Closed
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Aborted);
+    assert_eq!(conversation.state, Lifecycle::Closed);
     assert_eq!(conversation.worktree, None);
     assert_eq!(conversation.branch, "rate-limiting");
     assert_eq!(conversation.base_commit.as_deref(), Some("deadbeef"));
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Aborted]
+        [Lifecycle::Grilling, Lifecycle::Closed]
     );
 }
 
-/// Aborting twice is not an error — the human asked for it to be stopped, and it
+/// Closing twice is not an error — the human asked for it to be stopped, and it
 /// is. The second one records nothing, so the Timeline says it happened once.
 #[tokio::test]
-async fn aborting_twice_is_not_an_error() {
+async fn closing_twice_is_not_an_error() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
     start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
         .await
         .unwrap();
 
-    abort_conversation(&pool, id).await.unwrap();
+    close_conversation(&pool, id).await.unwrap();
     assert_eq!(
-        abort_conversation(&pool, id).await.unwrap(),
-        Aborting::AlreadyAborted
+        close_conversation(&pool, id).await.unwrap(),
+        Closing::AlreadyClosed
     );
 
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Aborted]
+        [Lifecycle::Grilling, Lifecycle::Closed]
     );
 }
 
-/// Aborting is reachable from every state this stage can reach, which includes
+/// Closing is reachable from every state this stage can reach, which includes
 /// the one where nothing has been made yet.
 #[tokio::test]
-async fn a_drafting_conversation_can_be_aborted_without_ever_having_grilled() {
+async fn a_drafting_conversation_can_be_closed_without_ever_having_grilled() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
 
     assert_eq!(
-        abort_conversation(&pool, id).await.unwrap(),
-        Aborting::Aborted
+        close_conversation(&pool, id).await.unwrap(),
+        Closing::Closed
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Aborted);
+    assert_eq!(conversation.state, Lifecycle::Closed);
     assert_eq!(conversation.worktree, None);
-    assert_eq!(moves(&pool, id).await, [Lifecycle::Aborted]);
+    assert_eq!(moves(&pool, id).await, [Lifecycle::Closed]);
 }
 
-/// An aborted Conversation is past drafting, so it cannot be started either.
+/// A closed Conversation is past drafting, so it cannot be started either.
 #[tokio::test]
-async fn an_aborted_conversation_cannot_start_grilling() {
+async fn a_closed_conversation_cannot_start_grilling() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
-    abort_conversation(&pool, id).await.unwrap();
+    close_conversation(&pool, id).await.unwrap();
 
     assert_eq!(
         start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
@@ -547,167 +546,15 @@ async fn an_aborted_conversation_cannot_start_grilling() {
 }
 
 #[tokio::test]
-async fn aborting_a_conversation_that_is_not_there_says_so() {
+async fn closing_a_conversation_that_is_not_there_says_so() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        abort_conversation(&pool, 404).await.unwrap(),
-        Aborting::NoSuchConversation
+        close_conversation(&pool, 404).await.unwrap(),
+        Closing::NoSuchConversation
     );
 }
 
-/// Reopening is the second round starting: the Conversation is drafting again,
-/// the frozen Brief is exactly where it was, and there is a new one to write
-/// beside it.
-#[tokio::test]
-async fn reopening_a_finished_conversation_adds_a_brief_beside_the_frozen_one() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = drafted(&pool).await;
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
-        .await
-        .unwrap();
-    set_state(&pool, id, Lifecycle::Done).await.unwrap();
-
-    assert_eq!(
-        reopen_conversation(&pool, id, Path::new("/state/worktrees/x"))
-            .await
-            .unwrap(),
-        Reopening::Reopened
-    );
-
-    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Draft);
-    assert_eq!(
-        conversation.worktree.as_deref(),
-        Some(Path::new("/state/worktrees/x")),
-        "the round before it worked here, and so does this one"
-    );
-    assert_eq!(
-        conversation.branch, "rate-limiting",
-        "a branch that has been worked is not a branch to start over"
-    );
-
-    assert_eq!(
-        briefs(&pool, id).await,
-        ["# Rate limiting\n".to_owned(), String::new()],
-        "the frozen one, and an empty one for the round starting here"
-    );
-
-    // The move is the round boundary, which is what a reader tells the two
-    // rounds apart by.
-    assert_eq!(
-        moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Draft]
-    );
-}
-
-/// What the human writes into is the new round's Brief. The frozen one is what
-/// the first round was built from, and a second round that edited it would lose
-/// why the work is the shape it is.
-#[tokio::test]
-async fn a_reopened_round_writes_its_own_brief_and_leaves_the_frozen_one() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = drafted(&pool).await;
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
-        .await
-        .unwrap();
-    set_state(&pool, id, Lifecycle::Done).await.unwrap();
-    reopen_conversation(&pool, id, Path::new("/state/worktrees/x"))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        save_brief(&pool, id, "# Rate limiting, again\n")
-            .await
-            .unwrap(),
-        Edited::Saved
-    );
-
-    assert_eq!(
-        briefs(&pool, id).await,
-        [
-            "# Rate limiting\n".to_owned(),
-            "# Rate limiting, again\n".to_owned(),
-        ]
-    );
-}
-
-/// The branch and the base commit are not the human's again, though the
-/// Conversation is drafting: the branch exists by now and the work carries on
-/// from what is on it.
-#[tokio::test]
-async fn a_reopened_rounds_branch_and_base_commit_stay_where_they_are() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = drafted(&pool).await;
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
-        .await
-        .unwrap();
-    set_state(&pool, id, Lifecycle::Done).await.unwrap();
-    reopen_conversation(&pool, id, Path::new("/state/worktrees/x"))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        rename_branch(&pool, id, "something-else").await.unwrap(),
-        Edited::NotDrafting
-    );
-    assert_eq!(
-        set_base_commit(&pool, id, Some("cafef00d")).await.unwrap(),
-        Edited::NotDrafting
-    );
-
-    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.branch, "rate-limiting");
-    assert_eq!(conversation.base_commit.as_deref(), Some("deadbeef"));
-}
-
-/// Done and nowhere else. Aborted is off the ladder and stays there, and every
-/// other state is somewhere the work has got to.
-#[tokio::test]
-async fn only_a_finished_conversation_can_be_reopened() {
-    let (_dir, pool) = fresh_pool().await;
-    let repo_id = repo(&pool, "verkstead").await;
-
-    for state in [
-        Lifecycle::Draft,
-        Lifecycle::Grilling,
-        Lifecycle::Implementing,
-        Lifecycle::Wrapping,
-        Lifecycle::Aborted,
-    ] {
-        let id = start_conversation(&pool, repo_id, "rate-limiting")
-            .await
-            .unwrap()
-            .unwrap();
-        set_state(&pool, id, state).await.unwrap();
-
-        assert_eq!(
-            reopen_conversation(&pool, id, Path::new("/state/worktrees/x"))
-                .await
-                .unwrap(),
-            Reopening::NotDone,
-            "{state:?} is not a round to open another after"
-        );
-
-        assert_eq!(
-            briefs(&pool, id).await.len(),
-            1,
-            "{state:?} was left with a second Brief"
-        );
-    }
-}
-
-#[tokio::test]
-async fn reopening_a_conversation_that_is_not_there_says_so() {
-    let (_dir, pool) = fresh_pool().await;
-
-    assert_eq!(
-        reopen_conversation(&pool, 404, Path::new("/state/worktrees/x"))
-            .await
-            .unwrap(),
-        Reopening::NoSuchConversation
-    );
-}
 /// Where the worktree went outlives the process that made it — it is a directory
 /// on disk, and the thing that knows to clean it up is a restarted server.
 #[tokio::test]

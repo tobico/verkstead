@@ -19,7 +19,7 @@ use verkstead_schema::Direction;
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::{DiffView, PairingView, RepoEntry, Standing};
+use crate::{DiffView, PairingView, ProfileChoice, RepoEntry, Standing};
 
 /// Where a Conversation has got to.
 ///
@@ -37,7 +37,7 @@ pub enum Lifecycle {
 
     /// Off the ladder rather than on it: the work stopped wherever it had got
     /// to. Reachable from every other state, and leading nowhere.
-    Aborted,
+    Closed,
 }
 
 /// One row of the conversations sidebar.
@@ -80,7 +80,7 @@ pub struct ConversationEntry {
     pub idle: bool,
 
     /// Whether something about this Conversation is waiting on the human: an ask
-    /// left open, or driving that has halted.
+    /// left open, or driving that has stopped.
     ///
     /// Folded from every source before it leaves, so the viewer holds no list of
     /// them. A Draft is never one of them: it is drawn as a draft, and that is
@@ -240,7 +240,7 @@ pub struct ConversationView {
     pub ready_to_resume: bool,
 
     /// And whether there is driving to stop: the Conversation is in a state
-    /// something ought to be driving, and it has not halted.
+    /// something ought to be driving, and it has not stopped.
     ///
     /// What decides whether Stop and Force stop are offered. Not the mirror of
     /// [`ready_to_resume`]: a Conversation between one step and the next has
@@ -255,6 +255,31 @@ pub struct ConversationView {
     /// [`working`]: ConversationView::working
     pub ready_to_stop: bool,
 
+    /// And whether a steer into Implementing has anything to carry on: the
+    /// branch holds a backlog with work left in it, or a roadmap it has
+    /// written.
+    ///
+    /// What decides whether the steer modal offers *carrying on* — the target
+    /// itself is offered on every Conversation there is, because an instruction
+    /// can always be written. Where this is false the instruction is the whole
+    /// of what that target can be, so the modal requires one.
+    ///
+    /// The server’s rule rather than something the page works out from the
+    /// fields around it: what stands is a reading of the Worktree as it is now,
+    /// which a page cannot make. Read the same way everything else pinned to
+    /// the Timeline is.
+    ///
+    /// **A Worktree that has gone is not a branch holding nothing**, and this is
+    /// true there. There is no directory to read, and the steer checks one out
+    /// of the branch before anything runs in it — so a Conversation stuck behind
+    /// a deleted directory is offered the carrying on its branch may well hold,
+    /// and what decides it in the end is the relaunch that reads the directory
+    /// the steer has just made.
+    ///
+    /// Checked again when the modal is submitted, as every refusal here is;
+    /// this says only that it was worth offering as of the moment it was read.
+    pub ready_to_continue: bool,
+
     /// What this Conversation is adopting, where it is adopting anything.
     ///
     /// `null` is the ordinary Conversation, which begins with a Brief and a
@@ -266,7 +291,7 @@ pub struct ConversationView {
 
     /// The worktree the grilling was given to work in, once there is one.
     ///
-    /// `null` both before grilling starts and after aborting — the two ways a
+    /// `null` both before grilling starts and after closing — the two ways a
     /// Conversation has none, which are the same fact about it.
     pub worktree: Option<Worktree>,
 
@@ -291,29 +316,25 @@ pub struct ConversationView {
     /// own, which is why this sits beside `state` rather than in it.
     pub blocked_on: Option<i64>,
 
-    /// Which of this Conversation's sessions the human has the keyboard of, or
-    /// `null` where it is Verkstead's.
+    /// What the stop shows about the account that ran out coming back, and
+    /// `null` on every stop that is not a usage window's — which is nearly all
+    /// of them, and every Conversation that has not stopped.
     ///
-    /// The Hold, said as the Event of the session it was taken on: the workbench
-    /// draws the hand-back control on that session's Screen, and a Hold with no
-    /// session to name would be one nobody could give back.
+    /// Words to draw beside Resume rather than a moment anything acts on: no
+    /// stop resumes itself, so what a stopped run waits for is a press whatever
+    /// stopped it. The one thing that tells a run stopped by an exhausted window
+    /// from a run stopped by anything else — same card, same badge, same button.
     ///
-    /// Beside `blocked_on` rather than folded into it, though a Hold sets that
-    /// too. What the badge says is *the work has stopped and it is your move*,
-    /// and what this says is *which move* — where a halt is answered by pressing
-    /// Resume, a Hold is answered by handing the keyboard back.
-    ///
-    /// Never on the Timeline, however long it lasts: the Timeline records the
-    /// work rather than the watching. This is a fact about now, read off the
-    /// running server every time the Conversation is.
-    pub held: Option<i64>,
+    /// As the session printed it, because the wording is the backend's: `3pm`
+    /// stays `3pm`, which is what somebody looks at their own clock for.
+    pub resets: Option<String>,
 
     /// Whether a session is registered for this Conversation as of this read.
     ///
     /// The same fact the sidebar draws its working indicator from, said here
-    /// because the Timeline has its own use for it: the Manual Task composer is
-    /// offered exactly where nothing is running, and the states it is offered in
-    /// are the ones a session may or may not be running in.
+    /// because the Timeline has its own use for it: Force stop is offered
+    /// exactly where something is running, and the states it is offered in are
+    /// the ones a session may or may not be running in.
     ///
     /// A question about a process rather than about the record, so it is true
     /// only as of the moment it was read — and a restarted server has no
@@ -377,7 +398,7 @@ pub enum TimelineEvent {
     Brief(BriefEvent),
 
     /// The Conversation moved, and this is the state it moved to. Starting to
-    /// grill and aborting are both this Event, because both are the work
+    /// grill and closing are both this Event, because both are the work
     /// changing hands and the state is the only thing that differs.
     Moved(MovedEvent),
 
@@ -412,16 +433,6 @@ pub enum TimelineEvent {
     /// same reason.
     Commit(CommitEvent),
 
-    /// A run waiting an account's window out: which Profile ran out, when it
-    /// comes back, and the press that starts the work again.
-    ///
-    /// The one kind of Event that carries its whole self rather than a summary
-    /// with the rest behind a fetch: there is something to press on it, and a
-    /// page that had to fetch what it was waiting for could draw the button
-    /// before it could say what for. Three short strings, where a Capture and a
-    /// diff are megabytes.
-    Pause(PauseEvent),
-
     /// Something Verkstead did on its own account, rendered inline like the
     /// Brief — and for the same reason: it is a sentence to read, and there is
     /// nothing of it a details pane would show.
@@ -429,91 +440,31 @@ pub enum TimelineEvent {
     /// The one Event with nothing to do about it and nobody behind it: no agent
     /// wrote it and no human pressed anything for it. It is how an unattended run
     /// says what it decided while nobody was watching.
+    ///
+    /// What a Verkstead of before wrote as a Pause arrives here too — see
+    /// [`notice_event`]: a wait that happened is a sentence to read like any
+    /// other, and what a stopped run waits on is the one Resume.
     Notice(NoticeEvent),
 
-    /// A Manual Task the human set going by hand, rendered inline like the
-    /// handoff — and for the same reason: it is what they asked for, in their
-    /// own words, with nothing of it a details pane would add.
+    /// A Manual Task a Verkstead of before set going by hand, rendered inline
+    /// like the Notice above it — and for its reason: it is a thing that was
+    /// asked for once, with nothing of it a details pane would add and nothing
+    /// on it to press.
     ///
-    /// What the session it started went on to do is not here. That lands as the
-    /// Events any work lands as — what it printed, what it asked, what it
-    /// committed — so this is the instruction alone, which is the part of a
-    /// Manual Task nothing else on the Timeline records.
+    /// Nothing writes another. A steer into Implementing carries the human's
+    /// instruction now, and drives the Conversation with it rather than leaving
+    /// the work standing beside its own session — so what is here is the record
+    /// of something that happened, kept and read rather than rewritten.
     ManualTask(ManualTaskEvent),
-}
 
-/// A run waiting an account's window out, as the Timeline shows it.
-///
-/// Nothing here went wrong, which is what makes it a different Event from the
-/// Notice a halt writes: the account is out of window, the agent is waiting for
-/// the same reset, and the Conversation is *blocked on you* only in the sense
-/// that the human may decide not to wait.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct PauseEvent {
-    pub id: i64,
-
-    /// When the run stopped, RFC 3339.
-    pub at: String,
-
-    /// What the Agent Profile whose account ran out is called, as it was called
-    /// then.
-    pub profile: String,
-
-    /// The line the session printed, as it printed it. The record of why this
-    /// was raised, in the backend's own words rather than in Verkstead's.
-    pub said: String,
-
-    /// When the window resets, RFC 3339 — or `null` where what the session
-    /// printed carried no time this build could read as one, which is a wait the
-    /// human ends.
-    pub resets_at: Option<String>,
-
-    /// What ended the wait, or `null` while it is still on — which is the state
-    /// the run is stopped in, and what the resume press is drawn for.
-    pub resumed: Option<PauseEnded>,
-}
-
-/// How a Pause ended: what started the work again, and when.
-///
-/// Named for the Pause rather than for the resuming, because [`Resumed`] is
-/// already what pressing **Resume** on a halt answers with. The two are
-/// different things said with one word — one is a wait that is over, the other
-/// is a run that has been started again — so this takes the longer name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct PauseEnded {
-    pub by: By,
-
-    /// When it ended, RFC 3339.
-    pub at: String,
-}
-
-/// The two things that end a wait.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum By {
-    /// The human said so, from the workbench or from their phone.
-    Human,
-
-    /// The reset time passed.
-    Reset,
-}
-
-/// What became of pressing resume.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum PauseResumed {
-    /// Recorded, and the run is going on again.
-    Resumed,
-
-    /// This Conversation has no such Pause — an Event id that belongs to another
-    /// Conversation names nothing.
-    NoSuchPause,
-
-    /// The wait was over before this arrived — the window came back, or a second
-    /// press. Not an error and not something to act on twice.
-    AlreadyResumed,
+    /// A Steer the human pressed: which state they moved the Conversation into.
+    ///
+    /// Drawn beside the Moved line the same move wrote rather than instead of
+    /// it. The move says where the work got to and this says who put it there,
+    /// and a record with only the first could never be read back for the
+    /// difference between the pipeline arriving somewhere and a human deciding
+    /// it should be there.
+    Steer(SteerEvent),
 }
 
 /// An Event the Timeline keeps in view rather than letting scroll past.
@@ -826,11 +777,10 @@ pub struct NoticeEvent {
     pub html: String,
 }
 
-/// A Manual Task as the page receives it: what the human asked for, and when.
+/// A Manual Task as the page receives it: what was asked for, and when.
 ///
-/// HTML alone, like the handoff and unlike the Brief: it is a moment on the
-/// record rather than a document anybody goes back and edits — what a second
-/// thought produces is a second Manual Task.
+/// HTML alone, like the Notice beside it and unlike the Brief: it is a moment on
+/// the record rather than a document anybody goes back and edits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ManualTaskEvent {
@@ -842,6 +792,32 @@ pub struct ManualTaskEvent {
     /// Rendered and sanitized by the server on the way out, as every piece of
     /// markdown on this wire is.
     pub html: String,
+}
+
+/// A steer as the page receives it: when, where the human sent it, and what
+/// they wrote to send it there with.
+///
+/// The one Event that is sometimes a move and sometimes a document. A steer
+/// into Wrapping or Done says nothing but the state, like the move it stands
+/// above; a steer into Implementing carries the instruction the session was set
+/// going on, which is the whole of what that session was asked to do. A steer
+/// into Grilling carries a document too, and that one arrives as a Brief Event
+/// of its own — it opens a round, and a round starts from a Brief.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerEvent {
+    pub id: i64,
+
+    /// When it was steered, RFC 3339.
+    pub at: String,
+
+    /// The state the human moved it into.
+    pub target: Lifecycle,
+
+    /// The instruction they steered it with, rendered and sanitized on the way
+    /// out as every piece of markdown on this wire is — and `None` for every
+    /// steer that carried nothing written.
+    pub html: Option<String>,
 }
 
 /// A move as the page receives it: when, and to what.
@@ -883,9 +859,9 @@ pub struct BriefEvent {
     ///
     /// The server's rule rather than something the page works out from the
     /// Conversation around it, as `ready_to_grill` is — and it is a fact about
-    /// one Brief rather than about the Conversation, because a reopened one has
-    /// a frozen Brief and an open one on the same Timeline. An adopting
-    /// Conversation's first Brief is frozen from the start: it is the stage
+    /// one Brief rather than about the Conversation, because a Conversation gets
+    /// one Brief per round and what is true of them differs: an adopting
+    /// Conversation's first Brief is frozen from the start — it is the stage
     /// brief, and nobody here writes it.
     pub frozen: bool,
 }
@@ -1091,14 +1067,9 @@ pub enum Shown {
 
 /// And what a watcher says back up it.
 ///
-/// Three kinds of thing, each saying which it is: the socket is a conversation
-/// in both directions, and what a watcher does to a Screen is look at it a
-/// different size, type into it, or move a mouse over it.
-///
-/// The last two carry the same thing — bytes on their way to the session's own
-/// terminal — and are told apart for one reason, which is the Hold. Typing
-/// takes it and mousing never does, so which of the two the human did has to
-/// survive the crossing rather than be guessed at from the bytes.
+/// Two kinds of thing, each saying which it is: the socket is a conversation in
+/// both directions, and what a watcher does to a Screen is look at it a
+/// different size, or put something into it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Watching {
@@ -1107,49 +1078,19 @@ pub enum Watching {
     /// reaches the session's own terminal, so its interface redraws to fit.
     Resized(Size),
 
-    /// What the human typed, on its way to the session's own terminal.
+    /// What the watcher put in, on its way to the session's own terminal.
     ///
-    /// The first of these takes the Hold: from then on Verkstead records and
-    /// nothing else until the keyboard is handed back — see the Hold in
-    /// `CONTEXT.md`. Whatever the terminal makes of it comes back the ordinary
-    /// way, in among what the session printed, because that is the one account
-    /// of what happened.
+    /// Keystrokes and mouse reports alike: a session whose interface tracks the
+    /// mouse is sent a report of every move, click and scroll over its Screen,
+    /// down the path a keystroke takes, and neither commits Verkstead to
+    /// anything. Whatever the terminal makes of what arrives comes back the
+    /// ordinary way, in among what the session printed, because that is the one
+    /// account of what happened.
     ///
     /// Text rather than a key: what a terminal takes is bytes, and the browser's
     /// own terminal has already turned a keypress into the ones a session
     /// expects.
-    Typed(String),
-
-    /// What the mouse did, on its way to the same terminal.
-    ///
-    /// A session whose interface tracks the mouse is sent a report of every
-    /// move, click and scroll over its Screen, down the path a keystroke takes
-    /// — so one of these is a keystroke in every respect but the one that
-    /// matters here: **it never takes the Hold**. The Hold is the human
-    /// deliberately intervening, and a cursor crossing a live Screen is not
-    /// that.
-    ///
-    /// Written through whether the Conversation is held or not, exactly as
-    /// [`Watching::Typed`] is: a human mid-intervention uses the mouse as much
-    /// as the keyboard.
-    Moused(String),
-}
-
-/// What handing a Conversation's keyboard back came to.
-///
-/// The one way a Hold ends, and it ends by being pressed: no timeout, no release
-/// on the socket dropping, because Verkstead resuming over a half-finished
-/// intervention is worse than a stalled run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum HandedBack {
-    /// The Hold is over: Verkstead has the Conversation again, and whatever the
-    /// human left is judged by the ordinary end-of-session rules.
-    HandedBack,
-
-    /// There was no Hold to end. The same answer arriving twice — a second
-    /// device, or a press repeated — rather than a refusal.
-    NotHeld,
+    PutIn(String),
 }
 
 /// How big a Screen is, in characters.
@@ -1484,34 +1425,6 @@ pub struct Comment {
     pub markdown: String,
 }
 
-/// A run waiting an account's window out, as an Event. Nothing to render — a
-/// Profile's name and a line off a terminal are not markdown — and here beside
-/// the rest for the reason a move is: one place knows how a Timeline is made.
-pub fn pause_event(id: i64, at: String, waiting: Waiting) -> TimelineEvent {
-    TimelineEvent::Pause(PauseEvent {
-        id,
-        at,
-        profile: waiting.profile,
-        said: waiting.said,
-        resets_at: waiting.resets_at,
-        resumed: waiting.resumed,
-    })
-}
-
-/// What the caller of [`pause_event`] hands over: the Pause as the store holds
-/// it.
-///
-/// Its own type rather than the store's, because this crate does not depend on
-/// the store — and rather than four parameters, two of which are strings: a
-/// call with those in the wrong order would compile.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Waiting {
-    pub profile: String,
-    pub said: String,
-    pub resets_at: Option<String>,
-    pub resumed: Option<PauseEnded>,
-}
-
 /// The handoff as an Event, rendered on the way — the same rendering the Brief
 /// gets, because it is the same kind of thing: markdown somebody wrote for
 /// somebody else to read.
@@ -1534,12 +1447,31 @@ pub fn notice_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
 }
 
 /// A Manual Task as an Event, rendered the same way and for the same reason: it
-/// is what the human asked for, written for somebody to read back.
+/// is what was asked for once, written for somebody to read back.
 pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEvent {
     TimelineEvent::ManualTask(ManualTaskEvent {
         id,
         at,
         html: crate::markdown::to_html(instruction),
+    })
+}
+
+/// A Steer as an Event: the state the human sent the Conversation into, and the
+/// instruction they sent it with where they wrote one.
+///
+/// Rendered the way the Brief is, and for the same reason: it is what the human
+/// asked for, written for somebody to read back.
+pub fn steer_event(
+    id: i64,
+    at: String,
+    target: Lifecycle,
+    instruction: Option<&str>,
+) -> TimelineEvent {
+    TimelineEvent::Steer(SteerEvent {
+        id,
+        at,
+        target,
+        html: instruction.map(crate::markdown::to_html),
     })
 }
 
@@ -1624,7 +1556,7 @@ pub enum BriefSaved {
     Saved,
     NoSuchConversation,
 
-    /// The Conversation is past drafting, so its Brief is frozen: a reopened
+    /// The Conversation is past drafting, so its Brief is frozen: a steered
     /// round adds a new Brief rather than editing this one.
     NotDrafting,
 }
@@ -1677,7 +1609,7 @@ pub enum GrillingStarted {
 
     NoSuchConversation,
 
-    /// It is past drafting, so it has been started once already — or aborted.
+    /// It is past drafting, so it has been started once already — or closed.
     NotDrafting,
 
     /// No Agent Profile is chosen for the grilling session.
@@ -1714,72 +1646,9 @@ pub enum GrillingStarted {
     WorktreeRefused,
 }
 
-/// What the human typed into the Manual Task composer: the instruction, and the
-/// Agent Profile to run it under.
-///
-/// The Profile travels with the instruction rather than being read off the
-/// Conversation, because the pick is one-off. The composer starts on the
-/// Conversation's implementation Profile and a different choice belongs to this
-/// submission alone — it never becomes the Conversation's.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct ManualTaskSubmission {
-    /// What to do, in the human's own markdown. Nothing here interprets it — it
-    /// goes on the Timeline whole and into the prompt whole.
-    pub instruction: String,
-
-    /// Which saved Profile the one-off session runs as.
-    pub profile_id: i64,
-
-    /// And which of that Profile's models it runs on. The composer prefills the
-    /// Conversation's implementation Pairing and otherwise demands a pick:
-    /// there is no default model anywhere.
-    pub model: String,
-}
-
-/// What became of submitting one.
-///
-/// Named the way [`GrillingStarted`]'s refusals are, and for the same reason:
-/// each of them is something different for the human to go and do, and a single
-/// "cannot start" would leave them guessing which.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum ManualTaskStarted {
-    /// The instruction is on the Timeline and a session is running on it.
-    Started,
-
-    NoSuchConversation,
-
-    /// It is drafting or aborted, so it has no Worktree for a session to run in.
-    /// The two states the composer is never offered in.
-    NowhereToWork,
-
-    /// A session was registered when this arrived, so the composer that was
-    /// pressed was stale. Nothing is queued: an instruction written against a
-    /// world that has since moved may no longer be the thing to do.
-    AlreadyRunning,
-
-    /// Nothing was typed, and an instruction is the whole of what a Manual Task
-    /// is.
-    EmptyInstruction,
-
-    /// The picked Profile has gone — deleted between the page being drawn and
-    /// the press.
-    NoSuchProfile,
-
-    /// It is still there and no longer lists the model picked beside it — its
-    /// list was edited between the page being drawn and the press.
-    NoSuchModel,
-
-    /// The instruction is on the Timeline and no session could be started for
-    /// it. The reason is in the server's log, as a worktree git refused is: this
-    /// is the one refusal with nothing for the human to correct.
-    NotStarted,
-}
-
 /// What became of pressing Resume.
 ///
-/// Named the way [`ManualTaskStarted`]'s refusals are, and for a reason of its
+/// Named the way [`GrillingStarted`]'s refusals are, and for a reason of its
 /// own on top of theirs: Resume is never silent. Either something is running —
 /// which needs no announcement, the session showing up on the Timeline — or
 /// nothing is, and the one place that can say why is the answer to the press.
@@ -1788,13 +1657,13 @@ pub enum ManualTaskStarted {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Resumed {
-    /// Driving has started again: the halt is cleared and what the lifecycle
+    /// Driving has started again: the stop is cleared and what the lifecycle
     /// and the branch say should be running is being launched.
     Resumed,
 
     NoSuchConversation,
 
-    /// It is drafting, done or aborted, so nothing was ever supposed to be
+    /// It is drafting, done or closed, so nothing was ever supposed to be
     /// driving it. None of the three is a Conversation standing still.
     NotDriven,
 
@@ -1832,6 +1701,265 @@ pub enum Resumed {
     NoImplementationPairing,
 }
 
+/// What clicking Steer found, which is what the modal it opens is drawn from.
+///
+/// The click is a press of its own rather than the first half of the submit: it
+/// stops the drive before the modal opens, so that nothing new is launched while
+/// the human composes and the world the modal was drawn against is the world the
+/// submit arrives in. Cancel leaves the Conversation stopped with Resume on
+/// offer, which is accepted rather than a bug — the click is what freezes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerOpened {
+    /// The drive has stopped — or there was never anything driving it — and the
+    /// modal may open.
+    Opened {
+        /// Whether a session is still running as the modal opens.
+        ///
+        /// What **Interrupt current task** is offered for: the click leaves what
+        /// is running exactly where it is, and the checkbox is the only way to
+        /// end it where it stands. What ends it otherwise is the submit's own
+        /// launch — one Worktree holds one agent, so the session a steer starts
+        /// takes the Worktree from whatever is still in it — and into Done,
+        /// where nothing is launched, nothing ends it at all.
+        ///
+        /// Where nothing is running there is nothing to interrupt, so the
+        /// checkbox is not drawn at all.
+        working: bool,
+    },
+
+    NoSuchConversation,
+}
+
+/// Where a steer can send a Conversation.
+///
+/// Draft and Closed are not among them and never will be: each has a way in of
+/// its own, and a steer is for the four states the work is *done in*. A target
+/// the modal offers is a target something can be set going in, which is why
+/// Wrapping is offered only where the work is already on a pull request — the
+/// one of the four that is drawn out at all, an instruction being writable
+/// anywhere and Done needing nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerTarget {
+    /// A new round: the work grilled again, from whatever brief the human writes
+    /// in the modal and against as much of the last interview as they ask for.
+    ///
+    /// The target that recreates the most, because it is the one reachable from
+    /// the states that hold the least. A Draft has neither branch nor Worktree
+    /// and gets both, its base commit resolved as a grill start resolves one; a
+    /// closed Conversation kept its branch and lost its Worktree, and gets the
+    /// branch checked out again into one.
+    Grilling,
+
+    /// The work built: either carrying on from what the branch already holds —
+    /// the next task of the backlog, the roadmap it has written — or doing what
+    /// the human wrote in the modal.
+    ///
+    /// **The instruction is what makes this a target from anywhere.** Where
+    /// something stands, writing nothing carries it on and what is next is the
+    /// branch’s own answer, asked exactly as every other turn of the run asks
+    /// it — see [`ConversationView::ready_to_continue`], which is the rule the
+    /// modal offers that by. Where nothing stands there is nothing to pick up,
+    /// so an instruction is required and a submit without one is refused by
+    /// name — see [`ConversationSteered::NoInstruction`].
+    ///
+    /// An instruction session is a driver rather than an errand: registered as
+    /// driving while it runs, judged by the ordinary end-of-session rules, and
+    /// on a clean finish the pipeline carries on from whatever the branch then
+    /// holds. Which is why a Conversation that has never said how its work is
+    /// built is recorded as building it inline as the steer lands — a state
+    /// something runs in with nothing saying how is a record a pressed Resume
+    /// refuses on.
+    Implementing,
+
+    /// The branch looked at again: the checks watched, the review run, the
+    /// comments answered. No payload — the wrap-up's watchers work out for
+    /// themselves what is left to do, which is what a pressed Resume already
+    /// asks of them.
+    ///
+    /// Offered only where the record already holds a pull request. A wrapping
+    /// Conversation is defined by the one under it, so a steer here is a move
+    /// onto a pull request that is already there rather than a way of opening
+    /// one — see [`ConversationSteered::NoPullRequest`].
+    Wrapping,
+
+    /// Finished with. Nothing runs, so there is no Pairing to settle and no
+    /// payload to carry: a steer into Done is the move alone.
+    Done,
+}
+
+impl SteerTarget {
+    /// Whether work goes on in this state, which is what the rest of the modal's
+    /// shape follows from.
+    ///
+    /// A target something runs in needs a Pairing settled and a Worktree to run
+    /// in; one nothing runs in needs neither. Said once here because the page
+    /// draws the picker by it and the server refuses by it, and two readings of
+    /// the same question could come to different answers.
+    pub fn runs(self) -> bool {
+        match self {
+            Self::Grilling | Self::Implementing | Self::Wrapping => true,
+            Self::Done => false,
+        }
+    }
+}
+
+/// What the human settled in the modal: where the Conversation goes, what runs
+/// the work there, and what to do about anything still running.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerSubmission {
+    /// Which state to move it into.
+    pub target: SteerTarget,
+
+    /// Whether to end the session that is running where it stands.
+    ///
+    /// `false` is the default and the ordinary case: the click stopped the
+    /// drive, so nothing was started after what is running, and what ends it is
+    /// this steer's own launch taking the Worktree from it. `true` is the human
+    /// saying they will not wait for it — which is what saves the wait where the
+    /// launch would have had to queue behind it, and what ends it at all into
+    /// Done, where nothing is launched.
+    pub interrupt: bool,
+
+    /// The Pairing the work runs under from here, for a target something runs
+    /// in — and what is picked is recorded as the *Conversation's*, because
+    /// steering re-settles what runs the work rather than picking for one
+    /// session.
+    ///
+    /// Absent where the target runs nothing, and absent where the human left
+    /// the picker on what the Conversation already had: both are a submit that
+    /// changes no Pairing. A Conversation with none fixed yet — a steered draft
+    /// — is why the pick is part of the modal rather than an error path, and one
+    /// that arrives with neither this nor a Pairing of its own is refused by
+    /// name.
+    #[serde(default)]
+    pub pairing: Option<ProfileChoice>,
+
+    /// The new round's Brief, for a steer into Grilling.
+    ///
+    /// It lands as a Brief Event of its own, frozen the moment it does: a Brief
+    /// freezes when its round leaves Draft, and a round steered into has no
+    /// Draft to leave. A second Brief beside the first rather than an edit of
+    /// it — what the earlier round was built from stays on the record.
+    ///
+    /// Absent is the ordinary case and not a refusal: the session starts on the
+    /// Brief that is already there, and the steer leaves nothing but its own
+    /// Event behind.
+    #[serde(default)]
+    pub brief: Option<String>,
+
+    /// The hand-written work, for a steer into Implementing.
+    ///
+    /// It lands as the Steer Event's own body and a session is started on it —
+    /// a driver of the Conversation rather than an errand beside it, so what
+    /// follows a clean finish is whatever the branch then holds.
+    ///
+    /// **Required where nothing stands to be carried on**, and optional beside
+    /// carrying on where something does: a branch with a backlog left in it has
+    /// an answer to what is next, and a branch with nothing on it has none. A
+    /// submit that names Implementing with neither is refused by name — see
+    /// [`ConversationSteered::NoInstruction`].
+    ///
+    /// Whitespace alone is nothing written, exactly as the brief above it: a
+    /// textarea somebody tabbed through is not an instruction.
+    ///
+    /// Nothing anywhere else reads it. A target that starts no session has
+    /// nothing to write an instruction for.
+    #[serde(default)]
+    pub instruction: Option<String>,
+
+    /// Whether the session is primed with everything the human has already
+    /// answered.
+    ///
+    /// The digest a relaunched grilling assembles for itself — every answered
+    /// Question Set of the Conversation, in the order it was asked — offered
+    /// here as a choice rather than always sent. A fresh brief is often the
+    /// point of the steer, and priming it with the whole of the last interview
+    /// would be steering into the argument that has just been left behind.
+    ///
+    /// Nothing anywhere else reads it: a target that starts no grilling starts
+    /// nothing to prime.
+    #[serde(default)]
+    pub digest: bool,
+}
+
+/// What became of submitting one.
+///
+/// Named the way [`GrillingStarted`]'s refusals are, and nothing here is about
+/// the state the Conversation was in: the human has looked at the work and said
+/// where it goes, so the source is not something to be refused for. What is left
+/// to be wrong about is the *target* — a state whose work cannot be set going
+/// from what the record holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConversationSteered {
+    /// Moved: the Steer Event is on the Timeline beside the move, and any stop
+    /// the click wrote is gone.
+    Steered,
+
+    NoSuchConversation,
+
+    /// Wrapping was named for a Conversation whose work is on no pull request.
+    ///
+    /// A wrapping Conversation is defined by the one under it — the store writes
+    /// the move and the pull-request row as one act — so there is no wrapping up
+    /// to steer into here. The modal does not offer the target on such a
+    /// Conversation at all; this is the same rule asked again on arrival, the
+    /// way every named refusal here is.
+    NoPullRequest,
+
+    /// Implementing was named with nothing written, for a Conversation with
+    /// nothing on its branch to carry on: no backlog with work left in it, and
+    /// no roadmap it has written.
+    ///
+    /// One or the other, never neither. A steer into Implementing either picks
+    /// up what stands or does what the human wrote, so a branch where nothing
+    /// stands and a modal where nothing was written is a session with no job.
+    /// The modal requires the instruction on such a Conversation rather than
+    /// offering the submit and refusing it — see
+    /// [`ConversationView::ready_to_continue`], which is what it draws that by
+    /// — and this is the same rule asked again on arrival.
+    NoInstruction,
+
+    /// Grilling was named with no brief written, for a Conversation whose newest
+    /// Brief is empty.
+    ///
+    /// The rule a pressed *Start grilling* is refused by — see
+    /// [`GrillingStarted::EmptyBrief`] — asked of the other way in. A grilling
+    /// starts from a Brief and a round steered into is frozen where it lands, so
+    /// an empty one is an interview about nothing that nothing can go back and
+    /// edit. Reachable on a Draft alone in practice: everything past drafting
+    /// was grilled out of a Brief somebody wrote.
+    EmptyBrief,
+
+    /// Nothing says which account and model the work runs under from here:
+    /// neither a Pairing picked in the modal nor one the Conversation already
+    /// had.
+    NoPairing,
+
+    /// The Pairing picked names a Profile that is not there — it was removed
+    /// between the list the modal read and the pick it made from it.
+    NoSuchProfile,
+
+    /// Or a model that Profile does not list, for the same reason.
+    NoSuchModel,
+
+    /// The branch has never been made and nothing in the repository answers to
+    /// what it would come off.
+    ///
+    /// A Draft alone, which is the one source with no branch behind it: what it
+    /// branches from is the base the human fixed while drafting, or the Repo's
+    /// default branch where they fixed none, and a repository that has since
+    /// lost either is one they can point at another.
+    NoBaseCommit,
+
+    /// What the record names is not a Worktree any more, and git would not make
+    /// it again from the branch.
+    WorktreeRefused,
+}
+
 /// What became of pressing Adopt.
 ///
 /// Named the way [`GrillingStarted`]'s refusals are, and for the same reason: a
@@ -1848,7 +1976,7 @@ pub enum Adopted {
 
     NoSuchConversation,
 
-    /// It is past drafting, so it has been adopted once already — or aborted.
+    /// It is past drafting, so it has been adopted once already — or closed.
     NotDrafting,
 
     /// It is adopting nothing, which is every Conversation that began with a
@@ -1857,7 +1985,8 @@ pub enum Adopted {
 
     /// No Agent Profile is chosen for the grilling. Carried by an adopted stage
     /// rather than run under: every stage after it inherits both Profiles from
-    /// its predecessor, and a Conversation that is reopened is grilled.
+    /// its predecessor, and a Conversation steered into a second round is
+    /// grilled.
     NoGrillingProfile,
 
     /// And none is chosen for the implementation, which is what the stage's own
@@ -1906,31 +2035,6 @@ pub enum Adopted {
     WorktreeRefused,
 }
 
-/// What became of reopening a finished one with a new round.
-///
-/// Every refusal is named, as [`GrillingStarted`]'s are: reopening is the other
-/// press that gives a Conversation somewhere to work, and what stops one is
-/// something different for the human to go and do each time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum ConversationReopened {
-    /// Reopened: it is drafting again, with a Brief of its own to write and a
-    /// worktree to work in.
-    Reopened,
-
-    NoSuchConversation,
-
-    /// It is not Done, so there is no finished round to open another after.
-    /// Aborted is off the ladder, and every other state is somewhere the work
-    /// has got to.
-    NotDone,
-
-    /// The worktree's directory had gone and git would not check the branch out
-    /// again. The reason is in the server's log — this is the one refusal with
-    /// nothing for the human to correct.
-    WorktreeRefused,
-}
-
 /// What became of pressing Stop or Force stop.
 ///
 /// One answer for both presses, because they ask for the same thing and differ
@@ -1947,37 +2051,37 @@ pub enum ConversationReopened {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum ConversationStopped {
-    /// It has stopped: the halt is written, the Notice is on the Timeline, and
+    /// It has stopped: the stop is written, the Notice is on the Timeline, and
     /// nothing more will be launched. Force stop always answers this, and so
     /// does a Stop pressed with nothing running to see out.
     Stopped,
 
     /// It is stopping: the session running now runs to its own end, and the
-    /// Conversation halts before anything else is started. What Stop answers
+    /// Conversation stops before anything else is started. What Stop answers
     /// where there was something to see out.
     Stopping,
 
-    /// It has stopped already, so the halt standing is the one that explains it.
+    /// It has stopped already, so the stop standing is the one that explains it.
     /// Getting going again is Resume's, not a second stop's.
-    AlreadyHalted,
+    AlreadyStopped,
 
-    /// It is drafting, done or aborted, so nothing was ever driving it and there
+    /// It is drafting, done or closed, so nothing was ever driving it and there
     /// is nothing to stop.
     NotDriven,
 
     NoSuchConversation,
 }
 
-/// What became of aborting one.
+/// What became of closing one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum ConversationAborted {
-    /// Stopped: the worktree is gone and the branch is not.
-    Aborted,
+pub enum ConversationClosed {
+    /// Closed: the worktree is gone and the branch is not.
+    Closed,
 
-    /// It was aborted already, which is not an error — what was asked for holds
+    /// It was closed already, which is not an error — what was asked for holds
     /// either way.
-    AlreadyAborted,
+    AlreadyClosed,
 
     NoSuchConversation,
 

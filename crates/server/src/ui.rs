@@ -28,13 +28,12 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationAborted,
-    ConversationEntry, ConversationReopened, ConversationStopped, ConversationView, Cursor,
-    GrillingStarted, HandedBack, Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption,
-    NewConversation, NewOrder, PauseResumed, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved,
-    SettingsView, Standing, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationClosed,
+    ConversationEntry, ConversationSteered, ConversationStopped, ConversationView, Cursor,
+    GrillingStarted, Lifecycle, NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit,
+    ProfileEntry, PushKey, Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -116,56 +115,34 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/conversations/{id}/base", post(set_base_branch))
         // The two that make and unmake what a Conversation works in. Named in
         // the path rather than in the verb, as closing a Set unanswered is: the
-        // viewer speaks one method.
+        // viewer speaks one method. Nothing here opens a second round on one
+        // Verkstead has finished with: a steer into Grilling is that, and it
+        // goes through the modal below like every other steer.
         .route("/api/ui/conversations/{id}/grill", post(start_grilling))
         // And the press that adopts a roadmap's next stage, which is the
         // grilling start's sibling: what the human presses on an adopting
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
-        .route("/api/ui/conversations/{id}/abort", post(abort))
-        // And the press that opens a second round on one Verkstead has finished
-        // with. Beside aborting rather than in the menu with it: reopening throws
-        // nothing away, and what it is is the next thing to do about a finished
-        // piece of work — so it belongs at the end of the Timeline, where the
-        // grilling start is.
-        .route("/api/ui/conversations/{id}/reopen", post(reopen))
-        // And the one press that ends a Hold. Per Conversation rather than per
-        // Event, because a Conversation has one keyboard: which of its sessions
-        // the human took is the Conversation's own answer, and a route that made
-        // them name it would be one they could get wrong.
-        //
-        // A press rather than anything the socket does. A Hold ends only by
-        // being handed back — not by the socket dropping, not by the tab closing
-        // — so what ends one is a request of its own, which any device on the
-        // tailnet can make and which outlives whatever was watching.
-        .route("/api/ui/conversations/{id}/hand-back", post(hand_back))
+        .route("/api/ui/conversations/{id}/close", post(close))
         // No route for how the work gets built: the direction rides the closing
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
         //
-        // And the press that says *do not wait for the window*. Per Event rather
-        // than per Conversation, because that is what is being answered: the
-        // Timeline is where the wait was said, and a route that took only the
-        // Conversation would answer whichever Pause happened to be open when it
-        // arrived. Nothing in the body: there is one thing to do about a Pause,
-        // and a choice of one is a press rather than a form.
-        .route(
-            "/api/ui/conversations/{id}/pause/{event}/resume",
-            post(resume_pause),
-        )
-        // And what the human sets going by hand, wherever nothing is running.
-        // Per Conversation rather than per Event, unlike a Set: a Manual Task
-        // answers nothing on the Timeline — it is a new thing to do, and the
-        // Event it becomes is written by this.
-        .route(
-            "/api/ui/conversations/{id}/manual-task",
-            post(start_manual_task),
-        )
-        // And the press beside it, which is the other way a stopped Conversation
-        // gets going: what Verkstead itself should be doing, worked out again
-        // from where the work now stands. Per Conversation for the same reason,
-        // and with no body at all — there is nothing to say about it beyond
-        // which Conversation it is.
+        // And no route for a run waiting an account's window out. That was a
+        // press per Event, on the one card that carried its own; a run stopped
+        // for a window is stopped like everything else now, and what starts it
+        // again is the one Resume below.
+        //
+        // And no route for the one thing the human used to set going by hand
+        // beside the work: a steer into Implementing carries the instruction
+        // now, and the session it starts drives the Conversation rather than
+        // standing next to it — see [`steer`].
+        //
+        // What there is is the press that gets a stopped Conversation going
+        // again: what Verkstead itself should be doing, worked out again from
+        // where the work now stands. Per Conversation rather than per Event, and
+        // with no body at all — there is nothing to say about it beyond which
+        // Conversation it is.
         .route("/api/ui/conversations/{id}/resume", post(resume))
         // And the two presses that stop it, which are Resume's opposite number
         // and take a body for the same reason it does: none. Which Conversation
@@ -174,6 +151,17 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // not.
         .route("/api/ui/conversations/{id}/stop", post(stop))
         .route("/api/ui/conversations/{id}/force-stop", post(force_stop))
+        // And the two presses that steer it, which are the row beside those in
+        // the same menu. Two rather than one because the click is an act of its
+        // own: it stops the drive so that nothing launches while the human
+        // composes, and answers with what it found running — see
+        // [`crate::steering`]. The submit under it carries what the modal
+        // settled, which is the only body of the four.
+        .route("/api/ui/conversations/{id}/steer", post(steer))
+        .route(
+            "/api/ui/conversations/{id}/steer/submit",
+            post(steer_submit),
+        )
         .route(
             "/api/ui/conversations/{id}/grilling-pairing",
             post(choose_grilling_pairing),
@@ -561,7 +549,7 @@ async fn start_conversation(
 ///
 /// Refused for nothing. Every id is either a Conversation, which is placed, or
 /// not one, which is passed over — a viewer sends the list it drew, and by the
-/// time it lands a row may have been started or aborted. There is nothing to
+/// time it lands a row may have been started or closed. There is nothing to
 /// answer with beyond that it was taken, so it answers with nothing.
 ///
 /// The Nudge is what carries it to the other devices: an order is the list
@@ -723,7 +711,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
 
     // Whether the worktree is still on disk, which is a look at the filesystem
     // rather than anything the store knows.
-    let worktree = match crate::conversations::worktree(conversation.worktree).await {
+    let worktree = match crate::conversations::worktree(conversation.worktree.clone()).await {
         Ok(worktree) => worktree,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a worktree failed");
@@ -733,8 +721,8 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
 
     // The Brief decides whether the Conversation is ready to grill, so it is
     // read off the Timeline before the Timeline is spent building the view. The
-    // newest of them: a reopened Conversation has a frozen Brief and an open one,
-    // and what a grilling would start from is the round nobody has grilled yet.
+    // newest of them: a Conversation gets one Brief per round, and what a
+    // grilling would start from is the round nobody has grilled yet.
     let brief = timeline
         .iter()
         .rev()
@@ -775,8 +763,9 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // row. Only the roadmap's name is stored — see [`crate::stages::adopting`].
     //
     // A worktree is what says the adoption has happened, adoption being what
-    // makes one. What follows it is the stage's work and, if the human reopens it
-    // when that work is done, a Brief of their own — never the stage brief again.
+    // makes one. What follows it is the stage's work and, if the human steers it
+    // into a second round when that work is done, a Brief of their own — never
+    // the stage brief again.
     let adopting = match conversation.adopting.clone() {
         Some(roadmap) if worktree.is_none() => Some(
             crate::stages::adopting(
@@ -789,22 +778,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         _ => None,
     };
 
-    // What the work is waiting an account's window out on, read off the Timeline
-    // for the reason the Brief is: it is already here. The store's index makes at
-    // most one open, so the last one that is unresumed is the one — and it is the
-    // *only* one, which is what makes *the run stops here* a fact rather than a
-    // promise. It carries *blocked on you* like a halt: a run that has stopped is
-    // stopped, and a badge with nowhere to go would be one the human could not
-    // act on.
-    let waiting_at = timeline.iter().rev().find_map(|event| match &event.event {
-        store::Event::Pause(pause) if pause.resumed.is_none() => Some(event.id),
-        _ => None,
-    });
-
-    // Whether driving has stopped: a halt says the Conversation is stopped
-    // now, and the Notice it points at says what stopped and why.
-    let halted = match store::halted(&state.pool, id).await {
-        Ok(halted) => halted.map(|halted| halted.event_id),
+    // Whether driving has stopped, however it stopped: the stop says the
+    // Conversation is stopped now, and the Notice it points at says what stopped
+    // and why. One question about one thing — an account out of window stops a
+    // run the same way a session falling over does.
+    let stopped = match store::stopped(&state.pool, id).await {
+        Ok(stopped) => stopped,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation had stopped failed");
             None
@@ -815,27 +794,43 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // fact about the other end of the ladder: the Conversation says it is being
     // worked on and nothing is working on it. Asked of the running server as
     // much as of the record — see [`crate::resume::ready`].
-    let ready_to_resume = crate::resume::ready(&state, id, conversation.state, halted.is_some());
+    let ready_to_resume = crate::resume::ready(&state, id, conversation.state, stopped.is_some());
 
     // And whether there is driving to stop, which is the same fact read the
     // other way: a Conversation that says it is being worked on and has not
-    // halted is one the human may pull the brake on. Nothing about the register
+    // stopped is one the human may pull the brake on. Nothing about the register
     // here — a run between two steps is as much a run to stop as a busy one. See
     // [`crate::stops::ready`].
-    let ready_to_stop = crate::stops::ready(conversation.state, halted.is_some());
+    let ready_to_stop = crate::stops::ready(conversation.state, stopped.is_some());
 
-    // And what the human has taken the keyboard of, which is the other thing the
-    // work can be stopped on and the one that is nowhere on the Timeline: a Hold
-    // leaves no Event, because the Timeline records the work rather than the
-    // watching. Read off the running server, which is the only thing that knows.
-    let held = state.sessions.holding(id);
+    // And whether a steer into Implementing would have anything to carry on: a
+    // backlog with work left in it, or a roadmap the branch has written. What
+    // the modal draws the *carrying on* by, the target itself being offered
+    // wherever an instruction can be written, which is everywhere. Off the
+    // Worktree as it stands, which is where the pinned Events above are read
+    // from and for the same reason — the repository owns those files. See
+    // [`crate::steering::standing`], which is the rule the submit refuses by,
+    // and which reads a Worktree that has gone as *cannot tell* rather than as
+    // nothing standing: the steer makes one out of the branch before anything
+    // runs in it.
+    let ready_to_continue = crate::steering::standing(
+        conversation.direction,
+        conversation.worktree.clone(),
+        conversation.base_commit.clone(),
+    )
+    .await
+    .offerable();
 
-    // The badge points at whichever of the three is in force, and at the Hold
-    // first. No two of them can really be in force together — nothing halts
-    // behind a Hold, and a run waiting a window out is one nothing is driving to
-    // halt — and where two somehow are, the keyboard is the thing the human is
-    // holding right now and the halt is the thing they have to press Resume on.
-    let blocked_on = held.or(halted).or(waiting_at);
+    // And the badge points at the stop's own Notice, whatever wrote it: a run
+    // that has stopped is stopped, and a badge with nowhere to go would be one
+    // the human could not act on.
+    let blocked_on = stopped.as_ref().map(|stopped| stopped.notice);
+
+    // With the words about the account coming back beside it, where the stop
+    // carries any: the one thing that tells a run stopped by an exhausted window
+    // from a run stopped by anything else. Drawn beside Resume rather than acted
+    // on — no stop resumes itself, so every one of them waits for the same press.
+    let resets = stopped.and_then(|stopped| stopped.resets);
 
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
@@ -858,6 +853,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         ready_to_grill,
         ready_to_resume,
         ready_to_stop,
+        ready_to_continue,
         adopting,
         grilling_pairing,
         implementation_pairing,
@@ -865,12 +861,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         direction: conversation.direction,
         pinned,
         blocked_on,
-        held,
+        resets,
         // The same reading the Events above are drawn against, said as a fact
-        // about the Conversation: the Timeline offers the Manual Task composer
-        // exactly where nothing is running, and one Event of a session's is not
-        // the question — a Conversation whose session has ended is not working,
-        // whichever Event it was writing into.
+        // about the Conversation: the Timeline offers Force stop exactly where
+        // something is running, and one Event of a session's is not the question
+        // — a Conversation whose session has ended is not working, whichever
+        // Event it was writing into.
         working: writing.is_some(),
         timeline: timeline
             .into_iter()
@@ -966,30 +962,49 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             summary: commit.summary,
                         },
                     ),
-                    // Whole, unlike the three above it: there is a press on it,
-                    // and a page that had to fetch what the run was waiting for
-                    // could draw the button before it could say what for. Three
-                    // short strings, because nothing went wrong here and there
-                    // is no evidence to gather.
-                    store::Event::Pause(pause) => {
-                        verkstead_render::pause_event(event.id, event.at, waiting(pause))
-                    }
+                    // A wait a Verkstead of before put on a Timeline, said in
+                    // the sentence a stop for a window is said in now — see
+                    // [`crate::stopping::out_of_window`]. Nothing writes another
+                    // and nothing rewrote these: what changes is that the record
+                    // reads as the one kind of stopped thing, drawn as the line
+                    // it always carried with nothing to press on it.
+                    //
+                    // A Notice by the time it is on the wire, which is what a
+                    // migrated database needs it to be: an open Pause was read
+                    // onto its Conversation as the stop it is, and the Event the
+                    // *blocked on you* badge points at is this one.
+                    store::Event::Pause(pause) => verkstead_render::notice_event(
+                        event.id,
+                        event.at,
+                        &crate::stopping::out_of_window(&pause.profile, &pause.said),
+                    ),
                     // Rendered like the handoff and inline like it, being the
                     // other kind of sentence somebody has to be able to read
                     // back — and the one nobody wrote for a human to press
-                    // anything about. What a halt's Notice says is what stopped,
-                    // why, and the evidence — see [`crate::halts`], which writes
+                    // anything about. What a stop's Notice says is what stopped,
+                    // why, and the evidence — see [`crate::stopping`], which writes
                     // the markdown.
                     store::Event::Notice(markdown) => {
                         verkstead_render::notice_event(event.id, event.at, &markdown)
                     }
-                    // And what the human asked for by hand, rendered like the
-                    // handoff and inline like it: the instruction is the whole
-                    // of what a Manual Task is on the record, and what its
-                    // session did lands beside it as its own Events.
+                    // And a Manual Task a Verkstead of before set going by hand.
+                    // Nothing writes another — a steer into Implementing carries
+                    // the instruction now — and nothing rewrote these: the
+                    // instruction is what was asked for, and it is drawn as the
+                    // line it is with nothing to press on it.
                     store::Event::ManualTask(instruction) => {
                         verkstead_render::manual_task_event(event.id, event.at, &instruction)
                     }
+                    // And where the human said the work goes, which is the one
+                    // Event that stands beside another: the move it wrote is
+                    // right under it, and the pair is the whole record of a
+                    // steer — who decided, and what became of it.
+                    store::Event::Steer(target, instruction) => verkstead_render::steer_event(
+                        event.id,
+                        event.at,
+                        lifecycle(target),
+                        instruction.as_deref(),
+                    ),
                     // The one kind that is not in the list: it is drawn pinned
                     // above the Timeline instead. Dropped by name rather than by
                     // a catch-all, so a kind added later has to be decided about
@@ -1405,71 +1420,11 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
     }
 }
 
-/// `POST /api/ui/conversations/{id}/pause/{event}/resume` — go on without
-/// waiting for the window.
-///
-/// The human's half of the two ways a Pause ends; the other is the reset time
-/// passing, which the sweep does — see [`crate::limits`]. Both close the same
-/// row and start the work again from where it stopped, and the Worktree is
-/// untouched by either: a Pause never changed anything in it.
-///
-/// `AlreadyResumed` is an outcome rather than an error, for the reason every
-/// other named outcome here is one: the window may have come back while the page
-/// was open, and the press arriving second is something to say in words rather
-/// than something to retry.
-async fn resume_pause(
-    State(state): State<AppState>,
-    Path((id, event)): Path<(String, String)>,
-) -> HttpResponse {
-    // Two ids out of a URL a human may have typed, read as permissively as every
-    // other pair here.
-    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
-        return Json(PauseResumed::NoSuchPause).into_response();
-    };
-
-    match crate::limits::resume(&state, id, event, store::By::Human).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, event_id = event, "starting a paused run again failed");
-            unavailable("the run could not be started again")
-        }
-    }
-}
-
-/// `POST /api/ui/conversations/{id}/manual-task` — do this one thing by hand.
-///
-/// The instruction goes on the Timeline and a one-off session starts on it under
-/// the Profile the human picked beside it. Nothing about the Conversation moves:
-/// a Manual Task is outside the pipeline, and what it leaves behind is its
-/// instruction, what its session printed and whatever that committed.
-///
-/// `AlreadyRunning` is an outcome rather than an error, for the reason every
-/// other named outcome here is one: the composer that was pressed was drawn a
-/// moment ago, and an agent having started since is something to say in words
-/// rather than something to retry.
-async fn start_manual_task(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(submission): Json<ManualTaskSubmission>,
-) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(ManualTaskStarted::NoSuchConversation).into_response();
-    };
-
-    match crate::manual::submit(&state, id, &submission).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "starting a manual task failed");
-            unavailable("the manual task could not be started")
-        }
-    }
-}
-
 /// `POST /api/ui/conversations/{id}/resume` — start driving it again.
 ///
 /// What should be running is recomputed from the state the Conversation is in
 /// and what its branch has written, rather than being read off whatever stopped:
-/// a halt is answered whenever the human gets to it, and the work moves on in
+/// a stop is answered whenever the human gets to it, and the work moves on in
 /// the meantime.
 ///
 /// Answered as soon as the decision is made rather than once the session is up.
@@ -1509,7 +1464,7 @@ async fn stop(State(state): State<AppState>, Path(id): Path<String>) -> HttpResp
     }
 }
 
-/// `POST /api/ui/conversations/{id}/force-stop` — halt now, and end what is
+/// `POST /api/ui/conversations/{id}/force-stop` — stop now, and end what is
 /// running.
 async fn force_stop(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
@@ -1525,72 +1480,64 @@ async fn force_stop(State(state): State<AppState>, Path(id): Path<String>) -> Ht
     }
 }
 
-/// `POST /api/ui/conversations/{id}/abort` — stop it wherever it has got to.
-async fn abort(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+/// `POST /api/ui/conversations/{id}/steer` — stop the drive and open the modal.
+///
+/// The click rather than the move. What comes back says the modal may open and
+/// whether a session is still running, which is what the **Interrupt current
+/// task** checkbox is offered against. Cancelling from here leaves the
+/// Conversation stopped with Resume on offer, which is what the click is for.
+async fn steer(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
-        return Json(ConversationAborted::NoSuchConversation).into_response();
+        return Json(SteerOpened::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::abort(&state, id).await {
+    match crate::steering::click(&state, id).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "aborting a Conversation failed");
-            unavailable("the conversation could not be aborted")
+            tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation to steer it failed");
+            unavailable("the conversation could not be stopped to steer it")
         }
     }
 }
 
-/// `POST /api/ui/conversations/{id}/reopen` — a second round on a finished one:
-/// a new Brief to write, on the branch the first round was built on.
+/// `POST /api/ui/conversations/{id}/steer/submit` — move it where the human
+/// said.
 ///
-/// Nothing in the body, as the grilling start takes nothing: which Conversation
-/// is in the path, and everything this is refused for the server decides itself
-/// when the button is pressed.
-async fn reopen(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+/// Answered as soon as the move is recorded rather than once anything the target
+/// needs is up, the way Resume is: what the browser is waiting for is *whether*
+/// it went, and the targets that launch something take as long as a launch
+/// takes.
+async fn steer_submit(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(submission): Json<SteerSubmission>,
+) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
-        return Json(ConversationReopened::NoSuchConversation).into_response();
+        return Json(ConversationSteered::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::reopen(&state, id).await {
+    match crate::steering::submit(&state, id, &submission).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reopening a Conversation failed");
-            unavailable("the conversation could not be reopened")
+            tracing::error!(error = ?error, conversation_id = id, "steering a Conversation failed");
+            unavailable("the conversation could not be steered")
         }
     }
 }
 
-/// `POST /api/ui/conversations/{id}/hand-back` — the human gives the keyboard
-/// back, and the Hold is over.
-///
-/// The only way one ends. Nothing here judges anything: what the human left is
-/// judged by whichever driver was waiting at the gate, by the ordinary
-/// end-of-session rules — the Step's commit landed so the run goes on, or it did
-/// not and driving halts. Handing back is what lets that question be asked, not
-/// what answers it.
-///
-/// Refused for nothing. A Conversation that is not held is one already handed
-/// back, which is the same answer arriving twice rather than a mistake.
-async fn hand_back(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+/// `POST /api/ui/conversations/{id}/close` — stop it wherever it has got to.
+async fn close(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
-        return Json(HandedBack::NotHeld).into_response();
+        return Json(ConversationClosed::NoSuchConversation).into_response();
     };
 
-    if !state.sessions.hand_back(id) {
-        return Json(HandedBack::NotHeld).into_response();
+    match crate::conversations::close(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "closing a Conversation failed");
+            unavailable("the conversation could not be closed")
+        }
     }
-
-    tracing::info!(
-        conversation_id = id,
-        "the keyboard has been handed back, so Verkstead has this Conversation again",
-    );
-
-    // The badge goes with it, and it is drawn off the Conversation.
-    state
-        .nudges
-        .announce(Nudge::Conversation { conversation: id });
-
-    Json(HandedBack::HandedBack).into_response()
 }
 
 /// `POST /api/ui/conversations/{id}/grilling-pairing` — which account and model
@@ -1698,27 +1645,6 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
     }
 }
 
-/// A Pause as the viewer receives it: which account ran out, when it comes back,
-/// and what ended the wait if anything has.
-///
-/// The one Event whose whole self rides on the Timeline. Held to the viewer's
-/// vocabulary here, as a lifecycle state is, because the two enums are one pair
-/// of words said in two crates that do not depend on each other.
-fn waiting(pause: store::Pause) -> verkstead_render::Waiting {
-    verkstead_render::Waiting {
-        profile: pause.profile,
-        said: pause.said,
-        resets_at: pause.resets_at,
-        resumed: pause.resumed.map(|resumed| verkstead_render::PauseEnded {
-            by: match resumed.by {
-                store::By::Human => verkstead_render::By::Human,
-                store::By::Reset => verkstead_render::By::Reset,
-            },
-            at: resumed.at,
-        }),
-    }
-}
-
 /// The store's lifecycle state as the viewer receives it. One word either side,
 /// and this is where the two vocabularies are held to each other.
 fn lifecycle(state: store::Lifecycle) -> Lifecycle {
@@ -1728,7 +1654,7 @@ fn lifecycle(state: store::Lifecycle) -> Lifecycle {
         store::Lifecycle::Implementing => Lifecycle::Implementing,
         store::Lifecycle::Wrapping => Lifecycle::Wrapping,
         store::Lifecycle::Done => Lifecycle::Done,
-        store::Lifecycle::Aborted => Lifecycle::Aborted,
+        store::Lifecycle::Closed => Lifecycle::Closed,
     }
 }
 

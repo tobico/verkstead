@@ -63,15 +63,17 @@ flowchart LR
   and pinned when it was typed). Each conversation owns one branch and one
   worktree; the branch name is prefilled randomly and customizable while the
   brief is drafted. Worktrees live under Verkstead's own data directory and
-  are kept until the conversation is aborted — *corrected 2026-08-20, building
+  are kept until the conversation is closed — *corrected 2026-08-20, building
   stage 02*: this said "archived", and there is no archive action on a
-  conversation. Aborting is what the teardown hangs off, and it leaves the
+  conversation. Closing is what the teardown hangs off, and it leaves the
   branch alone.
 - **Lifecycle:** Draft → Grilling → Direction → Implementing → Wrapping →
-  Done. *Blocked on you* is a badge on any active state, not a state. A Done
-  conversation can reopen with a new brief round. Aborting is possible from
-  any state, and **Aborted** is a state of its own — off the ladder rather than
-  on it, since every other state is somewhere the work has got to.
+  Done. *Blocked on you* is a badge on any active state, not a state. Closing
+  is possible from any state, and **Closed** is a state of its own — off the
+  ladder rather than on it, since every other state is somewhere the work has
+  got to. A conversation that is closed or Done is got back into by steering
+  it, a steer into Grilling being what opens a new brief round (*refined
+  2026-08-26, building close-and-retirements*).
 - **Agent profiles** are minimal: name, claude home dir + config file pair, the
   list of models that account can run — plus an agent-type discriminator so
   other backends can slot in later (claude is the only type now). The model
@@ -163,26 +165,31 @@ flowchart LR
   Verkstead reads whether the block is there and the session follows what it
   says; a repo that records none gets a branch off the default branch, said on
   the timeline, because there is no convention to invent on its behalf.
-- **The brief freezes at grill start.** A reopened round adds a new brief
+- **The brief freezes at grill start.** A later round adds a new brief
   event rather than editing the old one. Until then it is edited where it
   stands, with no mode to enter and no Save to press (*settled 2026-08-24,
   building workbench-refit*): the field is always there, it grows with what is
-  in it, and it keeps itself on a pause in the typing and on the way out of
-  the field.
-- **Driving that stops halts** (*settled 2026-08-24, building
-  halt-and-resume*). Whatever stopped it — a session that fell over, checks
-  that would not go green, a driver a restart took away, a Stop the human
-  pressed — Verkstead records a halt on the conversation and writes a stop
-  notice on its timeline saying what stopped, why, and what the evidence was.
-  Nothing advances past a halt, and the badge points at the notice. Getting
-  going again is one standing **Resume** in the start-work menu, recomputed
-  from the lifecycle and the branch rather than replaying whatever failed;
-  steering the work is what a manual task is for, so Resume carries nothing.
-  What replaced roadrunner's three remedies: retry is Resume, take over
-  manually is the halt already standing, and abort is Abort.
+  in it, and it keeps itself whenever the typing stops for a moment and on the
+  way out of the field.
+- **A conversation is driven or it is stopped** (*settled 2026-08-24, building
+  halt-and-resume; refined 2026-08-25, building one-stop; refined 2026-08-26,
+  building close-and-retirements*). Whatever stopped it — a session that fell
+  over, checks that would not go green, a driver a restart took away, an
+  account out of usage window, a Stop the human pressed —
+  Verkstead records the one stop on the conversation and writes a stop notice
+  on its timeline saying what stopped, why, and what the evidence was. Nothing
+  advances past a stop, and the badge points at the notice. Getting going again
+  is one standing **Resume** in the start-work menu, recomputed from the
+  lifecycle and the branch rather than replaying whatever failed; steering the
+  work is what **Steer** is for, so Resume carries nothing. What replaced
+  roadrunner's three remedies: retry is Resume, take over manually is the stop
+  already standing, and abort is **Close**.
 - **Usage limits.** When a claude account exhausts its window mid-run, the
-  conversation pauses and push-notifies; it resumes on the human's say-so or
-  when the window resets.
+  conversation stops the way every other stopped conversation does — one
+  notice, one badge, one Resume — and push-notifies. The reset time rides on
+  the stop as words to read beside that button rather than as a moment
+  anything acts on: no stop resumes itself, so this one waits for the same
+  press (*refined 2026-08-25, building one-stop*).
 - **No cap on concurrent sessions** across conversations.
 
 ## Execution and sandboxing
@@ -313,7 +320,7 @@ Timeline events:
   worktree as git saw it, and the tail of what the last session said — written
   as one markdown notice on the timeline. There is nothing on it to press,
   because there is nothing to decide about it: what the conversation is waiting
-  on is the halt beside it, and Resume at the foot of the timeline is what
+  on is the stop beside it, and Resume at the foot of the timeline is what
   answers that.
 - **Pinning is the fixed set** (task list, stage list, PR) with a floating
   summary box at the top of the timeline; no manual pin/unpin. More than one
@@ -362,12 +369,14 @@ Timeline events:
   Repo as it opens.
 - **Sidebar is manually ordered**; conversations needing attention carry a
   marker icon and border.
-- **Push notifications** for needs-you — a blocking question set, a Hold nobody
-  came back to, a halt Verkstead decided on, a usage-limit pause — **and
+- **Push notifications** for needs-you — a blocking question set, a stop
+  Verkstead decided on, an exhausted usage window among them — **and
   milestones** (PR opened, stage complete, conversation done). A stop nobody
   chose sends nothing: a restart picks that one up unasked, so waking a phone
-  about it would be asking for something that is already happening (*settled
-  2026-08-24, building halt-and-resume*).
+  about it would be asking for something that is already happening; neither
+  does the human's own Stop, they being the one person it would be telling
+  their own news (*settled 2026-08-24, building halt-and-resume; refined
+  2026-08-25, building one-stop*).
 - Question sets are answerable in the workbench and on the phone alike.
 - **Everything the human configures is one page**, `/settings`, the one
   place the sidebar leads out to (*settled 2026-08-23, building
@@ -399,7 +408,8 @@ it combining a whole-repo rename with a process supervisor.
 4. **Wrap-up** — PR events, gh integration, CI monitoring, the wrap-up loop,
    stacking, staged roadmaps.
 5. **Refinement** — deferred asks, usage-limit pausing, manual sidebar
-   ordering, milestone notifications, reopening rounds.
+   ordering, milestone notifications, reopening rounds (*retired 2026-08-26,
+   building close-and-retirements*: a steer into Grilling opens a round now).
 
 Adoption happens **after stage 4**, when Verkstead covers everything
 roadrunner does. Until then roadrunner and the tobico-scripts wrappers stay

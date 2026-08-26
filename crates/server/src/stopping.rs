@@ -1,11 +1,16 @@
 //! Where driving stops, and what the human is told about it.
 //!
-//! A halt is Verkstead saying *nothing is driving this Conversation any more*.
+//! A stop is Verkstead saying *nothing is driving this Conversation any more*.
 //! It is two things written together: durable state on the Conversation — see
-//! [`store::halt`] — and an ordinary **Notice** on its Timeline saying what
+//! [`store::stop`] — and an ordinary **Notice** on its Timeline saying what
 //! stopped, why, and what the evidence was. The state is what the *blocked on
 //! you* badge is drawn from and what a restart reads; the Notice is what the
 //! human reads.
+//!
+//! **One stop, however the run stopped.** A session that fell over, checks that
+//! would not go green, the human's press, a driver a crash took away, an account
+//! out of window — all of them come through here and leave the same record, so
+//! everything that reads it asks one question about one thing.
 //!
 //! The evidence is gathered at the moment the run stopped, because all of it
 //! moves on: a Worktree is a directory the human also has, and a session's
@@ -14,14 +19,14 @@
 //! reads on a phone, and what a stop needs to say is a paragraph and two blocks
 //! of terminal text.
 //!
-//! **A halt Verkstead decided on also reaches a phone.** The Notice is what
+//! **A stop Verkstead decided on also reaches a phone.** The Notice is what
 //! says it in full, and it says it to somebody who is looking; a run that
 //! stopped is a run that stays stopped until Resume is pressed, so a stop
 //! nobody is told about is one found days late. A stop nobody chose sends
 //! nothing, a restart being free to pick that one up unasked — and a stop the
 //! human pressed for sends nothing either, they being the one person a
 //! notification about it would be telling their own news. See [`Decided`], which
-//! is the whole of that rule, and [`crate::push::News::Halted`].
+//! is the whole of that rule, and [`crate::push::News`].
 //!
 //! Nothing here reverts, resets or stashes anything, and nothing here starts
 //! anything either. The repository is left exactly as the session left it, and
@@ -31,27 +36,49 @@
 use std::path::Path;
 
 use anyhow::Result;
+use sqlx::SqlitePool;
 use verkstead_schema::Nudge;
 
 use crate::AppState;
+use crate::nudge::Nudges;
 use crate::repos::git;
 use crate::store;
 
-/// Who stopped it, which decides the two things that follow from a halt: whether
-/// a restart takes the Conversation up unasked, and whether a phone is told.
+/// Who stopped it, which decides the three things that follow from a stop:
+/// whether a restart takes the Conversation up unasked, whether a phone is told,
+/// and what it is told.
 ///
-/// Both of those are really one question — *is anybody waiting on this?* — asked
+/// The first two are really one question — *is anybody waiting on this?* — asked
 /// of the record and of a pocket. Verkstead pulling the brake is waited on by
 /// nobody until they are told, so it is pushed and it waits for a press. A stop
 /// nobody chose is waited on by nothing at all: the next server up carries the
 /// work on. And a stop the human pressed for waits for their press like the
 /// first, but tells them nothing, because they are the one person who already
 /// knows.
+///
+/// Borrowed rather than owned, so that this stays the small copied thing every
+/// caller passes by value: what an out-of-window stop carries is read off the
+/// session that printed it and lives exactly as long as the call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Decided {
+pub(crate) enum Decided<'a> {
     /// Verkstead pulled the brake: a session that fell over, checks that would
     /// not go green, a finish step that left no pull request.
     Verkstead,
+
+    /// Verkstead pulled the brake because the account the run was spending is
+    /// out of window — see [`crate::limits`].
+    ///
+    /// A decision like the one above it and pushed like it, in words of its own:
+    /// which account ran out and when it comes back are the two things that
+    /// decide whether the human gets up for it.
+    OutOfWindow {
+        /// What the Agent Profile whose account ran out is called.
+        profile: &'a str,
+
+        /// When the window comes back, as the stop shows it — and `None` where
+        /// what the session printed said no such thing.
+        resets: Option<&'a str>,
+    },
 
     /// The human pressed Stop or Force stop.
     Human,
@@ -60,20 +87,43 @@ pub(crate) enum Decided {
     Nobody,
 }
 
-impl Decided {
+impl<'a> Decided<'a> {
     /// What the record keeps, which is only whether anybody chose — see
-    /// [`store::Halt`]. Verkstead and the human are one thing to a restart: both
-    /// are decisions, and neither is a server's to overturn.
-    fn halt(self) -> store::Halt {
+    /// [`store::Decision`]. Verkstead and the human are one thing to a restart:
+    /// both are decisions, and neither is a server's to overturn.
+    fn decision(self) -> store::Decision {
         match self {
-            Self::Verkstead | Self::Human => store::Halt::Deliberate,
-            Self::Nobody => store::Halt::Circumstance,
+            Self::Verkstead | Self::OutOfWindow { .. } | Self::Human => store::Decision::Deliberate,
+            Self::Nobody => store::Decision::Circumstance,
         }
     }
 
-    /// And whether the human's devices are told.
-    fn pushes(self) -> bool {
-        matches!(self, Self::Verkstead)
+    /// What the stop shows about a window coming back, which is an out-of-window
+    /// stop's alone.
+    fn resets(self) -> Option<&'a str> {
+        match self {
+            Self::OutOfWindow { resets, .. } => resets,
+            Self::Verkstead | Self::Human | Self::Nobody => None,
+        }
+    }
+
+    /// And what the human's devices are told, or `None` where they are told
+    /// nothing.
+    ///
+    /// `stopped` is what ought to have been happening with its first letter up,
+    /// so that the phone and the Timeline open with the same words about the
+    /// same stop.
+    fn told(self, stopped: &str) -> Option<crate::push::News> {
+        match self {
+            Self::Verkstead => Some(crate::push::News::Stopped {
+                stopped: stopped.to_owned(),
+            }),
+            Self::OutOfWindow { profile, resets } => Some(crate::push::News::OutOfWindow {
+                profile: profile.to_owned(),
+                resets: resets.map(str::to_owned),
+            }),
+            Self::Human | Self::Nobody => None,
+        }
     }
 }
 
@@ -82,20 +132,23 @@ impl Decided {
 /// Asked wherever a session is about to be launched — the runner's one launch
 /// in turn, which every step of a run goes through, and each of the wrap-up's
 /// watchers before it dispatches — so that a Conversation the human has to press
-/// Resume on does not quietly get another agent spent on it. The one halt per Conversation makes a second stop
-/// impossible; this makes a session behind the first one impossible too.
+/// Resume on does not quietly get another agent spent on it. The one stop per
+/// Conversation makes a second stop impossible; this makes a session behind the
+/// first one impossible too.
 ///
 /// A Stop the human pressed while a session was running lands here: this is the
-/// next launch it asked to come before, so the stop becomes a halt and the
-/// launch does not happen — see [`crate::stops::asked`].
+/// next launch it asked to come before, so the stop is written and the launch
+/// does not happen — see [`crate::stops::asked`].
 ///
-/// **A Pause answers this too**, and that is why it is one question rather than
-/// two. A run waiting an account's window out is stopped on purpose — see
-/// [`crate::limits`] — and launching over one would spend an account that has
-/// nothing left to spend. It is not a halt, because nothing went wrong and
-/// nothing needs Resume pressed: the wait ends on its own when the window comes
-/// back. What it shares with a halt is the only thing this asks about, which is
-/// that nothing may be launched past it.
+/// One question about one thing, an account out of window included. A run
+/// waiting a window out is stopped on purpose and stopped the same way, so there
+/// is nothing extra to ask: launching over one would spend an account that has
+/// nothing left to spend, and what says so is the stop on the Conversation.
+///
+/// Which leaves one thing that is *not* a stop and stops a launch just the same:
+/// a Conversation in a state nothing drives. See [`undriven`] — a steer is what
+/// puts one there while something is still running, and there is no stop on the
+/// far side of that to find.
 ///
 /// A store that will not answer reads as *stopped*, which is the right way round
 /// for the one thing this decides: what is on the other side of it is launching
@@ -106,27 +159,15 @@ pub(crate) async fn stopped(state: &AppState, conversation_id: i64) -> bool {
         return true;
     }
 
-    match store::open_pause(&state.pool, conversation_id).await {
-        Ok(Some(event_id)) => {
-            tracing::info!(
-                conversation_id,
-                event_id,
-                "the account this run is spending is out of window, so nothing was launched"
-            );
-            return true;
-        }
-        Ok(None) => {}
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether a run was waiting on a usage limit failed");
-            return true;
-        }
+    if undriven(state, conversation_id).await {
+        return true;
     }
 
-    match store::halted(&state.pool, conversation_id).await {
-        Ok(Some(halted)) => {
+    match store::stopped(&state.pool, conversation_id).await {
+        Ok(Some(stopped)) => {
             tracing::info!(
                 conversation_id,
-                event_id = halted.event_id,
+                notice = stopped.notice,
                 "driving has stopped, so nothing was launched"
             );
             true
@@ -137,6 +178,54 @@ pub(crate) async fn stopped(state: &AppState, conversation_id: i64) -> bool {
             true
         }
     }
+}
+
+/// Whether the Conversation is in a state nothing drives, which is the other
+/// way there is nothing left to advance.
+///
+/// Drafting, done and closed: the three the button beside this one refuses on
+/// too — see [`crate::resume::resume`] — because nothing was ever supposed to be
+/// driving any of them. Ordinarily nothing asks: a run is launched from inside
+/// the state it belongs to, and the state does not move underneath it.
+///
+/// A Steer is what moves it underneath one. The human steers a Conversation into
+/// Done while a session is still running, that session is seen out rather than
+/// cut off, and what was following it goes to its next launch with the stop
+/// already taken away — because the steer took it away, a Conversation Verkstead
+/// has finished with being no place for a badge nothing can answer. So *nothing
+/// new launches* has to be a fact about where the work now stands rather than a
+/// stop somebody remembered to leave behind.
+///
+/// A store that will not answer reads as *driven*, which is the opposite of how
+/// its neighbour reads its failures and right for the same reason: the caller
+/// stops on either `true`, and the stop below is the one that has evidence to
+/// say so.
+async fn undriven(state: &AppState, conversation_id: i64) -> bool {
+    let lifecycle = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.state,
+        // Nothing to launch into and nothing to say about it: whatever took the
+        // Conversation away has said so already.
+        Ok(None) => return true,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading where a Conversation had got to before a launch failed");
+            return false;
+        }
+    };
+
+    if matches!(
+        lifecycle,
+        store::Lifecycle::Grilling | store::Lifecycle::Implementing | store::Lifecycle::Wrapping
+    ) {
+        return false;
+    }
+
+    tracing::info!(
+        conversation_id,
+        state = ?lifecycle,
+        "the Conversation is in a state nothing drives, so nothing was launched",
+    );
+
+    true
 }
 
 /// How much of what git made of the Worktree to keep.
@@ -154,7 +243,7 @@ pub(crate) const STATUS_LINES: usize = 40;
 /// this one.
 pub(crate) const TAIL_LINES: usize = 40;
 
-/// Stop driving: gather what happened and put a halt and its Notice on the
+/// Stop driving: gather what happened and put the stop and its Notice on the
 /// Timeline.
 ///
 /// `what` is what ought to have been happening — "implementing the work" — and
@@ -162,21 +251,28 @@ pub(crate) const TAIL_LINES: usize = 40;
 /// Event the last session was printing into, which is where the tail comes
 /// from; `None` where there was no session to read.
 ///
-/// The Notice it became, or `None` where nothing was written. Neither way of
-/// getting `None` is a failure: a Conversation already halted is one that has
-/// already stopped, and the first Notice is the one that explains it — the
-/// sweep looking again a minute later finds the same Conversation standing just
-/// as still. A Conversation that has gone has nobody left to tell.
+/// The pool and the Nudges rather than the whole of the server, because that is
+/// all of it this needs — and because one caller has no more than those: the
+/// watcher that recognises an exhausted window runs inside a session's own relay
+/// task. See [`crate::limits`].
 ///
-/// A halt that was written and that Verkstead decided on is also pushed to the
-/// human's devices — see [`Decided`], which says which stops those are. The
-/// `None` above is what keeps that to one push per stop: the sweep that finds
-/// the same Conversation standing still writes nothing, so there is nothing here
-/// to tell anybody about twice.
-pub(crate) async fn halt(
-    state: &AppState,
+/// The Notice it became, or `None` where nothing was written. Neither way of
+/// getting `None` is a failure: a Conversation already stopped has already
+/// stopped, and the first Notice is the one that explains it — the sweep looking
+/// again a minute later finds the same Conversation standing just as still, and
+/// an out-of-window banner is redrawn twice a second for as long as the wait
+/// lasts. A Conversation that has gone has nobody left to tell.
+///
+/// A stop that was written and that Verkstead decided on is also pushed to the
+/// human's devices — see [`Decided`], which says which stops those are and in
+/// what words. The `None` above is what keeps that to one push per stop: the
+/// sweep that finds the same Conversation standing still writes nothing, so
+/// there is nothing here to tell anybody about twice.
+pub(crate) async fn stop(
+    pool: &SqlitePool,
+    nudges: &Nudges,
     conversation_id: i64,
-    decided: Decided,
+    decided: Decided<'_>,
     what: &str,
     how: &str,
     writing: Option<i64>,
@@ -184,17 +280,24 @@ pub(crate) async fn halt(
     let said = said(
         what,
         how,
-        &worktree_status(state, conversation_id).await,
-        &session_tail(state, conversation_id, writing).await,
+        &worktree_status(pool, conversation_id).await,
+        &session_tail(pool, conversation_id, writing).await,
     );
 
-    let halted = store::halt(&state.pool, conversation_id, decided.halt(), &said).await?;
+    let stopped = store::stop(
+        pool,
+        conversation_id,
+        decided.decision(),
+        &said,
+        decided.resets(),
+    )
+    .await?;
 
-    match halted {
-        Some(event_id) => {
+    match stopped {
+        Some(notice) => {
             tracing::warn!(
                 conversation_id,
-                event_id,
+                notice,
                 decided = ?decided,
                 how,
                 "driving stopped, so the Conversation is blocked on the human"
@@ -202,7 +305,7 @@ pub(crate) async fn halt(
 
             // The Timeline has something on it that is waiting on the human, and
             // an open page should say so without being reloaded.
-            state.nudges.announce(Nudge::Conversation {
+            nudges.announce(Nudge::Conversation {
                 conversation: conversation_id,
             });
 
@@ -212,24 +315,18 @@ pub(crate) async fn halt(
             // push service to redraw. See [`crate::push`] for why a stop nobody
             // chose sends nothing, and [`Decided`] for why the human's own press
             // sends nothing either.
-            if decided.pushes() {
-                crate::push::told(
-                    &state.pool,
-                    conversation_id,
-                    crate::push::News::Halted {
-                        stopped: opening(what),
-                    },
-                );
+            if let Some(news) = decided.told(&opening(what)) {
+                crate::push::told(pool, conversation_id, news);
             }
         }
         None => tracing::info!(
             conversation_id,
             how,
-            "driving stopped where it had stopped already, so the first halt stands"
+            "driving stopped where it had stopped already, so the first stop stands"
         ),
     }
 
-    Ok(halted)
+    Ok(stopped)
 }
 
 /// What the Notice says: the stop, the reason, and the two pieces of evidence.
@@ -253,6 +350,18 @@ fn said(what: &str, how: &str, git_status: &str, tail: &str) -> String {
         ),
         indented(tail, "It said nothing at all."),
     )
+}
+
+/// Why a run stopped when the account it was spending ran out: which account,
+/// and the line the session printed about it.
+///
+/// The `how` of that stop — see [`said`] — and here rather than where the stop
+/// is written, because it is read as well as written. A Pause a Verkstead of
+/// before put on a Timeline is the same two facts, and drawing it in the same
+/// sentence is what makes the record read as one kind of stopped thing rather
+/// than two: see the Timeline's own read, which is the other caller.
+pub(crate) fn out_of_window(profile: &str, said: &str) -> String {
+    format!("the account **{profile}** was being spent is out of window: {said}")
 }
 
 /// The stop with its first letter up, because it opens the sentence the Notice
@@ -292,8 +401,8 @@ fn indented(said: &str, empty: &str) -> String {
 /// Empty where there is nothing to say: a Conversation with no Worktree left, a
 /// repository that will not answer, or a Worktree with nothing pending in it —
 /// which is itself worth seeing, since it means the session left no work behind.
-pub(crate) async fn worktree_status(state: &AppState, conversation_id: i64) -> String {
-    let worktree = match store::load_conversation(&state.pool, conversation_id).await {
+pub(crate) async fn worktree_status(pool: &SqlitePool, conversation_id: i64) -> String {
+    let worktree = match store::load_conversation(pool, conversation_id).await {
         Ok(Some(conversation)) => conversation.worktree,
         Ok(None) => None,
         Err(error) => {
@@ -347,7 +456,7 @@ fn status(worktree: &Path) -> String {
 /// Empty where there is nothing to read at all: a step nothing could be launched
 /// for, or a session that went without a word.
 pub(crate) async fn session_tail(
-    state: &AppState,
+    pool: &SqlitePool,
     conversation_id: i64,
     writing: Option<i64>,
 ) -> String {
@@ -355,7 +464,7 @@ pub(crate) async fn session_tail(
         return String::new();
     };
 
-    match store::transcript(&state.pool, conversation_id, event_id).await {
+    match store::transcript(pool, conversation_id, event_id).await {
         Ok(Some(lines)) => {
             let said = verkstead_render::statements(&lines);
 
@@ -372,7 +481,7 @@ pub(crate) async fn session_tail(
         }
     }
 
-    match store::capture(&state.pool, conversation_id, event_id).await {
+    match store::capture(pool, conversation_id, event_id).await {
         Ok(Some(capture)) => crate::capture::tail(&capture, TAIL_LINES),
         Ok(None) => String::new(),
         Err(error) => {

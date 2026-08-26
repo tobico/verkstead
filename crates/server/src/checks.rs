@@ -15,7 +15,7 @@
 //! what it committed on the Timeline.
 //!
 //! **Two attempts, then it stops asking the machine and starts asking the
-//! human.** A check that is still red after [`ATTEMPTS`] fix sessions halts the
+//! human.** A check that is still red after [`ATTEMPTS`] fix sessions stops the
 //! run and nothing further is dispatched for it: the human reads which checks
 //! failed and what the last session said, off the Notice. The count
 //! is per check rather than per Conversation — a suite where one job fails and
@@ -51,13 +51,13 @@ use crate::store;
 ///
 /// Two, which is one automatic go and one more after it did not work. A third
 /// would be a machine spending an account on the same failure with nobody
-/// watching, which is the whole thing halting exists instead of.
+/// watching, which is the whole thing a stop exists instead of.
 const ATTEMPTS: i64 = 2;
 
 /// Watch `conversation_id`'s checks until it stops wrapping up.
 ///
 /// Returns when there is nothing left to watch: the Conversation has moved on or
-/// gone, or driving that halted. Idle rather than looping, for the
+/// gone, or driving that stopped. Idle rather than looping, for the
 /// runner's reason — a watcher that kept dispatching sessions at a check nothing
 /// was going to fix would be spending an account on the same failure over and
 /// over.
@@ -65,7 +65,7 @@ const ATTEMPTS: i64 = 2;
 /// Nothing here is refused for. This runs unattended with nobody watching, and
 /// what it has to say it says on the Timeline or in the log.
 pub(crate) async fn watch(state: AppState, conversation_id: i64) {
-    // The Timeline Event the last fix session printed into, so that a halt
+    // The Timeline Event the last fix session printed into, so that a stop
     // written here carries the tail of what it said — which is where the reason
     // it could not fix the check is usually written down.
     let mut writing = None;
@@ -90,9 +90,9 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
 /// Forget what a Conversation's checks have already been tried, and watch them
 /// again.
 ///
-/// What Resume does to a Conversation that halted on its checks. The attempts
+/// What Resume does to a Conversation that stopped on its checks. The attempts
 /// go first: the human has read the Notice of what stopped and asked for another
-/// go, and a count left standing would be a watcher that halted all over again on
+/// go, and a count left standing would be a watcher that stopped all over again on
 /// its next poll without dispatching anything.
 pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
     if let Err(error) = store::forget_fix_attempts(&state.pool, conversation_id).await {
@@ -106,7 +106,7 @@ pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
     );
 
     // The whole wrap-up rather than the checks alone: the review stopped being
-    // run when the halt was written, because nothing advances past one, and a
+    // run when the stop was written, because nothing advances past one, and a
     // Conversation that came back with its checks watched and nobody reading its
     // branch would wait on a review that was never going to happen.
     crate::wrapping::watching(&state, conversation_id);
@@ -134,18 +134,18 @@ async fn once(state: &AppState, conversation_id: i64, writing: Option<i64>) -> W
     };
 
     // The one thing that ends the watching by itself. Everything a Conversation
-    // leaves Wrapping for — Done, or aborted from the menu — arrives here as the
+    // leaves Wrapping for — Done, or closed from the menu — arrives here as the
     // same fact: this is not a wrap-up any more.
     if conversation.state != store::Lifecycle::Wrapping {
         return Watching::Done("the Conversation is not wrapping up any more");
     }
 
     // Asked before anything is dispatched, for the runner's reason: *the run does
-    // not advance past a halt* means no session is launched while the human is
-    // the only thing that can start one. Including the halt written here, and
-    // including a run waiting an account's window out — see
-    // [`crate::halts::stopped`], which is where the two are one question.
-    if crate::halts::stopped(state, conversation_id).await {
+    // not advance past a stop* means no session is launched while the human is
+    // the only thing that can start one. However the run stopped — the stop
+    // written here included, and an account out of window included — it is the
+    // one question [`crate::stopping::stopped`] answers.
+    if crate::stopping::stopped(state, conversation_id).await {
         return Watching::Done("driving has stopped");
     }
 
@@ -300,13 +300,13 @@ async fn fix(
     Watching::Again(said.or(writing))
 }
 
-/// Stop asking the machine: halt, and put what failed on the Timeline.
+/// Stop asking the machine: stop the run, and put what failed on the Timeline.
 ///
 /// The evidence is what makes the stop readable without opening a terminal —
 /// which checks failed, where their runs are, and the tail of what the last fix
-/// session said, which [`crate::halts::halt`] reads off `writing`.
+/// session said, which [`crate::stopping::stop`] reads off `writing`.
 ///
-/// [`store::Halt::Deliberate`]: every fix session the branch was allowed has
+/// [`store::Decision::Deliberate`]: every fix session the branch was allowed has
 /// been spent, and Verkstead stopping there is a decision. A restart that
 /// started the fixing over would spend them all again on checks that are still
 /// red for whatever reason they were red the first time.
@@ -325,10 +325,11 @@ async fn ask(
         listed(failed),
     );
 
-    if let Err(error) = crate::halts::halt(
-        state,
+    if let Err(error) = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
         conversation_id,
-        crate::halts::Decided::Verkstead,
+        crate::stopping::Decided::Verkstead,
         "getting the pull request's checks green again",
         &how,
         writing,
@@ -338,7 +339,7 @@ async fn ask(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "the checks would not go green and the halt saying so could not be recorded"
+            "the checks would not go green and the stop saying so could not be recorded"
         );
     }
 

@@ -35,7 +35,6 @@ use verkstead_schema::Nudge;
 
 use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
-use crate::hold::{Holds, Which};
 use crate::nudge::Nudges;
 use crate::runner::Pace;
 use crate::sandbox::{Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
@@ -62,7 +61,7 @@ const FLUSH_EVERY: Duration = Duration::from_millis(500);
 /// Short, because what it measures is a terminal rather than an agent: claude
 /// repaints its spinner many times a second while it is working, so a session
 /// that has printed nothing for this long is one that has stopped — sitting on
-/// a Blocking Ask, or waiting for the human at a Hold. Three seconds is clear
+/// a Blocking Ask, or waiting for the human. Three seconds is clear
 /// of the longest gap a working session leaves, and short enough that the mark
 /// says so while it still matters.
 pub(crate) const IDLE_AFTER: Duration = Duration::from_secs(3);
@@ -237,14 +236,6 @@ pub(crate) struct Sessions {
 
     /// Whose turn it is in each Conversation's Worktree — see [`Sessions::turn`].
     turns: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
-
-    /// The Holds the human has taken on them — see [`crate::hold`].
-    ///
-    /// Beside the sessions register rather than in it, because a Hold outlives
-    /// the session it was taken on: a session that exits while held is one
-    /// nothing may judge until the keyboard comes back, and a register that
-    /// forgot the Hold as the session ended would be one that judged it anyway.
-    holds: Holds,
 }
 
 /// The Worktree of one Conversation, held for as long as one thing is using it.
@@ -285,7 +276,7 @@ pub(crate) struct Session {
 
 /// How a session ended, as whoever was driving it hears.
 ///
-/// The distinction the halts turn on: [`Ended::Stopped`] is a session Verkstead
+/// The distinction a stop turns on: [`Ended::Stopped`] is a session Verkstead
 /// put an end to because its step had landed, and every other variant is a
 /// session that stopped without being asked to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -298,8 +289,10 @@ pub(crate) enum Ended {
     /// Exited badly, said as what happened to it — "exited with status 1".
     Badly(String),
 
-    /// Verkstead ended it: its step had landed and it had gone quiet, or the
-    /// human aborted the Conversation out from under it.
+    /// Verkstead ended it, however it came to: its step had landed and it had
+    /// gone quiet, the human closed the Conversation or pressed Force stop out
+    /// from under it, or the account it was spending ran out of window and the
+    /// stop written for that ended it — see [`crate::limits`].
     Stopped,
 
     /// It is over and nothing can say how — the relay itself failed, or could not
@@ -309,7 +302,7 @@ pub(crate) enum Ended {
 }
 
 impl Ended {
-    /// The sentence a halt's Notice records, or `None` where the session ended
+    /// The sentence a stop's Notice records, or `None` where the session ended
     /// the way it was meant to.
     ///
     /// One place decides what each way of ending is *called*, so the words the
@@ -325,12 +318,20 @@ impl Ended {
 
     /// Whether Verkstead is what ended it.
     ///
-    /// The one way of ending that never halts, whatever the Worktree then says.
-    /// Everything else a driver sees is a session that stopped without being
-    /// asked to, and the human is owed the telling about it; this is the human
-    /// having already stopped it themselves — they aborted the Conversation — or
-    /// the step having landed. Halting over it would be telling them driving had
-    /// stopped, about the thing they just stopped.
+    /// The one way of ending that never stops the run, whatever the Worktree
+    /// then says. Everything else a driver sees is a session that stopped
+    /// without being asked to, and the human is owed the telling about it; this
+    /// is a session Verkstead meant to end, and stopping over one would either
+    /// tell them driving had stopped about the thing they just stopped, or
+    /// write a second stop behind one already on the record.
+    ///
+    /// Three ways in, and the driver treats them alike. The step landed and the
+    /// session went quiet, so there is nothing to tell. The human closed the
+    /// Conversation or pressed Force stop, and the stop their press wrote is
+    /// already there. Or the account ran out of window, and the stop
+    /// [`crate::limits`] wrote before killing the sandbox is already there too —
+    /// which is what this has to be read as for, because a driver reading it as
+    /// the human's act alone would advance a run that has stopped.
     pub(crate) fn on_purpose(&self) -> bool {
         matches!(self, Self::Stopped)
     }
@@ -446,7 +447,6 @@ impl Sessions {
             agents: Some(Arc::new(agents)),
             running: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
-            holds: Holds::none(),
         }
     }
 
@@ -457,7 +457,6 @@ impl Sessions {
             agents: None,
             running: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
-            holds: Holds::none(),
         }
     }
 
@@ -629,43 +628,6 @@ impl Sessions {
             .unwrap_or_default()
     }
 
-    /// The human typed into the Screen of `event_id`'s session: take the Hold.
-    ///
-    /// Which Hold was taken, where this keystroke is the one that took it — see
-    /// [`Holds::take`], and [`crate::hold`] for what a Hold costs Verkstead.
-    pub(crate) fn hold(&self, conversation_id: i64, event_id: i64) -> Option<Which> {
-        self.holds.take(conversation_id, event_id)
-    }
-
-    /// Whether the Hold numbered `which` is the one still in force — see
-    /// [`Holds::still_held`].
-    pub(crate) fn still_held(&self, conversation_id: i64, which: Which) -> bool {
-        self.holds.still_held(conversation_id, which)
-    }
-
-    /// Which of this Conversation's sessions the human has the keyboard of, or
-    /// `None` where it is Verkstead's.
-    ///
-    /// What the *blocked on you* badge points at while a Hold is in force, and
-    /// what the workbench draws its hand-back control from.
-    pub(crate) fn holding(&self, conversation_id: i64) -> Option<i64> {
-        self.holds.holding(conversation_id)
-    }
-
-    /// The human has handed the keyboard back. `false` is a hand-back that
-    /// arrived twice — see [`Holds::hand_back`].
-    pub(crate) fn hand_back(&self, conversation_id: i64) -> bool {
-        self.holds.hand_back(conversation_id)
-    }
-
-    /// Wait until nothing is holding this Conversation's keyboard.
-    ///
-    /// The gate every driver asks before it ends a session or advances a run —
-    /// see [`crate::hold`], which is where the reasons for it are.
-    pub(crate) async fn until_handed_back(&self, conversation_id: i64) {
-        self.holds.until_handed_back(conversation_id).await
-    }
-
     /// Run `pairing`'s agent on `prompt`, inside `conversation`'s sandbox, and
     /// put what it prints on the Timeline as it arrives.
     ///
@@ -820,7 +782,7 @@ impl Sessions {
 
         // And the same output watched for the one thing a session says that is
         // about the account rather than about the work: that its window is
-        // spent. The Profile is taken now because that is what the Pause names,
+        // spent. The Profile is taken now because that is what the stop names,
         // and a Profile renamed while a session runs was not the account this
         // one is on — see [`crate::limits`].
         let limits =
@@ -928,7 +890,7 @@ impl Sessions {
                     });
 
                     // Last of all, for the reason the drop it replaced was last:
-                    // whoever is driving acts on this — it halts the run or
+                    // whoever is driving acts on this — it stops the run or
                     // launches the next step — and everything above has to
                     // have happened by then. Chief among them the final sweep of
                     // the branch, because a session's last act is usually a
@@ -979,21 +941,7 @@ impl Sessions {
     /// A Conversation with no session running is nothing to do, which is every
     /// Conversation that was never started and every one whose session has
     /// already ended.
-    ///
-    /// Any Hold on it goes with the session. Verkstead itself never gets this
-    /// far with one in force — every driver waits at the gate first, which is
-    /// what a Hold *is* — so an end that meets one is the human's own act:
-    /// aborting the Conversation, accepting the proposal the grilling made, or
-    /// choosing what to do about a run that stopped. Each of those is them
-    /// answering, and a keyboard nobody is at is one already handed back.
     pub(crate) async fn end(&self, conversation_id: i64) {
-        if self.holds.hand_back(conversation_id) {
-            tracing::info!(
-                conversation_id,
-                "a held session was ended by the human, so the Hold ended with it",
-            );
-        }
-
         let running = self
             .running
             .lock()
@@ -1134,7 +1082,7 @@ struct Printing {
 /// Conversation being watched and not the list of them.
 ///
 /// What comes back is how it ended, which is what whoever is driving decides
-/// between carrying on and halting by.
+/// between carrying on and stopping by.
 ///
 /// One parameter per thing the loop reads or writes, which is what makes the
 /// list long: gathering them would be a struct built at one call site and taken
@@ -1210,12 +1158,23 @@ async fn relay(
             _ = tokio::time::sleep_until(deadline), if !pending.is_empty() => {
                 flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
                 // On the same cadence as the flush, and after it: what is being
-                // looked for is in what was just written down, and a Pause the
+                // looked for is in what was just written down, and a stop the
                 // Timeline had no output under would be a wait with nothing
                 // above it saying where the session had got to.
-                limits
+                //
+                // A limit found there stops the run and ends this session, in
+                // that order — see [`crate::limits`], which writes the stop and
+                // leaves the ending here because this is the task it is running
+                // inside.
+                if limits
                     .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
-                    .await;
+                    .await
+                    && !ending
+                {
+                    ending = true;
+                    end_the_sandbox(child, event_id);
+                }
+
                 flushed = Instant::now();
             }
             _ = tokio::time::sleep_until(following), if tail.is_some() => {
@@ -1232,9 +1191,14 @@ async fn relay(
                     // moment it moves: a backend that says its window is spent
                     // in its own log and not on its display would otherwise go
                     // unnoticed until the terminal happened to say something.
-                    limits
+                    if limits
                         .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
-                        .await;
+                        .await
+                        && !ending
+                    {
+                        ending = true;
+                        end_the_sandbox(child, event_id);
+                    }
                 }
 
                 tailed = Instant::now();
@@ -1252,13 +1216,7 @@ async fn relay(
             }
             _ = &mut stopping, if !ending => {
                 ending = true;
-                // The whole sandbox, which is what makes this reach the session
-                // inside it: bwrap's child is the first process of a namespace
-                // of its own, and a namespace whose first process is gone is a
-                // namespace with nothing left in it.
-                if let Err(error) = child.start_kill() {
-                    tracing::error!(error = ?error, event_id, "a session would not be ended");
-                }
+                end_the_sandbox(child, event_id);
             }
         }
     }
@@ -1270,12 +1228,10 @@ async fn relay(
     flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
 
     // And no look at it, deliberately: everything from here down is a session
-    // that has gone. A limit the agent waits out never ends its session — that
-    // is the whole of why a Pause is a wait rather than a failure — so a limit
-    // in a session's last words is a session that did not come back from one,
-    // which is the halt whoever is driving is about to write. Pausing as well
-    // would leave the run stopped on two things at once, and Resume would
-    // launch nothing.
+    // that has gone. A limit in a session's last words is one it did not come
+    // back from, which is the stop whoever is driving is about to write — and a
+    // stop written here would be the run stopped on two things at once, with
+    // Resume launching nothing.
 
     // `ending` first, because a session Verkstead killed exits by a signal and
     // that is not a session that went wrong: it is the step having landed.
@@ -1315,6 +1271,23 @@ async fn relay(
     }
 
     ended
+}
+
+/// End the sandbox a session runs in, which is what reaches the session itself:
+/// bwrap's child is the first process of a namespace of its own, and a namespace
+/// whose first process is gone is a namespace with nothing left in it.
+///
+/// Asked for rather than waited on — the relay reads the terminal to its close
+/// and reaps the child on its way out, which is the one place a session is ever
+/// waited for. Its two callers are the word from outside that a session is to
+/// end, and a stop the relay itself has just written for an exhausted window.
+///
+/// Nothing is refused for. A child that will not take the signal is one already
+/// gone, which is the same instruction arriving too late to be needed.
+fn end_the_sandbox(child: &mut Child, event_id: i64) {
+    if let Err(error) = child.start_kill() {
+        tracing::error!(error = ?error, event_id, "a session would not be ended");
+    }
 }
 
 /// What the session's log says of it, for the summary the Timeline reads —

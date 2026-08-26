@@ -12,7 +12,7 @@
 //! the work is launched in it. Adopting is the same moment by the other door:
 //! a roadmap Verkstead did not write has its next stage started here, with the
 //! human's press standing in for the predecessor that would otherwise have
-//! started it — see [`adopt`]. Aborting is where both are given back: the
+//! started it — see [`adopt`]. Closing is where both are given back: the
 //! session ends, and then the worktree goes.
 
 use std::path::{Path, PathBuf};
@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationReopened,
-    GrillingStarted, PairingView, Started, Worktree,
+    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationClosed, GrillingStarted,
+    PairingView, Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -180,8 +180,8 @@ async fn usable(
 ///
 /// Nothing here is refused for: by the time this runs the Response is stored and
 /// the store has recorded the pick. What a session that could not be picked up
-/// leaves behind is something to see in the log, and no more than that. A halt
-/// is written about a run that stopped — see [`crate::halts`] — and this is not
+/// leaves behind is something to see in the log, and no more than that. A stop
+/// is written about a run that stopped — see [`crate::stopping`] — and this is not
 /// one.
 pub(crate) async fn settle_a_proposal(
     state: &AppState,
@@ -252,7 +252,7 @@ pub(crate) async fn settle_a_proposal(
     if !write_the_artifact(state, conversation_id, picked).await {
         // A Conversation grilling with nothing grilling it, which is a thing to
         // see in the log: the pick is recorded, so the human's answer stands, and
-        // there is nothing here to halt over — no session ran and went wrong.
+        // there is nothing here to stop over — no session ran and went wrong.
         tracing::error!(
             conversation_id,
             ?picked,
@@ -499,8 +499,8 @@ pub(crate) async fn set_base_branch(
 /// would be an agent nobody could see or stop. It is also the one part of this
 /// that failing does not refuse — the branch is made, the Brief is frozen, and a
 /// session that would not start is logged, leaving a Conversation that is
-/// grilling with a Timeline that says so and no session on it. Not a halt
-/// either: the human is at the button they have just pressed, and what a halt is
+/// grilling with a Timeline that says so and no session on it. Not a stop
+/// either: the human is at the button they have just pressed, and what a stop is
 /// for is telling them about a run that stopped while nobody was watching. The
 /// sweep is what finds this one, a minute later — see [`crate::stalls`].
 ///
@@ -512,11 +512,12 @@ pub(crate) async fn set_base_branch(
 /// repository with no remote has nothing to fetch and nothing to be stale
 /// against, and is never refused for it.
 ///
-/// **A second round makes neither.** A reopened Conversation is drafting again on
-/// a branch that has been worked, in the worktree that work was done in — see
-/// [`reopen`] — so what this does for one is resolve the commit it branched from
-/// and start the session. The branch already being there is the whole point of it
-/// rather than something to refuse for.
+/// **A Conversation that already has a worktree makes neither.** Its branch has
+/// been worked and the directory is where that work was done, so what this does
+/// for one is resolve the commit it branched from and start the session: a start
+/// that made a branch would start the work over. Nothing the pipeline does
+/// reaches this any more — a second round opens where it is steered, past
+/// drafting already — so it is asked of the record rather than assumed away.
 ///
 /// The whole state rather than the four pieces of it this needs: what starting a
 /// grilling reaches is most of what the server holds — the store, the boundary,
@@ -564,12 +565,11 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     let repo = conversation.repo.path.clone();
     let branch = conversation.branch.clone();
 
-    // Where a second round works is where the first one did. A reopened
-    // Conversation already has its worktree — kept, or checked out again on the
-    // branch it was always on — so there is nothing here to make: the branch has
-    // been worked, and a start that made one would start the work over.
-    let reopened = conversation.worktree.clone();
-    let path = reopened.clone().unwrap_or_else(|| {
+    // Where the work goes on. A Conversation that already has one works where it
+    // has always worked and there is nothing here to make; one that has none is
+    // given the name a first grilling chooses.
+    let worked_in = conversation.worktree.clone();
+    let path = worked_in.clone().unwrap_or_else(|| {
         worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch)
     });
 
@@ -578,12 +578,12 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
         move || {
-            // A second round resolves the commit the first one branched from and
-            // stops there: the branch is taken because this Conversation took it,
-            // the checkout is already where the work will happen, and a base
-            // that was frozen when the first round started is not something a
-            // fetch could freshen.
-            if reopened.is_some() {
+            // A Conversation that has a worktree resolves the commit its branch
+            // was cut from and stops there: the branch is taken because this
+            // Conversation took it, the checkout is already where the work will
+            // happen, and a base that was frozen when the work started is not
+            // something a fetch could freshen.
+            if worked_in.is_some() {
                 let named = picked.unwrap_or(default);
 
                 return worktrees::resolve(&repo, &named).ok_or(GrillingStarted::NoBaseCommit);
@@ -643,7 +643,8 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // will say so is a session that does not exist yet. So a registration stands
     // in for it across the launch, which is the slowest part of this: a sweep
     // that looked in between would find a Conversation grilling with nothing
-    // grilling it, and halt a press the human is still standing at. Held to the
+    // grilling it, and stop the run under a press the human is still standing
+    // at. Held to the
     // end of this rather than handed on — what drives a grilling from there is
     // its session — and what it leaves behind where the launch fails is a stall
     // for the next sweep to find. See [`crate::drivers`] and [`crate::stalls`].
@@ -739,10 +740,9 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         return Ok(Adopted::NotDrafting);
     }
 
-    // A reopened stage Conversation is drafting again on the branch its stage was
-    // worked on. Adopting is how that work *started*, so it is not a thing to do
-    // twice — and what says it has happened is the worktree, adoption being what
-    // made one.
+    // Adopting is how a stage's work *started*, so it is not a thing to do twice
+    // — and what says it has happened is the worktree, adoption being what made
+    // one.
     if conversation.worktree.is_some() {
         return Ok(Adopted::NotDrafting);
     }
@@ -919,86 +919,6 @@ fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
     )
 }
 
-/// Open a second round on a Conversation Verkstead has finished with: a new
-/// Brief to write, somewhere to write it about, and the ordinary pipeline from
-/// grilling onward.
-///
-/// Done and no other state. Aborted is off the ladder and stays there, and every
-/// other state is somewhere the work has got to — there is nothing to reopen
-/// about work that is still going on.
-///
-/// **The worktree is ordinarily still there**, because only aborting takes one
-/// away, so keeping it is the path and making one is the fallback: a directory
-/// that has gone — deleted by hand, or lost with a machine that was rebuilt — is
-/// checked out again *on the Conversation's existing branch*. A branch that has
-/// been worked is not a branch to start over, which is why this is
-/// [`worktrees::recheckout`] rather than the [`worktrees::add`] a first round
-/// uses.
-///
-/// Git first and the store after, which is [`start_grilling`]'s order and for its
-/// reason: a Conversation recorded as drafting again with nothing checked out is
-/// one nothing could grill and nothing would tidy.
-///
-/// No session is started and nothing is launched. What reopening produces is a
-/// Brief with nothing in it, and the human writes that before pressing the same
-/// `Start grilling` a first round is started by.
-pub(crate) async fn reopen(state: &AppState, id: i64) -> Result<ConversationReopened> {
-    let pool = &state.pool;
-
-    let Some(conversation) = store::load_conversation(pool, id).await? else {
-        return Ok(ConversationReopened::NoSuchConversation);
-    };
-
-    if conversation.state != store::Lifecycle::Done {
-        return Ok(ConversationReopened::NotDone);
-    }
-
-    // Where the work was done. A Done Conversation has a worktree recorded —
-    // nothing but aborting forgets one — and the fallback is for a record that
-    // somehow lost it: a name is chosen the way a first round chooses one.
-    let path = conversation.worktree.clone().unwrap_or_else(|| {
-        worktrees::worktree_path(
-            &state.data_dir,
-            id,
-            &conversation.repo.name,
-            &conversation.branch,
-        )
-    });
-
-    let repo = conversation.repo.path.clone();
-    let branch = conversation.branch.clone();
-
-    // Off the runtime, for the reason a first round's checkout is: looking at a
-    // directory and checking a branch out both block.
-    let there = tokio::task::spawn_blocking({
-        let path = path.clone();
-        move || path.is_dir() || worktrees::recheckout(&repo, &path, &branch)
-    })
-    .await?;
-
-    if !there {
-        tracing::error!(
-            conversation_id = id,
-            "a reopened Conversation's branch could not be checked out again"
-        );
-        return Ok(ConversationReopened::WorktreeRefused);
-    }
-
-    match store::reopen_conversation(pool, id, &path).await? {
-        store::Reopening::NoSuchConversation => Ok(ConversationReopened::NoSuchConversation),
-        store::Reopening::NotDone => Ok(ConversationReopened::NotDone),
-        store::Reopening::Reopened => {
-            // A Conversation moved, and its row in the sidebar reads differently
-            // for it: a finished piece of work is drafting again.
-            state
-                .nudges
-                .announce(Nudge::Conversation { conversation: id });
-
-            Ok(ConversationReopened::Reopened)
-        }
-    }
-}
-
 /// Stop a Conversation wherever it has got to: its session ended, its worktree
 /// removed, its branch left where it is.
 ///
@@ -1011,11 +931,11 @@ pub(crate) async fn reopen(state: &AppState, id: i64) -> Result<ConversationReop
 /// made before one: what is recorded is what happened. A Conversation that said
 /// it had stopped while its directory was still on disk would be one nothing
 /// would ever come back and remove.
-pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAborted> {
+pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClosed> {
     let pool = &state.pool;
 
     let Some(conversation) = store::load_conversation(pool, id).await? else {
-        return Ok(ConversationAborted::NoSuchConversation);
+        return Ok(ConversationClosed::NoSuchConversation);
     };
 
     state.sessions.end(id).await;
@@ -1030,7 +950,7 @@ pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAbort
                 conversation_id = id,
                 "a Conversation's worktree could not be removed"
             );
-            return Ok(ConversationAborted::WorktreeStuck);
+            return Ok(ConversationClosed::WorktreeStuck);
         }
     }
 
@@ -1041,10 +961,10 @@ pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAbort
     let handoffs = Handoffs::under(&state.data_dir);
     tokio::task::spawn_blocking(move || handoffs.remove(id)).await?;
 
-    Ok(match store::abort_conversation(pool, id).await? {
-        store::Aborting::Aborted => ConversationAborted::Aborted,
-        store::Aborting::AlreadyAborted => ConversationAborted::AlreadyAborted,
-        store::Aborting::NoSuchConversation => ConversationAborted::NoSuchConversation,
+    Ok(match store::close_conversation(pool, id).await? {
+        store::Closing::Closed => ConversationClosed::Closed,
+        store::Closing::AlreadyClosed => ConversationClosed::AlreadyClosed,
+        store::Closing::NoSuchConversation => ConversationClosed::NoSuchConversation,
     })
 }
 
@@ -1114,10 +1034,14 @@ impl Unready {
 /// The Brief the round a Conversation is in started from.
 ///
 /// The *last* Brief rather than the first, and searched for rather than taken
-/// from either end: a Conversation gets one Brief per round — a reopened one
+/// from either end: a Conversation gets one Brief per round — a steered one
 /// adds a second rather than editing the first — and the round about to be
 /// grilled is the one at the bottom of the Timeline.
-async fn brief(pool: &SqlitePool, id: i64) -> Result<String> {
+///
+/// Asked by the two ways into a grilling, so that both are refused on an empty
+/// one: [`start_grilling`] above, and the `steering` module's own refusals for
+/// a steer that opens a round without writing a brief for it.
+pub(crate) async fn brief(pool: &SqlitePool, id: i64) -> Result<String> {
     Ok(store::timeline(pool, id)
         .await?
         .into_iter()
@@ -1137,7 +1061,7 @@ async fn brief(pool: &SqlitePool, id: i64) -> Result<String> {
 /// exactly these two.
 ///
 /// Both are the *last* of their kind rather than the first, and for one reason:
-/// a Conversation gets a Brief and a handoff per round — a reopened one adds a
+/// a Conversation gets a Brief and a handoff per round — a steered one adds a
 /// second Brief rather than editing the first — and what a session about to build
 /// is primed with is the round it is building.
 pub(crate) async fn documents(pool: &SqlitePool, id: i64) -> Result<(String, Option<String>)> {

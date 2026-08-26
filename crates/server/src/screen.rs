@@ -32,20 +32,17 @@
 //! puts anything on a Timeline or moves a Conversation — a Screen with somebody
 //! looking at it and a Screen with nobody looking at it are the same Screen.
 //!
-//! **Typing into one commits them to everything.** Keystrokes go up the same
-//! socket and straight into the session's own terminal, and the first of them
-//! takes the Hold: from then on Verkstead records and nothing else, until the
-//! human hands the keyboard back — see [`crate::hold`]. The socket dropping
-//! does not end one, which is why nothing here releases anything on its way
-//! out.
+//! **Typing into one commits them to nothing either.** Keystrokes go up the
+//! same socket and straight into the session's own terminal, and that is the
+//! whole of it: nothing is registered, nothing is badged, and the run goes on
+//! ending sessions and advancing steps by the ordinary rules. Somebody who
+//! wants a session left alone while they work in it presses **Stop** first.
 //!
-//! **The mouse commits them to nothing.** A session whose interface tracks the
-//! mouse is sent a report of every move over its Screen, and those reports come
-//! up this socket too — as [`Watching::Moused`] rather than as typing, because
-//! the browser knows which the human did and the bytes do not say. They are
-//! written through to the session exactly as keystrokes are, and they leave the
-//! Hold alone: the Hold is what stops Verkstead ending a session under a human
-//! who is intervening, and a cursor crossing a pane is not one.
+//! **So there is one kind of watcher input.** A session whose interface tracks
+//! the mouse is sent a report of every move over its Screen, and those reports
+//! come up this socket the way keystrokes do. Nothing here tells the two apart
+//! — by the time either is on the wire it is bytes a terminal is being sent,
+//! and bytes are what reach the session.
 
 use std::sync::{Arc, Mutex};
 
@@ -55,7 +52,6 @@ use axum::extract::{Path, State};
 use axum::response::Response as HttpResponse;
 use tokio::sync::broadcast;
 use verkstead_render::{Shown, Size, Watching};
-use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::terminal::{COLUMNS, ROWS, Terminal};
@@ -222,12 +218,6 @@ impl Live {
 
     /// A watcher put `input` in: put it in at the session's own terminal.
     ///
-    /// Whichever of the two kinds it arrived as. Typing and a mouse report are
-    /// the same thing by the time they are here — bytes a terminal is being
-    /// sent — and the difference between them is what was done about the Hold
-    /// before this was called, which is [`watch`]'s business rather than this
-    /// one's.
-    ///
     /// Straight through, and nothing of it is drawn here. What a terminal does
     /// with a keystroke is the terminal's business — it echoes it, or it does
     /// not, or the application on it draws something else entirely — and
@@ -236,8 +226,8 @@ impl Live {
     /// the session was about to show.
     ///
     /// Nothing here touches the quiet clock either. Quiet-detection is keyed on
-    /// what the terminal prints, and what protects a human mid-typing is the
-    /// Hold suspending session-end rather than the clock — see [`crate::hold`].
+    /// what the terminal prints, and a human who wants the run held off while
+    /// they type presses Stop rather than relying on a clock.
     pub(crate) async fn put_in(&self, input: &str) {
         if let Err(error) = self.terminal.write(input.as_bytes()).await {
             tracing::error!(error = ?error, "what a watcher put in did not reach the session");
@@ -410,40 +400,11 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
 
                     match watching {
                         Watching::Resized(size) => live.resized(size),
-                        Watching::Typed(keys) => {
-                            // The Hold before the keystroke, so that a session
-                            // ended between the two is one that was held when it
-                            // went rather than one nobody had taken. Taken
-                            // whatever was typed, including a bare newline: what
-                            // says the human is at the keyboard is that they
-                            // touched it.
-                            if let Some(which) = state.sessions.hold(conversation_id, event_id) {
-                                tracing::info!(
-                                    conversation_id,
-                                    event_id,
-                                    "somebody typed into a live session, so the Hold is theirs",
-                                );
-
-                                // The badge is drawn off the Conversation, so
-                                // every open page is told to read it again.
-                                state.nudges.announce(Nudge::Conversation {
-                                    conversation: conversation_id,
-                                });
-
-                                // And if they walk away from it, their devices
-                                // hear about it — once, and only while it is
-                                // still standing.
-                                crate::push::when_it_has_stood(&state, conversation_id, which);
-                            }
-
-                            live.put_in(&keys).await;
-                        }
-                        // And the mouse, which is the same bytes going the same
-                        // way with the Hold left exactly as it was — taken or
-                        // not. Nothing is logged for one either: a session that
-                        // tracks the mouse sends a report per pixel crossed, and
-                        // a line each would be the log and nothing else.
-                        Watching::Moused(report) => live.put_in(&report).await,
+                        // Straight through, and nothing is logged for one: a
+                        // session that tracks the mouse sends a report per pixel
+                        // crossed, and a line each would be the log and nothing
+                        // else.
+                        Watching::PutIn(input) => live.put_in(&input).await,
                     }
                 }
                 // A ping is answered by the transport underneath, and a binary
@@ -452,9 +413,8 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
                 Some(Ok(_)) => {}
                 // The watcher has gone, or the connection has. Either way there
                 // is nothing here to keep, and the session goes on exactly as it
-                // was — a Hold included: a socket that dropped mid-intervention
-                // is exactly the case where resuming would be worse than
-                // stalling, so nothing is handed back here.
+                // was: watching one committed Verkstead to nothing, so there is
+                // nothing to undo.
                 Some(Err(_)) | None => return,
             },
         }

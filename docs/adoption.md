@@ -148,8 +148,9 @@ to run. Nobody presses anything for either.
   git made of the Worktree, and the tail of what the session last said — read
   at the moment the run stopped and kept. Getting going again is one **Resume**,
   which works out what ought to be running now rather than replaying whatever
-  failed; where you want the work steered instead, a **Manual Task** is what
-  says so.
+  failed; where you want the work to go somewhere else instead, **Steer** is
+  what says so — pick the state to carry on in, write the instruction or the
+  brief it needs, and the submit both moves the work and sets it going.
 - **Review happens once, on the pull request.** This is what "no commit gates"
   buys: nothing pauses per commit, and everything you would have said there is
   said in the wrap-up instead.

@@ -30,20 +30,21 @@ The core entity: a Repo, a base commit, a Brief, one branch and one Worktree.
 Everything done about one piece of work hangs off it. Runs through Draft →
 Grilling → Implementing → Wrapping → Done — a roadmap Conversation passes
 straight from Grilling to Wrapping, its building belonging to its Stages — and
-can be aborted from any of them or reopened once Done. There is one move back
-down the ladder: a wrap-up whose review split its findings out into a backlog
-returns to Implementing to build it, and its finish step wraps up again on the
-pull request it already had, reviewed afresh. *Blocked on you* is a badge on an active
-state, never a state of its own — where **Aborted** is a state of its own, off
+can be closed from any of them, a **Steer** being the one way back into a
+Conversation that is closed or Done. There is one move back down the ladder: a
+wrap-up whose review split its findings out into a backlog returns to
+Implementing to build it, and its finish step wraps up again on the pull request
+it already had, reviewed afresh. *Blocked on you* is a badge on an active
+state, never a state of its own — where **Closed** is a state of its own, off
 the ladder rather than on it: every other state is somewhere the work has got
-to, and aborting is the work stopping wherever it was.
+to, and closing is the work stopping wherever it was.
 _Avoid_: task, session, job, thread, ticket
 
 **Worktree**:
 The checkout a Conversation's work is done in, made when grilling starts along
-with the branch it holds, and removed when the Conversation is aborted — the
+with the branch it holds, and removed when the Conversation is closed — the
 branch outlives it, because a branch is cheap and may hold work worth reading.
-A reopened Conversation keeps the one it has; where the directory has gone, one
+A steered Conversation keeps the one it has; where the directory has gone, one
 is checked out again on the branch that was worked, which is the only time a
 Worktree is made without a branch being made with it.
 Named for the Repo and the branch, and it lives in the Data Directory rather
@@ -96,15 +97,17 @@ _Avoid_: prompt, instructions, plugin, workflow file
 
 **Brief**:
 The editable markdown document a round of a Conversation starts from, and the
-first Timeline Event. Freezes when its round's grilling starts; a reopened round
-adds a new Brief rather than editing the frozen one, so a Conversation has one
-Brief per round and the newest is the one being written. What is *not* the
-human's again on a reopened round is the branch and the base commit: the branch
-has been worked, and the second round carries on from what is on it.
+first Timeline Event. Freezes when its round's grilling starts; a steer into
+Grilling opens a round with a new Brief rather than editing the frozen one, so a
+Conversation has one Brief per round and the newest is the one being written.
+What is *not* the human's again on a later round is the branch and the base
+commit: the branch has been worked, and the second round carries on from what is
+on it.
 
 Written where it is read: while its round is drafting, the Brief on its card
-*is* the field — raw markdown, always open, keeping itself on a pause in the
-typing and whenever the field is left, and saying nothing about it either way.
+*is* the field — raw markdown, always open, keeping itself whenever the typing
+stops for a moment and whenever the field is left, and saying nothing about it
+either way.
 There is no Edit, no Save and no word about saving, because there is no other
 thing the Brief could be doing while it is a draft. Once it freezes it is the
 server's rendering of it and nothing else.
@@ -114,7 +117,7 @@ setup under it — the branch, the base commit, both Pairings and the readiness
 verdict — because setting the work up and kicking it off are one act, and both
 belong where the work is read. Every one of those freezes at the same moment
 the Brief does, so once grilling starts the card is the Brief alone; on a
-reopened round the branch and the base commit are frozen already, and what the
+later round the branch and the base commit are frozen already, and what the
 card carries under the new Brief is the Pairings.
 _Avoid_: description, prompt, spec, issue body
 
@@ -122,14 +125,13 @@ _Avoid_: description, prompt, spec, issue body
 A Conversation's ordered record of what has happened to it, and the middle pane
 of the workbench. Everything Verkstead and its agents do lands here as an
 Event; nothing happens off it. It records the work rather than the watching:
-looking at a session's Screen, and even a Hold, leaves no Event — the badge
-says so while it matters, and the record keeps what was built.
+looking at a session's Screen leaves no Event, and neither does typing into one
+— the record keeps what was built rather than who was there.
 _Avoid_: feed, log, history, activity stream
 
 **Event**:
 One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
-commit, a task list, a stage list, a PR, a Pause, a Notice. Each shows a summary
-in the
+commit, a task list, a stage list, a PR, a Notice. Each shows a summary in the
 Timeline and its full self in the details pane. Task lists, stage lists and PRs
 are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
@@ -153,8 +155,8 @@ running unattended owes the human: a decision made while nobody was watching is
 one they have to be able to read afterwards.
 
 Nothing to do about one, however much it says. A Notice is written after the
-fact and stays on the record for ever; what a stopped run is waiting on is the
-**Halt** beside it, and what answers that is **Resume**.
+fact and stays on the record for ever; what a stopped run is waiting on is that
+it is **Stopped**, and what answers that is **Resume**.
 _Avoid_: log line, info event, message, alert
 
 **Transcript**:
@@ -177,23 +179,15 @@ _Avoid_: transcript (that is the readable record), raw output, tape
 The live terminal view of a running session, held by Verkstead and shown in
 the workbench — one screen however many devices watch it, sized by whoever
 resized last. A session that has ended shows its Screen as it last stood,
-read-only. Watching one commits the human to nothing.
-_Avoid_: terminal, console, attach view, pane
+read-only.
 
-**Hold**:
-The human at a live session's keyboard. Begins with the first keystroke typed
-into a Screen — the keyboard alone, paste included — and ends only by being
-handed back, never by a timeout or a dropped connection, because the machine
-resuming over a half-finished intervention is worse than a stalled run. While
-it lasts Verkstead keeps recording but ends nothing and advances nothing, and
-the Conversation carries *blocked on you*; on hand-back the ordinary
-end-of-session rules judge whatever the human left. Its one job is stopping
-Verkstead ending a session out from under somebody who is deliberately
-intervening — so the mouse never takes one: a session whose interface tracks
-the mouse gets every move, click and scroll over its Screen, held or not, and
-a cursor crossing a pane is not an intervention. Distinct from a **Halt**,
-which is Verkstead having stopped driving rather than being asked to wait.
-_Avoid_: takeover, pause, manual mode, lock
+Watching one commits nobody to anything, and neither does typing into one:
+keystrokes reach the session and nothing else follows them — no register, no
+badge, no Event, and nothing held off. Somebody who means to take the work on by
+hand presses **Stop** first, and the Conversation being **Stopped** is what
+holds the run off while they do; a session typed into while a run is still
+driving it is ended and advanced by the ordinary rules.
+_Avoid_: terminal, console, attach view, pane
 
 **Agent Profile**:
 A named coding-agent account Verkstead can run a session under: a claude home
@@ -371,121 +365,148 @@ dismiss one by, a roadmap's score being the repository's to keep: an unwanted
 notice is silenced there, by ticking the box or annotating the stage.
 _Avoid_: stale, orphaned, dormant, unmanaged, needs attention
 
-**Halt**:
-That Verkstead has stopped driving a Conversation. Durable state on the
-Conversation rather than something that happened — the thing that happened is
-the **stop Notice** beside it, which says what stopped, why, and what the
-evidence was. At most one per Conversation: a Conversation that is stopped is
-stopped once, and a second stop noticed against one already halted is the same
-stop arriving twice.
+**Stopped**:
+What a Conversation is when nothing is driving it and nothing will start again
+until somebody presses. The state, where **Stop** is a button and only one of
+the ways a Conversation reaches it. Durable on the Conversation rather than
+something that happened — what happened is the **stop Notice** beside it, which
+says what stopped, why, and what the evidence was. At most one per
+Conversation, however the run stopped: a Conversation that is stopped is stopped
+once, and a second stop raised against one already stopped is the same stop
+noticed twice.
 
 Nothing advances past one. Every launch asks first, so a Conversation waiting
-on **Resume** never quietly gets another agent spent on it, and its card
-carries *blocked on you* until the halt is cleared. Nothing about a halt
+on **Resume** never quietly gets another agent spent on it, and its card carries
+*blocked on you* for as long as it is stopped. Nothing about being stopped
 reverts, resets or stashes anything: the repository is left exactly as the
 session left it, which is what makes taking the Worktree on by hand possible at
 all.
 
 **Deliberate** or by **circumstance**, which is the one thing a restart has to
 know. Verkstead pulling the brake — a session that fell over, checks that would
-not go green, a finish Step that left no pull request — and the human pressing
-**Stop** are both deliberate, and a restarting server leaves them alone. A
-driver a restart or a crash took away is circumstance: nobody decided anything,
-so the next server up carries the work on unasked. A deliberate halt Verkstead
-decided on is also pushed to the human's devices; one nobody chose is not, a
-restart being free to pick it up, and neither is the human's own Stop, they
-being the one person a notification would be telling their own news.
-_Avoid_: interruption, error, failure, crash, incident, alert, block
+not go green, a finish Step that left no pull request, an Agent Profile out of
+usage window — and the human pressing **Stop** are both deliberate, and a
+restarting server leaves them alone. A driver a restart or a crash took away is
+circumstance: nobody decided anything, so the next server up carries the work on
+unasked. A deliberate stop Verkstead decided on is also pushed to the human's
+devices; one nobody chose is not, a restart being free to pick it up, and
+neither is the human's own Stop, they being the one person a notification would
+be telling their own news.
+
+**No stop resumes itself**, the usage-window one included. A run whose Agent
+Profile has exhausted its window stops the way everything else does, and all
+that tells it apart is what it carries: the Profile that ran out, and — where
+the sentence the session printed carried a time this build could read — when the
+window comes back, as words to show beside the **Resume**. Information rather
+than a timer: nothing counts down to it, and nothing starts when it passes.
+Recognition is one phrase read off the Capture and the Transcript, kept in one
+place because the wording is the backend's and will move. The session is ended
+along with the stop, the agent's own wait for the same reset being no reason to
+have work going on inside a Conversation that reads as stopped. And **no
+auto-switching between Profiles**: an exhausted account is a wait, never a
+reason to spend a different one.
+_Avoid_: halt and pause (the two names this had before there was one of it),
+hold (gone, and nothing replaced it), interruption, error, failure, crash,
+incident, alert, block, rate limit, throttle
 
 **Resume**:
 The one way a stopped Conversation gets going again, standing in the start-work
 menu wherever there is driving to start. It recomputes what *ought* to be
 running now — from the lifecycle the Conversation is in and what its branch has
 written — and starts that, rather than running again whatever it was that
-stopped. A halt may be answered the next morning, and the Conversation moves on
-in the meantime.
+stopped. A stop may be answered the next morning, and the Conversation moves on
+in the meantime; where the stop carries words about a usage window coming back,
+they stand beside the button as text, and nothing is waiting on them.
 
-It carries nothing. Steering the work is what a **Manual Task** is for, so
-there is no note to write and one button rather than one per way of stopping.
-It is never silent either: either something starts, which the Timeline says by
-itself, or the press is refused by name and the page says which — the backlog
-that has gone, the Pairing that has, the Worktree that is nowhere. A Worktree
-the record names and git does not is made again from the branch rather than
-refused on.
+It carries nothing. Steering the work is what **Steer** is for, so there is no
+note to write and one button rather than one per way of stopping. It is never
+silent either: either something starts, which the Timeline says by itself, or
+the press is refused by name and the page says which — the backlog that has
+gone, the Pairing that has, the Worktree that is nowhere. A Worktree the record
+names and git does not is made again from the branch rather than refused on.
 
-Offered on a Conversation that is merely undriven as much as on one that has
-halted, a run with nothing behind it being the same condition however it got
-there. **And a restart presses it for itself**, on every Conversation it was
-left driving — except the halts somebody decided on, which are the ones waiting
+Offered on a Conversation that is merely undriven as much as on one that is
+**Stopped**, a run with nothing behind it being the same condition however it
+got there. **And a restart presses it for itself**, on every Conversation it was
+left driving — except the stops somebody decided on, which are the ones waiting
 for a person.
 
-Beside it in the Conversation's own menu, the two ways to stop: **Stop**, which
-lets whatever is running now reach its own end and halts before the next
+Beside it in the Conversation's own menu, the two presses that stop: **Stop**,
+which lets whatever is running now reach its own end and stops before the next
 launch, and **Force stop**, which ends the session where it stands.
 _Avoid_: retry, remedy, restart (that is the server's), continue, unblock
 
-**Pause**:
-A run stopped because the Agent Profile it was spending has exhausted its usage
-window. An Event on the Timeline, **open** the way a **Halt** stops a run — the
-run does not advance past one, no next Step and no fresh session, and the
-Conversation carries *blocked on you* — and at most one is open per
-Conversation. What makes it a different thing is that nothing went wrong: the
-account is out of window, and the agent is waiting for the same reset under a
-setting of its own that Verkstead neither turns off nor depends on. What the
-Pause adds is that the wait is *said*, and answerable from a phone, instead of
-being a session gone quiet for no stated reason.
+**Steer**:
+The human saying where the work goes, from wherever it has got to: a row in the
+Conversation's own menu beside **Stop**, and a modal over one question — where
+does this go? Targets are **Grilling**, **Implementing**, **Wrapping** and
+**Done**, the four states the work is done in; Draft and Closed are not among
+them, each having a way in of its own. Sources are every state there is — a
+Draft nothing has run in, a run in flight, work Verkstead has finished with —
+because a steer is the human stepping outside the pipeline's path rather than
+another move along it. So every refusal is about the target instead of the
+source: wrapping up is offered only where the work is on a pull request, there
+being no wrap-up to steer into otherwise.
 
-It names the Profile that ran out and, where the sentence the session printed
-carried a time this build could read, when the window comes back. Recognition is
-one phrase read off the Capture and the Transcript, kept in one place because the
-wording is the backend's and will move.
+**The click stops the drive**, before the modal opens. The ordinary Stop, so
+nothing new launches while the human composes and whatever is running is left
+exactly where it is. **Cancel leaves the Conversation stopped**, with **Resume**
+on offer: the click froze the world, and unfreezing is a press of its own rather
+than something a dismissed modal does behind the human's back.
 
-It ends two ways, and they meet in the same place: the human says *go on without
-waiting*, or the reset time passes. Neither reverts anything — the Worktree is
-exactly as the session left it — and the record keeps which of the two it was.
-**No auto-switching between Profiles**: an exhausted account is a wait, never a
-reason to spend a different one.
-_Avoid_: halt (that is driving stopped and waiting on a press), hold, rate
-limit, throttle
+**What ends the session running is the submit rather than the click.** One
+Worktree holds one agent, so the session a steer starts takes the Worktree from
+whatever is still in it — at once, or once a session that cannot be displaced
+has finished, which is a review waiting on an Ask. Into **Done** nothing is
+started, so nothing takes it and the session runs to its own end. **Interrupt
+current task** ends it where it stands instead, leaving the step however far it
+had got: the wait saved in the first case, and the only ending there is in the
+second.
 
-**Manual Task**:
-A free-text instruction the human types at the end of a Conversation's Timeline,
-with an Agent Profile picked beside it: submitting starts a one-off session that
-does what it says and stops. Offered wherever the Conversation has a Worktree
-and no session is registered for it — every quiet moment, in a driven state or
-out of one. The escape hatch: the way to get work moving by hand when the
-pipeline is not driving it.
+**What is missing is made again**, and the further from a running state the
+source is the more of it there is to make. A Worktree whose directory has gone
+is checked out afresh from the branch, exactly as a pressed Resume makes one; a
+Draft has no branch either, so it is cut where a grill start would have cut it —
+off the base the human fixed, resolved at that moment.
 
-Outside the pipeline in every sense that matters. It moves the Conversation into
-no state and out of none, clears no **Halt**, and reopens nothing a Done
-Conversation settled; what it leaves behind is its instruction on the record,
-what its session printed, and whatever that committed. The Pairing picked is for
-that submission alone and never becomes the Conversation's — the composer starts
-on the Conversation's implementation Pairing and otherwise asks for a pick.
+**What a target takes is what it has to be about.** Grilling takes a new Brief,
+optional, empty being the round starting on the one already there; and a choice
+about priming the session with the digest of everything already answered, off
+unless asked for, because a steer is usually a change of direction rather than a
+return to the argument just left. Implementing takes a hand-written
+instruction — required where the branch holds nothing to carry on, and optional
+where it does, empty there meaning carry it on. Wrapping takes nothing: its
+watchers recompute over whatever the branch now holds, the fix attempts
+forgotten. Done takes nothing at all, there being nothing to run in it.
 
-Ended on quiet with no Question Set of its own still open, there being no done
-file to end it by — so a session idling on a Blocking Ask is left where it is.
+**The record is the move with the human's own line above it.** The Steer is an
+Event of its own — somebody decided this — carrying the brief or the instruction
+as its body, and the machine's plain Moved line stands under it. A steer into
+Grilling lands that round's Brief under the move as well, frozen where it lands
+and beside the earlier round's rather than over it. The Pairing the modal
+settled is recorded as the **Conversation's** rather than one session's, because
+steering re-settles what runs the work — which is also why the pick is part of
+the form: a steered Draft has none fixed yet.
 
-One whose session exits badly **halts**, with the stop Notice saying so: the
-human submits from a phone and walks away, so being told is the only thing that
-reaches them. A finished one leaves the Conversation stopped either way —
-nothing takes the pipeline up again on the strength of a Manual Task, and what
-does is **Resume**. One that exits cleanly having committed nothing halts too,
-an instruction that legitimately changed nothing being indistinguishable from
-one that could not.
-_Avoid_: step (the unattended unit a done file ends), task (a backlog's), hold,
-take over, errand, manual step
+**And the submit resumes in the same press.** The stop the click left is
+cleared, and what that state ought to be running starts — a fresh grilling, the
+instruction session or the next step off the branch, the wrap-up's watchers.
+Into Done it is the move alone.
+_Avoid_: redirect, retarget, override, transition, take over, reopen and manual
+task (both retired: a steer into Grilling is what reopening a Done Conversation
+was, and a steer into Implementing with a hand-written instruction is what a
+manual task was)
 
 **Stalled**:
 A Conversation in a driven state — Grilling, Implementing or Wrapping — with
-nothing registered as driving it, no **Halt** written down and no open **Pause**.
+nothing registered as driving it and nothing on it saying it is **Stopped**.
 Nothing is moving the work and nothing is saying so, which is the one condition
 Verkstead has to notice on its own account. A condition an active state can be in
 rather than a state of its own — the Conversation is still Grilling or
 Implementing or Wrapping, and that is the half of it that is wrong.
 
 The condition rather than the record of it. A sweep looks every minute and
-**halts** what it finds, by circumstance rather than by anybody's decision, so
+**stops** what it finds, by circumstance rather than by anybody's decision, so
 what the human sees is a Conversation stopped with a Notice on it and a Resume
 to press — and what a restart sees is one it may take up unasked.
 
@@ -493,9 +514,9 @@ Judged by whether a driver — a grilling session, the watcher a Pick armed on
 one, a runner loop, a wrap-up's watchers — is registered, rather than by how
 long nothing has happened. Wrapping idles for days under live watchers and is
 perfectly healthy; so are the gaps between an unattended run's Steps. Draft,
-Done and Aborted are never stalled, nothing being supposed to drive them.
-_Avoid_: blocked on you (the badge a stall is precisely without), halt (what a
-stall becomes, not what it is), state, stuck, hung, idle
+Done and Closed are never stalled, nothing being supposed to drive them.
+_Avoid_: blocked on you (the badge a stall is precisely without), stopped (what
+a stall becomes, not what it is), state, stuck, hung, idle
 
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles
@@ -515,9 +536,8 @@ The **folding** is the far end: when a session is started to build, every
 answered Deferred Ask of that Conversation nobody has been told about goes into
 its prompt, oldest first, under the documents the prompt is built from. Each is
 folded once, and that it was folded is recorded rather than worked out from what
-is answered. A Manual Task's session is never folded into — its prompt is the
-instruction and nothing else — and neither is a relaunched grilling, which is
-already primed with everything the Conversation has answered.
+is answered. The one session never folded into is a relaunched grilling, which
+is already primed with everything the Conversation has answered.
 _Avoid_: sync/async ask, hard/soft question, urgent question
 
 ## Question Sets

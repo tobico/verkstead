@@ -1,17 +1,17 @@
-//! Manual Tasks: what the human asks for by hand at the end of a Timeline.
+//! The Manual Tasks a Verkstead of before put on a Conversation's Timeline, read
+//! back by this one.
 //!
-//! One instruction in markdown, recorded as its own kind of Event and read back
-//! whole. What the session it starts goes on to do is not this test's business
-//! and not the Event's either — that lands beside it as the Events any work
-//! lands as.
+//! Nothing writes one any more: what a human sets going by hand is a steer into
+//! Implementing, whose instruction rides the Steer Event. What is asked of the
+//! store here is ADR-0006's rule — *the record is kept and read rather than
+//! rewritten* — so the rows are written by hand, as a database from before holds
+//! them, and the tests are that a Timeline carrying one still reads back the
+//! instruction it was written with.
 
 use std::path::Path;
 
 use sqlx::SqlitePool;
-use verkstead_store::{
-    Event, open_database, record_manual_task, register_repo, save_brief, start_conversation,
-    start_grilling, timeline,
-};
+use verkstead_store::{Event, open_database, register_repo, start_conversation, timeline};
 
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
@@ -22,35 +22,42 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     (dir, pool)
 }
 
-/// A Conversation with a Worktree, which is where a Manual Task can reach one.
+/// A Conversation for an instruction to have been asked of.
+async fn conversation(pool: &SqlitePool) -> i64 {
+    let repo = register_repo(pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing was registered at that path yet")
+        .id;
+
+    start_conversation(pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered")
+}
+
+/// One Manual Task as a Verkstead of before wrote it: the Event of its own kind,
+/// with the instruction whole in the body column.
 ///
-/// Started for real rather than moved by hand: `start_grilling` is what records
-/// the base commit and the worktree beside the state.
-async fn working(pool: &SqlitePool) -> i64 {
-    let repo = register_repo(pool, Path::new("/srv/verkstead"), "verkstead", "main")
-        .await
-        .unwrap()
-        .expect("nothing is registered at that path yet");
-
-    let id = start_conversation(pool, repo.id, "rate-limiting")
-        .await
-        .unwrap()
-        .expect("the Repo was just registered");
-
-    save_brief(pool, id, "# Rate limiting\n").await.unwrap();
-    start_grilling(
-        pool,
-        id,
-        "c0ffee",
-        Path::new("/state/worktrees/rate-limiting"),
+/// Written here rather than by the call that used to write it — that call has
+/// gone with the feature, and what has to keep working is a database rather than
+/// a function.
+async fn stored(pool: &SqlitePool, conversation_id: i64, instruction: &str) -> i64 {
+    let (event_id,): (i64,) = sqlx::query_as(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, '2026-08-24T04:00:00.000Z', 'manual-task', ?)
+         RETURNING id",
     )
+    .bind(conversation_id)
+    .bind(instruction)
+    .fetch_one(pool)
     .await
     .unwrap();
 
-    id
+    event_id
 }
 
-/// The instructions a Conversation has been asked by hand, in order.
+/// The instructions a Conversation was asked by hand, in Timeline order.
 async fn instructions(pool: &SqlitePool, id: i64) -> Vec<String> {
     timeline(pool, id)
         .await
@@ -63,48 +70,60 @@ async fn instructions(pool: &SqlitePool, id: i64) -> Vec<String> {
         .collect()
 }
 
+/// What a stored Manual Task has to say is the whole of what the human typed:
+/// the markdown they wrote, read back word for word.
 #[tokio::test]
-async fn an_instruction_lands_on_the_timeline_as_the_markdown_it_was_typed_as() {
+async fn a_stored_instruction_reads_back_as_the_markdown_it_was_typed_as() {
     let (_dir, pool) = fresh_pool().await;
-    let id = working(&pool).await;
+    let id = conversation(&pool).await;
 
     let typed = "Rebase onto `main` and fix the conflicts.\n\n- keep the tests green\n";
 
-    assert!(record_manual_task(&pool, id, typed).await.unwrap());
+    stored(&pool, id, typed).await;
 
     assert_eq!(instructions(&pool, id).await, [typed]);
 }
 
+/// And a Timeline that carries several carries all of them, in the order they
+/// were asked: each was a moment of its own, and nothing rewrites a record.
 #[tokio::test]
-async fn each_manual_task_is_a_moment_of_its_own_rather_than_a_rewrite() {
+async fn each_stored_instruction_is_a_moment_of_its_own() {
     let (_dir, pool) = fresh_pool().await;
-    let id = working(&pool).await;
+    let id = conversation(&pool).await;
 
-    record_manual_task(&pool, id, "Rebase onto `main`.\n")
-        .await
-        .unwrap();
-    record_manual_task(&pool, id, "Now push the branch.\n")
-        .await
-        .unwrap();
+    stored(&pool, id, "Rebase onto `main`.\n").await;
+    stored(&pool, id, "Now push the branch.\n").await;
 
     assert_eq!(
         instructions(&pool, id).await,
         ["Rebase onto `main`.\n", "Now push the branch.\n"],
-        "a second thought is a second Manual Task, and nothing leaves a Timeline",
     );
 }
 
+/// A Manual Task is one Conversation's, so another's Timeline does not carry it.
 #[tokio::test]
-async fn there_is_no_conversation_to_ask_anything_of() {
+async fn a_manual_task_belongs_to_the_conversation_it_is_on() {
     let (_dir, pool) = fresh_pool().await;
+    let one = conversation(&pool).await;
 
-    assert!(
-        !record_manual_task(&pool, 404, "Rebase onto `main`.\n")
-            .await
-            .unwrap()
-    );
+    let repo = register_repo(&pool, Path::new("/watched/askance"), "askance", "trunk")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    let other = start_conversation(&pool, repo, "deferred-asks")
+        .await
+        .unwrap()
+        .unwrap();
+
+    stored(&pool, one, "Rebase onto `main`.\n").await;
+
+    assert_eq!(instructions(&pool, other).await, Vec::<String>::new());
+    assert_eq!(instructions(&pool, one).await.len(), 1);
 }
 
+/// And it is still there when the database is opened again, which is the whole
+/// of what *the record is kept* means.
 #[tokio::test]
 async fn a_manual_task_survives_the_database_being_reopened() {
     let dir = tempfile::tempdir().unwrap();
@@ -112,10 +131,8 @@ async fn a_manual_task_survives_the_database_being_reopened() {
 
     let id = {
         let pool = open_database(&database).await.unwrap();
-        let id = working(&pool).await;
-        record_manual_task(&pool, id, "Rebase onto `main`.\n")
-            .await
-            .unwrap();
+        let id = conversation(&pool).await;
+        stored(&pool, id, "Rebase onto `main`.\n").await;
         pool.close().await;
         id
     };

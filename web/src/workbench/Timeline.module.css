@@ -392,13 +392,13 @@
   color: var(--accent);
 }
 
-/* The three documents on a timeline — the frozen brief, the handoff the grilling
-   wrote, and the instruction a manual task was set going with. All three are
-   prose, and read at the measure like every other block of it, on the card and
-   in the pane the card opens — where `.document` says the same thing again. */
+/* The documents on a timeline — the frozen brief, the handoff the grilling
+   wrote, and the instruction a steer carried. All of them are prose, and read
+   at the measure like every other block of it, on the card and in the pane the
+   card opens — where `.document` says the same thing again. */
 .brief .briefBody,
 .handoff .handoffBody,
-.manualTask .manualTaskBody {
+.steeredWith .steerBody {
   max-width: var(--measure);
 }
 
@@ -480,7 +480,7 @@
   color: var(--ink-soft);
 }
 
-.timelineEvent > .moved.aborted {
+.timelineEvent > .moved.closed {
   color: #b3382c;
 }
 
@@ -492,6 +492,52 @@
   border-top: 1px solid var(--edge);
   padding-top: 0.6rem;
   margin-top: 0.4rem;
+}
+
+/* And the human saying where the work goes, which is the line the move under it
+   came of. Drawn like the move for that reason — the two are one moment read
+   twice — and in the ink the rest of the page is set in rather than the dim the
+   move takes: of the pair, this is the half somebody decided. */
+.timelineEvent > .steered,
+.steeredWith > .steered {
+  margin: 0;
+  padding: 0.15rem 0 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: center;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+/* Except where it carried an instruction, which makes it a card rather than a
+   line: what a session was sent off to do is a document like the brief and the
+   handoff, and is read the same way. The line stays what it was and becomes the
+   card's heading, so the pair under it still reads as one moment. */
+.steeredWith > .steered {
+  padding: 0 0 0.6rem;
+  text-align: left;
+}
+
+/* And a manual task a Verkstead of before was set going by hand, which reads
+   as the same kind of thing once more: something that was asked for, on a
+   record nothing writes another of. The same rule at its left and for the same
+   reason — there is nothing to open and nothing to do about it — in the ink the
+   prose around it is set in, because the words are somebody's own. */
+.timelineEvent > .manualTask {
+  margin: 0;
+  padding: 0.15rem 0 0.15rem 0.6rem;
+  font-size: 0.9rem;
+  border-left: 2px solid var(--edge);
+}
+
+.timelineEvent > .manualTask > :first-child {
+  margin-top: 0;
+}
+
+.timelineEvent > .manualTask > :last-child {
+  margin-bottom: 0;
 }
 
 /* And something Verkstead did on its own account, which reads as the same kind
@@ -512,6 +558,14 @@
 
 .timelineEvent > .notice > :last-child {
   margin-bottom: 0;
+}
+
+/* And the one of them a conversation is blocked on, which the badge in the
+   header marks: the rule at its left takes the colour that means stopped, so a
+   long record says where the stop is at a glance. The one thing that ever
+   selects a notice — there is no pane behind it to open. */
+.timelineEvent > .notice.selected {
+  border-left-color: var(--stopped);
 }
 
 /* What a session has printed, summarised. A button, because the whole of it is
@@ -833,35 +887,6 @@
   font-size: 0.9rem;
 }
 
-/* And what happens next on one that is finished, in the same place and never at
-   the same time: a conversation is either drafting a round or it has finished
-   one. Drawn quieter than `Start grilling` — reopening is a deliberate second
-   thought about work that is over, rather than the obvious next press. */
-.reopen {
-  margin-top: 1rem;
-}
-
-.reopen .reopenConversation {
-  padding: 0.5rem 1rem;
-  font: inherit;
-  font-weight: 600;
-  color: var(--accent);
-  background: none;
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
-.reopen .reopenConversation:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.reopen .failure {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-
 /* Starting Verkstead driving again, above the way to move the conversation by
    hand: the two are the same kind of thing — offered whenever nothing is
    running rather than in one state — and each is set off by a rule of its own,
@@ -893,67 +918,17 @@
   opacity: 0.65;
 }
 
-.resume .failure {
+/* And when the account that ran out comes back, where the stop carries it.
+   Beside the button rather than in the note under it, and in the ink of the
+   note's siblings rather than the note's own: it is the one fact this stop has
+   that the others do not, and the human reads it to decide when to press. */
+.resume .resets {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
-}
-
-/* The way to move a conversation by hand, under whichever of the two above is
-   drawn rather than instead of one: neither of those is for a state this is
-   for, and this is offered whenever nothing is running rather than in one
-   state. Set off by a rule, so the end of the record is still visible as an
-   end. */
-.manualTaskComposer {
-  margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--edge);
-}
-
-.manualTaskComposer h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
-}
-
-.manualTaskComposer label {
-  display: block;
-  margin-bottom: 0.3rem;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* The profile the one-off session runs as, on its own line under the box: the
-   instruction is the thing being written and this is a setting on it. */
-.manualTaskComposer .manualTaskProfile {
-  margin-top: 0.75rem;
-}
-
-.manualTaskComposer select {
-  font: inherit;
-  padding: 0.35rem 0.5rem;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-}
-
-.manualTaskComposer .startManualTask {
-  margin-top: 0.75rem;
-  padding: 0.5rem 1rem;
-  font: inherit;
   font-weight: 600;
-  color: var(--paper);
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 0.4rem;
-  cursor: pointer;
 }
 
-.manualTaskComposer .startManualTask:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.manualTaskComposer .failure {
+.resume .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
@@ -977,7 +952,7 @@
    press that ends something should not read as the next line of prose. */
 .stop,
 .forceStop,
-.abort {
+.close {
   display: inline-block;
   width: auto;
   padding: 0.4rem 0.8rem;
@@ -988,9 +963,16 @@
   border-radius: 0.4rem;
 }
 
+/* Steering is a menu row like the three above and is drawn like every other
+   one, from `.drop button` in `Menu.module.css`. It keeps no outline of its
+   own: the rule above is for the presses that end a run, and this one moves
+   the work rather than ending it. Named here so the row can be found. */
+.steer {
+}
+
 /* The one that cannot be undone, in the colour of what cannot be undone. Both
    stops are reversed by a resume, and read as the ordinary buttons they are. */
-.abort {
+.close {
   color: #b3382c;
   border-color: #b3382c;
 }

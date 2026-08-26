@@ -351,9 +351,9 @@ html: string,
  *
  * The server's rule rather than something the page works out from the
  * Conversation around it, as `ready_to_grill` is — and it is a fact about
- * one Brief rather than about the Conversation, because a reopened one has
- * a frozen Brief and an open one on the same Timeline. An adopting
- * Conversation's first Brief is frozen from the start: it is the stage
+ * one Brief rather than about the Conversation, because a Conversation gets
+ * one Brief per round and what is true of them differs: an adopting
+ * Conversation's first Brief is frozen from the start — it is the stage
  * brief, and nobody here writes it.
  */
 frozen: boolean, };
@@ -370,11 +370,6 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * was written down. This is what has become of its pair since.
  */
 export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
-
-/**
- * The two things that end a wait.
- */
-export type By = "Human" | "Reset";
 
 /**
  * One session's Capture, whole, as the details pane receives it.
@@ -482,9 +477,9 @@ diagrams: boolean,
 diff: DiffView | null, };
 
 /**
- * What became of aborting one.
+ * What became of closing one.
  */
-export type ConversationAborted = "Aborted" | "AlreadyAborted" | "NoSuchConversation" | "WorktreeStuck";
+export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversation" | "WorktreeStuck";
 
 /**
  * One row of the conversations sidebar.
@@ -525,7 +520,7 @@ working: boolean,
 idle: boolean, 
 /**
  * Whether something about this Conversation is waiting on the human: an ask
- * left open, or driving that has halted.
+ * left open, or driving that has stopped.
  *
  * Folded from every source before it leaves, so the viewer holds no list of
  * them. A Draft is never one of them: it is drawn as a draft, and that is
@@ -534,13 +529,15 @@ idle: boolean,
 waiting: boolean, };
 
 /**
- * What became of reopening a finished one with a new round.
+ * What became of submitting one.
  *
- * Every refusal is named, as [`GrillingStarted`]'s are: reopening is the other
- * press that gives a Conversation somewhere to work, and what stops one is
- * something different for the human to go and do each time.
+ * Named the way [`GrillingStarted`]'s refusals are, and nothing here is about
+ * the state the Conversation was in: the human has looked at the work and said
+ * where it goes, so the source is not something to be refused for. What is left
+ * to be wrong about is the *target* — a state whose work cannot be set going
+ * from what the record holds.
  */
-export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone" | "WorktreeRefused";
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
 
 /**
  * What became of pressing Stop or Force stop.
@@ -557,7 +554,7 @@ export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone"
  * [`Stopped`]: ConversationStopped::Stopped
  * [`Stopping`]: ConversationStopped::Stopping
  */
-export type ConversationStopped = "Stopped" | "Stopping" | "AlreadyHalted" | "NotDriven" | "NoSuchConversation";
+export type ConversationStopped = "Stopped" | "Stopping" | "AlreadyStopped" | "NotDriven" | "NoSuchConversation";
 
 /**
  * One Conversation, whole: what it is attached to, what the human has settled
@@ -615,7 +612,7 @@ ready_to_grill: boolean,
 ready_to_resume: boolean, 
 /**
  * And whether there is driving to stop: the Conversation is in a state
- * something ought to be driving, and it has not halted.
+ * something ought to be driving, and it has not stopped.
  *
  * What decides whether Stop and Force stop are offered. Not the mirror of
  * [`ready_to_resume`]: a Conversation between one step and the next has
@@ -631,6 +628,32 @@ ready_to_resume: boolean,
  */
 ready_to_stop: boolean, 
 /**
+ * And whether a steer into Implementing has anything to carry on: the
+ * branch holds a backlog with work left in it, or a roadmap it has
+ * written.
+ *
+ * What decides whether the steer modal offers *carrying on* — the target
+ * itself is offered on every Conversation there is, because an instruction
+ * can always be written. Where this is false the instruction is the whole
+ * of what that target can be, so the modal requires one.
+ *
+ * The server’s rule rather than something the page works out from the
+ * fields around it: what stands is a reading of the Worktree as it is now,
+ * which a page cannot make. Read the same way everything else pinned to
+ * the Timeline is.
+ *
+ * **A Worktree that has gone is not a branch holding nothing**, and this is
+ * true there. There is no directory to read, and the steer checks one out
+ * of the branch before anything runs in it — so a Conversation stuck behind
+ * a deleted directory is offered the carrying on its branch may well hold,
+ * and what decides it in the end is the relaunch that reads the directory
+ * the steer has just made.
+ *
+ * Checked again when the modal is submitted, as every refusal here is;
+ * this says only that it was worth offering as of the moment it was read.
+ */
+ready_to_continue: boolean, 
+/**
  * What this Conversation is adopting, where it is adopting anything.
  *
  * `null` is the ordinary Conversation, which begins with a Brief and a
@@ -643,7 +666,7 @@ adopting: AdoptionView | null,
 /**
  * The worktree the grilling was given to work in, once there is one.
  *
- * `null` both before grilling starts and after aborting — the two ways a
+ * `null` both before grilling starts and after closing — the two ways a
  * Conversation has none, which are the same fact about it.
  */
 worktree: Worktree | null, 
@@ -671,30 +694,26 @@ direction: Direction | null,
  */
 blocked_on: number | null, 
 /**
- * Which of this Conversation's sessions the human has the keyboard of, or
- * `null` where it is Verkstead's.
+ * What the stop shows about the account that ran out coming back, and
+ * `null` on every stop that is not a usage window's — which is nearly all
+ * of them, and every Conversation that has not stopped.
  *
- * The Hold, said as the Event of the session it was taken on: the workbench
- * draws the hand-back control on that session's Screen, and a Hold with no
- * session to name would be one nobody could give back.
+ * Words to draw beside Resume rather than a moment anything acts on: no
+ * stop resumes itself, so what a stopped run waits for is a press whatever
+ * stopped it. The one thing that tells a run stopped by an exhausted window
+ * from a run stopped by anything else — same card, same badge, same button.
  *
- * Beside `blocked_on` rather than folded into it, though a Hold sets that
- * too. What the badge says is *the work has stopped and it is your move*,
- * and what this says is *which move* — where a halt is answered by pressing
- * Resume, a Hold is answered by handing the keyboard back.
- *
- * Never on the Timeline, however long it lasts: the Timeline records the
- * work rather than the watching. This is a fact about now, read off the
- * running server every time the Conversation is.
+ * As the session printed it, because the wording is the backend's: `3pm`
+ * stays `3pm`, which is what somebody looks at their own clock for.
  */
-held: number | null, 
+resets: string | null, 
 /**
  * Whether a session is registered for this Conversation as of this read.
  *
  * The same fact the sidebar draws its working indicator from, said here
- * because the Timeline has its own use for it: the Manual Task composer is
- * offered exactly where nothing is running, and the states it is offered in
- * are the ones a session may or may not be running in.
+ * because the Timeline has its own use for it: Force stop is offered
+ * exactly where something is running, and the states it is offered in are
+ * the ones a session may or may not be running in.
  *
  * A question about a process rather than about the record, so it is true
  * only as of the moment it was read — and a restarted server has no
@@ -749,15 +768,6 @@ export type Direction = "inline" | "task-list" | "roadmap";
 export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
 
 /**
- * What handing a Conversation's keyboard back came to.
- *
- * The one way a Hold ends, and it ends by being pressed: no timeout, no release
- * on the socket dropping, because Verkstead resuming over a half-finished
- * intervention is worse than a stalled run.
- */
-export type HandedBack = "HandedBack" | "NotHeld";
-
-/**
  * The handoff document as the page receives it.
  *
  * HTML alone, unlike the Brief, which travels as its source as well: the Brief
@@ -783,7 +793,7 @@ html: string, };
  * the domain's, and the page says which one a Conversation is in rather than
  * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Done" | "Aborted";
+export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Done" | "Closed";
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -800,11 +810,10 @@ export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Do
 export type Liveness = "waiting" | "disconnected" | "deferred";
 
 /**
- * A Manual Task as the page receives it: what the human asked for, and when.
+ * A Manual Task as the page receives it: what was asked for, and when.
  *
- * HTML alone, like the handoff and unlike the Brief: it is a moment on the
- * record rather than a document anybody goes back and edits — what a second
- * thought produces is a second Manual Task.
+ * HTML alone, like the Notice beside it and unlike the Brief: it is a moment on
+ * the record rather than a document anybody goes back and edits.
  */
 export type ManualTaskEvent = { id: number, 
 /**
@@ -816,41 +825,6 @@ at: string,
  * markdown on this wire is.
  */
 html: string, };
-
-/**
- * What became of submitting one.
- *
- * Named the way [`GrillingStarted`]'s refusals are, and for the same reason:
- * each of them is something different for the human to go and do, and a single
- * "cannot start" would leave them guessing which.
- */
-export type ManualTaskStarted = "Started" | "NoSuchConversation" | "NowhereToWork" | "AlreadyRunning" | "EmptyInstruction" | "NoSuchProfile" | "NoSuchModel" | "NotStarted";
-
-/**
- * What the human typed into the Manual Task composer: the instruction, and the
- * Agent Profile to run it under.
- *
- * The Profile travels with the instruction rather than being read off the
- * Conversation, because the pick is one-off. The composer starts on the
- * Conversation's implementation Profile and a different choice belongs to this
- * submission alone — it never becomes the Conversation's.
- */
-export type ManualTaskSubmission = { 
-/**
- * What to do, in the human's own markdown. Nothing here interprets it — it
- * goes on the Timeline whole and into the prompt whole.
- */
-instruction: string, 
-/**
- * Which saved Profile the one-off session runs as.
- */
-profile_id: number, 
-/**
- * And which of that Profile's models it runs on. The composer prefills the
- * Conversation's implementation Pairing and otherwise demands a pick:
- * there is no default model anywhere.
- */
-model: string, };
 
 /**
  * A move as the page receives it: when, and to what.
@@ -970,60 +944,6 @@ export type PairingView = { profile: ProfileEntry,
  * here has to say — its Pairings are fixed and there is no picking left.
  */
 model: string | null, };
-
-/**
- * How a Pause ended: what started the work again, and when.
- *
- * Named for the Pause rather than for the resuming, because [`Resumed`] is
- * already what pressing **Resume** on a halt answers with. The two are
- * different things said with one word — one is a wait that is over, the other
- * is a run that has been started again — so this takes the longer name.
- */
-export type PauseEnded = { by: By, 
-/**
- * When it ended, RFC 3339.
- */
-at: string, };
-
-/**
- * A run waiting an account's window out, as the Timeline shows it.
- *
- * Nothing here went wrong, which is what makes it a different Event from the
- * Notice a halt writes: the account is out of window, the agent is waiting for
- * the same reset, and the Conversation is *blocked on you* only in the sense
- * that the human may decide not to wait.
- */
-export type PauseEvent = { id: number, 
-/**
- * When the run stopped, RFC 3339.
- */
-at: string, 
-/**
- * What the Agent Profile whose account ran out is called, as it was called
- * then.
- */
-profile: string, 
-/**
- * The line the session printed, as it printed it. The record of why this
- * was raised, in the backend's own words rather than in Verkstead's.
- */
-said: string, 
-/**
- * When the window resets, RFC 3339 — or `null` where what the session
- * printed carried no time this build could read as one, which is a wait the
- * human ends.
- */
-resets_at: string | null, 
-/**
- * What ended the wait, or `null` while it is still on — which is the state
- * the run is stopped in, and what the resume press is drawn for.
- */
-resumed: PauseEnded | null, };
-
-/**
- * What became of pressing resume.
- */
-export type PauseResumed = "Resumed" | "NoSuchPause" | "AlreadyResumed";
 
 /**
  * An Event the Timeline keeps in view rather than letting scroll past.
@@ -1378,7 +1298,7 @@ direction?: Direction | null, };
 /**
  * What became of pressing Resume.
  *
- * Named the way [`ManualTaskStarted`]'s refusals are, and for a reason of its
+ * Named the way [`GrillingStarted`]'s refusals are, and for a reason of its
  * own on top of theirs: Resume is never silent. Either something is running —
  * which needs no announcement, the session showing up on the Timeline — or
  * nothing is, and the one place that can say why is the answer to the press.
@@ -1616,6 +1536,152 @@ export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "A
 export type Started = { "Started": { id: number, } } | "NoSuchRepo";
 
 /**
+ * A steer as the page receives it: when, where the human sent it, and what
+ * they wrote to send it there with.
+ *
+ * The one Event that is sometimes a move and sometimes a document. A steer
+ * into Wrapping or Done says nothing but the state, like the move it stands
+ * above; a steer into Implementing carries the instruction the session was set
+ * going on, which is the whole of what that session was asked to do. A steer
+ * into Grilling carries a document too, and that one arrives as a Brief Event
+ * of its own — it opens a round, and a round starts from a Brief.
+ */
+export type SteerEvent = { id: number, 
+/**
+ * When it was steered, RFC 3339.
+ */
+at: string, 
+/**
+ * The state the human moved it into.
+ */
+target: Lifecycle, 
+/**
+ * The instruction they steered it with, rendered and sanitized on the way
+ * out as every piece of markdown on this wire is — and `None` for every
+ * steer that carried nothing written.
+ */
+html: string | null, };
+
+/**
+ * What clicking Steer found, which is what the modal it opens is drawn from.
+ *
+ * The click is a press of its own rather than the first half of the submit: it
+ * stops the drive before the modal opens, so that nothing new is launched while
+ * the human composes and the world the modal was drawn against is the world the
+ * submit arrives in. Cancel leaves the Conversation stopped with Resume on
+ * offer, which is accepted rather than a bug — the click is what freezes it.
+ */
+export type SteerOpened = { "Opened": { 
+/**
+ * Whether a session is still running as the modal opens.
+ *
+ * What **Interrupt current task** is offered for: the click leaves what
+ * is running exactly where it is, and the checkbox is the only way to
+ * end it where it stands. What ends it otherwise is the submit's own
+ * launch — one Worktree holds one agent, so the session a steer starts
+ * takes the Worktree from whatever is still in it — and into Done,
+ * where nothing is launched, nothing ends it at all.
+ *
+ * Where nothing is running there is nothing to interrupt, so the
+ * checkbox is not drawn at all.
+ */
+working: boolean, } } | "NoSuchConversation";
+
+/**
+ * What the human settled in the modal: where the Conversation goes, what runs
+ * the work there, and what to do about anything still running.
+ */
+export type SteerSubmission = { 
+/**
+ * Which state to move it into.
+ */
+target: SteerTarget, 
+/**
+ * Whether to end the session that is running where it stands.
+ *
+ * `false` is the default and the ordinary case: the click stopped the
+ * drive, so nothing was started after what is running, and what ends it is
+ * this steer's own launch taking the Worktree from it. `true` is the human
+ * saying they will not wait for it — which is what saves the wait where the
+ * launch would have had to queue behind it, and what ends it at all into
+ * Done, where nothing is launched.
+ */
+interrupt: boolean, 
+/**
+ * The Pairing the work runs under from here, for a target something runs
+ * in — and what is picked is recorded as the *Conversation's*, because
+ * steering re-settles what runs the work rather than picking for one
+ * session.
+ *
+ * Absent where the target runs nothing, and absent where the human left
+ * the picker on what the Conversation already had: both are a submit that
+ * changes no Pairing. A Conversation with none fixed yet — a steered draft
+ * — is why the pick is part of the modal rather than an error path, and one
+ * that arrives with neither this nor a Pairing of its own is refused by
+ * name.
+ */
+pairing: ProfileChoice | null, 
+/**
+ * The new round's Brief, for a steer into Grilling.
+ *
+ * It lands as a Brief Event of its own, frozen the moment it does: a Brief
+ * freezes when its round leaves Draft, and a round steered into has no
+ * Draft to leave. A second Brief beside the first rather than an edit of
+ * it — what the earlier round was built from stays on the record.
+ *
+ * Absent is the ordinary case and not a refusal: the session starts on the
+ * Brief that is already there, and the steer leaves nothing but its own
+ * Event behind.
+ */
+brief: string | null, 
+/**
+ * The hand-written work, for a steer into Implementing.
+ *
+ * It lands as the Steer Event's own body and a session is started on it —
+ * a driver of the Conversation rather than an errand beside it, so what
+ * follows a clean finish is whatever the branch then holds.
+ *
+ * **Required where nothing stands to be carried on**, and optional beside
+ * carrying on where something does: a branch with a backlog left in it has
+ * an answer to what is next, and a branch with nothing on it has none. A
+ * submit that names Implementing with neither is refused by name — see
+ * [`ConversationSteered::NoInstruction`].
+ *
+ * Whitespace alone is nothing written, exactly as the brief above it: a
+ * textarea somebody tabbed through is not an instruction.
+ *
+ * Nothing anywhere else reads it. A target that starts no session has
+ * nothing to write an instruction for.
+ */
+instruction: string | null, 
+/**
+ * Whether the session is primed with everything the human has already
+ * answered.
+ *
+ * The digest a relaunched grilling assembles for itself — every answered
+ * Question Set of the Conversation, in the order it was asked — offered
+ * here as a choice rather than always sent. A fresh brief is often the
+ * point of the steer, and priming it with the whole of the last interview
+ * would be steering into the argument that has just been left behind.
+ *
+ * Nothing anywhere else reads it: a target that starts no grilling starts
+ * nothing to prime.
+ */
+digest: boolean, };
+
+/**
+ * Where a steer can send a Conversation.
+ *
+ * Draft and Closed are not among them and never will be: each has a way in of
+ * its own, and a steer is for the four states the work is *done in*. A target
+ * the modal offers is a target something can be set going in, which is why
+ * Wrapping is offered only where the work is already on a pull request — the
+ * one of the four that is drawn out at all, an instruction being writable
+ * anywhere and Done needing nothing.
+ */
+export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "Done";
+
+/**
  * What became of the human's Response.
  */
 export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Archived" | { "Rejected": Array<string> };
@@ -1683,7 +1749,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Pause": PauseEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent };
 
 /**
  * What is to become of the configured token.
@@ -1898,16 +1964,11 @@ label?: string | null, message: string, };
 /**
  * And what a watcher says back up it.
  *
- * Three kinds of thing, each saying which it is: the socket is a conversation
- * in both directions, and what a watcher does to a Screen is look at it a
- * different size, type into it, or move a mouse over it.
- *
- * The last two carry the same thing — bytes on their way to the session's own
- * terminal — and are told apart for one reason, which is the Hold. Typing
- * takes it and mousing never does, so which of the two the human did has to
- * survive the crossing rather than be guessed at from the bytes.
+ * Two kinds of thing, each saying which it is: the socket is a conversation in
+ * both directions, and what a watcher does to a Screen is look at it a
+ * different size, or put something into it.
  */
-export type Watching = { "Resized": Size } | { "Typed": string } | { "Moused": string };
+export type Watching = { "Resized": Size } | { "PutIn": string };
 
 /**
  * A Conversation's worktree: where it is, and whether it is still there.

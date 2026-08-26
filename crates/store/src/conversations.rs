@@ -10,10 +10,11 @@
 //! The Timeline is its own table from the start rather than a Brief column on
 //! the Conversation. The Brief is the first Event, and agent output, Question
 //! Sets and commits are the same list with more in it. A Brief kept beside the
-//! Timeline rather than in it would
-//! have to be moved into it later, and a reopened round adds a second Brief
-//! Event rather than editing the first — which a column could not hold at all.
+//! Timeline rather than in it would have to be moved into it later, and a
+//! steered round adds a second Brief Event rather than editing the first —
+//! which a column could not hold at all.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -53,15 +54,15 @@ fn direction_read(word: &str) -> Result<Direction> {
 /// the Conversation is still drafting — need the states they refuse on behalf of
 /// to exist before the stage that reaches them does.
 ///
-/// [`Lifecycle::Aborted`] is off the ladder rather than on it. Every other state
-/// is somewhere the work has got to, and aborting is the work stopping wherever
+/// [`Lifecycle::Closed`] is off the ladder rather than on it. Every other state
+/// is somewhere the work has got to, and closing is the work stopping wherever
 /// it was — which is why it is reachable from all of them and leads nowhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
-    /// The brief of the round it is in is being written. On a first round that
-    /// is everything about the Conversation — the Brief, the branch name and the
-    /// base commit alike; on a reopened one it is the Brief alone, the branch
-    /// having been worked already.
+    /// The Brief is being written, and with it everything else about the
+    /// Conversation: the branch name and the base commit alike. Where every
+    /// Conversation starts, and the one state nothing comes back to — a second
+    /// round opens where it is steered, past drafting already.
     Draft,
 
     /// A grilling session is running against it.
@@ -73,14 +74,14 @@ pub enum Lifecycle {
     /// The work is on a PR and the wrap-up loop has it.
     Wrapping,
 
-    /// Finished. It can be reopened with a new round, which puts it back to
-    /// [`Lifecycle::Draft`] with a Brief of its own to write — see
-    /// [`reopen_conversation`].
+    /// Finished. A steer is the way back in: one into [`Lifecycle::Grilling`]
+    /// opens a second round with a Brief of its own — see
+    /// [`steer_conversation`].
     Done,
 
-    /// Stopped, from wherever it had got to. The worktree is gone; the branch is
+    /// Closed, from wherever it had got to. The worktree is gone; the branch is
     /// not, because a branch is cheap and may hold work worth reading.
-    Aborted,
+    Closed,
 }
 
 impl Lifecycle {
@@ -93,13 +94,19 @@ impl Lifecycle {
             Self::Implementing => "implementing",
             Self::Wrapping => "wrapping",
             Self::Done => "done",
-            Self::Aborted => "aborted",
+            Self::Closed => "closed",
         }
     }
 
     /// The state a stored word names. A word this does not know is a database
     /// written by a Verkstead this one does not understand, which is worth
     /// saying rather than guessing past.
+    ///
+    /// `aborted` is read beside `closed`, because that is what the state was
+    /// called while the press was Abort. A migration rewrites the rows it can
+    /// reach — see [`super::migrations`] — and this reads the ones it never
+    /// did: a database restored from a backup taken before it ran, or a row
+    /// somebody wrote by hand.
     pub(crate) fn read(word: &str) -> Result<Self> {
         Ok(match word {
             "draft" => Self::Draft,
@@ -107,7 +114,7 @@ impl Lifecycle {
             "implementing" => Self::Implementing,
             "wrapping" => Self::Wrapping,
             "done" => Self::Done,
-            "aborted" => Self::Aborted,
+            "closed" | "aborted" => Self::Closed,
             other => bail!("a Conversation is in the unknown state {other:?}"),
         })
     }
@@ -150,10 +157,10 @@ pub struct Conversation {
 
     /// Where the Conversation's worktree was put, once grilling has made one.
     ///
-    /// `None` before grilling starts and again after aborting — the two ways a
+    /// `None` before grilling starts and again after closing — the two ways a
     /// Conversation has no worktree, which are the same fact about it whatever
     /// put it there. Whether the directory is still on disk is not something the
-    /// store can say; see [`abort_conversation`] for who does.
+    /// store can say; see [`close_conversation`] for who does.
     pub worktree: Option<PathBuf>,
 
     /// The latest pick: how the human most recently said the work should be
@@ -237,7 +244,7 @@ pub enum Event {
     /// One kind for every move rather than one per destination: what the
     /// Timeline is recording is that the work changed hands, and the state it
     /// changed to is the only thing that differs between one move and the next.
-    /// Starting to grill and aborting both land here.
+    /// Starting to grill and closing both land here.
     Moved(Lifecycle),
 
     /// A session's output, summarised. The whole of it is the Capture beside
@@ -309,23 +316,47 @@ pub enum Event {
     /// looking at the work will ever find.
     ///
     /// Never something to do about, whatever it says: a Notice is written
-    /// after the fact, and what a run that stopped is waiting on is the halt
-    /// beside it rather than anything on the Timeline — see [`super::halts`].
+    /// after the fact, and what a run that stopped is waiting on is the stop
+    /// on the Conversation rather than anything on the Timeline — see
+    /// [`super::stops`].
     Notice(String),
 
-    /// A Manual Task: the instruction the human typed at the end of the
-    /// Timeline for a one-off session to carry out.
+    /// A Manual Task: the instruction a human typed at the end of the Timeline
+    /// for a one-off session to carry out.
     ///
     /// Markdown in the `body` column like the Brief and the handoff, because
     /// that is what it is — one document, written by a human for an agent to
     /// read. Nothing is joined in beside it: a Manual Task is its instruction,
-    /// and what the session it starts does lands as the Events that work lands
+    /// and what the session it started did lands as the Events that work lands
     /// as.
     ///
-    /// Beside the run rather than a step of it. It moves no state, and it is not
-    /// a Step — the unattended unit a done file ends — however much the two look
-    /// alike from the session's end.
+    /// **Read rather than written.** Nothing puts another on a Timeline — a
+    /// steer into Implementing carries the human's instruction now, and drives
+    /// the Conversation with it — and nothing rewrote the ones that are there.
+    /// The kind stays because the rows do: ADR-0006's rule is that the record
+    /// is kept and read as it was written.
     ManualTask(String),
+
+    /// A Steer: the state the human moved the Conversation into, and whatever
+    /// they wrote to send it there with.
+    ///
+    /// Its own kind beside the [`Event::Moved`] line the move writes, and the
+    /// two say different things about the same moment. A move is the machine
+    /// recording where the work got to; this is the human saying they put it
+    /// there, which is the one thing a Timeline of moves alone could never be
+    /// read back for.
+    ///
+    /// The target on the first line of the `body` column, exactly as a move
+    /// holds the state it went to, and the instruction under it where the
+    /// human wrote one — the hand-written work a steer into Implementing
+    /// carries, kept as they wrote it. A steer into Grilling carries a
+    /// document too and that one is not here: it opens a round, and what a
+    /// round starts from is a Brief Event like any other.
+    ///
+    /// One line and no instruction is every steer written before there was one
+    /// to write, and it reads back as the steer it was — ADR-0006's rule, and
+    /// the reason the target goes above the document rather than under it.
+    Steer(Lifecycle, Option<String>),
 }
 
 /// A Question Set as its Timeline Event holds it: which Set, what it asked, and
@@ -371,30 +402,42 @@ impl Event {
             Self::Pause(_) => super::pauses::PAUSE,
             Self::Notice(_) => "notice",
             Self::ManualTask(_) => "manual-task",
+            Self::Steer(..) => "steer",
         }
     }
 
     /// What goes in the `body` column beside the kind.
-    fn body(&self) -> &str {
+    ///
+    /// Borrowed for every kind but one, which is what the `Cow` is for: a
+    /// steer's body is the state it named with the instruction under it, which
+    /// is two things joined rather than one thing held.
+    fn body(&self) -> Cow<'_, str> {
         match self {
-            Self::Brief(markdown) => markdown,
-            Self::Moved(state) => state.stored(),
+            Self::Brief(markdown) => Cow::Borrowed(markdown),
+            Self::Moved(state) => Cow::Borrowed(state.stored()),
             // Nothing: what a session printed is in the Capture tables, and
             // what the Timeline shows of it is read back from there too.
-            Self::AgentOutput(_) => "",
+            Self::AgentOutput(_) => Cow::Borrowed(""),
             // Nothing either, and for the nearer reason: a Set is a row in
             // `question_sets` already.
-            Self::QuestionSet(_) => "",
-            Self::Handoff(markdown) => markdown,
+            Self::QuestionSet(_) => Cow::Borrowed(""),
+            Self::Handoff(markdown) => Cow::Borrowed(markdown),
             // Nothing, for the Capture's reason: what a commit is, is a row
             // in `commits`.
-            Self::Commit(_) => "",
+            Self::Commit(_) => Cow::Borrowed(""),
             // Nothing either, and for the commit's reason.
-            Self::PullRequest(_) => "",
+            Self::PullRequest(_) => Cow::Borrowed(""),
             // Nothing either, and for the commit's reason again.
-            Self::Pause(_) => "",
-            Self::Notice(markdown) => markdown,
-            Self::ManualTask(instruction) => instruction,
+            Self::Pause(_) => Cow::Borrowed(""),
+            Self::Notice(markdown) => Cow::Borrowed(markdown),
+            Self::ManualTask(instruction) => Cow::Borrowed(instruction),
+            // The state it was steered into, as a move holds the state it moved
+            // to — with the instruction under it where the human wrote one, on
+            // lines of its own so that the word above it reads back whole.
+            Self::Steer(target, None) => Cow::Borrowed(target.stored()),
+            Self::Steer(target, Some(instruction)) => {
+                Cow::Owned(format!("{}\n{instruction}", target.stored()))
+            }
         }
     }
 
@@ -442,6 +485,15 @@ impl Event {
             }
             "notice" => Self::Notice(body),
             "manual-task" => Self::ManualTask(body),
+            // The state off the first line and the instruction under it, split
+            // rather than parsed: an instruction is a document and may hold
+            // anything, so the only thing read out of it is where it starts.
+            "steer" => match body.split_once('\n') {
+                Some((target, instruction)) => {
+                    Self::Steer(Lifecycle::read(target)?, Some(instruction.to_owned()))
+                }
+                None => Self::Steer(Lifecycle::read(&body)?, None),
+            },
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -500,7 +552,7 @@ pub enum Grilling {
     /// There is no Conversation with that id.
     NoSuchConversation,
 
-    /// It is past drafting, so it has been started once already — or aborted.
+    /// It is past drafting, so it has been started once already — or closed.
     NotDrafting,
 }
 
@@ -564,26 +616,6 @@ pub enum Implementing {
     NoSuchConversation,
 }
 
-/// What became of reopening a finished one.
-///
-/// Reopening twice has no outcome of its own, unlike aborting twice: the first
-/// press leaves the Conversation drafting, and a second finds a state that is
-/// not Done — which is [`Reopening::NotDone`], the round being open already.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Reopening {
-    /// Reopened: the Conversation is drafting again, with a Brief of its own to
-    /// write and the round boundary on its Timeline.
-    Reopened,
-
-    /// It is not Done, so there is no finished round here to open another
-    /// after. Every other state is somewhere the work has got to, and Aborted
-    /// is off the ladder rather than on it.
-    NotDone,
-
-    /// There is no Conversation with that id.
-    NoSuchConversation,
-}
-
 /// What became of sending a wrapping Conversation back to be built.
 ///
 /// The one way back down the ladder, and the only thing that takes it: a review
@@ -597,26 +629,48 @@ pub enum Rebuilding {
     Started,
 
     /// It is not wrapping up, so there is no wrap-up here to leave — it was
-    /// aborted out from under the session, or it is being built already.
+    /// closed out from under the session, or it is being built already.
     NotWrapping,
 
     /// There is no Conversation with that id.
     NoSuchConversation,
 }
 
-/// What became of aborting one.
+/// What became of steering one.
 ///
-/// Aborting twice is not an error, which is what [`Aborting::AlreadyAborted`] is
+/// Nothing here is about the state the Conversation was in, and that is the
+/// point of a steer: the human has looked at the work and said where it goes, so
+/// every source is a source — a draft, a run in flight, a Conversation Verkstead
+/// has finished with. What is left to be wrong about is which Conversation was
+/// named, and which Profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Steering {
+    /// Recorded: the Steer Event, the state, the move on the Timeline, and the
+    /// Pairing where the human picked one.
+    Steered,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// The Pairing picked names a Profile that is not there — removed between
+    /// the list the modal read and the pick it made from it. Nothing is moved:
+    /// the move and the Pairing are one act.
+    NoSuchProfile,
+}
+
+/// What became of closing one.
+///
+/// Closing twice is not an error, which is what [`Closing::AlreadyClosed`] is
 /// for: it is a distinct outcome rather than a failure, because the thing the
 /// human asked for holds either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Aborting {
-    /// Stopped: the worktree is forgotten, the state is [`Lifecycle::Aborted`],
+pub enum Closing {
+    /// Closed: the worktree is forgotten, the state is [`Lifecycle::Closed`],
     /// and the move is on the Timeline.
-    Aborted,
+    Closed,
 
-    /// It was aborted already. Nothing to record and nothing wrong.
-    AlreadyAborted,
+    /// It was closed already. Nothing to record and nothing wrong.
+    AlreadyClosed,
 
     /// There is no Conversation with that id.
     NoSuchConversation,
@@ -669,7 +723,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // as an archiving hangs off a Set: there is no migration machinery here and
     // `conversations` is STRICT and left alone. One worktree per Conversation,
     // by the primary key — and a Conversation that has none has no row, which is
-    // both the state before grilling and the state after aborting.
+    // both the state before grilling and the state after closing.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS worktrees (
              conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
@@ -789,8 +843,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// human pressing a separate chooser. The pick rides the closing Set now, so
 /// nothing ever waits there — and a Conversation *found* waiting there is
 /// stranded: its grilling session is over, and the chooser it was waiting on is
-/// gone. Aborted is what that is, which is where this puts it, with the move on
-/// its Timeline as every abort has one.
+/// gone. Closed is what that is, which is where this puts it, with the move on
+/// its Timeline as every close has one.
 ///
 /// The retired Events go with the state. A Timeline holding a move to `direction`
 /// or a `directed` Event is one this Verkstead cannot read at all — every state
@@ -799,24 +853,24 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// chose is the answered proposal Set, which stays exactly where it was.
 ///
 /// No compatibility path, which is what makes this a one-way collapse: this is a
-/// single-user tool, and in-flight Conversations are finished or aborted before
+/// single-user tool, and in-flight Conversations are finished or closed before
 /// upgrading. Safe to run against a database that has been through it — after the
 /// first run there is nothing left to match.
 async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
-    // Before the state is rewritten, while the rows to abort can still be found
+    // Before the state is rewritten, while the rows to close can still be found
     // by it.
     sqlx::query(
         "INSERT INTO timeline_events (conversation_id, at, kind, body)
          SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'moved', ?
          FROM conversations WHERE state = 'direction'",
     )
-    .bind(Lifecycle::Aborted.stored())
+    .bind(Lifecycle::Closed.stored())
     .execute(pool)
     .await
-    .context("recording the abort of every Conversation caught choosing a direction")?;
+    .context("recording the closing of every Conversation caught choosing a direction")?;
 
-    // The worktree row goes with it, as it does at [`abort_conversation`]: an
-    // aborted Conversation has none. The directory itself is not the store's to
+    // The worktree row goes with it, as it does at [`close_conversation`]: a
+    // closed Conversation has none. The directory itself is not the store's to
     // remove, and never was.
     sqlx::query(
         "DELETE FROM worktrees
@@ -827,10 +881,10 @@ async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
     .context("forgetting the worktrees of the Conversations caught choosing a direction")?;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE state = 'direction'")
-        .bind(Lifecycle::Aborted.stored())
+        .bind(Lifecycle::Closed.stored())
         .execute(pool)
         .await
-        .context("aborting every Conversation caught choosing a direction")?;
+        .context("closing every Conversation caught choosing a direction")?;
 
     sqlx::query(
         "DELETE FROM timeline_events
@@ -929,7 +983,7 @@ async fn started(
     )
     .bind(id)
     .bind(brief.kind())
-    .bind(brief.body())
+    .bind(brief.body().into_owned())
     .execute(&mut *tx)
     .await
     .with_context(|| format!("writing the Brief of Conversation {id}"))?;
@@ -965,22 +1019,17 @@ async fn started(
 /// `waiting` is an `OR` over the sources, computed here rather than by the
 /// caller, because every one of them is a read of this database and the sidebar
 /// is one list: a caller folding them itself would be issuing a query per row
-/// for facts a subselect already has. A new source is one more clause — which is
-/// how the Hold will arrive, once there is one to ask about.
+/// for facts a subselect already has.
 ///
 /// The sources, in the order they appear below:
 ///
 /// - A **Question Set with no Response and no archiving** — an ask left open.
 ///   Blocking and Deferred alike: what draws the human is that there is
 ///   something answerable, not whether the asking session is idling on it.
-/// - A **halt**, which is a Conversation nothing is driving any more and which
-///   goes again only when the human says so. Read off the table rather than off
-///   the Timeline, so the whole list costs one query.
-/// - An **open Pause**, which is a run stopped because the account it was
-///   spending is out of window. Read the same way and for the same reason. The
-///   human may not have to do anything about one — the window comes back by
-///   itself — but a run that has stopped is one the sidebar has to say has
-///   stopped.
+/// - A **stop**, which is a Conversation nothing is driving any more and which
+///   goes again only when the human says so — however it stopped, an account
+///   out of window included. A column on the row rather than a subselect, so
+///   the whole list costs one query.
 ///
 /// A grilling waiting on its closing proposal is the first of them and not a
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
@@ -1004,13 +1053,7 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                               SELECT 1 FROM archivings a WHERE a.set_id = s.set_id
                           )
                     )
-                    OR EXISTS (
-                        SELECT 1 FROM halts h WHERE h.conversation_id = c.id
-                    )
-                    OR EXISTS (
-                        SELECT 1 FROM pauses u
-                        WHERE u.conversation_id = c.id AND u.resumed_at IS NULL
-                    )
+                    OR c.stopped_at IS NOT NULL
                 ) AS waiting
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
@@ -1231,13 +1274,12 @@ pub async fn set_implementation_pairing(
 ///
 /// Refused past drafting, which is what fixes a Pairing when grilling starts:
 /// what runs the work is settled before the work starts, alongside the branch,
-/// the base commit and the Brief.
+/// the base commit and the Brief. The one thing that re-settles one afterwards
+/// is a steer, and it goes through [`settle`] rather than here — see
+/// [`steer_conversation`].
 ///
-/// The Profile is selected from `profiles` inside the statement rather than
-/// checked first, as a Conversation's Repo is: SQLite enforces a foreign key
-/// only when asked to, and a column naming a Profile that is not there is a
-/// session that fails to start with nobody watching. Whether the Profile lists
-/// the model is decided above the store, where the Profile is read as a row.
+/// Whether the Profile lists the model is decided above the store, where the
+/// Profile is read as a row.
 ///
 /// `model` is `None` for the one caller that carries a Pairing across rather
 /// than making one — see [`Pairing::model`] — and it takes the model row away,
@@ -1261,6 +1303,41 @@ async fn choose(
         .await
         .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
 
+    if !settle(&mut tx, id, role, profile_id, model).await? {
+        return Ok(Chosen::NoSuchProfile);
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
+
+    Ok(Chosen::Chosen)
+}
+
+/// Write one role's Pairing, both halves of it, inside somebody else's
+/// transaction.
+///
+/// `false` means there is no Profile with that id — the one thing this can be
+/// wrong about, and the caller's to name in its own words.
+///
+/// Apart from [`choose`] because a steer settles a Pairing too, and settles it
+/// past drafting: what runs the work is fixed when grilling starts, and steering
+/// is the human re-settling it from wherever the work has got to. What is common
+/// to the two is this — the Profile column and the model row, written together,
+/// because a Pairing is both halves and either alone is not something to launch
+/// a session with. See [`steer_conversation`].
+///
+/// The Profile is selected from `profiles` inside the statement rather than
+/// checked first, as a Conversation's Repo is: SQLite enforces a foreign key
+/// only when asked to, and a column naming a Profile that is not there is a
+/// session that fails to start with nobody watching.
+pub(crate) async fn settle(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    id: i64,
+    role: Role,
+    profile_id: i64,
+    model: Option<&str>,
+) -> Result<bool> {
     let changed = sqlx::query(&format!(
         "UPDATE conversations
          SET {} = (SELECT id FROM profiles WHERE id = ?)
@@ -1270,19 +1347,19 @@ async fn choose(
     .bind(profile_id)
     .bind(id)
     .bind(profile_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?
     .rows_affected();
 
     if changed == 0 {
-        return Ok(Chosen::NoSuchProfile);
+        return Ok(false);
     }
 
     sqlx::query("DELETE FROM pairing_models WHERE conversation_id = ? AND role = ?")
         .bind(id)
         .bind(role.stored())
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .with_context(|| format!("clearing the model Conversation {id} had paired"))?;
 
@@ -1291,16 +1368,12 @@ async fn choose(
             .bind(id)
             .bind(role.stored())
             .bind(model)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .with_context(|| format!("pairing {model:?} with Conversation {id}'s Profile"))?;
     }
 
-    tx.commit()
-        .await
-        .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
-
-    Ok(Chosen::Chosen)
+    Ok(true)
 }
 
 /// A Conversation's Timeline, oldest first — which is reading order, and which
@@ -1610,7 +1683,7 @@ pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
 ///
 /// The newest rather than the batch's own, because nothing on the record says
 /// which session asked one and nothing has to. One Worktree holds one agent and
-/// nothing advances past a halt, so the proposal a batch session made is the
+/// nothing advances past a stop, so the proposal a batch session made is the
 /// last one there is for as long as anything is asking about it.
 pub async fn last_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
     Ok(proposals(pool, conversation_id).await?.last().copied())
@@ -1855,8 +1928,9 @@ async fn landed_since(pool: &SqlitePool, conversation_id: i64, submitted_at: &st
 /// The Event id is what makes it *whose* Set. Nothing else on the record says
 /// which session asked one, and nothing has to: one Worktree holds one agent, so
 /// every Set that landed after a session's own Event is that session's. What
-/// asks is the driver of a Manual Task — a session idling on a Blocking Ask
-/// prints nothing for hours, and quiet alone would reap it mid-question.
+/// asks is a driver deciding whether a quiet session is finished — a session
+/// idling on a Blocking Ask prints nothing for hours, and quiet alone would reap
+/// it mid-question.
 ///
 /// Blocking Asks alone, for that same reason read the other way: a Deferred Ask
 /// idles nobody, so a session that has gone quiet behind one has finished rather
@@ -1921,7 +1995,7 @@ pub async fn asked_from(pool: &SqlitePool, set_id: i64) -> Result<Option<i64>> {
 /// Rewrite the Brief of the round a drafting Conversation is in.
 ///
 /// The Brief Event is edited in place rather than added to, and it is the
-/// *newest* of them: the frozen-Brief rule the design states — a reopened round
+/// *newest* of them: the frozen-Brief rule the design states — a steered round
 /// adds a new Brief rather than editing the old one — makes every Brief but the
 /// last one a record of a round that has been built, and the drafting guard is
 /// what keeps this to the round nobody has grilled yet. A Conversation on its
@@ -1954,9 +2028,11 @@ pub async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<Ed
 /// Whether the name is one git would take is decided above the store, where git
 /// itself is asked — this records what it is given.
 ///
-/// Refused once the branch has been made, which drafting alone no longer says:
-/// a reopened round is drafting again on a branch that has been worked — see
-/// [`branch_made`].
+/// Refused once the branch has been made as well as off the state — see
+/// [`branch_made`]. Drafting says as much on its own now that a second round
+/// opens where it is steered rather than back in Draft; the branch is asked
+/// about all the same, because what the work branched from is a fact from the
+/// moment there is a branch and no field of the human's rewrites one.
 pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<Edited> {
     if let Some(refusal) = not_drafting(pool, id).await? {
         return Ok(refusal);
@@ -1984,7 +2060,7 @@ pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<E
 /// is no value to hold — only whether the human has overridden the rule.
 ///
 /// Refused once the branch has been made, for [`rename_branch`]'s reason: the rule
-/// resolved to a commit when the work branched, and a reopened round carries on
+/// resolved to a commit when the work branched, and a second round carries on
 /// from what was built rather than branching again.
 pub async fn set_base_commit(pool: &SqlitePool, id: i64, commit: Option<&str>) -> Result<Edited> {
     if let Some(refusal) = not_drafting(pool, id).await? {
@@ -2032,14 +2108,13 @@ async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
 /// Whether this Conversation's branch has been made already.
 ///
 /// The worktree row is what says so: it is written when the branch and the
-/// checkout are made, and forgotten only by aborting. Drafting used to answer
-/// this on its own — a Conversation was drafting exactly until its branch
-/// existed — and a reopened round is the case that separated the two: it is
-/// drafting a second Brief on a branch that has already been worked.
+/// checkout are made, and forgotten only by closing.
 ///
-/// Which is why the branch name and the base commit are refused off this as
-/// well as off the state. The Brief is not: writing the new round's Brief is
-/// the whole of what reopening is for.
+/// Asked beside the state rather than instead of it, because the two answer
+/// different questions: drafting is where the Conversation has got to, and this
+/// is whether there is a branch behind it. What is refused off this is the
+/// branch name and the base commit — a record that has both settled is not one
+/// a field should rewrite, whatever its state column says.
 async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
     let row: Option<(i64,)> =
         sqlx::query_as("SELECT conversation_id FROM worktrees WHERE conversation_id = ?")
@@ -2104,9 +2179,9 @@ pub async fn start_grilling(
     .await
     .with_context(|| format!("moving Conversation {id} to grilling"))?;
 
-    // Written over whatever is there, because a second round has one already: a
-    // reopened Conversation is drafting on the checkout it was reopened with, and
-    // this writes the same path back — see [`reopen_conversation`].
+    // Written over whatever is there rather than inserted: a record that somehow
+    // holds a worktree already is corrected to the one just made, where an
+    // insert would fail on it.
     sqlx::query(
         "INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)
          ON CONFLICT(conversation_id) DO UPDATE SET path = excluded.path",
@@ -2130,7 +2205,7 @@ pub async fn start_grilling(
     Ok(Grilling::Started)
 }
 
-/// Record that a Conversation has been aborted: its worktree is gone, and it has
+/// Record that a Conversation has been closed: its worktree is gone, and it has
 /// stopped wherever it had got to.
 ///
 /// The worktree is forgotten rather than remembered as removed, because there is
@@ -2139,10 +2214,10 @@ pub async fn start_grilling(
 /// server before this is called, for the reason the branch is created before
 /// [`start_grilling`] is: the record follows the work rather than promising it.
 ///
-/// Aborting one that is already aborted records nothing and is not an error. The
-/// human asked for it to be stopped, and it is.
-pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> {
-    let mut tx = pool.begin().await.context("aborting a Conversation")?;
+/// Closing one that is closed already records nothing and is not an error. The
+/// human asked for it to be closed, and it is.
+pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
+    let mut tx = pool.begin().await.context("closing a Conversation")?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
@@ -2151,19 +2226,19 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
         .with_context(|| format!("reading the state of Conversation {id}"))?;
 
     let Some((state,)) = row else {
-        return Ok(Aborting::NoSuchConversation);
+        return Ok(Closing::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? == Lifecycle::Aborted {
-        return Ok(Aborting::AlreadyAborted);
+    if Lifecycle::read(&state)? == Lifecycle::Closed {
+        return Ok(Closing::AlreadyClosed);
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Aborted.stored())
+        .bind(Lifecycle::Closed.stored())
         .bind(id)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("aborting Conversation {id}"))?;
+        .with_context(|| format!("closing Conversation {id}"))?;
 
     sqlx::query("DELETE FROM worktrees WHERE conversation_id = ?")
         .bind(id)
@@ -2171,99 +2246,11 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
         .await
         .with_context(|| format!("forgetting the worktree of Conversation {id}"))?;
 
-    moved(&mut tx, id, Lifecycle::Aborted).await?;
+    moved(&mut tx, id, Lifecycle::Closed).await?;
 
-    tx.commit().await.context("aborting a Conversation")?;
+    tx.commit().await.context("closing a Conversation")?;
 
-    Ok(Aborting::Aborted)
-}
-
-/// Record that a finished Conversation has been reopened: it is drafting a
-/// second Brief, on the branch the first round was built on.
-///
-/// Done is the one state this is reachable from. Aborted is off the ladder and
-/// stays there, and every other state is somewhere the work has got to — there
-/// is nothing to reopen about work that is still going on.
-///
-/// **The frozen Brief is left exactly where it is and a new one is added.** That
-/// is the whole rule the design states: the first Brief is what the first round
-/// was built from, and a Timeline that had lost it would have lost why the work
-/// is the shape it is. What [`save_brief`] writes from here on is the new one.
-///
-/// The move is written first and the Brief after it, which is reading order: the
-/// move is where the round boundary falls, and the Brief under it belongs to the
-/// round that starts there.
-///
-/// The worktree is recorded rather than made, as [`start_grilling`] records one:
-/// the directory is the server's to keep or to check out again before this is
-/// called. Written over whatever was there, because a Conversation that had one
-/// keeps it and one whose directory had gone gets it back in the same place.
-///
-/// One transaction, for [`start_grilling`]'s reason: a Conversation left saying
-/// `done` with a second Brief on its Timeline would be one nothing could grill
-/// and nothing would tidy.
-pub async fn reopen_conversation(pool: &SqlitePool, id: i64, worktree: &Path) -> Result<Reopening> {
-    let worktree = super::repos::text(worktree)?;
-
-    let mut tx = pool.begin().await.context("reopening a Conversation")?;
-
-    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .with_context(|| format!("reading the state of Conversation {id}"))?;
-
-    let Some((state,)) = row else {
-        return Ok(Reopening::NoSuchConversation);
-    };
-
-    if Lifecycle::read(&state)? != Lifecycle::Done {
-        return Ok(Reopening::NotDone);
-    }
-
-    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Draft.stored())
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("moving Conversation {id} back to drafting"))?;
-
-    sqlx::query(
-        "INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)
-         ON CONFLICT(conversation_id) DO UPDATE SET path = excluded.path",
-    )
-    .bind(id)
-    .bind(worktree)
-    .execute(&mut *tx)
-    .await
-    .with_context(|| format!("recording the worktree of Conversation {id}"))?;
-
-    // The round before this one is over and its bookkeeping goes with it, so
-    // that the wrap-up of the round starting here waits on the same things from
-    // nothing — see [`super::wrap_up::forget_the_round`].
-    super::wrap_up::forget_the_round(&mut tx, id).await?;
-
-    moved(&mut tx, id, Lifecycle::Draft).await?;
-
-    // Empty, because the new round has not been written yet — exactly as the
-    // first Brief is empty from the moment there is a Conversation. It is a
-    // second Event and never an edit of the first: what the first round was
-    // built from stays on the record beside it.
-    let brief = Event::Brief(String::new());
-    sqlx::query(
-        "INSERT INTO timeline_events (conversation_id, at, kind, body)
-         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
-    )
-    .bind(id)
-    .bind(brief.kind())
-    .bind(brief.body())
-    .execute(&mut *tx)
-    .await
-    .with_context(|| format!("writing the new round's Brief of Conversation {id}"))?;
-
-    tx.commit().await.context("reopening a Conversation")?;
-
-    Ok(Reopening::Reopened)
+    Ok(Closing::Closed)
 }
 
 /// Record the direction the human picked on a wrap-up proposal: it is the
@@ -2333,7 +2320,7 @@ pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) ->
 /// decision of its own.
 ///
 /// Refused for anything but Grilling, which is the only place a tail can be
-/// running. That refusal is what keeps a run that was aborted, or one whose pick
+/// running. That refusal is what keeps a run that was closed, or one whose pick
 /// was superseded, from moving a Conversation that has gone somewhere else since.
 ///
 /// One transaction, as every move is: a Conversation that says Implementing
@@ -2379,7 +2366,7 @@ pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementi
 /// second wrap.
 ///
 /// Refused for anything but Wrapping, for the reason every other move is refused
-/// outside the state it leaves: a Conversation aborted out from under the session
+/// outside the state it leaves: a Conversation closed out from under the session
 /// that wrote the backlog is not one to start building.
 ///
 /// **The review's settle goes with it**, in the same transaction. *Settled once
@@ -2424,6 +2411,281 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
     Ok(Rebuilding::Started)
 }
 
+/// Steer a Conversation into `target`: the human's own Event, the state, and
+/// the move that says it got there.
+///
+/// The one move with no state it is refused from. Every other call here answers
+/// to a rung of the ladder — grilling starts from a draft, a rebuild leaves a
+/// wrap-up — because each of them is the pipeline moving the work along its own
+/// path. A steer is the human stepping outside that path, so the state it finds
+/// is not something to be right or wrong: a draft, a run in flight and a
+/// Conversation Verkstead has finished with are all somewhere to be steered
+/// from.
+///
+/// Two Events, in the order the moment happened in. The Steer goes first because
+/// it is the act — somebody decided this — and the Moved line follows it because
+/// it is what came of the act.
+///
+/// **The Steer carries what the human wrote**, where a target takes anything
+/// written: the instruction a steer into Implementing sends a session off with
+/// is the Event's own body, so reading the Event back is reading the job that
+/// was set. See [`Event::Steer`] for how the two are held in the one column.
+///
+/// **A third where the steer opens a round**: the Brief the human wrote for it,
+/// under the move rather than above it, because the move is where the round
+/// boundary falls and the Brief belongs to the round that starts there. Frozen
+/// where it lands, the round it opens being past drafting, and a second Brief
+/// Event beside the first rather than an edit of it: what the earlier round was
+/// built from stays on the record.
+///
+/// One transaction, as every move is: a Conversation that says Done always has
+/// the move on its Timeline to say when it got there, and one steered always has
+/// the human's own line above it.
+///
+/// **And the Pairing the human picked, where they picked one.** In the same
+/// transaction as the move, because it is the same act: steering re-settles what
+/// runs the work rather than picking for one session, and a Conversation that
+/// moved into a state something runs in without the Pairing that state's
+/// sessions run under would be a move only half made. Past drafting, which is
+/// the whole of why this does not go through [`set_implementation_pairing`] —
+/// see [`settle`].
+///
+/// `None` is the ordinary case twice over: a target nothing runs in has no
+/// Pairing to settle, and a human who left the picker on what the Conversation
+/// already had has changed none.
+///
+/// **And how the work is being built, where nothing said yet.** Written only
+/// over a Conversation with no direction on it: a state something runs in with
+/// nothing saying how the work is built is a record a pressed Resume refuses on
+/// by name, and a steer that set a session going in one would leave the
+/// Conversation unable to be started again. What is already picked is left
+/// exactly as it is.
+///
+/// **And what the steer had to make before it could move anything**, which is
+/// the Worktree it is to run in and — for a Draft, which has never had one — the
+/// commit its branch was cut from. Recorded here rather than made here: git and
+/// the filesystem are the server's to reach, and what this writes is the record
+/// of work that has already happened. See [`Steer`].
+///
+/// Nothing about the run is touched, and what has to stop running is stopped
+/// before this is called — see the server's `steering` module, which is the only
+/// caller.
+pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) -> Result<Steering> {
+    let Steer {
+        target,
+        pairing,
+        brief,
+        instruction,
+        direction,
+        worktree,
+        base_commit,
+    } = steer;
+
+    let mut tx = pool.begin().await.context("steering a Conversation")?;
+
+    let steer = Event::Steer(target, instruction.map(str::to_owned));
+
+    // Selected from `conversations` rather than trusting the id, as every other
+    // Event is written: a steer attributed to a Conversation that is not there
+    // would be on nobody's Timeline — and this is also what says whether there
+    // is anything here to move at all.
+    let landed = sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?
+         FROM conversations WHERE id = ?",
+    )
+    .bind(steer.kind())
+    .bind(steer.body().into_owned())
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("putting a steer on the Timeline of Conversation {id}"))?
+    .rows_affected();
+
+    if landed == 0 {
+        return Ok(Steering::NoSuchConversation);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(target.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("steering Conversation {id} into {}", target.stored()))?;
+
+    // What the branch was cut from, for the one source that had no branch: a
+    // Draft's column holds the base the human picked while drafting, which is a
+    // *branch* until the moment something resolves it. This is that moment, as
+    // [`start_grilling`] is for a Conversation that reached grilling the
+    // ordinary way — and after it there is a fact about what the work branched
+    // from rather than a rule about what it would have.
+    if let Some(base_commit) = base_commit {
+        sqlx::query("UPDATE conversations SET base_commit = ? WHERE id = ?")
+            .bind(base_commit)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("recording what Conversation {id} branched from"))?;
+    }
+
+    // And where the work goes on, written over whatever was there: a
+    // Conversation that kept its directory is written the same path back, and
+    // one that never had it — a Draft, or a closed Conversation whose Worktree
+    // was deleted — is written the one the steer has just checked out.
+    if let Some(worktree) = worktree {
+        sqlx::query(
+            "INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)
+             ON CONFLICT(conversation_id) DO UPDATE SET path = excluded.path",
+        )
+        .bind(id)
+        .bind(super::repos::text(worktree)?)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+    }
+
+    // And how the work is built from here, for a Conversation that has never
+    // said. `DO NOTHING` rather than an upsert, which is what makes the rule the
+    // record's rather than the caller's: a direction already picked is the
+    // human's own answer to how their work is built, and a steer that wrote over
+    // it would be deciding that for them. What this is for is the Conversation
+    // that reaches Implementing without ever having been grilled — a steered
+    // draft, or one whose work is a hand-written instruction and nothing else —
+    // because a state something runs in with nothing saying how is a record
+    // Resume refuses on by name.
+    if let Some(direction) = direction {
+        sqlx::query(
+            "INSERT INTO directions (conversation_id, direction) VALUES (?, ?)
+             ON CONFLICT (conversation_id) DO NOTHING",
+        )
+        .bind(id)
+        .bind(direction_stored(direction))
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording how Conversation {id} is being built"))?;
+    }
+
+    // A steer into Grilling opens a round, so the round before it is over and
+    // its wrap-up bookkeeping goes with it: a round that inherited the one before
+    // it would reach Wrapping with everything wrap-up waits on already settled,
+    // and would be over the moment it arrived. See
+    // [`super::wrap_up::forget_the_round`].
+    if target == Lifecycle::Grilling {
+        super::wrap_up::forget_the_round(&mut tx, id).await?;
+    }
+
+    moved(&mut tx, id, target).await?;
+
+    // The new round's Brief under the move, because the move is where the round
+    // boundary falls and the Brief under it belongs to the round that starts
+    // there. Frozen from the moment it lands — the round it opens is past
+    // drafting, which is the only state [`save_brief`] will edit one in — and a
+    // second Brief Event beside the first rather than an edit of it.
+    if let Some(brief) = brief {
+        let event = Event::Brief(brief.to_owned());
+
+        sqlx::query(
+            "INSERT INTO timeline_events (conversation_id, at, kind, body)
+             VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
+        )
+        .bind(id)
+        .bind(event.kind())
+        .bind(event.body().into_owned())
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("writing the steered round's Brief of Conversation {id}"))?;
+    }
+
+    if let Some(pairing) = pairing
+        && !settle(
+            &mut tx,
+            id,
+            pairing.role,
+            pairing.profile_id,
+            Some(pairing.model),
+        )
+        .await?
+    {
+        return Ok(Steering::NoSuchProfile);
+    }
+
+    tx.commit().await.context("steering a Conversation")?;
+
+    Ok(Steering::Steered)
+}
+
+/// Everything one steer writes: where it goes, and whatever the human's press
+/// settled or the server had to make on the way.
+///
+/// One struct rather than a parameter list, because all of it is one act. A
+/// steer moves the Conversation, and the Brief the human wrote, the Pairing they
+/// picked and the Worktree that had to exist before any of it could run are
+/// parts of that move rather than things done beside it — a Conversation left
+/// wrapping under a Pairing that was not written, or grilling a round whose
+/// Brief did not land, would be a move only half made.
+///
+/// Everything but the target is `None` in the ordinary case, and each `None`
+/// says something different: no Brief is a steer into a round that starts on the
+/// Brief already there, no instruction is a steer that carries on what the
+/// branch already holds, no Pairing is a picker left on what the Conversation
+/// already had, no direction is a Conversation that has already said how its
+/// work is built, and no Worktree or base commit is a target nothing runs in or
+/// a Conversation that had both already.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Steer<'a> {
+    /// Which state the human moved it into.
+    pub target: Lifecycle,
+
+    /// What the work runs under from here, where they picked something new.
+    pub pairing: Option<Settling<'a>>,
+
+    /// The new round's Brief, for a steer that opens one.
+    pub brief: Option<&'a str>,
+
+    /// The hand-written work a steer into Implementing carries, which lands as
+    /// the Steer Event's own body rather than beside it.
+    ///
+    /// Not a Brief, however alike the two look on the page. A Brief is what a
+    /// round is grilled *about*; this is one session's whole job, said by the
+    /// human at the moment they steered — so it belongs to the steer, and
+    /// reading the Event back is reading what they asked for.
+    pub instruction: Option<&'a str>,
+
+    /// How the work is being built from here, for a Conversation that has never
+    /// said.
+    ///
+    /// Written only where there is nothing to overwrite — see
+    /// [`steer_conversation`], which leaves a direction already picked exactly
+    /// as it found it. What says how the work is built is the human's own pick,
+    /// and a steer that rewrote one would be answering a question they had
+    /// already answered.
+    pub direction: Option<Direction>,
+
+    /// Where the work goes on, for a target something runs in.
+    pub worktree: Option<&'a Path>,
+
+    /// And what its branch was cut from, where the steer is what cut it.
+    pub base_commit: Option<&'a str>,
+}
+
+/// A Pairing a steer settles: which of the two roles, and both halves of the
+/// choice.
+///
+/// The model borrowed rather than owned, this being read straight off what the
+/// modal submitted and living exactly as long as the call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Settling<'a> {
+    /// Which role's Pairing is being re-settled: the one the state steered into
+    /// runs its sessions under.
+    pub role: Role,
+
+    pub profile_id: i64,
+
+    /// One of that Profile's models. Never absent: there is no default model
+    /// anywhere, so a Pairing is picked whole or not at all.
+    pub model: &'a str,
+}
+
 /// Put the handoff document the grilling wrote on a Conversation's Timeline.
 ///
 /// `false` means there is no such Conversation, by the same insert-from-select
@@ -2431,7 +2693,7 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// that is not there would be a document on nobody's Timeline.
 ///
 /// Written whole, every time it is called. A Conversation gets one of these per
-/// grilling round rather than one ever — a reopened round grills again, and its
+/// grilling round rather than one ever — a steered round grills again, and its
 /// handoff is a second Event beside the first rather than a rewrite of it.
 pub async fn record_handoff(pool: &SqlitePool, id: i64, markdown: &str) -> Result<bool> {
     let event = Event::Handoff(markdown.to_owned());
@@ -2442,7 +2704,7 @@ pub async fn record_handoff(pool: &SqlitePool, id: i64, markdown: &str) -> Resul
          FROM conversations WHERE id = ?",
     )
     .bind(event.kind())
-    .bind(event.body())
+    .bind(event.body().into_owned())
     .bind(id)
     .execute(pool)
     .await
@@ -2469,38 +2731,11 @@ pub async fn note(pool: &SqlitePool, id: i64, markdown: &str) -> Result<bool> {
          FROM conversations WHERE id = ?",
     )
     .bind(event.kind())
-    .bind(event.body())
+    .bind(event.body().into_owned())
     .bind(id)
     .execute(pool)
     .await
     .with_context(|| format!("putting a notice on the Timeline of Conversation {id}"))?
-    .rows_affected();
-
-    Ok(written > 0)
-}
-
-/// Put a Manual Task's instruction on a Conversation's Timeline.
-///
-/// `false` means there is no such Conversation, by the same insert-from-select
-/// every other Event is written with.
-///
-/// The record of what was asked for by hand, written as it is asked and never
-/// rewritten: a Manual Task is a moment on the Timeline like the rest of them,
-/// and what its session goes on to do lands beside it as its own Events.
-pub async fn record_manual_task(pool: &SqlitePool, id: i64, instruction: &str) -> Result<bool> {
-    let event = Event::ManualTask(instruction.to_owned());
-
-    let written = sqlx::query(
-        "INSERT INTO timeline_events (conversation_id, at, kind, body)
-         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?
-         FROM conversations WHERE id = ?",
-    )
-    .bind(event.kind())
-    .bind(event.body())
-    .bind(id)
-    .execute(pool)
-    .await
-    .with_context(|| format!("putting a manual task on the Timeline of Conversation {id}"))?
     .rows_affected();
 
     Ok(written > 0)
@@ -2630,7 +2865,7 @@ pub(crate) async fn moved(
     )
     .bind(id)
     .bind(event.kind())
-    .bind(event.body())
+    .bind(event.body().into_owned())
     .execute(&mut *tx)
     .await
     .with_context(|| {
@@ -2646,7 +2881,7 @@ pub(crate) async fn moved(
 /// Move a Conversation on to another state.
 ///
 /// The blunt instrument, for the states no stage has arrived at yet. Starting to
-/// grill and aborting have their own calls, because each of them is a move plus
+/// grill and closing have their own calls, because each of them is a move plus
 /// everything else that has to be true at the same moment.
 pub async fn set_state(pool: &SqlitePool, id: i64, state: Lifecycle) -> Result<()> {
     let changed = sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")

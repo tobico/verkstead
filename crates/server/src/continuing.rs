@@ -54,11 +54,6 @@ use crate::worktrees;
 /// read off the branch, and a Conversation whose branch has written to no roadmap
 /// quietly is not one.
 pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
-    // Starting the next stage is the largest thing this pipeline does unasked,
-    // so it asks the gate every driver asks: a Conversation whose keyboard the
-    // human has is one Verkstead advances nothing behind — see [`crate::hold`].
-    state.sessions.until_handed_back(conversation_id).await;
-
     let Some(conversation) = load(&state, conversation_id).await else {
         return;
     };
@@ -67,7 +62,7 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
         conversation.worktree.clone(),
         conversation.base_commit.clone(),
     ) else {
-        // No Worktree is an aborted Conversation, and no base commit is one that
+        // No Worktree is a closed Conversation, and no base commit is one that
         // never started grilling. Neither can have written to a roadmap.
         return;
     };
@@ -405,8 +400,8 @@ fn begun(stage: &Stage, branch: &str, stacked_on: Option<&str>, from: &str) -> S
 ///
 /// The Pairings are the predecessor's, both of them. The implementation one is
 /// what the work runs under; the grilling one is carried across because a stage
-/// that is reopened later is grilled by whatever the roadmap's work has been
-/// grilled by all along.
+/// steered into a second round later is grilled by whatever the roadmap's work
+/// has been grilled by all along.
 ///
 /// Carried whole, model and all — and a predecessor whose Profile was chosen
 /// before pairings existed carries no model, which leaves this stage running on
@@ -445,15 +440,15 @@ async fn settle(
 /// Stop the half-made Conversation, where a stage got as far as a record and no
 /// further.
 ///
-/// Aborted rather than left drafting, because drafting is a Conversation waiting
+/// Closed rather than left drafting, because drafting is a Conversation waiting
 /// for a human to write a Brief and press a button — and this one is a stage
-/// nobody is going to start by hand. Aborting is the work stopping wherever it
+/// nobody is going to start by hand. Closing is the work stopping wherever it
 /// was, which is exactly what happened.
 ///
 /// Nothing was checked out by the time this can run, so there is nothing to
 /// clean up but the row.
 async fn gave_up(state: &AppState, id: i64) {
-    if let Err(error) = store::abort_conversation(&state.pool, id).await {
+    if let Err(error) = store::close_conversation(&state.pool, id).await {
         tracing::error!(error = ?error, conversation_id = id, "stopping a half-made stage failed");
     }
 }

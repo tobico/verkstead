@@ -18,13 +18,13 @@ use ts_rs::TS;
 
 use crate::{
     AbandonedRepo, Adopted, Archived, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
-    BriefEdit, BriefSaved, Capture, CommitPane, ConversationAborted, ConversationEntry,
-    ConversationReopened, ConversationStopped, ConversationView, GrillingStarted, HandedBack,
-    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, NewOrder, PauseResumed,
-    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
-    PullRequestDetails, PushKey, Registered, Registration, RepoEntry, Resumed, Screen, SetReading,
-    SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
-    TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    BriefEdit, BriefSaved, Capture, CommitPane, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, NewAdoption,
+    NewConversation, NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry,
+    Resumed, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, Shown, Started,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -83,13 +83,11 @@ fn the_viewers_types_are_written_from_these() {
     BaseBranchChoice::export_all(&config).unwrap();
     BaseRecorded::export_all(&config).unwrap();
 
-    // And the three actions that make, unmake and make again what a
-    // Conversation works in. None takes a request shape — which Conversation is
-    // in the path, and there is nothing else to say about any of them — so it is
-    // the outcomes alone.
+    // And the two actions that make and unmake what a Conversation works in.
+    // Neither takes a request shape — which Conversation is in the path, and
+    // there is nothing else to say about either — so it is the outcomes alone.
     GrillingStarted::export_all(&config).unwrap();
-    ConversationAborted::export_all(&config).unwrap();
-    ConversationReopened::export_all(&config).unwrap();
+    ConversationClosed::export_all(&config).unwrap();
 
     // And the press that starts an adopted stage, which is the grilling start's
     // sibling: one Conversation, one branch, and every way of being refused
@@ -125,12 +123,6 @@ fn the_viewers_types_are_written_from_these() {
     Shown::export_all(&config).unwrap();
     Watching::export_all(&config).unwrap();
 
-    // And the one press that ends what typing into one starts: the hand-back,
-    // which is the only way a Hold ever ends. It takes no request shape — which
-    // Conversation is in the path, and there is nothing else to say about it —
-    // so it is the outcome alone.
-    HandedBack::export_all(&config).unwrap();
-
     // And what a session committed. The snippet rides on the Timeline too; the
     // diff is its own payload, rendered by the same renderer an attached Diff
     // goes through — which is why this writes no new Diff types.
@@ -141,28 +133,25 @@ fn the_viewers_types_are_written_from_these() {
     // own payload, because reading that is asking GitHub over the network.
     PullRequestDetails::export_all(&config).unwrap();
 
-    // What the human does about a run waiting an account's window out. The Pause
-    // rides on the Timeline whole — it is the one Event with nothing behind a
-    // second fetch — and there is nothing to send with the press, so this is the
-    // outcome alone.
-    PauseResumed::export_all(&config).unwrap();
-
-    // What the human sets going by hand at the end of a Timeline, and every way
-    // of being refused it. The instruction's own Event rides on the
-    // `ConversationView` above, rendered like the handoff.
-    ManualTaskSubmission::export_all(&config).unwrap();
-    ManualTaskStarted::export_all(&config).unwrap();
-
-    // And the press beside it, which takes no request shape at all: what to
-    // start again is recomputed from the lifecycle and the branch, so all there
-    // is to send is which Conversation. What comes back is the outcome — a
-    // start, or the named reason there was nothing to start.
+    // The press that gets a stopped Conversation going again, which takes no
+    // request shape at all: what to start again is recomputed from the
+    // lifecycle and the branch, so all there is to send is which Conversation.
+    // What comes back is the outcome — a start, or the named reason there was
+    // nothing to start.
     Resumed::export_all(&config).unwrap();
 
     // And the two presses that stop it, which take no request shape either and
     // answer with one outcome between them: the run is stopping, or the named
     // reason there was nothing to stop.
     ConversationStopped::export_all(&config).unwrap();
+
+    // And the two presses that steer it. The first takes no request shape — the
+    // click stops the drive and reports what it found running — and the second
+    // carries what the modal settled. The Steer's own Event rides on the
+    // `ConversationView` above, beside the move it wrote.
+    SteerOpened::export_all(&config).unwrap();
+    SteerSubmission::export_all(&config).unwrap();
+    ConversationSteered::export_all(&config).unwrap();
 
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the two choices a Conversation makes of them.

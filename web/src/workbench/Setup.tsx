@@ -84,13 +84,13 @@ export function Setup(props: {
 }): JSX.Element {
   /// Whether the branch this work is done on has been made already, which is
   /// what a worktree says: one is made with the branch and forgotten only by
-  /// aborting.
+  /// closing.
   ///
-  /// A drafting conversation that has one is a reopened one — a second round on
-  /// a branch that has been worked. The branch and the base commit are settled
-  /// for good by then and the server refuses both, so the fields go: a field
-  /// whose save comes back refused is worse than no field. The pairings stay,
-  /// because a second round may well be run under a different account.
+  /// A drafting conversation with one has had its branch cut already. The branch
+  /// and the base commit are settled for good by then and the server refuses
+  /// both, so the fields go: a field whose save comes back refused is worse than
+  /// no field. The pairings stay, because they are re-settled every time work
+  /// starts under them.
   const branched = () => props.conversation.worktree !== null;
 
   return (

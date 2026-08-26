@@ -256,7 +256,7 @@ pub(crate) async fn choose_grilling(
     choice: &ProfileChoice,
 ) -> Result<ProfileChosen> {
     if let Some(refusal) = unlisted(pool, choice).await? {
-        return Ok(refusal);
+        return Ok(refused(refusal));
     }
 
     Ok(chosen(
@@ -271,12 +271,29 @@ pub(crate) async fn choose_implementation(
     choice: &ProfileChoice,
 ) -> Result<ProfileChosen> {
     if let Some(refusal) = unlisted(pool, choice).await? {
-        return Ok(refusal);
+        return Ok(refused(refusal));
     }
 
     Ok(chosen(
         store::set_implementation_pairing(pool, id, choice.profile_id, Some(&choice.model)).await?,
     ))
+}
+
+/// What is wrong with a picked Pairing, where anything is.
+///
+/// Its own two words rather than one of the outcome types around it, because two
+/// presses ask this and each answers in a vocabulary of its own: the drafting
+/// pickers answer as [`ProfileChosen`], and a steer answers as
+/// [`verkstead_render::ConversationSteered`]. The question is the same either
+/// way — is this still a Profile, and does it still list that model?
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unlisted {
+    /// There is no Profile with that id: it was removed between the list the
+    /// page read and the pick it made from it.
+    NoSuchProfile,
+
+    /// That Profile does not list that model, for the same reason.
+    NoSuchModel,
 }
 
 /// Why this is not a Pairing to record, or `None` where the Profile lists the
@@ -286,12 +303,23 @@ pub(crate) async fn choose_implementation(
 /// read as a row: a Profile written before the model list existed carries its
 /// one model in the old column, and a statement that checked `profile_models`
 /// alone would refuse the only model that Profile has.
-async fn unlisted(pool: &SqlitePool, choice: &ProfileChoice) -> Result<Option<ProfileChosen>> {
+pub(crate) async fn unlisted(
+    pool: &SqlitePool,
+    choice: &ProfileChoice,
+) -> Result<Option<Unlisted>> {
     let Some(profile) = store::load_profile(pool, choice.profile_id).await? else {
-        return Ok(Some(ProfileChosen::NoSuchProfile));
+        return Ok(Some(Unlisted::NoSuchProfile));
     };
 
-    Ok((!profile.models.contains(&choice.model)).then_some(ProfileChosen::NoSuchModel))
+    Ok((!profile.models.contains(&choice.model)).then_some(Unlisted::NoSuchModel))
+}
+
+/// What is wrong with a pick, as the drafting pickers say it.
+fn refused(unlisted: Unlisted) -> ProfileChosen {
+    match unlisted {
+        Unlisted::NoSuchProfile => ProfileChosen::NoSuchProfile,
+        Unlisted::NoSuchModel => ProfileChosen::NoSuchModel,
+    }
 }
 
 /// The store's outcome as the viewer receives it. One word either side, and this

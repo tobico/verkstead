@@ -5,29 +5,29 @@
 //! Wrapping; nothing is registered as driving it — see [`crate::drivers`]; and
 //! nothing has stopped it on purpose. Each of the three is doing work. The state is
 //! what says something ought to be happening, so Draft and Direction waiting on
-//! the human, Done finished and Aborted stopped are none of them a Conversation
+//! the human, Done finished and Closed stopped are none of them a Conversation
 //! standing still. The register is what says nothing is, rather than a stopwatch
 //! — a wrapping Conversation idles for days under live watchers and is perfectly
-//! healthy, and so are the gaps between an unattended run's steps. And a halt is
+//! healthy, and so are the gaps between an unattended run's steps. And a stop is
 //! already the record of a Conversation that stopped, so one that has one is one
-//! that has been written down — as is one waiting an account's window out, which
-//! is a run stopped on purpose and said on its own Timeline. Both are the one
-//! question [`crate::halts::stopped`] answers.
+//! that has been written down — an account out of window included, that being a
+//! run stopped on purpose and said on its own Timeline. It is all the one
+//! question [`crate::stopping::stopped`] answers.
 //!
-//! What it records is a **halt** — see [`crate::halts`] — of the kind nobody
+//! What it records is a **stop** — see [`crate::stopping`] — of the kind nobody
 //! chose: a stall is a driver that went away rather than a decision anybody
 //! took, so a restarting server is free to start the work again unasked. The
 //! Notice beside it reads as a report of a Conversation standing still rather
 //! than of a session that failed, because nothing failed and nothing exited:
 //! there was no session there at all.
 //!
-//! **When it looks.** At startup, every [`crate::Pace::stalls`] while the server
-//! runs, and the moment a Manual Task's session ends. Startup is the one that
-//! matters least, and deliberately: no driver survives the process, so a server
-//! coming back holds no registrations at all — and what puts that right is the
-//! restart's own resume, which runs first and takes up everything it can. See
-//! [`crate::resume::at_startup`] and [`sweeping`], which waits for it. What is
-//! left over when the sweep looks is what genuinely has nobody.
+//! **When it looks.** At startup, and every [`crate::Pace::stalls`] while the
+//! server runs. Startup is the one that matters least, and deliberately: no
+//! driver survives the process, so a server coming back holds no registrations
+//! at all — and what puts that right is the restart's own resume, which runs
+//! first and takes up everything it can. See [`crate::resume::at_startup`] and
+//! [`sweeping`], which waits for it. What is left over when the sweep looks is
+//! what genuinely has nobody.
 //!
 //! And never, on a server that runs no sessions: there, nobody is what every
 //! Conversation mid-run has and always will have, so the sweep has nothing to
@@ -63,7 +63,7 @@ pub(crate) fn sweeping(state: &AppState, resumed: Vec<JoinHandle<()>>) {
     // [`crate::sessions::Sessions::runs_sessions`]. A stall is a Conversation
     // *nothing is driving*, and a server with no agents drives nothing by
     // construction: every Conversation mid-run is one, forever. So the sweep
-    // would be a minute-by-minute halt on each of them saying so.
+    // would be a minute-by-minute stop on each of them saying so.
     //
     // Only the tests' routers are ever built that way, and what it costs them
     // is what it would cost a server: `router()` over a store held still is
@@ -90,17 +90,12 @@ pub(crate) fn sweeping(state: &AppState, resumed: Vec<JoinHandle<()>>) {
     });
 }
 
-/// One look over every Conversation: halt each one that has stalled.
-///
-/// Called on its own the moment a Manual Task's session ends, which is the one
-/// time a stall is worth noticing without waiting for the next sweep: the human
-/// set that session going by hand because nothing was moving, and what they want
-/// to know when it stops is whether anything is moving now.
+/// One look over every Conversation: stop each one that has stalled.
 ///
 /// Nothing is refused for and nothing is returned. This runs unattended with
 /// nobody watching, and what it has to say it says on the Timeline or in the
 /// log.
-pub(crate) async fn sweep(state: &AppState) {
+async fn sweep(state: &AppState) {
     let conversations = match store::conversations(&state.pool).await {
         Ok(conversations) => conversations,
         Err(error) => {
@@ -123,30 +118,21 @@ pub(crate) async fn sweep(state: &AppState) {
         }
 
         // Asked before the evidence is gathered rather than left to
-        // [`store::halt`] to refuse, which would answer the same way: gathering
+        // [`store::stop`] to refuse, which would answer the same way: gathering
         // it is a `git status` on a Worktree and a Timeline read, and a
-        // Conversation already halted is not one to spend either on. It is also
+        // Conversation already stopped is not one to spend either on. It is also
         // not stalled — being written down is the half of a stall that is
         // missing.
-        match store::halted(&state.pool, conversation.id).await {
+        //
+        // One question, an account out of window included: a run waiting a window
+        // out is stopped on purpose, said on its own Timeline and already pushed,
+        // and stopping it again would be telling the human twice about one wait
+        // and calling a deliberate stop a failure.
+        match store::stopped(&state.pool, conversation.id).await {
             Ok(Some(_)) => continue,
             Ok(None) => {}
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id = conversation.id, "asking whether a Conversation had already stopped failed");
-                continue;
-            }
-        }
-
-        // A run waiting an account's window out, which is stopped on purpose,
-        // said on its own Timeline and already push-notified — see
-        // [`crate::limits`]. Halting it would be telling the human twice about
-        // one wait and calling a deliberate one a failure, and the wait ends
-        // itself when the window comes back.
-        match store::open_pause(&state.pool, conversation.id).await {
-            Ok(Some(_)) => continue,
-            Ok(None) => {}
-            Err(error) => {
-                tracing::error!(error = ?error, conversation_id = conversation.id, "asking whether a Conversation was waiting on a usage limit failed");
                 continue;
             }
         }
@@ -166,16 +152,16 @@ pub(crate) async fn sweep(state: &AppState) {
     }
 }
 
-/// Halt a stalled Conversation, and say so on its own Timeline.
+/// Stop a stalled Conversation, and say so on its own Timeline.
 ///
 /// The evidence is the ordinary evidence with nothing invented to fill it: the
 /// state it is in, that nothing was driving it, what git makes of the Worktree,
 /// and the tail of whatever the last session to run said — which is usually the
 /// reason there is no session running now.
 ///
-/// [`store::Halt::Circumstance`], because that is what a stall is: nobody
+/// [`store::Decision::Circumstance`], because that is what a stall is: nobody
 /// decided to stop, a driver went away. What that buys is a restart free to
-/// start the work again without asking — a deliberate halt is the one that
+/// start the work again without asking — a deliberate stop is the one that
 /// waits for a press.
 async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
     tracing::warn!(
@@ -184,21 +170,22 @@ async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
         "nothing is driving a Conversation that says it is being worked on",
     );
 
-    let halted = crate::halts::halt(
-        state,
+    let stopped = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
         conversation_id,
-        crate::halts::Decided::Nobody,
+        crate::stopping::Decided::Nobody,
         driving(lifecycle),
         "nothing is driving it: no session is running, and nothing is left to start one",
         said_last(state, conversation_id).await,
     )
     .await;
 
-    if let Err(error) = halted {
+    if let Err(error) = stopped {
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a Conversation has stalled and the halt saying so could not be recorded"
+            "a Conversation has stalled and the stop saying so could not be recorded"
         );
     }
 }
@@ -207,7 +194,7 @@ async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
 /// — the sentence the Timeline draws above how it ended.
 ///
 /// Read off the state, because for a stall the state is the whole of what says
-/// it. Every other halt names a step a session was launched for; this one names
+/// it. Every other stop names a step a session was launched for; this one names
 /// the thing nobody was doing.
 ///
 /// The three states nothing drives never reach here — [`sweep`] leaves them
@@ -223,7 +210,7 @@ pub(crate) fn driving(lifecycle: Lifecycle) -> &'static str {
         Lifecycle::Grilling => "grilling the work",
         Lifecycle::Implementing => "implementing the work",
         Lifecycle::Wrapping => "wrapping the work up",
-        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Aborted => "driving the Conversation",
+        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => "driving the Conversation",
     }
 }
 
@@ -239,7 +226,7 @@ pub(crate) fn driving(lifecycle: Lifecycle) -> &'static str {
 /// A Timeline read per stalled Conversation, which is a read per Conversation
 /// nothing is driving rather than per Conversation — the sweep asks this only
 /// once it has one to raise about. [`crate::resume::refused`] asks it on the same
-/// terms, having likewise found one to halt about.
+/// terms, having likewise found one to stop about.
 pub(crate) async fn said_last(state: &AppState, conversation_id: i64) -> Option<i64> {
     let timeline = match store::timeline(&state.pool, conversation_id).await {
         Ok(timeline) => timeline,

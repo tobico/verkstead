@@ -1,20 +1,27 @@
 ---
-name: manual-task
-description: Do the one thing the human typed at the end of a Conversation's timeline, and commit it. Use when a session has been dispatched with a manual task's instruction as the whole of its prompt.
+name: instruction
+description: Do the one thing the human steered this Conversation into Implementing to have done, commit it, and stop. Use when a session has been dispatched with a steer's instruction under the documents the work started from.
 ---
 
-Do what the instruction at the end of this prompt says, and commit what you
-change. That instruction is the whole of the job: this session has none of the
-context of the ones before it, and the next one will have none of yours.
+Do what the instruction at the end of this prompt says, commit what you change,
+and stop. That instruction is the whole of this session's job: this session has
+none of the context of the ones before it, and the next one will have none of
+yours.
 
 You start in a worktree of the repository, on a branch of its own. The branch is
 already made and this is already the work: there is nothing to create and
 nothing to switch to.
 
-This is a **manual task** — the human asked for it by hand, outside whatever
-else the Conversation is doing. It is not a step of a backlog, not a piece of
-review feedback, and not a stage of anything. Nothing was written down about it
-anywhere: the instruction you were given is all there is, and it is enough.
+The Brief above the instruction — and the handoff document under it, where there
+is one — say what the work as a whole is. They are context rather than the job:
+what you were started for is the instruction, and they are there so that you do
+it the way the rest of this branch was done.
+
+**The pipeline carries on after you.** The human steered this Conversation into
+Implementing and wrote the instruction as the way in; what follows you is
+Verkstead's rather than yours. So there is nothing here to hand back and nothing
+to line up for whoever is next: commit what you changed, say what you did, and
+stop.
 
 ## 1. Read what was asked
 
@@ -23,20 +30,16 @@ its `CLAUDE.md`, its `docs/`, the tests around what you are about to change —
 and work the way it does. Match what is around the change, and prefer the
 smallest thing that does the job.
 
-**Keep to what was asked.** Anything else you notice on the way is another
-manual task and not this one: the human asked for one thing, and work that also
-refactored two modules is work they did not ask for and cannot review against
-what they typed.
+**Keep to what was asked.** Anything else you notice on the way is work of its
+own and not this: the human asked for one thing, and work that also refactored
+two modules is work they did not ask for and cannot review against what they
+typed.
 
 ## 2. Do it
 
 Work test-first where tests are appropriate: a failing test, the change that
 passes it, then the tidying. Run the repository's tests and fix what you break —
 a green branch is part of the work rather than a bonus on top of it.
-
-Some instructions are not code at all — rebase this, push that, read something
-and say what you found. Do those as they are asked, and do not turn them into
-code changes.
 
 ## 3. Commit what you changed
 
@@ -50,6 +53,11 @@ noticed.
 
 Pick a conventional-commit type — `feat`, `fix`, `refactor`, `test`, `docs`,
 `chore`.
+
+**Committing is how this session reports.** Nothing reads what you print to
+decide whether the work landed: the commit is the one report an agent cannot
+half make, and a session that changed files and left them uncommitted is one
+that did nothing as far as anything after it can tell.
 
 ### What the message body says
 
@@ -88,23 +96,19 @@ Trailers go at the end as usual; the workbench takes them off what it shows.
     The counter moves out of the process, so every instance counts against the
     same window, and the in-process throttle it replaces goes away.
 
-If the instruction asked for nothing that changes files, commit nothing. That is
-a manual task done, not a manual task failed — say what you found as the last
-thing you print, because that is what the human sees on the timeline.
+## 4. Stop
 
-Then **stop**. Do not go looking for more to do, and do not open a pull request:
-what happens to this branch next is the human's to decide.
+Then **stop**. Do not go looking for more to do, do not start the next task of
+any backlog, and do not push or open a pull request: what happens to this branch
+next is the pipeline's, and it reads the branch for itself the moment you are
+quiet. Work of yours that ran on into the step after this one would put two
+steps in one commit and one step's worth of context in the wrong session.
 
-## Asking, if you need to
+## When you need the human
 
-You **may** put a Question Set to the human, and nothing here says you have to.
-A manual task is usually one instruction that already says what it means, and a
-question asked about work you already understand is a session idling for hours
-over nothing.
-
-Ask when the instruction genuinely cannot be carried out as it stands: it means
-two different things and the difference is expensive, or it asks for something
-the repository says not to do.
+Only when the work genuinely cannot go on without them: something the
+instruction, the documents above it and the codebase together cannot answer, or
+a decision that would be expensive to unpick.
 
 - **Read `verkstead guide` before the first ask**, and put the Question Set
   through `verkstead ask`. It ships inside the binary, so nothing else has to be

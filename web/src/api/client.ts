@@ -15,15 +15,12 @@ import type {
   BriefSaved,
   Capture,
   CommitPane,
-  ConversationAborted,
+  ConversationClosed,
   ConversationEntry,
-  ConversationReopened,
+  ConversationSteered,
   ConversationStopped,
   ConversationView,
   GrillingStarted,
-  HandedBack,
-  ManualTaskStarted,
-  PauseResumed,
   ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
@@ -42,6 +39,8 @@ import type {
   SettingsSaved,
   SettingsView,
   Started,
+  SteerOpened,
+  SteerSubmission,
   Submitted,
   Subscribed,
   Subscription,
@@ -328,68 +327,8 @@ export function adoptRoadmap(id: number): Promise<Adopted> {
 
 /// Stop a Conversation wherever it has got to: its worktree removed, its branch
 /// left where it is.
-export function abortConversation(id: number): Promise<ConversationAborted> {
-  return post<ConversationAborted>(`/api/ui/conversations/${id}/abort`, {});
-}
-
-/// Open a second round on a Conversation Verkstead has finished with: a new
-/// brief to write, on the branch the first round was built on.
-///
-/// Nothing is sent, for the reason nothing is sent to start a grilling. The
-/// worktree is ordinarily still there and is kept; one whose directory has gone
-/// is checked out again on the same branch, which is the server's to do.
-export function reopenConversation(id: number): Promise<ConversationReopened> {
-  return post<ConversationReopened>(`/api/ui/conversations/${id}/reopen`, {});
-}
-
-/// Give a session's keyboard back, which is the one thing that ends a Hold.
-///
-/// Not the socket closing and not the tab going: Verkstead resuming over a
-/// half-finished intervention is worse than a stalled run, so ending one is a
-/// press. What the human left is then judged by the ordinary end-of-session
-/// rules, which is the server's to do and not this side's.
-export function handBack(id: number): Promise<HandedBack> {
-  return post<HandedBack>(`/api/ui/conversations/${id}/hand-back`, {});
-}
-
-/// Go on without waiting for the account's window to come back.
-///
-/// The human's half of the two ways a pause ends; the other is the reset time
-/// passing, which the server does on its own. Both close the same wait and start
-/// the work again from where it stopped, and neither touches the worktree — a
-/// pause never changed anything in it.
-///
-/// No body: there is one thing to do about a pause, and a choice of one is a
-/// press rather than a form.
-export function resumePause(
-  id: number,
-  event: number,
-): Promise<PauseResumed> {
-  return post<PauseResumed>(
-    `/api/ui/conversations/${id}/pause/${event}/resume`,
-    {},
-  );
-}
-
-/// Set a manual task going: this one instruction, under the pairing picked
-/// beside it, in a session of its own.
-///
-/// Outside the pipeline, so nothing about the conversation moves. What it leaves
-/// behind is the instruction on the timeline, whatever the session printed, and
-/// whatever that committed.
-///
-/// The pairing is sent rather than left to the server to read off the
-/// conversation, because the pick is one-off: it is what *this* task runs under
-/// and never becomes the conversation's own implementation pairing.
-export function startManualTask(
-  id: number,
-  instruction: string,
-  pairing: ProfileChoice,
-): Promise<ManualTaskStarted> {
-  return post<ManualTaskStarted>(`/api/ui/conversations/${id}/manual-task`, {
-    instruction,
-    ...pairing,
-  });
+export function closeConversation(id: number): Promise<ConversationClosed> {
+  return post<ConversationClosed>(`/api/ui/conversations/${id}/close`, {});
 }
 
 /// Start driving a conversation again, from wherever the work now stands.
@@ -407,14 +346,43 @@ export function resume(id: number): Promise<Resumed> {
 /// Stop driving a conversation after the task it is on.
 ///
 /// Nothing new is started and nothing running is cut short: the session going
-/// now runs to its own end, and the conversation halts before the next launch.
+/// now runs to its own end, and the conversation stops before the next launch.
 /// Nothing is sent, for the reason nothing goes with a resume — which
 /// conversation it is is the whole of it.
 export function stopConversation(id: number): Promise<ConversationStopped> {
   return post<ConversationStopped>(`/api/ui/conversations/${id}/stop`, {});
 }
 
-/// And stop it now: whatever is running is ended where it stands, and the halt
+/// Click steer: stop the drive, and find out what was running when it stopped.
+///
+/// The click rather than the move, and a press of its own for that reason.
+/// Nothing new is launched while the human composes, so the world the modal is
+/// drawn against is the world the submit arrives in — and cancelling leaves the
+/// conversation stopped with resume on offer, which is what the click bought.
+///
+/// Nothing is sent, as nothing is sent with either stop: which conversation it
+/// is is the whole of it.
+export function steerConversation(id: number): Promise<SteerOpened> {
+  return post<SteerOpened>(`/api/ui/conversations/${id}/steer`, {});
+}
+
+/// And submit the modal it opened: where the work goes, and whether to end what
+/// is running where it stands.
+///
+/// Into done there is nothing to start, so this is the move alone — the
+/// conversation is finished with, the steer is on the timeline beside the move
+/// it wrote, and the stop the click left is taken away.
+export function steer(
+  id: number,
+  submission: SteerSubmission,
+): Promise<ConversationSteered> {
+  return post<ConversationSteered>(
+    `/api/ui/conversations/${id}/steer/submit`,
+    submission,
+  );
+}
+
+/// And stop it now: whatever is running is ended where it stands, and the stop
 /// is written at once.
 ///
 /// The step is left however far the session had got, uncommitted work and all.

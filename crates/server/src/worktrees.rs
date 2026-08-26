@@ -1,5 +1,5 @@
 //! Where a Conversation's work is done: the branch it is on and the worktree it
-//! is checked out in, made when grilling starts and removed when it is aborted.
+//! is checked out in, made when grilling starts and removed when it is closed.
 //!
 //! Worktrees live under Verkstead's own data directory rather than inside a
 //! Watched Path. The Watched Paths are the boundary on what the *human* may
@@ -11,7 +11,7 @@
 //!
 //! The branch is made in the Repo's own git directory, not in the worktree —
 //! `git worktree add -b` does both at once, which is the point of asking git for
-//! this rather than checking a tree out by hand. Aborting removes the worktree
+//! this rather than checking a tree out by hand. Closing removes the worktree
 //! and leaves the branch: a branch is a name and a commit, and it may hold work
 //! worth reading; a worktree is a directory the human never asked to keep.
 
@@ -309,40 +309,6 @@ pub(crate) fn add(repo: &Path, path: &Path, branch: &str, commit: &str) -> bool 
     .is_some()
 }
 
-/// Check `branch` out again at `path`, on the branch as it already stands.
-///
-/// What a reopened round needs where the directory has gone from under it: the
-/// branch has been worked, so there is nothing to create and nothing to branch
-/// from — [`add`]'s `-b` is exactly the difference between the two, and a second
-/// round that made a branch would start the work over.
-///
-/// Pruned first, because the registration outlives the directory: git keeps a
-/// worktree's administrative files under the repository until it is told the
-/// checkout has gone, and until then it refuses to check the branch out again —
-/// *already used by worktree at …*, naming a directory that is not there.
-pub(crate) fn recheckout(repo: &Path, path: &Path, branch: &str) -> bool {
-    if let Some(parent) = path.parent()
-        && let Err(error) = std::fs::create_dir_all(parent)
-    {
-        tracing::error!(error = ?error, path = %parent.display(), "making room for a worktree failed");
-        return false;
-    }
-
-    git(repo, &["worktree", "prune"]);
-
-    git(
-        repo,
-        &[
-            "worktree",
-            "add",
-            "--end-of-options",
-            &path.to_string_lossy(),
-            branch,
-        ],
-    )
-    .is_some()
-}
-
 /// The git directory `worktree` shares with the repository it was made from, in
 /// full.
 ///
@@ -370,7 +336,7 @@ pub(crate) fn common_git_dir(worktree: &Path) -> Option<PathBuf> {
 /// Take the worktree at `path` away, and tell `repo` it has gone.
 ///
 /// True when there is no longer a worktree there, which includes there never
-/// having been one: aborting twice is not an error, and neither is aborting a
+/// having been one: closing twice is not an error, and neither is closing a
 /// Conversation whose directory the human already deleted by hand.
 ///
 /// `--force` because the whole point is to stop: a worktree with uncommitted

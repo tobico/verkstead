@@ -460,7 +460,7 @@ impl Sandbox {
     ///
     /// `None` where the Conversation has nowhere to run yet — no worktree, or
     /// one git will not own — which is every Conversation before grilling starts
-    /// and every one that has been aborted. Its handoff directory is made here
+    /// and every one that has been closed. Its handoff directory is made here
     /// where it is not already there, and failing to make one is the same
     /// answer: a bind with nothing behind it is a sandbox that will not start.
     ///
