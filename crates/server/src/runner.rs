@@ -26,6 +26,14 @@
 //! period, and anything it prints in the meantime puts the whole grace back on
 //! the clock. A session that keeps talking is never killed blind.
 //!
+//! **Every kind of session is ended by Verkstead**, and none of them by itself:
+//! they are ordinary interactive agents, which idle when their work is done
+//! rather than exiting, so waiting to see one exit is waiting for something that
+//! never comes. What differs between the kinds is what *done* is read off. A
+//! propose-then-fix session — the wrap-up's review, and each batch of comments —
+//! reports through nothing but its own words, so its rule is quiet with nothing
+//! pending: see [`proposing`].
+//!
 //! A step whose session ends without landing it stops the run where it is, and
 //! what it stops at is a **stop**: the Conversation records that nothing is
 //! driving it any more, and a Notice carrying the evidence goes on the Timeline
@@ -34,7 +42,7 @@
 //! had moved would spend an account on the same failure with nobody watching.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use verkstead_schema::Direction;
 
@@ -72,6 +80,20 @@ pub struct Pace {
     /// them at once — see [`crate::checks::ASKED_EVERY`] for what it costs.
     pub checks: Duration,
 
+    /// And how long a session that proposes and then fixes must have printed
+    /// nothing, with nothing of its own left for the human to answer, before it
+    /// is ended — see [`proposing`].
+    ///
+    /// Distinctly longer than [`Pace::grace`], because it is carrying more
+    /// weight. A backlog step is ended on quiet *and* a landing read off the
+    /// repository, so quiet is the second of two signals; one of these reports
+    /// through nothing but its own words, and quiet is the only signal there
+    /// is. Cutting a review off early leaves what it had got to standing as the
+    /// whole of it, which on the Timeline reads as a review that found nothing
+    /// — and a minute of silence is the shortest an agent still at work
+    /// reliably breaks.
+    pub proposing: Duration,
+
     /// And how often every Conversation is looked over for one that has
     /// Stalled — see [`crate::stalls`].
     ///
@@ -88,6 +110,7 @@ impl Default for Pace {
             poll: Duration::from_secs(2),
             grace: Duration::from_secs(5),
             checks: crate::checks::ASKED_EVERY,
+            proposing: Duration::from_secs(60),
             stalls: crate::stalls::SWEPT_EVERY,
         }
     }
@@ -1146,10 +1169,14 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
 /// review, and each batch of comments answered after it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Reviewed {
-    /// It saw itself out: it read what it was sent to read, put what it would do
-    /// to the human, landed what they accepted, and ended. One that found
-    /// nothing worth raising ends the same way, having said so as the last thing
-    /// it printed.
+    /// It finished: it read what it was sent to read, put what it would do to the
+    /// human, landed what they accepted, and ran out of things to say. One that
+    /// found nothing worth raising finishes the same way, having said so as the
+    /// last thing it printed.
+    ///
+    /// Which is nearly always Verkstead ending it on quiet with nothing pending
+    /// rather than the session exiting — an interactive agent idles when its work
+    /// is done. Both are this: see [`proposing`].
     Done,
 
     /// It ended, and not well. Which is not a session with nothing left to do —
@@ -1198,19 +1225,32 @@ pub(crate) async fn respond(state: &AppState, conversation_id: i64, said: &str) 
 
 /// Run one session that proposes and then fixes, and wait until it is over.
 ///
-/// **Ended by itself**, which these are the only sessions here that are. Every
-/// other reports through the repository and is ended on what landed plus quiet;
-/// one of these puts what it would do to the human in the middle of its work and
-/// has the rest of that work to do afterwards, so what says it is finished is it
-/// finishing. `verkstead ask` blocks for as long as they take to answer, and a
-/// session waiting on that is one working rather than one stuck — so nothing here
-/// reads the wait as an ending, and the Turn the caller is holding keeps the
-/// Worktree this session's across the whole of it.
+/// **Ended on quiet with nothing pending**, which is a rule of its own. Every
+/// other session here reports through the repository and is ended on what landed
+/// plus quiet; one of these puts what it would do to the human in the middle of
+/// its work and has the rest of that work to do afterwards, so there is no
+/// landing to watch for and no commit it must make — a review that fixes nothing
+/// is a review that did its job. What is left is silence, and every session is an
+/// interactive agent that idles when its work is done rather than exiting, so
+/// waiting to see one exit is waiting for something that never comes.
 ///
-/// How it ended is read exactly as an inline run's is: cleanly means it did what
-/// it was sent to do, and anything else means it did not. Nothing is refused for
-/// and nothing is stopped here — what to do about either of those is the
-/// caller's, and both callers ask the same further question first: whether
+/// So it is quiet for [`Pace::proposing`] *and* nothing of its own left for the
+/// human to answer, or it is left where it is. `verkstead ask` blocks for as long
+/// as they take, and a session idling on a Blocking Ask is one working rather
+/// than one stuck — quiet alone would reap it mid-question, however carefully the
+/// grace was chosen. A Deferred Ask idles nobody and so holds nothing open: its
+/// Answers reach a later session by design, and waiting on one would be waiting
+/// for the human to answer something nothing was waiting for. Anything the
+/// session prints puts the whole grace back on the clock, so one still talking is
+/// never cut off. The Turn the caller is holding keeps the Worktree this
+/// session's across the whole of it, the wait on the human included.
+///
+/// A session ended that way **is a session that finished**: it is
+/// [`Reviewed::Done`], exactly as one that saw itself out is. Where the session
+/// ends first, how it ended is read exactly as an inline run's is: cleanly means
+/// it did what it was sent to do, and anything else means it did not. Nothing is
+/// refused for and nothing is stopped here — what to do about either of those is
+/// the caller's, and both callers ask the same further question first: whether
 /// anything the human accepted was left unlanded. See [`crate::review`] and
 /// [`crate::responding`].
 ///
@@ -1227,7 +1267,25 @@ async fn proposing(
     };
 
     let event_id = session.event_id;
-    let ended = session.ended().await;
+    let quiet = session.quiet.clone();
+    let pace = state.sessions.pace();
+
+    let ended = tokio::select! {
+        ended = session.ended() => ended,
+        () = quiet_and_nothing_asked(state, conversation_id, event_id, &quiet, pace) => {
+            tracing::info!(
+                conversation_id,
+                event_id,
+                what,
+                "the session has gone quiet with nothing of its own open, so it is \
+                 being ended",
+            );
+
+            state.sessions.end(conversation_id).await;
+
+            return Reviewed::Done;
+        }
+    };
 
     // Verkstead ended it — the human closed or force-stopped the Conversation
     // out from under the wrap-up, or the account ran out of window. Either way
@@ -1249,6 +1307,91 @@ async fn proposing(
             writing: event_id,
         },
         None => Reviewed::Done,
+    }
+}
+
+/// Wait until the session has printed nothing for [`Pace::proposing`] *and* has
+/// no Question Set of its own still waiting to be answered.
+///
+/// Both, and neither on its own is enough. Quiet alone would reap a session
+/// idling on a Blocking Ask, which is a session doing exactly what it should —
+/// the ask blocks until the human answers, and that may be the next morning.
+/// Nothing-open alone would end every session the moment it started, none of them
+/// having asked anything yet.
+///
+/// The grace is asked first because it is the cheap half: a session still talking
+/// is not one to ask the store about. And anything it prints puts the whole grace
+/// back on the clock — see [`crate::sessions::Quiet`] — so a session mid-sentence
+/// is never one this ends, however long it goes on for.
+///
+/// An Answer arriving does the same, which is the other half of that rule: a
+/// session that has just been told what to do has everything it asked for and
+/// nothing done yet, and reaping it in the moment between the Response landing
+/// and the agent finding its voice again would throw away the whole of what the
+/// human decided. So the grace runs again from the last time an ask of its own
+/// was open, and the session is ended only once both are spent.
+async fn quiet_and_nothing_asked(
+    state: &AppState,
+    conversation_id: i64,
+    event_id: i64,
+    quiet: &Quiet,
+    pace: Pace,
+) {
+    // When it was last seen with an ask of its own open, and `None` while it has
+    // asked nothing at all.
+    let mut asked: Option<Instant> = None;
+
+    loop {
+        let owed = pace.proposing.saturating_sub(quiet.for_how_long());
+
+        if !owed.is_zero() {
+            tokio::time::sleep(owed).await;
+            continue;
+        }
+
+        if asking(state, conversation_id, event_id).await {
+            asked = Some(Instant::now());
+            tokio::time::sleep(pace.poll).await;
+            continue;
+        }
+
+        let owed = asked
+            .map(|at| pace.proposing.saturating_sub(at.elapsed()))
+            .unwrap_or_default();
+
+        if !owed.is_zero() {
+            tokio::time::sleep(owed).await;
+            continue;
+        }
+
+        return;
+    }
+}
+
+/// Whether the session has a Blocking Ask of its own that nothing has answered.
+///
+/// Its own, which is what the Event id says: nothing on the record names the
+/// session a Set was asked by, and nothing has to — one Worktree holds one agent,
+/// so every Set that landed after this session's Event is this session's. A
+/// Deferred Ask is not one of them, and neither is a Set the human closed
+/// unanswered: both are Sets nobody is idling on. See
+/// [`store::unanswered_set_since`].
+///
+/// A store that will not answer reads as *asking*, which is the right way round
+/// for the one thing this decides: a session is ended on the strength of it, and
+/// ending one mid-question would take the answer away from an agent that asked
+/// for it.
+async fn asking(state: &AppState, conversation_id: i64, event_id: i64) -> bool {
+    match store::unanswered_set_since(&state.pool, conversation_id, event_id).await {
+        Ok(open) => open.is_some(),
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "reading whether a session that proposes was still asking failed"
+            );
+            true
+        }
     }
 }
 

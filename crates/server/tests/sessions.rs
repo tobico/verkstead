@@ -331,12 +331,40 @@ impl Grilling {
     /// Over the agent API rather than through the stub, because what these ask
     /// is what happens once a Set is answered — the stub's job is to be a
     /// session, not to be a CLI.
+    ///
+    /// Which leaves one thing the stub has to be told: that the Set is up. A real
+    /// session asks moments after it starts and is talking until it does, so the
+    /// silence a propose-then-fix session is ended on only ever begins with an ask
+    /// of its own already open — see [`WHILE_NOBODY_HAS_ASKED`]. A Set posted from
+    /// out here arrives whenever the test gets to it, so the marker is what puts
+    /// the two back in the order they really happen in.
     async fn ask(&self, yaml: &str) -> i64 {
+        let id = self.asking(yaml, "").await;
+
+        self.asked();
+
+        id
+    }
+
+    /// The same, deferred: what a session sends when it is not going to wait
+    /// for the Answer, which is a query parameter rather than anything in the
+    /// Set — see the server's `sets` module.
+    async fn ask_deferred(&self, yaml: &str) -> i64 {
+        let id = self.asking(yaml, "?deferred=true").await;
+
+        self.asked();
+
+        id
+    }
+
+    /// What both of them are made of: post the Set over the agent API and read
+    /// its id back.
+    async fn asking(&self, yaml: &str, how: &str) -> i64 {
         let (status, body) = fetch(
             &self.app,
             Request::builder()
                 .method("POST")
-                .uri(format!("/conversations/{}/api/v1/sets", self.id))
+                .uri(format!("/conversations/{}/api/v1/sets{how}", self.id))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -349,28 +377,16 @@ impl Grilling {
         created.id
     }
 
-    /// The same, deferred: what a session sends when it is not going to wait
-    /// for the Answer, which is a query parameter rather than anything in the
-    /// Set — see the server's `sets` module.
-    async fn ask_deferred(&self, yaml: &str) -> i64 {
-        let (status, body) = fetch(
-            &self.app,
-            Request::builder()
-                .method("POST")
-                .uri(format!(
-                    "/conversations/{}/api/v1/sets?deferred=true",
-                    self.id
-                ))
-                .header(header::CONTENT_TYPE, "application/yaml")
-                .body(Body::from(yaml.to_owned()))
-                .unwrap(),
-        )
-        .await;
+    /// Tell the stub that the Set it would have sent is up, which is what stops
+    /// it talking — see [`WHILE_NOBODY_HAS_ASKED`].
+    ///
+    /// Written for every ask rather than only where a stub reads it: a marker
+    /// nobody is watching for costs nothing.
+    fn asked(&self) {
+        let directory = handoff_directory(self);
 
-        assert_eq!(status, StatusCode::CREATED, "the Set was refused: {body}");
-
-        let created: verkstead_schema::SetCreated = serde_saphyr::from_str(&body).unwrap();
-        created.id
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("asked"), "").unwrap();
     }
 
     /// Answer it the way the human does, from the browser.
@@ -742,6 +758,10 @@ const BRISKLY: Pace = Pace {
     poll: Duration::from_millis(100),
     grace: Duration::from_millis(300),
     checks: Duration::from_millis(100),
+    // Longer than the grace above, as a server's is: the tests that watch a
+    // review being ended on quiet want the two apart, so that a session ended
+    // after the shorter of them is one ended by the wrong rule.
+    proposing: Duration::from_millis(900),
     // Longer than any of these run for, so that the sweep for a stalled
     // Conversation is the one thing that never fires by itself here. Every one
     // of these fixtures is a Conversation whose grilling session has printed and
@@ -4087,6 +4107,11 @@ fn wrapping_up(
     review: &str,
     responding: &str,
 ) -> String {
+    // Written as a word in the stubs above and spelled out here, because the loop
+    // is the same loop in every one of them — see [`WHILE_NOBODY_HAS_ASKED`].
+    let review = review.replace("WHILE_NOBODY_HAS_ASKED", WHILE_NOBODY_HAS_ASKED);
+    let responding = responding.replace("WHILE_NOBODY_HAS_ASKED", WHILE_NOBODY_HAS_ASKED);
+
     format!(
         r#"
 case "$2" in
@@ -4117,16 +4142,48 @@ esac
     )
 }
 
+/// A session reading, up until the Set the test puts on its behalf is up.
+///
+/// The two halves of a propose-then-fix session in one line, because the fixture
+/// splits them across two processes. A real one reads the branch out loud, asks
+/// within moments of starting and only then goes silent — so the quiet it is
+/// ended on begins with its ask already open, and the ask is the only thing
+/// keeping it alive. Here the reading is a stub and the asking is the test, which
+/// posts the Set whenever it gets to it: without this the stub would fall silent
+/// with nothing open, and be ended before the test had asked anything.
+///
+/// The same line over and over, so that the last thing said is the same whether
+/// it was said once or fifty times — which is what the Timeline shows of a
+/// session. [`Grilling::ask`] is what writes the marker.
+const WHILE_NOBODY_HAS_ASKED: &str =
+    "while [ ! -f /tmp/verkstead/asked ]; do printf '%s\\n' \"$SAYING\"; sleep 0.1; done";
+
 /// A review session that reads the branch and then waits on the human, which is
 /// what one blocked on `verkstead ask` looks like from outside.
-const REVIEW_THEN_WAIT: &str = "    printf 'reading the branch\\n'\n    sleep 300";
+const REVIEW_THEN_WAIT: &str = "    SAYING='reading the branch'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     sleep 300";
+
+/// One that is still at work when the answers have come back, and stays that way.
+///
+/// What a restart has to interrupt to be a restart at all: a session with nothing
+/// left to do is ended on quiet rather than left hanging, so a stub that fell
+/// silent on being answered would be seen out by the server that started it and
+/// there would be nothing for the restart to find.
+const REVIEW_THEN_WORK_ON: &str = "    SAYING='reading the branch'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while :; do printf 'acting on the answers\\n'; sleep 0.1; done";
 
 /// One that goes on to fix what the human accepted, which is the rest of what a
 /// review session is for.
 ///
 /// A stub cannot idle on a blocking ask and then wake up, so the marker file
 /// stands in for the Response arriving: the test writes it once it has answered.
-const REVIEW_THEN_FIX: &str = "    printf 'reading the branch\\n'\n    \
+const REVIEW_THEN_FIX: &str = "    SAYING='reading the branch'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'a fix\\n' >> fixes.md\n    \
      git add -A\n    \
@@ -4136,13 +4193,38 @@ const REVIEW_THEN_FIX: &str = "    printf 'reading the branch\\n'\n    \
 /// One that waits for the answers and then goes without landing any of them,
 /// which is the failure a session dying between the deciding and the doing
 /// leaves behind.
-const REVIEW_THEN_VANISH: &str = "    printf 'reading the branch\\n'\n    \
+const REVIEW_THEN_VANISH: &str = "    SAYING='reading the branch'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'that is what I would have fixed\\n'";
 
 /// One that finds nothing, says so as the last thing it prints, and stops.
 const REVIEW_AND_FIND_NOTHING: &str =
     "    printf 'I read the whole branch and found nothing worth raising\n'";
+
+/// The same, except that it never stops: it says what it found and then idles,
+/// which is what an interactive agent does when its work is done and so what
+/// every real session does.
+///
+/// The one above exits when it has finished, which is convenient to write and is
+/// a shape no agent has: a stub that sees itself out proves nothing about a
+/// session that simply sits there, which is every session there is.
+const REVIEW_AND_FIND_NOTHING_THEN_IDLE: &str =
+    "    printf 'I read the whole branch and found nothing worth raising\n'\n    sleep 300";
+
+/// One that reads the branch, waits on the human, does what they accepted — and
+/// then idles rather than exiting, as a real one does.
+const REVIEW_THEN_FIX_AND_IDLE: &str = "    SAYING='reading the branch'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'fixed what was accepted and left the rest\\n'\n    \
+     sleep 300";
+
+/// And one that never goes quiet at all, which is a session still at work.
+const REVIEW_THAT_KEEPS_TALKING: &str = "    printf 'reading the branch\\n'\n    \
+     while :; do sleep 0.1; printf 'still reading\\n'; done";
 
 /// A batch session that finds nothing in what was said needing a change, says so
 /// as the last thing it prints, and stops.
@@ -4154,7 +4236,9 @@ const RESPOND_AND_FIND_NOTHING: &str =
 ///
 /// The marker file stands in for the Response arriving, as the review's does: a
 /// stub cannot idle on a blocking ask and then wake up.
-const RESPOND_THEN_FIX: &str = "    printf 'reading what was said\n'\n    \
+const RESPOND_THEN_FIX: &str = "    SAYING='reading what was said'\n    \
+     printf '%s\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'a fix\n' >> fixes.md\n    \
      git add -A\n    \
@@ -4162,13 +4246,18 @@ const RESPOND_THEN_FIX: &str = "    printf 'reading what was said\n'\n    \
      printf 'did what was accepted and left the rest\n'";
 
 /// And one that waits for the answers and then goes without landing any of them.
-const RESPOND_THEN_VANISH: &str = "    printf 'reading what was said\n'\n    \
+const RESPOND_THEN_VANISH: &str = "    SAYING='reading what was said'\n    \
+     printf '%s\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'that is what I would have done\n'";
 
 /// One that reads what was said and then waits on the human, which is what a
 /// batch session blocked on `verkstead ask` looks like from outside.
-const RESPOND_THEN_WAIT: &str = "    printf 'reading what was said\n'\n    sleep 300";
+const RESPOND_THEN_WAIT: &str = "    SAYING='reading what was said'\n    \
+     printf '%s\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     sleep 300";
 
 /// What a batch session puts to the human, as the bundled responding skill
 /// writes it: a Question per comment it would do something about, and the
@@ -4519,6 +4608,234 @@ async fn a_review_that_finds_nothing_raises_no_question_set_and_says_so() {
     );
 }
 
+/// A review session that finishes and then sits there is ended, and the wrap-up
+/// carries on to Done with nobody touching a Screen.
+///
+/// The bug this closes: every session is an interactive agent, which idles when
+/// its work is done rather than exiting, so a review Verkstead waited to see exit
+/// waited forever. The wrap-up never settled, a roadmap's next stage never
+/// started, and the only way on was quitting the session by hand.
+///
+/// Green all the way through, so the review is the one thing between this wrap-up
+/// and Done — which makes reaching Done the whole proof.
+#[tokio::test]
+async fn a_review_that_finishes_without_exiting_is_ended_and_the_wrap_up_carries_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING_THEN_IDLE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        review_settled(&fixture).await,
+        "the review settled, which is what reaching Done was waiting on",
+    );
+    assert!(
+        outputs(&view).last().is_some_and(|output| !output.running),
+        "and the session that never exited is over: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        outputs(&view)
+            .last()
+            .is_some_and(|output| output.latest.contains("nothing worth raising")),
+        "with what it said still the last thing on its row: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "ending it is a session finishing rather than one that stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// A review sitting on a Blocking Ask is left alone however long the human takes,
+/// and is ended once they have answered and it has finished.
+///
+/// The other half of the rule, and the one that makes the first half safe: a
+/// session idling on an ask prints nothing for hours, and quiet on its own would
+/// reap it mid-question and throw the answers away. So it is quiet *and* nothing
+/// of its own left to answer, or it is left where it is.
+#[tokio::test]
+async fn a_review_waiting_on_its_ask_is_left_alone_until_the_answers_are_in() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW).await;
+
+    // Several graces of a session saying nothing at all, which is what waiting on
+    // a human looks like from outside.
+    tokio::time::sleep(BRISKLY.proposing * 4).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session is still there to read what they say: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        !review_settled(&fixture).await,
+        "and nothing settled a review whose questions are still open",
+    );
+
+    // Declined outright, so that what is proven is the ending rather than the
+    // fixing: nothing is owed either way.
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the answers were in and the session that read them was never ended",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| !output.running),
+        "the session that sat on the ask is over: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// A Deferred Ask holds nothing open: nobody is idling on it, so the session that
+/// sent one is ended on quiet like any other.
+///
+/// Waiting on one would be waiting for the human to answer something nothing was
+/// waiting for — its Answers reach a later session by design — and the session
+/// would sit there until they got round to it.
+///
+/// The ending is the whole of what is asked here. What the wrap-up then makes of
+/// a review that left a Set standing is the review's own business, and it is the
+/// same business whichever way the Set was asked.
+#[tokio::test]
+async fn a_deferred_ask_of_a_reviews_own_does_not_hold_its_session_open() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask_deferred(REVIEW).await;
+
+    // Which is the whole assertion: it returns only once the session that sent
+    // the Set is over, and a Deferred Ask that held it open would hold this open
+    // until the deadline instead.
+    fixture
+        .until(|view| {
+            outputs(view)
+                .last()
+                .and_then(|output| (!output.running).then_some(()))
+        })
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        !responded(&view, set),
+        "and nobody ever answered it: {:?}",
+        sets(&view),
+    );
+}
+
+/// Whether this Set of the Conversation's was answered, as against still open or
+/// closed unanswered.
+fn responded(view: &ConversationView, set_id: i64) -> bool {
+    sets(view)
+        .into_iter()
+        .find(|asked| asked.set_id == set_id)
+        .is_some_and(|asked| matches!(asked.standing, verkstead_render::Standing::Answered(_)))
+}
+
+/// A review that is still talking is never cut off, however long it goes on for.
+///
+/// Anything printed puts the whole grace back on the clock, which is what makes a
+/// grace safe to end a session on: the work after a commit — a message, a
+/// summary, a push — runs to completion rather than being killed mid-sentence.
+#[tokio::test]
+async fn a_review_that_keeps_talking_is_never_ended_under_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THAT_KEEPS_TALKING),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    tokio::time::sleep(BRISKLY.proposing * 4).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "a session that never stops printing is never one this ends: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        !review_settled(&fixture).await,
+        "and nothing settled a review still being read",
+    );
+}
+
 /// A review session that dies is not a review that found nothing.
 ///
 /// One is a branch nobody has read and the other is a branch somebody read and
@@ -4778,7 +5095,7 @@ async fn a_restart_over_an_answered_review_lands_the_fixes_without_asking_again(
     let reviews = spill.path().join("review-prompts");
     let dispatched = spill.path().join("fix-prompts");
 
-    let stub = a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT);
+    let stub = a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WORK_ON);
 
     let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
 
