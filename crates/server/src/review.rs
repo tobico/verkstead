@@ -451,16 +451,22 @@ async fn wanted(state: &AppState, conversation_id: i64) -> Wanted {
     }
 }
 
-/// Which Set this Conversation's review has last put its findings on, where it
-/// has put them anywhere.
+/// Which Set this Conversation's wrap-up has last put to the human, where it has
+/// asked anything at all.
 ///
-/// The newest of this wrap's proposals rather than its first, because a wrap can
-/// read its branch more than once: a review the human pressed Resume over is
-/// read afresh — see [`afresh`] — and the Set that reading puts up is the one
-/// there is anybody behind. Every proposal of an unsettled wrap is the review's
-/// own, so the newest of them is this review's: the batch sessions that propose
-/// the same way about what was said on the pull request are none of them
-/// dispatched until the review is over. See [`crate::comments::once`].
+/// The newest of this wrap's asks rather than its first, because a wrap can read
+/// its branch more than once: a review the human pressed Resume over is read
+/// afresh — see [`afresh`] — and the Set that reading puts up is the one there is
+/// anybody behind. An unsettled wrap's asks are the review's own, because it is
+/// the session a wrap-up starts with and the batch sessions that propose the same
+/// way about what was said on the pull request are none of them dispatched until
+/// it is over. See [`crate::comments::once`].
+///
+/// Nothing marks a Set as the review's — see [`store::last_proposal`] — so a Set
+/// some other session of this wrap left standing is read as one of these too.
+/// Which is the safe way round: what is on the other side of it is a question
+/// nobody is coming back to answer, and that is worth stopping over whoever asked
+/// it.
 ///
 /// A store that will not answer reads as *it never asked*, which is the same way
 /// round the rest of this module reads one: everything on the other side of a

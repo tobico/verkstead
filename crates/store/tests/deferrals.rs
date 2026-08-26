@@ -65,7 +65,6 @@ fn set(title: &str) -> QuestionSet {
         }],
         postscript: None,
         proposal: None,
-        review: None,
         project: Some("verkstead".to_owned()),
         branch: Some("deferred-asks".to_owned()),
         diff: None,

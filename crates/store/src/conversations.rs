@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use sqlx::SqlitePool;
-use verkstead_schema::{Decided, Direction, QuestionSet, Response, Review, SetCreated};
+use verkstead_schema::{Direction, QuestionSet, SetCreated};
 
 use super::wrap_up::{WaitingOn, settled_when};
 
@@ -1668,34 +1668,23 @@ pub async fn set_asked_from(pool: &SqlitePool, conversation_id: i64, set_id: i64
     Ok(found.is_some())
 }
 
-/// Whether this Conversation's self-review has put its findings to the human,
-/// and which Set they are on.
+/// The newest Set this wrap has put to the human, where it has asked anything.
 ///
-/// Read off the Sets themselves rather than written down when one is asked — see
-/// [`proposals`]. The **first** of them is the review's: it is the session a
-/// wrap-up starts with, and the batch sessions that propose the same way about
-/// what was said on the pull request are all dispatched after it has settled.
-pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
-    Ok(proposals(pool, conversation_id)
-        .await?
-        .first()
-        .map(|proposal| proposal.set_id))
-}
-
-/// And the newest of them, which is whatever was last put to the human: the
-/// review's own Set until a batch of comments is answered after it, and that
-/// batch's from then on.
+/// The review's own Set until a batch of comments asks something after it, and
+/// that batch's from then on — see [`proposals`], which is where *this wrap's*
+/// is worked out.
 ///
-/// The newest rather than the batch's own, because nothing on the record says
+/// The newest rather than the review's own, because nothing on the record says
 /// which session asked one and nothing has to. One Worktree holds one agent and
-/// nothing advances past a stop, so the proposal a batch session made is the
-/// last one there is for as long as anything is asking about it.
+/// nothing advances past a stop, so the Set the session that is running put up
+/// is the last one there is for as long as anything is asking about it.
 pub async fn last_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
     Ok(proposals(pool, conversation_id)
         .await?
         .last()
         .map(|proposal| proposal.set_id))
 }
+
 /// And the newest one a *batch* session put up, where a batch has put one up at
 /// all.
 ///
@@ -1727,13 +1716,20 @@ pub async fn last_batch_proposal(pool: &SqlitePool, conversation_id: i64) -> Res
         .next_back())
 }
 
-/// Every Set of this Conversation's carrying a `review` block, oldest first —
-/// and only the ones this wrap asked.
+/// Every Set this wrap has put to the human, oldest first.
 ///
-/// A Set carrying the block *is* a proposal to fix things, which is the whole
-/// reason the block is a field being there rather than a convention. A second
-/// record saying which Sets were which would be a second thing to keep true, and
-/// the one that could disagree.
+/// **Every Set**, because a wrap-up's asks are all of them proposals: the review
+/// reads the branch and proposes what to do about what it found, and a batch
+/// session proposes what to do about what was said on the pull request. Nothing
+/// marks one as such and nothing needs to — a Set that says which kind of ask it
+/// was would be a second record to keep true, and the one that could disagree
+/// with the session that asked it.
+///
+/// Which widens what counts: a Set some other session of this wrap put up is one
+/// of these too, and a Set left standing behind one is read as this wrap's ask
+/// with nobody behind it. That is the safe way round for what hangs on it —
+/// what is on the other side is a run stopping, and a question nobody is coming
+/// back to answer is worth stopping over whoever asked it.
 ///
 /// **This wrap's**, because a Conversation can wrap up more than once: a review
 /// that splits its findings out into a backlog leaves Wrapping to build them and
@@ -1750,8 +1746,8 @@ pub async fn last_batch_proposal(pool: &SqlitePool, conversation_id: i64) -> Res
 /// nothing is left to act on, so no fresh reading of the branch could ever be
 /// recognised as the review of this wrap.
 async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Proposal>> {
-    let rows: Vec<(i64, String, String)> = sqlx::query_as(
-        "SELECT q.id, q.created_at, q.body
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT q.id, q.created_at
          FROM question_sets q
          JOIN set_events s ON s.set_id = q.id
          JOIN timeline_events e ON e.id = s.event_id
@@ -1772,25 +1768,10 @@ async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Propos
     .await
     .with_context(|| format!("looking for Conversation {conversation_id}'s proposals"))?;
 
-    let mut proposing = Vec::new();
-
-    for (set_id, asked_at, body) in rows {
-        // A Set this build cannot read is passed over rather than failing the
-        // question: it carries no `review` block anybody here could act on, and
-        // one unreadable body must not be able to tell a Conversation it has no
-        // review when what happened is that a field left the schema.
-        let asked = super::Asked::read(body);
-
-        let Some(set) = asked.set() else {
-            continue;
-        };
-
-        if set.review.is_some() {
-            proposing.push(Proposal { set_id, asked_at });
-        }
-    }
-
-    Ok(proposing)
+    Ok(rows
+        .into_iter()
+        .map(|(set_id, asked_at)| Proposal { set_id, asked_at })
+        .collect())
 }
 
 /// One proposal, as the reads above tell them apart: which Set it is, and when
@@ -1804,174 +1785,6 @@ struct Proposal {
 
     /// When it was asked, as the Set's own row records it.
     asked_at: String,
-}
-
-/// One finding the human said to fix, as the session that will fix it is told
-/// about it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Fixing {
-    /// The finding as the review wrote it for whoever fixes it.
-    pub what: String,
-
-    /// And whatever the human wrote alongside their Answer, or empty where they
-    /// wrote nothing — which is the ordinary way of agreeing with the
-    /// recommendation.
-    pub said: String,
-}
-
-/// The findings this Conversation's review was told to fix and nothing has
-/// landed, in the order the review raised them.
-///
-/// Empty is the ordinary answer, and it covers every way there is nothing owed:
-/// no review has asked, the Set is still waiting on the human, they declined
-/// every finding, or the session that was going to fix them did so. What is left
-/// is the one failure this exists for — the decisions were made and the doing did
-/// not happen — and the words it hands back are the review's own, which is what
-/// a session dispatched to finish the job is told.
-///
-/// **Landed is a commit after the Answers**, which is as much as anything here
-/// can know: what the fixes are is prose the review wrote, and no reading of a
-/// branch can say which commit was which finding. So this is a coarse question
-/// deliberately — a review whose accepted findings landed one commit and then
-/// stopped reads as landed, because a session that got that far is one that was
-/// working rather than one that fell over before it started.
-///
-/// The two stamps are the Response's and the commit Event's, both written by
-/// SQLite as this database's `now`, so comparing them as text is comparing the
-/// instants they name.
-pub async fn unlanded_fixes(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Fixing>> {
-    let Some(set_id) = review_asked(pool, conversation_id).await? else {
-        return Ok(Vec::new());
-    };
-
-    unlanded_on(pool, conversation_id, set_id).await
-}
-
-/// The same question of a batch's newest proposal instead: what a batch session
-/// was told to fix and nothing has landed.
-///
-/// A batch's own and never the review's — see [`last_batch_proposal`]. How a
-/// review ended is the report of the session that ran it, so a review that
-/// settled having landed nothing it was answered for leaves a Set that reads as
-/// owing work, and reading that here would be the batch half starting a session
-/// over a decision somebody else already reported on.
-///
-/// Empty until a batch has asked anything, which is the ordinary answer: nothing
-/// is dispatched about what was said on the pull request until the review is
-/// over.
-pub async fn unlanded_batch_fixes(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Fixing>> {
-    let Some(set_id) = last_batch_proposal(pool, conversation_id).await? else {
-        return Ok(Vec::new());
-    };
-
-    unlanded_on(pool, conversation_id, set_id).await
-}
-
-/// What is owed on one proposal, which is the whole of what either of the two
-/// above is.
-async fn unlanded_on(pool: &SqlitePool, conversation_id: i64, set_id: i64) -> Result<Vec<Fixing>> {
-    let Some(stored) = super::load_set(pool, set_id).await? else {
-        return Ok(Vec::new());
-    };
-
-    // A Set this build cannot read carries no findings anybody here could act
-    // on, and passing over it is the whole of what there is to do about one —
-    // see [`super::Asked`].
-    let Some(review) = stored.set.set().and_then(|set| set.review.as_ref()) else {
-        return Ok(Vec::new());
-    };
-
-    let Some(answered) = super::load_response(pool, set_id).await? else {
-        return Ok(Vec::new());
-    };
-
-    let fixing = decided_as(review, &answered.response, Decided::Fix);
-
-    if fixing.is_empty() || landed_since(pool, conversation_id, &answered.submitted_at).await? {
-        return Ok(Vec::new());
-    }
-
-    Ok(fixing)
-}
-
-/// The findings this Conversation's review was told to split out into a backlog
-/// of their own, in the order the review raised them.
-///
-/// The escape hatch's half of [`unlanded_fixes`], and it reads the same record
-/// the other way: a finding the human answered with the Option it named as
-/// *split it out* is work for a session of its own rather than work for the
-/// session that asked. Empty is the ordinary answer — a review that offered no
-/// split at all, one still waiting on the human, one whose splits were declined.
-///
-/// **Nothing here asks whether it landed**, unlike [`unlanded_fixes`]. What says
-/// a split has been carried out is a `.tasks/` backlog on the branch, and that is
-/// a question about the Worktree rather than about the record — so this says what
-/// was split out and its caller says whether the backlog is there.
-pub async fn split_out(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Fixing>> {
-    let Some(set_id) = review_asked(pool, conversation_id).await? else {
-        return Ok(Vec::new());
-    };
-
-    let Some(stored) = super::load_set(pool, set_id).await? else {
-        return Ok(Vec::new());
-    };
-
-    // Passed over where this build cannot read the body, for [`unlanded_on`]'s
-    // reason.
-    let Some(review) = stored.set.set().and_then(|set| set.review.as_ref()) else {
-        return Ok(Vec::new());
-    };
-
-    let Some(answered) = super::load_response(pool, set_id).await? else {
-        return Ok(Vec::new());
-    };
-
-    Ok(decided_as(review, &answered.response, Decided::Split))
-}
-
-/// The findings a Response decided one way, as the session that acts on them is
-/// told about them.
-///
-/// One reading for both outcomes, because they are the same question asked of
-/// different Options — and what the human wrote beside their Answer travels with
-/// the finding either way, the schema following the pick to find it.
-fn decided_as(review: &Review, response: &Response, decided: Decided) -> Vec<Fixing> {
-    review
-        .findings
-        .iter()
-        .filter(|finding| finding.decided(response) == decided)
-        .map(|finding| Fixing {
-            what: finding.what.trim().to_owned(),
-            said: finding.said(response).to_owned(),
-        })
-        .collect()
-}
-
-/// Whether anything has been committed on this Conversation's branch since
-/// `submitted_at`.
-///
-/// The commits on the Timeline rather than the branch itself, for the reason
-/// every other reader of them asks the store: the branch is swept while the
-/// session runs and what it finds lands here, so this is where a fresh commit
-/// shows up — and asking it costs one small read where asking git costs a
-/// process.
-async fn landed_since(pool: &SqlitePool, conversation_id: i64, submitted_at: &str) -> Result<bool> {
-    let found: Option<(i64,)> = sqlx::query_as(
-        "SELECT c.event_id
-         FROM commits c
-         JOIN timeline_events e ON e.id = c.event_id
-         WHERE c.conversation_id = ? AND e.at > ?
-         LIMIT 1",
-    )
-    .bind(conversation_id)
-    .bind(submitted_at)
-    .fetch_optional(pool)
-    .await
-    .with_context(|| {
-        format!("looking for what Conversation {conversation_id} committed since {submitted_at}")
-    })?;
-
-    Ok(found.is_some())
 }
 
 /// A Question Set of this Conversation's that arrived after `event_id` and is

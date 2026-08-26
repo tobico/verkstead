@@ -4023,8 +4023,7 @@ async fn a_finish_that_opened_no_pull_request_leaves_the_conversation_where_it_i
 }
 
 /// The findings of a review, as the bundled reviewing skill writes them: a
-/// Question per finding, and the `review` block that says which Answer to each
-/// means *fix it*.
+/// Question per finding, each offering a way to fix it beside leaving it alone.
 ///
 /// Put through the agent API by the test rather than by the stub, exactly as the
 /// grilling's proposal is: a router driven by `oneshot` has no socket for a
@@ -4051,12 +4050,6 @@ questions:
       - n: 2
         text: Leave it
         recommended: true
-review:
-  findings:
-    - fix: Q1.1
-      what: Reset the counter as the window rolls.
-    - fix: Q2.1
-      what: Collapse the two clocks onto one.
 "#;
 
 /// The shortest whole backlog, plus the sessions a wrap-up runs.
@@ -4277,8 +4270,8 @@ const RESPOND_THEN_WAIT: &str = "    SAYING='reading what was said'\n    \
      sleep 300";
 
 /// What a batch session puts to the human, as the bundled responding skill
-/// writes it: a Question per comment it would do something about, and the
-/// `review` block that says which Answer to each means *do it*.
+/// writes it: a Question per comment it would do something about, each offering
+/// to do it beside leaving it alone.
 const ANSWERING_THE_COMMENTS: &str = r#"
 title: What was said on the rate limiter's pull request
 preface: |
@@ -4300,12 +4293,6 @@ questions:
       - n: 2
         text: Leave it
         recommended: true
-review:
-  findings:
-    - fix: Q1.1
-      what: Move the reset above the comparison.
-    - fix: Q2.1
-      what: Rename the test that pins the old field.
 "#;
 
 /// Whether Verkstead has recorded this Conversation's review as done with.
@@ -5511,11 +5498,11 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
     );
 }
 
-/// Which Set this Conversation's wrap-up has its review's findings on, as
-/// Verkstead reads it — and `None` where the wrap it is in has not asked.
+/// Which Set this Conversation's wrap-up has put to the human, as Verkstead
+/// reads it — and `None` where the wrap it is in has asked nothing.
 async fn review_asked(fixture: &Grilling) -> Option<i64> {
     let pool = open_database(&fixture.database).await.unwrap();
-    let asked = verkstead_server::store::review_asked(&pool, fixture.id)
+    let asked = verkstead_server::store::last_proposal(&pool, fixture.id)
         .await
         .unwrap();
     pool.close().await;
@@ -5524,8 +5511,8 @@ async fn review_asked(fixture: &Grilling) -> Option<i64> {
 }
 
 /// The Set a review writes where one of its findings is too big to fix in the
-/// sitting it was found in: a third Option on that Question, and a `split` naming
-/// it, so all three answers mean something.
+/// sitting it was found in: a third Option on that Question, offering to spin
+/// the work out as a backlog of its own, so all three answers mean something.
 const REVIEW_WITH_A_SPLIT: &str = r#"
 title: Review of the rate limiter branch
 preface: |
@@ -5549,13 +5536,6 @@ questions:
         recommended: true
       - n: 3
         text: Leave it
-review:
-  findings:
-    - fix: Q1.1
-      what: Reset the counter as the window rolls.
-    - fix: Q2.1
-      split: Q2.2
-      what: Collapse the three clocks onto one, injected at construction.
 "#;
 
 /// A review session that writes what was split out as a `.tasks/` backlog and
