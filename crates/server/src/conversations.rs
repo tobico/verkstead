@@ -504,6 +504,14 @@ pub(crate) async fn set_base_branch(
 /// for is telling them about a run that stopped while nobody was watching. The
 /// sweep is what finds this one, a minute later — see [`crate::stalls`].
 ///
+/// **The fetch comes before the resolving**, whether the human picked a base or
+/// left it to the rule: a remote-tracking branch is only ever as fresh as the
+/// last fetch, and an unpicked base means origin's default branch rather than
+/// this checkout's copy of it — so the work comes off what the remote is
+/// holding now rather than off wherever the local branch was last left. A
+/// repository with no remote has nothing to fetch and nothing to be stale
+/// against, and is never refused for it.
+///
 /// **A second round makes neither.** A reopened Conversation is drafting again on
 /// a branch that has been worked, in the worktree that work was done in — see
 /// [`reopen`] — so what this does for one is resolve the commit it branched from
@@ -548,11 +556,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // What the work branches from, resolved here and nowhere earlier: what the
     // human picked is a branch, and what they meant by picking it is wherever it
     // stands at this moment. Without one it is the default branch, which is the
-    // same rule by another name.
-    let named = conversation
-        .base_commit
-        .clone()
-        .unwrap_or_else(|| conversation.repo.default_branch.clone());
+    // same rule by another name — read off origin, once the fetch below has
+    // made origin's copy of it current.
+    let picked = conversation.base_commit.clone();
+    let default = conversation.repo.default_branch.clone();
 
     let repo = conversation.repo.path.clone();
     let branch = conversation.branch.clone();
@@ -571,16 +578,43 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
         move || {
+            // A second round resolves the commit the first one branched from and
+            // stops there: the branch is taken because this Conversation took it,
+            // the checkout is already where the work will happen, and a base
+            // that was frozen when the first round started is not something a
+            // fetch could freshen.
+            if reopened.is_some() {
+                let named = picked.unwrap_or(default);
+
+                return worktrees::resolve(&repo, &named).ok_or(GrillingStarted::NoBaseCommit);
+            }
+
+            // Before anything resolves, because a remote-tracking ref is only as
+            // fresh as the last fetch — and a branch made off a stale one is
+            // work starting from wherever this checkout happened to be left.
+            // Refused rather than carried on with: the human is at the button,
+            // and offline or an authentication that has gone is theirs to fix.
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+                tracing::error!(
+                    said,
+                    repo = %repo.display(),
+                    "fetching a Repo's remotes failed, so its grilling is not being started",
+                );
+
+                return Err(GrillingStarted::FetchFailed);
+            }
+
+            // A picked base resolves exactly as picked; the fetch only means a
+            // picked remote-tracking branch stands where it now stands. An
+            // unpicked one is the default branch as origin holds it.
+            let named = match picked {
+                Some(picked) => picked,
+                None => worktrees::default_ref(&repo, &default),
+            };
+
             let Some(commit) = worktrees::resolve(&repo, &named) else {
                 return Err(GrillingStarted::NoBaseCommit);
             };
-
-            // A second round resolves the commit the first one branched from and
-            // stops there: the branch is taken because this Conversation took it,
-            // and the checkout is already where the work will happen.
-            if reopened.is_some() {
-                return Ok(commit);
-            }
 
             if worktrees::branch_exists(&repo, &branch) {
                 return Err(GrillingStarted::BranchExists);
@@ -671,6 +705,12 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 /// Profiles are answered before anything that costs a git call. Nothing is
 /// created and nothing is checked out for any of them.
 ///
+/// **The fetch comes before the resolving**, as it does at a grill start: an
+/// unpicked base means the default branch as origin holds it rather than this
+/// checkout's copy of it, so what is adopted is judged against origin's tip. A
+/// fetch git would not make refuses the press by name; a repository with no
+/// remote has nothing to be stale against and is never refused for it.
+///
 /// **The stage is read again, here, at whatever the base resolves to.** What the
 /// page showed is a reading of a moment ago, and a roadmap is a document in a
 /// repository that anybody may have moved since — ticked the last box, taken the
@@ -733,21 +773,41 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
 
     // Where the stage branches from. The override where the human fixed one —
     // which is how an unmerged predecessor is stacked on, that being their move
-    // rather than Verkstead's — and the default branch's tip where they did not.
-    let named = conversation
-        .base_commit
-        .clone()
-        .unwrap_or_else(|| conversation.repo.default_branch.clone());
+    // rather than Verkstead's — and the default branch as origin holds it where
+    // they did not; which of the two it is, is settled inside the read below,
+    // because the fetch that makes origin's copy current happens there.
+    let picked = conversation.base_commit.clone();
+    let default = conversation.repo.default_branch.clone();
 
     let repo = conversation.repo.path.clone();
 
-    // The reading, off the runtime's threads: resolving a commit and reading a
-    // roadmap out of a git directory are both blocking calls.
+    // The reading, off the runtime's threads: fetching, resolving a commit and
+    // reading a roadmap out of a git directory are all blocking calls.
     let read = tokio::task::spawn_blocking({
         let repo = repo.clone();
-        let named = named.clone();
 
         move || {
+            // Before anything resolves. The human is at this button, so a fetch
+            // git would not make refuses the press by name rather than adopting
+            // a stage judged against refs that may be a week old — being offline
+            // or having lost an authentication is theirs to go and fix. A
+            // repository with no remote has nothing to fetch and is never
+            // refused for it.
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+                tracing::error!(
+                    said,
+                    repo = %repo.display(),
+                    "fetching a Repo's remotes failed, so its roadmap is not being adopted",
+                );
+
+                return Err(Adopted::FetchFailed);
+            }
+
+            let named = match picked {
+                Some(picked) => picked,
+                None => worktrees::default_ref(&repo, &default),
+            };
+
             let Some(commit) = worktrees::resolve(&repo, &named) else {
                 return Err(Adopted::NoBaseCommit);
             };
@@ -758,7 +818,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             // have moved since. Which clause refused it is the answer to the
             // button: each of them is a different thing to go and do about it.
             match crate::stages::startable(&repo, &commit, &roadmap) {
-                Startable::Stage(abandoned) => Ok((commit, abandoned.stage)),
+                Startable::Stage(abandoned) => Ok((commit, named, abandoned.stage)),
                 Startable::NoRoadmap => Err(Adopted::NoRoadmap),
                 Startable::Complete => Err(Adopted::RoadmapComplete),
                 Startable::InFlight => Err(Adopted::StageInFlight),
@@ -769,7 +829,10 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     })
     .await?;
 
-    let (commit, stage) = match read {
+    // `named` comes back out rather than being worked out again up here: what an
+    // unpicked base resolved through is decided inside, after the fetch, and the
+    // Timeline is owed the name the branch actually came off.
+    let (commit, named, stage) = match read {
         Ok(read) => read,
         Err(refusal) => return Ok(refusal),
     };

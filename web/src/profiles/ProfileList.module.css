@@ -1,0 +1,170 @@
+/* The Agent Profiles section of the settings page: the list of what is saved,
+   and the one form that both adds and rewrites — see `ProfileList.tsx`.
+
+   The Repos below are the same card read the same way, and their module
+   carries a copy of it rather than either of them sharing one: two lists that
+   look alike today are still two lists, and a rule they held in common would
+   make every change to one a decision about the other.
+
+   The heading each section of this page is topped with is `sectionHead`, page
+   vocabulary rather than this module's: it is defined once in `App.module.css`
+   and `ProfileList.tsx` writes it beside its own. */
+
+.profiles {
+  margin-bottom: 1.5rem;
+}
+
+.profiles h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* A saved profile is a list row with its two controls on the far end: nowhere
+   to go, but two things to do to it. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.row > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.row .title {
+  font-weight: 600;
+}
+
+.row .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* What is quoted rather than said: the pair's two paths, and every model name
+   the account can launch. */
+.row .path,
+.row .model {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Which one the modal over the page is about, said in the accent border — the
+   same mark the open conversation carries. */
+.row.editing {
+  border-color: var(--accent);
+}
+
+/* A profile whose pair has gone. Said in the row rather than only in the words
+   under it, because a list is scanned before it is read — and those words are
+   the same class one level down, which is what tells the two rules apart. */
+.row.broken {
+  border-color: var(--removed);
+}
+
+.row .broken {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.actions .remove {
+  color: var(--removed);
+}
+
+/* One form for both saving and rewriting — a profile is four fields with
+   nothing built from them yet, so editing one is filling the same form in with
+   what it already says — and it is drawn over the page as a modal, so the box
+   around it is the card the modal already draws. */
+.form h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.form label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.form label code {
+  font-size: 0.9em;
+}
+
+/* The models are the one field that is a list, so they are the one taken in a
+   textarea — drawn as the inputs around it, because it is the same kind of
+   typing with room for more than one line of it. */
+.form input,
+.form textarea {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.85rem;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.form textarea {
+  resize: vertical;
+}
+
+.buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.buttons button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The one button that undoes rather than does, drawn as the outline of the one
+   beside it — as the brief editor's cancel is. */
+.buttons .cancel {
+  color: var(--accent);
+  background: none;
+}
+
+.form .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}

@@ -11,8 +11,19 @@
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { describe, expect, it } from "vitest";
 
-import stylesheet from "../src/main.css?raw";
 import { Menu } from "../src/Menu";
+// The one menu, both ways: the hashed names to query the page by, and the
+// source to read the rules off, jsdom laying nothing out to read them from.
+import menu from "../src/Menu.module.css";
+import stylesheet from "../src/Menu.module.css?raw";
+// The two schemes' palettes, which is where the shadow itself is named.
+import tokens from "../src/styles/base.css?raw";
+// The callers' paint, each in the module of the component that passes the
+// class: a caller's class is hashed, so it reaches this component's parts by
+// the elements they are rather than by a name it cannot spell.
+import standing from "../src/set/Standing.module.css?raw";
+import sidebar from "../src/workbench/Conversations.module.css?raw";
+import timeline from "../src/workbench/Timeline.module.css?raw";
 
 /// A menu with one row in it, which is enough of one to press.
 function mount(): { container: HTMLElement; opened: () => number } {
@@ -39,12 +50,12 @@ function mount(): { container: HTMLElement; opened: () => number } {
 
 /// The trigger, which is the only part of a closed menu on the page.
 function trigger(container: ParentNode): HTMLButtonElement {
-  return container.querySelector<HTMLButtonElement>(".menu-trigger")!;
+  return container.querySelector<HTMLButtonElement>(`.${menu.trigger}`)!;
 }
 
 /// What it drops, or nothing where it is closed.
 function drop(container: ParentNode): HTMLElement | null {
-  return container.querySelector<HTMLElement>(".menu-drop");
+  return container.querySelector<HTMLElement>(`.${menu.drop}`);
 }
 
 describe("a dropdown menu", () => {
@@ -102,7 +113,7 @@ describe("a dropdown menu", () => {
     const { container } = mount();
     fireEvent.click(trigger(container));
 
-    fireEvent.click(container.querySelector(".menu-backdrop")!);
+    fireEvent.click(container.querySelector(`.${menu.backdrop}`)!);
 
     await waitFor(() => expect(drop(container)).toBeNull());
   });
@@ -152,26 +163,45 @@ describe("a dropdown menu", () => {
   });
 });
 
-/// The two ⋯ triggers — the sidebar's and the Conversation's — are one rule
-/// rather than one each, for the same reason: they sit in the same place in
-/// their two pane headers and mean the same thing there, so a change to one of
-/// them is a change to both.
+/// The two ⋯ triggers — the sidebar's and the Conversation's — sit in the same
+/// place in their two pane headers and mean the same thing there, so they are
+/// painted alike. Each in its own caller's module, because the class the rule
+/// hangs off is that caller's and a caller's class is hashed; what used to be
+/// one rule is two that have to go on saying the same thing, and this is what
+/// says so.
 describe("the ⋯ at the head of a pane", () => {
-  it("is painted once for the two places there is one", () => {
-    expect(stylesheet).toContain(
-      ".workbench-actions > .menu-trigger,\n.conversation-actions > .menu-trigger {",
+  it("is painted the same in the two places there is one", () => {
+    expect(paint(".workbenchActions > button", sidebar)).toEqual(
+      paint(".conversationActions > button", timeline),
+    );
+  });
+
+  /// And what it says when the menu under it is down, which is the other half
+  /// of the same paint.
+  it("darkens the same while its menu is open", () => {
+    expect(
+      paint('.workbenchActions > button[aria-expanded="true"]', sidebar),
+    ).toEqual(
+      paint('.conversationActions > button[aria-expanded="true"]', timeline),
     );
   });
 });
 
-/// What one rule declares, read off the stylesheet by the selector that carries
+/// What one rule declares and nothing about which selector carries it, so that
+/// two rules written against two callers' classes can be held to saying the
+/// same thing.
+function paint(selector: string, sheet: string): string {
+  return block(selector, sheet).replace(`\n${selector} {`, "");
+}
+
+/// What one rule declares, read off a stylesheet by the selector that carries
 /// it. Enough to say what a menu is painted with, and no more.
-function block(selector: string): string {
-  const at = stylesheet.indexOf(`\n${selector} {\n`);
+function block(selector: string, sheet: string = stylesheet): string {
+  const at = sheet.indexOf(`\n${selector} {\n`);
   expect(at, `expected the stylesheet to hold \`${selector}\``).toBeGreaterThan(
     -1,
   );
-  return stylesheet.slice(at, stylesheet.indexOf("\n}", at));
+  return sheet.slice(at, sheet.indexOf("\n}", at));
 }
 
 /// One shadow rather than one apiece, which is the visible half of there being
@@ -179,25 +209,27 @@ function block(selector: string): string {
 /// be plain which of the two is in front.
 describe("what every menu is drawn with", () => {
   it("stands off the page by the one shared shadow", () => {
-    expect(block(".menu-drop")).toContain("box-shadow: var(--lift);");
+    expect(block(".drop")).toContain("box-shadow: var(--lift);");
   });
 
   /// In both schemes, because the light-mode shadow is invisible on dark paper
   /// and the dark-mode one would be a bruise on light.
   it("defines that shadow for either paper", () => {
-    expect(stylesheet.match(/--lift:/g)).toHaveLength(2);
+    expect(tokens.match(/--lift:/g)).toHaveLength(2);
   });
 
   /// The point of the unification: no menu carries a shadow of its own to drift
   /// away from the shared one.
   it("leaves no menu a shadow of its own", () => {
-    for (const menu of [
-      ".new-conversation > .menu-drop",
-      ".workbench-actions > .menu-drop",
-      ".conversation-actions > .menu-drop",
-      ".standing > .menu-drop",
-    ]) {
-      expect(block(menu)).not.toContain("box-shadow");
+    const callers: [string, string][] = [
+      ['.newConversation > [role="menu"]', sidebar],
+      ['.workbenchActions > [role="menu"]', sidebar],
+      ['.conversationActions > [role="menu"]', timeline],
+      ['.standing > [role="menu"]', standing],
+    ];
+
+    for (const [caller, sheet] of callers) {
+      expect(block(caller, sheet)).not.toContain("box-shadow");
     }
   });
 });

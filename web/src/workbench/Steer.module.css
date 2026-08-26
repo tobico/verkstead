@@ -1,0 +1,172 @@
+/* Steering a conversation: one question — where does this go? — with whatever
+   the target it picks needs under it, drawn over the page as the profile form
+   above is. The card is the modal's; what is here is the form inside it.
+
+   The run has already stopped by the time any of this is on the screen, which is
+   what the line under the heading says: the click froze the world, and cancel
+   leaves it frozen with resume on offer. */
+.steerConversation h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.steerConversation > form > .lead {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The targets, as a group of radios with a line under each saying what it means
+   — the actions menu's arrangement, and for its reason: the words between two of
+   these are the difference between an hour of work and none. */
+.steerTargets {
+  margin: 0 0 1rem;
+  padding: 0;
+  border: 0;
+}
+
+.steerTargets legend {
+  padding: 0;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.steerTarget + .steerTarget {
+  margin-top: 0.75rem;
+}
+
+.steerTarget label,
+.steerInterrupt label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-weight: 600;
+}
+
+.steerTarget .optionNote,
+.steerInterrupt .optionNote {
+  margin: 0.25rem 0 0 1.5rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The new round's brief and what the interview is primed with, drawn only under
+   grilling. A textarea the size of a paragraph rather than of a document: what
+   goes here is a brief, and one long enough to need scrolling is one to write in
+   the drafting pane. */
+.steerBrief {
+  margin: 0 0 1rem;
+}
+
+.steerBrief > label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.steerBrief textarea {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  font: inherit;
+  color: var(--ink);
+  resize: vertical;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.steerBrief .fieldNote {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The digest, which is a choice about the same round: kept in the brief's own
+   block rather than set apart, and drawn as the interrupt's checkbox is. */
+.steerBrief .steerDigest {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin-top: 0.9rem;
+  font-weight: 600;
+}
+
+.steerBrief .steerDigest + .fieldNote {
+  margin-left: 1.5rem;
+}
+
+/* What the work runs under from here, drawn only under a target something runs
+   in. A label above the control rather than beside it, as the setup pane's two
+   pickers are: the line under it says the thing worth reading twice, which is
+   that this is settled on the conversation rather than on one run. */
+.steerPairing {
+  margin: 0 0 1rem;
+}
+
+.steerPairing label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.steerPairing select {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.steerPairing .fieldNote {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The one control here that is about the world rather than about the move, so it
+   is set apart from the targets by a rule rather than by spacing alone. */
+.steerInterrupt {
+  padding-top: 0.9rem;
+  margin-bottom: 1rem;
+  border-top: 1px solid var(--edge);
+}
+
+.steerButtons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.steerButtons .steer,
+.steerButtons .cancel {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.steerButtons .steer:disabled,
+.steerButtons .cancel:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The one that undoes rather than does, drawn as the outline of the one beside
+   it — as the profile form's cancel is. */
+.steerButtons .cancel {
+  color: var(--accent);
+  background: none;
+}
+
+.steerConversation .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}

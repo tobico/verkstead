@@ -236,7 +236,7 @@ $ cargo fmt
 $ nix fmt                 # the Nix files
 $ nix flake check         # the viewer's suite, and the NixOS module in a VM
 
-$ tools/generate-icons.sh # the PWA icons, after editing their SVG
+$ tools/generate-icons.sh # the favicon and PWA icons, after replacing the artwork
 ```
 
 And in `web/`, which is the Solid viewer
@@ -290,10 +290,28 @@ The worker itself does no caching; every list and every Set is read from live
 SQLite, and a cached copy of one that has since been answered is worse to the
 human than a failure to load.
 
-The icons are all one SVG, `assets/icons/verkstead.svg`, rasterized by the
-script above (using `resvg` from the dev shell) to the PNG sizes the manifest
-and iOS ask for. The PNGs are committed so a build needs nothing but cargo — edit the
-SVG and re-run the script rather than touching them.
+The icons are all downscaled by the script above (using ImageMagick from the dev
+shell) to the sizes the favicon, the manifest and iOS ask for. The smaller PNGs
+are committed so a build needs nothing but cargo — replace the artwork and
+re-run the script rather than touching them.
+
+There are three pieces of artwork, because one square does not serve every size
+and every platform:
+
+| Artwork | Cut into | Why it is its own file |
+| --- | --- | --- |
+| `icons/verkstead.png` | `icon-192`, `icon-512` | The full mark on a transparent field: the manifest's icons, and the sidebar's at `3rem` |
+| `icons/verkstead-hammer.png` | `icon-32` | The hammer alone — at 32px the full mark is a grey smudge with confetti on it, and no filter rescues artwork with too much in it for the size |
+| `icons/verkstead-bg.jpg` | `apple-touch-icon.png` | The only one drawn with a field of its own, because iOS composites a transparent icon onto black |
+
+The iOS icon used to be the full mark flattened onto the manifest's
+`theme_color`; now it carries its own field, so the browser chrome's colour and
+the icon's are no longer the same value and nothing keeps them in step.
+
+The manifest asks for `any` rather than `any maskable`: the artwork runs to the
+edges of its square, and a launcher masking it to a circle would cut the hammer
+and the anvil's horn off. Art with a margin inside it could claim `maskable`
+back.
 
 The tests run the real server in-process, so the round trip they check is the
 one an agent gets — including the quickstart above, whose example files

@@ -765,6 +765,58 @@ mod tests {
         );
     }
 
+    /// And the inline session carries its own branch the rest of the way: pushed,
+    /// and opened as a draft pull request the target repository's own way. There is
+    /// no step after this one, so a skill that held the branch back would leave the
+    /// run with nowhere to go.
+    #[test]
+    fn the_implementation_skill_opens_the_pull_request_itself() {
+        let implementing = skill("implementing/SKILL.md");
+
+        assert!(
+            implementing.contains("docs/agents/git-workflow.md")
+                && implementing.contains("Finish sequence"),
+            "the process is the repository's, read out of the file that records it: \
+             {implementing}"
+        );
+        assert!(
+            implementing.contains("gh stack submit --auto"),
+            "a stacked branch is submitted as a stack: {implementing}"
+        );
+        assert!(
+            implementing.contains("gh pr create --draft"),
+            "and an unstacked one opens a draft PR of its own: {implementing}"
+        );
+        assert!(
+            !implementing.contains("Do not push"),
+            "nothing holds the branch back any more — the session that built the work \
+             carries it to a PR: {implementing}"
+        );
+        assert!(
+            implementing.contains("Nothing waits on approval here either"),
+            "and there is no gate in front of that either, as there is in front of \
+             none: {implementing}"
+        );
+    }
+
+    /// And a session that arrives to find the work already committed carries that
+    /// to the pull request rather than reading *nothing to build* as *nothing to
+    /// do*.
+    ///
+    /// The case Resume makes: the first session built the work and went before it
+    /// pushed, and the fresh one launched over it is the only thing left that can
+    /// finish the run.
+    #[test]
+    fn the_implementation_skill_says_what_a_second_session_does() {
+        let implementing = skill("implementing/SKILL.md");
+
+        assert!(
+            implementing.contains("Nothing to build is not nothing to do"),
+            "a session that finds the work already committed carries it on rather \
+             than ending on nothing: {implementing}"
+        );
+    }
+
     /// What the breakdown produces is a `.tasks/` backlog in the repository, so
     /// the fork has to say what to write and where — Verkstead reads it back off
     /// the branch and owns none of it.

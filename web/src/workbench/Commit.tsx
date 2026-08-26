@@ -42,15 +42,23 @@ import {
   type JSX,
 } from "solid-js";
 
+import app from "../App.module.css";
 import { Switch as Toggle } from "../Switch";
 import { loadCommitPane } from "../api/client";
 import type { CommitEvent, ConversationView } from "../api/types";
 import { setWrapping, wrapping } from "../device";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
 import { Contents, navigation } from "../set/Contents";
 import { drawDiagrams } from "../set/diagrams";
 import type { Section } from "../set/outline";
+// The Diff section, drawn as the Set page draws it: the box, the column of
+// files, and what the wrap switch does to the lines inside them. One definition
+// wherever a Diff is read — the renderer's own markup inside it is global.
+import diffStyles from "../set/Diff.module.css";
 import { files, spied } from "../set/outline";
+import styles from "./Commit.module.css";
+import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";
 
 /// What the diff section is reached by, from the nav's own heading line. Its
@@ -104,7 +112,7 @@ function Summary(props: { html: string; diagrams: boolean }): JSX.Element {
   return (
     <section
       id={SUMMARY}
-      class="commit-summary document markdown"
+      class={`${styles.summary} markdown`}
       ref={block}
       innerHTML={props.html}
     />
@@ -172,27 +180,23 @@ export function Commit(props: {
 
   return (
     <>
-      <div class="pane-head">
-        <button type="button" class="pane-back" onClick={props.back}>
-          ← Timeline
-        </button>
-        <h1>Commit</h1>
-        {/* The way back to what the conversation is, which is what this pane
-            shows when no event is open. */}
-        <button type="button" class="close-event" onClick={props.close}>
-          Close
-        </button>
-      </div>
+      {/* The Close is the way back to what the conversation is, which is what
+          this pane shows when no event is open. */}
+      <PaneHead
+        back={{ to: "Timeline", go: props.back }}
+        title="Commit"
+        close={props.close}
+      />
 
-      <div class="commit-header">
-        <p class="subject">{props.commit.subject}</p>
-        <p class="changed">
-          <span class="sha">{props.commit.sha.slice(0, ABBREVIATED)}</span>
-          <span class="files">
+      <div class={styles.header}>
+        <p class={styles.subject}>{props.commit.subject}</p>
+        <p class={styles.changed}>
+          <span class={styles.sha}>{props.commit.sha.slice(0, ABBREVIATED)}</span>
+          <span>
             {props.commit.files} {props.commit.files === 1 ? "file" : "files"}
           </span>
-          <span class="added">+{props.commit.insertions}</span>
-          <span class="removed">−{props.commit.deletions}</span>
+          <span class={styles.added}>+{props.commit.insertions}</span>
+          <span class={styles.removed}>−{props.commit.deletions}</span>
         </p>
       </div>
 
@@ -218,33 +222,35 @@ export function Commit(props: {
 
       <Switch>
         <Match when={opened.isPending}>
-          <p class="empty">Loading…</p>
+          <Empty>Loading…</Empty>
         </Match>
         <Match when={opened.isError}>
-          <p class="error">
+          <ErrorLine>
             Could not read this commit: {opened.error?.message}
-          </p>
+          </ErrorLine>
         </Match>
         <Match when={opened.data}>
           {(read) => (
             <Show
               when={read().diff}
-              fallback={
-                <p class="empty">This commit changed no files.</p>
-              }
+              fallback={<Empty>This commit changed no files.</Empty>}
             >
               {(diff) => (
                 <section
-                  class={wrapped() ? "diff wrapped" : "diff"}
+                  class={
+                    wrapped()
+                      ? `${diffStyles.diff} ${diffStyles.wrapped}`
+                      : diffStyles.diff
+                  }
                   id={DIFF}
                 >
-                  <div class="section-head">
-                    <h2 class="section-heading">Diff</h2>
+                  <div class={app.sectionHead}>
+                    <h2 class={app.sectionHeading}>Diff</h2>
                     <Toggle label="Word wrap" on={wrapped()} flip={flip} />
                   </div>
                   {/* The per-file folds and their anchors are stamped by the
                       renderer, since this arrives already rendered. */}
-                  <div class="diff-files" innerHTML={diff().html} />
+                  <div class={diffStyles.diffFiles} innerHTML={diff().html} />
                 </section>
               )}
             </Show>

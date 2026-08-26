@@ -22,21 +22,22 @@ import { Notifications } from "../push/Notifications";
 import { RepoList } from "../repos/RepoList";
 import { UpdateNotice } from "../update/UpdateNotice";
 import { Credentials } from "./Credentials";
+import styles from "./SettingsPage.module.css";
 
 /// The settings page, whole.
 export function SettingsPage(): JSX.Element {
   return (
-    <div class="list-page">
+    <div class={styles.listPage}>
       {/* The way back to the workbench, in the slot every page keeps for where
           else there is to go. */}
-      <A class="back" href="/">
+      <A class={styles.back} href="/">
         ← Workbench
       </A>
       {/* On the title's line rather than in a section of its own: whether this
           device is told about a Question Set is one switch, and a switch is
           small enough to live in the space the heading was leaving empty
           anyway. */}
-      <div class="page-head">
+      <div class={styles.pageHead}>
         <h1>Settings</h1>
         <Notifications />
       </div>

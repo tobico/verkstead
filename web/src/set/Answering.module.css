@@ -1,0 +1,38 @@
+/* The sheet a waiting Set is answered on — see `Answering.tsx`.
+
+   The Questions themselves are the sheet's vocabulary, one definition for the
+   form and the record alike: this module imports `Sheet.module.css` for every
+   one of them. What is here is the two things only the form has — the submit
+   that ends the agent's wait, and what it says when the Response did not get
+   through. */
+
+/* The submit sits at the foot of the column, after the last thing there is to
+   read — it is the end of the page, not a bar hovering over it. */
+.submit {
+  margin-top: 1.75rem;
+}
+
+/* It stands where a card stands rather than inside one, so the measure alone
+   would leave it a card's padding short of the prose above it — see `main` in
+   `styles/base.css`, where the measure is named. */
+.submit button {
+  width: 100%;
+  max-width: calc(var(--measure) + 2rem);
+  padding: 0.8rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+
+.submit button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.submit .failure {
+  margin-bottom: 0;
+}

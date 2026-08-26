@@ -1,0 +1,89 @@
+/* Every dropdown menu in the UI, which is one component — see `Menu.tsx`. The
+   chrome is here and only the paint is each menu's own: they hang the same way,
+   they are dismissed the same way, and they stand off the page by the same
+   shadow, which is what says a menu is in front of what it covers.
+
+   What is *not* the chrome is each menu's own paint: the trigger it drops from
+   and the width of what it drops. Those rules are written against a class of the
+   caller's and a class of this component's at once, and a caller's class is
+   hashed, so they belong to the caller rather than here — it paints its trigger
+   and its drop from its own module, reaching them by the elements they are: the
+   trigger is the one button the menu holds directly, and the drop is the one
+   thing in it with a menu's role. Every caller does that now; `set/Standing`,
+   `workbench/Conversations` and `workbench/Timeline` are the three that paint
+   anything. */
+
+/* The anchor everything below hangs from. */
+.menu {
+  position: relative;
+}
+
+/* The trigger keeps almost nothing of its own: what one of these looks like is
+   the caller's, and they look nothing like each other — a full-width button, a
+   pill, an ellipsis. Only the two things every one of them is. */
+.trigger {
+  font: inherit;
+  cursor: pointer;
+}
+
+.trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* What a press away from the open menu lands on, so that it lands on nothing
+   else: a stray press that opened a conversation, or answered a question, is
+   not a small thing on either page. Invisible, unlike a dialog's wash — a menu
+   is not in front of the page the way a dialog is, it is only on top of it. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+}
+
+/* The menu itself, hung under the trigger's far end. Over the page rather than
+   in the flow of it, so opening one does not move what it was opened from. */
+.drop {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 3;
+  padding: 0.3rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  box-shadow: var(--lift);
+}
+
+/* Every row of every menu: drawn as the text it is rather than as a control,
+   because a menu of buttons that looked like buttons would read as a form to
+   fill in. */
+.drop button,
+.drop a[role="menuitem"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  text-decoration: none;
+  text-align: start;
+  background: transparent;
+  border: 0;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.drop button:hover,
+.drop button:focus-visible,
+.drop a[role="menuitem"]:hover,
+.drop a[role="menuitem"]:focus-visible {
+  background: var(--paper);
+}
+
+.drop button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+

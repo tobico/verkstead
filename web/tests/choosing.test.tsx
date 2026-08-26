@@ -11,8 +11,15 @@
 import { fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import stylesheet from "../src/main.css?raw";
+// The page's own vocabulary, both ways: the hashed names to query the page by,
+// and the source to read the Gutter's own rules off, jsdom laying nothing out
+// to read them from.
+import app from "../src/App.module.css";
+import sheet from "../src/set/Sheet.module.css";
+import stylesheet from "../src/set/Sheet.module.css?raw";
 import type { Direction, Submitted } from "../src/api/types";
+import contents from "../src/set/Contents.module.css";
+import submitting from "../src/set/Answering.module.css";
 import { draftKey } from "../src/set/sheet";
 import { answering, sent, texts } from "./reading";
 import { json, readable } from "./serving";
@@ -59,7 +66,7 @@ describe("the chooser on a Set that carries a proposal", () => {
   it("offers all three directions, whichever one was recommended", async () => {
     const { page } = await answering(PROPOSING);
 
-    expect(texts(page, ".direction-pick .direction-name")).toEqual([
+    expect(texts(page, `.${sheet.directionPick} .${sheet.directionName}`)).toEqual([
       "Implement inline",
       "Break into a task list",
       "Stage a roadmap",
@@ -69,13 +76,13 @@ describe("the chooser on a Set that carries a proposal", () => {
   it("marks the agent's recommendation without picking it", async () => {
     const { page } = await answering(PROPOSING);
 
-    const recommended = page.querySelectorAll(".direction-pick .recommended");
+    const recommended = page.querySelectorAll(`.${sheet.directionPick} .${sheet.recommended}`);
     expect(recommended).toHaveLength(1);
-    expect(recommended[0]!.querySelector(".direction-name")!.textContent).toBe(
+    expect(recommended[0]!.querySelector(`.${sheet.directionName}`)!.textContent).toBe(
       "Break into a task list",
     );
     expect(
-      recommended[0]!.querySelector(".star"),
+      recommended[0]!.querySelector(`.${sheet.star}`),
       "marked with the ★ an Option's Recommendation carries",
     ).toBeTruthy();
 
@@ -90,7 +97,7 @@ describe("the chooser on a Set that carries a proposal", () => {
   it("draws the agent's reasoning beside the choices", async () => {
     const { page } = await answering(PROPOSING);
 
-    const rationale = page.querySelector(".direction-pick .ask .text");
+    const rationale = page.querySelector(`.${sheet.directionPick} .${sheet.ask} .${sheet.text}`);
     expect(rationale, "expected the rationale on the page").toBeTruthy();
     expect(rationale!.textContent).toContain("Five changes that barely touch");
     expect(
@@ -105,7 +112,7 @@ describe("the chooser on a Set that carries a proposal", () => {
   it("asks it the way a question is asked, labelled End", async () => {
     const { page } = await answering(PROPOSING);
 
-    const label = page.querySelector(".direction-card .ask .text .label");
+    const label = page.querySelector(`.${sheet.directionCard} .${sheet.ask} .${sheet.text} .${sheet.label}`);
     expect(label, "expected the ask's label on the chooser").toBeTruthy();
     expect(label!.textContent).toBe("End");
   });
@@ -117,13 +124,19 @@ describe("the chooser on a Set that carries a proposal", () => {
   it("is a headed section holding one question-like card", async () => {
     const { page } = await answering(PROPOSING);
 
-    const heading = page.querySelector(".direction-pick > h2.section-heading");
+    const heading = page.querySelector(
+      `.${sheet.directionPick} > h2.${app.sectionHeading}`,
+    );
     expect(heading, "expected the section's heading over the card").toBeTruthy();
     expect(heading!.textContent).toBe("Direction");
 
-    const card = page.querySelector(".direction-pick > .direction-card");
+    const card = page.querySelector(`.${sheet.directionPick} > .${sheet.directionCard}`);
     expect(card, "expected the card under the heading").toBeTruthy();
-    for (const part of [".ask .text .label", ".directions", ".semantics"]) {
+    for (const part of [
+      `.${sheet.ask} .${sheet.text} .${sheet.label}`,
+      `.${sheet.directions}`,
+      `.${sheet.semantics}`,
+    ]) {
       expect(
         card!.querySelector(part),
         `${part} belongs inside the card, as a question's parts do`,
@@ -134,7 +147,7 @@ describe("the chooser on a Set that carries a proposal", () => {
   it("says what picking one does, so the Preface does not have to", async () => {
     const { page } = await answering(PROPOSING);
 
-    const said = page.querySelector(".direction-pick .semantics")!.textContent!;
+    const said = page.querySelector(`.${sheet.directionPick} .${sheet.semantics}`)!.textContent!;
     expect(said).toContain("accepts the proposal");
     expect(said, "and how to disagree, which is the whole way back").toContain(
       "sends it back",
@@ -144,15 +157,15 @@ describe("the chooser on a Set that carries a proposal", () => {
   it("is not drawn at all on an ordinary Set", async () => {
     const { page } = await answering(ORDINARY);
 
-    expect(page.querySelector(".direction-pick")).toBeNull();
+    expect(page.querySelector(`.${sheet.directionPick}`)).toBeNull();
   });
 
   it("is named in the table of contents, under the Questions", async () => {
     const { page } = await answering(PROPOSING);
 
-    const nav = page.querySelector("nav.contents")!;
+    const nav = page.querySelector(`nav.${contents.contents}`)!;
     expect(
-      [...nav.querySelectorAll("a.contents-link")].map((link) =>
+      [...nav.querySelectorAll(`a.${contents.link}`)].map((link) =>
         link.getAttribute("href"),
       ),
     ).toEqual(["#preface", "#questions", "#q9", "#direction", "#postscript"]);
@@ -205,7 +218,7 @@ describe("picking a direction", () => {
     );
 
     fireEvent.click(offered(page, "inline"));
-    fireEvent.click(page.querySelector(".submit button")!);
+    fireEvent.click(page.querySelector(`.${submitting.submit} button`)!);
 
     await waitFor(() => expect(sent(fetching)).toBeTruthy());
     expect(
@@ -220,7 +233,7 @@ describe("picking a direction", () => {
       submitted("Accepted"),
     );
 
-    fireEvent.click(page.querySelector(".submit button")!);
+    fireEvent.click(page.querySelector(`.${submitting.submit} button`)!);
 
     // The warning stands between the human and a Set with an offered choice
     // left open — this Set has none, so the Response goes straight out.
@@ -236,15 +249,15 @@ describe("the record a picked-on Set becomes", () => {
   it("marks what was chosen apart from what was recommended", async () => {
     const { page } = await answering(PROPOSED);
 
-    const chosen = page.querySelectorAll(".direction-pick .chosen");
+    const chosen = page.querySelectorAll(`.${sheet.directionPick} .${sheet.chosen}`);
     expect(chosen).toHaveLength(1);
-    expect(chosen[0]!.querySelector(".direction-name")!.textContent).toBe(
+    expect(chosen[0]!.querySelector(`.${sheet.directionName}`)!.textContent).toBe(
       "Implement inline",
     );
 
-    const recommended = page.querySelectorAll(".direction-pick .recommended");
+    const recommended = page.querySelectorAll(`.${sheet.directionPick} .${sheet.recommended}`);
     expect(
-      recommended[0]!.querySelector(".direction-name")!.textContent,
+      recommended[0]!.querySelector(`.${sheet.directionName}`)!.textContent,
       "the ★ still says what was argued for, which was not what was picked",
     ).toBe("Break into a task list");
   });
@@ -254,7 +267,7 @@ describe("the record a picked-on Set becomes", () => {
   it("reads back as the question it was asked as", async () => {
     const { page } = await answering(PROPOSED);
 
-    const label = page.querySelector(".direction-card .ask .text .label");
+    const label = page.querySelector(`.${sheet.directionCard} .${sheet.ask} .${sheet.text} .${sheet.label}`);
     expect(label, "expected the ask's label on the record").toBeTruthy();
     expect(label!.textContent).toBe("End");
   });
@@ -265,11 +278,13 @@ describe("the record a picked-on Set becomes", () => {
   it("keeps the heading and the card on the settled record", async () => {
     const { page } = await answering(PROPOSED);
 
-    const heading = page.querySelector(".direction-pick > h2.section-heading");
+    const heading = page.querySelector(
+      `.${sheet.directionPick} > h2.${app.sectionHeading}`,
+    );
     expect(heading, "expected the heading over the record").toBeTruthy();
     expect(heading!.textContent).toBe("Direction");
     expect(
-      page.querySelector(".direction-pick > .direction-card .directions"),
+      page.querySelector(`.${sheet.directionPick} > .${sheet.directionCard} .${sheet.directions}`),
       "and the three inside the card, as they were picked from",
     ).toBeTruthy();
   });
@@ -278,7 +293,7 @@ describe("the record a picked-on Set becomes", () => {
     const { page } = await answering(PROPOSED);
 
     expect(
-      texts(page, ".direction-pick .direction-name"),
+      texts(page, `.${sheet.directionPick} .${sheet.directionName}`),
       "what was turned down is half of what the decision was",
     ).toEqual([
       "Implement inline",
@@ -286,7 +301,7 @@ describe("the record a picked-on Set becomes", () => {
       "Stage a roadmap",
     ]);
     expect(
-      page.querySelectorAll('.direction-pick input[type="radio"]'),
+      page.querySelectorAll(`.${sheet.directionPick} input[type="radio"]`),
       "and there is nothing left to press: a Set is answered once",
     ).toHaveLength(0);
   });
@@ -304,17 +319,17 @@ describe("the card in the wide-window Gutter", () => {
   it("reserves the Gutter like the page's other cards", () => {
     expect(
       declares(
-        ".preface-body,\n  .postscript-card,\n  .direction-card,\n  .question",
+        ".prefaceBody,\n  .directionCard,\n  .question",
       ),
     ).toContain("--bleed: var(--gutter);");
   });
 
   it("hangs the End label in the Gutter the card reserved", () => {
-    expect(stylesheet).toContain(".direction-card > .ask > .text > .label {");
+    expect(stylesheet).toContain(".directionCard > .ask > .text > .label {");
     expect(
       stylesheet,
       "and no longer off the section, which reserves no Gutter of its own",
-    ).not.toContain(".direction-pick > .ask > .text > .label");
+    ).not.toContain(".directionPick > .ask > .text > .label");
   });
 });
 

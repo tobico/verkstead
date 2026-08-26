@@ -1,0 +1,30 @@
+/* The three lines the app falls back on: that there is nothing here, that
+   something went wrong, and what a control does not say for itself.
+
+   Every rule in this file is the whole of what one of them looks like. A
+   context that wants one tighter, indented or in another colour styles the
+   class it hands the component — see the `class` prop in `notices.tsx` — and
+   what it writes lands beside these rather than instead of them. */
+
+/* Nothing to show, in the quiet the rest of a list is read in: an empty list
+   and a list still loading are both this, because neither is anything the eye
+   should stop on. */
+.empty {
+  color: var(--ink-soft);
+}
+
+/* And what did not work, in the one colour on the page that means it. Loud
+   enough to be found on a form that scrolled, because a failure nobody sees is
+   a save that quietly did not happen. */
+.error {
+  color: #b3382c;
+}
+
+/* What a control does not say for itself, tucked under it: half a line's gap
+   rather than a paragraph's, so the words read as belonging to the thing above
+   them rather than as the next thing down the page. */
+.note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}

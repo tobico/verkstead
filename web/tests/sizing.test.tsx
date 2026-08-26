@@ -16,7 +16,13 @@
 import { fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import stylesheet from "../src/main.css?raw";
+// The terminal's own scroller, which is the one thing here still written beside
+// the Screen rather than beside the pane it fills.
+import screenCss from "../src/workbench/Screen.module.css?raw";
+// The frame, both ways: the hashed names to query the page by, and the source
+// to read the rules that jsdom lays nothing out for.
+import shell from "../src/workbench/Workbench.module.css";
+import stylesheet from "../src/workbench/Workbench.module.css?raw";
 import {
   ALL_THREE,
   BESIDE,
@@ -68,7 +74,7 @@ async function bench(width: Parameters<typeof windowIs>[0]) {
   theWorkbench();
 
   const { container } = mount();
-  const frame = await drawn<HTMLElement>(container, ".workbench");
+  const frame = await drawn<HTMLElement>(container, `.${shell.workbench}`);
 
   frame.getBoundingClientRect = () =>
     ({ left: 0, right: FRAME, width: FRAME, top: 0, bottom: 0, height: 0 }) as DOMRect;
@@ -78,7 +84,7 @@ async function bench(width: Parameters<typeof windowIs>[0]) {
 
 /// The dividers on the page, in the order they part the panes.
 function dividers(container: ParentNode): HTMLElement[] {
-  return [...container.querySelectorAll<HTMLElement>(".pane-divider")];
+  return [...container.querySelectorAll<HTMLElement>(`.${shell.divider}`)];
 }
 
 /// Drag a divider to a point across the frame and let go of it.
@@ -355,14 +361,14 @@ describe("the rules the widths are read by", () => {
   /// sees and everybody notices.
   it("draws the border on the divider rather than on the panes", () => {
     expect(stylesheet).toContain(
-      ".pane-divider {\n" +
+      ".divider {\n" +
         "  position: relative;\n" +
         "  width: 0.5rem;\n" +
         "  cursor: col-resize;\n" +
         "  touch-action: none;\n}",
     );
     expect(stylesheet).toContain(
-      ".pane-divider::before {\n" +
+      ".divider::before {\n" +
         '  content: "";\n' +
         "  position: absolute;\n" +
         "  inset-block: 0;\n" +
@@ -382,14 +388,14 @@ describe("the rules the widths are read by", () => {
   /// it has.
   it("caps the details pane's content at the page's own measure", () => {
     expect(stylesheet).toContain(
-      ".workbench > .details-pane {\n" +
+      ".workbench > .detailsPane {\n" +
         "  padding-inline: max(1rem, (100% - 60rem) / 2);\n}",
     );
 
     // And the pane a terminal fills is still the pane that ends where the
     // window does: the cap is inline, and says nothing about a height.
     expect(stylesheet).toContain(
-      ".workbench > .details-pane:has(.screen) {\n" +
+      ".workbench > .detailsPane:has(.paneScreen) {\n" +
         "  flex-direction: column;\n" +
         "  height: 100dvh;\n",
     );
@@ -424,13 +430,13 @@ describe("the rules the widths are read by", () => {
     // is the only place it could win.
     expect(stylesheet).toContain(
       `@media ${BESIDE} {\n` +
-        "  .workbench > .details-pane:has(.screen) {\n" +
+        "  .workbench > .detailsPane:has(.paneScreen) {\n" +
         "    height: auto;\n  }\n}",
     );
 
     // And the terminal inside it, which is a scroller of its own.
-    expect(stylesheet).toMatch(
-      /\.screen \.terminal-host \{[^}]*overscroll-behavior: contain;/,
+    expect(screenCss).toMatch(
+      /\.screen \.terminalHost \{[^}]*overscroll-behavior: contain;/,
     );
   });
 });

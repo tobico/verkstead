@@ -64,7 +64,7 @@ stage_title: string, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused";
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused";
 
 /**
  * The stage an adoption would start, named.
@@ -774,7 +774,7 @@ export type Direction = "inline" | "task-list" | "roadmap";
  * Brief, pick another commit, deal with a branch that is already there. A
  * single "cannot start" would leave them guessing which.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
 
 /**
  * The handoff document as the page receives it.
