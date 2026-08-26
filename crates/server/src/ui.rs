@@ -28,12 +28,13 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationClosed,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationView, Cursor,
-    GrillingStarted, Lifecycle, NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit,
-    SettingsSaved, SettingsView, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
-    Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    GrillingStarted, Lifecycle, Locked, NewAdoption, NewConversation, NewOrder, ProfileChoice,
+    ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed, SetReading, SetView,
+    SettingsEdit, SettingsSaved, SettingsView, Standing, SteerOpened, SteerSubmission, Submitted,
+    Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
+    Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -48,7 +49,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
     axum::Router::new()
         .route("/api/ui/sets/{id}", get(set))
         .route("/api/ui/sets/{id}/response", post(submit_response))
-        .route("/api/ui/sets/{id}/archive", post(archive_set))
+        .route("/api/ui/sets/{id}/lock", post(lock_set))
         .route("/api/ui/repos", get(repos).post(register_repo))
         // What one Repo's branches are, which is what a drafting Conversation
         // picks the one it comes off out of. Under the Repo rather than under
@@ -314,8 +315,8 @@ fn standing(
                 response: answered.response,
             })
         }
-        Some(store::Settlement::ArchivedUnanswered(archived)) => {
-            Standing::ArchivedUnanswered(archived.archived_at)
+        Some(store::Settlement::LockedUnanswered(locked)) => {
+            Standing::LockedUnanswered(locked.locked_at)
         }
         None if deferred => Standing::Waiting(verkstead_schema::Liveness::Deferred),
         None => Standing::Waiting(state.waits.liveness(set_id, created_at, now)),
@@ -352,7 +353,7 @@ async fn submit_response(
         }
         store::Submission::AlreadyAnswered => Submitted::AlreadyAnswered,
         store::Submission::NoSuchSet => Submitted::NoSuchSet,
-        store::Submission::Archived => Submitted::Archived,
+        store::Submission::Locked => Submitted::Locked,
         store::Submission::Invalid(invalid) => {
             Submitted::Rejected(invalid.violations.iter().map(ToString::to_string).collect())
         }
@@ -360,30 +361,30 @@ async fn submit_response(
     .into_response()
 }
 
-/// `POST /api/ui/sets/{id}/archive` — close a Set unanswered.
+/// `POST /api/ui/sets/{id}/lock` — close a Set unanswered.
 ///
 /// The human declaring that nobody is ever going to answer it, so it stops being
 /// something that is waiting on them. Only ever reached from a browser
 /// (ADR-0001) — the agent API has no route for it, because a disconnected agent
 /// is not evidence: the CLI reconnects through transient drops.
-async fn archive_set(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+async fn lock_set(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
-        return Json(Archived::NoSuchSet).into_response();
+        return Json(Locked::NoSuchSet).into_response();
     };
 
-    let archiving = match store::archive_set(&state.pool, &state.settlements, id).await {
-        Ok(archiving) => archiving,
+    let locking = match store::lock_set(&state.pool, &state.settlements, id).await {
+        Ok(locking) => locking,
         Err(error) => {
-            tracing::error!(error = ?error, set_id = id, "archiving a Set failed");
-            return unavailable("the Question Set could not be archived");
+            tracing::error!(error = ?error, set_id = id, "locking a Set failed");
+            return unavailable("the Question Set could not be locked");
         }
     };
 
-    Json(match archiving {
-        store::Archiving::Archived(_) => Archived::Closed,
-        store::Archiving::AlreadyAnswered => Archived::AlreadyAnswered,
-        store::Archiving::AlreadyArchived => Archived::AlreadyArchived,
-        store::Archiving::NoSuchSet => Archived::NoSuchSet,
+    Json(match locking {
+        store::Locking::Locked(_) => Locked::Closed,
+        store::Locking::AlreadyAnswered => Locked::AlreadyAnswered,
+        store::Locking::AlreadyLocked => Locked::AlreadyLocked,
+        store::Locking::NoSuchSet => Locked::NoSuchSet,
     })
     .into_response()
 }

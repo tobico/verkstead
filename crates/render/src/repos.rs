@@ -2,7 +2,7 @@
 //! and what it is handed back.
 //!
 //! Every way registering can be refused is a named outcome rather than a status
-//! code, as answering and archiving are — because each of them is a different
+//! code, as answering and locking are — because each of them is a different
 //! sentence to put in front of the human, and none of them is something to
 //! retry. A path outside the Watched Paths is the boundary doing its job, not an
 //! error.

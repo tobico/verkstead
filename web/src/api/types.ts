@@ -234,11 +234,6 @@ error: string,
 violations?: Array<Violation>, };
 
 /**
- * What became of the human closing a Set unanswered.
- */
-export type Archived = "Closed" | "AlreadyAnswered" | "AlreadyArchived" | "NoSuchSet";
-
-/**
  * A Question or a Sub-question as the page draws it: the name it answers to,
  * its text already rendered, and the Options it offers.
  *
@@ -802,12 +797,17 @@ export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Do
  *
  * Display state only (ADR-0001). A disconnected Set is still answerable and is
  * never withdrawn on its own — the CLI reconnects through transient drops, and
- * only a human may archive a Set whose agent is really gone.
+ * only a human may lock a Set whose agent is really gone.
  *
  * It is a verdict rather than a timestamp because the server has the clock and
  * the registry of held waits; the browser only draws what it is told.
  */
 export type Liveness = "waiting" | "disconnected" | "deferred";
+
+/**
+ * What became of the human closing a Set unanswered.
+ */
+export type Locked = "Closed" | "AlreadyAnswered" | "AlreadyLocked" | "NoSuchSet";
 
 /**
  * A Manual Task as the page receives it: what was asked for, and when.
@@ -1528,7 +1528,7 @@ stages: Array<StageEntry>, };
 /**
  * How a Set stands: still waiting on the human, answered, or closed unanswered.
  */
-export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "ArchivedUnanswered": string };
+export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "LockedUnanswered": string };
 
 /**
  * What became of starting one.
@@ -1684,7 +1684,7 @@ export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "Done";
 /**
  * What became of the human's Response.
  */
-export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Archived" | { "Rejected": Array<string> };
+export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> };
 
 /**
  * What became of a device asking to be notified.
@@ -1882,7 +1882,7 @@ id: number, line: string, };
  * should find it exactly as the agent sent it.
  *
  * No `standing` and no title. Answering is checked against Questions nobody
- * here can read, so it is not offered, and neither is archiving; and what the
+ * here can read, so it is not offered, and neither is locking; and what the
  * Set was called is in the body along with everything else, said once rather
  * than half-recovered into a heading.
  */

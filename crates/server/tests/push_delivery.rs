@@ -278,13 +278,13 @@ async fn answer(app: &Router, id: i64) {
 }
 
 /// Close a Set unanswered the way the viewer does.
-async fn archive(app: &Router, id: i64) {
+async fn lock(app: &Router, id: i64) {
     let http = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/api/ui/sets/{id}/archive"))
+                .uri(format!("/api/ui/sets/{id}/lock"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from("{}"))
                 .unwrap(),
@@ -294,7 +294,7 @@ async fn archive(app: &Router, id: i64) {
 
     let status = http.status();
     let body = body_text(http).await;
-    assert_eq!(status, StatusCode::OK, "archiving failed: {body}");
+    assert_eq!(status, StatusCode::OK, "locking failed: {body}");
 }
 
 /// Wait until the push service has taken `count` pushes, then hand them over.
@@ -439,7 +439,7 @@ async fn a_device_the_push_service_has_finished_with_is_dropped() {
 }
 
 #[tokio::test]
-async fn answering_or_archiving_a_set_sends_nothing() {
+async fn answering_or_locking_a_set_sends_nothing() {
     let (service, received) = push_service().await;
     let (_dir, _pool, app) = fresh_app().await;
 
@@ -450,7 +450,7 @@ async fn answering_or_archiving_a_set_sends_nothing() {
     pushes(&received, 2).await;
 
     answer(&app, answered.id).await;
-    archive(&app, closed.id).await;
+    lock(&app, closed.id).await;
     settle().await;
 
     assert_eq!(

@@ -17,13 +17,13 @@
 use ts_rs::TS;
 
 use crate::{
-    AbandonedRepo, Adopted, Archived, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
-    BriefEdit, BriefSaved, Capture, CommitPane, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, NewAdoption,
-    NewConversation, NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
-    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry,
-    Resumed, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, Shown, Started,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
+    AbandonedRepo, Adopted, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
+    BriefSaved, Capture, CommitPane, ConversationClosed, ConversationEntry, ConversationSteered,
+    ConversationStopped, ConversationView, GrillingStarted, Locked, NewAdoption, NewConversation,
+    NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry, Resumed,
+    Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, Shown, Started, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
     UpdateNotice, Watching,
 };
 
@@ -49,7 +49,7 @@ fn the_viewers_types_are_written_from_these() {
     // them is a Response, which the Set already brought along: it is what an
     // answered Set is read back with.
     Submitted::export_all(&config).unwrap();
-    Archived::export_all(&config).unwrap();
+    Locked::export_all(&config).unwrap();
 
     // The Repos Verkstead has been told about, and adding one by path.
     RepoEntry::export_all(&config).unwrap();

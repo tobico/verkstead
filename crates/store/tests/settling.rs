@@ -2,7 +2,7 @@
 //! and what it will no longer accept once it has.
 //!
 //! Read through the Timeline the Set is on, which is the one way there is to
-//! reach one. The standalone pending and archive lists that used to be the other
+//! reach one. The standalone pending and settled lists that used to be the other
 //! way are gone: a Set belongs to the Conversation it was asked from, and a
 //! second route into it would be a second thing to keep true.
 
@@ -11,8 +11,8 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{QuestionSet, Response, SetCreated};
 use verkstead_store::{
-    Archiving, Ask, Event, Settlement, Settlements, Submission, archive_set, ask, conversations,
-    insert_response, open_database, register_repo, start_conversation, submit_response, timeline,
+    Ask, Event, Locking, Settlement, Settlements, Submission, ask, conversations, insert_response,
+    lock_set, open_database, register_repo, start_conversation, submit_response, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -130,7 +130,7 @@ async fn a_set_nobody_has_answered_is_still_waiting_on_the_human() {
     assert_eq!(
         settlings(&pool).await,
         [("still waiting".to_owned(), None)],
-        "a Set settles by being answered or archived, not by anyone filing it",
+        "a Set settles by being answered or locked, not by anyone filing it",
     );
 }
 
@@ -159,7 +159,7 @@ async fn an_answered_set_carries_its_response_and_the_time_it_was_answered() {
 }
 
 #[tokio::test]
-async fn archiving_a_set_settles_it_unanswered_and_leaves_the_rest_waiting() {
+async fn locking_a_set_settles_it_unanswered_and_leaves_the_rest_waiting() {
     let (_dir, pool) = fresh_pool().await;
     let orphan = asked(&pool, &set("the one whose agent died"))
         .await
@@ -174,36 +174,70 @@ async fn archiving_a_set_settles_it_unanswered_and_leaves_the_rest_waiting() {
         "both are waiting on the human before either is closed",
     );
 
-    let archiving = archive_set(&pool, &settlements(), orphan.id).await.unwrap();
-    let Archiving::Archived(archived) = archiving else {
-        panic!("a Set nobody has answered should archive: {archiving:?}");
+    let locking = lock_set(&pool, &settlements(), orphan.id).await.unwrap();
+    let Locking::Locked(locked) = locking else {
+        panic!("a Set nobody has answered should lock: {locking:?}");
     };
-    assert_eq!(archived.set_id, orphan.id);
+    assert_eq!(locked.set_id, orphan.id);
 
     assert_eq!(
         settlings(&pool).await,
         [
             (
                 "the one whose agent died".to_owned(),
-                Some(Settlement::ArchivedUnanswered(archived)),
+                Some(Settlement::LockedUnanswered(locked)),
             ),
             ("still waiting".to_owned(), None),
         ],
-        "the point of archiving is that the Set stops reading as waiting — and \
+        "the point of locking is that the Set stops reading as waiting — and \
          that it says so without a Response, because there never was one",
     );
 }
 
+/// A database written before locking was called locking holds its locks in a
+/// table called `archivings`, and there is no migration machinery here to
+/// rename it with — so what that build put away has to read back as locked.
+///
+/// Written with raw SQL because that is what the older build left behind: the
+/// old name is the stored one and nothing else in this crate says it out loud.
 #[tokio::test]
-async fn an_answered_set_cannot_be_archived_unanswered() {
+async fn a_set_put_away_by_an_older_build_reads_back_as_locked() {
+    let (_dir, pool) = fresh_pool().await;
+    let orphan = asked(&pool, &set("put away before the rename"))
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO archivings (set_id, archived_at) VALUES (?, ?)")
+        .bind(orphan.id)
+        .bind("2026-08-01T09:07:11.000Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let Some(Settlement::LockedUnanswered(locked)) = settling(&pool, orphan.id).await else {
+        panic!("a Set the older build put away reads as locked");
+    };
+    assert_eq!(locked.set_id, orphan.id);
+    assert_eq!(locked.locked_at, "2026-08-01T09:07:11.000Z");
+
+    assert_eq!(
+        lock_set(&pool, &settlements(), orphan.id).await.unwrap(),
+        Locking::AlreadyLocked,
+        "and it is settled as much as one locked by this build: there is \
+         nothing left to do to it",
+    );
+}
+
+#[tokio::test]
+async fn an_answered_set_cannot_be_locked_unanswered() {
     let (_dir, pool) = fresh_pool().await;
     let decided = answer(&pool, "already answered").await;
     let before = settling(&pool, decided).await;
 
     assert_eq!(
-        archive_set(&pool, &settlements(), decided).await.unwrap(),
-        Archiving::AlreadyAnswered,
-        "a decision is not an orphan, and archiving is not a way to unmake one",
+        lock_set(&pool, &settlements(), decided).await.unwrap(),
+        Locking::AlreadyAnswered,
+        "a decision is not an orphan, and locking is not a way to unmake one",
     );
     assert_eq!(
         settling(&pool, decided).await,
@@ -213,57 +247,56 @@ async fn an_answered_set_cannot_be_archived_unanswered() {
 }
 
 #[tokio::test]
-async fn an_archived_set_will_not_take_a_response() {
+async fn a_locked_set_will_not_take_a_response() {
     let (_dir, pool) = fresh_pool().await;
     let orphan = asked(&pool, &set("closed unanswered")).await.unwrap();
-    archive_set(&pool, &settlements(), orphan.id).await.unwrap();
+    lock_set(&pool, &settlements(), orphan.id).await.unwrap();
 
     assert_eq!(
         submit_response(&pool, &settlements(), orphan.id, &Response::default())
             .await
             .unwrap(),
-        Submission::Archived,
-        "archiving closes a Set for good: it must not also become an answered one",
+        Submission::Locked,
+        "locking closes a Set for good: it must not also become an answered one",
     );
 
     assert!(
         matches!(
             settling(&pool, orphan.id).await,
-            Some(Settlement::ArchivedUnanswered(_))
+            Some(Settlement::LockedUnanswered(_))
         ),
         "and it is still the Set nobody ever answered",
     );
 }
 
 #[tokio::test]
-async fn archiving_a_set_twice_leaves_the_first_archiving_standing() {
+async fn locking_a_set_twice_leaves_the_first_locking_standing() {
     let (_dir, pool) = fresh_pool().await;
     let orphan = asked(&pool, &set("closed unanswered")).await.unwrap();
 
-    let Archiving::Archived(first) = archive_set(&pool, &settlements(), orphan.id).await.unwrap()
-    else {
-        panic!("the first archiving should have taken");
+    let Locking::Locked(first) = lock_set(&pool, &settlements(), orphan.id).await.unwrap() else {
+        panic!("the first locking should have taken");
     };
 
     // Two devices, or one page left open in a second tab.
     assert_eq!(
-        archive_set(&pool, &settlements(), orphan.id).await.unwrap(),
-        Archiving::AlreadyArchived,
+        lock_set(&pool, &settlements(), orphan.id).await.unwrap(),
+        Locking::AlreadyLocked,
     );
 
     assert_eq!(
         settling(&pool, orphan.id).await,
-        Some(Settlement::ArchivedUnanswered(first)),
+        Some(Settlement::LockedUnanswered(first)),
         "the Set was closed once, at the time it was closed",
     );
 }
 
 #[tokio::test]
-async fn there_is_nothing_to_archive_about_a_set_that_does_not_exist() {
+async fn there_is_nothing_to_lock_about_a_set_that_does_not_exist() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        archive_set(&pool, &settlements(), 404).await.unwrap(),
-        Archiving::NoSuchSet,
+        lock_set(&pool, &settlements(), 404).await.unwrap(),
+        Locking::NoSuchSet,
     );
 }

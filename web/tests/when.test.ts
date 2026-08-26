@@ -2,7 +2,7 @@
 //!
 //! The assertions are `crates/render/src/when.rs`'s own, against the same
 //! stamps: the two have to agree about how a settled Set is worded, because
-//! they word the same settlings — the Archive's rows on the server's side of
+//! they word the same settlings — the Lock's rows on the server's side of
 //! the wire, and the record of one Set on this side.
 
 import { describe, expect, it } from "vitest";

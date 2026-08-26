@@ -7,7 +7,7 @@
 //! nothing knows how to draw, applied to the Sets themselves.
 //!
 //! Nothing to press. Answering is checked against Questions nobody here can
-//! read, so there is no sheet to fill in and no Response to send; archiving is
+//! read, so there is no sheet to fill in and no Response to send; locking is
 //! not offered either, because closing a Set unanswered is a thing done about a
 //! Set somebody is reading, and this is a record to be fixed by a build that can
 //! read it.

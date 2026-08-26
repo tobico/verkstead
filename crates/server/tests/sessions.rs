@@ -4659,7 +4659,7 @@ async fn a_review_that_dies_on_its_own_ask_closes_its_questions_and_reads_the_br
         .clone();
 
     assert!(
-        matches!(standing, verkstead_render::Standing::ArchivedUnanswered(_)),
+        matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
         "with nothing left for the human to answer into: {standing:?}",
     );
     assert_eq!(
@@ -4759,7 +4759,7 @@ async fn a_restart_over_a_review_waiting_on_its_ask_stops_the_run_rather_than_le
         .clone();
 
     assert!(
-        matches!(standing, verkstead_render::Standing::ArchivedUnanswered(_)),
+        matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
         "with nothing left for the human to answer into: {standing:?}",
     );
 }
@@ -6075,7 +6075,7 @@ async fn a_restart_over_a_batch_waiting_on_its_ask_stops_the_run_and_reads_what_
         .clone();
 
     assert!(
-        matches!(standing, verkstead_render::Standing::ArchivedUnanswered(_)),
+        matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
         "with nothing left for the human to answer into: {standing:?}",
     );
     assert!(
@@ -10876,7 +10876,7 @@ async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
 /// every Set that came back, and does not open by asking again what was settled
 /// yesterday.
 ///
-/// And the Set the dead session left open is archived on the way past. Nothing
+/// And the Set the dead session left open is locked on the way past. Nothing
 /// is waiting on that Answer any more, so leaving it open would be the human
 /// answering into nothing.
 #[tokio::test]
@@ -10974,7 +10974,7 @@ async fn resuming_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_se
         .clone();
 
     assert!(
-        matches!(hanging, verkstead_render::Standing::ArchivedUnanswered(_)),
+        matches!(hanging, verkstead_render::Standing::LockedUnanswered(_)),
         "and nothing is left for the human to answer into: {hanging:?}",
     );
     assert_eq!(
@@ -10984,12 +10984,12 @@ async fn resuming_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_se
     );
 }
 
-/// And the Deferred Ask the dead session left behind is *not* archived, which is
+/// And the Deferred Ask the dead session left behind is *not* locked, which is
 /// the same rule read the other way.
 ///
 /// Nothing was ever waiting on one, so a session dying takes nothing away from
 /// it: the human answers it in their own time and the Answers are folded into
-/// whichever session builds next. Archiving it here would close a question they
+/// whichever session builds next. Locking it here would close a question they
 /// were meant to answer, on the grounds that nobody would read the answer — the
 /// one thing that is not true of a Deferred Ask.
 #[tokio::test]
@@ -11024,13 +11024,13 @@ async fn resuming_a_stalled_grilling_leaves_its_deferred_asks_open() {
             .clone()
     };
 
-    // Waited for on the blocking one, because that is the archiving the relaunch
+    // Waited for on the blocking one, because that is the locking the relaunch
     // does: once it has happened, the deferred one has been walked past too.
     let view = fixture
         .until(|view| {
             matches!(
                 standing(view, blocking),
-                verkstead_render::Standing::ArchivedUnanswered(_)
+                verkstead_render::Standing::LockedUnanswered(_)
             )
             .then(|| view.clone())
         })

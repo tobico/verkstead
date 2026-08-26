@@ -720,7 +720,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .context("indexing the Timeline by its Conversation")?;
 
     // The worktree hangs off a Conversation rather than being a column on it,
-    // as an archiving hangs off a Set: there is no migration machinery here and
+    // as a lock hangs off a Set: there is no migration machinery here and
     // `conversations` is STRICT and left alone. One worktree per Conversation,
     // by the primary key — and a Conversation that has none has no row, which is
     // both the state before grilling and the state after closing.
@@ -1023,7 +1023,7 @@ async fn started(
 ///
 /// The sources, in the order they appear below:
 ///
-/// - A **Question Set with no Response and no archiving** — an ask left open.
+/// - A **Question Set with no Response and no lock** — an ask left open.
 ///   Blocking and Deferred alike: what draws the human is that there is
 ///   something answerable, not whether the asking session is idling on it.
 /// - A **stop**, which is a Conversation nothing is driving any more and which
@@ -1390,8 +1390,12 @@ pub(crate) async fn settle(
 /// A Question Set's whole body *is* joined in, which is the one place this pays
 /// for a deserialization per Event — see [`SetOnTimeline`] for why there is
 /// nothing cheaper to read instead. One query all the same: the Sets, their
-/// Responses and their archivings hang off the same Event rows, and asking per
+/// Responses and their locks hang off the same Event rows, and asking per
 /// Set would be a read for every Question the human has ever been put.
+///
+/// `archivings` is where a lock is stored: the name it went under before
+/// locking was called locking, kept because there is no migration machinery
+/// here to rename a table with.
 pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<TimelineEvent>> {
     /// The columns in the order the query below selects them: the Event, the
     /// Set with however it was settled that is there for one kind of Event, and
@@ -1415,7 +1419,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
 
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT e.id, e.at, e.kind, e.body,
-                q.id, q.body, r.submitted_at, r.body, a.archived_at,
+                q.id, q.body, r.submitted_at, r.body, a.archived_at AS locked_at,
                 c.sha, c.subject, c.files, c.insertions, c.deletions
          FROM timeline_events e
          LEFT JOIN set_events s ON s.event_id = e.id
@@ -1475,7 +1479,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 set_body,
                 answered_at,
                 answer,
-                archived_at,
+                locked_at,
                 sha,
                 subject,
                 files,
@@ -1512,7 +1516,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                         // the Timeline is drawn around it — see
                         // [`super::Asked`].
                         set: super::Asked::read(body),
-                        settlement: settled(set_id, answered_at, answer, archived_at)?,
+                        settlement: settled(set_id, answered_at, answer, locked_at)?,
                         deferred: deferred.contains(&set_id),
                     })
                 })
@@ -1536,14 +1540,13 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
 /// How a Set on the Timeline was settled, out of the two rows that can settle
 /// one, or `None` while it is still waiting on the human.
 ///
-/// The Response wins where both are somehow there, exactly as the Archive's own
-/// listing has it: the answering is the decision, and it is the one already
-/// filed.
+/// The Response wins where both are somehow there: the answering is the
+/// decision, and a decision is not something a lock can take back.
 fn settled(
     set_id: i64,
     answered_at: Option<String>,
     answer: Option<String>,
-    archived_at: Option<String>,
+    locked_at: Option<String>,
 ) -> Result<Option<super::Settlement>> {
     if let Some((submitted_at, body)) = answered_at.zip(answer) {
         let response = serde_json::from_str(&body).with_context(|| {
@@ -1557,11 +1560,8 @@ fn settled(
         })));
     }
 
-    Ok(archived_at.map(|archived_at| {
-        super::Settlement::ArchivedUnanswered(super::SetArchived {
-            set_id,
-            archived_at,
-        })
+    Ok(locked_at.map(|locked_at| {
+        super::Settlement::LockedUnanswered(super::SetLocked { set_id, locked_at })
     }))
 }
 
@@ -1705,9 +1705,9 @@ pub async fn last_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Op
 /// move into Wrapping — and where there has been no such move, at the start of
 /// the Timeline, which is every Conversation that has not got that far.
 ///
-/// **And only the ones still standing.** A Set archived unanswered is one nobody
+/// **And only the ones still standing.** A Set locked unanswered is one nobody
 /// is ever going to answer, which is what Verkstead closes a proposal whose
-/// session is gone as — see [`super::archive_set`]. Counting one would be the
+/// session is gone as — see [`super::lock_set`]. Counting one would be the
 /// same mistake the other way about: the review it found asking is a question
 /// nothing is left to act on, so no fresh reading of the branch could ever be
 /// recognised as the review of this wrap.
@@ -1922,7 +1922,7 @@ async fn landed_since(pool: &SqlitePool, conversation_id: i64, submitted_at: &st
 /// A Question Set of this Conversation's that arrived after `event_id` and is
 /// still waiting to be answered, or `None` where none is.
 ///
-/// Unanswered *and* unarchived: a Set the human closed without answering is one
+/// Unanswered *and* unlocked: a Set the human closed without answering is one
 /// nothing is coming for, so it is settled as much as an answered one is.
 ///
 /// The Event id is what makes it *whose* Set. Nothing else on the record says

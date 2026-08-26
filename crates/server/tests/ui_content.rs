@@ -403,14 +403,14 @@ async fn answered_set(
 
 /// A Set the human closed unanswered: the third standing, and the one with no
 /// Response behind it.
-async fn archived_set(app: &Router, pool: &SqlitePool, set: &QuestionSet) -> (SetView, String) {
+async fn locked_set(app: &Router, pool: &SqlitePool, set: &QuestionSet) -> (SetView, String) {
     let stored = put(pool, set).await.unwrap();
-    let archiving = store::archive_set(pool, &store::Settlements::new(1), stored.id)
+    let locking = store::lock_set(pool, &store::Settlements::new(1), stored.id)
         .await
         .unwrap();
     assert!(
-        matches!(archiving, store::Archiving::Archived(_)),
-        "a freshly stored Set archives unanswered: {archiving:?}"
+        matches!(locking, store::Locking::Locked(_)),
+        "a freshly stored Set locks unanswered: {locking:?}"
     );
 
     fetch_set(app, stored.id).await
@@ -849,11 +849,11 @@ async fn a_settled_sets_material_is_rendered_the_way_a_waiting_ones_is() {
     let (_dir, pool, app) = fresh_app().await;
 
     let (answered, _) = answered_set(&app, &pool, &marked_up_set(), &decided_every_way()).await;
-    let (archived, _) = archived_set(&app, &pool, &marked_up_set()).await;
+    let (locked, _) = locked_set(&app, &pool, &marked_up_set()).await;
 
     // A settled Set is read for what was asked as well as for what was decided,
     // so nothing about the rendering turns on where it stands.
-    for set in [&answered, &archived] {
+    for set in [&answered, &locked] {
         assert!(
             set.questions[0]
                 .ask
@@ -1088,14 +1088,14 @@ async fn a_set_says_where_it_stands_in_each_of_the_three_ways_it_can() {
     assert_eq!(response, decided_every_way());
     assert!(!submitted_at.is_empty(), "expected when it was answered");
 
-    let (archived, _) = archived_set(&app, &pool, &full_grammar_set()).await;
-    let Standing::ArchivedUnanswered(archived_at) = archived.standing else {
+    let (locked, _) = locked_set(&app, &pool, &full_grammar_set()).await;
+    let Standing::LockedUnanswered(locked_at) = locked.standing else {
         panic!(
             "expected a Set closed unanswered, got {:?}",
-            archived.standing
+            locked.standing
         );
     };
-    assert!(!archived_at.is_empty(), "expected when it was closed");
+    assert!(!locked_at.is_empty(), "expected when it was closed");
 }
 
 #[tokio::test]
@@ -1358,8 +1358,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     // And closed unanswered, which is the one standing with no Response behind it.
     let (_dir, pool, app) = fresh_app().await;
-    let (_, json) = archived_set(&app, &pool, &marked_up_set()).await;
-    write("set-archived.json", &pinned(&json));
+    let (_, json) = locked_set(&app, &pool, &marked_up_set()).await;
+    write("set-locked.json", &pinned(&json));
 
     // And the one that is no standing at all: a stored body this build cannot
     // read, which is the record drawn as itself with nothing to press.
@@ -2644,8 +2644,8 @@ fn pinned(json: &str) -> String {
 
     if let Some(answered) = standing.get_mut("Answered") {
         answered["submitted_at"] = settled.into();
-    } else if standing.get("ArchivedUnanswered").is_some() {
-        standing["ArchivedUnanswered"] = settled.into();
+    } else if standing.get("LockedUnanswered").is_some() {
+        standing["LockedUnanswered"] = settled.into();
     }
 
     serde_json::to_string(&payload).unwrap()

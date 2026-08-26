@@ -6,9 +6,9 @@
 //! arrives whole, and every Conversation named in it is placed at the position
 //! it arrived in.
 //!
-//! Beside the Conversations rather than as a column on them, for the reason the
-//! archivings are beside the Question Sets: there is no migration machinery
-//! here, `conversations` is STRICT, and a placement is a fact about the sidebar
+//! Beside the Conversations rather than as a column on them, for the reason a
+//! Set's lock is beside the Question Set: there is no migration machinery here,
+//! `conversations` is STRICT, and a placement is a fact about the sidebar
 //! rather than about the work.
 //!
 //! A Conversation with no row here has never been placed, and the sidebar puts

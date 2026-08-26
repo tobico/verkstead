@@ -20,8 +20,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    Archived, ConversationView, PushKey, QuestionSetEvent, SetReading, SetView, Standing,
-    Submitted, Subscribed, Subscription, TimelineEvent,
+    ConversationView, Locked, PushKey, QuestionSetEvent, SetReading, SetView, Standing, Submitted,
+    Subscribed, Subscription, TimelineEvent,
 };
 use verkstead_schema::{Answer, ApiError, Liveness, QuestionSet, Response, SetCreated};
 use verkstead_server::{open_database, router, store};
@@ -369,7 +369,7 @@ async fn the_badge_is_the_wait_the_agents_half_is_genuinely_holding() {
     );
 
     // The set view is fed from the same registry, because the two badges are one
-    // fact: the human archives a Set from its own page, with the badge in view.
+    // fact: the human locks a Set from its own page, with the badge in view.
     let set = get_set(&app, waited_on).await;
     assert_eq!(set.standing, Standing::Waiting(Liveness::Waiting));
     let orphaned = get_set(&app, orphan).await;
@@ -449,7 +449,7 @@ async fn the_timeline_tells_a_decision_from_a_set_nobody_ever_answered() {
     settle_at(&pool, decided_set.id, "2025-08-03T09:07:00.000Z").await;
 
     let orphan = asked(&pool, &bare("nobody ever answered")).await.unwrap();
-    store::archive_set(&pool, &store::Settlements::new(1), orphan.id)
+    store::lock_set(&pool, &store::Settlements::new(1), orphan.id)
         .await
         .unwrap();
 
@@ -465,7 +465,7 @@ async fn the_timeline_tells_a_decision_from_a_set_nobody_ever_answered() {
     };
     assert_eq!(answered.submitted_at, "2025-08-03T09:07:00.000Z");
 
-    let Standing::ArchivedUnanswered(closed_at) = &asked[1].standing else {
+    let Standing::LockedUnanswered(closed_at) = &asked[1].standing else {
         panic!(
             "expected a Set closed unanswered, got {:?}",
             asked[1].standing
@@ -630,20 +630,20 @@ async fn a_submit_to_a_set_that_is_gone_says_which_way_it_went() {
     let id = post_set(&app, SET).await;
     let body = serde_json::to_value(decided()).unwrap();
 
-    // Archived first, which closes it for good: a Response to one cannot make
+    // Locked first, which closes it for good: a Response to one cannot make
     // it an answered Set instead.
-    let archived: Archived = post(&app, &format!("/api/ui/sets/{id}/archive"), body.clone()).await;
-    assert_eq!(archived, Archived::Closed);
+    let locked: Locked = post(&app, &format!("/api/ui/sets/{id}/lock"), body.clone()).await;
+    assert_eq!(locked, Locked::Closed);
 
     let refused: Submitted = post(&app, &format!("/api/ui/sets/{id}/response"), body.clone()).await;
-    assert_eq!(refused, Submitted::Archived);
+    assert_eq!(refused, Submitted::Locked);
 
     let missing: Submitted = post(&app, "/api/ui/sets/9999/response", body).await;
     assert_eq!(missing, Submitted::NoSuchSet);
 }
 
 #[tokio::test]
-async fn archiving_a_set_ends_a_wait_held_on_it_and_files_it_unanswered() {
+async fn locking_a_set_ends_a_wait_held_on_it_and_files_it_unanswered() {
     let (_dir, _pool, app) = fresh_app().await;
     let id = post_set(&app, SET).await;
 
@@ -653,34 +653,34 @@ async fn archiving_a_set_ends_a_wait_held_on_it_and_files_it_unanswered() {
     });
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let outcome: Archived = post(
+    let outcome: Locked = post(
         &app,
-        &format!("/api/ui/sets/{id}/archive"),
+        &format!("/api/ui/sets/{id}/lock"),
         serde_json::json!({}),
     )
     .await;
-    assert_eq!(outcome, Archived::Closed);
+    assert_eq!(outcome, Locked::Closed);
 
     // Nothing is ever coming, and the CLI is told so rather than left polling.
     assert_eq!(agent.await.unwrap().status(), StatusCode::GONE);
 
     let asked = asked_sets(&app).await;
     assert!(
-        matches!(asked[0].standing, Standing::ArchivedUnanswered(_)),
+        matches!(asked[0].standing, Standing::LockedUnanswered(_)),
         "the Timeline stops claiming the Set is waiting, and says it was never \
          answered rather than showing a decision: {asked:?}"
     );
 
     let set = get_set(&app, id).await;
     assert!(
-        matches!(set.standing, Standing::ArchivedUnanswered(_)),
+        matches!(set.standing, Standing::LockedUnanswered(_)),
         "expected the Set closed unanswered, got {:?}",
         set.standing
     );
 }
 
 #[tokio::test]
-async fn archiving_says_what_it_found_when_the_set_had_already_gone() {
+async fn locking_says_what_it_found_when_the_set_had_already_gone() {
     let (_dir, _pool, app) = fresh_app().await;
     let answered_set = post_set(&app, SET).await;
     post::<Submitted>(
@@ -692,22 +692,16 @@ async fn archiving_says_what_it_found_when_the_set_had_already_gone() {
 
     let orphan = post_set(&app, SET).await;
     let empty = serde_json::json!({});
-    post::<Archived>(
-        &app,
-        &format!("/api/ui/sets/{orphan}/archive"),
-        empty.clone(),
-    )
-    .await;
+    post::<Locked>(&app, &format!("/api/ui/sets/{orphan}/lock"), empty.clone()).await;
 
     // A decision is not something to close, and one closing is enough.
     for (id, expected) in [
-        (answered_set, Archived::AlreadyAnswered),
-        (orphan, Archived::AlreadyArchived),
-        (9999, Archived::NoSuchSet),
+        (answered_set, Locked::AlreadyAnswered),
+        (orphan, Locked::AlreadyLocked),
+        (9999, Locked::NoSuchSet),
     ] {
-        let outcome: Archived =
-            post(&app, &format!("/api/ui/sets/{id}/archive"), empty.clone()).await;
-        assert_eq!(outcome, expected, "archiving {id} again");
+        let outcome: Locked = post(&app, &format!("/api/ui/sets/{id}/lock"), empty.clone()).await;
+        assert_eq!(outcome, expected, "locking {id} again");
     }
 }
 

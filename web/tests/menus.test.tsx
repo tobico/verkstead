@@ -149,7 +149,7 @@ describe("a dropdown menu", () => {
     expect(opened()).toBe(2);
   });
 
-  /// A disabled trigger still says what it says — a badge mid-archive is the
+  /// A disabled trigger still says what it says — a badge mid-lock is the
   /// case this is for — and drops nothing.
   it("does not open while its trigger is disabled", () => {
     const { container } = render(() => (

@@ -47,7 +47,7 @@ export function Menu(props: {
   /// enough to tell one menu on the page from another.
   name?: string;
   /// Whether the trigger takes a press. A disabled trigger still says what it
-  /// says — a badge mid-archive is the case this is for.
+  /// says — a badge with a locking in flight is the case this is for.
   disabled?: boolean;
   /// Said each time the menu is opened, for the caller that has something to
   /// reset before its rows are drawn again.

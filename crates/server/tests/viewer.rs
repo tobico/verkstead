@@ -87,7 +87,7 @@ async fn the_document_is_served_from_the_root() {
 async fn every_path_the_viewer_routes_on_is_answered_with_the_document() {
     // None of these exist as files. The router that knows them is the one in the
     // browser, and it cannot run until the document has been served to it.
-    for path in ["/archive", "/sets/12", "/sets/12/anything/deeper"] {
+    for path in ["/conversations", "/sets/12", "/sets/12/anything/deeper"] {
         let response = get(path).await;
 
         assert_eq!(response.status(), StatusCode::OK, "GET {path}");

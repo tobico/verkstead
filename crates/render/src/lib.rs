@@ -9,7 +9,7 @@
 //!
 //! The rest of what the viewer is handed lives here for the same reason, even
 //! where no markdown is involved: a Timeline's Events and the outcomes of
-//! answering and archiving are named states the viewer says in words. Taken
+//! answering and locking are named states the viewer says in words. Taken
 //! together these types *are* the viewer's side of the wire, which is what makes
 //! this the one crate the TypeScript is generated from — see the `typescript`
 //! feature in the manifest.
@@ -29,7 +29,7 @@ mod transcript;
 mod update;
 mod view;
 
-pub use answering::{Archived, Submitted};
+pub use answering::{Locked, Submitted};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent, BriefSaved,

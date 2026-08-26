@@ -1400,7 +1400,7 @@ function QuestionSet(props: {
 }): JSX.Element {
   const standing = () => props.asked.standing;
   const waiting = () => "Waiting" in standing();
-  const archived = () => "ArchivedUnanswered" in standing();
+  const locked = () => "LockedUnanswered" in standing();
 
   /// Whether the Set nobody has answered yet was a Deferred Ask. Read off the
   /// standing, which is where the fact lives while it matters: an answered Set
@@ -1430,7 +1430,7 @@ function QuestionSet(props: {
         <Show when={deferred()}>
           <span class={styles.deferred}>deferred</span>
         </Show>
-        <Show when={archived()}>
+        <Show when={locked()}>
           <span class={styles.closed}>closed unanswered</span>
         </Show>
       </span>

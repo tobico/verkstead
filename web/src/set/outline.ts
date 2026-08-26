@@ -177,7 +177,7 @@ export function closing(postscript: string | null): string {
 ///
 /// A waiting Set always has one: the comment box is on every Set, so there is
 /// always something down there to reach. A settled one has it only where
-/// something was actually said — a Postscript, a comment, or both. Archived
+/// something was actually said — a Postscript, a comment, or both. Locked
 /// unanswered with neither, the page ends at the Questions and so does the nav.
 function closes(set: SetView): string | null {
   const standing = set.standing;

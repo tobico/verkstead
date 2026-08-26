@@ -51,7 +51,7 @@
    badge's own half of this is in `Standing.module.css`, which is where the
    badge is. */
 .meta .answeredAt,
-.meta .archivedAt {
+.meta .lockedAt {
   margin-left: auto;
 }
 
@@ -477,7 +477,7 @@
    When it settled sits at the far end of the provenance line — see `.meta` — in
    the line's own quiet type, so the two classes need no rules of their own
    here: they exist to tell the two settlings apart, because nothing about an
-   archived Set was answered. */
+   locked Set was answered. */
 
 /* A Response that resolved nothing still decided something — that these were
    the wrong questions. It gets a card of its own so the page below it cannot be
@@ -589,7 +589,7 @@
 }
 
 /* The two confirm sheets — the warning before a Response goes out with
-   questions left open, and the one before a Set is archived. Both are drawn
+   questions left open, and the one before a Set is locked. Both are drawn
    through the same `Modal` the settings page's form is, so what is left here
    is their own words, and both are drawn from this module because the two
    sheets are one thing said twice: `Answering` draws the first and `Standing`

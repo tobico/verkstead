@@ -2361,11 +2361,11 @@ async fn only_row(app: &Router) -> ConversationEntry {
     sidebar[0].clone()
 }
 
-/// Archive a Set the way the human does with one nobody is waiting on.
-async fn archive(app: &Router, set_id: i64) -> verkstead_render::Archived {
+/// Lock a Set the way the human does with one nobody is waiting on.
+async fn lock(app: &Router, set_id: i64) -> verkstead_render::Locked {
     post(
         app,
-        &format!("/api/ui/sets/{set_id}/archive"),
+        &format!("/api/ui/sets/{set_id}/lock"),
         &serde_json::json!({}),
     )
     .await
@@ -2396,14 +2396,14 @@ async fn a_conversation_with_an_unanswered_set_is_waiting_on_the_human() {
 }
 
 #[tokio::test]
-async fn a_set_that_was_archived_unanswered_stops_drawing_the_human_too() {
+async fn a_set_that_was_locked_unanswered_stops_drawing_the_human_too() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
 
     let set = ask(&app, id, ORDINARY).await;
     assert!(only_row(&app).await.waiting);
 
-    archive(&app, set).await;
+    lock(&app, set).await;
     assert!(!only_row(&app).await.waiting);
 }
 

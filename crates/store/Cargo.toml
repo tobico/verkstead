@@ -18,7 +18,7 @@ sqlx.workspace = true
 # of its own rather than letting SQLite stamp the time.
 time.workspace = true
 # For `Settlements` only: the announcement that a Set has been settled has to
-# cross from whichever crate took the Response — or archived the Set — to
+# cross from whichever crate took the Response — or locked the Set — to
 # whichever is holding a wait.
 tokio = { workspace = true, features = ["sync"] }
 

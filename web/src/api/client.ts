@@ -9,7 +9,7 @@ import type {
   AbandonedRepo,
   Adopted,
   ApiError,
-  Archived,
+  Locked,
   BaseRecorded,
   BranchRenamed,
   BriefSaved,
@@ -78,7 +78,7 @@ export function loadSet(id: string): Promise<SetReading> {
 /// Answer a Set, which ends the wait the agent is holding on it.
 ///
 /// The outcome is the answer's body rather than its status: every one of them —
-/// taken, already answered, archived, refused by the grammar — is something the
+/// taken, already answered, locked, refused by the grammar — is something the
 /// page has to say in words, and only a server that could not answer at all
 /// throws.
 export function submitResponse(
@@ -91,8 +91,8 @@ export function submitResponse(
 /// Close a Set unanswered: the human declaring that nobody is ever going to
 /// answer it. There is nothing to send but the Set's own id, which is in the
 /// path.
-export function archiveSet(id: number): Promise<Archived> {
-  return post<Archived>(`/api/ui/sets/${id}/archive`);
+export function lockSet(id: number): Promise<Locked> {
+  return post<Locked>(`/api/ui/sets/${id}/lock`);
 }
 
 /// The Repos Verkstead has been told about, by name.

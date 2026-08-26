@@ -28,7 +28,7 @@ use crate::{AppState, MAX_HOLD, store};
 ///
 /// Malformed YAML is a 400; a Response that leaves a question unaccounted for
 /// is a 422 naming it. A Set is answered once: a second Response is a 409 and
-/// the first one stands. A Set the human archived unanswered is closed for good,
+/// the first one stands. A Set the human locked unanswered is closed for good,
 /// so a Response to one is a 410.
 pub(crate) async fn submit_response(
     State(state): State<AppState>,
@@ -61,7 +61,7 @@ pub(crate) async fn submit_response(
             yaml(StatusCode::CREATED, &taken.accepted)
         }
         Ok(Submission::NoSuchSet) => not_found(id),
-        Ok(Submission::Archived) => gone(id),
+        Ok(Submission::Locked) => gone(id),
         Ok(Submission::Invalid(invalid)) => yaml(
             StatusCode::UNPROCESSABLE_ENTITY,
             &ApiError::with_violations(
@@ -99,7 +99,7 @@ pub(crate) struct Wait {
 /// is a bare 204 meaning "nothing yet, come back". There is no expiry on the
 /// waiting itself: the client owns retry, so it simply opens another wait.
 ///
-/// A Set the human archived unanswered ends the wait with a 410 instead: nothing
+/// A Set the human locked unanswered ends the wait with a 410 instead: nothing
 /// is ever coming, and the client is told so rather than left polling a Set
 /// nobody will answer.
 pub(crate) async fn wait_for_response(
@@ -138,7 +138,7 @@ pub(crate) async fn wait_for_response(
             Ok(Some(Settlement::Answered(stored))) => {
                 return yaml(StatusCode::OK, &stored.response);
             }
-            Ok(Some(Settlement::ArchivedUnanswered(_))) => return gone(id),
+            Ok(Some(Settlement::LockedUnanswered(_))) => return gone(id),
             Ok(None) => {}
             Err(error) => {
                 tracing::error!(error = ?error, set_id = id, "loading a Response failed");
@@ -255,13 +255,13 @@ fn not_found(id: i64) -> HttpResponse {
     )
 }
 
-/// The Set was archived unanswered: it is closed, and no amount of retrying will
+/// The Set was locked unanswered: it is closed, and no amount of retrying will
 /// change that. The CLI treats this as fatal.
 fn gone(id: i64) -> HttpResponse {
     yaml(
         StatusCode::GONE,
         &ApiError::new(format!(
-            "Question Set {id} was archived unanswered, so it is closed"
+            "Question Set {id} was locked unanswered, so it is closed"
         )),
     )
 }

@@ -12,7 +12,7 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{Answer, Question, QuestionOption, QuestionSet, Response};
 use verkstead_store::{
-    Ask, Event, Settlements, archive_set, ask, insert_response, open_database, record_folded,
+    Ask, Event, Settlements, ask, insert_response, lock_set, open_database, record_folded,
     register_repo, start_conversation, submit_response, timeline, unanswered_set_since, unfolded,
 };
 
@@ -199,7 +199,7 @@ async fn only_answered_deferred_sets_are_waiting_to_be_folded() {
 
     let answered = asked(&pool, conversation, "answered", Ask::Deferred).await;
     asked(&pool, conversation, "unanswered", Ask::Deferred).await;
-    let archived = asked(&pool, conversation, "archived", Ask::Deferred).await;
+    let locked = asked(&pool, conversation, "locked", Ask::Deferred).await;
     let blocking = asked(&pool, conversation, "blocking", Ask::Blocking).await;
 
     for settled in [answered, blocking] {
@@ -209,9 +209,7 @@ async fn only_answered_deferred_sets_are_waiting_to_be_folded() {
             .expect("neither had a Response yet");
     }
 
-    archive_set(&pool, &Settlements::new(4), archived)
-        .await
-        .unwrap();
+    lock_set(&pool, &Settlements::new(4), locked).await.unwrap();
 
     assert_eq!(
         folding(&pool, conversation).await,

@@ -20,13 +20,13 @@
 //! **And except for what was left hanging.** A session that died mid-question
 //! leaves a **Blocking Ask** open with nothing waiting on the Answer: the human
 //! can still see it, still answer it, and nothing will ever read what they
-//! write. So the relaunch archives it unanswered first — the same archiving the
+//! write. So the relaunch locks it unanswered first — the same locking the
 //! human reaches by hand for a Set whose agent has gone.
 //!
 //! **A Deferred Ask is left standing**, and that is the same rule read the other
 //! way. Nothing was ever waiting on one — see [`crate::deferrals`] — so a dead
 //! session takes nothing away from it, and what the human writes is folded into
-//! the prompt of whichever session builds next. Archiving one here would close a
+//! the prompt of whichever session builds next. Locking one here would close a
 //! question they were meant to answer in their own time, and close it on the
 //! grounds that nobody would read the answer, which is the one thing that is not
 //! true of it.
@@ -154,13 +154,13 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
     drop(driving);
 }
 
-/// Archive every Question Set left open, so that nothing is left for the human
+/// Lock every Question Set left open, so that nothing is left for the human
 /// to answer into.
 ///
 /// An open Set is a question with a reader, and the reader has gone: the badge
 /// still says *blocked on you*, the Set still takes an Answer, and what the
-/// human writes goes nowhere. Archiving unanswered is what that Set has always
-/// meant — see [`store::archive_set`] — and this is Verkstead reaching for it on
+/// human writes goes nowhere. Locking unanswered is what that Set has always
+/// meant — see [`store::lock_set`] — and this is Verkstead reaching for it on
 /// their behalf, because it knows something they cannot see: the session that
 /// asked is not there any more, or is about to not be.
 ///
@@ -172,21 +172,21 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
 /// more than one open at once is unusual, but they were all orphaned by the same
 /// thing and none of them has anybody waiting on it.
 ///
-/// Nothing is refused for. A Set that will not archive is a Set the human can
-/// archive themselves from the page it is on, and stopping the relaunch over one
+/// Nothing is refused for. A Set that will not lock is a Set the human can
+/// lock themselves from the page it is on, and stopping the relaunch over one
 /// would leave the Conversation standing still with the press spent.
 async fn orphaned(state: &AppState, conversation_id: i64, timeline: &[store::TimelineEvent]) {
-    let mut archived = false;
+    let mut locked = false;
 
     for asked in open(timeline) {
-        match store::archive_set(&state.pool, &state.settlements, asked).await {
-            Ok(store::Archiving::Archived(_)) => {
-                archived = true;
+        match store::lock_set(&state.pool, &state.settlements, asked).await {
+            Ok(store::Locking::Locked(_)) => {
+                locked = true;
 
                 tracing::info!(
                     conversation_id,
                     set_id = asked,
-                    "a Question Set the dead grilling left open was archived as orphaned"
+                    "a Question Set the dead grilling left open was locked as orphaned"
                 );
             }
             Ok(other) => tracing::info!(
@@ -196,7 +196,7 @@ async fn orphaned(state: &AppState, conversation_id: i64, timeline: &[store::Tim
                 "a Question Set the dead grilling left open was settled before the relaunch reached it",
             ),
             Err(error) => {
-                tracing::error!(error = ?error, conversation_id, set_id = asked, "archiving an orphaned Question Set failed");
+                tracing::error!(error = ?error, conversation_id, set_id = asked, "locking an orphaned Question Set failed");
             }
         }
     }
@@ -204,7 +204,7 @@ async fn orphaned(state: &AppState, conversation_id: i64, timeline: &[store::Tim
     // The page the human is looking at is the page the Set was open on, and
     // what has just changed there is that it no longer is. Only where something
     // did change: a nudge is every open page going back to the store.
-    if archived {
+    if locked {
         state.nudges.announce(Nudge::Set {
             conversation: conversation_id,
         });
@@ -247,8 +247,8 @@ fn brief(timeline: &[store::TimelineEvent]) -> String {
 /// Everything the human has already answered, as one markdown document in the
 /// order it was asked.
 ///
-/// Answered Sets only. One archived unanswered is one nobody ever replied to —
-/// including, now, the one this very relaunch archived — and a heading over
+/// Answered Sets only. One locked unanswered is one nobody ever replied to —
+/// including, now, the one this very relaunch locked — and a heading over
 /// nothing would tell the new session that something had been said.
 ///
 /// Empty where nothing has been answered, which is a grilling that died before
@@ -422,7 +422,7 @@ comment: none of this is settled about the burst allowance
 
     /// Answered Sets, in the order they were asked, and nothing else. One
     /// nobody ever replied to is one nothing was said about — including the one
-    /// the relaunch has just archived on its way past.
+    /// the relaunch has just locked on its way past.
     #[test]
     fn only_what_was_answered_reaches_the_digest() {
         let timeline = vec![
@@ -431,9 +431,9 @@ comment: none of this is settled about the burst allowance
             on_timeline(
                 3,
                 13,
-                Some(store::Settlement::ArchivedUnanswered(store::SetArchived {
+                Some(store::Settlement::LockedUnanswered(store::SetLocked {
                     set_id: 13,
-                    archived_at: "2026-08-23T12:06:00Z".to_owned(),
+                    locked_at: "2026-08-23T12:06:00Z".to_owned(),
                 })),
             ),
         ];
@@ -448,7 +448,7 @@ comment: none of this is settled about the burst allowance
         assert_eq!(
             open(&timeline),
             vec![12],
-            "and the one still waiting on the human is the one to archive as orphaned",
+            "and the one still waiting on the human is the one to lock as orphaned",
         );
     }
 

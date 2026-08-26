@@ -546,7 +546,7 @@ _Avoid_: sync/async ask, hard/soft question, urgent question
 **Question Set**:
 A batch of Questions submitted together by one agent, with a Preface and a
 title. The unit that lands on a Conversation's Timeline, gets answered, and is
-archived. Reached through the Conversation it was asked from and nowhere else:
+locked. Reached through the Conversation it was asked from and nowhere else:
 a second way in would be a second thing to keep true.
 _Avoid_: request, batch, ticket
 
@@ -554,7 +554,7 @@ _Avoid_: request, batch, ticket
 What a stored Question Set is when the build looking at it cannot deserialize
 the body it was written as — ordinary schema movement, a field having left. It
 is drawn as a row saying so, on the Timeline it has always been on, with the
-stored body reachable and nothing offered to answer or archive it by. The rule
+stored body reachable and nothing offered to answer or lock it by. The rule
 is ADR-0006's, applied to the Sets themselves: keep what was written and defer
 rendering it, so that one record the schema has outrun costs its own row and
 never the Timeline around it. Nothing rewrites a body to make it readable —
@@ -669,12 +669,14 @@ never optional. There are none at present: the gates Topic was the only one,
 and it went when the last gate did.
 _Avoid_: section, chapter
 
-**Archive**:
-What Question Sets become once their Response is delivered (or once an orphaned
-Set is manually archived). Permanent decision history, and no longer a place of
-its own to browse: a settled Set stays on the Timeline it was asked from,
-saying what became of it. Nothing leaves a Timeline.
-_Avoid_: history, log
+**Locked**:
+What a Question Set becomes once it is settled — its Response delivered, or an
+orphaned Set put away unanswered by hand. Permanent decision history, and no
+place of its own to browse: a locked Set stays on the Timeline it was asked
+from, saying what became of it, and takes no Response ever again. Locking one
+by hand is the single irreversible act in the workbench, which is why it is the
+single one confirmed in as many words. Nothing leaves a Timeline.
+_Avoid_: archived, filed, history, log
 
 **Liveness**:
 Whether an agent is currently connected and waiting on a Question Set

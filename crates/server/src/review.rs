@@ -689,7 +689,7 @@ pub(crate) async fn unanswered(state: &AppState, set_id: i64) -> bool {
 /// Set left standing would be a question whose answer nothing would ever read —
 /// the session that asked it is not there to be woken, and no other session is
 /// ever handed somebody else's ask. Closing it is Verkstead reaching for the
-/// archive on the human's behalf because it knows something they cannot see,
+/// lock on the human's behalf because it knows something they cannot see,
 /// exactly as a relaunched grilling closes what its dead session left open — see
 /// [`crate::grillings`]. And it is what makes a Resume mean something: with
 /// nothing left standing, a fresh reading of the branch is recognised as this
@@ -747,8 +747,8 @@ async fn abandoned(
 /// Shared with the batch half, which closes its own the same way and for the same
 /// reason — see [`crate::responding`].
 pub(crate) async fn closed(state: &AppState, conversation_id: i64, set_id: i64) {
-    match store::archive_set(&state.pool, &state.settlements, set_id).await {
-        Ok(store::Archiving::Archived(_)) => tracing::info!(
+    match store::lock_set(&state.pool, &state.settlements, set_id).await {
+        Ok(store::Locking::Locked(_)) => tracing::info!(
             conversation_id,
             set_id,
             "the session that asked is gone, so its questions are closed unanswered"

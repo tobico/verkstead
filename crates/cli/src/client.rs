@@ -5,7 +5,7 @@
 //! "nothing yet", a dropped connection, a refused connection and a server
 //! restart are all the same thing here: go back and open another wait. Only
 //! delivery, a refusal the server will keep repeating — including the Set having
-//! been archived unanswered — or a kill ends it.
+//! been locked unanswered — or a kill ends it.
 
 use std::time::Duration;
 
@@ -151,7 +151,7 @@ impl Client {
             // only they can do and is not undone. Retrying would be waiting on a
             // Set nobody is ever going to answer.
             410 => Err(Interrupted::Fatal(anyhow!(
-                "Question Set {id} was archived unanswered — the human closed it \
+                "Question Set {id} was locked unanswered — the human closed it \
                  without answering, so no Response is coming"
             ))),
             status => {

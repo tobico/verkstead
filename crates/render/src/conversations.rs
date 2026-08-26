@@ -1151,7 +1151,7 @@ pub fn agent_output_event(
 /// A Question Set as an Event, summarised on the way.
 ///
 /// The Answers come out of `standing` rather than beside it: a Set that has not
-/// settled has none, one that was archived unanswered never will have, and one
+/// settled has none, one that was locked unanswered never will have, and one
 /// that was answered carries them — so the one field decides both what the table
 /// says and how it reads.
 pub fn question_set_event(
@@ -1163,7 +1163,7 @@ pub fn question_set_event(
 ) -> TimelineEvent {
     let response = match &standing {
         Standing::Answered(answered) => Some(&answered.response),
-        Standing::Waiting(_) | Standing::ArchivedUnanswered(_) => None,
+        Standing::Waiting(_) | Standing::LockedUnanswered(_) => None,
     };
 
     TimelineEvent::QuestionSet(QuestionSetEvent {

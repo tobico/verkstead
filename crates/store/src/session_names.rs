@@ -9,7 +9,7 @@
 //! belonging to somebody else's program.
 //!
 //! A table of its own rather than a column on the Capture, for the reason the
-//! archivings are a table of their own: there is no migration machinery here,
+//! Sets' locks are a table of their own: there is no migration machinery here,
 //! and a fact that arrived after the Capture did can be added beside it without
 //! one. One row per Event, because one Event is one session.
 //!

@@ -9,7 +9,7 @@
 import { fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Archived } from "../src/api/types";
+import type { Locked } from "../src/api/types";
 // The one menu, which the standing badge is the trigger of.
 import menu from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
@@ -21,7 +21,7 @@ import setPage from "../src/set/SetPage.module.css";
 import { draftKey } from "../src/set/sheet";
 import { answering, posts } from "./reading";
 import { json, readable } from "./serving";
-import archivedSet from "./fixtures/set-archived.json" with { type: "json" };
+import lockedSet from "./fixtures/set-locked.json" with { type: "json" };
 import waiting from "./fixtures/set-answering.json" with { type: "json" };
 
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
@@ -30,10 +30,10 @@ const WAITING = readable(waiting);
 
 /// The same Set once it has been closed: what the server answers with when the
 /// page reads it back where it stands.
-const ARCHIVED = { ...readable(archivedSet), id: WAITING.id };
+const LOCKED = { ...readable(lockedSet), id: WAITING.id };
 const KEY = draftKey(WAITING.id);
 
-const archived = (outcome: Archived) => json(outcome);
+const locked = (outcome: Locked) => json(outcome);
 
 /// The button reading `text`.
 function press(page: ParentNode, text: string) {
@@ -46,11 +46,11 @@ function press(page: ParentNode, text: string) {
 
 /// Open the standing menu — the badge is its title — and choose the one thing
 /// in it, which is the offer to close the Set unanswered.
-function reachForArchive(page: ParentNode) {
+function reachForLock(page: ParentNode) {
   const trigger = page.querySelector(`.${standing.standing} > .${menu.trigger}`);
   expect(trigger, "expected the badge to open the standing menu").toBeTruthy();
   fireEvent.click(trigger!);
-  press(page, "Archive unanswered");
+  press(page, "Lock unanswered");
 }
 
 beforeEach(() => {
@@ -67,27 +67,27 @@ describe("the offer to close a Set unanswered", () => {
     const { page } = await answering(WAITING);
 
     // The badge is the menu's title, and the offer is nowhere on the page
-    // until the menu is asked for: archiving is almost never the right thing
+    // until the menu is asked for: locking is almost never the right thing
     // to do to a Set.
     const trigger = page.querySelector(`.${standing.standing} > .${menu.trigger}`)!;
     expect(trigger.querySelector(`.${standing.liveness}`)!.textContent).toBe(
       "agent waiting",
     );
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(page.querySelector(`button.${standing.archive}`)).toBeNull();
+    expect(page.querySelector(`button.${standing.lock}`)).toBeNull();
 
     fireEvent.click(trigger);
 
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(page.querySelector(`button.${standing.archive}`)!.textContent).toBe(
-      "Archive unanswered",
+    expect(page.querySelector(`button.${standing.lock}`)!.textContent).toBe(
+      "Lock unanswered",
     );
 
     // And it is the one menu the rest of the UI drops, rather than a second
     // one built here — which is what says it takes Escape, takes a press away
     // from it and stands off the page the way every other menu does.
-    expect(page.querySelector(`.${standing.standing} > .${menu.drop} button.${standing.archive}`)).toBe(
-      page.querySelector(`button.${standing.archive}`),
+    expect(page.querySelector(`.${standing.standing} > .${menu.drop} button.${standing.lock}`)).toBe(
+      page.querySelector(`button.${standing.lock}`),
     );
   });
 
@@ -117,14 +117,14 @@ describe("the offer to close a Set unanswered", () => {
     expect(badge.className).toBe(`${standing.liveness} ${standing.deferred}`);
     expect(badge.textContent).toBe("no agent waiting");
 
-    reachForArchive(page);
+    reachForLock(page);
     expect(page.querySelector(`.${sheet.confirm}`)).toBeTruthy();
   });
 
   it("is not offered on a Set that has already settled", async () => {
     const { page } = await answering({
       ...WAITING,
-      standing: { ArchivedUnanswered: "2026-08-03T09:07:11.000Z" },
+      standing: { LockedUnanswered: "2026-08-03T09:07:11.000Z" },
     });
 
     expect(
@@ -133,10 +133,10 @@ describe("the offer to close a Set unanswered", () => {
     ).toBeNull();
   });
 
-  it("archives nothing until the human has confirmed it", async () => {
-    const { page, fetching } = await answering(WAITING, archived("Closed"));
+  it("locks nothing until the human has confirmed it", async () => {
+    const { page, fetching } = await answering(WAITING, locked("Closed"));
 
-    reachForArchive(page);
+    reachForLock(page);
 
     const asking = page.querySelector(`dialog.${sheet.confirm}`)!;
     expect((asking as HTMLDialogElement).open, "opened as a modal").toBe(true);
@@ -157,16 +157,16 @@ describe("the offer to close a Set unanswered", () => {
 });
 
 describe("closing a Set unanswered", () => {
-  it("settles it as archived and reads it back where it stands", async () => {
+  it("settles it as locked and reads it back where it stands", async () => {
     const { page, fetching, history, settles } = await answering(
       WAITING,
-      archived("Closed"),
+      locked("Closed"),
     );
     // What the page reads back once the Set is closed: it stays put, so the
     // sheet it redraws is the record of a Set nobody ever answered.
-    settles(ARCHIVED);
+    settles(LOCKED);
 
-    reachForArchive(page);
+    reachForLock(page);
     // The dialog's own button, which is the second one reading this.
     fireEvent.click(
       page.querySelector(`.${sheet.confirmActions} button:last-child`) as HTMLElement,
@@ -174,13 +174,13 @@ describe("closing a Set unanswered", () => {
 
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     const [path, init] = posts(fetching)[0]!;
-    expect(path).toBe(`/api/ui/sets/${WAITING.id}/archive`);
+    expect(path).toBe(`/api/ui/sets/${WAITING.id}/lock`);
     expect(init?.method).toBe("POST");
 
     // The Set was not discarded, it was closed — so the page stays on it and
     // says so, which is the confirmation that nothing was lost. The way out
     // leads where it always did: the Conversation this Set was asked from.
-    await waitFor(() => expect(page.querySelector(`.${sheet.archivedAt}`)).toBeTruthy());
+    await waitFor(() => expect(page.querySelector(`.${sheet.lockedAt}`)).toBeTruthy());
     expect(history.get()).toBe(`/sets/${WAITING.id}`);
     expect(page.querySelector(`a.${setPage.back}`)!.getAttribute("href")).toBe(
       `/conversations/${WAITING.conversation}`,
@@ -188,7 +188,7 @@ describe("closing a Set unanswered", () => {
   });
 
   it("drops the draft, which this Set can never take a Response from now", async () => {
-    const { page, fetching } = await answering(WAITING, archived("Closed"));
+    const { page, fetching } = await answering(WAITING, locked("Closed"));
 
     fireEvent.input(
       page.querySelector<HTMLTextAreaElement>("#set-comment")!,
@@ -196,7 +196,7 @@ describe("closing a Set unanswered", () => {
     );
     await waitFor(() => expect(localStorage.getItem(KEY)).toBeTruthy());
 
-    reachForArchive(page);
+    reachForLock(page);
     fireEvent.click(
       page.querySelector(`.${sheet.confirmActions} button:last-child`) as HTMLElement,
     );
@@ -205,15 +205,15 @@ describe("closing a Set unanswered", () => {
     await waitFor(() => expect(localStorage.getItem(KEY)).toBeNull());
   });
 
-  it("says why it was not archived, when it was not", async () => {
+  it("says why it was not locked, when it was not", async () => {
     for (const [outcome, said] of [
       ["AlreadyAnswered", "it stands as the decision that was made"],
-      ["AlreadyArchived", "This Set has already been archived."],
+      ["AlreadyLocked", "This Set has already been locked."],
       ["NoSuchSet", "This Set is no longer here."],
-    ] as Array<[Archived, string]>) {
-      const { page, fetching } = await answering(WAITING, archived(outcome));
+    ] as Array<[Locked, string]>) {
+      const { page, fetching } = await answering(WAITING, locked(outcome));
 
-      reachForArchive(page);
+      reachForLock(page);
       fireEvent.click(
         page.querySelector(`.${sheet.confirmActions} button:last-child`) as HTMLElement,
       );
@@ -230,10 +230,10 @@ describe("closing a Set unanswered", () => {
   it("says so in the server's own wording when it did not get through", async () => {
     const { page, fetching } = await answering(
       WAITING,
-      json({ error: "the Question Set could not be archived" }, 503),
+      json({ error: "the Question Set could not be locked" }, 503),
     );
 
-    reachForArchive(page);
+    reachForLock(page);
     fireEvent.click(
       page.querySelector(`.${sheet.confirmActions} button:last-child`) as HTMLElement,
     );
@@ -241,7 +241,7 @@ describe("closing a Set unanswered", () => {
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() =>
       expect(page.querySelector(`.${sheet.meta} .${notices.error}`)!.textContent).toContain(
-        "the Question Set could not be archived",
+        "the Question Set could not be locked",
       ),
     );
   });
