@@ -52,8 +52,6 @@
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--paper);
   background: var(--stopped);
   border: 0;
@@ -377,18 +375,16 @@
 
 /* A liveness said in words, which is the unanswered Set's badge alone: a
    session's own is the mark at the row's edge, because a Timeline of rows
-   shouting `RUNNING` is a Timeline nobody reads. The colour the accent already
-   is, because what a badge like this says is that something is waiting on the
-   human here rather than that something is wrong.
+   each saying `running` is a Timeline nobody reads. The colour the accent
+   already is, because what a badge like this says is that something is waiting
+   on the human here rather than that something is wrong.
 
    Said inside the head it is a badge in, rather than by the word alone: a live
-   Screen marks itself `live` too, and a bare rule would put the capitals
-   through xterm's whole grid. */
+   Screen marks itself `live` too, and a bare rule would put this badge's type
+   through the whole of xterm's grid. */
 .eventHead .live {
   font-size: 0.8rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--accent);
 }
 
@@ -522,14 +518,12 @@
 
 /* And a manual task a Verkstead of before was set going by hand, which reads
    as the same kind of thing once more: something that was asked for, on a
-   record nothing writes another of. The same rule at its left and for the same
-   reason — there is nothing to open and nothing to do about it — in the ink the
-   prose around it is set in, because the words are somebody's own. */
+   record nothing writes another of. A card like the events around it, in the
+   ink the prose around it is set in, because the words are somebody's own —
+   there is still nothing to open and nothing to do about it, so it carries
+   neither a pointer nor a control. */
 .timelineEvent > .manualTask {
-  margin: 0;
-  padding: 0.15rem 0 0.15rem 0.6rem;
   font-size: 0.9rem;
-  border-left: 2px solid var(--edge);
 }
 
 .timelineEvent > .manualTask > :first-child {
@@ -542,14 +536,12 @@
 
 /* And something Verkstead did on its own account, which reads as the same kind
    of thing again — a fact about the work, said by the one voice on a Timeline
-   that is neither the human's nor an agent's. Marked off by a rule at its left
-   rather than by a card: there is nothing to open, and nothing to do about it. */
+   that is neither the human's nor an agent's. A card like everything else in
+   the record, because it is one of the things that happened; the dim ink is
+   what keeps it quiet among them, rather than a rule at its left. */
 .timelineEvent > .notice {
-  margin: 0;
-  padding: 0.15rem 0 0.15rem 0.6rem;
   font-size: 0.9rem;
   color: var(--ink-soft);
-  border-left: 2px solid var(--edge);
 }
 
 .timelineEvent > .notice > :first-child {
@@ -561,11 +553,12 @@
 }
 
 /* And the one of them a conversation is blocked on, which the badge in the
-   header marks: the rule at its left takes the colour that means stopped, so a
-   long record says where the stop is at a glance. The one thing that ever
-   selects a notice — there is no pane behind it to open. */
+   header marks: its border takes the colour that means stopped, so a long
+   record says where the stop is at a glance — the card's own border, the way
+   every other selected card says it is the one being pointed at. The one thing
+   that ever selects a notice; there is no pane behind it to open. */
 .timelineEvent > .notice.selected {
-  border-left-color: var(--stopped);
+  border-color: var(--stopped);
 }
 
 /* What a session has printed, summarised. A button, because the whole of it is
@@ -665,8 +658,6 @@
 .questionSet .deferred {
   font-size: 0.8rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--ink-soft);
 }
 
@@ -675,8 +666,6 @@
 .questionSet .closed {
   font-size: 0.8rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--ink-soft);
 }
 

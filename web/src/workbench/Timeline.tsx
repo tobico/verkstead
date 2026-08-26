@@ -1038,11 +1038,11 @@ function Handoff(props: {
 /// branch went, a roadmap with nothing left to run — or a stop, which is what
 /// stopped the run, why, and what the evidence was.
 ///
-/// A line and not a card, unlike the handoff above it: it is a sentence rather
-/// than a document, and there is nothing to open and nothing to answer. It is
-/// rendered markdown all the same, because what it names — a branch, a stage, a
-/// file the repository records its process in — reads better set apart from the
-/// prose around it.
+/// A card like the events around it, because it is one of the things that
+/// happened — quiet among them, in the dim ink, because there is nothing to open
+/// and nothing to answer. It is rendered markdown, because what it names — a
+/// branch, a stage, a file the repository records its process in — reads better
+/// set apart from the prose around it.
 ///
 /// Marked while it is what the conversation is blocked on, which is the whole of
 /// what the badge above does: a timeline is long by the time a run stops, and
@@ -1069,9 +1069,9 @@ function Notice(props: {
 /// beside it — so this is a record of something that happened, kept and read
 /// rather than rewritten.
 ///
-/// A line and not a card, like the notice above it: it is what was asked for, in
-/// somebody's own words, and there is nothing to open and nothing to answer. It
-/// is rendered markdown all the same, because that is what was typed.
+/// A card like the notice above it, and read the same way: it is what was asked
+/// for, in somebody's own words, and there is nothing to open and nothing to
+/// answer. It is rendered markdown, because that is what was typed.
 ///
 /// What the session it started went on to do is not drawn here. That arrives as
 /// the events any work arrives as — what it printed, what it asked, what it

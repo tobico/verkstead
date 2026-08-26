@@ -4005,14 +4005,14 @@ describe("watching a live session's screen", () => {
     );
   });
 
-  /// And it renders what the session wrote in the case the session wrote it in.
-  /// The badge that says a row is live is styled by that word alone, and the
-  /// Screen marks itself with the same one. The two are hashed apart now that
-  /// each is in a module of its own, but neither sheet may ask for the word
-  /// bare inside itself — a rule that did would match every element of that
-  /// module carrying it, and `text-transform` inherits all the way down into
-  /// the rows xterm builds.
-  it("leaves a live terminal's text in its own case", async () => {
+  /// And it leaves the session's own type alone. The badge that says a row is
+  /// live is styled by that word alone, and the Screen marks itself with the
+  /// same one. The two are hashed apart now that each is in a module of its
+  /// own, but neither sheet may ask for the word bare inside itself — a rule
+  /// that did would match every element of that module carrying it, and the
+  /// inherited half of what a badge is set in would reach every row xterm
+  /// builds.
+  it("leaves a live terminal's text in its own type", async () => {
     watching();
     const { container, socket } = await watched();
 
@@ -4021,12 +4021,12 @@ describe("watching a live session's screen", () => {
     const screen = await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
     expect(screen.classList).toContain(screenPane.live!);
 
-    // The badge keeps its capitals, and asks for them where badges are.
+    // The badge asks for its type where badges are, and in sentence case:
+    // nothing in the viewer is set in capitals any more.
     expect(timelineCss).toContain(
       ".eventHead .live {\n" +
         "  font-size: 0.8rem;\n" +
-        "  font-weight: 600;\n" +
-        "  text-transform: uppercase;\n",
+        "  font-weight: 600;\n",
     );
 
     // And nothing asks for them by the word alone, here or anywhere else: a
@@ -6591,9 +6591,10 @@ describe("the pinned stage list", () => {
   /// What Verkstead did on its own account while nobody was watching — here,
   /// the stage it started when this roadmap's wrap-up settled.
   ///
-  /// A line in the record rather than a card above it, because it is a sentence
-  /// and not a document: there is nothing to open, and nothing to answer.
-  it("draws what verkstead did unasked as a line in the record", async () => {
+  /// In the record rather than pinned above it, because it is a moment and not
+  /// the standing state of anything — and a card there like every other moment,
+  /// with nothing to open and nothing to answer.
+  it("draws what verkstead did unasked as a card in the record", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
 
@@ -6603,6 +6604,15 @@ describe("the pinned stage list", () => {
     expect(notice.querySelector("code")?.textContent).toBe("mvp");
     expect(notice.closest(`.${timeline.timeline}`)).not.toBeNull();
     expect(notice.querySelectorAll("button")).toHaveLength(0);
+
+    // The card surface is the one every timeline event is given, so the notice
+    // asks for nothing that would take it back out of the run of them.
+    expect(timelineCss).toContain(
+      ".timelineEvent > .notice {\n" +
+        "  font-size: 0.9rem;\n" +
+        "  color: var(--ink-soft);\n" +
+        "}",
+    );
   });
 
   it("draws nothing at all where the branch has written no roadmap", async () => {
@@ -6829,6 +6839,11 @@ describe("a run stopped because an account ran out of window", () => {
     expect(marked.textContent).toContain("Implementing the work");
     expect(frame(container).dataset.pane).toBe("timeline");
 
+    // Said by the card's own border, the way every other selected card says it
+    // — in the colour that means stopped, because that is what this one is.
+    expect(timelineCss).toContain(
+      ".timelineEvent > .notice.selected {\n  border-color: var(--stopped);\n}",
+    );
   });
 });
 
@@ -7249,9 +7264,9 @@ const ASKED_BY_HAND = (() => {
 })();
 
 describe("a manual task on an old record", () => {
-  /// A line in the record, like the notice beside it: nothing sets another
+  /// A card in the record, like the notice beside it: nothing sets another
   /// going, so there is nothing to press and nothing to open.
-  it("draws what was asked for as a line in the record", async () => {
+  it("draws what was asked for as a card in the record", async () => {
     theWrapping();
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
@@ -7261,6 +7276,12 @@ describe("a manual task on an old record", () => {
     expect(asked.querySelector(`.${timeline.eventHead}`)).toBeNull();
     expect(asked.classList.contains("openable")).toBe(false);
     expect(asked.getAttribute("role")).toBeNull();
+
+    // And it takes the card surface every timeline event is given, asking for
+    // nothing that would draw it back out of the run of them.
+    expect(timelineCss).toContain(
+      ".timelineEvent > .manualTask {\n  font-size: 0.9rem;\n}",
+    );
   });
 
   /// Put in the page as the server rendered it, like every other piece of
