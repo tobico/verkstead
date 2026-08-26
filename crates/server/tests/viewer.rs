@@ -228,23 +228,26 @@ fn the_manifest_asks_to_be_installed_with_icons_that_exist() {
     let icons = manifest["icons"].as_array().expect("icons");
     assert!(!icons.is_empty(), "an installable manifest needs an icon");
 
-    // Android's launcher crops to a circle, so at least one icon has to be
-    // declared safe to mask.
-    assert!(
-        icons.iter().any(|icon| {
-            icon["purpose"]
-                .as_str()
-                .is_some_and(|purpose| purpose.split_whitespace().any(|p| p == "maskable"))
-        }),
-        "one of the icons should be maskable",
-    );
-
+    // Every icon is a file that is really there, and says what it is for. None
+    // of them claims `maskable`: the mark is artwork that runs to the edges of
+    // its square — see `tools/generate-icons.sh` — so a launcher cropping one to
+    // a circle would take the hammer and the anvil's horn off with it. Art drawn
+    // with a margin inside it could claim `maskable` back, and this is what
+    // would have to be relaxed to let it.
     for icon in icons {
         let src = icon["src"].as_str().expect("an icon needs a src");
         let path = src.strip_prefix('/').expect("icon srcs should be absolute");
+
         assert!(
             assets().join(path).exists(),
             "the manifest names {src}, which is not in the assets directory",
+        );
+
+        let purpose = icon["purpose"].as_str().expect("an icon needs a purpose");
+
+        assert!(
+            !purpose.split_whitespace().any(|p| p == "maskable"),
+            "{src} claims `maskable`, which full-bleed art cannot honour",
         );
     }
 }
