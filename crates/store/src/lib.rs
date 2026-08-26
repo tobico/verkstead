@@ -28,6 +28,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
+mod archives;
 mod captures;
 mod commits;
 mod conversations;
@@ -46,6 +47,7 @@ mod transcripts;
 mod waits;
 mod wrap_up;
 
+pub use archives::{Archiving, archive_conversation};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
@@ -619,6 +621,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // the Conversations alone for that reason too — an order is a fact about the
     // list rather than a thing that happened to the work.
     placements::apply_schema(pool).await?;
+
+    // And which of them the human has put away, which the sidebar reads the
+    // same way and for the same reason: what a list draws is not a fact about
+    // the work either.
+    archives::apply_schema(pool).await?;
 
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite

@@ -20,9 +20,9 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved,
-    Registered, Started, SteerOpened, TimelineEvent,
+    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationArchived, ConversationClosed,
+    ConversationEntry, ConversationSteered, ConversationView, GrillingStarted, Lifecycle,
+    PinnedEvent, ProfileSaved, Registered, Started, SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
@@ -731,6 +731,17 @@ async fn close(app: &Router, id: i64) -> ConversationClosed {
     post(
         app,
         &format!("/api/ui/conversations/{id}/close"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// And put a closed one away, which is Close's neighbour in the same menu and
+/// says as little for itself.
+async fn archive(app: &Router, id: i64) -> ConversationArchived {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/archive"),
         &serde_json::json!({}),
     )
     .await
@@ -2065,6 +2076,67 @@ async fn closing_a_conversation_that_is_not_there_says_so() {
     assert_eq!(
         close(&app, 404).await,
         ConversationClosed::NoSuchConversation
+    );
+}
+
+/// Archiving is what a Closed Conversation is for: it comes off the sidebar,
+/// and everything else about it — its state, its Timeline, its branch — is
+/// where it was. Nothing leaves a Timeline.
+#[tokio::test]
+async fn archiving_a_closed_conversation_takes_it_off_the_sidebar() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    close(&app, id).await;
+
+    assert_eq!(archive(&app, id).await, ConversationArchived::Archived);
+
+    assert!(sidebar(&app).await.is_empty());
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(
+        brief(&view).markdown,
+        "# Rate limiting\n\nThe API has none.\n"
+    );
+}
+
+/// Archiving twice is not an error — what the human asked for holds either way.
+#[tokio::test]
+async fn archiving_twice_is_not_an_error() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    close(&app, id).await;
+
+    assert_eq!(archive(&app, id).await, ConversationArchived::Archived);
+    assert_eq!(
+        archive(&app, id).await,
+        ConversationArchived::AlreadyArchived
+    );
+    assert!(sidebar(&app).await.is_empty());
+}
+
+/// A Conversation still being worked on belongs on the list it is being worked
+/// from: it is closed first and archived after.
+#[tokio::test]
+async fn a_conversation_that_is_not_closed_cannot_be_archived() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(archive(&app, id).await, ConversationArchived::NotClosed);
+
+    grill(&app, id).await;
+
+    assert_eq!(archive(&app, id).await, ConversationArchived::NotClosed);
+    assert_eq!(sidebar(&app).await.len(), 1);
+}
+
+#[tokio::test]
+async fn archiving_a_conversation_that_is_not_there_says_so() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(
+        archive(&app, 404).await,
+        ConversationArchived::NoSuchConversation
     );
 }
 

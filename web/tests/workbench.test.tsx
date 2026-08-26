@@ -22,6 +22,7 @@ import type {
   BriefEvent,
   Capture,
   CommitPane,
+  ConversationArchived,
   ConversationClosed,
   ConversationEntry,
   ConversationSteered,
@@ -4403,6 +4404,79 @@ describe("closing a conversation", () => {
     fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.close}`));
 
     await waitFor(() => screen.getByText(/could not be removed/));
+  });
+});
+
+/// Archiving stands where Close does once Close has been pressed: the way to
+/// put a finished conversation out of the list without touching any of it.
+describe("archiving a conversation", () => {
+  /// A conversation still being worked on belongs on the list it is worked
+  /// from, so the row is not there to press.
+  it("is offered on a closed conversation and on no other", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+    expect(menu.querySelector(`.${timeline.archive}`)).toBeNull();
+  });
+
+  it("stands where close was, on one that has been closed", async () => {
+    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+    await waitFor(() => expect(menu.querySelector(`.${timeline.archive}`)).toBeTruthy());
+    expect(menu.querySelector(`.${timeline.close}`)).toBeNull();
+  });
+
+  it("posts to the conversation's own archive route", async () => {
+    const fetching = theWorkbenchWith(
+      { state: "Closed", ready_to_grill: false },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/archive`,
+        json("Archived" satisfies ConversationArchived),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.archive}`));
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/archive`)).toEqual({}),
+    );
+  });
+
+  /// What the human is owed before a press that makes something disappear: that
+  /// it is the list it goes off, and that nothing of the record goes with it.
+  it("says the record stays where it is", async () => {
+    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+
+    await waitFor(() => screen.getByText(/Take it off the conversations list/));
+    expect(screen.getByText(/Its record stays where it is/)).toBeTruthy();
+  });
+
+  /// A page drawn against a conversation that has since been steered back into
+  /// the work: the press is refused, and the refusal is what says so.
+  it("says when it is not a conversation to put away", async () => {
+    theWorkbenchWith(
+      { state: "Closed", ready_to_grill: false },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/archive`,
+        json("NotClosed" satisfies ConversationArchived),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.archive}`));
+
+    await waitFor(() => screen.getByText(/nothing to put away/));
   });
 });
 

@@ -15,6 +15,7 @@ import type {
   BriefSaved,
   Capture,
   CommitPane,
+  ConversationArchived,
   ConversationClosed,
   ConversationEntry,
   ConversationSteered,
@@ -329,6 +330,18 @@ export function adoptRoadmap(id: number): Promise<Adopted> {
 /// left where it is.
 export function closeConversation(id: number): Promise<ConversationClosed> {
   return post<ConversationClosed>(`/api/ui/conversations/${id}/close`, {});
+}
+
+/// Put a closed Conversation away: it comes off the sidebar, and nothing else
+/// about it moves.
+///
+/// Nothing is sent with it either — which Conversation it is is the whole of
+/// what the press says, and whether it is one to put away is the server's to
+/// answer.
+export function archiveConversation(
+  id: number,
+): Promise<ConversationArchived> {
+  return post<ConversationArchived>(`/api/ui/conversations/${id}/archive`, {});
 }
 
 /// Start driving a conversation again, from wherever the work now stands.

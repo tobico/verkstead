@@ -28,13 +28,13 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationClosed,
-    ConversationEntry, ConversationSteered, ConversationStopped, ConversationView, Cursor,
-    GrillingStarted, Lifecycle, Locked, NewAdoption, NewConversation, NewOrder, ProfileChoice,
-    ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed, SetReading, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, Standing, SteerOpened, SteerSubmission, Submitted,
-    Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
-    Verified,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationView, Cursor, GrillingStarted, Lifecycle, Locked, NewAdoption, NewConversation,
+    NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -125,6 +125,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/close", post(close))
+        // And the one that puts a closed Conversation away, which is the row
+        // beside Close in the same menu. Named in the path like everything
+        // around it, and with no body for the same reason: which Conversation
+        // it is is the whole of what it says.
+        .route("/api/ui/conversations/{id}/archive", post(archive))
         // No route for how the work gets built: the direction rides the closing
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
@@ -1538,6 +1543,35 @@ async fn close(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
             tracing::error!(error = ?error, conversation_id = id, "closing a Conversation failed");
             unavailable("the conversation could not be closed")
         }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/archive` — take a closed one off the list.
+///
+/// Straight to the store rather than through [`crate::conversations`], as the
+/// sidebar's order is: there is no worktree to remove and no session to end.
+/// Archiving is a fact about the list, and writing it down is the whole of it.
+async fn archive(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationArchived::NoSuchConversation).into_response();
+    };
+
+    match store::archive_conversation(&state.pool, id).await {
+        Ok(outcome) => Json(archived(outcome)).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "archiving a Conversation failed");
+            unavailable("the conversation could not be archived")
+        }
+    }
+}
+
+/// The store's word for what became of it, as the wire says it.
+fn archived(outcome: store::Archiving) -> ConversationArchived {
+    match outcome {
+        store::Archiving::Archived => ConversationArchived::Archived,
+        store::Archiving::AlreadyArchived => ConversationArchived::AlreadyArchived,
+        store::Archiving::NotClosed => ConversationArchived::NotClosed,
+        store::Archiving::NoSuchConversation => ConversationArchived::NoSuchConversation,
     }
 }
 

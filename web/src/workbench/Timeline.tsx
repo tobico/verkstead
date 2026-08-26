@@ -60,6 +60,7 @@ import {
 } from "solid-js";
 
 import {
+  archiveConversation,
   closeConversation,
   forceStopConversation,
   resume,
@@ -73,6 +74,7 @@ import type {
   BriefEvent,
   BriefSaved,
   CommitEvent,
+  ConversationArchived,
   ConversationClosed,
   ConversationStopped,
   ConversationView,
@@ -173,6 +175,18 @@ export const CLOSE_REFUSAL: Record<ConversationClosed, string> = {
   NoSuchConversation: "This conversation is gone.",
   WorktreeStuck:
     "The worktree could not be removed, so nothing was changed. The server log says why.",
+};
+
+/// And each way of being refused an archive.
+///
+/// Both of the ones that say anything are a page drawn against a conversation
+/// that has moved: the row is offered on a closed conversation, so a refusal
+/// here means it stopped being one between the drawing and the press.
+export const ARCHIVE_REFUSAL: Record<ConversationArchived, string> = {
+  Archived: "",
+  AlreadyArchived: "",
+  NotClosed: "This conversation is not closed, so there is nothing to put away.",
+  NoSuchConversation: "This conversation is gone.",
 };
 
 /// And each way of being refused a resume.
@@ -1672,10 +1686,16 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 /// Each is drawn only where it applies. The two stops need something to stop —
 /// see `ready_to_stop`, which is the server's rule and not this page's — and
 /// force stop needs a session to end, which is what `working` says.
+///
+/// And where close has already been pressed, archive stands in its place: a
+/// closed conversation is the only one there is anything to put away on, and
+/// putting it away is what takes it off the list.
 function Actions(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
   const [refused, setRefused] = createSignal<ConversationClosed | null>(null);
+  const [unarchivable, setUnarchivable] =
+    createSignal<ConversationArchived | null>(null);
   const [stopped, setStopped] = createSignal<ConversationStopped | null>(null);
 
   /// What the click found, once it has answered, and `null` while the modal is
@@ -1767,6 +1787,23 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
     },
   }));
 
+  /// And putting the closed conversation away, which reads the same way: both
+  /// of its refusals are a page drawn against a conversation that has moved,
+  /// and both of its successes mean it is off the list.
+  const archive = useMutation(() => ({
+    mutationFn: () => archiveConversation(props.conversation.id),
+    onSuccess: (outcome: ConversationArchived) => {
+      if (outcome === "NoSuchConversation" || outcome === "NotClosed") {
+        setUnarchivable(outcome);
+        return;
+      }
+
+      setUnarchivable(null);
+      shut();
+      reread();
+    },
+  }));
+
   return (
     <>
       <Menu
@@ -1845,9 +1882,45 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
               </Show>
             </div>
 
+            {/* And where Close was, on a conversation that has already had it:
+                the way to put the record out of sight once there is nothing
+                left to read on it. Reversible, so there is nothing to confirm
+                — see the unarchive it is offered beside. */}
             <Show
               when={props.conversation.state !== "Closed"}
-              fallback={<Note>This conversation has been closed.</Note>}
+              fallback={
+                <>
+                  <Note>This conversation has been closed.</Note>
+                  <div class={styles.action}>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      class={styles.archive}
+                      disabled={archive.isPending}
+                      onClick={() => archive.mutate()}
+                    >
+                      {archive.isPending ? "Archiving…" : "Archive"}
+                    </button>
+                    <Note>
+                      Take it off the conversations list. Its record stays where
+                      it is.
+                    </Note>
+                    <Show when={unarchivable()}>
+                      {(outcome) => (
+                        <ErrorLine class={styles.failure}>
+                          {ARCHIVE_REFUSAL[outcome()]}
+                        </ErrorLine>
+                      )}
+                    </Show>
+                    <Show when={archive.isError}>
+                      <ErrorLine class={styles.failure}>
+                        The conversation could not be archived:{" "}
+                        {archive.error?.message}
+                      </ErrorLine>
+                    </Show>
+                  </div>
+                </>
+              }
             >
               <div class={styles.action}>
                 <button

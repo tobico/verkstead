@@ -472,6 +472,16 @@ diagrams: boolean,
 diff: DiffView | null, };
 
 /**
+ * And what became of archiving one: putting a Closed Conversation away, so the
+ * sidebar stops drawing it.
+ *
+ * Reversible, which is why nothing here is confirmed and why the refusals are
+ * so mild: the worst of them says the human asked for something that is already
+ * true.
+ */
+export type ConversationArchived = "Archived" | "AlreadyArchived" | "NotClosed" | "NoSuchConversation";
+
+/**
  * What became of closing one.
  */
 export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversation" | "WorktreeStuck";

@@ -2090,3 +2090,27 @@ pub enum ConversationClosed {
     /// nothing would ever clean up.
     WorktreeStuck,
 }
+
+/// And what became of archiving one: putting a Closed Conversation away, so the
+/// sidebar stops drawing it.
+///
+/// Reversible, which is why nothing here is confirmed and why the refusals are
+/// so mild: the worst of them says the human asked for something that is already
+/// true.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConversationArchived {
+    /// Archived: it is off the list, and everything else about it is where it
+    /// was.
+    Archived,
+
+    /// It was archived already, which is not an error — what was asked for holds
+    /// either way.
+    AlreadyArchived,
+
+    /// It has not been closed, so there is nothing to put away. A Conversation
+    /// still being worked on belongs on the list it is being worked from.
+    NotClosed,
+
+    NoSuchConversation,
+}

@@ -1102,6 +1102,14 @@
 .steer {
 }
 
+/* Archiving is a row like steering and drawn like every other one, from `.drop
+   button` in `Menu.module.css`. No outline of its own: it ends nothing — the
+   run it belonged to ended when the conversation was closed — and it is undone
+   by putting the conversation back on the list. Named here so the row can be
+   found. */
+.archive {
+}
+
 /* The one that cannot be undone, in the colour of what cannot be undone. Both
    stops are reversed by a resume, and read as the ordinary buttons they are. */
 .close {

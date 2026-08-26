@@ -5,9 +5,10 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Closing, Edited, Event, Grilling, Lifecycle, adopting, close_conversation, conversations,
-    load_conversation, open_database, register_repo, rename_branch, save_brief, set_base_commit,
-    set_state, start_adoption, start_conversation, start_grilling, timeline,
+    Archiving, Closing, Edited, Event, Grilling, Lifecycle, adopting, archive_conversation,
+    close_conversation, conversations, load_conversation, open_database, register_repo,
+    rename_branch, save_brief, set_base_commit, set_state, start_adoption, start_conversation,
+    start_grilling, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -552,6 +553,104 @@ async fn closing_a_conversation_that_is_not_there_says_so() {
     assert_eq!(
         close_conversation(&pool, 404).await.unwrap(),
         Closing::NoSuchConversation
+    );
+}
+
+/// Archiving takes a Closed Conversation off the sidebar and leaves everything
+/// else about it where it was: nothing leaves a Timeline, and the branch is
+/// still the branch.
+#[tokio::test]
+async fn archiving_a_closed_conversation_takes_it_off_the_list() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    close_conversation(&pool, id).await.unwrap();
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::Archived
+    );
+
+    assert!(conversations(&pool).await.unwrap().is_empty());
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Closed);
+    assert_eq!(conversation.branch, "rate-limiting");
+    assert_eq!(brief(&pool, id).await, "# Rate limiting\n");
+}
+
+/// And it survives the process, which is the whole point of writing it down: a
+/// list that forgot what had been put away would put it back on the next
+/// reload.
+#[tokio::test]
+async fn what_was_archived_is_still_archived_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verkstead.db");
+
+    let id = {
+        let pool = open_database(&path).await.unwrap();
+        let id = drafted(&pool).await;
+        close_conversation(&pool, id).await.unwrap();
+        archive_conversation(&pool, id).await.unwrap();
+        pool.close().await;
+        id
+    };
+
+    let pool = open_database(&path).await.unwrap();
+
+    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::AlreadyArchived
+    );
+}
+
+/// Archiving twice is not an error — what the human asked for holds either way
+/// — and the second one writes nothing.
+#[tokio::test]
+async fn archiving_twice_is_not_an_error() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    close_conversation(&pool, id).await.unwrap();
+
+    archive_conversation(&pool, id).await.unwrap();
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::AlreadyArchived
+    );
+}
+
+/// A Conversation still being worked on belongs on the list it is being worked
+/// from, so it is closed first and archived after.
+#[tokio::test]
+async fn a_conversation_that_is_not_closed_cannot_be_archived() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::NotClosed
+    );
+
+    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::NotClosed
+    );
+
+    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn archiving_a_conversation_that_is_not_there_says_so() {
+    let (_dir, pool) = fresh_pool().await;
+
+    assert_eq!(
+        archive_conversation(&pool, 404).await.unwrap(),
+        Archiving::NoSuchConversation
     );
 }
 

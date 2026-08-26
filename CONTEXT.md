@@ -519,6 +519,20 @@ Done and Closed are never stalled, nothing being supposed to drive them.
 _Avoid_: blocked on you (the badge a stall is precisely without), stopped (what
 a stall becomes, not what it is), state, stuck, hung, idle
 
+**Archived**:
+A Closed Conversation the human has taken off the sidebar, there being nothing
+left to read on it. A fact about the list and nothing else: the Timeline, the
+branch and the Conversation's own page are exactly where they were, and opening
+it by its URL shows all of it. Offered on a Closed Conversation alone — a
+Conversation still being worked on belongs on the list it is being worked from,
+so it is closed first and archived after.
+
+Reversible, which is what tells it from **Locked**: nothing is confirmed,
+because nothing is lost. The two words are not each other's — one is a Question
+Set settling for good, this is a Conversation leaving a list.
+_Avoid_: locked (the Question Set word), deleted, hidden, closed (the state
+being archived, not the archiving), done
+
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles
 the session until the Response arrives, as every ask does in askance. A
@@ -676,7 +690,8 @@ place of its own to browse: a locked Set stays on the Timeline it was asked
 from, saying what became of it, and takes no Response ever again. Locking one
 by hand is the single irreversible act in the workbench, which is why it is the
 single one confirmed in as many words. Nothing leaves a Timeline.
-_Avoid_: archived, filed, history, log
+_Avoid_: archived (**Archived** is a Conversation coming off the sidebar, which
+is reversible and about a list rather than about a Set), filed, history, log
 
 **Liveness**:
 Whether an agent is currently connected and waiting on a Question Set

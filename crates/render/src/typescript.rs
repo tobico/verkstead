@@ -18,13 +18,13 @@ use ts_rs::TS;
 
 use crate::{
     AbandonedRepo, Adopted, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
-    BriefSaved, Capture, CommitPane, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationView, GrillingStarted, Locked, NewAdoption, NewConversation,
-    NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
-    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry, Resumed,
-    Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, Shown, Started, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
-    UpdateNotice, Watching,
+    BriefSaved, Capture, CommitPane, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Locked,
+    NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted,
+    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    RepoEntry, Resumed, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, Shown,
+    Started, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView,
+    Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -88,6 +88,10 @@ fn the_viewers_types_are_written_from_these() {
     // there is nothing else to say about either — so it is the outcomes alone.
     GrillingStarted::export_all(&config).unwrap();
     ConversationClosed::export_all(&config).unwrap();
+
+    // And the press that puts a closed one away, which takes no request shape
+    // either: which Conversation it is is the whole of what it says.
+    ConversationArchived::export_all(&config).unwrap();
 
     // And the press that starts an adopted stage, which is the grilling start's
     // sibling: one Conversation, one branch, and every way of being refused
