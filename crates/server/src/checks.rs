@@ -109,7 +109,12 @@ pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
     // run when the stop was written, because nothing advances past one, and a
     // Conversation that came back with its checks watched and nobody reading its
     // branch would wait on a review that was never going to happen.
-    crate::wrapping::watching(&state, conversation_id);
+    //
+    // And its review from the start, which is the same forgetting as the
+    // attempts above: a review found already asking is what the press is an
+    // answer to, so it is read past rather than stopped over a second time. See
+    // [`crate::review::afresh`].
+    crate::wrapping::watching(&state, conversation_id, crate::wrapping::Reviewing::Afresh);
 }
 
 /// What one look at the checks decided.

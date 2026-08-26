@@ -496,3 +496,20 @@ fn the_guides_quoted_cli_contract_is_the_real_one() {
          output into the CLI contract section of crates/cli/guide/core.md"
     );
 }
+
+/// A review's Set is a plain Question Set like every other, so the Guide teaches
+/// one grammar and only one. The block a review used to carry has left the
+/// schema, and a Guide that still described it would be teaching an agent to
+/// write something nothing reads.
+#[test]
+fn the_guide_teaches_no_findings_grammar() {
+    let guide = stdout(&run(&["guide"]));
+
+    for phrase in ["findings:", "review:", "fix: Q", "split: Q"] {
+        assert!(
+            !guide.contains(phrase),
+            "the Guide should carry no trace of the findings grammar, and it has \
+             {phrase} in:\n{guide}"
+        );
+    }
+}

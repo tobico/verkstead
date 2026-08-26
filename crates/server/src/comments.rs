@@ -136,8 +136,10 @@ async fn once(state: &AppState, conversation_id: i64) -> Watching {
     // still open — see [`crate::responding::unattended`], which sees to whatever
     // is outstanding and says whether it found anything.
     //
-    // Asked only once the review is over, because until then the newest proposal
-    // is the review's own Set and seeing to that is [`crate::review`]'s.
+    // Asked only once the review is over, because a batch is only dispatched
+    // once it is: until then there is nothing here for anybody to have left
+    // behind, and the review's own Set is [`crate::review`]'s to see to whatever
+    // becomes of it.
     if reviewed(state, conversation_id).await
         && crate::responding::unattended(state, conversation_id).await
     {

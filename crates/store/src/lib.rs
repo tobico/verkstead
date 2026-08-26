@@ -49,14 +49,14 @@ mod wrap_up;
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
-    Chosen, Closing, Conversation, ConversationRow, Directing, Edited, Event, Fixing, Grilling,
+    Chosen, Closing, Conversation, ConversationRow, Directing, Edited, Event, Grilling,
     Implementing, Lifecycle, Rebuilding, Role, SetOnTimeline, Settling, Staged, Steer, Steering,
     TimelineEvent, adopting, ask, asked_from, close_conversation, conversations, implement_again,
-    last_proposal, load_conversation, note, pick_direction, record_handoff, rename_branch,
-    review_asked, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_state, split_out, stacks_on, start_adoption,
-    start_conversation, start_grilling, start_implementing, start_stage, steer_conversation,
-    timeline, unanswered_set_since, unlanded_batch_fixes, unlanded_fixes,
+    last_batch_proposal, last_proposal, load_conversation, note, pick_direction, record_handoff,
+    rename_branch, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
+    set_implementation_pairing, set_state, stacks_on, start_adoption, start_conversation,
+    start_grilling, start_implementing, start_stage, steer_conversation, timeline,
+    unanswered_set_since,
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
 pub use pairings::{RepoPairings, remembered_pairings};
@@ -157,9 +157,8 @@ impl Asked {
     /// The Set where this build can read it, and nothing where it cannot.
     ///
     /// What everything walking a Timeline for the Sets on it asks: an
-    /// unreadable one carries no proposal to settle, no review to answer and no
-    /// exchange to put in a prompt, so passing over it is the whole of what
-    /// there is to do about one.
+    /// unreadable one carries no proposal to settle and no exchange to put in a
+    /// prompt, so passing over it is the whole of what there is to do about one.
     pub fn set(&self) -> Option<&QuestionSet> {
         match self {
             Self::Set(set) => Some(set),
@@ -383,11 +382,11 @@ pub async fn submit_response(
         (None, _) => None,
     };
 
-    // A review's Set carries its findings and now its Answers too, and answering
-    // it moves nothing at all. What wrap-up waits on is the review session, which
-    // is still running: the Response goes back to it, it fixes what was accepted,
-    // and its ending cleanly is what settles the review — see [`review_asked`],
-    // which is how the Set is found again afterwards.
+    // A wrap-up's Set carries its Answers now too, and answering it moves nothing
+    // at all. What wrap-up waits on is the session that asked, which is still
+    // running: the Response goes back to it, it does what was accepted, and its
+    // ending cleanly is what settles the review — see [`last_proposal`], which is
+    // how the Set is found again afterwards.
     settlements.announce(settled_set(pool, set_id).await?);
 
     Ok(Submission::Accepted(Taken { accepted, proposed }))

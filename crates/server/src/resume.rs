@@ -275,7 +275,11 @@ pub(crate) async fn resume(
                 // which is the handover the press makes by holding its across
                 // the spawn.
                 Resuming::Restarted => {
-                    crate::wrapping::watching(state, conversation_id);
+                    crate::wrapping::watching(
+                        state,
+                        conversation_id,
+                        crate::wrapping::Reviewing::AsFound,
+                    );
                     drop(driving);
                 }
             }

@@ -59,56 +59,42 @@ Set is that the decision is theirs.
 
 ## 4. Propose it as one Question Set
 
-One Set, one Question per comment you would do something about, and a `review`
-block that tells Verkstead which Option means *do it*:
+One Set, one Question per comment you would do something about, and nothing
+beside them: what a batch session sends is an ordinary Question Set, the same
+shape as every other ask.
 
 ```yaml
 title: What was said on the rate limiter's pull request
 preface: |
   Two things you said I would change. Everything else I have answered here.
 
-  Answering **do it** has me do it here, before I push; **leave it** and I will
-  not raise it again. Anything you write beside an answer is part of what I do
-  about it.
+  Each one lists the ways I would do it — pick the way you want and I do it that
+  way here, before I push. **Leave it** and I will not raise it again. Anything
+  you write beside an answer is part of what I do about it.
 questions:
   - label: Q1
     text: |
       You said on `window.rs` line 12 that the reset is the wrong way round. It
       is: the counter is cleared after the window is compared rather than
       before, so the first request of a window is counted against the last one.
-      I would move the reset above the comparison and cover the roll-over in
-      the tests.
     options:
       - n: 1
-        text: Do it
+        text: Do it — move the reset above the comparison
         recommended: true
       - n: 2
         text: Leave it
   - label: Q2
     text: |
-      You asked whether `limits.rs` still needs its own clock. It does not —
-      `window.rs` has the better of the two — so I would collapse them onto
-      one and update the tests that pin the other.
+      You asked whether `limits.rs` still needs its own clock. It does not, so
+      there are two ways to be rid of it.
     options:
       - n: 1
-        text: Do it
+        text: Do it — collapse them onto `window.rs`'s clock
       - n: 2
+        text: Do it — inject one clock at construction instead
+      - n: 3
         text: Leave it
         recommended: true
-review:
-  findings:
-    - fix: Q1.1
-      what: |
-        `crates/limiter/src/window.rs` — `Window::count` is reset after the
-        limit is compared rather than before, so the first request of a fresh
-        window is refused against the window before it. Move the reset above
-        the comparison, and cover the roll-over in the tests beside
-        `counts_requests_in_a_window`.
-    - fix: Q2.1
-      what: |
-        `crates/limiter/src/limits.rs` and `window.rs` each hold their own
-        notion of now. Collapse them onto one clock — `window.rs` has the
-        better of the two — and update the tests that pin the other.
 ```
 
 - **Small.** This is a batch of comments rather than a reading of the branch:
@@ -118,20 +104,27 @@ review:
 - **The Question is what the human reads**, on a phone, deciding. Say which
   comment it answers and what you would do about it, in prose — not as a patch.
   Their own words come back to them, so they can see them being taken up.
-- **`what` is the work the answer authorises.** It is what you come back to when
-  the answers arrive, and the only account of it anything other than you would
-  have — so write it for a competent agent that has not read the comment: the
-  file, the cause, and what *done* would look like. The comment is where it came
-  from and not what it says to do.
-- **`fix` names the Option that means do it** — `Q1.1` for a Question's, `Q1a.1`
-  for a Sub-question's. It has to be an Option your Set actually offers, or the
-  Set is refused: nothing else turns what was said into work.
-- **No `split` here.** Splitting a finding out into a backlog belongs to the one
+- **Each credible way to do it is an Option of its own**, worded in your own
+  words: the Option says *which* way it is, because that is what they are
+  picking between. Offer alternatives wherever more than one credible way
+  exists, and only there — a comment with one sensible answer carries one Option
+  for doing it, and a way invented to fill the Question out is one you would not
+  defend.
+- **Leave it is always offered**, on every Question, so declining stays possible
+  whatever else it puts.
+- **Recommend the one you would take** — the way you would do it, or leave it
+  where that is your answer. One star per Question.
+- **Nothing else goes on the Set.** There is no findings block and no marker
+  saying which Option means do it: Verkstead reads how your session ended rather
+  than a record of what you were answered. Which makes the answers yours alone
+  to act on — nothing else holds an account of what each comment is about, so
+  keep your own reading of it to hand, the file and the cause and what *done*
+  would look like, for when they arrive.
+- **Nothing is split out here.** Handing work on as a backlog belongs to the one
   review that read the branch whole. A comment asking for more than a batch
   session can do is worth saying so about in the Question, so the human can
   decline it knowing why — it is not a backlog for you to plan.
-- **Every finding in the block is a Question in the Set**, and one Set for the
-  batch rather than one per comment.
+- **One Set for the batch** rather than one per comment.
 - **Read `verkstead guide` before you write it** — how a Set is labelled, how
   much belongs in one, and the shape it goes over the wire in. It ships inside
   the binary, so nothing else has to be found.
@@ -154,9 +147,10 @@ The Response is the whole of what you act on. Read all of it, the `comment` on
 the Set included, before you touch anything: it is about the Set as a whole and
 may reframe the answers above it.
 
-- **A comment is accepted only where they picked the Option you named as do
-  it.** Anything else is not a yes: the other Option, an answer in their own
-  words instead of a pick, a question left open.
+- **A comment is accepted where they picked one of its do-it Options**, and
+  *which* one they picked is part of the answer: do it the way they chose rather
+  than the way you would have. Anything else is not a yes — leave it, an answer
+  in their own words instead of a pick, a question left open.
 - **What they wrote beside a yes is part of the instruction.** "Yes, but leave
   the public signature alone" changes what you do, and it is the reason their
   words come back to you at all.
