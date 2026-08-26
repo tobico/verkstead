@@ -2359,8 +2359,41 @@ describe("the panes on a narrow window", () => {
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
     expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
 
+    // The way back out is a navigation — it takes the Conversation off the URL
+    // — so the level changes when the router has moved rather than when the
+    // button was pressed.
     fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
-    expect(frame(container).dataset.pane).toBe("conversations");
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("conversations"),
+    );
+  });
+
+  /// Walking back out takes the Conversation off the URL as well as off the
+  /// frame, so that pressing the same card again is a change of selection
+  /// rather than a navigation to where the page already stands — which is what
+  /// pages a phone forward into it a second time.
+  it("walks back in to the conversation it just came out of", async () => {
+    theWorkbench();
+    const { container, history } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    fireEvent.click(screen.getByText(DRAFTING.branch));
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("timeline"),
+    );
+    expect(history.get()).toBe(`/conversations/${DRAFTING.id}`);
+    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("conversations"),
+    );
+    expect(history.get()).toBe("/");
+
+    fireEvent.click(screen.getByText(DRAFTING.branch));
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("timeline"),
+    );
   });
 
   /// So walking in to the third level is opening something, and the way forward

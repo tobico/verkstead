@@ -11,6 +11,13 @@
 //! The attribute rather than a rendered-or-not pane, because walking back out
 //! should not throw away what the pane it came from had drawn.
 //!
+//! Which level it is follows the URL: naming a Conversation walks the page into
+//! it, and walking back out to the list takes the name off again. One account of
+//! where the page stands rather than two — left selected behind the list, the
+//! card the human had just walked out of navigated to where the page already
+//! was, so nothing changed and a phone could not get back into the Conversation
+//! it had only just left.
+//!
 //! How wide the panes stand is held here too, for the same reason: the widths
 //! are a property of the frame rather than of anything drawn in it. They are
 //! percentages of the workbench kept per device (`panes.ts`), and the dividers
@@ -407,6 +414,7 @@ export function Workbench(): JSX.Element {
             select={setEvent}
             pane={setPane}
             close={close}
+            list={() => navigate("/")}
             divider={
               <Show when={allThree()}>
                 <Divider
@@ -447,6 +455,11 @@ function Reading(props: {
   /// details pane.
   pane: (pane: Pane) => void;
   close: () => void;
+
+  /// And the way back out to the list, which is a navigation rather than a
+  /// change of level: what is being let go of is the selection, and the URL is
+  /// where the selection is kept.
+  list: () => void;
 
   /// The line between the two panes, which is the frame's rather than this
   /// component's: how wide the panes stand is a property of the workbench,
@@ -572,7 +585,7 @@ function Reading(props: {
             {(conversation) => (
               <Timeline
                 conversation={conversation()}
-                back={() => props.pane("conversations")}
+                back={props.list}
                 details={() => props.pane("details")}
                 selected={props.event}
                 select={props.select}
