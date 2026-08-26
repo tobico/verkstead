@@ -1074,6 +1074,30 @@ describe("the order the human puts the sidebar in", () => {
     expect(history.get(), "the drag was the whole of what they said").toBe("/");
   });
 
+  /// And the card is a card again straight afterwards. What swallows the click
+  /// a drag ends on is spent by that one click: a keyboard press is a click
+  /// with no pointer behind it, so anything left standing would leave the card
+  /// the drag ended on deaf to Enter until the hand went back to it.
+  it("opens from the keyboard on the card a drag just moved", async () => {
+    three();
+    const { container, history } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    dragTo(rows[2]!, 10);
+    fireEvent.click(card(rows[2]!));
+
+    expect(await order(container)).toEqual(["third", "first", "second"]);
+    expect(history.get(), "the drag itself opened nothing").toBe("/");
+
+    // Enter on the card the hand let go of, which is a click and nothing else
+    // — there is no press in front of it to clear anything.
+    fireEvent.click(card((await cards(container))[0]!));
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/3"));
+  });
+
   /// A finger drags a card by holding it still first. No distance tells a drag
   /// from a scroll on a phone, so what tells the two apart is the time before
   /// the finger moves.

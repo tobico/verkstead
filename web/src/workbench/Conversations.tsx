@@ -181,6 +181,12 @@ export function Conversations(props: {
 
   // Whether the press that has just ended moved a card. The click arrives after
   // the pointer is up, and a card dragged into place should not open as well.
+  //
+  // Spent by the one click it is for, rather than standing until the next
+  // press. A keyboard press is a click with no pointer behind it, so a flag
+  // left set would leave the card the drag ended on deaf to Enter and Space
+  // until the hand went back to it — which is the one way in for somebody who
+  // is not dragging anything.
   let reordered = false;
 
   // And whether the press this gesture began with was a finger rather than a
@@ -306,8 +312,14 @@ export function Conversations(props: {
   /// A press that let go about where it landed is a click, and a click opens the
   /// Conversation. One that moved a card is not: the card is where they put it,
   /// and opening it as well would be answering one gesture twice.
+  ///
+  /// The flag is read once and spent, so the drag it belongs to swallows the
+  /// click that follows it and nothing after that.
   const opened = (id: number) => {
-    if (reordered) return;
+    const dragged = reordered;
+    reordered = false;
+
+    if (dragged) return;
     props.open(id);
   };
 
