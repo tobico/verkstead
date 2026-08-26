@@ -151,3 +151,22 @@
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
+
+/* The field being typed in or picked from, which is no pointer's doing: the
+   border says which of the four the branch, the base or a pairing is going
+   into. */
+.fieldLine input:focus-visible,
+.baseBranch select:focus-visible,
+.profileChoice select:focus-visible {
+  border-color: var(--accent);
+}
+
+/* And the same four under the pointer, one border darker. There is nothing else
+   in this block to hover: the setup is fields alone. */
+@media (hover: hover) {
+  .fieldLine input:hover,
+  .baseBranch select:hover,
+  .profileChoice select:hover {
+    border-color: var(--ink-soft);
+  }
+}

@@ -53,3 +53,12 @@
     display: none;
   }
 }
+
+/* Under the pointer, the underline a link takes: this is drawn as one and is
+   already in the accent, so the accent has nothing left to say about it. The
+   way *on* into the details pane does the same from `Timeline.module.css`. */
+@media (hover: hover) {
+  .back:hover {
+    text-decoration: underline;
+  }
+}

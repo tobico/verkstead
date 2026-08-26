@@ -263,3 +263,21 @@
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
+
+/* Under the pointer: the card is a surface and shifts one step of the paper the
+   list is drawn on, and the one action above it is filled and deepens its
+   accent.
+
+   Never the card in the hand. A card being dragged is already marked as held,
+   the pointer is on it the whole way, and a second thing happening to it at the
+   same moment would say the drag had ended. */
+@media (hover: hover) {
+  .conversationRow:not(.held) .open:hover {
+    background: var(--paper);
+  }
+
+  .newConversation > button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

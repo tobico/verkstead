@@ -77,7 +77,6 @@
 /* Under the pointer, and under the keyboard's focus, the line says it is a
    thing that moves. The whole half-rem is the target; what lights up is the
    line, because the half-rem is only there to be easier to hit than a pixel. */
-.divider:hover::before,
 .divider:focus-visible::before {
   width: 2px;
   background: var(--accent);
@@ -328,5 +327,15 @@
 @media (min-width: 80rem) {
   .workbench > .detailsPane:has(.paneScreen) {
     display: flex;
+  }
+}
+
+/* Under the pointer, the same lighting the keyboard's focus gives it above: the
+   whole half-rem is the target and what lights up is the line, because the
+   half-rem is only there to be easier to hit than a pixel. */
+@media (hover: hover) {
+  .divider:hover::before {
+    width: 2px;
+    background: var(--accent);
   }
 }

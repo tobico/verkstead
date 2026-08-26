@@ -170,3 +170,30 @@
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
+
+/* The field being typed in or picked from, which is no pointer's doing: the
+   border says which of them the words or the choice are going into. */
+.steerBrief textarea:focus-visible,
+.steerPairing select:focus-visible {
+  border-color: var(--accent);
+}
+
+/* And under the pointer: the two fields darken their borders, the steer deepens
+   the accent it is filled with, and the cancel's outline takes the accent its
+   words are already in. */
+@media (hover: hover) {
+  .steerBrief textarea:hover,
+  .steerPairing select:hover {
+    border-color: var(--ink-soft);
+  }
+
+  .steerButtons .steer:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+
+  .steerButtons .cancel:not(:disabled):hover {
+    background: none;
+    border-color: var(--accent);
+  }
+}

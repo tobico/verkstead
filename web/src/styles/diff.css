@@ -265,3 +265,12 @@
     --diff-number-width: calc(1rem + var(--gutter) - var(--diff-marker-width));
   }
 }
+
+/* A file's fold under the pointer: the row is a surface and shifts one step of
+   the paper, off the card each file is drawn as. The one hover state in the
+   Diff — everything else here is read rather than pressed. */
+@media (hover: hover) {
+  .diffFile > summary:hover {
+    background: var(--paper);
+  }
+}

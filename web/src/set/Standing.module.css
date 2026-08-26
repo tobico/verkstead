@@ -87,3 +87,14 @@
   flex-basis: 100%;
   margin: 0;
 }
+
+/* Under the pointer, the badge as the small outline it is: the words and the
+   box both take the accent. A Liveness that says something in a colour of its
+   own keeps it — a disconnected agent is still disconnected while the pointer
+   is on the badge saying so. */
+@media (hover: hover) {
+  .standing > button:not(:disabled):hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+}

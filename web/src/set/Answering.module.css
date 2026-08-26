@@ -36,3 +36,12 @@
 .submit .failure {
   margin-bottom: 0;
 }
+
+/* Under the pointer, the accent it is filled with taken one step deeper — the
+   same step every filled button in the app takes, at the size this one is. */
+@media (hover: hover) {
+  .submit button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

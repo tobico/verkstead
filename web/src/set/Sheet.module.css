@@ -774,3 +774,39 @@
   /* And the Diff's own gutter is cut to this one, so a line of code starts on
      the axis the prose starts on — see `.diffFile` in `styles/diff.css`. */
 }
+
+/* Under the pointer, on the sheet a Set is answered on: an Option and a
+   direction are rows to press anywhere on, so both are surfaces and shift one
+   step of the paper off the card their question is drawn as — and so is a row
+   of an Answer Table, where there is no label to wrap the row in and the row
+   itself is the target.
+
+   None of the three on the record: what is drawn there was decided, and a
+   pointer resting on it is not about to decide it again. The Answer Table says
+   so in the selector it already had; the other two say it by being labels, which
+   the record does not draw.
+
+   And the confirm's pair, which is the filled button of the whole app deepening
+   its accent beside an outline whose words are the ordinary ink — so that one
+   is a surface too, and steps to the paper off the modal's card rather than
+   taking a colour it never had. */
+@media (hover: hover) {
+  .option label:hover,
+  .directionPick .direction label:hover {
+    background: var(--paper);
+  }
+
+  .ask:not(.decided) .answerTable tbody tr:hover > td {
+    background: var(--paper);
+  }
+
+  .confirmActions button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+
+  .confirmActions .secondary:not(:disabled):hover {
+    background: var(--paper);
+    border-color: var(--ink-soft);
+  }
+}

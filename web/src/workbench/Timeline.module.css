@@ -134,6 +134,14 @@
     visibility: visible;
   }
 
+  /* And one of them under the pointer, which is the whole of what an arrow has
+     to say about itself: the small outline takes the accent, words and box
+     together. */
+  .deck > .step:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
   .deck > .back {
     left: 0.35rem;
   }
@@ -1124,4 +1132,64 @@
 /* What a stop that is waiting for a task to finish says while it waits. */
 .conversationActions .waiting {
   color: var(--ink);
+}
+
+/* Under the pointer, everything on this pane that can be pressed. Together at
+   the foot of the file rather than each beside its own card: a hover state has
+   to be inside a query like this one — see `styles/base.css`, where the scheme
+   is set out — and one block is one place to read the whole pane's answer to
+   it.
+
+   The cards are surfaces and shift one step of the paper the record passes
+   behind, whichever mark they are already carrying: a Set waiting on the human,
+   a document that is the open one, a commit. None of those marks is a
+   background, so none of them is what moves.
+
+   The way on into the details pane is drawn as a link and is already in the
+   accent, so it takes a link's underline — the way back out does the same from
+   `PaneHead.module.css`. The title of a pull request and the arrows of the
+   carousel are text and a small outline, and take the accent. The dots are
+   neither: what is drawn is a mark rather than a control, so the one under the
+   pointer darkens by a step of ink — the accent is what says which card is
+   showing, and a dot that took it under the pointer would be saying that.
+
+   The filled buttons deepen their accent, and the badge saying where the work
+   stopped deepens its red the same way. Neither while it is refusing the press:
+   the start has two ways of doing that and this excludes both. */
+@media (hover: hover) {
+  .paneForward:hover {
+    text-decoration: underline;
+  }
+
+  .blocked:hover {
+    background: color-mix(in srgb, var(--stopped) 88%, var(--ink));
+  }
+
+  .dots button:not([aria-current]):hover::before {
+    background: var(--ink-soft);
+  }
+
+  .openPullRequest:hover {
+    color: var(--accent);
+  }
+
+  .timelineEvent > .openable:hover,
+  .timelineEvent > .agentOutput:hover,
+  .timelineEvent > .questionSet:hover,
+  .timelineEvent > .commit:hover {
+    background: var(--paper);
+  }
+
+  /* The running session held against the foot of the pane, which is the one card
+     here drawn on the paper rather than on the card colour — so its step is the
+     other way round. */
+  .session:hover {
+    background: var(--card);
+  }
+
+  .startGrilling .start:not(:disabled):not(.inert):hover,
+  .resume .resumeConversation:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
 }

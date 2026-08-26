@@ -102,9 +102,9 @@
   cursor: pointer;
 }
 
-.drop button:hover,
+/* The row the keyboard has walked to, which is no pointer's doing and so is
+   not inside the query at the foot of this file. */
 .drop button:focus-visible,
-.drop a[role="menuitem"]:hover,
 .drop a[role="menuitem"]:focus-visible {
   background: var(--paper);
 }
@@ -114,3 +114,28 @@
   opacity: 0.65;
 }
 
+/* Under the pointer: a row is a surface and shifts one step of the paper the
+   app is drawn in, and the ⋯ is a control and takes the accent — a step past
+   the `--ink` it darkens to while its own menu is down, so a mark under the
+   pointer and a mark with a drop under it never read as the same thing. */
+@media (hover: hover) {
+  .drop button:not(:disabled):hover,
+  .drop a[role="menuitem"]:hover {
+    background: var(--paper);
+  }
+
+  /* The one row of a menu that is a link keeps the row's treatment and takes
+     none of a link's: it is drawn as the buttons beside it and reads as one of
+     them, and the colour and underline every other link in the app takes would
+     be one row of this menu behaving differently. Said rather than left to the
+     cascade, because the rule in `styles/base.css` carries the same weight as
+     the one above that took the underline off. */
+  .drop a[role="menuitem"]:hover {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .trigger.mark:not(:disabled):hover {
+    color: var(--accent);
+  }
+}

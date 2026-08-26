@@ -168,3 +168,34 @@
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
+
+/* The field being typed in, which is no pointer's doing: the border says which
+   of the four the words are going into. */
+.form input:focus-visible,
+.form textarea:focus-visible {
+  border-color: var(--accent);
+}
+
+/* And under the pointer: the fields darken their borders, the save deepens the
+   accent it is filled with, and the two outlines take the colour their own
+   words are in — the cancel's accent, and the remove's red. */
+@media (hover: hover) {
+  .form input:hover,
+  .form textarea:hover {
+    border-color: var(--ink-soft);
+  }
+
+  .buttons button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+
+  .buttons .cancel:not(:disabled):hover {
+    background: none;
+    border-color: var(--accent);
+  }
+
+  .actions .remove:not(:disabled):hover {
+    border-color: var(--removed);
+  }
+}
