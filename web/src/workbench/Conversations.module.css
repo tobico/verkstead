@@ -153,15 +153,21 @@
   gap: 0.5rem;
 }
 
-/* The row itself is the card and the grip beside it: the card is what is
-   pressed to open the Conversation, and the grip is what is dragged to move it.
-   Two targets rather than one, because a card that was both would have to guess
-   which of the two a press meant — and on a phone it would have to take the
-   touch that was meant to scroll the list. */
+/* The row is the card, and the card is the whole of the target: pressing it
+   opens the Conversation and dragging it moves the Conversation up the list.
+   One target rather than the two this was — a grip beside the card was a second
+   thing to aim at, and one that had to be aimed at, for something the card can
+   carry itself.
+
+   What tells the two gestures apart is the hand rather than the place, which is
+   `Conversations.tsx`'s to do and not this file's: a press that travels is a
+   drag and one that stays put is a click, and on a phone a card lifts under a
+   finger that holds still while a swipe scrolls the list as it always did.
+   Nothing here says `touch-action`, and that is the point — a card that refused
+   the scroll in advance would refuse the swipe with it. */
 .conversationRow {
   display: flex;
   align-items: stretch;
-  gap: 0.25rem;
 }
 
 /* A row rather than a column: the name and the repo it is in stack down the
@@ -180,6 +186,11 @@
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
   cursor: pointer;
+
+  /* A card dragged the length of the sidebar would otherwise paint every name
+     it passed in the selection blue. There is nothing on a card worth selecting
+     — the branch is read, not copied out of here. */
+  user-select: none;
 }
 
 /* A draft: nothing about it has been settled, so the card is drawn as the
@@ -234,42 +245,14 @@
   opacity: 0.45;
 }
 
-/* The grip: the part of a row that is dragged rather than pressed, which is how
-   the human says where a Conversation sits. Its own target beside the card, as
-   wide as a thumb and as tall as the row.
-
-   `touch-action: none` is what makes it work on a phone at all: without it a
-   touch that starts here scrolls the sidebar, and the pointer events the drag is
-   made of are cancelled the moment it does. It is on the grip alone, so the rest
-   of the list scrolls under a thumb exactly as it did. */
-.conversationRow .grip {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 2.25rem;
-  padding: 0;
-  color: var(--ink-soft);
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 0.6rem;
-  cursor: grab;
-  touch-action: none;
-  font: inherit;
-  font-size: 1rem;
-  letter-spacing: -0.25em;
-  text-indent: -0.25em;
-}
-
-/* The row under the hand: lifted off the list while it is being moved, so what
-   is being dragged is the one thing on the list that is obviously moving. */
-.conversationRow.held .grip {
-  cursor: grabbing;
-}
-
+/* The card under the hand: lifted off the list while it is being moved, so what
+   is being dragged is the one thing on the list that is obviously moving. The
+   closed hand says the card is held rather than merely pressed, which is the
+   whole of what the grip's own cursor was for. */
 .conversationRow.held .open {
   border-color: var(--accent);
   opacity: 0.9;
+  cursor: grabbing;
 }
 
 /* The left-hand column: everything the row says in words. `min-width: 0` so a

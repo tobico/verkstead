@@ -752,9 +752,9 @@ describe("how a card says where its conversation has got to", () => {
   });
 });
 
-/// The order the sidebar is in, which is the human's own: they drag a row's grip
-/// and the whole list goes to the server, so it survives a reload, a restart and
-/// a second device without any of the three being a case this page knows about.
+/// The order the sidebar is in, which is the human's own: they drag a card and
+/// the whole list goes to the server, so it survives a reload, a restart and a
+/// second device without any of the three being a case this page knows about.
 ///
 /// What the server does with the order is asked over there — the tests in
 /// `crates/server/tests/conversations.rs` say where an unplaced Conversation
@@ -821,13 +821,46 @@ describe("the order the human puts the sidebar in", () => {
     }
   }
 
-  /// Drag one row's grip to a height on the pane, and let go.
-  function dragTo(card: HTMLElement, y: number) {
-    const grip = card.querySelector<HTMLElement>(`.${sidebar.grip}`)!;
+  /// The card of a row, which is the whole of what a row is a target for now:
+  /// the press that opens a Conversation and the press that moves one land on
+  /// the same button, and what tells them apart is what the hand does next.
+  function card(row: HTMLElement): HTMLElement {
+    return row.querySelector<HTMLElement>(`.${sidebar.open}`)!;
+  }
 
-    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 0 });
-    fireEvent.pointerMove(grip, { pointerId: 1, clientY: y });
-    fireEvent.pointerUp(grip, { pointerId: 1 });
+  /// Drag one card to a height on the pane with the mouse, and let go. Past the
+  /// grace on the way out, since a press that never travels is a click.
+  function dragTo(row: HTMLElement, y: number) {
+    const open = card(row);
+
+    fireEvent.pointerDown(open, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "mouse",
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(open, { pointerId: 1, clientX: 0, clientY: y });
+    fireEvent.pointerUp(open, { pointerId: 1 });
+  }
+
+  /// A finger put on a card, and the card given long enough to lift under it.
+  async function holdOn(row: HTMLElement): Promise<HTMLElement> {
+    const open = card(row);
+
+    fireEvent.pointerDown(open, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+
+    // Longer than a card takes to lift, which is the whole of what the finger
+    // has to do — see `LIFT` in `Conversations.tsx`.
+    await new Promise((done) => setTimeout(done, 450));
+
+    return open;
   }
 
   it("moves the row under the hand and sends the whole list", async () => {
@@ -863,14 +896,14 @@ describe("the order the human puts the sidebar in", () => {
     expect(await order(container)).toEqual(["second", "third", "first"]);
   });
 
-  /// A grip that could only be dragged would be a control half the people using
+  /// A card that could only be dragged would be a control half the people using
   /// it could not reach.
   it("moves a row a step at a time from the keyboard", async () => {
     const fetching = three();
     const { container } = mount();
 
     const rows = await cards(container);
-    fireEvent.keyDown(rows[2]!.querySelector(`.${sidebar.grip}`)!, { key: "ArrowUp" });
+    fireEvent.keyDown(card(rows[2]!), { key: "ArrowUp" });
 
     expect(await order(container)).toEqual(["first", "third", "second"]);
     await waitFor(() =>
@@ -885,7 +918,7 @@ describe("the order the human puts the sidebar in", () => {
     const { container } = mount();
 
     const rows = await cards(container);
-    fireEvent.keyDown(rows[0]!.querySelector(`.${sidebar.grip}`)!, { key: "ArrowUp" });
+    fireEvent.keyDown(card(rows[0]!), { key: "ArrowUp" });
 
     expect(await order(container)).toEqual(["first", "second", "third"]);
     expect(
@@ -894,24 +927,147 @@ describe("the order the human puts the sidebar in", () => {
     ).toBe(0);
   });
 
-  /// The grip is a second control on a row that already has one, and it does a
-  /// different thing: it says so itself rather than leaving the card's label to
-  /// cover both.
-  it("names what each grip moves", async () => {
+  /// There is no grip beside the card to be dragged, and none to be tabbed to
+  /// either: the card is the only control on the row.
+  it("carries no second control on the row", async () => {
+    three();
+    const { container } = mount();
+
+    expect((await cards(container)).map((row) => row.querySelectorAll("button").length))
+      .toEqual([1, 1, 1]);
+  });
+
+  /// The grip had a label of its own saying which row it moved. Nothing beside
+  /// the card carries one now, so the card says which keys move it instead.
+  it("says on the card which keys move it", async () => {
     three();
     const { container } = mount();
 
     expect(
-      (await cards(container)).map((card) =>
-        card.querySelector(`.${sidebar.grip}`)!.getAttribute("aria-label"),
-      ),
-    ).toEqual(["Move first", "Move second", "Move third"]);
+      (await cards(container)).map((row) => card(row).getAttribute("aria-keyshortcuts")),
+    ).toEqual(["ArrowUp ArrowDown", "ArrowUp ArrowDown", "ArrowUp ArrowDown"]);
   });
 
-  /// Most answering happens on a phone, and a touch that starts on the grip has
-  /// to drag the row rather than scroll the list out from under it.
-  it("takes the touch that starts on a grip", () => {
-    expect(sidebarCss).toContain("  cursor: grab;\n  touch-action: none;\n");
+  /// A press that let go about where it landed is a click, whatever the pixel
+  /// or two a hand moves between the two.
+  it("opens the conversation a press did not move", async () => {
+    three();
+    const { container, history } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    const open = card(rows[2]!);
+    fireEvent.pointerDown(open, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "mouse",
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(open, { pointerId: 1, clientX: 2, clientY: 2 });
+    fireEvent.pointerUp(open, { pointerId: 1 });
+    fireEvent.click(open);
+
+    expect(await order(container)).toEqual(["first", "second", "third"]);
+    expect(history.get()).toBe("/conversations/3");
+  });
+
+  /// And one that moved a card does not also open it: the card is where they
+  /// put it, and opening the Conversation as well would answer one gesture
+  /// twice.
+  it("does not open the conversation a drag moved", async () => {
+    three();
+    const { container, history } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    dragTo(rows[2]!, 10);
+    fireEvent.click(card(rows[2]!));
+
+    expect(await order(container)).toEqual(["third", "first", "second"]);
+    expect(history.get(), "the drag was the whole of what they said").toBe("/");
+  });
+
+  /// A finger drags a card by holding it still first. No distance tells a drag
+  /// from a scroll on a phone, so what tells the two apart is the time before
+  /// the finger moves.
+  it("lifts a card under a finger that holds still", async () => {
+    const fetching = three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    const open = await holdOn(rows[2]!);
+    fireEvent.pointerMove(open, { pointerId: 1, clientX: 0, clientY: 10 });
+    fireEvent.pointerUp(open, { pointerId: 1 });
+
+    expect(await order(container)).toEqual(["third", "first", "second"]);
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
+        order: [3, 1, 2],
+      }),
+    );
+  });
+
+  /// A finger that travels before its card has lifted is scrolling the list,
+  /// and the list is the browser's to scroll.
+  it("leaves a swipe to the list", async () => {
+    const fetching = three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    const open = card(rows[2]!);
+    fireEvent.pointerDown(open, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(open, { pointerId: 1, clientX: 0, clientY: 40 });
+    fireEvent.pointerUp(open, { pointerId: 1 });
+
+    expect(await order(container)).toEqual(["first", "second", "third"]);
+    expect(
+      askedFor(fetching, "/api/ui/conversations/order"),
+      "nothing was moved, so there is nothing to save",
+    ).toBe(0);
+  });
+
+  /// Once a card has lifted, though, the list must not scroll out from under
+  /// it — and the refusal is over the moment the hand is.
+  it("refuses the scroll only while a card is held", async () => {
+    three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    const open = await holdOn(rows[2]!);
+    expect(scrolled(), "the held card, not the list").toBe(true);
+
+    fireEvent.pointerUp(open, { pointerId: 1 });
+    expect(scrolled(), "the list again, as on any other day").toBe(false);
+  });
+
+  /// Whether the page took the scroll away from the browser: a touch move at
+  /// the document, and whether anything refused it.
+  function scrolled(): boolean {
+    const swipe = new Event("touchmove", { bubbles: true, cancelable: true });
+    document.dispatchEvent(swipe);
+    return swipe.defaultPrevented;
+  }
+
+  /// A card that refused the scroll before the finger landed would refuse the
+  /// swipe that scrolls the list with it, which is why nothing here says
+  /// `touch-action` and the drag refuses it from the lift instead.
+  it("leaves the scroll to the browser until a card has lifted", () => {
+    expect(sidebarCss).not.toContain("touch-action:");
   });
 
   /// The order that was not saved is not the order to draw: what comes back is
@@ -927,7 +1083,7 @@ describe("the order the human puts the sidebar in", () => {
     const { container } = mount();
 
     const rows = await cards(container);
-    fireEvent.keyDown(rows[2]!.querySelector(`.${sidebar.grip}`)!, { key: "ArrowUp" });
+    fireEvent.keyDown(card(rows[2]!), { key: "ArrowUp" });
 
     await waitFor(() =>
       screen.getByText(/The order could not be saved/, { exact: false }),

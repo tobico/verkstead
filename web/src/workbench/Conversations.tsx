@@ -19,9 +19,9 @@
 //!
 //! The order the rows are in is the human's own. This is one person's working
 //! set, so which piece of work sits at the top is theirs to say rather than a
-//! sort's — they say it by dragging a row's grip, and what they said is the
-//! server's to keep. So a drag sends the whole list and the list comes back from
-//! the server on every read, which is what makes the order survive a reload, a
+//! sort's — they say it by dragging a card, and what they said is the server's
+//! to keep. So a drag sends the whole list and the list comes back from the
+//! server on every read, which is what makes the order survive a reload, a
 //! restart and a second device without any of the three being a case.
 //!
 //! The sidebar is also where the rest of Verkstead is reached from, because the
@@ -37,6 +37,7 @@ import {
   Switch,
   createEffect,
   createSignal,
+  onCleanup,
   type JSX,
 } from "solid-js";
 
@@ -143,52 +144,146 @@ export function Conversations(props: {
   // about pixels, and pixels are something only the DOM knows.
   let list: HTMLUListElement | undefined;
 
-  /// Take hold of a row: the order stops being the server's for as long as the
-  /// hand is on it.
-  const grab = (event: PointerEvent, id: number) => {
-    // The primary button, a finger or a pen. A right-click is not a drag.
-    if (event.button !== 0) return;
+  // The press in flight: which card it is on, where on the screen it started,
+  // whether it is a finger, and whether the card has lifted under it yet. Null
+  // every moment nothing is pressed, which is nearly all of them.
+  //
+  // Not a signal, because nothing is drawn from it: what a lifted card is drawn
+  // from is `held` above, and the rest of this is bookkeeping between one
+  // pointer event and the next.
+  let press: {
+    id: number;
+    x: number;
+    y: number;
+    touch: boolean;
+    lifted: boolean;
+    waiting?: ReturnType<typeof setTimeout>;
+  } | null = null;
 
-    // So a touch drags the row instead of selecting the text under it.
-    event.preventDefault();
+  // Whether the press that has just ended moved a card. The click arrives after
+  // the pointer is up, and a card dragged into place should not open as well.
+  let reordered = false;
 
-    // Every move from here reaches this grip, whatever the pointer ends up
-    // over — including the gap between two rows and the world outside the
-    // sidebar.
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  /// The card lifts: the order stops being the server's for as long as the hand
+  /// is on it.
+  const lift = (at: NonNullable<typeof press>) => {
+    at.lifted = true;
 
     // Held first and ordered second, in that order: the two are read together
     // by the effect above, and an order taken hold of by nobody is one it is
     // entitled to throw away.
-    setHeld(id);
+    setHeld(at.id);
     setDragged(shown().map((row) => row.id));
+
+    // The list must not scroll out from under a card being moved. A
+    // `touch-action` on the card would have said so before the finger landed
+    // and taken the swipe that scrolls the list with it, so the scroll is
+    // refused here instead: from the lift until the hand lets go, and never
+    // while a finger is merely passing through.
+    if (at.touch) {
+      document.addEventListener("touchmove", refuse, { passive: false });
+    }
   };
 
-  /// The hand moved: put the held row where the pointer is.
+  /// A press begins somewhere on a card. Which of the three things it is — a
+  /// click, a scroll or a drag — is settled by what the hand does next.
+  const grab = (event: PointerEvent, id: number) => {
+    // The primary button, a finger or a pen. A right-click is not a drag.
+    if (event.button !== 0) return;
+
+    // Every move from here reaches this card, whatever the pointer ends up
+    // over — including the gap between two rows and the world outside the
+    // sidebar.
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+
+    const began: NonNullable<typeof press> = {
+      id,
+      x: event.clientX,
+      y: event.clientY,
+      touch: event.pointerType !== "mouse",
+      lifted: false,
+    };
+    press = began;
+    reordered = false;
+
+    // A finger lifts a card by holding still. No distance tells a drag from a
+    // scroll on a phone — both of them are the finger moving — so what tells
+    // the two apart is the time before it does.
+    if (began.touch) {
+      began.waiting = setTimeout(() => {
+        if (press === began) lift(began);
+      }, LIFT);
+    }
+  };
+
+  /// The hand moved: past the grace it is a drag, and a drag puts the lifted
+  /// card where the pointer is.
   const drag = (event: PointerEvent) => {
-    const id = held();
+    const at = press;
+    if (!at) return;
+
+    if (!at.lifted) {
+      // Inside the grace the hand has not said anything yet: this is the wobble
+      // between pressing a card and letting go of it, and a card that started
+      // moving here is a card that could not be clicked at all.
+      if (Math.hypot(event.clientX - at.x, event.clientY - at.y) <= GRACE) {
+        return;
+      }
+
+      // A finger that travels before its card has lifted is scrolling the list,
+      // so the press is over and the browser has it.
+      if (at.touch) {
+        clearTimeout(at.waiting);
+        press = null;
+        return;
+      }
+
+      lift(at);
+    }
+
     const order = dragged();
-    if (id === null || !order || !list) return;
+    if (!order || !list) return;
 
     const to = order.indexOf(under(list, event.clientY));
-    if (to < 0 || to === order.indexOf(id)) return;
+    if (to < 0 || to === order.indexOf(at.id)) return;
 
-    setDragged(moved(order, id, to));
+    setDragged(moved(order, at.id, to));
   };
 
   /// The hand let go: what is on the screen is what the human meant, so that is
   /// what is sent.
   const drop = () => {
-    const order = dragged();
-    if (held() === null) return;
+    const at = press;
+    if (!at) return;
 
+    clearTimeout(at.waiting);
+    press = null;
+    if (!at.lifted) return;
+
+    document.removeEventListener("touchmove", refuse);
+    reordered = true;
     setHeld(null);
+
+    const order = dragged();
     if (order) place.mutate(order);
   };
 
-  /// And the same move made from the keyboard, which is the whole of what a
-  /// grip has to offer somebody who is not dragging anything: one row up, one
-  /// row down, and the list saved each time as a drag saves it.
+  // A sidebar that goes away mid-drag takes its refusal of the scroll with it.
+  // Nothing else would ever take it off the document again: the drop that would
+  // have is on an element that is no longer there.
+  onCleanup(() => document.removeEventListener("touchmove", refuse));
+
+  /// A press that let go about where it landed is a click, and a click opens the
+  /// Conversation. One that moved a card is not: the card is where they put it,
+  /// and opening it as well would be answering one gesture twice.
+  const opened = (id: number) => {
+    if (reordered) return;
+    props.open(id);
+  };
+
+  /// And the same move made from the keyboard, which is the whole of what a card
+  /// has to offer somebody who is not dragging anything: one row up, one row
+  /// down, and the list saved each time as a drag saves it.
   const step = (id: number, by: number) => {
     const order = shown().map((row) => row.id);
     const from = order.indexOf(id);
@@ -247,7 +342,7 @@ export function Conversations(props: {
                   entry={entry}
                   selected={String(entry.id) === props.selected}
                   held={held() === entry.id}
-                  open={props.open}
+                  open={opened}
                   grab={grab}
                   drag={drag}
                   drop={drop}
@@ -608,6 +703,13 @@ function spoken(entry: ConversationEntry): string {
 /// implementing and wrapping are not told apart here, because what the sidebar
 /// is for is finding the Conversation to look at and all three are *this one is
 /// under way*.
+///
+/// The card is also what is dragged to move the Conversation up the list. There
+/// was a grip beside it until there was not: a second target to aim at, and one
+/// that had to be aimed at, for something the card can carry itself. What tells
+/// the gestures apart is now the hand rather than the place — see `grab`, `drag`
+/// and `drop` above — and the arrow keys do from the keyboard what the grip's
+/// did.
 function ConversationRow(props: {
   entry: ConversationEntry;
   selected: boolean;
@@ -639,7 +741,24 @@ function ConversationRow(props: {
         class={styles.open}
         aria-current={props.selected ? "true" : undefined}
         aria-label={spoken(props.entry)}
+        // What the grip's own label used to say, now that there is no second
+        // control to say it in: this card can be moved, and these are the keys
+        // that move it.
+        aria-keyshortcuts="ArrowUp ArrowDown"
         onClick={() => props.open(props.entry.id)}
+        onPointerDown={(event) => props.grab(event, props.entry.id)}
+        onPointerMove={props.drag}
+        onPointerUp={props.drop}
+        onPointerCancel={props.drop}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            props.step(props.entry.id, -1);
+          } else if (event.key === "ArrowDown") {
+            event.preventDefault();
+            props.step(props.entry.id, 1);
+          }
+        }}
       >
         <span class={styles.what}>
           <span class={styles.title}>{props.entry.branch}</span>
@@ -655,32 +774,6 @@ function ConversationRow(props: {
             <span class={`${marks.mark} ${marks[which()]}`} aria-hidden="true" />
           )}
         </Show>
-      </button>
-
-      {/* The grip: what is dragged, and the one control on this row that is
-          about the list rather than about the Conversation. Its own label,
-          because what it does is not what the card beside it does — and its own
-          keys, because a control that could only be dragged would be a control
-          half the people using it could not reach. */}
-      <button
-        type="button"
-        class={styles.grip}
-        aria-label={`Move ${props.entry.branch}`}
-        onPointerDown={(event) => props.grab(event, props.entry.id)}
-        onPointerMove={props.drag}
-        onPointerUp={props.drop}
-        onPointerCancel={props.drop}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowUp") {
-            event.preventDefault();
-            props.step(props.entry.id, -1);
-          } else if (event.key === "ArrowDown") {
-            event.preventDefault();
-            props.step(props.entry.id, 1);
-          }
-        }}
-      >
-        {GRIP}
       </button>
     </li>
   );
@@ -711,8 +804,21 @@ function under(list: HTMLUListElement, y: number): number {
   return Number(over?.dataset.id ?? NaN);
 }
 
-/// What the grip says: the dots everything draggable is gripped by, so that
-/// what it is for needs no explaining. Two columns of them, which is the shape
-/// the convention is, in characters rather than in a drawing — every other mark
-/// in this viewer is a character.
-const GRIP = "⋮⋮";
+/// How far a pointer may travel and still have been a click, in pixels. A press
+/// is not a steady thing — a mouse moves a pixel or two between going down and
+/// coming up — so a card that began moving at the first move would be a card
+/// that could not be clicked at all.
+const GRACE = 5;
+
+/// How long a finger holds a card still before it lifts, in milliseconds. Long
+/// enough that a swipe down the list is never taken for it, short enough that
+/// holding a card is not waiting for it.
+const LIFT = 400;
+
+/// What a card being dragged does to the scroll under it: refuses it. Hung on
+/// the document at the lift and taken off again at the drop, so a finger scrolls
+/// the sidebar every other moment of the day.
+///
+/// A function of its own rather than one made per drag, because removing a
+/// listener means handing back the very same function.
+const refuse = (event: Event): void => event.preventDefault();
