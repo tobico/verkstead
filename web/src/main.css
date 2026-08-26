@@ -2285,6 +2285,20 @@ main:has(.workbench) {
   color: #b3382c;
 }
 
+/* And the round boundary on the records of before. Nothing moves a conversation
+   to drafting any more — a second round opens where it is steered, past drafting
+   already — but a conversation reopened while Reopen existed carries the move
+   that says so, and everything above it was built from a different brief. The
+   boundary on everything written since is the `.steered` line below, and this is
+   the same reading of a timeline that says it in the older vocabulary. */
+.timeline-event > .moved.draft {
+  font-weight: 600;
+  color: var(--ink-soft);
+  border-top: 1px solid var(--edge);
+  padding-top: 0.6rem;
+  margin-top: 0.4rem;
+}
+
 /* And the human saying where the work goes, which is the line the move under it
    came of. Drawn like the move for that reason — the two are one moment read
    twice — and in the ink the rest of the page is set in rather than the dim the

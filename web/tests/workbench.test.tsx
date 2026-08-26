@@ -4088,6 +4088,25 @@ describe("a second round", () => {
     expect(stylesheet).toContain(".timeline-event > .steered,");
   });
 
+  /// And the boundary on a timeline reopened before a steer was the way back
+  /// in. Nothing writes a move to drafting any more, but the records that carry
+  /// one are the record, and the rounds on them still have to be told apart.
+  it("keeps the boundary a reopened round was drawn with", async () => {
+    theBuilding({
+      state: "Draft",
+      timeline: [
+        ...BUILDING.timeline,
+        { Moved: { id: 9007, at: "2026-08-24T11:00:00Z", state: "Draft" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const boundary = await drawn(container, ".timeline-event > .moved.draft");
+    expect(boundary.textContent).toBe("Implementing → Draft");
+
+    expect(stylesheet).toContain(".timeline-event > .moved.draft {");
+  });
+
   /// And the finished end of the ladder still reads as having something to do
   /// from here: nothing stands under the timeline, and the steer that opens a
   /// round like this one is in the menu on the header.
