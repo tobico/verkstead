@@ -4260,6 +4260,15 @@ const RESPOND_THEN_VANISH: &str = "    SAYING='reading what was said'\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'that is what I would have done\n'";
 
+/// And one that waits for the answers and then falls over, which is a batch
+/// session that took what it was going to do about them with it.
+const RESPOND_THEN_DIE_ON_THE_ANSWERS: &str = "    SAYING='reading what was said'\n    \
+     printf '%s\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'gh: the connection dropped\n'\n    \
+     exit 1";
+
 /// One that reads what was said and then waits on the human, which is what a
 /// batch session blocked on `verkstead ask` looks like from outside.
 const RESPOND_THEN_WAIT: &str = "    SAYING='reading what was said'\n    \
@@ -6404,18 +6413,19 @@ async fn addressed(fixture: &Grilling) -> Vec<String> {
     addressed
 }
 
-/// A batch that was answered and never acted on does not go quietly either.
+/// A batch session that ends having landed none of what the human accepted
+/// leaves what was said dealt with all the same: what it did with the answers is
+/// its own to report.
 ///
-/// The review's net, one turn later and for the same reason: the session that
-/// asked is the session that fixes, so one that dies between the Response and its
-/// push takes the approved work with it. The record is what says otherwise, and
-/// the run stops at an Interruption saying what is owed.
-///
-/// The retry is that doing and nothing else — one fix session, handed every
-/// accepted proposal at once with what the human said beside it. Nothing is asked
-/// again, because nothing is left to decide.
+/// The review's rule one turn later, and for the review's reason. The record
+/// could say otherwise — the proposals they accepted are on the Set, and there
+/// is no commit on the branch since — and it is deliberately not asked. The
+/// session read what was said, put what it would do, was answered and ran to the
+/// end of what it had to say; a Verkstead that audited the branch against the
+/// picks would be second-guessing the only participant that was there, and
+/// stopping the run over a change the session decided against on second look.
 #[tokio::test]
-async fn a_batchs_accepted_fixes_that_never_landed_stop_the_run_and_are_fixed_on_a_retry() {
+async fn a_batch_that_landed_nothing_still_leaves_what_was_said_addressed() {
     let spill = tempfile::tempdir().unwrap();
     let reviews = spill.path().join("review-prompts");
     let dispatched = spill.path().join("fix-prompts");
@@ -6433,8 +6443,94 @@ async fn a_batchs_accepted_fixes_that_never_landed_stop_the_run_and_are_fixed_on
     worked_to_empty(&fixture).await;
     until_written(&batches).await;
 
-    // What it would do goes up, the human decides, and the session goes without
-    // landing a thing.
+    // One accepted, one declined, and the session lands neither.
+    let set = fixture.ask(ANSWERING_THE_COMMENTS).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1, "free_text": "Keep the signature." },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the batch session ended and what was said never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped over what the record says was owed: {:?}",
+        notices(&view),
+    );
+    assert_eq!(fixes(&view), 0, "and nothing was committed");
+    assert!(
+        !dispatched.exists(),
+        "with nothing dispatched to land it afterwards: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&batches).unwrap()).len(),
+        1,
+        "and nothing read the comments a second time",
+    );
+}
+
+/// But a batch session that *dies* after the answers stops the run, and
+/// dispatches nothing to finish what it started.
+///
+/// The other half of the same rule: what the session did with the answers is its
+/// report to make, and one that fell over made none. There is nothing here that
+/// knows whether the changes landed, so the run stops with the tail of what it
+/// said as the evidence — and what was said goes back to being unread, because
+/// the press is the batch over again rather than a session handed decisions off
+/// the record. What that fresh reading proposes is whatever is still worth
+/// proposing about the branch as it now stands.
+#[tokio::test]
+async fn a_batch_that_dies_after_the_answers_stops_the_run_and_dispatches_nothing() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let mended = spill.path().join("mended");
+
+    // Falls over on the answers — and once whatever the human went off and did
+    // about it is done, reads what was said and finds nothing left in it.
+    let responding = format!(
+        "    if [ -e {mended} ]; then\n        \
+             printf 'I read what was said and none of it needs a change\n'\n    \
+         else\n{die}\n    \
+         fi",
+        mended = quoted(&mended),
+        die = RESPOND_THEN_DIE_ON_THE_ANSWERS,
+    );
+
+    let gh = gh_about_once(CHECKS_UNANSWERABLE, &reviews, THREE_COMMENTS, "");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, &responding),
+        &gh,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&batches).await;
+
     let set = fixture.ask(ANSWERING_THE_COMMENTS).await;
 
     assert_eq!(
@@ -6455,18 +6551,15 @@ async fn a_batchs_accepted_fixes_that_never_landed_stop_the_run_and_are_fixed_on
     let stopped = fixture.stopped().await;
 
     assert!(
-        stopped.html.contains("Landing the fixes"),
-        "the stop is named as the half that failed: {:?}",
+        stopped
+            .html
+            .contains("Answering what was said on the pull request"),
+        "the step is named as what it was: {:?}",
         stopped.html,
     );
     assert!(
-        stopped.html.contains("Move the reset above the comparison"),
-        "and what is owed is said in the words the session wrote: {:?}",
-        stopped.html,
-    );
-    assert!(
-        !stopped.html.contains("Rename the test that pins"),
-        "the one they declined is owed by nobody: {:?}",
+        stopped.html.contains("the connection dropped"),
+        "with the tail of what the session said, which is where it says why: {:?}",
         stopped.html,
     );
     assert_eq!(
@@ -6474,61 +6567,50 @@ async fn a_batchs_accepted_fixes_that_never_landed_stop_the_run_and_are_fixed_on
         Some(stopped.id),
         "what is waiting is the human",
     );
-
-    assert_eq!(fixture.resume().await, Resumed::Resumed);
-
-    let told = until_written(&dispatched).await;
-
-    assert_eq!(
-        prompts(&told).len(),
-        1,
-        "one session for the lot of them, rather than one per proposal: {told}",
+    assert!(
+        !comments_settled(&fixture).await,
+        "and nothing settled what was said, because nobody saw it through",
     );
     assert!(
-        told.contains("addressing/SKILL.md"),
-        "inside the bundled addressing skill: {told}",
+        addressed(&fixture).await.is_empty(),
+        "which is unread again, so the press is a session about the same words \
+         rather than one about nothing",
     );
     assert!(
-        told.contains("Move the reset above the comparison")
-            && told.contains("Keep the signature."),
-        "handed the accepted proposal and what they said beside it: {told}",
-    );
-    assert!(
-        !told.contains("Rename the test that pins"),
-        "and not the one they declined: {told}",
-    );
-
-    fixture.until(|view| (fixes(view) == 1).then_some(())).await;
-
-    // What was said goes back to settled once the fixes are on the branch: a
-    // batch with work owed on it is a wrap-up with something left unaddressed,
-    // whatever the record of dispatched-for comments says, and nothing re-reads
-    // them to get there.
-    let deadline = Instant::now() + PATIENCE;
-    while !comments_settled(&fixture).await {
-        assert!(
-            Instant::now() < deadline,
-            "the fixes landed and what was said never settled",
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-
-    let view = fixture.view().await;
-
-    assert_eq!(
-        fixes(&view),
-        1,
-        "the fix the retry ran is the only one on the branch",
-    );
-    assert_eq!(
-        sets(&view).len(),
-        2,
-        "the grilling's proposal and the batch's, and nothing asked a second time",
+        !dispatched.exists(),
+        "and nothing was dispatched to carry out what it was answered: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
     );
     assert_eq!(
         prompts(&std::fs::read_to_string(&batches).unwrap()).len(),
         1,
-        "and nothing read the comments again: the decisions were already made",
+        "with nothing launched behind the stop either",
+    );
+
+    // And the press is the batch over again: a session as fresh as the first,
+    // reading what was said rather than being handed what was decided about it.
+    std::fs::write(&mended, "").unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let deadline = Instant::now() + PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the press never answered what was said, so it never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&batches).unwrap()).len(),
+        2,
+        "the batch that died on the answers, and the one the press ran",
+    );
+    assert!(
+        !dispatched.exists(),
+        "and still nothing dispatched from the record: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
     );
 }
 
