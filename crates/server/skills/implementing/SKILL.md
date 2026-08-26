@@ -28,8 +28,9 @@ noticed.
   Timeline, where the human reads it.
 - **Leave the work committed.** Uncommitted changes at the end of a session are
   work nobody can see and nothing can build on.
-- **Do not push, and do not open a pull request.** Getting the branch reviewed is
-  a step of its own that Verkstead runs after this one.
+- **Leave nothing for a later session.** There is no step after this one: the
+  branch is yours to carry all the way to the pull request, which is what the
+  last section here is.
 
 ### What the message body says
 
@@ -74,6 +75,50 @@ Read what the repository says about itself before writing code — its
 `CLAUDE.md`, its `docs/`, the tests around what you are changing — and follow
 it. Run its tests, and fix what you break: a green branch is part of the work
 rather than a bonus on top of it.
+
+## Then get the branch reviewed, the way this repository does it
+
+The work is committed, so the last of it is getting it looked at. Read the
+repository's `docs/agents/git-workflow.md` — its `## Review process`, and the
+`### Finish sequence` inside it — and follow that sequence step by step. It is
+the repository's process rather than Verkstead's, so what is written there is
+what to do, whatever another project's habits would suggest.
+
+Two shapes, and which one this is, is a fact about the branch rather than a
+choice:
+
+- an **unstacked** branch — the ordinary case — is pushed, and then opened as a
+  **draft** pull request titled for the work, with a summary of what you built
+  as its body;
+- a **stacked** branch, one made with `gh stack init` / `gh stack add`, goes
+  through `gh stack submit --auto` instead, after which this branch's own pull
+  request has its title and body corrected. Leave the stack's other pull
+  requests alone: they belong to finished work.
+
+Work out which of the two this branch is before running either, and follow what
+the repository's own sequence says about it — `gh stack view` naming this branch
+is what says it is in a stack, and an error or a stack without it says it is
+not. A repository whose file says nothing about finishing, or has no such file:
+push the branch and open a draft pull request titled for the work —
+
+    git push -u origin HEAD
+    gh pr create --draft --title '<what this built>' --body '<what you built>'
+
+**Nothing waits on approval here either.** No gate, no confirmation and nobody
+at this terminal: the pull request opens unasked, and it opens as a *draft*
+because merging is the human's act and nothing here is allowed to look like it
+was theirs. Then stop — that is also what ends this session: Verkstead waits for
+you to go quiet, finds the pull request, and takes the Conversation on to
+wrapping it up.
+
+### A session that finds the work already done
+
+You may be the second session on this branch — the first one built the work and
+went before it got this far. Nothing to build is not nothing to do: read what is
+on the branch against the handoff, finish anything it left short, and then carry
+it to the pull request exactly as above. A session that ended here saying there
+was nothing for it to do would leave the branch where the one before it did,
+which is the one ending this run cannot recover from by itself.
 
 ## When you need the human
 

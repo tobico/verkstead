@@ -22,6 +22,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProfileEntry } from "../src/api/types";
 import { ProfileList } from "../src/profiles/ProfileList";
+import styles from "../src/profiles/ProfileList.module.css";
 import { json, serving, whenever } from "./serving";
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 
@@ -78,13 +79,13 @@ function editProfile(name: string) {
     screen
       .getByText(name)
       .closest("li")!
-      .querySelector(".profile-actions button")!,
+      .querySelector(`.${styles.actions} button`)!,
   );
 }
 
 /// The form, or nothing at all where it has not been opened.
 function theForm(container: ParentNode): HTMLDialogElement | null {
-  return container.querySelector<HTMLDialogElement>("dialog.edit-profile");
+  return container.querySelector<HTMLDialogElement>(`dialog.${styles.form}`);
 }
 
 /// Fill the form in, whichever profile it is about.
@@ -127,7 +128,7 @@ describe("the agent profiles page", () => {
       expect.anything(),
     );
     expect(
-      [...container.querySelectorAll(".profile-row .title")].map(
+      [...container.querySelectorAll(`.${styles.row} .${styles.title}`)].map(
         (row) => row.textContent,
       ),
     ).toEqual(SAVED.map((profile) => profile.name));
@@ -144,14 +145,19 @@ describe("the agent profiles page", () => {
       "li",
     )!;
 
-    expect([...row.querySelectorAll(".model")].map((it) => it.textContent)).toEqual(
-      FABLE.models,
-    );
-    expect(row.querySelector(".agent-type")!.textContent).toBe(
-      FABLE.agent_type,
-    );
+    expect(
+      [...row.querySelectorAll(`.${styles.model}`)].map((it) => it.textContent),
+    ).toEqual(FABLE.models);
+    // The agent type closes the meta line the models are on: it has no paint of
+    // its own, so it is read as the last thing on that line rather than by a
+    // class that would exist only to be queried here.
+    expect(
+      row.querySelector(`.${styles.meta}`)!.lastElementChild!.textContent,
+    ).toBe(FABLE.agent_type);
 
-    const paths = [...row.querySelectorAll(".path")].map((it) => it.textContent);
+    const paths = [...row.querySelectorAll(`.${styles.path}`)].map(
+      (it) => it.textContent,
+    );
     expect(paths).toEqual([FABLE.claude_dir, FABLE.config_file]);
   });
 
@@ -167,9 +173,9 @@ describe("the agent profiles page", () => {
     )!;
 
     expect(OPUS.models.length).toBeGreaterThan(1);
-    expect([...row.querySelectorAll(".model")].map((it) => it.textContent)).toEqual(
-      OPUS.models,
-    );
+    expect(
+      [...row.querySelectorAll(`.${styles.model}`)].map((it) => it.textContent),
+    ).toEqual(OPUS.models);
   });
 
   /// The list is what stays on the page. Adding one is a form, and the form is
@@ -390,7 +396,7 @@ describe("removing a profile", () => {
     fireEvent.click(
       (await waitFor(() => screen.getByText(FABLE.name)))
         .closest("li")!
-        .querySelector(".profile-actions .remove")!,
+        .querySelector(`.${styles.actions} .${styles.remove}`)!,
     );
 
     await waitFor(() =>
@@ -411,7 +417,7 @@ describe("removing a profile", () => {
     fireEvent.click(
       (await waitFor(() => screen.getByText(FABLE.name)))
         .closest("li")!
-        .querySelector(".profile-actions .remove")!,
+        .querySelector(`.${styles.actions} .${styles.remove}`)!,
     );
 
     await waitFor(() => screen.getByText(/A conversation is set to run under it/));
@@ -440,8 +446,8 @@ describe("a profile whose pair has gone", () => {
       "li",
     )!;
 
-    expect(row.classList).toContain("broken");
-    expect(row.querySelector(".broken")!.textContent).toBe(said);
+    expect(row.classList).toContain(styles.broken);
+    expect(row.querySelector(`.${styles.broken}`)!.textContent).toBe(said);
   });
 
   it("says nothing about a profile whose pair is where it was left", async () => {
@@ -453,7 +459,7 @@ describe("a profile whose pair has gone", () => {
     )!;
 
     expect(FABLE.broken).toBeNull();
-    expect(row.classList).not.toContain("broken");
-    expect(row.querySelector(".broken")).toBeNull();
+    expect(row.classList).not.toContain(styles.broken);
+    expect(row.querySelector(`.${styles.broken}`)).toBeNull();
   });
 });

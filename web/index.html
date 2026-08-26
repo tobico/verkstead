@@ -9,13 +9,19 @@
          `publicDir`. A worker only controls the paths beneath the one it was
          served from, so none of them may move under the bundle's directory. -->
     <link rel="manifest" href="/manifest.webmanifest" />
-    <!-- The icon's own field, so the browser chrome reads as the frame around
-         the mark rather than as a second colour beside it. Kept in step with
-         `theme_color` in the web manifest. -->
+    <!-- The colour the browser chrome takes, so the window reads as a frame
+         around the app rather than as a second colour beside it. Kept in step
+         with `theme_color` in the web manifest. -->
     <meta name="theme-color" content="#21201e" />
-    <link rel="icon" href="/icons/verkstead.svg" type="image/svg+xml" />
-    <!-- iOS reads neither the manifest's icons nor an SVG favicon, so it gets
-         its own link, to a PNG of the size it wants. -->
+    <!-- The artwork is a raster, so the favicon is a PNG cut to the size a tab
+         draws rather than one the browser has to shrink itself — and cut from
+         the hammer alone, the full mark having more in it than 32px can hold.
+         See `tools/generate-icons.sh`. -->
+    <link rel="icon" href="/icons/icon-32.png" sizes="32x32" type="image/png" />
+    <!-- iOS reads neither the manifest's icons nor a favicon this small, so it
+         gets its own link, to a PNG of the size it wants — cut from the one
+         piece of artwork drawn with a field of its own, because iOS composites
+         a transparent icon onto black. -->
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   </head>
   <body>

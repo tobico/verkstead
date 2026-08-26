@@ -1,0 +1,302 @@
+/* The conversations sidebar: the wordmark over it, the one way to add to the
+   list, and the rows themselves. See `Conversations.tsx`.
+
+   Two of this pane's menus are `Menu`'s — the ⋯ at the head of the pane and the
+   New conversation button — and what is here is their paint rather than their
+   chrome: how they hang and how they are dismissed is `Menu.module.css`. Their
+   trigger and their drop are that component's own elements, so they are reached
+   by what they are rather than by a class this module cannot spell: the trigger
+   is the one button the menu holds directly, and the drop is the one thing in it
+   with a menu's role.
+
+   The mark a waiting card carries is `Mark.module.css`, drawn out of that module
+   so that a ring means the same thing in this list that it means on the row the
+   list opens. */
+
+/* The sidebar leads with the mark rather than with a title of its own: this pane
+   is the whole of what Verkstead is entered by, so what belongs over the list is
+   the thing the list is part of, and *Conversations* only named what was under
+   it a second time. The icon and the word together rather than either alone —
+   the icon by itself is a shape nobody has been taught yet, and the word by
+   itself is what every other pane's title already looks like.
+
+   Larger than a pane's title, and still an `<h1>`, so the pane keeps a heading
+   at the top of it for a screen reader to find. It is the class the sidebar
+   hands the pane head for its heading — see the `heading` prop in
+   `PaneHead.tsx`, which is how the app's own header is a variant of the one
+   header component rather than a second component beside it. Everything sized
+   here is sized on this class alone, so no other pane's title moves with it. */
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  /* Over the 1.4rem `base.css` gives every `<h1>`: this one names the app
+     rather than the pane, and it is read before any of them. */
+  font-size: 1.8rem;
+}
+
+/* The mark at the height of the header rather than of the word beside it, so
+   what the eye lands on first is the thing rather than the name of it. */
+.wordmark img {
+  width: 3rem;
+  height: 3rem;
+}
+
+/* The ⋯ at the head of the pane: what there is beyond the conversations at all.
+   It sits at the right edge of the header beside the thing that header names,
+   and a mark is what fits there. The Timeline's ⋯ is the same mark in the same
+   slot and is painted the same way, in `Timeline.module.css`. */
+.workbenchActions > button {
+  padding: 0 0.4rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+}
+
+.workbenchActions > button[aria-expanded="true"] {
+  color: var(--ink);
+}
+
+/* Wider than the one word in it, so it reads as a menu with room for the next
+   entry rather than as a label that happened to appear under the mark. */
+.workbenchActions > [role="menu"] {
+  min-width: 9rem;
+}
+
+/* Starting a conversation: which repo the work is in, and nothing else — the
+   branch name is prefilled by the server and the brief is written in the
+   timeline. One decision, so one press: the button is the whole of the form,
+   and the menu it drops is the anchor everything below hangs from. */
+.newConversation {
+  margin-bottom: 1.5rem;
+}
+
+/* The width of the pane, because it is the pane's one action and the menu comes
+   down the width of it. The mark is pushed to the far end, where a dropdown's
+   is. */
+.newConversation > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+}
+
+/* As wide as the button it came down from, and over the list rather than in the
+   flow above it: opening it does not push the conversations down, which is the
+   whole of what the notices under the old box were doing. */
+.newConversation > [role="menu"] {
+  left: 0;
+}
+
+.newConversation .nothing {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
+}
+
+.newConversation .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* A run of rows kept apart from the rest by a rule, where pressing one of them
+   does a different kind of thing than pressing the others: the roadmaps nothing
+   is driving, under the repos a conversation is started in. This pane is the
+   only caller that groups its rows, which is why the two of them are here rather
+   than with the menu's own chrome. */
+.menuGroup {
+  margin-top: 0.3rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--edge);
+}
+
+.menuHeading {
+  margin: 0;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* The roadmap's name over the stage that would be started, because on a phone
+   the two of them do not share a line — and the Repo beside the name, since the
+   group is flat and two repositories may each hold an `mvp`. */
+.adoptRoadmap .what {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.4rem;
+}
+
+.adoptRoadmap .in,
+.adoptRoadmap .stage {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The conversations themselves, drawn as the set lists' rows are: the whole card
+   is the target, and a line of provenance under the name. */
+.conversationList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* The row itself is the card and the grip beside it: the card is what is
+   pressed to open the Conversation, and the grip is what is dragged to move it.
+   Two targets rather than one, because a card that was both would have to guess
+   which of the two a press meant — and on a phone it would have to take the
+   touch that was meant to scroll the list. */
+.conversationRow {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+/* A row rather than a column: the name and the repo it is in stack down the
+   left, and whatever mark the Conversation carries sits at the right edge. */
+.conversationRow .open {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+
+/* Which one is open, said in the accent border alone: the border is the mark
+   everywhere something is selected, and a card that also carried a stripe down
+   its near edge read as heavier than the rest of the list rather than as the one
+   being looked at. A fill is no better — the row is read, and a wash behind it
+   would fight the words. */
+.conversationRow.selected .open {
+  border-color: var(--accent);
+}
+
+/* A draft: nothing about it has been settled, so the card is drawn as the
+   outline of one rather than as one.
+
+   `border-style` alone, so a selected draft still takes the accent — a dotted
+   accent border is a draft that is open, which is both things at once and is
+   what it should look like. */
+.conversationRow.draft .open {
+  border-style: dotted;
+}
+
+/* Work that has stopped, finished and aborted alike — which of the two is the
+   details pane's to say, and what the sidebar is saying is that there is nothing
+   here to do. Still a row to press: a Done Conversation can be reopened.
+
+   Far enough down that the card reads as closed at a glance rather than merely
+   quiet: a list of live work with a Done conversation in it should not have to be
+   read to tell which is which. The line under the name is lifted to `--ink`
+   below all the same — left soft it would be dimmed twice, and the card is what
+   should recede and not the words in it. */
+.conversationRow.ended .open {
+  opacity: 0.45;
+}
+
+.conversationRow.ended .meta {
+  color: var(--ink);
+}
+
+/* Something is waiting on the human, and the whole card says so: the accent all
+   the way round it, at the card's weight — one 1px border and one 1px inset
+   shadow being the same 2px this is. A border rather than the mark alone,
+   because what this has to survive is a glance down a list on a phone, and an
+   edge is legible where a 12px dot beside four names is not.
+
+   The accent rather than the `--stopped` red for the reason the mark inside it
+   is the accent: an ask left open, a run stopped on an Interruption and an
+   account out of window are none of them anything going wrong. */
+.conversationRow.waiting .open {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Open *and* waiting: both marks on the one card, the near edge thickened and
+   the ring around it, rather than the later rule taking the earlier one's
+   shadow away. */
+.conversationRow.selected.waiting .open {
+  box-shadow:
+    inset 0.2rem 0 0 var(--accent),
+    inset 0 0 0 1px var(--accent);
+}
+
+/* The grip: the part of a row that is dragged rather than pressed, which is how
+   the human says where a Conversation sits. Its own target beside the card, as
+   wide as a thumb and as tall as the row.
+
+   `touch-action: none` is what makes it work on a phone at all: without it a
+   touch that starts here scrolls the sidebar, and the pointer events the drag is
+   made of are cancelled the moment it does. It is on the grip alone, so the rest
+   of the list scrolls under a thumb exactly as it did. */
+.conversationRow .grip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  padding: 0;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  cursor: grab;
+  touch-action: none;
+  font: inherit;
+  font-size: 1rem;
+  letter-spacing: -0.25em;
+  text-indent: -0.25em;
+}
+
+/* The row under the hand: lifted off the list while it is being moved, so what
+   is being dragged is the one thing on the list that is obviously moving. */
+.conversationRow.held .grip {
+  cursor: grabbing;
+}
+
+.conversationRow.held .open {
+  border-color: var(--accent);
+  opacity: 0.9;
+}
+
+/* The left-hand column: everything the row says in words. `min-width: 0` so a
+   long branch name wraps inside it instead of pushing the mark off the edge. */
+.conversationRow .what {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.conversationRow .title {
+  font-weight: 600;
+}
+
+.conversationRow .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}

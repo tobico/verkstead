@@ -10,6 +10,7 @@ import { createSignal, onMount } from "solid-js";
 
 import { Switch } from "../Switch";
 import { disable, enable, look, said as saidAbout } from "./browser";
+import styles from "./Notifications.module.css";
 import type { Standing } from "./standing";
 import { flippable, said } from "./standing";
 
@@ -71,14 +72,14 @@ export function Notifications(): JSX.Element {
   // region to announce into rather than a paragraph appearing beside it; the
   // stylesheet takes an empty one out of the layout.
   return (
-    <section class="notifications">
+    <section class={styles.notifications}>
       <Switch
         label="Push notifications"
         on={on()}
         disabled={waiting()}
         flip={flip}
       />
-      <p class="state" aria-live="polite">
+      <p class={styles.state} aria-live="polite">
         {trouble() ?? said(standing())}
       </p>
     </section>

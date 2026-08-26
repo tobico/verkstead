@@ -9,8 +9,10 @@
 
 import type { JSX } from "solid-js";
 
+import app from "../App.module.css";
 import { Switch } from "../Switch";
 import type { DiffView } from "../api/types";
+import styles from "./Diff.module.css";
 
 /// The attached Diff, and the one setting that governs how it is read.
 ///
@@ -27,14 +29,17 @@ export function Diff(props: {
   flip: (on: boolean) => void;
 }): JSX.Element {
   return (
-    <section class={props.wrapped ? "diff wrapped" : "diff"} id="diff">
-      <div class="section-head">
-        <h2 class="section-heading">Diff</h2>
+    <section
+      class={props.wrapped ? `${styles.diff} ${styles.wrapped}` : styles.diff}
+      id="diff"
+    >
+      <div class={app.sectionHead}>
+        <h2 class={app.sectionHeading}>Diff</h2>
         <Switch label="Word wrap" on={props.wrapped} flip={props.flip} />
       </div>
       {/* The per-file anchors are stamped by the renderer, since this arrives
           already rendered. */}
-      <div class="diff-files" innerHTML={props.diff.html} />
+      <div class={styles.diffFiles} innerHTML={props.diff.html} />
     </section>
   );
 }

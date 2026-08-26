@@ -10,6 +10,11 @@ import { waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SetView } from "../src/api/types";
+// The wrap control, which is the one on/off switch this page draws twice.
+import app from "../src/App.module.css";
+// The Diff section itself, whose two classes are the whole of what wrapping is.
+import styles from "../src/set/Diff.module.css";
+import toggle from "../src/Switch.module.css";
 import { mount, reading, texts } from "./reading";
 import { json, readable, reads, serving, whenever } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
@@ -35,7 +40,7 @@ afterEach(() => {
 
 /// The Diff section of a page, which every test here has to have found.
 function diffOf(page: ParentNode): HTMLElement {
-  const diff = page.querySelector<HTMLElement>("section.diff");
+  const diff = page.querySelector<HTMLElement>(`section.${styles.diff}`);
   expect(diff, "expected the Diff section").toBeTruthy();
   return diff as HTMLElement;
 }
@@ -44,10 +49,10 @@ describe("the attached Diff", () => {
   it("is put in as the server rendered it, one fold per file", async () => {
     const diff = diffOf(await reading(WAITING));
 
-    const folds = diff.querySelectorAll<HTMLDetailsElement>("details.diff-file");
+    const folds = diff.querySelectorAll<HTMLDetailsElement>("details.diffFile");
     expect(folds, "one fold per file, whatever git knew of it").toHaveLength(2);
     expect([...folds].map((fold) => fold.id)).toEqual(["diff-1", "diff-2"]);
-    expect(texts(diff, "details.diff-file .diff-path")).toEqual([
+    expect(texts(diff, "details.diffFile .diffPath")).toEqual([
       "src/limits.rs",
       "notes.txt",
     ]);
@@ -58,8 +63,8 @@ describe("the attached Diff", () => {
     // server's, and this is the whole of what arrives.
     const diff = diffOf(await reading(WAITING));
 
-    expect(diff.querySelector(".diff-line.add")).toBeTruthy();
-    expect(diff.querySelector(".diff-line.del")).toBeTruthy();
+    expect(diff.querySelector(".diffLine.add")).toBeTruthy();
+    expect(diff.querySelector(".diffLine.del")).toBeTruthy();
     expect(
       diff.querySelector("span[class^='tok-']"),
       "expected the Rust file highlighted server-side",
@@ -70,12 +75,14 @@ describe("the attached Diff", () => {
     const diff = diffOf(await reading(WAITING));
 
     expect(diff.id).toBe("diff");
-    expect(diff.querySelector("h2.section-heading")!.textContent).toBe("Diff");
+    expect(diff.querySelector(`h2.${app.sectionHeading}`)!.textContent).toBe(
+      "Diff",
+    );
   });
 
   it("folds and unfolds each file", async () => {
     const diff = diffOf(await reading(WAITING));
-    const [first] = diff.querySelectorAll<HTMLDetailsElement>("details.diff-file");
+    const [first] = diff.querySelectorAll<HTMLDetailsElement>("details.diffFile");
 
     // Open as the server wrote them: a Diff is evidence, and evidence nobody
     // can see until they open it is not being shown.
@@ -84,7 +91,7 @@ describe("the attached Diff", () => {
     // The fold is the browser's own `details`, so what a test can ask is that
     // the page is still one — a summary to press, and the file's lines inside
     // it.
-    expect(first!.querySelector("summary .diff-path")!.textContent).toBe(
+    expect(first!.querySelector("summary .diffPath")!.textContent).toBe(
       "src/limits.rs",
     );
     first!.open = false;
@@ -110,7 +117,7 @@ describe("the attached Diff", () => {
     await waitFor(() => expect(container.querySelector("h1")).toBeTruthy());
 
     const first = container.querySelector<HTMLDetailsElement>(
-      "details.diff-file",
+      "details.diffFile",
     )!;
     first.open = false;
 
@@ -122,23 +129,23 @@ describe("the attached Diff", () => {
     await waitFor(() =>
       expect(container.querySelector("h1")!.textContent).toBe(RETITLED.title),
     );
-    expect(container.querySelector("details.diff-file")).toBe(first);
+    expect(container.querySelector("details.diffFile")).toBe(first);
     expect(first.open).toBe(false);
   });
 
   it("shows none of its chrome on a Set that has no Diff", async () => {
     const page = await reading(UNDIFFED);
 
-    expect(page.querySelector("section.diff")).toBeNull();
+    expect(page.querySelector(`section.${styles.diff}`)).toBeNull();
     expect(page.querySelector("#diff")).toBeNull();
     expect(page.querySelector("#diff-1")).toBeNull();
     expect(
-      texts(page, "h2.section-heading"),
+      texts(page, `h2.${app.sectionHeading}`),
       "with no Diff there is no heading to draw either — the closing section " +
         "is headed for the box it holds, this Set having no Postscript",
     ).toEqual(["Preface", "Questions", "Comment"]);
     expect(
-      page.querySelector(".switch"),
+      page.querySelector(`.${toggle.switch}`),
       "and nowhere for word wrap to belong: it governs a Diff, and there is none",
     ).toBeNull();
   });
@@ -148,7 +155,7 @@ describe("word wrap", () => {
   /// The switch beside the Diff's heading.
   function wrapSwitch(page: ParentNode): HTMLInputElement {
     const found = page.querySelector<HTMLInputElement>(
-      "section.diff .switch input",
+      `section.${styles.diff} .${toggle.switch} input`,
     );
     expect(
       found,
@@ -163,7 +170,7 @@ describe("word wrap", () => {
 
     expect(flip.getAttribute("role")).toBe("switch");
     expect(flip.checked).toBe(false);
-    expect(diffOf(page).className).toBe("diff");
+    expect(diffOf(page).className).toBe(styles.diff);
   });
 
   it("wraps the Diff, and remembers it for the next one", async () => {
@@ -174,7 +181,7 @@ describe("word wrap", () => {
     expect(
       diffOf(page).className,
       "wrapping is a class and nothing more: the Diff arrived rendered",
-    ).toBe("diff wrapped");
+    ).toBe(`${styles.diff} ${styles.wrapped}`);
     expect(
       localStorage.getItem(WRAP),
       "the setting governs every Diff, so it is the device that remembers it",
@@ -186,7 +193,7 @@ describe("word wrap", () => {
 
     const page = await reading(WAITING);
 
-    expect(diffOf(page).className).toBe("diff wrapped");
+    expect(diffOf(page).className).toBe(`${styles.diff} ${styles.wrapped}`);
     expect(wrapSwitch(page).checked).toBe(true);
   });
 
@@ -196,7 +203,7 @@ describe("word wrap", () => {
 
     wrapSwitch(page).click();
 
-    expect(diffOf(page).className).toBe("diff");
+    expect(diffOf(page).className).toBe(styles.diff);
     expect(
       localStorage.getItem(WRAP),
       "the absence is already the default, so off is nothing kept",
@@ -214,10 +221,10 @@ describe("word wrap", () => {
     });
 
     const page = await reading(WAITING);
-    expect(diffOf(page).className).toBe("diff");
+    expect(diffOf(page).className).toBe(styles.diff);
 
     wrapSwitch(page).click();
-    expect(diffOf(page).className).toBe("diff wrapped");
+    expect(diffOf(page).className).toBe(`${styles.diff} ${styles.wrapped}`);
 
     vi.restoreAllMocks();
   });

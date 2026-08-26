@@ -62,7 +62,10 @@ import {
 
 import { loadCapture, loadTranscript } from "../api/client";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
 import { Mark } from "./Mark";
+import styles from "./Output.module.css";
+import { PaneHead } from "./PaneHead";
 import { Screen } from "./Screen";
 import type {
   AgentOutputEvent,
@@ -216,12 +219,10 @@ export function Output(props: {
 
   return (
     <>
-      <div class="pane-head">
-        <button type="button" class="pane-back" onClick={props.back}>
-          ← Timeline
-        </button>
-        <h1>Agent output</h1>
-
+      {/* No Close beside the switch: "← Timeline" is the way out of this pane on
+          a narrow window, and a header with two ways off it would be one row
+          asking the same question twice. */}
+      <PaneHead back={{ to: "Timeline", go: props.back }} title="Agent output">
         {/* The two ways of reading the one session, beside the title rather than
             across the pane under it: two words is all the width it ever needs,
             and the header is where a pane's own controls belong. Buttons that
@@ -234,12 +235,12 @@ export function Output(props: {
             `aria-pressed` has already said, and it exists so that switching
             reads as one thing moving rather than two things blinking. */}
         <div
-          class="record-switch"
+          class={styles.recordSwitch}
           role="group"
           aria-label="How to read this session"
         >
           <span
-            class="indicator"
+            class={styles.indicator}
             aria-hidden="true"
             style={{
               transform: `translateX(${mark().at}px)`,
@@ -248,7 +249,7 @@ export function Output(props: {
           />
           <button
             type="button"
-            class="transcript-tab"
+            class={styles.transcriptTab}
             ref={transcriptTab}
             aria-pressed={showing() === "transcript"}
             onClick={() => setShowing("transcript")}
@@ -257,7 +258,7 @@ export function Output(props: {
           </button>
           <button
             type="button"
-            class="screen-tab"
+            class={styles.screenTab}
             ref={screenTab}
             aria-pressed={showing() === "screen"}
             onClick={() => setShowing("screen")}
@@ -265,22 +266,26 @@ export function Output(props: {
             Screen
           </button>
         </div>
-      </div>
+      </PaneHead>
 
       {/* The same metric the Timeline row shows, and absent for the same
           reason: a session with no Transcript has no turns to count. A finished
           session with none has nothing to say here at all, so the line itself
           goes rather than standing empty above the record. */}
       <Show when={props.output.turns !== null || props.output.running}>
-        <p class="capture-summary">
+        <p class={styles.captureSummary}>
           <Show when={props.output.turns !== null}>
-            <span class="turns">
+            <span class={styles.turns}>
               {props.output.turns} {props.output.turns === 1 ? "turn" : "turns"}
             </span>
           </Show>
           {/* And the same mark the row this was opened from carries: one
               session's liveness, said the one way. */}
-          <Mark running={props.output.running} idle={props.output.idle} />
+          <Mark
+            running={props.output.running}
+            idle={props.output.idle}
+            class={styles.liveMark}
+          />
         </p>
       </Show>
 
@@ -292,12 +297,12 @@ export function Output(props: {
       >
         <Switch>
           <Match when={transcript.isPending}>
-            <p class="empty">Loading…</p>
+            <Empty>Loading…</Empty>
           </Match>
           <Match when={transcript.isError}>
-            <p class="error">
+            <ErrorLine>
               Could not read what this session said: {transcript.error?.message}
-            </p>
+            </ErrorLine>
           </Match>
           <Match when={spoke() && transcript.data}>
             {(said) => <Record said={said()} />}
@@ -305,24 +310,22 @@ export function Output(props: {
           {/* No Transcript, so the bytes — which is the whole Transcript-side
               story for a session whose backend kept no log of itself. */}
           <Match when={capture.isError}>
-            <p class="error">
+            <ErrorLine>
               Could not read this capture: {capture.error?.message}
-            </p>
+            </ErrorLine>
           </Match>
           <Match when={capture.data}>
             {(capture) => (
               <Show
                 when={capture().text !== ""}
-                fallback={
-                  <p class="empty">This session has printed nothing yet.</p>
-                }
+                fallback={<Empty>This session has printed nothing yet.</Empty>}
               >
-                <pre class="capture">{capture().text}</pre>
+                <pre class={styles.capture}>{capture().text}</pre>
               </Show>
             )}
           </Match>
           <Match when={true}>
-            <p class="empty">Loading…</p>
+            <Empty>Loading…</Empty>
           </Match>
         </Switch>
       </Show>
@@ -377,7 +380,7 @@ function Record(props: { said: TranscriptView }): JSX.Element {
 
   return (
     <>
-      <ol class="transcript">
+      <ol class={styles.transcript}>
         <For each={props.said.turns}>
           {(turn) => (
             <Said
@@ -413,7 +416,7 @@ function Said(props: {
     <Switch>
       <Match when={props.turn.kind === "Prose" && props.turn}>
         {(prose) => (
-          <li class="turn prose">
+          <li class={`${styles.turn} ${styles.prose}`}>
             <div class="markdown" innerHTML={prose().html} />
           </li>
         )}
@@ -421,7 +424,7 @@ function Said(props: {
 
       <Match when={props.turn.kind === "Reasoning" && props.turn}>
         {(reasoning) => (
-          <li class="turn reasoning">
+          <li class={`${styles.turn} ${styles.reasoning}`}>
             <details>
               <summary>Thinking</summary>
               <div class="markdown" innerHTML={reasoning().html} />
@@ -437,7 +440,7 @@ function Said(props: {
           const answer = () => props.answer(call().call);
 
           return (
-            <li class="turn tool-call">
+            <li class={`${styles.turn} ${styles.toolCall}`}>
               <details>
                 {/* Shut, a pair says what was run and nothing about how it
                     went: a session calls a hundred tools and ninety-nine of
@@ -446,21 +449,23 @@ function Said(props: {
                     says so, in the red a stopped run is said in — which is
                     what makes one findable without opening anything. */}
                 <summary>
-                  <span class="tool">{call().name}</span>
+                  <span class={styles.tool}>{call().name}</span>
                   <Show when={call().about}>
-                    <span class="about">{call().about}</span>
+                    <span class={styles.about}>{call().about}</span>
                   </Show>
                   <Show when={answer()?.failed}>
-                    <span class="failed">failed</span>
+                    <span class={styles.failed}>failed</span>
                   </Show>
                 </summary>
-                <pre class="input">{call().input}</pre>
+                <pre class={styles.input}>{call().input}</pre>
                 {/* And what it said back, under what it was called with,
                     because that is the order the two happened in. Absent
                     while the tool is still working, which is a card a reader
                     can open on a call that has not come back yet. */}
                 <Show when={answer()}>
-                  {(answered) => <pre class="output">{answered().text}</pre>}
+                  {(answered) => (
+                    <pre class={styles.output}>{answered().text}</pre>
+                  )}
                 </Show>
               </details>
             </li>
@@ -475,10 +480,13 @@ function Said(props: {
       <Match when={props.turn.kind === "ToolResult" && props.turn}>
         {(answer) => (
           <Show when={!props.paired(answer().call)}>
-            <li class="turn tool-result" classList={{ failed: answer().failed }}>
+            <li
+              class={`${styles.turn} ${styles.toolResult}`}
+              classList={{ [styles.failed!]: answer().failed }}
+            >
               <details>
                 <summary>{answer().failed ? "Failed" : "Result"}</summary>
-                <pre class="output">{answer().text}</pre>
+                <pre class={styles.output}>{answer().text}</pre>
               </details>
             </li>
           </Show>
@@ -487,7 +495,7 @@ function Said(props: {
 
       <Match when={props.turn.kind === "Put" && props.turn}>
         {(put) => (
-          <li class="turn put">
+          <li class={`${styles.turn} ${styles.put}`}>
             <div class="markdown" innerHTML={put().html} />
           </li>
         )}
@@ -498,10 +506,10 @@ function Said(props: {
           instead of quietly emptying the pane. */}
       <Match when={props.turn.kind === "Unread" && props.turn}>
         {(unread) => (
-          <li class="turn unread">
+          <li class={`${styles.turn} ${styles.unread}`}>
             <details>
               <summary>A line this version does not know</summary>
-              <pre class="raw">{unread().line}</pre>
+              <pre class={styles.raw}>{unread().line}</pre>
             </details>
           </li>
         )}
@@ -518,7 +526,7 @@ function Said(props: {
 function Kept(props: { lines: Bookkeeping[] }): JSX.Element {
   return (
     <Show when={props.lines.length > 0}>
-      <details class="bookkeeping">
+      <details class={styles.bookkeeping}>
         <summary>
           {props.lines.length}{" "}
           {props.lines.length === 1 ? "bookkeeping line" : "bookkeeping lines"}
@@ -527,8 +535,8 @@ function Kept(props: { lines: Bookkeeping[] }): JSX.Element {
           <For each={props.lines}>
             {(kept) => (
               <li>
-                <span class="kind">{kept.kind}</span>
-                <pre class="raw">{kept.line}</pre>
+                <span class={styles.kind}>{kept.kind}</span>
+                <pre class={styles.raw}>{kept.line}</pre>
               </li>
             )}
           </For>

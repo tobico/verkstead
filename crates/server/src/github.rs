@@ -239,7 +239,7 @@ impl Trouble {
                 "the repository has no GitHub remote for `gh` to ask about".to_owned()
             }
             Trouble::NoPullRequest => {
-                "GitHub has no pull request on this branch, so the finish step opened none"
+                "GitHub has no pull request on this branch, so the session that finished opened none"
                     .to_owned()
             }
             Trouble::Refused(said) => format!("`gh` said: {said}"),

@@ -1,0 +1,68 @@
+/* The Diff as a section of a page: the box it stands in, the column its files
+   are stacked down, and what word wrap does to the lines inside them. See
+   `Diff.tsx`.
+
+   What is *not* here is the Diff itself — the folds, the hunks, the line cells
+   and the syntax colouring. That is HTML `crates/render` writes and the page
+   injects, so its names are the renderer's and syntect's and cannot be hashed:
+   they live in `styles/diff.css`, and the rules below reach them through
+   `:global`.
+
+   The commit pane draws the same section and imports this module for it — see
+   `workbench/Commit.tsx` — the way `Answering.tsx` imports `Sheet.module.css`.
+   One definition of what the wrap switch does, wherever a Diff is read. */
+
+.diff {
+  margin-bottom: 1.5rem;
+  /* Where a jump from the table of contents lands, clear of whatever the page
+     has pinned across its top edge — `--jump-clear` in `Contents.module.css`,
+     that being what does the pinning. Each file's own fold keeps the same
+     clearance, in `styles/diff.css`, the fold being the renderer's. */
+  scroll-margin-top: var(--jump-clear);
+}
+
+.diffFiles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* Word wrap, remembered per device and switched on beside the heading. It undoes
+   the three rules that hold a hunk on one line: the `pre`'s own `white-space`,
+   the box measured to the longest line, and — because a wrapped line has to
+   break somewhere — the browser's refusal to break inside a long word, which
+   here is a minified line or a URL that would otherwise still overflow.
+
+   Nothing about the colouring changes: the wash is on the line, and a line that
+   is three rows tall is washed three rows deep. */
+
+.diff.wrapped :global(.diffLines) {
+  /* Nothing left to scroll to, so the box stops offering. */
+  overflow-x: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff.wrapped :global(.diffLines > code) {
+  width: auto;
+}
+
+/* Hung off the code column: the padding holds every row of the line clear of the
+   two cells, and the negative indent pulls the first row — the one those cells
+   are actually in — back out to the edge again. The remainder of a wrapped line
+   then starts under the code above it rather than under the line numbers.
+
+   The widths are the renderer's file element's, named in `styles/diff.css` and
+   inherited from it. */
+.diff.wrapped :global(.diffLine) {
+  padding-left: var(--diff-gutter);
+  text-indent: calc(-1 * var(--diff-gutter));
+}
+
+/* `text-indent` is inherited and an inline-block is a block container of its own,
+   so without this the two cells would each pull their own contents out to the
+   left along with the line. */
+.diff.wrapped :global(.diffNumber),
+.diff.wrapped :global(.diffLine .marker) {
+  text-indent: 0;
+}

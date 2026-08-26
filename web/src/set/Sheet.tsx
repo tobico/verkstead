@@ -21,6 +21,7 @@
 import type { JSX } from "solid-js";
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 
+import app from "../App.module.css";
 import type {
   Answer,
   AskView,
@@ -39,6 +40,7 @@ import { AskText } from "./AskText";
 import { Contents, PageHeader, navigation } from "./Contents";
 import { Diff } from "./Diff";
 import { Postscript } from "./Postscript";
+import styles from "./Sheet.module.css";
 import { Standing } from "./Standing";
 import { drawDiagrams } from "./diagrams";
 import { anchor, outline, spied } from "./outline";
@@ -154,7 +156,7 @@ export function Sheet(props: {
       return {
         // A class of its own for each: the two sit in the same place and are
         // styled together, but nothing about an archived Set was answered.
-        mark: "answered-at",
+        mark: styles.answeredAt!,
         said: `Answered ${settledAge(how.Answered.submitted_at, now())}`,
         stamp: utcStamp(how.Answered.submitted_at),
       };
@@ -162,7 +164,7 @@ export function Sheet(props: {
 
     if ("ArchivedUnanswered" in how) {
       return {
-        mark: "archived-at",
+        mark: styles.archivedAt!,
         said: `Archived unanswered ${settledAge(how.ArchivedUnanswered, now())}`,
         stamp: utcStamp(how.ArchivedUnanswered),
       };
@@ -212,12 +214,12 @@ export function Sheet(props: {
           every Set stands somewhere, even one sent from outside a repo with no
           provenance to name. A `div` because the far end holds controls, which
           are more than a paragraph may contain. */}
-      <div class="meta">
+      <div class={styles.meta}>
         <Show when={props.set.project}>
-          {(project) => <span class="project">{project()}</span>}
+          {(project) => <span class={styles.project}>{project()}</span>}
         </Show>
         <Show when={props.set.branch}>
-          {(branch) => <span class="branch">{branch()}</span>}
+          {(branch) => <span class={styles.branch}>{branch()}</span>}
         </Show>
         <Show when={when()}>
           {(when) => (
@@ -243,9 +245,9 @@ export function Sheet(props: {
           — the section around it is all that is the Preface's own. */}
       <Show when={props.set.preface_html}>
         {(html) => (
-          <section class="preface" id="preface">
-            <h2 class="section-heading">Preface</h2>
-            <div class="preface-body markdown" innerHTML={html()} />
+          <section class={styles.preface} id="preface">
+            <h2 class={app.sectionHeading}>Preface</h2>
+            <div class={`${styles.prefaceBody} markdown`} innerHTML={html()} />
           </section>
         )}
       </Show>
@@ -312,19 +314,19 @@ function Questions(props: {
           the head of the page, about the Set as a whole, not under the
           Questions. */}
       <Show when={orphaned()}>
-        <p class="counter-question">
+        <p class={styles.counterQuestion}>
           This Set was archived unanswered: nobody answered these questions, and
           no Response was ever sent. The agent was told the Set had been
           archived.
         </p>
       </Show>
       <Show when={nothing()}>
-        {(said) => <p class="counter-question">{said()}</p>}
+        {(said) => <p class={styles.counterQuestion}>{said()}</p>}
       </Show>
-      <h2 class="section-heading" id="questions">
+      <h2 class={app.sectionHeading} id="questions">
         Questions
       </h2>
-      <ol class="questions decided">
+      <ol class={`${styles.questions} ${styles.decided}`}>
         <For each={props.questions}>
           {(question, index) => (
             <Question
@@ -355,9 +357,9 @@ function Questions(props: {
         <Postscript html={props.postscript}>
           <Show when={comment()}>
             {(comment) => (
-              <section class="set-comment decided">
+              <section class={`${styles.setComment} ${styles.decided}`}>
                 <h2>On the Set as a whole</h2>
-                <p class="comment">{comment()}</p>
+                <p class={styles.comment}>{comment()}</p>
               </section>
             )}
           </Show>
@@ -381,46 +383,46 @@ function Chosen(props: {
   picked: Direction | null;
 }): JSX.Element {
   return (
-    <section class="direction-pick decided" id="direction">
+    <section class={`${styles.directionPick} ${styles.decided}`} id="direction">
       {/* Headed and carded exactly as the chooser is — see `Choosing` — because
           the record is that same section read after the fact, and a heading the
           answering page had and this one dropped would be two pages. */}
-      <h2 class="section-heading">Direction</h2>
-      <div class="direction-card">
+      <h2 class={app.sectionHeading}>Direction</h2>
+      <div class={styles.directionCard}>
         {/* Asked as a Question is asked, and read back the same way: the label
             floated in the accent with the agent's argument running beside it,
             keeping the place a Question's number keeps. */}
-        <div class="ask">
+        <div class={styles.ask}>
           <AskText
             name={DIRECTION_LABEL}
             html={props.proposal.rationale_html}
           />
         </div>
-        <ul class="directions">
+        <ul class={styles.directions}>
           <For each={DIRECTIONS}>
             {(offered) => (
               <li
-                class="direction"
+                class={styles.direction}
                 classList={{
-                  recommended: props.proposal.direction === offered,
-                  chosen: props.picked === offered,
+                  [styles.recommended!]: props.proposal.direction === offered,
+                  [styles.chosen!]: props.picked === offered,
                 }}
               >
-                <span class="direction-name">{DIRECTION[offered]}</span>
+                <span class={styles.directionName}>{DIRECTION[offered]}</span>
                 <Show when={props.proposal.direction === offered}>
-                  <span class="star" title="the agent's Recommendation">
+                  <span class={styles.star} title="the agent's Recommendation">
                     ★
                   </span>
                 </Show>
                 <Show when={props.picked === offered}>
-                  <span class="chose">chosen</span>
+                  <span class={styles.chose}>chosen</span>
                 </Show>
               </li>
             )}
           </For>
         </ul>
         <Show when={props.picked === null}>
-          <p class="semantics">
+          <p class={styles.semantics}>
             No direction was picked, so the proposal went back to the agent.
           </p>
         </Show>
@@ -437,7 +439,7 @@ function Question(props: {
 }): JSX.Element {
   return (
     <li
-      class="question"
+      class={styles.question}
       id={anchor(props.question.ask.name, props.position)}
     >
       {/* A Heading asked nothing, so there is nothing that became of it: it is
@@ -448,7 +450,7 @@ function Question(props: {
       <Show
         when={!props.question.heading}
         fallback={
-          <div class="ask heading">
+          <div class={`${styles.ask} ${styles.heading}`}>
             <AskText
               name={props.question.ask.name}
               html={props.question.ask.text_html}
@@ -461,10 +463,10 @@ function Question(props: {
       {/* Sub-questions get no anchor of their own: one scrolls into view with
           its parent. */}
       <Show when={props.question.subquestions.length > 0}>
-        <ol class="subquestions">
+        <ol class={styles.subquestions}>
           <For each={props.question.subquestions}>
             {(subquestion) => (
-              <li class="subquestion">
+              <li class={styles.subquestion}>
                 <Ask ask={subquestion} response={props.response} />
               </li>
             )}
@@ -516,7 +518,7 @@ function Ask(props: {
     props.ask.options.length === 0 ? "Your answer" : "Your thoughts";
 
   return (
-    <div class="ask decided">
+    <div class={`${styles.ask} ${styles.decided}`}>
       <AskText name={props.ask.name} html={props.ask.text_html} />
       {/* The Options as the sheet showed them: the table where the agent
           declared the axes to compare them along, and the list they have always
@@ -527,7 +529,7 @@ function Ask(props: {
         <Show
           when={props.ask.columns.length > 0}
           fallback={
-            <ul class="options">
+            <ul class={styles.options}>
               <For each={props.ask.options}>
                 {(option) => <Offered option={option} selected={selected()} />}
               </For>
@@ -539,14 +541,14 @@ function Ask(props: {
       </Show>
       <Show when={said()}>
         {(said) => (
-          <p class="answer-text">
-            <span class="prompt">{prompt()}</span>
+          <p class={styles.answerText}>
+            <span class={styles.prompt}>{prompt()}</span>
             {said()}
           </p>
         )}
       </Show>
       <Show when={open()}>
-        <p class="unanswered">
+        <p class={styles.unanswered}>
           Unanswered — the agent was told this one is still open.
         </p>
       </Show>
@@ -579,18 +581,18 @@ function Offered(props: {
   // else.
   return (
     <li class={marks(props.option, chosen())}>
-      <span class="n">{props.option.n}</span>
+      <span class={styles.n}>{props.option.n}</span>
       <span
-        class="option-text markdown"
+        class={`${styles.optionText} markdown`}
         innerHTML={props.option.text_html}
       />
       <Show when={props.option.recommended}>
-        <span class="star" title="the agent's Recommendation">
+        <span class={styles.star} title="the agent's Recommendation">
           ★
         </span>
       </Show>
       <Show when={chosen()}>
-        <span class="chose">chosen</span>
+        <span class={styles.chose}>chosen</span>
       </Show>
     </li>
   );
@@ -601,7 +603,11 @@ function Offered(props: {
 /// not. Shared by the list entry and the table row, because the marks are the
 /// Option's rather than the shape's.
 function marks(option: OptionView, chosen: boolean): string {
-  return ["option", chosen && "chosen", option.recommended && "recommended"]
+  return [
+    styles.option,
+    chosen && styles.chosen,
+    option.recommended && styles.recommended,
+  ]
     .filter(Boolean)
     .join(" ");
 }
@@ -618,7 +624,7 @@ function Tabulated(props: {
   const marked = () => starred(props.ask.options);
 
   return (
-    <table class="answer-table">
+    <table class={styles.answerTable}>
       <Head columns={props.ask.columns} starred={marked()} />
       <tbody>
         <For each={props.ask.options}>
@@ -654,20 +660,23 @@ function Chose(props: {
 
   return (
     <tr class={marks(props.option, chosen())}>
-      <td class="pick">
-        <span class="n">{props.option.n}</span>
+      <td class={styles.pick}>
+        <span class={styles.n}>{props.option.n}</span>
         <Show when={chosen()}>
-          <span class="chose">chosen</span>
+          <span class={styles.chose}>chosen</span>
         </Show>
       </td>
-      <td class="option-text markdown" innerHTML={props.option.text_html} />
+      <td
+        class={`${styles.optionText} markdown`}
+        innerHTML={props.option.text_html}
+      />
       <For each={props.option.cells}>
         {(cell) => <td class="markdown" innerHTML={cell} />}
       </For>
       <Show when={props.starred}>
-        <td class="star-cell">
+        <td class={styles.starCell}>
           <Show when={props.option.recommended}>
-            <span class="star" title="the agent's Recommendation">
+            <span class={styles.star} title="the agent's Recommendation">
               ★
             </span>
           </Show>

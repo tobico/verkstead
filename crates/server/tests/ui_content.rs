@@ -928,15 +928,15 @@ async fn the_attached_diff_is_rendered_per_file_and_highlighted_by_the_server() 
     // table of contents is built from both: `paths[0]` is what `#diff-1` shows.
     assert_eq!(diff.paths, ["src/limits.rs", "notes.txt"]);
     assert_eq!(
-        diff.html.matches(r#"class="diff-file""#).count(),
+        diff.html.matches(r#"class="diffFile""#).count(),
         2,
         "expected one section per file, whatever git knew of it:\n{}",
         diff.html
     );
 
     // The colouring comes from the server: the viewer gets no diff parser.
-    assert!(diff.html.contains("diff-line add"), "{}", diff.html);
-    assert!(diff.html.contains("diff-line del"), "{}", diff.html);
+    assert!(diff.html.contains("diffLine add"), "{}", diff.html);
+    assert!(diff.html.contains("diffLine del"), "{}", diff.html);
     assert!(
         diff.html.contains(r#"<span class="tok-"#),
         "expected the Rust file highlighted server-side:\n{}",

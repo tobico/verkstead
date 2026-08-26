@@ -16,6 +16,7 @@
 //! worth reading; a worktree is a directory the human never asked to keep.
 
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use crate::repos::git;
 
@@ -148,6 +149,97 @@ pub(crate) fn branches(repo: &Path) -> Vec<String> {
         .filter(|(symref, _)| symref.is_empty())
         .map(|(_, name)| name.to_owned())
         .collect()
+}
+
+/// What fetching `repo`'s remotes came to.
+///
+/// Three answers rather than a boolean, because the middle one is not a
+/// failure: a repository with no remote has nothing to fetch and nothing to be
+/// stale against, and treating that as a fetch that did not happen would refuse
+/// work on repositories that are entirely local.
+pub(crate) enum Fetched {
+    /// The remote-tracking refs are as fresh as the remote is.
+    Fresh,
+
+    /// There is no remote to fetch from, so there is nothing to be behind.
+    NoRemote,
+
+    /// Git would not fetch, in git's own words — offline, or an authentication
+    /// that has expired, or a remote that has gone.
+    Failed(String),
+}
+
+/// Bring `repo`'s remote-tracking refs up to what its remotes are holding.
+///
+/// Run before anything resolves a branch to a commit, because a
+/// remote-tracking ref is only ever as fresh as the last fetch: without this a
+/// Conversation comes off wherever the human's checkout last stood rather than
+/// off what origin holds now.
+///
+/// Safe to run against a repository somebody is working in. A fetch moves
+/// remote-tracking refs and nothing else — no local branch, no index, no
+/// working tree — so the worst it can do to the human's own checkout is tell it
+/// the truth about the remote.
+///
+/// A repository git will not answer about at all reads as having no remote, and
+/// then fails again a moment later when its base commit will not resolve. The
+/// difference is not worth splitting here: what follows either way is a refusal
+/// naming something the human can go and look at.
+pub(crate) fn fetch(repo: &Path) -> Fetched {
+    let remotes = git(repo, &["remote"]).unwrap_or_default();
+
+    if remotes.trim().is_empty() {
+        return Fetched::NoRemote;
+    }
+
+    // Not [`crate::repos::git`]: that one throws git's stderr away, and git's
+    // stderr is the whole of what a fetch that failed has to say.
+    let output = Command::new("git")
+        .args(["fetch", "--all", "--quiet"])
+        .current_dir(repo)
+        // A fetch that wants a password must fail rather than wait for one:
+        // there is nobody at this terminal to type it, and an authentication
+        // that has gone is one of the two things this is expected to catch.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .output();
+
+    let output = match output {
+        Ok(output) => output,
+        Err(error) => return Fetched::Failed(error.to_string()),
+    };
+
+    if output.status.success() {
+        return Fetched::Fresh;
+    }
+
+    let said = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+
+    Fetched::Failed(match said.is_empty() {
+        true => "git would not say why".to_owned(),
+        false => said,
+    })
+}
+
+/// The name an unpicked base resolves through: origin's copy of `default`,
+/// where origin carries one, and the local branch where it does not.
+///
+/// What "the default branch" means to everybody who works on the repository is
+/// what the remote is holding, not wherever the human's own copy of it last
+/// stood — a local `main` that has not been pulled for a week is a week behind
+/// the work the branch is meant to come off.
+///
+/// The local branch is the honest answer for a repository with no origin, and
+/// for one whose origin does not carry a branch by that name: neither has an
+/// origin copy to prefer, and there is nothing stale about the only branch
+/// there is. Ask [`fetch`] first, or origin's copy is as old as the last fetch.
+pub(crate) fn default_ref(repo: &Path, default: &str) -> String {
+    let remote = format!("origin/{default}");
+
+    match resolve(repo, &remote) {
+        Some(_) => remote,
+        None => default.to_owned(),
+    }
 }
 
 /// The commit `named` resolves to in `repo`, in full, or `None` if nothing there
