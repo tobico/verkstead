@@ -253,6 +253,35 @@ pub async fn wrap_up_settled(pool: &SqlitePool, conversation_id: i64) -> Result<
         .collect()
 }
 
+/// When one of the things a wrap-up waits on was settled, where it has been.
+///
+/// The moment rather than the fact, which is what tells one half of a wrap-up's
+/// proposals from the other: the review is the session a wrap-up starts with and
+/// no batch is dispatched until it has settled, so a proposal put up before this
+/// is the review's own and one put up after it is a batch's. See
+/// [`super::last_batch_proposal`].
+pub async fn settled_when(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    waiting_on: WaitingOn,
+) -> Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT at FROM wrap_up_settled WHERE conversation_id = ? AND waiting_on = ?",
+    )
+    .bind(conversation_id)
+    .bind(waiting_on.stored())
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "reading when {waiting_on:?} was settled for the wrap-up of \
+             Conversation {conversation_id}"
+        )
+    })?;
+
+    Ok(row.map(|(at,)| at))
+}
+
 /// How many fix sessions this check has already had.
 ///
 /// Zero for a check nothing has been dispatched for, which is every check the

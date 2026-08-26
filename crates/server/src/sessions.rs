@@ -349,41 +349,72 @@ impl Session {
     }
 }
 
-/// How long a session has been printing nothing.
+/// How long a session has been printing nothing, and whether it has ever
+/// printed anything at all.
 ///
 /// Shared with the relay, which puts it back to now on everything that arrives.
 /// That is what makes a grace period safe to end a session on: a session still
 /// talking is never one to end, however long it goes on for, and the work a
 /// session does after its commit — a message, a summary, a push — runs to
 /// completion rather than being cut off mid-sentence.
+///
+/// The second half is for the driver that has nothing else to read. A session
+/// ended on its own quiet is one being taken at its word, and a session that
+/// never said a word has given none: see [`Quiet::said_anything`].
 #[derive(Debug, Clone)]
-pub(crate) struct Quiet(Arc<Mutex<Instant>>);
+pub(crate) struct Quiet(Arc<Mutex<Silence>>);
+
+/// What the clock holds: when the session last said anything, and whether that
+/// was ever it saying anything rather than it starting.
+#[derive(Debug)]
+struct Silence {
+    /// The moment it was last put back — the session's last word, or the moment
+    /// it was launched where it has had none.
+    at: Instant,
+
+    /// Whether it has said anything since it started.
+    spoke: bool,
+}
 
 impl Quiet {
     fn started() -> Quiet {
-        Quiet(Arc::new(Mutex::new(Instant::now())))
+        Quiet(Arc::new(Mutex::new(Silence {
+            at: Instant::now(),
+            spoke: false,
+        })))
     }
 
     /// The session said something, so it has been quiet for no time at all.
     fn spoke(&self) {
-        *self
-            .0
-            .lock()
-            .expect("a session's quiet clock is not poisoned") = Instant::now();
+        let mut silence = self.held();
+
+        silence.at = Instant::now();
+        silence.spoke = true;
     }
 
     pub(crate) fn for_how_long(&self) -> Duration {
-        self.0
-            .lock()
-            .expect("a session's quiet clock is not poisoned")
-            .elapsed()
+        self.held().at.elapsed()
+    }
+
+    /// Whether the session has said anything at all since it started.
+    ///
+    /// What tells a session that finished from one that never got going, for the
+    /// driver whose only signal is silence — see [`crate::runner`]'s
+    /// propose-then-fix rule. A session that reports through the repository has a
+    /// commit or an artifact to be read as done; one that reports through nothing
+    /// but its own words has said nothing, and *nothing* is not a report.
+    pub(crate) fn said_anything(&self) -> bool {
+        self.held().spoke
     }
 
     /// When it last said anything, for whoever wants to sleep until it has been
     /// quiet long enough rather than to ask how long it has been.
     fn since(&self) -> Instant {
-        *self
-            .0
+        self.held().at
+    }
+
+    fn held(&self) -> std::sync::MutexGuard<'_, Silence> {
+        self.0
             .lock()
             .expect("a session's quiet clock is not poisoned")
     }

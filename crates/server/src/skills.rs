@@ -1386,21 +1386,34 @@ mod tests {
             "what it reads is the pull request the work is on: {reviewing}"
         );
     }
-
-    /// The half of it the human decides: one Set, a Question per finding, and the
-    /// block that says which Answer to each means fix it.
+    /// The half of it the human decides: one Set, a Question per finding, and
+    /// every credible way to fix it offered as an Option the human picks
+    /// between — with leaving it alone always among them.
     #[test]
     fn the_reviewing_skill_says_how_a_finding_becomes_work() {
         let reviewing = skill("reviewing/SKILL.md");
 
         assert!(
-            reviewing.contains("review:") && reviewing.contains("findings:"),
-            "the Set is marked by the block it carries, so the skill has to name it: \
-             {reviewing}"
+            reviewing.contains("Each credible way to fix it is an Option of its own"),
+            "a finding is not fix-or-leave: the ways of fixing it are what the human \
+             picks between — {reviewing}"
         );
         assert!(
-            reviewing.contains("fix: Q1.1"),
-            "and name the Option that means fix it, in the Guide's own notation: \
+            reviewing.contains("Leave it is always offered"),
+            "and declining stays possible on every finding: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("Recommend the one you would take"),
+            "with the way the review would take starred: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("Nothing else goes on the Set") && reviewing.contains("no marker"),
+            "the Set is a plain Question Set, carrying no block that says which Option \
+             means fix it: {reviewing}"
+        );
+        assert!(
+            !reviewing.contains("findings:") && !reviewing.contains("fix: Q"),
+            "so nothing in it teaches the findings grammar the schema no longer reads: \
              {reviewing}"
         );
         assert!(
@@ -1414,16 +1427,15 @@ mod tests {
     }
 
     /// The escape hatch: a finding too big for the sitting may offer to be split
-    /// out instead, and what the session then writes for it is a backlog rather
-    /// than a fix.
+    /// out instead — an Option beside the ways of fixing it, like any other —
+    /// and what the session then writes for it is a backlog rather than a fix.
     #[test]
     fn the_reviewing_skill_offers_a_split_only_where_the_work_is_too_big() {
         let reviewing = skill("reviewing/SKILL.md");
 
         assert!(
-            reviewing.contains("split: Q3.2"),
-            "the Option that means split it out is named beside the one that means fix \
-             it: {reviewing}"
+            reviewing.contains("Split it out as its own work"),
+            "splitting it out is an ordinary Option, worded like the rest: {reviewing}"
         );
         assert!(
             reviewing.contains("Offer it rarely, and never by default"),
@@ -1438,6 +1450,11 @@ mod tests {
             reviewing.contains("Do not build any of it"),
             "and written rather than built, because a backlog is worked a session at a \
              time: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("Verkstead reads the branch rather than the"),
+            "the committed backlog being the whole of what says it was split out: \
+             {reviewing}"
         );
     }
 
@@ -1620,22 +1637,30 @@ mod tests {
              dispatched: {responding}"
         );
     }
-
     /// The half the human decides: one Set for the batch, a Question per comment
-    /// worth doing something about, and the block that says which Answer means
-    /// do it.
+    /// worth doing something about, and every credible way of doing it offered
+    /// as an Option — with leaving it alone always among them.
     #[test]
     fn the_responding_skill_says_how_a_comment_becomes_work() {
         let responding = skill("responding/SKILL.md");
 
         assert!(
-            responding.contains("review:") && responding.contains("findings:"),
-            "the Set is marked by the block it carries, so the skill has to name it: \
-             {responding}"
+            responding.contains("Each credible way to do it is an Option of its own"),
+            "a comment is not do-it-or-leave: the ways of doing it are what the human \
+             picks between — {responding}"
         );
         assert!(
-            responding.contains("fix: Q1.1"),
-            "and name the Option that means do it, in the Guide's own notation: \
+            responding.contains("Leave it is always offered"),
+            "and declining stays possible on every one of them: {responding}"
+        );
+        assert!(
+            responding.contains("Nothing else goes on the Set") && responding.contains("no marker"),
+            "the Set is a plain Question Set, carrying no block that says which Option \
+             means do it: {responding}"
+        );
+        assert!(
+            !responding.contains("findings:") && !responding.contains("fix: Q"),
+            "so nothing in it teaches the findings grammar the schema no longer reads: \
              {responding}"
         );
         assert!(
@@ -1648,7 +1673,7 @@ mod tests {
              {responding}"
         );
         assert!(
-            responding.contains("No `split` here"),
+            responding.contains("Nothing is split out here"),
             "and the escape hatch is the review's alone: a batch session that split \
              something out would be owed a backlog nobody reads it for — {responding}"
         );

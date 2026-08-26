@@ -21,43 +21,54 @@
 //! stays settled as addressed. Spending the human's attention only where there
 //! is a decision, which is the review's rule one turn later.
 //!
-//! **Nothing the human accepted is allowed to go quietly**, which is the review's
-//! net too and the reason this module exists rather than the dispatch simply
-//! being a session launch. A batch session that asked, was answered and then went
-//! — cleanly or otherwise — with nothing committed since is a wrap-up owing work
-//! nobody is left to do. So the record is asked afterwards rather than the
-//! session trusted, and what is owed stops the run. Resuming is the doing over
-//! again: one fix session handed every accepted proposal at once, because the
-//! decisions were made and only the carrying out failed. Nothing is asked again.
+//! **The batch is dealt with when its session ends cleanly**, which is the one
+//! moment everything it was sent to do is certainly over: what was said read,
+//! whatever it would do put to the human, whatever they accepted carried out.
+//! Answering the Set deals with nothing by itself — the Response is what the
+//! session acts on, and it is still acting when it arrives.
 //!
-//! A batch session that ended badly having been owed nothing never got as far as
-//! asking. That stops the run too — and because the batch was written down as
-//! addressed the moment it was dispatched, the comments are forgotten again as
-//! the stop is recorded, so a Resume is the batch over again in a session as
-//! fresh as the first.
+//! Nothing is asked of the record about what it did with those answers. The
+//! session is the one thing that read what the human picked and the one thing
+//! that carried it out, so *it ended cleanly* is the whole of its report: the
+//! comments stay written down as addressed, and the watcher settles them on its
+//! next poll. A Verkstead that read the picks back and audited the branch
+//! against them would be second-guessing the only participant that was there —
+//! the review's rule one turn later again, and for the review's reason. See
+//! [`crate::review`].
 //!
-//! **And nothing the human was asked goes quietly either**, which is the review's
-//! net once more and the failure the addressing-as-dispatched trade opens. The
-//! comments are written down as dealt with before the session that deals with
-//! them has done anything, so a batch session that goes between the asking and
-//! the answering leaves a record saying somebody saw to what was said and a Set
-//! nobody is behind. Left alone, the watcher finds nothing new, settles the
-//! comments, and the wrap-up reaches Done with the human's questions still open.
+//! **A batch session that is gone is a stop.** Two things arrive there — one
+//! that fell over, and a server that came back up over a batch that was still
+//! running — and both are the same fact, because a session lives and dies with
+//! the process that started it. Either way the one session that could have
+//! finished this batch is not there, and no other is ever sent to finish
+//! somebody else's: what was decided, what was half done and what was never
+//! started are all beyond asking, so the run stops and the human says what
+//! happens next.
 //!
-//! A restart is where that happens, because a session lives and dies with the
-//! process that started it. What it owes an open batch proposal is what the
-//! review owes its own: **answered**, and the fixes are landed by a fresh session
-//! with nobody asked for anything; **unanswered**, and there is nothing to carry
-//! out and nobody to carry it out, so the Set is closed unanswered and the run
-//! stops.
+//! **And nothing the human was asked is left standing behind it**, which is the
+//! failure the addressing-as-dispatched trade opens. The comments are written
+//! down as dealt with before the session that deals with them has done anything,
+//! so a batch session that goes between the asking and the answering leaves a
+//! record saying somebody saw to what was said and a Set nobody is behind. Left
+//! alone, the watcher finds nothing new, settles the comments, and the wrap-up
+//! reaches Done with the human's questions still open. So any Set a gone session
+//! left unanswered is closed as the stop is raised, which says on the Timeline
+//! that the question is off.
 //!
-//! What was said goes back to being unread as that stop is recorded. The record cannot
-//! say which comments the dead session was dealing with and which the review
-//! folded in before it, so every one of them is read again — a comment read twice
-//! costs a session's work, and one dropped costs the human theirs. Which is safe
+//! What was said goes back to being unread as that stop is recorded, so that the
+//! human's feedback outlives the session that lost it. The record cannot say
+//! which comments the dead session was dealing with and which the review folded
+//! in before it, so every one of them is read again — a comment read twice costs
+//! a session's work, and one dropped costs the human theirs. Which is safe
 //! because of what a batch session is: it reads the code as it now stands, and
 //! a question the commits since have answered is one it says so about and asks
 //! nothing more of.
+//!
+//! Resume is the batch over again, in a session as fresh as the first. Nothing
+//! is dispatched from the record, answered or not: the deciding was the human's
+//! and the doing was the gone session's, and a session handed decisions off a
+//! Set nobody reported on would be Verkstead acting on somebody else's reading
+//! of what was said.
 //!
 //! **One agent in one Worktree.** The caller holds the Conversation's Turn
 //! across the whole of a batch session, the wait on the human included, exactly
@@ -87,36 +98,23 @@ pub(crate) async fn run(state: &AppState, conversation_id: i64, said: &str, whic
 
 /// The batch session is over: leave the wrap-up to carry on, or stop the run.
 ///
-/// One question first, and it is asked of the record rather than of the session:
-/// is there anything the human accepted that never landed? That is the failure
-/// this half exists for, and it reads the same whether the session saw itself out
-/// or fell over — the decisions are made either way, and what is owed is owed.
+/// Nothing is asked of the record about what it did. The session is the one
+/// thing that read the human's picks and the one thing that carried them out, so
+/// how it ended is the whole of its report.
 ///
 /// `ended_badly` is how it ended where it did not end well, and the Timeline
-/// Event it was printing into. A session owed nothing that ended badly is one
-/// that never got as far as asking, which is the other stop here.
+/// Event it was printing into. A session that ended badly is a batch that was
+/// not seen to, whatever it had got to by then, and that stops the run.
 async fn over(
     state: &AppState,
     conversation_id: i64,
     which: &[String],
     ended_badly: Option<(String, i64)>,
 ) {
-    let owed = unlanded(state, conversation_id).await;
-
-    if !owed.is_empty() {
-        let (how, writing) = match &ended_badly {
-            Some((how, writing)) => (Some(how.as_str()), Some(*writing)),
-            None => (None, None),
-        };
-
-        return dropped(state, conversation_id, &owed, how, writing).await;
-    }
-
-    // Owed nothing, which is two very different things: everything the human
-    // accepted was done, or they were never asked to accept anything. A session
-    // that put its proposal up and then went — cleanly or otherwise — is owed
-    // nothing because nothing was decided, and leaving it there would settle the
-    // comments over a Set nobody is behind.
+    // A session that put its proposal up and then went — cleanly or otherwise —
+    // leaves a Set with nobody to read what the human writes into it, so the
+    // questions go off and the run stops rather than waiting on an answer
+    // nothing would ever act on.
     if let Some(set_id) = proposed(state, conversation_id).await {
         if crate::review::unanswered(state, set_id).await {
             return abandoned(state, conversation_id, set_id, Some(which), ended_badly).await;
@@ -146,10 +144,19 @@ async fn over(
 /// nothing about anything new until this is dealt with. `false` is the ordinary
 /// answer and the cheap one — two reads of the record and no Worktree taken.
 ///
-/// Asked of the newest proposal, which is only a batch's once the review is over:
-/// until then it is the review's own Set and seeing to that is
-/// [`crate::review`]'s. The caller keeps that rule — see
-/// [`crate::comments::once`].
+/// What it looks for is a batch's own proposal still waiting on the human — see
+/// [`proposed`]. That is the whole of what a record can be asked here. A
+/// proposal they have already answered is one the session behind it acted on,
+/// because acting on the answers is the last thing a batch session does and
+/// ending cleanly is its report that it did; the same session lost to a restart
+/// between the two is the one thing this cannot tell from that, and the record
+/// is not asked to guess. A session that died in front of the server that
+/// started it is caught where it ends instead — see [`over`].
+///
+/// Asked of a batch's own proposal and never of the review's, for the same
+/// reason: how a review ended is the report of the session that ran it, and
+/// stopping over its Set here would be this half acting on somebody else's
+/// half-read report.
 ///
 /// **The Worktree is what says the session is gone.** A batch session holds the
 /// Conversation's Turn across the whole of its own life, the wait on the human
@@ -161,9 +168,7 @@ pub(crate) async fn unattended(state: &AppState, conversation_id: i64) -> bool {
         return false;
     };
 
-    if unlanded(state, conversation_id).await.is_empty()
-        && !crate::review::unanswered(state, set_id).await
-    {
+    if !crate::review::unanswered(state, set_id).await {
         return false;
     }
 
@@ -176,30 +181,10 @@ pub(crate) async fn unattended(state: &AppState, conversation_id: i64) -> bool {
         return true;
     };
 
-    // Said before anything else, because what wrap-up waits on is nothing said on
-    // the pull request being left unaddressed — and a batch whose session is gone
-    // is exactly that, whatever the record of dispatched-for comments says.
-    unsettle(state, conversation_id).await;
-
     // Asked with the Worktree in hand, for the reason the review asks twice: a
     // Conversation closed while this looked has nowhere left to work.
     if !crate::wrapping::still_going(state, conversation_id).await {
         return false;
-    }
-
-    let owed = unlanded(state, conversation_id).await;
-
-    if !owed.is_empty() {
-        tracing::info!(
-            conversation_id,
-            set_id,
-            fixes = owed.len(),
-            "what was said was answered and the session that would have acted on it is \
-             gone, so a session is starting on the fixes alone"
-        );
-
-        land(state, conversation_id, owed).await;
-        return true;
     }
 
     abandoned(state, conversation_id, set_id, None, None).await;
@@ -207,14 +192,20 @@ pub(crate) async fn unattended(state: &AppState, conversation_id: i64) -> bool {
     true
 }
 
-/// Which Set the newest proposal on this Conversation's Timeline is, where there
-/// is one.
+/// Which Set the newest proposal a *batch* session put up is, where a batch has
+/// put one up at all.
+///
+/// A batch's own and never the review's, which the review's settle is the line
+/// between — see [`store::last_batch_proposal`]. It has to be: the review's Set
+/// is the newest proposal on the Timeline until a batch asks anything, and how a
+/// review ended is the report of the session that ran it rather than something
+/// for this half to read off its Set afterwards.
 ///
 /// A store that will not answer reads as *nothing has been proposed*, which is
 /// the right way round for what this decides: on the other side of it is a run
-/// being stopped and an agent being let loose in a Worktree.
+/// being stopped.
 async fn proposed(state: &AppState, conversation_id: i64) -> Option<i64> {
-    match store::last_proposal(&state.pool, conversation_id).await {
+    match store::last_batch_proposal(&state.pool, conversation_id).await {
         Ok(proposed) => proposed,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what was last put to the human failed");
@@ -319,114 +310,14 @@ async fn forget(state: &AppState, conversation_id: i64, which: Option<&[String]>
 /// And record that something said on the pull request is left unaddressed, which
 /// is what a proposal nobody is behind amounts to.
 ///
-/// Said before the fixes are dispatched as well as before the run is stopped:
-/// wrap-up's rule is decided by a loop of its own, and a Conversation whose
-/// checks went green mid-fix would otherwise reach Done while the session was
-/// still working.
+/// Said before the run is stopped, because wrap-up's rule is decided by a loop
+/// of its own: a Conversation whose checks went green in the meantime would
+/// otherwise reach Done over the top of a proposal nobody is behind.
 async fn unsettle(state: &AppState, conversation_id: i64) {
     if let Err(error) =
         store::unsettle_wrap_up(&state.pool, conversation_id, store::WaitingOn::Comments).await
     {
         tracing::error!(error = ?error, conversation_id, "putting the comments back to waiting failed");
-    }
-}
-
-/// Land the fixes the human accepted, in one session that does nothing else.
-///
-/// One session handed all of them together, which is what the batch's own would
-/// have done: the decisions were made, so there is nothing to propose and nothing
-/// to read the comments for a second time.
-///
-/// The caller is holding the Conversation's Turn, so a red check going red
-/// mid-fix queues behind this rather than ending it — and the Conversation was
-/// read as still wrapping up on the far side of taking it, which is what says
-/// there is anywhere to work at all.
-///
-/// Asked of the record again afterwards, exactly as it was the first time: a fix
-/// session that landed nothing has left the same work owed, and letting that one
-/// through would be the failure this whole path exists to close.
-async fn land(state: &AppState, conversation_id: i64, owed: Vec<store::Fixing>) {
-    let writing = crate::runner::address(state, conversation_id, &feedback(&owed)).await;
-
-    let owed = unlanded(state, conversation_id).await;
-
-    if !owed.is_empty() {
-        return dropped(state, conversation_id, &owed, None, writing).await;
-    }
-
-    tracing::info!(
-        conversation_id,
-        "the fixes the batch was owed have landed, so the wrap-up carries on"
-    );
-
-    // Left to the watcher's next poll rather than settled here: what says the
-    // comments are settled is nothing being unaddressed, which is GitHub's
-    // question and not this one's.
-}
-
-/// What the fix session is told: every proposal the human accepted, in the words
-/// the batch session wrote for whoever would fix them, and whatever they said
-/// beside each answer.
-///
-/// The comments themselves are not here, and that is the point of the whole
-/// path: what the human agreed to is this session's reading of them, written for
-/// an agent to act on. Their own words already had their say when the Set was
-/// answered.
-///
-/// Nothing here is put as a question. The Set was answered and the answers are
-/// what this is made of, so a session that came back with a proposal would be
-/// asking the human to decide something they already have.
-fn feedback(owed: &[store::Fixing]) -> String {
-    let findings = owed
-        .iter()
-        .map(|finding| match finding.said.trim().is_empty() {
-            true => finding.what.trim().to_owned(),
-            false => format!(
-                "{}\n\nWhat they said when they agreed:\n\n{}",
-                finding.what.trim(),
-                finding.said.trim(),
-            ),
-        })
-        .collect::<Vec<String>>()
-        .join("\n\n---\n\n");
-
-    format!(
-        "What was said on this branch's pull request was read, and the human has said to do \
-         {this}. The session that was to do it ended without landing anything, so what is \
-         left is the doing rather than the deciding: none of this is still a question. Fix \
-         {each}, commit, and push so the pull request has {it}.\n\n{findings}\n",
-        this = match owed.len() {
-            1 => "this about it",
-            _ => "these about it",
-        },
-        each = match owed.len() {
-            1 => "it",
-            _ => "each of them",
-        },
-        it = match owed.len() {
-            1 => "it",
-            _ => "them",
-        },
-    )
-}
-
-/// What a batch session was told to fix and nothing has landed.
-///
-/// Empty is the ordinary answer and covers every way there is nothing owed: the
-/// batch asked nothing, the Set is still waiting on the human, they declined
-/// every proposal, or the session that was going to fix them did so.
-///
-/// A store that will not answer reads as *nothing owed*, which is the right way
-/// round for what is on the other side of this: stopping the run and letting an
-/// agent loose in a Worktree. The error is in the log, where a broken database
-/// says everything else it has to say.
-async fn unlanded(state: &AppState, conversation_id: i64) -> Vec<store::Fixing> {
-    match store::unlanded_batch_fixes(&state.pool, conversation_id).await {
-        Ok(owed) => owed,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading what a batch session was owed failed");
-            Vec::new()
-        }
     }
 }
 
@@ -472,182 +363,6 @@ async fn stopped(
             error = ?error,
             conversation_id,
             "a batch session did not finish and the stop saying so could not be recorded"
-        );
-    }
-}
-
-/// Stop the run: the human accepted fixes that nothing landed, and only they can
-/// say what happens now.
-///
-/// The Notice names the doing rather than the reading, because that is the half
-/// that failed — and it says what is owed in the session's own words, so what to
-/// do about it is answerable without opening the Set again.
-///
-/// [`store::Decision::Deliberate`]: what to do is Resume, which is the fixes in one
-/// session, or the human making them, or closing the Conversation with the branch
-/// exactly as the session left it.
-///
-/// The comments are not forgotten here, unlike the other stop's: they were
-/// answered, and what is owed is the answer rather than the reading.
-///
-/// `how` is how the session ended where it ended badly, and `writing` the Event
-/// it was printing into — both absent for a session that saw itself out and
-/// simply never pushed.
-async fn dropped(
-    state: &AppState,
-    conversation_id: i64,
-    owed: &[store::Fixing],
-    how: Option<&str>,
-    writing: Option<i64>,
-) {
-    if let Err(error) = crate::stopping::stop(
-        &state.pool,
-        &state.nudges,
-        conversation_id,
-        crate::stopping::Decided::Verkstead,
-        "landing the fixes what was said on the pull request was answered with",
-        &owing(owed, how),
-        writing,
-    )
-    .await
-    {
-        tracing::error!(
-            error = ?error,
-            conversation_id,
-            "a batch session's accepted fixes were never landed and the stop saying so \
-             could not be recorded"
-        );
-    }
-}
-
-/// What is owed, as the Notice says it: how many fixes, and the session's own
-/// words for each.
-///
-/// Its words rather than Verkstead's, because the human decided against those
-/// words an hour ago and these are the ones they will recognise. Clamped to a
-/// line the way the review's are, and for the same reason — this is one line on
-/// read on a phone. See [`crate::review::in_a_line`].
-fn owing(owed: &[store::Fixing], how: Option<&str>) -> String {
-    let fixes = owed
-        .iter()
-        .map(|finding| format!("“{}”", crate::review::in_a_line(&finding.what)))
-        .collect::<Vec<String>>()
-        .join("; ");
-
-    let what = format!(
-        "{} the human accepted about what was said {} landed: {fixes}",
-        match owed.len() {
-            1 => "one fix".to_owned(),
-            n => format!("{n} fixes"),
-        },
-        match owed.len() {
-            1 => "was never",
-            _ => "were never",
-        },
-    );
-
-    match how {
-        Some(how) => format!("{how}, and {what}"),
-        None => format!("it ended without pushing, and {what}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn finding(what: &str, said: &str) -> store::Fixing {
-        store::Fixing {
-            what: what.to_owned(),
-            said: said.to_owned(),
-        }
-    }
-
-    /// What a fix session is told about the batch's accepted proposals: the
-    /// session's own words for whoever would fix them, and that these are
-    /// decisions rather than proposals.
-    #[test]
-    fn a_fix_session_is_told_every_accepted_proposal_at_once() {
-        let told = feedback(&[
-            finding("Move the reset above the comparison in `window.rs`.", ""),
-            finding("Collapse the two clocks onto one.", ""),
-        ]);
-
-        assert!(
-            told.contains("Move the reset above the comparison")
-                && told.contains("Collapse the two clocks onto one"),
-            "both of them, in the words the batch session wrote: {told}",
-        );
-        assert!(
-            told.contains("said to do these about it")
-                && told.contains("none of this is still a question"),
-            "and that the deciding is over: {told}",
-        );
-        assert!(
-            told.contains("push"),
-            "with the push that puts them on the pull request: {told}",
-        );
-        assert!(
-            !told.contains("What they said"),
-            "and nothing said about words nobody wrote: {told}",
-        );
-    }
-
-    /// And their qualification, where they wrote one — which is the whole reason
-    /// the Answer's free text is kept on the Set at all.
-    #[test]
-    fn what_the_human_wrote_alongside_reaches_the_session_that_can_act_on_it() {
-        let told = feedback(&[finding(
-            "Move the reset above the comparison in `window.rs`.",
-            "Yes, but leave the public signature alone.",
-        )]);
-
-        assert!(
-            told.contains("leave the public signature alone"),
-            "their words reach the session: {told}",
-        );
-        assert!(
-            told.find("Move the reset") < told.find("leave the public signature"),
-            "under the proposal rather than over it: {told}",
-        );
-    }
-
-    /// What the Notice says: that the fixes never landed, and which ones.
-    #[test]
-    fn the_notice_says_what_is_unlanded_in_the_sessions_own_words() {
-        let says = owing(
-            &[
-                finding("Move the reset above the comparison.", ""),
-                finding("Collapse the two clocks onto one.", ""),
-            ],
-            None,
-        );
-
-        assert!(
-            says.contains("2 fixes") && says.contains("never landed"),
-            "how much is owed: {says}",
-        );
-        assert!(
-            says.contains("Move the reset") && says.contains("Collapse the two clocks"),
-            "and what, as the session wrote it: {says}",
-        );
-        assert!(
-            says.contains("what was said"),
-            "and that it was about the pull request's comments: {says}",
-        );
-    }
-
-    /// A session that fell over says both: how it ended, and what it left owed.
-    #[test]
-    fn a_session_that_ended_badly_says_so_beside_what_it_left() {
-        let says = owing(
-            &[finding("Move the reset above the comparison.", "")],
-            Some("exited with status 1"),
-        );
-
-        assert!(
-            says.contains("exited with status 1") && says.contains("one fix"),
-            "how it ended and what is owed: {says}",
         );
     }
 }

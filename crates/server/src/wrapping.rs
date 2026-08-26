@@ -109,7 +109,7 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
             // And the wrap-up itself starts here. The branch has just been
             // pushed, so GitHub is already running the checks and nobody else is
             // going to look — and nobody has read the branch at all.
-            watching(state, conversation_id);
+            watching(state, conversation_id, Reviewing::AsFound);
         }
         // The run was stopped from outside while the last step was landing, or
         // this is a second attempt at an ending that already moved the
@@ -138,16 +138,33 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
     }
 }
 
+/// Which review a wrap-up's watchers start.
+///
+/// The one thing that differs between the two ways of starting a wrap-up's
+/// watchers, and it differs because a press is the human saying something. The
+/// other three watchers each read the record and decide for themselves either
+/// way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Reviewing {
+    /// Whatever there is to see to: a branch nobody has read, or a review whose
+    /// session is gone, which is a stop. What the finish step and a server
+    /// coming back up both mean — see [`crate::review::run`].
+    AsFound,
+
+    /// The branch read from the start, whatever the last review left behind.
+    /// What a press means — see [`crate::review::afresh`].
+    Afresh,
+}
+
 /// Everything a wrapping Conversation has going on: its pull request's checks
 /// watched, its comments read, its branch reviewed where nobody has read it yet,
 /// and the rule that ends the whole thing waiting to be true.
 ///
 /// One place that says what a wrap-up *is*, because everything that starts one
 /// has to start the whole of it: the finish step opening the pull request, a
-/// Resume pressed on a wrap-up that stopped, a server coming back up over a
-/// Conversation it left wrapping — see [`crate::resume`] for both of those — and
-/// Resume being pressed on a stopped wrap-up, which stopped
-/// the rest too, since nothing advances past an open one.
+/// server coming back up over a Conversation it left wrapping, and a Resume
+/// pressed on a wrap-up that stopped — which stopped the rest too, since nothing
+/// advances past an open one. See [`crate::resume`] for the last two.
 ///
 /// Each of them decides for itself whether there is anything to do, so starting
 /// them twice is not starting two of anything: a review that has already settled
@@ -159,14 +176,23 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
 /// picking their own step. What either of them is looking at is a wrap-up with
 /// nothing running, and that is one situation with several possible causes: a
 /// branch nobody has read, a review whose session went between its ask and the
-/// answers, a batch's proposal in the same state, fixes the human approved and
-/// nobody landed. Each of the four asks the record what it is looking at rather
-/// than being told — see [`crate::review::run`] and
-/// [`crate::responding::unattended`].
-pub(crate) fn watching(state: &AppState, conversation_id: i64) {
+/// answers, a batch's proposal in the same state. Each of the four asks the
+/// record what it is looking at rather than being told — see
+/// [`crate::review::run`] and [`crate::responding::unattended`].
+///
+/// `reviewing` is the one thing the two ways of starting them differ over, and
+/// it is the human's press that makes the difference: a review already asking is
+/// something to stop over where a server found it, and something to read past
+/// where they have read the Notice and asked for another go.
+pub(crate) fn watching(state: &AppState, conversation_id: i64, reviewing: Reviewing) {
     driving(state, conversation_id, crate::checks::watch);
     driving(state, conversation_id, crate::comments::watch);
-    driving(state, conversation_id, crate::review::run);
+
+    match reviewing {
+        Reviewing::AsFound => driving(state, conversation_id, crate::review::run),
+        Reviewing::Afresh => driving(state, conversation_id, crate::review::afresh),
+    }
+
     driving(state, conversation_id, crate::settling::watch);
 }
 

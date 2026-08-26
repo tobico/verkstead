@@ -154,7 +154,21 @@ flowchart LR
   the review's own set, and a batch said after it gets one session inside the
   bundled responding skill, which puts what it would do as its own small set
   and lands what the human accepts. A comment is the human saying what is
-  wrong, not an instruction to a session. Commit feedback consolidates here:
+  wrong, not an instruction to a session. Each of those sets offers **every
+  credible way of fixing a finding as an option of its own**, with leaving it
+  alone always among them (*refined 2026-08-26, building wrapping-fix*), rather
+  than a fix-it-or-leave-it pair. **Verkstead ends both kinds of session
+  itself** (*refined 2026-08-26, building wrapping-fix*): every session is an
+  interactive agent, which idles when its work is done rather than exiting, so
+  the rule is quiet for a grace with no unanswered blocking ask of its own — a
+  deferred ask holds nothing open — and waiting to see one exit was waiting for
+  something that never came. **What a review left behind is read off the branch
+  and the session, never off the record** (*settled 2026-08-26, building
+  wrapping-fix*): the session that read the picks is the one that carried them
+  out, so its ending cleanly is the whole of its report, a fresh `.tasks/`
+  backlog on the branch is what sends spun-off work back to be built, and one
+  that dies is a stop with Resume meaning the review over from the start.
+  Nothing is dispatched from what was picked. Commit feedback consolidates here:
   there are **no
   per-commit review states**; commits are viewable events, and the wrap-up
   phase is where problems get raised. The next stage starts only after

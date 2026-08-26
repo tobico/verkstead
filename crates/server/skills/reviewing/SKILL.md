@@ -96,17 +96,17 @@ decision is theirs.
 
 ## 5. Propose it as one Question Set
 
-One Set, one Question per finding, and a `review` block that tells Verkstead
-which Option means *fix it*:
+One Set, one Question per finding, and nothing beside them: what a review sends
+is an ordinary Question Set, the same shape as every other ask.
 
 ```yaml
 title: Review of the rate limiter branch
 preface: |
   Three things worth a decision. Everything else looks right to me.
 
-  Answering **fix it** has me fix it here, before I push; **leave it** and I
-  will not raise it again. Anything you write beside an answer is part of what
-  I do about it.
+  Each one lists the ways I would fix it — pick the way you want and I do it
+  that way here, before I push. **Leave it** and I will not raise it again.
+  Anything you write beside an answer is part of what I do about it.
 questions:
   - label: Q1
     text: |
@@ -115,7 +115,7 @@ questions:
       request and nothing clears it.
     options:
       - n: 1
-        text: Fix it
+        text: Fix it — reset the counter as the window rolls
         recommended: true
       - n: 2
         text: Leave it
@@ -125,44 +125,39 @@ questions:
       tests pin both.
     options:
       - n: 1
-        text: Fix it
-      - n: 2
-        text: Leave it
+        text: Fix it — collapse them onto `window.rs`'s clock
         recommended: true
-review:
-  findings:
-    - fix: Q1.1
-      what: |
-        `crates/limiter/src/window.rs` — `Window::count` accumulates for the
-        life of the process and is never reset when the window rolls over, so a
-        client that exceeds the limit is refused for ever rather than for the
-        window. Reset it as the window rolls, and cover the roll-over in the
-        tests beside `counts_requests_in_a_window`.
-    - fix: Q2.1
-      what: |
-        `crates/limiter/src/limits.rs` and `window.rs` each hold their own
-        notion of now. Collapse them onto one clock — `window.rs` has the
-        better of the two — and update the tests that pin the other.
+      - n: 2
+        text: Fix it — inject one clock at construction instead
+      - n: 3
+        text: Leave it
 ```
 
-- **One Question per finding**, and every one of them answerable: two Options,
-  one meaning fix it and one meaning leave it. Recommend the one you would take.
+- **One Question per finding**, and every one of them answerable.
+- **Each credible way to fix it is an Option of its own**, worded in your own
+  words: the Option says *which* fix it is, because that is what they are
+  picking between. Offer alternatives wherever more than one credible way
+  exists, and only there — a finding with one sensible fix carries one fix
+  Option, and an alternative invented to fill the Question out is a way you
+  would not defend, which costs them a read and buys nothing.
+- **Leave it is always offered**, on every finding, so declining stays possible
+  whatever else the Question puts.
+- **Recommend the one you would take** — the way you would fix it, or leave it
+  where that is your answer. One star per Question.
 - **The Question is what the human reads**, on a phone, deciding. Write it as
-  prose that says what is wrong and why it matters — not as a patch.
-- **`what` is the work the answer authorises.** It is what you come back to when
-  the answers arrive, and the only account of the finding anything other than you
-  would have — so write it for a competent agent that has not read the diff: the
-  file, the cause, and what *done* would look like.
-- **`fix` names the Option that means fix it** — `Q1.1` for a Question's,
-  `Q1a.1` for a Sub-question's. It has to be an Option your Set actually offers,
-  or the Set is refused: nothing else turns a finding into work.
-- **Every finding in the block is a Question in the Set**, and the block goes on
-  one Set and no others. This is the review, not a running commentary.
-- **A comment's fix is a finding like any other**, in the same Set and the same
-  block. Say in the Question which comment it answers and whose it was, so the
-  human can see their own words being taken up — and write `what` for the agent
-  that will do it, which is you: their comment is where it came from and not what
-  it says to do.
+  prose that says what is wrong and why it matters — not as a patch. Where the
+  ways differ along more than one axis, the guide's `columns` and `cells` draw
+  them as a comparison table rather than having them read the comparison twice.
+- **Nothing else goes on the Set.** There is no findings block and no marker
+  saying which Option means fix it: Verkstead reads how your session ended and
+  what it left on the branch, rather than a record of what you were answered.
+  Which makes the answers yours alone to act on — nothing else holds an account
+  of what you found, so keep your own reading of each finding to hand, the file
+  and the cause and what *done* would look like, for when they arrive.
+- **A comment's fix is a finding like any other**, in the same Set. Say in the
+  Question which comment it answers and whose it was, so the human can see their
+  own words being taken up — their comment is where it came from and not what it
+  says to do.
 - **Read `verkstead guide` before you write it** — how a Set is labelled, how
   much belongs in one, and the shape it goes over the wire in. It ships inside
   the binary, so nothing else has to be found. A review that has found more than
@@ -174,8 +169,8 @@ review:
 Everything above assumes what you found can be fixed between the human's answer
 and your push, which is nearly always true. Where one genuinely cannot — a
 rewrite that wants breaking into steps, a change whose blast radius is the
-branch over again — you may offer to split it out instead, and `split` names the
-Option that means that:
+branch over again — offer splitting it out as an Option of its own, beside the
+ways to fix it and the leave-it:
 
 ```yaml
   - label: Q3
@@ -186,20 +181,12 @@ Option that means that:
       branch half-migrated.
     options:
       - n: 1
-        text: Fix it here
+        text: Fix it here anyway — one clock, injected at construction
       - n: 2
         text: Split it out as its own work
         recommended: true
       - n: 3
         text: Leave it
-review:
-  findings:
-    - fix: Q3.1
-      split: Q3.2
-      what: |
-        `crates/limiter/src/` — `limits.rs`, `window.rs` and `refill.rs` each
-        hold their own notion of now. Collapse them onto one clock, injected at
-        construction, and move the tests that pin the other two onto it.
 ```
 
 - **Offer it rarely, and never by default.** A Set that put the choice on every
@@ -207,15 +194,12 @@ review:
   what this whole phase is for is keeping the ordinary handful of fixes in one
   session. Most reviews offer no split at all and are not the poorer for it: if
   you could do it today, it is a fix.
-- **All three answers mean something** — fix it here, split it out, leave it —
-  and the human decides per finding. Recommend the one you would take.
-- **`split` is held to what `fix` is held to**: an Option your Set actually
-  offers, in the same notation. It cannot be the finding's own `fix` Option, and
-  no two findings may turn on the same Option, or the Set is refused.
-- **`what` is written for whoever works the task**, which is somebody else
-  entirely and later. That is the same brief you would write for a fix session,
-  because a split finding becomes exactly that: a task file, worked by a session
-  with none of your context.
+- **Every Option means something** — fixed here this way, split out, left — and
+  the human decides per finding. Recommend the one you would take.
+- **Picked, it is step 8's backlog**: a task file written here and committed
+  here, and none of the work done in this session. That commit is the whole of
+  what says it was split out, because Verkstead reads the branch rather than the
+  answers — a split nothing was written for is a finding nobody will ever work.
 - **A split is not a way out of deciding.** Something you have not thought
   through is not a task to hand on, and something you simply do not fancy is a
   fix. Offer it where the work is too big and nowhere else.
@@ -238,17 +222,18 @@ The Response is the whole of what you act on. Read all of it, the `comment` on
 the Set included, before you touch anything: it is about the Set as a whole and
 may reframe the answers above it.
 
-- **A finding is accepted only where they picked the Option you named as fix
-  it.** Anything else is not a yes: the other Option, an answer in their own
-  words instead of a pick, a question left open.
+- **A finding is accepted where they picked one of its fix Options**, and *which*
+  one they picked is part of the answer: fix it the way they chose rather than
+  the way you would have. Anything else is not a yes — leave it, an answer in
+  their own words instead of a pick, a question left open.
 - **What they wrote beside a yes is part of the instruction.** "Yes, but leave
   the public signature alone" changes what you do, and it is the reason their
   words come back to you at all.
-  - **A finding they declined is over.** Do not fix it, do not fix half of it, and
-    do not raise it again.
-  - **A finding they split out is neither.** It is not fixed here and it is not
-    forgotten: what you owe it is step 8's backlog, and starting on it here is
-    doing the thing they said not to do in this session.
+- **A finding they declined is over.** Do not fix it, do not fix half of it, and
+  do not raise it again.
+- **A finding they split out is neither.** It is not fixed here and it is not
+  forgotten: what you owe it is step 8's backlog, and starting on it here is
+  doing the thing they said not to do in this session.
 - **Unanswered is not a yes.** Leave it as declined. Where it is one you
   genuinely cannot leave — the correctness bug the rest of the branch turns on —
   go back with one short Set about that alone and wait as before.
@@ -293,7 +278,7 @@ yourself. A fix written from the name of a job is a guess.
 
 ## 8. Write down anything they split out
 
-A finding they answered with **split it out** is not work for this session. What
+A finding they answered by splitting it out is not work for this session. What
 you owe it is a `.tasks/` backlog — written here, committed here, and worked by
 nobody in this Worktree today.
 
@@ -304,10 +289,11 @@ what you write is a fresh one:
   for, and one `- [ ] NN: <title> — [details](NN-<slug>.md)` entry per split
   finding, in the order they should be worked.
 - **One `NN-<slug>.md` task file per finding**, numbered from `01`. Each carries
-  what you wrote in that finding's `what`, whatever the human wrote beside their
-  pick, and acceptance criteria that say when it is done. Write it for a session
-  with none of your context that will never speak to you — because that is what
-  works it.
+  your own account of that finding — the file, the cause and what *done* would
+  look like — whatever the human wrote beside their pick, and acceptance
+  criteria that say when it is done. Write it for a session with none of your
+  context that will never speak to you, because that is what works it: your
+  reading of the finding lives nowhere else once this session ends.
 - **Nothing else goes in.** What they accepted is fixed above and what they
   declined is over: a backlog of anything but what they split out is work nobody
   agreed to.
