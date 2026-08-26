@@ -392,7 +392,7 @@ function WorkbenchActions(): JSX.Element {
       class={styles.workbenchActions!}
       label="Workbench actions"
       name="Workbench actions"
-      trigger="⋯"
+      mark
     >
       {() => (
         <A role="menuitem" href="/settings">

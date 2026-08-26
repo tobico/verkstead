@@ -39,7 +39,6 @@ import { PaneHead } from "./PaneHead";
 export function Asked(props: {
   asked: QuestionSetEvent | UnreadableSetEvent;
   back: () => void;
-  close: () => void;
 }): JSX.Element {
   const set = useReading(() => ({
     // The same key the standalone page reads a Set under, so answering it in
@@ -53,11 +52,8 @@ export function Asked(props: {
   }));
 
   // No title: the Set draws its own heading, and a pane titled over the top of
-  // it would name the same thing twice. The Close is the way back to what the
-  // conversation is, which is what this pane shows when no event is open.
-  const head = (
-    <PaneHead back={{ to: "Timeline", go: props.back }} close={props.close} />
-  );
+  // it would name the same thing twice.
+  const head = <PaneHead back={{ to: "Timeline", go: props.back }} />;
 
   return (
     <Switch>

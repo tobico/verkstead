@@ -123,7 +123,6 @@ export function Commit(props: {
   conversation: ConversationView;
   commit: CommitEvent;
   back: () => void;
-  close: () => void;
 }): JSX.Element {
   const opened = useReading(() => ({
     // The event is in the key, so opening another commit is another query
@@ -180,13 +179,7 @@ export function Commit(props: {
 
   return (
     <>
-      {/* The Close is the way back to what the conversation is, which is what
-          this pane shows when no event is open. */}
-      <PaneHead
-        back={{ to: "Timeline", go: props.back }}
-        title="Commit"
-        close={props.close}
-      />
+      <PaneHead back={{ to: "Timeline", go: props.back }} title="Commit" />
 
       <div class={styles.header}>
         <p class={styles.subject}>{props.commit.subject}</p>

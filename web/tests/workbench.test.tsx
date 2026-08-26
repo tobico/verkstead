@@ -3718,22 +3718,19 @@ describe("a session's output on the timeline", () => {
   });
 
   /// The switch is the pane's own control, so it stands in the pane's header
-  /// beside the title — where every other pane's Close is, and where this one's
-  /// was. Two of them there would be one row with two ways off it, so the Close
-  /// goes: "← Timeline" is the way out of every pane on a narrow window, and a
-  /// wide one has the conversation's Timeline standing beside this anyway.
-  it("puts the switch in the header, and keeps no Close beside it", async () => {
+  /// beside the title, with "← Timeline" over the top of it — which is every
+  /// details pane's header now that none of them carries a Close.
+  it("puts the switch in the header, beside the way back", async () => {
     theSpeaking();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
+    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
     await drawn(container, `.${shell.detailsPane} .${paneHead.head} .${outputPane.recordSwitch}`);
     await drawn(container, `.${shell.detailsPane} .${paneHead.head} .${paneHead.back}`);
 
-    expect(
-      container.querySelector(`.${shell.detailsPane} .${paneHead.close}`),
-    ).toBeNull();
+    expect(head.textContent).not.toContain("Close");
   });
 
   /// Sharing that row is what the switch's width is now about: as wide as its
@@ -5871,22 +5868,20 @@ describe("a commit on the timeline", () => {
     expect(row.textContent).not.toContain("Approve");
   });
 
-  /// The pane is the open Event and nothing else, so closing the diff leaves it
-  /// bare — and a narrow window walks back out to the record with it, there
-  /// being no level left to be on.
-  it("empties the pane and walks back out when it is closed", async () => {
+  /// "← Timeline" is the only way off the pane: there is no Close anywhere in
+  /// the details panel, and on a narrow window the way back is the way out.
+  it("walks back out to the record, and offers no Close", async () => {
     theCommits();
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, `.${shell.detailsPane} .${diffSection.diffFiles}`);
+    const pane = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
 
-    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.close}`));
+    expect(pane.textContent).not.toContain("Close");
 
-    await waitFor(() =>
-      expect(screen.getByLabelText("Details").textContent).toBe(""),
-    );
-    expect(frame(container).dataset.pane).toBe("timeline");
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
+
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
   });
 
   it("shows that commit's diff in the details pane, as the server rendered it", async () => {

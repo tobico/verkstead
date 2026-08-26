@@ -29,7 +29,6 @@ export function PullRequest(props: {
   conversation: ConversationView;
   opened: PullRequestEvent;
   back: () => void;
-  close: () => void;
 }): JSX.Element {
   const carried = useReading(() => ({
     // The event is in the key, as a commit's diff is: opening another
@@ -50,11 +49,7 @@ export function PullRequest(props: {
 
   return (
     <>
-      <PaneHead
-        back={{ to: "Timeline", go: props.back }}
-        title="Pull request"
-        close={props.close}
-      />
+      <PaneHead back={{ to: "Timeline", go: props.back }} title="Pull request" />
 
       <div class={styles.summary}>
         <p class={styles.title}>{props.opened.title}</p>

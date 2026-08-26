@@ -42,24 +42,11 @@
   height: 3rem;
 }
 
-/* The ⋯ at the head of the pane: what there is beyond the conversations at all.
-   It sits at the right edge of the header beside the thing that header names,
-   and a mark is what fits there. The Timeline's ⋯ is the same mark in the same
-   slot and is painted the same way, in `Timeline.module.css`. */
-.workbenchActions > button {
-  padding: 0 0.4rem;
-  font-size: 1.1rem;
-  line-height: 1;
-  color: var(--ink-soft);
-  background: none;
-  border: 0;
-}
+/* The ⋯ at the head of the pane is drawn by the menu itself — see `mark` in
+   `Menu.module.css` — so nothing of the button is here. What is left of this
+   menu's own paint is how wide it comes down.
 
-.workbenchActions > button[aria-expanded="true"] {
-  color: var(--ink);
-}
-
-/* Wider than the one word in it, so it reads as a menu with room for the next
+   Wider than the one word in it, so it reads as a menu with room for the next
    entry rather than as a label that happened to appear under the mark. */
 .workbenchActions > [role="menu"] {
   min-width: 9rem;

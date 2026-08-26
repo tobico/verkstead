@@ -1,6 +1,6 @@
-/* The furniture every workbench pane repeats: the bar across the top of it, the
-   way back out to the pane it was entered from, and the way out of an open
-   Event. See `PaneHead.tsx` for what the seven panes vary.
+/* The furniture every workbench pane repeats: the bar across the top of it and
+   the way back out to the pane it was entered from. See `PaneHead.tsx` for what
+   the seven panes vary.
 
    What is *not* here is the panes themselves — the grid they stand in, which of
    them is drawn at which width, the divider between two of them, and what a pane
@@ -11,9 +11,8 @@
    pane wears its `paneBack`, so that the frame can stick the one and hide the
    other where the pane it returns to is already on screen. */
 
-/* A pane's title with the ways out of it either side. Wrapping, so a narrow
-   pane puts the title under the way back rather than squeezing both onto one
-   line. */
+/* A pane's title with the way out of it above. Wrapping, so a narrow pane puts
+   the title under the way back rather than squeezing both onto one line. */
 .head {
   display: flex;
   flex-wrap: wrap;
@@ -27,17 +26,15 @@
   margin: 0;
 }
 
-/* The two ways off a pane's header: back out of this level, and out of the open
-   Event to what the conversation is. Buttons rather than links, because neither
-   is going anywhere — the workbench is one page, and the URL follows the
-   conversation rather than the pane. Drawn as the links they stand in for.
-
-   One rule, because they were always the same seven declarations said twice:
-   `.pane-back` and `.close-event` were written apart and drawn alike. The way
-   *on* to the next level is `.paneForward` in `Timeline.module.css`, being the
-   timeline's alone and drawn with the rest of it. */
-.back,
-.close {
+/* The one way off a pane's header: back out of this level, above the title
+   rather than beside it, in the slot every other page's "← Pending" sits in. A
+   button rather than a link, because it is not going anywhere — the workbench is
+   one page, and the URL follows the conversation rather than the pane. Drawn as
+   the link it stands in for. The way *on* to the next level is `.paneForward` in
+   `Timeline.module.css`, being the timeline's alone and drawn with the rest of
+   it. */
+.back {
+  flex-basis: 100%;
   padding: 0;
   font: inherit;
   font-size: 0.9rem;
@@ -45,12 +42,6 @@
   background: none;
   border: 0;
   cursor: pointer;
-}
-
-/* The way back sits above the title rather than beside it, in the slot every
-   other page's "← Pending" sits in. */
-.back {
-  flex-basis: 100%;
 }
 
 /* From 80rem all three panes stand together, so there is nowhere left to go

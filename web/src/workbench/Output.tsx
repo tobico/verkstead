@@ -219,9 +219,6 @@ export function Output(props: {
 
   return (
     <>
-      {/* No Close beside the switch: "← Timeline" is the way out of this pane on
-          a narrow window, and a header with two ways off it would be one row
-          asking the same question twice. */}
       <PaneHead back={{ to: "Timeline", go: props.back }} title="Agent output">
         {/* The two ways of reading the one session, beside the title rather than
             across the pane under it: two words is all the width it ever needs,

@@ -1774,7 +1774,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
         label="Conversation actions"
         name="Conversation actions"
         closer={(close) => (shut = close)}
-        trigger="⋯"
+        mark
       >
         {() => (
           <>

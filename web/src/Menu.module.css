@@ -3,15 +3,15 @@
    they are dismissed the same way, and they stand off the page by the same
    shadow, which is what says a menu is in front of what it covers.
 
-   What is *not* the chrome is each menu's own paint: the trigger it drops from
-   and the width of what it drops. Those rules are written against a class of the
-   caller's and a class of this component's at once, and a caller's class is
-   hashed, so they belong to the caller rather than here — it paints its trigger
-   and its drop from its own module, reaching them by the elements they are: the
-   trigger is the one button the menu holds directly, and the drop is the one
-   thing in it with a menu's role. Every caller does that now; `set/Standing`,
-   `workbench/Conversations` and `workbench/Timeline` are the three that paint
-   anything. */
+   What is *not* the chrome is each menu's own paint: the trigger it drops from,
+   where the trigger is the caller's own, and the width of what it drops. Those
+   rules are written against a class of the caller's and a class of this
+   component's at once, and a caller's class is hashed, so they belong to the
+   caller rather than here — it paints its trigger and its drop from its own
+   module, reaching them by the elements they are: the trigger is the one button
+   the menu holds directly, and the drop is the one thing in it with a menu's
+   role. `set/Standing`, `workbench/Conversations` and `workbench/Timeline` are
+   the three that paint anything, and by now only their drops. */
 
 /* The anchor everything below hangs from. */
 .menu {
@@ -31,14 +31,41 @@
   opacity: 0.65;
 }
 
+/* The ⋯ at the head of a workbench pane: what there is beyond what the pane
+   names — beyond the conversations in the sidebar, beyond the Conversation in
+   the timeline. Both sit at the right edge of their header beside the thing that
+   header names, and a mark is what fits there.
+
+   Here rather than in the two panes, which is the whole of what this rule is
+   for: they held a copy each, written apart and drawn alike until they weren't,
+   and the two marks read as two sizes across the divider between them. */
+.trigger.mark {
+  padding: 0 0.4rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+}
+
+/* Darkened while the menu is down, so the mark says which header the drop under
+   it belongs to. */
+.trigger.mark[aria-expanded="true"] {
+  color: var(--ink);
+}
+
 /* What a press away from the open menu lands on, so that it lands on nothing
    else: a stray press that opened a conversation, or answered a question, is
-   not a small thing on either page. Invisible, unlike a dialog's wash — a menu
-   is not in front of the page the way a dialog is, it is only on top of it. */
+   not a small thing on either page. A wash over the window with it, the same
+   20% the answer-set navigation's list comes down over — that one reads as
+   plainly in front of the page, and there is no reason a menu should read as
+   less. Lighter than a dialog's 45%: a menu is on top of what the human was
+   reading rather than in place of it. */
 .backdrop {
   position: fixed;
   inset: 0;
   z-index: 2;
+  background: rgb(0 0 0 / 20%);
 }
 
 /* The menu itself, hung under the trigger's far end. Over the page rather than

@@ -315,14 +315,6 @@ export function Workbench(): JSX.Element {
         }
       : undefined;
 
-  /// Closing whatever is open, which empties the pane — so on a narrow window it
-  /// is also the way back out of it. Harmless on a wide one, where all three
-  /// panes are drawn and `data-pane` means nothing.
-  const close = () => {
-    setEvent(null);
-    setPane("timeline");
-  };
-
   /// Which Conversation the URL names, or the empty string on the bare
   /// workbench. Unparsed, like a Set's id: the server decides what names
   /// nothing.
@@ -413,7 +405,6 @@ export function Workbench(): JSX.Element {
             event={event()}
             select={setEvent}
             pane={setPane}
-            close={close}
             list={() => navigate("/")}
             divider={
               <Show when={allThree()}>
@@ -451,10 +442,9 @@ function Reading(props: {
   event: number | null;
   select: (event: number) => void;
 
-  /// Which level a narrow window is showing, and the way back out of the
+  /// Which level a narrow window is showing, which is the way back out of the
   /// details pane.
   pane: (pane: Pane) => void;
-  close: () => void;
 
   /// And the way back out to the list, which is a navigation rather than a
   /// change of level: what is being let go of is the selection, and the URL is
@@ -623,7 +613,6 @@ function Reading(props: {
                       <Asked
                         asked={asked()}
                         back={() => props.pane("timeline")}
-                        close={props.close}
                       />
                     )}
                   </Match>
@@ -633,7 +622,6 @@ function Reading(props: {
                         conversation={conversation()}
                         commit={commit()}
                         back={() => props.pane("timeline")}
-                        close={props.close}
                       />
                     )}
                   </Match>
@@ -643,7 +631,6 @@ function Reading(props: {
                         conversation={conversation()}
                         opened={opened()}
                         back={() => props.pane("timeline")}
-                        close={props.close}
                       />
                     )}
                   </Match>
@@ -658,7 +645,6 @@ function Reading(props: {
                         html={brief().html}
                         empty="Nothing was written."
                         back={() => props.pane("timeline")}
-                        close={props.close}
                       />
                     )}
                   </Match>
@@ -669,7 +655,6 @@ function Reading(props: {
                         html={handoff().html}
                         empty="The grilling wrote nothing down."
                         back={() => props.pane("timeline")}
-                        close={props.close}
                       />
                     )}
                   </Match>
@@ -683,7 +668,6 @@ function Reading(props: {
                         html={steer().html ?? ""}
                         empty="Nothing was asked for."
                         back={() => props.pane("timeline")}
-                        close={props.close}
                       />
                     )}
                   </Match>

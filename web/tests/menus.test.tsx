@@ -21,6 +21,7 @@ import tokens from "../src/styles/base.css?raw";
 // The callers' paint, each in the module of the component that passes the
 // class: a caller's class is hashed, so it reaches this component's parts by
 // the elements they are rather than by a name it cannot spell.
+import contents from "../src/set/Contents.module.css?raw";
 import standing from "../src/set/Standing.module.css?raw";
 import sidebar from "../src/workbench/Conversations.module.css?raw";
 import timeline from "../src/workbench/Timeline.module.css?raw";
@@ -165,34 +166,37 @@ describe("a dropdown menu", () => {
 
 /// The two ⋯ triggers — the sidebar's and the Conversation's — sit in the same
 /// place in their two pane headers and mean the same thing there, so they are
-/// painted alike. Each in its own caller's module, because the class the rule
-/// hangs off is that caller's and a caller's class is hashed; what used to be
-/// one rule is two that have to go on saying the same thing, and this is what
-/// says so.
+/// one button rather than two painted alike. They were two: a rule each, hashed
+/// off a class each, written apart and drifted into two sizes across the
+/// divider between the panes. The mark and the paint under it are the menu's
+/// now, and neither pane says anything about a trigger at all.
 describe("the ⋯ at the head of a pane", () => {
-  it("is painted the same in the two places there is one", () => {
-    expect(paint(".workbenchActions > button", sidebar)).toEqual(
-      paint(".conversationActions > button", timeline),
+  it("is the menu's own mark, not the caller's", () => {
+    const { container } = render(() => (
+      <Menu class="example" label="Example actions" mark>
+        {() => <button type="button" role="menuitem" class="row" />}
+      </Menu>
+    ));
+
+    const button = trigger(container);
+    expect(button.textContent).toBe("⋯");
+    expect(button.classList).toContain(menu.mark);
+  });
+
+  it("is painted here, where there is one of it", () => {
+    expect(block(".trigger.mark")).toContain("font-size: 1.1rem;");
+    expect(block('.trigger.mark[aria-expanded="true"]')).toContain(
+      "color: var(--ink);",
     );
   });
 
-  /// And what it says when the menu under it is down, which is the other half
-  /// of the same paint.
-  it("darkens the same while its menu is open", () => {
-    expect(
-      paint('.workbenchActions > button[aria-expanded="true"]', sidebar),
-    ).toEqual(
-      paint('.conversationActions > button[aria-expanded="true"]', timeline),
-    );
+  /// The point of moving it: neither pane keeps a trigger of its own to drift
+  /// away from the other.
+  it("leaves neither pane a button to paint", () => {
+    expect(sidebar).not.toContain(".workbenchActions > button");
+    expect(timeline).not.toContain(".conversationActions > button");
   });
 });
-
-/// What one rule declares and nothing about which selector carries it, so that
-/// two rules written against two callers' classes can be held to saying the
-/// same thing.
-function paint(selector: string, sheet: string): string {
-  return block(selector, sheet).replace(`\n${selector} {`, "");
-}
 
 /// What one rule declares, read off a stylesheet by the selector that carries
 /// it. Enough to say what a menu is painted with, and no more.
@@ -216,6 +220,16 @@ describe("what every menu is drawn with", () => {
   /// and the dark-mode one would be a bruise on light.
   it("defines that shadow for either paper", () => {
     expect(tokens.match(/--lift:/g)).toHaveLength(2);
+  });
+
+  /// And a wash under it, so the page behind an open menu is dimmed the way the
+  /// page behind the answer-set navigation's list is. The same wash, because
+  /// they are the same kind of thing coming down over the same page.
+  it("washes the page behind it, as the navigation's list does", () => {
+    expect(block(".backdrop")).toContain("background: rgb(0 0 0 / 20%);");
+    expect(block(".backdrop", contents)).toContain(
+      "background: rgb(0 0 0 / 20%);",
+    );
   });
 
   /// The point of the unification: no menu carries a shadow of its own to drift

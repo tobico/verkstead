@@ -1101,24 +1101,11 @@
   border-color: #b3382c;
 }
 
-/* The ⋯ at the head of the pane: what can be done to the Conversation being
-   read. It sits at the right edge of the header beside the thing that header
-   names, and a mark is what fits there. The sidebar's ⋯ is the same mark in the
-   same slot and is painted the same way, in `Conversations.module.css`. */
-.conversationActions > button {
-  padding: 0 0.4rem;
-  font-size: 1.1rem;
-  line-height: 1;
-  color: var(--ink-soft);
-  background: none;
-  border: 0;
-}
+/* The ⋯ at the head of the pane is drawn by the menu itself — see `mark` in
+   `Menu.module.css` — so nothing of the button is here. What is left of this
+   menu's own paint is the card it comes down as.
 
-.conversationActions > button[aria-expanded="true"] {
-  color: var(--ink);
-}
-
-/* What can be done to the conversation as a whole: room under each action for
+   What can be done to the conversation as a whole: room under each action for
    the sentence saying what it does, which is more than a row of a menu holds —
    so this one is padded as a card rather than as a list. */
 .conversationActions > [role="menu"] {

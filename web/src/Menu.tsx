@@ -28,11 +28,18 @@ import styles from "./Menu.module.css";
 export function Menu(props: {
   /// Which menu this is, put on the anchor so the caller can paint this one's
   /// trigger and size its drop. The shared chrome is `Menu.module.css` — the
-  /// anchor, the trigger, the backdrop and the drop underneath it.
+  /// anchor, the trigger, the backdrop and the drop underneath it, and the ⋯ a
+  /// `mark` menu is drawn as.
   class: string;
   /// What the trigger reads as. Whatever the caller would have put inside its
-  /// own button — a word, a badge, a mark.
-  trigger: JSX.Element;
+  /// own button — a word, a badge, a mark. A pane's ⋯ passes none: that trigger
+  /// is drawn here, being the same button in both places there is one.
+  trigger?: JSX.Element;
+  /// Whether this is the ⋯ at the head of a workbench pane. The mark and the
+  /// paint under it are this component's rather than the caller's, so the
+  /// sidebar's and the Conversation's render as one button rather than as two
+  /// rules that were written apart and drifted.
+  mark?: boolean;
   /// What a screen reader calls the trigger, for a trigger whose contents are
   /// a mark rather than a word.
   label?: string;
@@ -91,7 +98,7 @@ export function Menu(props: {
     <div class={`${styles.menu} ${props.class}`}>
       <button
         type="button"
-        class={styles.trigger}
+        class={props.mark ? `${styles.trigger} ${styles.mark}` : styles.trigger}
         ref={trigger}
         aria-haspopup="menu"
         aria-expanded={open() ? "true" : "false"}
@@ -103,7 +110,7 @@ export function Menu(props: {
           setOpen(!open());
         }}
       >
-        {props.trigger}
+        {props.mark ? "⋯" : props.trigger}
       </button>
 
       <Show when={open()}>

@@ -26,17 +26,10 @@ export function Document(props: {
   /// as a blank pane.
   empty: string;
   back: () => void;
-  close: () => void;
 }): JSX.Element {
   return (
     <>
-      {/* The Close is the way back to what the conversation is, which is what
-          this pane shows when no event is open. */}
-      <PaneHead
-        back={{ to: "Timeline", go: props.back }}
-        title={props.heading}
-        close={props.close}
-      />
+      <PaneHead back={{ to: "Timeline", go: props.back }} title={props.heading} />
 
       <Show when={props.html !== ""} fallback={<Empty>{props.empty}</Empty>}>
         <div class={`${styles.document} markdown`} innerHTML={props.html} />
