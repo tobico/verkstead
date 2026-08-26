@@ -63,15 +63,17 @@ flowchart LR
   and pinned when it was typed). Each conversation owns one branch and one
   worktree; the branch name is prefilled randomly and customizable while the
   brief is drafted. Worktrees live under Verkstead's own data directory and
-  are kept until the conversation is aborted — *corrected 2026-08-20, building
+  are kept until the conversation is closed — *corrected 2026-08-20, building
   stage 02*: this said "archived", and there is no archive action on a
-  conversation. Aborting is what the teardown hangs off, and it leaves the
+  conversation. Closing is what the teardown hangs off, and it leaves the
   branch alone.
 - **Lifecycle:** Draft → Grilling → Direction → Implementing → Wrapping →
-  Done. *Blocked on you* is a badge on any active state, not a state. A Done
-  conversation can reopen with a new brief round. Aborting is possible from
-  any state, and **Aborted** is a state of its own — off the ladder rather than
-  on it, since every other state is somewhere the work has got to.
+  Done. *Blocked on you* is a badge on any active state, not a state. Closing
+  is possible from any state, and **Closed** is a state of its own — off the
+  ladder rather than on it, since every other state is somewhere the work has
+  got to. A conversation that is closed or Done is got back into by steering
+  it, a steer into Grilling being what opens a new brief round (*refined
+  2026-08-26, building close-and-retirements*).
 - **Agent profiles** are minimal: name, claude home dir + config file pair, the
   list of models that account can run — plus an agent-type discriminator so
   other backends can slot in later (claude is the only type now). The model
@@ -163,24 +165,25 @@ flowchart LR
   Verkstead reads whether the block is there and the session follows what it
   says; a repo that records none gets a branch off the default branch, said on
   the timeline, because there is no convention to invent on its behalf.
-- **The brief freezes at grill start.** A reopened round adds a new brief
+- **The brief freezes at grill start.** A later round adds a new brief
   event rather than editing the old one. Until then it is edited where it
   stands, with no mode to enter and no Save to press (*settled 2026-08-24,
   building workbench-refit*): the field is always there, it grows with what is
   in it, and it keeps itself whenever the typing stops for a moment and on the
   way out of the field.
 - **A conversation is driven or it is stopped** (*settled 2026-08-24, building
-  halt-and-resume; refined 2026-08-25, building one-stop*). Whatever stopped it
-  — a session that fell over, checks that would not go green, a driver a
-  restart took away, an account out of usage window, a Stop the human pressed —
+  halt-and-resume; refined 2026-08-25, building one-stop; refined 2026-08-26,
+  building close-and-retirements*). Whatever stopped it — a session that fell
+  over, checks that would not go green, a driver a restart took away, an
+  account out of usage window, a Stop the human pressed —
   Verkstead records the one stop on the conversation and writes a stop notice
   on its timeline saying what stopped, why, and what the evidence was. Nothing
   advances past a stop, and the badge points at the notice. Getting going again
   is one standing **Resume** in the start-work menu, recomputed from the
   lifecycle and the branch rather than replaying whatever failed; steering the
-  work is what a manual task is for, so Resume carries nothing. What replaced
+  work is what **Steer** is for, so Resume carries nothing. What replaced
   roadrunner's three remedies: retry is Resume, take over manually is the stop
-  already standing, and abort is Abort.
+  already standing, and abort is **Close**.
 - **Usage limits.** When a claude account exhausts its window mid-run, the
   conversation stops the way every other stopped conversation does — one
   notice, one badge, one Resume — and push-notifies. The reset time rides on

@@ -30,20 +30,21 @@ The core entity: a Repo, a base commit, a Brief, one branch and one Worktree.
 Everything done about one piece of work hangs off it. Runs through Draft →
 Grilling → Implementing → Wrapping → Done — a roadmap Conversation passes
 straight from Grilling to Wrapping, its building belonging to its Stages — and
-can be aborted from any of them or reopened once Done. There is one move back
-down the ladder: a wrap-up whose review split its findings out into a backlog
-returns to Implementing to build it, and its finish step wraps up again on the
-pull request it already had, reviewed afresh. *Blocked on you* is a badge on an active
-state, never a state of its own — where **Aborted** is a state of its own, off
+can be closed from any of them, a **Steer** being the one way back into a
+Conversation that is closed or Done. There is one move back down the ladder: a
+wrap-up whose review split its findings out into a backlog returns to
+Implementing to build it, and its finish step wraps up again on the pull request
+it already had, reviewed afresh. *Blocked on you* is a badge on an active
+state, never a state of its own — where **Closed** is a state of its own, off
 the ladder rather than on it: every other state is somewhere the work has got
-to, and aborting is the work stopping wherever it was.
+to, and closing is the work stopping wherever it was.
 _Avoid_: task, session, job, thread, ticket
 
 **Worktree**:
 The checkout a Conversation's work is done in, made when grilling starts along
-with the branch it holds, and removed when the Conversation is aborted — the
+with the branch it holds, and removed when the Conversation is closed — the
 branch outlives it, because a branch is cheap and may hold work worth reading.
-A reopened Conversation keeps the one it has; where the directory has gone, one
+A steered Conversation keeps the one it has; where the directory has gone, one
 is checked out again on the branch that was worked, which is the only time a
 Worktree is made without a branch being made with it.
 Named for the Repo and the branch, and it lives in the Data Directory rather
@@ -96,11 +97,12 @@ _Avoid_: prompt, instructions, plugin, workflow file
 
 **Brief**:
 The editable markdown document a round of a Conversation starts from, and the
-first Timeline Event. Freezes when its round's grilling starts; a reopened round
-adds a new Brief rather than editing the frozen one, so a Conversation has one
-Brief per round and the newest is the one being written. What is *not* the
-human's again on a reopened round is the branch and the base commit: the branch
-has been worked, and the second round carries on from what is on it.
+first Timeline Event. Freezes when its round's grilling starts; a steer into
+Grilling opens a round with a new Brief rather than editing the frozen one, so a
+Conversation has one Brief per round and the newest is the one being written.
+What is *not* the human's again on a later round is the branch and the base
+commit: the branch has been worked, and the second round carries on from what is
+on it.
 
 Written where it is read: while its round is drafting, the Brief on its card
 *is* the field — raw markdown, always open, keeping itself whenever the typing
@@ -115,7 +117,7 @@ setup under it — the branch, the base commit, both Pairings and the readiness
 verdict — because setting the work up and kicking it off are one act, and both
 belong where the work is read. Every one of those freezes at the same moment
 the Brief does, so once grilling starts the card is the Brief alone; on a
-reopened round the branch and the base commit are frozen already, and what the
+later round the branch and the base commit are frozen already, and what the
 card carries under the new Brief is the Pairings.
 _Avoid_: description, prompt, spec, issue body
 
@@ -438,7 +440,7 @@ _Avoid_: retry, remedy, restart (that is the server's), continue, unblock
 The human saying where the work goes, from wherever it has got to: a row in the
 Conversation's own menu beside **Stop**, and a modal over one question — where
 does this go? Targets are **Grilling**, **Implementing**, **Wrapping** and
-**Done**, the four states the work is done in; Draft and Aborted are not among
+**Done**, the four states the work is done in; Draft and Closed are not among
 them, each having a way in of its own. Sources are every state there is — a
 Draft nothing has run in, a run in flight, work Verkstead has finished with —
 because a steer is the human stepping outside the pipeline's path rather than
@@ -455,11 +457,11 @@ than something a dismissed modal does behind the human's back.
 **What ends the session running is the submit rather than the click.** One
 Worktree holds one agent, so the session a steer starts takes the Worktree from
 whatever is still in it — at once, or once a session that cannot be displaced
-has finished, which is a review waiting on an Ask or a **Manual Task**. Into
-**Done** nothing is started, so nothing takes it and the session runs to its own
-end. **Interrupt current task** ends it where it stands instead, leaving the
-step however far it had got: the wait saved in the first case, and the only
-ending there is in the second.
+has finished, which is a review waiting on an Ask. Into **Done** nothing is
+started, so nothing takes it and the session runs to its own end. **Interrupt
+current task** ends it where it stands instead, leaving the step however far it
+had got: the wait saved in the first case, and the only ending there is in the
+second.
 
 **What is missing is made again**, and the further from a running state the
 source is the more of it there is to make. A Worktree whose directory has gone
@@ -490,36 +492,10 @@ the form: a steered Draft has none fixed yet.
 cleared, and what that state ought to be running starts — a fresh grilling, the
 instruction session or the next step off the branch, the wrap-up's watchers.
 Into Done it is the move alone.
-_Avoid_: redirect, retarget, override, transition, take over, manual task (the
-errand beside the work, not a way of moving it)
-
-**Manual Task**:
-A free-text instruction the human types at the end of a Conversation's Timeline,
-with an Agent Profile picked beside it: submitting starts a one-off session that
-does what it says and stops. Offered wherever the Conversation has a Worktree
-and no session is registered for it — every quiet moment, in a driven state or
-out of one. The escape hatch: the way to get work moving by hand when the
-pipeline is not driving it.
-
-Outside the pipeline in every sense that matters. It moves the Conversation into
-no state and out of none, clears no stop, and reopens nothing a Done
-Conversation settled; what it leaves behind is its instruction on the record,
-what its session printed, and whatever that committed. The Pairing picked is for
-that submission alone and never becomes the Conversation's — the composer starts
-on the Conversation's implementation Pairing and otherwise asks for a pick.
-
-Ended on quiet with no Question Set of its own still open, there being no done
-file to end it by — so a session idling on a Blocking Ask is left where it is.
-
-One whose session exits badly leaves the Conversation **Stopped**, with the stop
-Notice saying so: the human submits from a phone and walks away, so being told
-is the only thing that reaches them. A finished one leaves the Conversation
-stopped either way — nothing takes the pipeline up again on the strength of a
-Manual Task, and what does is **Resume**. One that exits cleanly having
-committed nothing stops it too, an instruction that legitimately changed nothing
-being indistinguishable from one that could not.
-_Avoid_: step (the unattended unit a done file ends), task (a backlog's), take
-over, errand, manual step
+_Avoid_: redirect, retarget, override, transition, take over, reopen and manual
+task (both retired: a steer into Grilling is what reopening a Done Conversation
+was, and a steer into Implementing with a hand-written instruction is what a
+manual task was)
 
 **Stalled**:
 A Conversation in a driven state — Grilling, Implementing or Wrapping — with
@@ -538,7 +514,7 @@ Judged by whether a driver — a grilling session, the watcher a Pick armed on
 one, a runner loop, a wrap-up's watchers — is registered, rather than by how
 long nothing has happened. Wrapping idles for days under live watchers and is
 perfectly healthy; so are the gaps between an unattended run's Steps. Draft,
-Done and Aborted are never stalled, nothing being supposed to drive them.
+Done and Closed are never stalled, nothing being supposed to drive them.
 _Avoid_: blocked on you (the badge a stall is precisely without), stopped (what
 a stall becomes, not what it is), state, stuck, hung, idle
 
