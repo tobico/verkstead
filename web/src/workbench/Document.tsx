@@ -13,6 +13,10 @@
 
 import { Show, type JSX } from "solid-js";
 
+import { Empty } from "../notices";
+import styles from "./Document.module.css";
+import { PaneHead } from "./PaneHead";
+
 export function Document(props: {
   /// What the pane is titled, which is what the card is titled.
   heading: string;
@@ -26,23 +30,16 @@ export function Document(props: {
 }): JSX.Element {
   return (
     <>
-      <div class="pane-head">
-        <button type="button" class="pane-back" onClick={props.back}>
-          ← Timeline
-        </button>
-        <h1>{props.heading}</h1>
-        {/* The way back to what the conversation is, which is what this pane
-            shows when no event is open. */}
-        <button type="button" class="close-event" onClick={props.close}>
-          Close
-        </button>
-      </div>
+      {/* The Close is the way back to what the conversation is, which is what
+          this pane shows when no event is open. */}
+      <PaneHead
+        back={{ to: "Timeline", go: props.back }}
+        title={props.heading}
+        close={props.close}
+      />
 
-      <Show
-        when={props.html !== ""}
-        fallback={<p class="empty">{props.empty}</p>}
-      >
-        <div class="document markdown" innerHTML={props.html} />
+      <Show when={props.html !== ""} fallback={<Empty>{props.empty}</Empty>}>
+        <div class={`${styles.document} markdown`} innerHTML={props.html} />
       </Show>
     </>
   );

@@ -1,0 +1,204 @@
+/* The paper everything else is drawn on: the palette both schemes are named in,
+   what an element looks like before any class has touched it, and the measure
+   prose is read at. None of it is any component's — a token is read from
+   everywhere and an element has no class to hash — so it is global, and it is
+   first, because the rest of the app is written over it.
+
+   Phone-first: one column, comfortable tap targets, widening only where a
+   wider screen actually helps. */
+
+:root {
+  --ink: #1c1a17;
+  --ink-soft: #6b645c;
+  --paper: #faf8f5;
+  --card: #ffffff;
+  --edge: #e3ddd4;
+  /* The icon's ember, taken down until it carries text. `--accent` is both a
+     foreground on `--paper` and a button background with `--paper` on it, so it
+     has to clear 4.5:1 against the paper either way round — which the icon's
+     own #f08a3c does not, at 2.4:1 on this light paper. This is the same hue at
+     5.5:1. Dark mode has the opposite problem and so gets the bright one. */
+  --accent: #a34b12;
+
+  /* Inline code gets a wash of its own rather than the fenced block's: a span of
+     it is a few characters inside a line of prose, with no box and no margin to
+     set it apart, so it has to be a shade more present than a block that has
+     both. `mark` is the one colour here that is not a shade of the paper — it
+     means "look at this", which nothing else in the palette is for. */
+  --code-wash: #efe8dd;
+  --marked: #fbeeba;
+
+  /* The Diff: a saturated colour for the markers and the tally, a wash of the
+     same behind the line. */
+  --added: #2f7d4f;
+  --added-wash: #e9f5ec;
+  --removed: #b3382c;
+  --removed-wash: #fbeceb;
+  --hunk: #f2ede6;
+
+  /* A run that has stopped. Its own name rather than borrowing the Diff's
+     `--removed`, because it means something else — nothing was deleted, the work
+     is waiting on you — and the two would drift apart the moment either was
+     tuned. The same value for now, and it has to clear 4.5:1 both ways round:
+     it is text on the card at 6.0:1, and the *blocked on you* badge is `--paper`
+     on it at 5.6:1. */
+  --stopped: #b3382c;
+
+  --tok-comment: #8d857a;
+  --tok-string: #4a7a4f;
+  --tok-constant: #8a5a2b;
+  --tok-keyword: #9b3f5e;
+  --tok-name: #2f6f8f;
+  --tok-support: #6b5aa0;
+
+  /* What a dropdown menu stands off the page by. One shadow rather than three,
+     and a strong one: a menu is drawn over whatever the human was reading, and
+     against a card of the same paper the border alone was not enough to say
+     which of the two was in front. Two layers, because a single soft one reads
+     as a smudge — the tight one is the edge, the wide one is the lift. */
+  --lift:
+    0 0.75rem 2rem rgb(0 0 0 / 22%), 0 0.15rem 0.4rem rgb(0 0 0 / 14%);
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ece7e0;
+    --ink-soft: #a19a91;
+    --paper: #171614;
+    --card: #201e1b;
+    --edge: #35312c;
+    /* The icon's ember unaltered: against this paper it is 7.2:1, and the
+       deeper light-mode one would be far too dark to read here. */
+    --accent: #f08a3c;
+
+    --code-wash: #2e2b26;
+    --marked: #4a3f1c;
+
+    --added: #79c48f;
+    --added-wash: #1b2a20;
+    --removed: #e0857a;
+    --removed-wash: #2d1f1d;
+    --hunk: #26241f;
+
+    /* The light-mode red is far too dark to read on this paper, so this is the
+       same hue lifted: 6.2:1 as text on the card, and 6.9:1 the other way round
+       under the badge. */
+    --stopped: #e0857a;
+
+    --tok-comment: #8b8378;
+    --tok-string: #9dc493;
+    --tok-constant: #d8a76a;
+    --tok-keyword: #e08aa6;
+    --tok-name: #86bcd8;
+    --tok-support: #b6a8e0;
+
+    /* Deeper, because a shadow this faint is invisible on paper this dark: the
+       same two layers, carrying the weight the light-mode pair carries. */
+    --lift:
+      0 0.75rem 2rem rgb(0 0 0 / 55%), 0 0.15rem 0.4rem rgb(0 0 0 / 40%);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* No `scroll-behavior: smooth` here, deliberately: a rule on the root would
+   slow every scroll the browser does on its own, Back and Forward restoring a
+   place included. The one scroll that animates is the table of contents jump,
+   and the script that makes it is where its length and
+   `prefers-reduced-motion` are honoured — see `bring` in `set/Contents.tsx`. */
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main {
+  /* The measure: the width a line of prose is read at, wherever on the page it
+     is set. The column is wider than it, because a good deal of what a Set
+     carries is not prose: code is written to a width of its own — 104 columns
+     here — a table is as wide as the axes it compares along, and a Diagram is
+     a shape rather than a line. So width is a property of the block rather
+     than of the page: the cards span the column, the blocks inside them that
+     were never prose take the room, and the prose keeps the measure — see the
+     rules just below.
+
+     58rem of card is what the Diff asks for: 104 columns of code, the five the
+     gutter takes and the padding around both come to 55rem or so at the size
+     and the faces monospace is usually set in. The column is the card plus its
+     own padding either side, and it is never traded away: at every window that
+     holds it, the column is this wide — what the window's width decides is
+     only what stands beside it and where it sits, which is the breakpoints'
+     whole business in the pages' own modules. A narrower window is the one
+     thing that narrows it. */
+  --measure: 42rem;
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 3rem;
+}
+
+/* Prose at the measure, flush left rather than centred in the card: the eye
+   starts the next line where the last one began, and a column that sat
+   somewhere different under every block would make that a hunt.
+
+   Every block the markdown dialect reads in lines is named here, the rule that
+   parts two of them included, because what is left out is exactly what the
+   room was widened for: a table, a Diagram and a fence keep the card. On a
+   window too narrow for the difference to exist, the cap simply never binds.
+
+   What is measured here is what has no component to measure it: the renderer's
+   own markup. The blocks that are some component's — an Option on offer, the
+   human's own words on the record, the submit, and the field every page grows
+   to fit what is typed into it — read `--measure` from their own modules, this
+   being where the width is named. */
+.markdown > p,
+.markdown > ul,
+.markdown > ol,
+.markdown > blockquote,
+.markdown > h1,
+.markdown > h2,
+.markdown > h3,
+.markdown > h4,
+.markdown > h5,
+.markdown > h6,
+.markdown > hr {
+  max-width: var(--measure);
+}
+
+h1 {
+  font-size: 1.4rem;
+  margin: 0 0 1rem;
+}
+
+a {
+  color: var(--accent);
+}
+
+textarea {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  /* Every field in the app grows to fit what is in it — see `.grow` in
+     `App.module.css` — so there is nothing to scroll and no reason to offer a
+     drag handle. A height dragged by hand would be overwritten by the next
+     keystroke anyway. */
+  resize: none;
+  overflow: hidden;
+}
+
+/* The prompt is the placeholder rather than a label above the field, so it is
+   doing a label's work and has to be as readable as one. `opacity` because
+   Firefox dims a placeholder on top of whatever colour it is given. */
+textarea::placeholder {
+  color: var(--ink-soft);
+  opacity: 1;
+}

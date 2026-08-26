@@ -1,0 +1,44 @@
+/* The settings page's frame — see `SettingsPage.tsx`. Everything drawn inside
+   it belongs to one of the three sections; what is here is the column the page
+   is read in, the way back out of it, and the line the title shares with a
+   switch. */
+
+/* A list page, whole: a row carries a name and a line of provenance, and never
+   wanted more room than the reading column — so the page keeps to it, and sits
+   in the middle of whatever the window offers past it. */
+.listPage {
+  max-width: calc(var(--measure) + 2rem);
+  margin-inline: auto;
+}
+
+/* The way back out of a page, in the same slot on every one of them. The way
+   *on* to the settings was here too until it went into the ⋯ at the head of the
+   conversations — see `.workbenchActions` in `workbench/Conversations.module.css`
+   — and nothing is left that puts two of these on a line.
+
+   The Set page draws the same link from four lines of its own in
+   `set/SetPage.module.css`: a page's way out is that page's paint now, and two
+   pages that agree about it today are still two pages. */
+.back {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+/* A page's title with a control on the other end of its line. Wrapping, so that
+   anything the control has to say in words drops to a full-width line of its own
+   underneath rather than being squeezed into the column beside the title. */
+.pageHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 1rem;
+}
+
+/* The gap below belongs to the row, which has more in it than the heading. */
+.pageHead h1 {
+  margin: 0;
+}

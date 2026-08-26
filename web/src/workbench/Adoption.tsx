@@ -22,6 +22,8 @@ import { createSignal, type JSX, Show } from "solid-js";
 
 import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
+import { Empty, ErrorLine, Note } from "../notices";
+import styles from "./Adoption.module.css";
 
 /// Each way of being refused an adoption, in the words of what to go and do
 /// about it.
@@ -41,6 +43,8 @@ export const ADOPT_REFUSAL: Record<Adopted, string> = {
     "Choose an implementation profile and model first, on the brief.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
+  FetchFailed:
+    "Git could not fetch from the repo's remote, so nothing was adopted. The server log says why.",
   NoBaseCommit: "The repo has nothing to branch from any more.",
   NoRoadmap: "There is no roadmap by that name at the base commit.",
   RoadmapComplete:
@@ -78,13 +82,13 @@ export function Adoption(props: {
   }));
 
   return (
-    <section class="adoption" aria-label="Adoption">
+    <section class={styles.adoption} aria-label="Adoption">
       <h2>Adopt a roadmap</h2>
 
-      <p class="roadmap">
+      <p class={styles.roadmap}>
         <code>{props.adopting.roadmap}</code>
         <Show when={props.adopting.title}>
-          {(title) => <span class="roadmap-title">{title()}</span>}
+          {(title) => <span class={styles.roadmapTitle}>{title()}</span>}
         </Show>
       </p>
 
@@ -95,22 +99,22 @@ export function Adoption(props: {
           // same way here: there is no stage to start. Which of them it is —
           // the roadmap finished, the roadmap not there, somebody already on
           // the next stage — is what the press says by name.
-          <p class="empty">
+          <Empty>
             Nothing to adopt at this base commit: no stage of{" "}
             <code>{props.adopting.roadmap}</code> can be started from it.
-          </p>
+          </Empty>
         }
       >
         {(stage) => (
           <>
-            <p class="stage">
+            <p class={styles.stage}>
               Stage {stage().label}: {stage().title}
             </p>
-            <p class="note">
+            <Note>
               The brief at <code>{stage().brief_path}</code> becomes this
               conversation's brief, and the work is done on{" "}
               <code>{stage().branch}</code>, branched from the base commit.
-            </p>
+            </Note>
           </>
         )}
       </Show>
@@ -118,25 +122,27 @@ export function Adoption(props: {
       <Show when={props.conversation.state === "Draft"}>
         <button
           type="button"
-          class="adopt"
+          class={styles.adopt}
           disabled={adopt.isPending}
           onClick={() => adopt.mutate()}
         >
           {adopt.isPending ? "Adopting…" : "Adopt"}
         </button>
-        <p class="note">
+        <Note>
           This creates the branch and its worktree, takes the stage brief as
           this conversation's brief, and starts the work on it. Both agent
           profiles have to be chosen first.
-        </p>
+        </Note>
 
         <Show when={refused()}>
-          {(outcome) => <p class="error">{ADOPT_REFUSAL[outcome()]}</p>}
+          {(outcome) => (
+            <ErrorLine class={styles.failure}>{ADOPT_REFUSAL[outcome()]}</ErrorLine>
+          )}
         </Show>
         <Show when={adopt.isError}>
-          <p class="error">
+          <ErrorLine class={styles.failure}>
             The stage could not be adopted: {adopt.error?.message}
-          </p>
+          </ErrorLine>
         </Show>
       </Show>
     </section>

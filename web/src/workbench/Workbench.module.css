@@ -1,0 +1,306 @@
+/* The workbench frame: the panes, the grid they stand in, and the line between
+   two of them. See `Workbench.tsx` for what is drawn inside them.
+
+   A hierarchy rather than three columns that happen to sit together — a
+   conversation is picked, then read, then its details are looked at — so a
+   narrow window shows one level of it at a time and a wide one shows the levels
+   side by side. Which level is showing is `data-pane` on the frame, put there by
+   the page; below the first breakpoint it is the whole of what decides what is
+   drawn, and above the last it decides nothing.
+
+   The panes are always in the document. A pane that was rendered away would
+   have to be rebuilt — and its scroll position found again — every time the
+   human walked back into it.
+
+   Three of the names here are worn by things this file does not draw:
+   `paneChrome` by whatever sticks to the top of a pane, `paneBack` by the way
+   out of one, and `paneScreen` by a terminal that takes a pane's whole height.
+   The rules that read them are about what a *pane* does, and a pane is the
+   frame's; so the frame writes the names and the components that have to be
+   recognised by it wear them — `PaneHead.tsx`, `Timeline.tsx` and `Screen.tsx`
+   each import this module for the one they need. */
+
+.workbench {
+  display: grid;
+}
+
+.pane {
+  padding: 1.25rem 1rem 3rem;
+  min-width: 0;
+}
+
+/* Phone-first, as everything here is: one pane, and it is whichever one the
+   page says. */
+.workbench > .pane {
+  display: none;
+}
+
+.workbench[data-pane="conversations"] > .conversationsPane,
+.workbench[data-pane="timeline"] > .timelinePane,
+.workbench[data-pane="details"] > .detailsPane {
+  display: block;
+}
+
+/* The line between two panes, and the handle that moves it.
+
+   Only in the document where a layout stands panes side by side — the page puts
+   it there, and takes it away again below the breakpoint where the workbench is
+   walked through one pane at a time. So there is no `display: none` here to
+   keep in step with the rules that decide which panes are drawn: a divider that
+   is drawn is a divider there is something either side of.
+
+   It is the border as well as the handle. The panes themselves carry no edge
+   between them any more — two lines a pixel apart, one of them moving, is the
+   sort of thing nobody sees and everybody notices.
+
+   `touch-action` because a finger dragging this is dragging this: left to
+   itself the browser would take the gesture for a scroll of the pane under it
+   and the divider would never see the second event. */
+.divider {
+  position: relative;
+  width: 0.5rem;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.divider::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--edge);
+}
+
+/* Under the pointer, and under the keyboard's focus, the line says it is a
+   thing that moves. The whole half-rem is the target; what lights up is the
+   line, because the half-rem is only there to be easier to hit than a pixel. */
+.divider:hover::before,
+.divider:focus-visible::before {
+  width: 2px;
+  background: var(--accent);
+}
+
+.divider:focus-visible {
+  outline: none;
+}
+
+/* What stays at the top of a pane while the pane goes up under it: the pane's
+   header, and in the timeline the header and the pinned block together, wrapped
+   as one block. One rule for both, which is what the two halves of it said
+   apart until the panes moved here — the header wears this name in
+   `PaneHead.tsx`, the timeline's wrapper wears it in `Timeline.tsx`, and the
+   child combinator is what decides which of the two the pane is sticking: a
+   wrapped header is the wrapper's child rather than the pane's, so the wrapper
+   is the one thing that sticks and the header inside it travels with it.
+
+   Sticky rather than fixed, because what it is the top of is the pane: a narrow
+   window scrolls the whole page and a wide one scrolls this pane, and sticky is
+   right in both. */
+.pane > .paneChrome {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* The paper behind it, out past the pane's own padding on both sides, so the
+     record passes under it rather than beside it. Above it there is nothing to
+     cover: pinned to `top: 0` the block sits against the pane's top edge, and
+     the padding that was over its head has gone up with everything else. */
+  margin: 0 -1rem 1rem;
+  padding: 1.25rem 1rem 0;
+  background: var(--paper);
+}
+
+/* Which is why the padding over its head is the block's own rather than the
+   pane's: that rem and a quarter is what the record would otherwise slide up
+   against the underside of the title through, and padding the pane keeps has
+   scrolled away by the time it is wanted. Nothing moves at rest — the block
+   pays for exactly what the pane stopped paying for. A pane with no chrome to
+   its name keeps its own, because there is nothing there to hand it to. */
+.pane:has(> .paneChrome) {
+  padding-top: 0;
+}
+
+/* The record thins out into what is stuck rather than being cut off against it.
+   The gradient hangs in the gap that was already below the chrome — the rem it
+   keeps under itself — which is why it costs nothing at rest: paper drawn over
+   paper, with nothing of the first event covered until the record is actually
+   passing beneath. So there is no scroll listener and no `scrolled` flag, and
+   nothing that would have to be answered twice over for the two ways a pane
+   scrolls.
+
+   Deaf to the pointer, because for most of a pane's life this is a rem of the
+   record it is lying over, and a fade that swallowed the presses meant for what
+   shows through it would be worse than the abrupt edge it replaced. */
+.pane > .paneChrome::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: 1rem;
+  background: linear-gradient(var(--paper), transparent);
+  pointer-events: none;
+}
+
+/* Chrome inside the chrome — the timeline's header, wrapped with the pinned
+   block below it — takes the layer over what it is wrapped with. That is what
+   lets its ⋯ menu come down over the pinned items rather than behind them,
+   where it could not be pressed. The layer belongs to the header rather than to
+   the menu that wanted it: everything the header ever hangs underneath itself
+   is over the pinned block by being part of the header, and the next thing hung
+   there needs no rule of its own. */
+.paneChrome > .paneChrome {
+  position: relative;
+  z-index: 1;
+}
+
+/* From 60rem the window holds the sidebar beside the level being read: the
+   conversations stay, and the second column is the timeline or the details.
+   Each pane scrolls on its own from here, because two columns of one page's
+   scroll would move the list the human is not reading. */
+@media (min-width: 60rem) {
+  .workbench {
+    /* The sidebar, the divider that moves it, and whichever level is being
+       read. A share of the window rather than a length: what the human is
+       trading away is a part of what they have, and what they have is not the
+       same window twice. The default behind the name is the 15rem this column
+       used to be fixed at, as a share of the window the third pane arrives
+       at. */
+    grid-template-columns: var(--pane-sidebar, 20%) auto 1fr;
+    height: 100dvh;
+    /* And nothing inside it may make the document taller than that. The frame
+       is the window's height here, so anything standing past the bottom of it
+       is a pane that has got its own height wrong — and left unclipped that
+       becomes page to scroll, which pushes the whole workbench off the screen
+       once the pane the human is reading runs out of its own. Clipped, the
+       mistake stays inside the pane it was made in. */
+    overflow: hidden;
+  }
+
+  .pane {
+    overflow-y: auto;
+    /* A pane scrolled to its end stops there. Left to itself the browser hands
+       the rest of the gesture to the document, which is the same page-under-
+       the-panes scroll by another route. */
+    overscroll-behavior: contain;
+  }
+
+  .workbench > .conversationsPane {
+    display: block;
+  }
+
+  .workbench:not([data-pane="details"]) > .timelinePane,
+  .workbench[data-pane="details"] > .detailsPane {
+    display: block;
+  }
+
+  /* And the conversations being on screen is what makes the timeline's way back
+     to them pointless, so it goes. The details pane keeps its own: it is what
+     the second column gives up to. The way back is drawn by `PaneHead`, and
+     wears this name so that the frame can say where one is not needed. */
+  .timelinePane .paneBack {
+    display: none;
+  }
+}
+
+/* And from 80rem all three stand together, which is the workbench as it is
+   meant to be read: pick, read, and look into. Nothing is anywhere else to go
+   to, so the ways between the panes go away — the last of them in
+   `PaneHead.module.css`, there being no pane left to name. */
+@media (min-width: 80rem) {
+  .workbench {
+    grid-template-columns:
+      var(--pane-sidebar, 20%) auto var(--pane-timeline, 30%) auto 1fr;
+  }
+
+  .workbench > .pane {
+    display: block;
+  }
+}
+
+/* The details pane's content at the measure the rest of the app is read at, and
+   in the middle of the pane when the pane is wider than that.
+
+   A pane that can be dragged is a pane that can be dragged to the width of a
+   window, and a Set answered across two feet of screen is a Set nobody can read
+   a line of. 60rem is what every other page's column is capped at — the Set and
+   the Settings both — so what the pane holds is the same width there that it is
+   anywhere else, whatever the human has left the pane itself at.
+
+   Padding rather than a `max-width` on the content, because what is inside this
+   pane is a pane's worth of blocks rather than one wrapper to cap: the sticky
+   header, the sheets, the diffs, the terminal. Padding moves the whole column
+   in from both edges at once and every one of them is inside it — including
+   the header, which goes on bleeding its rem of paper out either side of what
+   it is the header of.
+
+   The percentage is of the pane, so below the first breakpoint — where the pane
+   is the window and the window is narrower than the measure — the `max` picks
+   the rem the pane always had, and this rule costs nothing. No media query
+   needed to say so. */
+.workbench > .detailsPane {
+  padding-inline: max(1rem, (100% - 60rem) / 2);
+}
+
+/* The one exception to that pane: the one with a Screen in it, which is the one
+   pane in the workbench that ends where the window does rather than running on
+   down the page. A column: the header and the turn count keep their size and
+   the Screen takes the rest, so the terminal is given a height to fit itself to
+   — and a live session's terminal is told what it was given, which is why
+   nothing scrolls under one.
+
+   Here rather than in `Screen.module.css`, where these were written beside the
+   terminal, because what they are about is a pane: what they set they set on
+   the pane, and the pane is this file's. The Screen wears `paneScreen` so that
+   this file can say which pane it is in.
+
+   Only where a Screen is showing. The Transcript is a column of the page and
+   scrolls like everything else the pane holds, which is what switching back to
+   it puts back.
+
+   Below the first breakpoint the pane is the whole page with nothing standing
+   above it, so the window's height is the height it wants and `100dvh` says so.
+   Above it, the pane is a cell of a frame that is already exactly that tall, and
+   the height comes from the row instead — the same number by a different route,
+   and asking the viewport twice is what put blank page under the workbench: two
+   resolutions of one `dvh` that disagree by a pixel leave the pane standing past
+   the bottom of the frame, and that pixel is document to scroll.
+
+   And the room a scrolling pane leaves under its last line goes, because a pane
+   that does not scroll has no use for it. */
+.workbench > .detailsPane:has(.paneScreen) {
+  flex-direction: column;
+  height: 100dvh;
+  padding-bottom: 1.25rem;
+  overflow: hidden;
+}
+
+/* Said after the rule it takes the height back off, which is the only place it
+   could win — and `auto` rather than a length, because the row is what is being
+   handed the job and stretching an item to its row is what a grid does by
+   itself. It is how every other pane here is already the height it is. */
+@media (min-width: 60rem) {
+  .workbench > .detailsPane:has(.paneScreen) {
+    height: auto;
+  }
+}
+
+.workbench > .detailsPane:has(.paneScreen) > :not(.paneScreen) {
+  flex: none;
+}
+
+/* And that it is a column at all, said twice, because the pane is shown by two
+   different rules: by name below the last breakpoint, and along with every
+   other pane above it. What must not happen is either of them turning into a
+   `display` for a pane that is meant to be hidden — so each is answered where
+   it is made rather than once over the top of both. */
+.workbench[data-pane="details"] > .detailsPane:has(.paneScreen) {
+  display: flex;
+}
+
+@media (min-width: 80rem) {
+  .workbench > .detailsPane:has(.paneScreen) {
+    display: flex;
+  }
+}

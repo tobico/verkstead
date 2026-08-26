@@ -36,6 +36,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { Modal } from "../Modal";
+import { QuietButton } from "../QuietButton";
 import { loadSettings, saveSettings } from "../api/client";
 import { useReading } from "../freshness";
 import type {
@@ -45,7 +46,10 @@ import type {
   TokenEdit,
   Verified,
 } from "../api/types";
+import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
+import app from "../App.module.css";
+import styles from "./Credentials.module.css";
 
 /// The credentials as they stand, and the form that writes them.
 export function Credentials(): JSX.Element {
@@ -178,9 +182,9 @@ export function Credentials(): JSX.Element {
   const standing = () => (
     <Show when={configured()}>
       {(saved) => (
-        <p class="token-standing">
-          A token ending <code class="last-four">{saved().last_four}</code>,
-          saved <span class="when">{utcStamp(saved().at)}</span>.
+        <p class={styles.tokenStanding}>
+          A token ending <code class={styles.lastFour}>{saved().last_four}</code>,
+          saved <span>{utcStamp(saved().at)}</span>.
         </p>
       )}
     </Show>
@@ -189,28 +193,26 @@ export function Credentials(): JSX.Element {
   return (
     <Switch>
       <Match when={settings.isPending}>
-        <p class="empty">Loading…</p>
+        <Empty>Loading…</Empty>
       </Match>
       <Match when={settings.isError}>
-        <p class="error">
+        <ErrorLine>
           Could not read the settings: {settings.error?.message}
-        </p>
+        </ErrorLine>
       </Match>
       <Match when={told()}>
-        <section class="credentials">
+        <section class={styles.credentials}>
           {/* The heading, with the one thing there is to do to what is under it
               on the other end of its line — as the two lists below have. */}
-          <div class="section-head">
+          <div class={app.sectionHead}>
             <h2>GitHub and git author</h2>
-            <button type="button" onClick={() => setOpen(true)}>
-              Edit
-            </button>
+            <QuietButton onClick={() => setOpen(true)}>Edit</QuietButton>
           </div>
 
           {/* What a token that is not there costs, said here rather than found
               out by a session that could not push at midnight. */}
           <Show when={configured() === null}>
-            <p class="warning">
+            <p class={styles.warning}>
               No GitHub token is configured, so sessions cannot reach GitHub.
             </p>
           </Show>
@@ -222,21 +224,21 @@ export function Credentials(): JSX.Element {
               this form exists to catch. */}
           <Show when={account()}>
             {(login) => (
-              <p class="verified">
-                GitHub says it is <span class="login">{login()}</span>.
+              <p class={styles.verified}>
+                GitHub says it is <span class={styles.login}>{login()}</span>.
               </p>
             )}
           </Show>
           <Show when={refused()}>
             {(why) => (
-              <p class="error unverified">
+              <ErrorLine class={styles.unverified}>
                 It is saved, but GitHub would not say whose it is: {why()}
-              </p>
+              </ErrorLine>
             )}
           </Show>
 
           <Show when={authorless()}>
-            <p class="warning">
+            <p class={styles.warning}>
               No git author is configured, so commits inside a session fail
               asking who the author is.
             </p>
@@ -244,10 +246,10 @@ export function Credentials(): JSX.Element {
           {/* Written the way git writes an author, which is the form it is
               going to be used in. */}
           <Show when={authored()}>
-            <p class="author-standing">
+            <p class={styles.authorStanding}>
               Commits are by{" "}
-              <span class="author-name">{author()?.name}</span>{" "}
-              <span class="author-email">
+              <span class={styles.authorName}>{author()?.name}</span>{" "}
+              <span class={styles.authorEmail}>
                 &lt;{author()?.email}&gt;
               </span>
               .
@@ -257,26 +259,26 @@ export function Credentials(): JSX.Element {
           {/* One form for both files, drawn over the page: the server writes
               them in one request, so there is one Save. */}
           <Modal
-            class="edit-credentials"
+            class={styles.form!}
             open={open()}
             close={shut}
             name="GitHub and git author"
           >
-            <form class="settings" onSubmit={submit}>
-              <section class="github-token">
+            <form onSubmit={submit}>
+              <section>
                 <h3>GitHub token</h3>
                 {standing()}
 
                 <Show
                   when={typing()}
                   fallback={
-                    <div class="token-actions">
+                    <div class={styles.tokenActions}>
                       <button type="button" onClick={() => setReplacing(true)}>
                         Replace
                       </button>
                       <button
                         type="button"
-                        class="clear"
+                        class={styles.clear}
                         disabled={save.isPending}
                         onClick={() => {
                           setVerified(null);
@@ -308,10 +310,10 @@ export function Credentials(): JSX.Element {
                       which is the way out of the whole form on the line
                       below. */}
                   <Show when={configured() !== null}>
-                    <div class="token-actions">
+                    <div class={styles.tokenActions}>
                       <button
                         type="button"
-                        class="cancel"
+                        class={styles.cancel}
                         onClick={() => {
                           setReplacing(false);
                           setToken("");
@@ -324,7 +326,7 @@ export function Credentials(): JSX.Element {
                 </Show>
               </section>
 
-              <section class="git-author">
+              <section>
                 <h3>Git author</h3>
 
                 <label for="author-name">Name</label>
@@ -353,11 +355,11 @@ export function Credentials(): JSX.Element {
                 />
               </section>
 
-              <div class="settings-buttons">
+              <div class={styles.buttons}>
                 <button type="submit" disabled={save.isPending}>
                   Save
                 </button>
-                <button type="button" class="cancel" onClick={shut}>
+                <button type="button" class={styles.cancel} onClick={shut}>
                   Cancel
                 </button>
               </div>
@@ -367,9 +369,9 @@ export function Credentials(): JSX.Element {
                   that keeps the form up. Said loudly: a settings page that
                   quietly saved nothing is how credentials go missing. */}
               <Show when={save.isError}>
-                <p class="error">
+                <ErrorLine class={styles.failure}>
                   The settings could not be saved: {save.error?.message}
-                </p>
+                </ErrorLine>
               </Show>
             </form>
           </Modal>

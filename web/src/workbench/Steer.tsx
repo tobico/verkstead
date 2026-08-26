@@ -55,9 +55,11 @@ import type {
   SteerTarget,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { ErrorLine, Note } from "../notices";
 import { Modal } from "../Modal";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
+import styles from "./Steer.module.css";
 
 /// Each way of being refused a steer.
 ///
@@ -334,7 +336,7 @@ export function Steer(props: {
 
   return (
     <Modal
-      class="steer-conversation"
+      class={styles.steerConversation!}
       open
       close={props.close}
       labelledBy="steer-title"
@@ -346,19 +348,19 @@ export function Steer(props: {
         }}
       >
         <h3 id="steer-title">Steer this conversation</h3>
-        <p class="note">
+        <Note class={styles.lead}>
           The run has stopped while you decide. Cancel leaves it stopped, with
           resume on offer.
-        </p>
+        </Note>
 
         {/* One block per target, each saying what it means, for the reason the
             actions menu gives each of its presses a line: the words between two
             of these are the difference between an hour of work and none. */}
-        <fieldset class="steer-targets">
+        <fieldset class={styles.steerTargets}>
           <legend>Move it into</legend>
           <For each={offered()}>
             {(offered) => (
-              <div class="steer-target">
+              <div class={styles.steerTarget}>
                 <label>
                   <input
                     type="radio"
@@ -369,7 +371,7 @@ export function Steer(props: {
                   />
                   {offered.label}
                 </label>
-                <p class="note">{offered.note}</p>
+                <Note class={styles.optionNote}>{offered.note}</Note>
               </div>
             )}
           </For>
@@ -380,7 +382,7 @@ export function Steer(props: {
             they could mean: no brief is the round starting on the one already
             there, and no digest is the interview starting from the brief alone. */}
         <Show when={target() === "Grilling"}>
-          <div class="steer-brief">
+          <div class={styles.steerBrief}>
             <label for="steer-brief">A brief for the new round</label>
             <textarea
               id="steer-brief"
@@ -394,12 +396,12 @@ export function Steer(props: {
                   : "Nothing is written down yet, so say what this round is about."
               }
             />
-            <p class="note">
+            <Note class={styles.fieldNote}>
               What you write lands as a brief of its own, frozen at once. The
               brief the earlier round was built from stays on the timeline.
-            </p>
+            </Note>
 
-            <label class="steer-digest">
+            <label class={styles.steerDigest}>
               <input
                 type="checkbox"
                 checked={digest()}
@@ -407,10 +409,10 @@ export function Steer(props: {
               />
               Prime it with everything you have already answered
             </label>
-            <p class="note">
+            <Note class={styles.fieldNote}>
               Every answered question set of this conversation, in the order it
               was asked. Leave it off to start the interview fresh.
-            </p>
+            </Note>
           </div>
         </Show>
 
@@ -419,7 +421,7 @@ export function Steer(props: {
             there is something there — so where there is not, the field is what
             the target is, and the submit is held shut until it says something. */}
         <Show when={target() === "Implementing"}>
-          <div class="steer-instruction">
+          <div>
             <label for="steer-instruction">What to do first</label>
             <textarea
               id="steer-instruction"
@@ -433,11 +435,11 @@ export function Steer(props: {
                   : "There is nothing on this branch to carry on, so say what to do."
               }
             />
-            <p class="note">
+            <Note>
               A session does what you write and commits it. What follows is
               Verkstead’s: the next task of the backlog, or the pull request
               wrapped up again.
-            </p>
+            </Note>
           </div>
         </Show>
 
@@ -449,7 +451,7 @@ export function Steer(props: {
             one pairing while the submit would send another — see
             `src/picking.tsx`. */}
         <Show when={runs()}>
-          <div class="steer-pairing">
+          <div class={styles.steerPairing}>
             <label for="steer-pairing">Run it under</label>
             {/* Drawn only once the list is here, the way the setup's pickers
                 are: a select whose value is set before its options exist is a
@@ -458,11 +460,11 @@ export function Steer(props: {
             <Show
               when={profiles.data}
               fallback={
-                <p class="note">
+                <Note class={styles.fieldNote}>
                   {profiles.isError
                     ? `Could not read the agent profiles: ${profiles.error?.message}`
                     : "Reading the agent profiles…"}
-                </p>
+                </Note>
               }
             >
               {(saved) => (
@@ -478,17 +480,17 @@ export function Steer(props: {
                 />
               )}
             </Show>
-            <p class="note">
+            <Note class={styles.fieldNote}>
               What the work runs under from here. This is recorded as the
               conversation's, not just this run's.
-            </p>
+            </Note>
           </div>
         </Show>
 
         {/* Only where there is one to interrupt. With nothing running the box
             would promise something about a session that is not there. */}
         <Show when={props.working}>
-          <div class="steer-interrupt">
+          <div class={styles.steerInterrupt}>
             <label>
               <input
                 type="checkbox"
@@ -497,22 +499,22 @@ export function Steer(props: {
               />
               Interrupt current task
             </label>
-            <p class="note">
+            <Note class={styles.optionNote}>
               End the session running now where it stands, leaving the step
               however far it had got. Left alone it keeps the worktree — to its
               own end into done, where nothing is started, and otherwise until
               the session this steer starts is ready to take it over.
-            </p>
+            </Note>
           </div>
         </Show>
 
-        <div class="steer-buttons">
+        <div class={styles.steerButtons}>
           {/* Held shut where the target runs something and nothing is picked to
               run it: the server refuses that by name, and a press that could
               only be refused is one the human should not have to make. */}
           <button
             type="submit"
-            class="steer"
+            class={styles.steer}
             disabled={
               submit.isPending ||
               (runs() && !picked()) ||
@@ -525,20 +527,20 @@ export function Steer(props: {
           {/* Drawn as well as the ways out the modal already has: escape and a
               press on the backdrop are for a keyboard and a cursor, and this is
               the one a thumb has. */}
-          <button type="button" class="cancel" onClick={props.close}>
+          <button type="button" class={styles.cancel} onClick={props.close}>
             Cancel
           </button>
         </div>
 
         <Show when={refused()}>
-          {(outcome) => <p class="error">{STEER_REFUSAL[outcome()]}</p>}
+          {(outcome) => <ErrorLine class={styles.failure}>{STEER_REFUSAL[outcome()]}</ErrorLine>}
         </Show>
         {/* A server that could not answer at all, which is the one thing here
             that is an error rather than an outcome. */}
         <Show when={submit.isError}>
-          <p class="error">
+          <ErrorLine class={styles.failure}>
             The conversation could not be steered: {submit.error?.message}
-          </p>
+          </ErrorLine>
         </Show>
       </form>
     </Modal>

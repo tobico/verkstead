@@ -12,6 +12,8 @@ import { Match, Switch } from "solid-js";
 import { RefusedError, loadSet } from "../api/client";
 import type { SetReading, SetView, UnreadableSet } from "../api/types";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
+import styles from "./SetPage.module.css";
 import { Sheet } from "./Sheet";
 import { Unreadable } from "./Unreadable";
 
@@ -46,13 +48,13 @@ export function SetPage(): JSX.Element {
       {/* Pending rather than fetching: the fallback belongs to the first load
           alone. */}
       <Match when={set.isPending}>
-        <p class="empty">Loading…</p>
+        <Empty>Loading…</Empty>
       </Match>
       <Match when={set.isError && absent(set.error)}>
-        <p class="empty">No such Set.</p>
+        <Empty>No such Set.</Empty>
       </Match>
       <Match when={set.isError}>
-        <p class="error">Could not read the Set: {set.error?.message}</p>
+        <ErrorLine>Could not read the Set: {set.error?.message}</ErrorLine>
       </Match>
       {/* A Set whose stored body this build cannot read is a page of its own
           rather than a failure: the record is there, and this is what there is
@@ -90,7 +92,7 @@ function unreadable(reading: SetReading): UnreadableSet | undefined {
 /// that is the pane's header rather than a link to the page it is already on.
 function Back(props: { to: number }): JSX.Element {
   return (
-    <A href={`/conversations/${props.to}`} class="back">
+    <A href={`/conversations/${props.to}`} class={styles.back}>
       ← Conversation
     </A>
   );

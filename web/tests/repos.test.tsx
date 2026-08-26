@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Registered, RepoEntry } from "../src/api/types";
 import { RepoList } from "../src/repos/RepoList";
+import styles from "../src/repos/RepoList.module.css";
 import { mount, texts } from "./listing";
 import { json, serving } from "./serving";
 import repos from "./fixtures/repos.json" with { type: "json" };
@@ -39,7 +40,7 @@ function addRepo() {
 
 /// The form, or nothing at all where it has not been opened.
 function theForm(container: ParentNode): HTMLDialogElement | null {
-  return container.querySelector<HTMLDialogElement>("dialog.add-repo");
+  return container.querySelector<HTMLDialogElement>(`dialog.${styles.form}`);
 }
 
 /// Type a path into the form and send it, opening the form first.
@@ -70,8 +71,10 @@ describe("the Repo list", () => {
     // The resolved path the server recorded, not whatever was typed to register
     // it: that is the directory Verkstead will work in, and the point of showing
     // it is that it can be checked.
-    expect(row.querySelector(".path")!.textContent).toBe(FIRST.path);
-    expect(row.querySelector(".branch")!.textContent).toBe(FIRST.default_branch);
+    expect(row.querySelector(`.${styles.path}`)!.textContent).toBe(FIRST.path);
+    expect(row.querySelector(`.${styles.branch}`)!.textContent).toBe(
+      FIRST.default_branch,
+    );
   });
 
   it("keeps the order it was given", async () => {
@@ -80,7 +83,7 @@ describe("the Repo list", () => {
 
     await waitFor(() => screen.getByText(FIRST.name));
 
-    expect(texts(container, ".repo-row .title")).toEqual(
+    expect(texts(container, `.${styles.row} .${styles.title}`)).toEqual(
       REPOS.map((repo) => repo.name),
     );
   });

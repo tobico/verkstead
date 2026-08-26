@@ -15,6 +15,7 @@ import type { JSX } from "solid-js";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 
+import app from "../App.module.css";
 import { Modal } from "../Modal";
 import { submitResponse } from "../api/client";
 import type {
@@ -32,8 +33,13 @@ import {
   DIRECTION_NOTE,
   DIRECTIONS,
 } from "../directions";
+import { ErrorLine, Note } from "../notices";
+import styles from "./Answering.module.css";
 import { AskText } from "./AskText";
 import { Postscript } from "./Postscript";
+// The question vocabulary, defined once for the form and the record alike —
+// every class below that a settled Set also draws comes from here.
+import page from "./Sheet.module.css";
 import { anchor } from "./outline";
 import { Head, starred } from "./table";
 import {
@@ -194,19 +200,19 @@ export function Answering(props: {
 
   return (
     <>
-      <h2 class="section-heading" id="questions">
+      <h2 class={app.sectionHeading} id="questions">
         Questions
       </h2>
-      <ol class="questions">
+      <ol class={page.questions}>
         <For each={props.questions}>
           {(question, index) => (
-            <li class="question" id={anchor(question.ask.name, index() + 1)}>
+            <li class={page.question} id={anchor(question.ask.name, index() + 1)}>
               {/* A Heading is its text and nothing else — no Options, no field,
                   nothing to leave open. What it heads is directly under it. */}
               <Show
                 when={!question.heading}
                 fallback={
-                  <div class="ask heading">
+                  <div class={`${page.ask} ${page.heading}`}>
                     <AskText
                       name={question.ask.name}
                       html={question.ask.text_html}
@@ -219,10 +225,10 @@ export function Answering(props: {
               {/* Sub-questions get no anchor of their own: one scrolls into
                   view with its parent. */}
               <Show when={question.subquestions.length > 0}>
-                <ol class="subquestions">
+                <ol class={page.subquestions}>
                   <For each={question.subquestions}>
                     {(subquestion) => (
-                      <li class="subquestion">
+                      <li class={page.subquestion}>
                         <Asking
                           ask={subquestion}
                           fields={fields(subquestion.name)}
@@ -259,8 +265,8 @@ export function Answering(props: {
           without one still draws the card, so the box is in the same place
           either way. */}
       <Postscript html={props.postscript}>
-        <section class="set-comment">
-          <div class="grow" data-value={sheet.comment}>
+        <section class={page.setComment}>
+          <div class={app.grow} data-value={sheet.comment}>
             <textarea
               id="set-comment"
               name="set-comment"
@@ -273,11 +279,13 @@ export function Answering(props: {
           </div>
         </section>
       </Postscript>
-      <section class="submit">
+      <section class={styles.submit}>
         <button type="button" onClick={start} disabled={submit.isPending}>
           {submit.isPending ? "Sending…" : "Submit"}
         </button>
-        <Show when={failed()}>{(said) => <p class="error">{said()}</p>}</Show>
+        <Show when={failed()}>
+          {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
+        </Show>
       </section>
       {/* The warning that stands between the human and a submit skipping
           offered choices: every multiple-choice question left open, by name, and
@@ -287,20 +295,24 @@ export function Answering(props: {
           counter-question, not a mistake, and it comes through here like any
           other. */}
       <Modal
-        class="confirm"
+        class={page.confirm!}
         open={confirming() !== null}
         close={() => setConfirming(null)}
         labelledBy="confirm-title"
       >
-        <p id="confirm-title">Going back unanswered:</p>
-        <ul class="unanswered">
+        <p id="confirm-title" class={page.confirmTitle}>
+          Going back unanswered:
+        </p>
+        <ul class={page.unanswered}>
           <For each={confirming() ?? []}>{(name) => <li>{name}</li>}</For>
         </ul>
-        <p class="note">The agent will be told these are still open.</p>
-        <div class="confirm-actions">
+        <Note class={page.caveat}>
+          The agent will be told these are still open.
+        </Note>
+        <div class={page.confirmActions}>
           <button
             type="button"
-            class="secondary"
+            class={page.secondary}
             onClick={() => setConfirming(null)}
           >
             Keep answering
@@ -350,31 +362,31 @@ function Choosing(props: {
   move: (direction: Direction) => void;
 }): JSX.Element {
   return (
-    <section class="direction-pick" id="direction">
+    <section class={page.directionPick} id="direction">
       {/* Headed like the Preface and the Postscript, and holding one card like
           the Questions do: the section names what is being decided and the card
           is the deciding, so this reads as one more question under a heading of
           its own rather than as furniture of a different kind. */}
-      <h2 class="section-heading">Direction</h2>
-      <div class="direction-card">
+      <h2 class={app.sectionHeading}>Direction</h2>
+      <div class={page.directionCard}>
         {/* Asked as a Question is asked: the label floated in the accent with
             the agent's argument running beside it, and the three to pick from
             under it where a Question's Options are. */}
-        <div class="ask">
+        <div class={page.ask}>
           <AskText
             name={DIRECTION_LABEL}
             html={props.proposal.rationale_html}
           />
         </div>
-        <ul class="directions">
+        <ul class={page.directions}>
           <For each={DIRECTIONS}>
             {(offered) => {
               const recommended = () => props.proposal.direction === offered;
 
               return (
                 <li
-                  class="direction"
-                  classList={{ recommended: recommended() }}
+                  class={page.direction}
+                  classList={{ [page.recommended!]: recommended() }}
                 >
                   <label>
                     <input
@@ -390,20 +402,20 @@ function Choosing(props: {
                       onChange={() => props.move(offered)}
                       onClick={() => props.pick(offered)}
                     />
-                    <span class="direction-name">{DIRECTION[offered]}</span>
+                    <span class={page.directionName}>{DIRECTION[offered]}</span>
                     <Show when={recommended()}>
-                      <span class="star" title="the agent's Recommendation">
+                      <span class={page.star} title="the agent's Recommendation">
                         ★
                       </span>
                     </Show>
                   </label>
-                  <p class="note">{DIRECTION_NOTE[offered]}</p>
+                  <Note class={page.means}>{DIRECTION_NOTE[offered]}</Note>
                 </li>
               );
             }}
           </For>
         </ul>
-        <p class="semantics">
+        <p class={page.semantics}>
           Picking a direction accepts the proposal and lets the agent get on
           with it. Anything else — an answer of your own, questions left open,
           nothing picked here — sends it back for another round.
@@ -438,7 +450,7 @@ function Asking(props: { ask: AskView; fields: Fields }): JSX.Element {
     }`;
 
   return (
-    <div class="ask">
+    <div class={page.ask}>
       <AskText name={props.ask.name} html={props.ask.text_html} />
       {/* The Options, as a table where the agent declared the axes to compare
           them along and as the list they have always been where it did not. The
@@ -448,7 +460,7 @@ function Asking(props: { ask: AskView; fields: Fields }): JSX.Element {
         <Show
           when={props.ask.columns.length > 0}
           fallback={
-            <ul class="options">
+            <ul class={page.options}>
               <For each={options()}>
                 {(option) => (
                   <Offered
@@ -472,10 +484,10 @@ function Asking(props: { ask: AskView; fields: Fields }): JSX.Element {
           field with nothing else naming it would reach a screen reader unnamed.
 
           The wrapper carries the text a second time, where the stylesheet uses
-          it to give the field its height — see `.grow`. It is the field's own
-          value, so a restored draft arrives at the right height rather than one
-          line tall with the rest of it hidden. */}
-      <div class="grow" data-value={props.fields.free_text()}>
+          it to give the field its height — see `.grow` in `App.module.css`. It
+          is the field's own value, so a restored draft arrives at the right
+          height rather than one line tall with the rest of it hidden. */}
+      <div class={app.grow} data-value={props.fields.free_text()}>
         <textarea
           id={field()}
           name={field()}
@@ -512,7 +524,7 @@ function Offered(props: {
   // markdown all the same: what did survive, a code span above all, is drawn as
   // it is everywhere else.
   return (
-    <li class={props.option.recommended ? "option recommended" : "option"}>
+    <li class={marks(props.option)}>
       <label>
         <input
           type="radio"
@@ -533,13 +545,13 @@ function Offered(props: {
           onChange={() => props.fields.move(n())}
           onClick={() => props.fields.pick(n())}
         />
-        <span class="n">{n()}</span>
+        <span class={page.n}>{n()}</span>
         <span
-          class="option-text markdown"
+          class={`${page.optionText} markdown`}
           innerHTML={props.option.text_html}
         />
         <Show when={props.option.recommended}>
-          <span class="star" title="the agent's Recommendation">
+          <span class={page.star} title="the agent's Recommendation">
             ★
           </span>
         </Show>
@@ -562,7 +574,7 @@ function Tabulated(props: {
   const marked = () => starred(props.ask.options);
 
   return (
-    <table class="answer-table">
+    <table class={page.answerTable}>
       <Head columns={props.ask.columns} starred={marked()} />
       <tbody>
         <For each={props.ask.options}>
@@ -600,10 +612,10 @@ function Row(props: {
 
   return (
     <tr
-      class={props.option.recommended ? "option recommended" : "option"}
+      class={marks(props.option)}
       onClick={() => props.fields.pick(n())}
     >
-      <td class="pick">
+      <td class={page.pick}>
         <input
           type="radio"
           id={`${props.group}-${n()}`}
@@ -615,20 +627,20 @@ function Row(props: {
           // here — see `Offered` for what the two gestures are between them.
           onChange={() => props.fields.move(n())}
         />
-        <span class="n">{n()}</span>
+        <span class={page.n}>{n()}</span>
       </td>
       <td
         id={naming()}
-        class="option-text markdown"
+        class={`${page.optionText} markdown`}
         innerHTML={props.option.text_html}
       />
       <For each={props.option.cells}>
         {(cell) => <td class="markdown" innerHTML={cell} />}
       </For>
       <Show when={props.starred}>
-        <td class="star-cell">
+        <td class={page.starCell}>
           <Show when={props.option.recommended}>
-            <span class="star" title="the agent's Recommendation">
+            <span class={page.star} title="the agent's Recommendation">
               ★
             </span>
           </Show>
@@ -636,6 +648,18 @@ function Row(props: {
       </Show>
     </tr>
   );
+}
+
+/// What one Option on offer is marked as: an Option, and the one the agent
+/// recommended. Shared by the list entry and the table row, because the mark is
+/// the Option's rather than the shape's.
+///
+/// The record's `marks` in `Sheet.tsx` carries a third — what was chosen — which
+/// only a settled Set has.
+function marks(option: OptionView): string {
+  return [page.option, option.recommended && page.recommended]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /// Every question of the Set in the order it was asked, Sub-questions under the

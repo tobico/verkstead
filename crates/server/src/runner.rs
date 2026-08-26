@@ -40,6 +40,7 @@ use verkstead_schema::Direction;
 
 use crate::AppState;
 use crate::drivers::Driving;
+use crate::github;
 use crate::repos::git;
 use crate::sessions::{Quiet, Session};
 use crate::skills;
@@ -383,17 +384,67 @@ pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, dr
     }
 }
 
-/// Run an inline implementation again, in a fresh session.
+/// Run an inline implementation again — or, where the branch is already on a
+/// pull request, wrap that up instead.
 ///
-/// The whole of the work in one session, so there is nothing to read off the
-/// repository first: what the last one left behind is on the branch, and the
-/// branch is what the fresh session reads.
+/// The question in front of the session is the one [`roadmap_again`] asks a
+/// phase earlier: an inline implementation ends on a pull request, so a branch
+/// that already has one has nothing left to implement. Two ways it gets there,
+/// and neither of them is noticed by anything else — a session that pushed and
+/// opened the pull request before it died, and a human who opened one by hand
+/// off the halt's own advice. Asked of GitHub rather than of the branch,
+/// because a pull request is GitHub's fact and the branch cannot say whether
+/// there is one.
+///
+/// So `gh` is asked first, and what comes back decides between three things:
+///
+/// - a pull request, and the wrap-up takes it from here without a session being
+///   spent on work that is already done;
+/// - [`github::Trouble::NoPullRequest`], which is the ordinary case — the work
+///   really is unfinished, so a fresh session builds it exactly as before;
+/// - anything else, which is `gh` unable to answer at all, and that halts. A
+///   session launched into it could only dead-end on the same missing thing
+///   when it came to push, and the halt is what reaches the human on their
+///   phone.
 async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
-    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing).await else {
+    let Some((branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
         return;
     };
 
-    follow_inline(state, conversation_id, session, driving).await
+    match found {
+        Ok(opened) => {
+            tracing::info!(
+                conversation_id,
+                number = opened.number,
+                "the work is already on a pull request, so this wraps it up rather than \
+                 building it again"
+            );
+
+            // With no Event to read a tail off: there is no session behind this
+            // one, the last of them having gone before the human pressed
+            // Resume.
+            crate::wrapping::opened(&state, conversation_id, None).await
+        }
+        Err(github::Trouble::NoPullRequest) => {
+            let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing).await
+            else {
+                return;
+            };
+
+            follow_inline(state, conversation_id, session, driving).await
+        }
+        Err(trouble) => {
+            tracing::warn!(
+                conversation_id,
+                branch,
+                why = trouble.why(),
+                "GitHub cannot be asked whether the work is on a pull request, so nothing \
+                 was started again",
+            );
+
+            crate::wrapping::stopped(&state, conversation_id, &trouble.why(), None).await
+        }
+    }
 }
 
 /// Write the roadmap again — or, where the branch already has one, look for the
@@ -626,7 +677,8 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
     follow_inline(state, conversation_id, session, driving).await
 }
 
-/// See an inline implementation session out, and stop the run if it ends having
+/// See an inline implementation session out, and carry the Conversation on to
+/// wrapping the pull request it opened — or stop the run if it ends having
 /// landed nothing.
 ///
 /// The whole of the work in one session, so there is no next step to launch and
@@ -638,6 +690,20 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// which is what makes a second go answerable: a first attempt that committed
 /// twice and then died leaves two commits behind, and a second that commits
 /// nothing has still landed nothing.
+///
+/// What follows a session that landed something is the same ending a backlog's
+/// finish step has: the session followed the repository's own review process on
+/// its way out, so the branch is pushed and on a pull request by the time it
+/// goes quiet, and [`crate::wrapping::opened`] is what finds that pull request
+/// and moves the Conversation on. An inline implementation is work like any
+/// other work and goes for review like any other work.
+///
+/// Which is why landing nothing is not the end of it either. A second session on
+/// the branch — the one [`inline_again`] launches where GitHub has no pull
+/// request yet — is sent to check work that is already built and carry it to
+/// one, and has nothing to commit when it finds nothing left to finish. So a
+/// clean session that committed nothing is asked about before it is called an
+/// empty one, and the pull request is what tells the two apart.
 ///
 /// The registration it is handed is held until the session is over and whatever
 /// it left behind has been read, so an inline run is a driven Conversation for
@@ -690,19 +756,60 @@ async fn follow_inline(
 
     let how = match (ended.badly(), landed) {
         // Ended well and committed something, which is an inline implementation
-        // done. What becomes of the work from here is the wrap-up phase's.
+        // done. What becomes of the work from here is the wrap-up phase's, and
+        // the session's own Timeline Event goes with it, so that a halt written
+        // there carries the tail of what it last said — which is where the
+        // reason it opened no pull request is usually written down.
         (None, true) => {
             tracing::info!(
                 conversation_id,
                 event_id,
                 "an inline session has landed its work"
             );
+
+            crate::wrapping::opened(&state, conversation_id, Some(event_id)).await;
             return;
         }
         // Exited cleanly having committed nothing at all. An interactive agent
         // that decides there is nothing to do exits zero, so this is exactly the
         // case a status could not have caught.
-        (None, false) => "the session ended without committing anything".to_owned(),
+        //
+        // But it is also what the *second* session on a branch looks like when
+        // it does its job. The skill sends one that finds the work already built
+        // to check it over and carry it to the pull request — see
+        // [`inline_again`], which is what launches it — and a session that finds
+        // nothing left to finish has nothing left to commit either. So GitHub is
+        // asked before this is called nothing: a pull request on the branch is
+        // that session having done the whole of what it was sent for.
+        (None, false) => match crate::wrapping::asked(&state, conversation_id).await {
+            // Nothing committed, and GitHub saying there is nothing on the
+            // branch either, which is the session that really did do nothing.
+            // Said in its own words rather than `gh`'s: what is wrong here is
+            // the empty session, and the missing pull request is only how it
+            // shows.
+            //
+            // A branch that could not be asked about at all falls the same way,
+            // that being in the log already and no more of an answer than it
+            // was.
+            Some((_, Err(github::Trouble::NoPullRequest))) | None => {
+                "the session ended without committing anything".to_owned()
+            }
+            // Anything else is what the landed arm above makes of it, made in
+            // the one place that knows how: a pull request found is a wrap-up,
+            // and a `gh` that cannot answer at all is a halt naming what the
+            // human can go and fix.
+            Some(_) => {
+                tracing::info!(
+                    conversation_id,
+                    event_id,
+                    "an inline session committed nothing, so its pull request is what says \
+                     whether it did anything"
+                );
+
+                crate::wrapping::opened(&state, conversation_id, Some(event_id)).await;
+                return;
+            }
+        },
         // Ended badly, whether or not it got some of the way: the human is owed
         // the telling either way, and what it committed is on the Timeline above
         // the Notice for them to read.

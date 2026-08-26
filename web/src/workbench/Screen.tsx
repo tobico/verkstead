@@ -84,6 +84,9 @@ import type {
   Watching,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine, Note } from "../notices";
+import styles from "./Screen.module.css";
+import shell from "./Workbench.module.css";
 
 export function Screen(props: {
   conversation: ConversationView;
@@ -316,9 +319,9 @@ export function Screen(props: {
   return (
     <Switch>
       <Match when={screen.isError}>
-        <p class="error">
+        <ErrorLine>
           Could not read this screen: {screen.error?.message}
-        </p>
+        </ErrorLine>
       </Match>
       <Match when={live() || screen.data}>
         {/* Whether the session is still printing, said on the element as well as
@@ -326,29 +329,32 @@ export function Screen(props: {
             still running is redrawn at whatever size this pane is, so there is
             nothing to scroll to; the grid one left behind is fixed at the size
             it was printed for. */}
-        <div class="screen" classList={{ live: live() }}>
-          <div class="terminal-host" ref={host} />
+        <div
+          class={`${styles.screen} ${shell.paneScreen}`}
+          classList={{ [styles.live!]: live() }}
+        >
+          <div class={styles.terminalHost} ref={host} />
           {/* What the human may do with this Screen, said under it. */}
           <Show
             when={lost()}
             fallback={
-              <p class="note read-only">
+              <Note class={styles.readOnly}>
                 {!shown()
                   ? "Waiting for this session's screen…"
                   : live()
                     ? "Watching. Type to work in this session — press Stop first if the run must not advance under you."
                     : "Read-only: this is what the session's terminal is showing."}
-              </p>
+              </Note>
             }
           >
-            <p class="error">
+            <ErrorLine>
               The connection to this session's screen was lost.
-            </p>
+            </ErrorLine>
           </Show>
         </div>
       </Match>
       <Match when={true}>
-        <p class="empty">Loading…</p>
+        <Empty>Loading…</Empty>
       </Match>
     </Switch>
   );

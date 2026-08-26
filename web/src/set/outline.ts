@@ -12,6 +12,7 @@
 //! description both shapes of the nav and the floating header are built from.
 
 import type { DiffView, SetView } from "../api/types";
+import contents from "./Contents.module.css";
 
 /// The id a Question is reached by: its label, lowercased — `Q3` becomes `q3`,
 /// which is also what a human writing the link by hand would type.
@@ -200,7 +201,7 @@ function closes(set: SetView): string | null {
 /// Taken from whether there is a label because that is what tells the two
 /// apart: a file's path is the whole of what it is called.
 export function face(label: string | null): string {
-  return label === null ? "contents-path" : "contents-question";
+  return label === null ? contents.path! : contents.question!;
 }
 
 /// One anchored part of the page as the nav has it: the id the scroll-spy
@@ -258,7 +259,7 @@ export function spied(sections: Section[]): Watched[] {
       anchor: section.anchor,
       label: null,
       text: section.name,
-      kind: "contents-section",
+      kind: contents.section!,
       section: section.anchor,
       sectionName: section.name,
     },
@@ -321,7 +322,7 @@ export type Mark = "at" | "within";
 
 /// The class that draws it.
 export function markClass(mark: Mark): string {
-  return mark === "at" ? "contents-here" : "contents-within";
+  return mark === "at" ? contents.here! : contents.within!;
 }
 
 /// Which mark a line standing for these places carries while the reader is at
