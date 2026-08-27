@@ -28,13 +28,14 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Cursor, GrillingStarted, Lifecycle, Locked,
-    NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved,
-    SettingsView, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
-    Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, CompanionAdded, CompanionMode,
+    CompanionRemoved, CompanionView, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
+    GrillingStarted, Lifecycle, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Standing,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -132,6 +133,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
         .route("/api/ui/conversations/{id}/base", post(set_base_branch))
+        // And the other registered Repos the work runs alongside, added and
+        // taken away on the same card and for as long as the same card is
+        // drawn. Named in the path rather than in the verb, as everything
+        // around it is: the viewer speaks one method, so taking one away is a
+        // route rather than a `DELETE`.
+        .route("/api/ui/conversations/{id}/companions", post(add_companion))
+        .route(
+            "/api/ui/conversations/{id}/companions/{repo}/remove",
+            post(remove_companion),
+        )
         // The two that make and unmake what a Conversation works in. Named in
         // the path rather than in the verb, as closing a Set unanswered is: the
         // viewer speaks one method. Nothing here opens a second round on one
@@ -905,6 +916,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         },
         branch: conversation.branch,
         base_commit: conversation.base_commit,
+        companions: conversation.companions.into_iter().map(companion).collect(),
         state: lifecycle(conversation.state),
         ready_to_grill,
         ready_to_resume,
@@ -1533,6 +1545,48 @@ async fn set_base_branch(
     }
 }
 
+/// `POST /api/ui/conversations/{id}/companions` — work alongside another
+/// registered Repo.
+async fn add_companion(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(added): Json<NewCompanion>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(CompanionAdded::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::add_companion(&state.pool, id, added.repo_id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "adding a companion repo failed");
+            unavailable("the companion repo could not be added")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/companions/{repo}/remove` — and stop working
+/// alongside one.
+///
+/// Which Repo is in the path and there is no body at all: the id is the whole of
+/// what a removal says.
+async fn remove_companion(
+    State(state): State<AppState>,
+    Path((id, repo)): Path<(String, String)>,
+) -> HttpResponse {
+    let (Ok(id), Ok(repo)) = (id.parse::<i64>(), repo.parse::<i64>()) else {
+        return Json(CompanionRemoved::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::remove_companion(&state.pool, id, repo).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "removing a companion repo failed");
+            unavailable("the companion repo could not be removed")
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/grill` — give a Conversation somewhere to
 /// work and set it grilling.
 ///
@@ -1894,6 +1948,28 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
             tracing::error!(error = ?error, profile_id = id, "removing an Agent Profile failed");
             unavailable("the agent profile could not be removed")
         }
+    }
+}
+
+/// A stored companion as the viewer receives it: the Repo in the shape every
+/// other Repo crosses this wire in, and the three facts about how the work will
+/// use it.
+fn companion(companion: store::Companion) -> CompanionView {
+    CompanionView {
+        repo: RepoEntry {
+            id: companion.repo.id,
+            name: companion.repo.name,
+            // Stored as UTF-8 in the first place — a path that is not cannot be
+            // registered — so nothing is lost putting it back on the wire.
+            path: companion.repo.path.to_string_lossy().into_owned(),
+            default_branch: companion.repo.default_branch,
+        },
+        mode: match companion.mode {
+            store::CompanionMode::ReadOnly => CompanionMode::ReadOnly,
+            store::CompanionMode::ReadWrite => CompanionMode::ReadWrite,
+        },
+        base_ref: companion.base_ref,
+        branch: companion.branch,
     }
 }
 

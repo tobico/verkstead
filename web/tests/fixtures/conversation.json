@@ -4,6 +4,19 @@
   "base_commit": "release-1.4",
   "blocked_on": null,
   "branch": "rate-limiting",
+  "companions": [
+    {
+      "base_ref": null,
+      "branch": "",
+      "mode": "ReadOnly",
+      "repo": {
+        "default_branch": "trunk",
+        "id": 2,
+        "name": "askance",
+        "path": "/srv/repos/askance"
+      }
+    }
+  ],
   "direction": null,
   "grilling_pairing": {
     "model": "claude-fable-5",

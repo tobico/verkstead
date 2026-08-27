@@ -20,10 +20,11 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
-    ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered,
-    RoadmapPane, ShowingArchived, Started, SteerOpened, TimelineEvent,
+    Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded, CompanionMode,
+    CompanionRemoved, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle,
+    PinnedEvent, ProfileSaved, Registered, RoadmapPane, ShowingArchived, Started, SteerOpened,
+    TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
@@ -543,6 +544,160 @@ async fn clearing_the_base_branch_puts_the_conversation_back_on_the_rule() {
     }
 }
 
+/// A second registered repository in the same watched directory, for the tests
+/// about working alongside one. Hands back its Repo id.
+async fn second_repo(app: &Router, watched: &Path, name: &str) -> i64 {
+    let path = repository(watched.join(name));
+
+    let registered: Registered =
+        post(app, "/api/ui/repos", &serde_json::json!({ "path": path })).await;
+    assert_eq!(registered, Registered::Added);
+
+    let repos: Vec<verkstead_render::RepoEntry> = get(app, "/api/ui/repos").await;
+    repos
+        .into_iter()
+        .find(|repo| repo.name == name)
+        .expect("it was just registered")
+        .id
+}
+
+async fn add_companion(app: &Router, id: i64, repo_id: i64) -> CompanionAdded {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/companions"),
+        &serde_json::json!({ "repo_id": repo_id }),
+    )
+    .await
+}
+
+async fn remove_companion(app: &Router, id: i64, repo_id: i64) -> CompanionRemoved {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/companions/{repo_id}/remove"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// What a Conversation says it works alongside, by Repo name.
+async fn companions(app: &Router, id: i64) -> Vec<String> {
+    opened(app, id)
+        .await
+        .companions
+        .into_iter()
+        .map(|companion| companion.repo.name)
+        .collect()
+}
+
+/// The two ends of it: a registered Repo added to a drafting Conversation, and
+/// taken away again.
+#[tokio::test]
+async fn a_repo_is_added_to_work_alongside_and_taken_away_again() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, watched.path(), "askance").await;
+    let id = started(&app, repo_id).await;
+
+    assert!(companions(&app, id).await.is_empty());
+
+    assert_eq!(
+        add_companion(&app, id, askance).await,
+        CompanionAdded::Added
+    );
+
+    // With the least the human had to say filled in: read it, off its own
+    // default branch, on no branch of its own.
+    let added = opened(&app, id).await.companions;
+    assert_eq!(added.len(), 1);
+    assert_eq!(added[0].repo.id, askance);
+    assert_eq!(added[0].repo.name, "askance");
+    assert_eq!(added[0].mode, CompanionMode::ReadOnly);
+    assert_eq!(added[0].base_ref, None);
+    assert_eq!(added[0].branch, "");
+
+    assert_eq!(
+        remove_companion(&app, id, askance).await,
+        CompanionRemoved::Removed
+    );
+    assert!(companions(&app, id).await.is_empty());
+}
+
+/// The work is being done in its own repository already, so adding it beside
+/// itself would be that repository twice in one sandbox.
+#[tokio::test]
+async fn a_conversation_is_not_a_companion_of_itself() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        add_companion(&app, id, repo_id).await,
+        CompanionAdded::OwnRepo
+    );
+    assert!(companions(&app, id).await.is_empty());
+}
+
+/// And one repository is one companion: a second press on the same row says so
+/// rather than making a second checkout of it.
+#[tokio::test]
+async fn a_repo_already_added_is_not_added_twice() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, watched.path(), "askance").await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        add_companion(&app, id, askance).await,
+        CompanionAdded::Added
+    );
+    assert_eq!(
+        add_companion(&app, id, askance).await,
+        CompanionAdded::AlreadyAdded
+    );
+
+    assert_eq!(companions(&app, id).await, ["askance"]);
+}
+
+/// The registry is the trust boundary: what is not in it is not something a
+/// Conversation may compose into its sandbox.
+#[tokio::test]
+async fn a_repo_that_is_not_registered_is_not_a_companion() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        add_companion(&app, id, repo_id + 404).await,
+        CompanionAdded::NoSuchRepo
+    );
+    assert!(companions(&app, id).await.is_empty());
+}
+
+/// The configuration freezes with the branch and the base: past grill start
+/// there is no setup card to press, and every press is refused whatever a stale
+/// page believed.
+#[tokio::test]
+async fn companions_are_settled_once_the_grilling_has_started() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, watched.path(), "askance").await;
+    let alone = second_repo(&app, watched.path(), "alone").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(
+        add_companion(&app, id, askance).await,
+        CompanionAdded::Added
+    );
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        add_companion(&app, id, alone).await,
+        CompanionAdded::NotDrafting
+    );
+    assert_eq!(
+        remove_companion(&app, id, askance).await,
+        CompanionRemoved::NotDrafting
+    );
+
+    // And what it was configured with is still exactly what it froze with.
+    assert_eq!(companions(&app, id).await, ["askance"]);
+}
+
 #[tokio::test]
 async fn a_conversation_that_is_not_there_says_so_however_it_is_asked_about() {
     let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
@@ -568,6 +723,14 @@ async fn a_conversation_that_is_not_there_says_so_however_it_is_asked_about() {
     assert_eq!(
         base(&app, 404, None).await,
         BaseRecorded::NoSuchConversation
+    );
+    assert_eq!(
+        add_companion(&app, 404, 1).await,
+        CompanionAdded::NoSuchConversation
+    );
+    assert_eq!(
+        remove_companion(&app, 404, 1).await,
+        CompanionRemoved::NoSuchConversation
     );
 }
 

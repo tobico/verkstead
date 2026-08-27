@@ -31,6 +31,7 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 mod archives;
 mod captures;
 mod commits;
+mod companions;
 mod conversations;
 mod deferrals;
 mod migrations;
@@ -53,6 +54,9 @@ pub use archives::{
 };
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
+pub use companions::{
+    Adding, Companion, CompanionMode, Removing, add_companion, companions, remove_companion,
+};
 pub use conversations::{
     Chosen, Closing, Conversation, ConversationRow, Directing, Edited, Event, Grilling,
     Implementing, Landed, Lifecycle, Rebuilding, Role, SetOnTimeline, Settling, Staged, Steer,
@@ -572,6 +576,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // The Conversations attached to them, and their Timelines. After the Repos
     // and the Profiles, because a Conversation's row references all three.
     conversations::apply_schema(pool).await?;
+
+    // And the other registered Repos each Conversation works alongside. After
+    // the Conversations and the Repos both, because a companion's row
+    // references one of each.
+    companions::apply_schema(pool).await?;
 
     // And what each Repo was last grilled with, so a Conversation started on
     // it arrives with both pickers filled. After the Conversations only for

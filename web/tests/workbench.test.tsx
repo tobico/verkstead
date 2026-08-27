@@ -103,6 +103,10 @@ import timelineCss from "../src/workbench/Timeline.module.css?raw";
 import shell from "../src/workbench/Workbench.module.css";
 import shellCss from "../src/workbench/Workbench.module.css?raw";
 import { CLAMPED_LINES, RESUME_REFUSAL, SWIPE } from "../src/workbench/Timeline";
+import {
+  COMPANION_REFUSAL,
+  COMPANION_REMOVAL_REFUSAL,
+} from "../src/workbench/Setup";
 import { STEER_REFUSAL } from "../src/workbench/Steer";
 import {
   BRANCHES,
@@ -2473,6 +2477,173 @@ describe("a conversation's setup", () => {
       container.querySelector(`.${setup.baseBranch} .${notices.note}`),
     ).toBeNull();
     expect(screen.queryByText(/branches from/)).toBeNull();
+  });
+});
+
+/// The other repositories a conversation works alongside: added from the ⋯ at
+/// the end of the branch row, and drawn as a row apiece under it.
+///
+/// Whether a repository may be added at all is the server's — its own repo and
+/// one already there are refused over there, and the tests in
+/// `crates/server/tests/conversations.rs` are what say so. What is asked here is
+/// that the press goes out, that the row is drawn, and that a refusal is said in
+/// words where it was made.
+describe("a conversation's companion repos", () => {
+  /// The two presses it takes to get to the list of repos: the ⋯ at the end of
+  /// the branch row, and then the row that opens the level they are listed in.
+  async function openTheList(container: ParentNode): Promise<void> {
+    fireEvent.click(
+      await drawn<HTMLButtonElement>(
+        container,
+        `.${setup.setupMenu} > button`,
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /Add companion repo/ }),
+    );
+  }
+
+  it("lists the registered repos in a level of the one menu", async () => {
+    theWorkbenchWith({ companions: [] });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openTheList(container);
+
+    // Every registered repo, including this conversation's own: what may be
+    // added is the server's to say, and a list that quietly left one out would
+    // send the human hunting for a repo that is registered.
+    for (const repo of REPOS) {
+      expect(screen.getByRole("menuitem", { name: repo.name })).toBeTruthy();
+    }
+
+    // One card and one wash, because a level is a place in this menu rather
+    // than a menu of its own.
+    expect(container.querySelectorAll(`.${dropdown.drop}`)).toHaveLength(1);
+    expect(container.querySelectorAll(`.${dropdown.backdrop}`)).toHaveLength(1);
+  });
+
+  it("sends the repo that was pressed", async () => {
+    const fetching = theWorkbenchWith({ companions: [] }, whenever(
+      `/api/ui/conversations/${OPEN.id}/companions`,
+      json("Added"),
+      "POST",
+    ));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openTheList(container);
+    fireEvent.click(screen.getByRole("menuitem", { name: REPOS[1]!.name }));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/companions`),
+      ).toEqual({ repo_id: REPOS[1]!.id }),
+    );
+
+    // The menu is a way to say which repository, and the row appearing under
+    // the branch is the confirmation — so the card comes back.
+    await waitFor(() => expect(container.querySelector(`.${dropdown.drop}`)).toBeNull());
+  });
+
+  /// A refusal is not an error: it is a sentence about the repository that was
+  /// pressed, and it is said in the level the press was made in — which is
+  /// still open, because a menu that shut would take the only place it had left
+  /// to be said.
+  it("says a refusal where the press was made, and stays open to say it", async () => {
+    theWorkbenchWith({ companions: [] }, whenever(
+      `/api/ui/conversations/${OPEN.id}/companions`,
+      json("OwnRepo"),
+      "POST",
+    ));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openTheList(container);
+    fireEvent.click(screen.getByRole("menuitem", { name: OPEN.repo.name }));
+
+    await waitFor(() =>
+      expect(container.textContent).toContain(COMPANION_REFUSAL.OwnRepo),
+    );
+    expect(container.querySelector(`.${dropdown.drop}`)).toBeTruthy();
+  });
+
+  /// A row apiece under the branch row, naming the repository.
+  it("draws a row per companion under the branch row", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const rows = await drawn(container, `.${setup.companions}`);
+    expect([...rows.querySelectorAll(`.${setup.companionName}`)].map(
+      (name) => name.textContent,
+    )).toEqual(OPEN.companions.map((companion) => companion.repo.name));
+
+    // Under the two fields rather than over them: the branch row is what they
+    // were added from.
+    const branches = container.querySelector(`.${setup.branches}`)!;
+    expect(
+      branches.compareDocumentPosition(rows) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("takes one away when its × is pressed", async () => {
+    const companion = OPEN.companions[0]!;
+    const removing = `/api/ui/conversations/${OPEN.id}/companions/${companion.repo.id}/remove`;
+    const fetching = theWorkbench(whenever(removing, json("Removed"), "POST"));
+    mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await waitFor(() =>
+        screen.getByRole("button", { name: `Remove ${companion.repo.name}` }),
+      ),
+    );
+
+    await waitFor(() => expect(writes(fetching, removing)).toBe(1));
+  });
+
+  it("says why a removal was refused, on the row it was refused for", async () => {
+    const companion = OPEN.companions[0]!;
+    const removing = `/api/ui/conversations/${OPEN.id}/companions/${companion.repo.id}/remove`;
+    theWorkbench(whenever(removing, json("NotDrafting"), "POST"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await waitFor(() =>
+        screen.getByRole("button", { name: `Remove ${companion.repo.name}` }),
+      ),
+    );
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${setup.companion} .${setup.failure}`)
+          ?.textContent,
+      ).toBe(COMPANION_REMOVAL_REFUSAL.NotDrafting),
+    );
+  });
+
+  /// A conversation with none has nothing here to say, so nothing is drawn —
+  /// not an empty list with a heading over it.
+  it("draws nothing at all where there are none", async () => {
+    theWorkbenchWith({ companions: [] });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${setup.branches}`);
+
+    expect(container.querySelector(`.${setup.companions}`)).toBeNull();
+
+    // And the way to add one is still there: having none is the state most
+    // conversations are in rather than a thing to be locked out of.
+    expect(container.querySelector(`.${setup.setupMenu}`)).toBeTruthy();
+  });
+
+  /// The rows freeze with the branch and the base, because the server freezes
+  /// all three at the same moment: a row whose × comes back refused is worse
+  /// than no row.
+  it("goes with the branch and the base when the card freezes", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
+
+    expect(container.querySelector(`.${setup.companions}`)).toBeNull();
+    expect(container.querySelector(`.${setup.setupMenu}`)).toBeNull();
   });
 });
 

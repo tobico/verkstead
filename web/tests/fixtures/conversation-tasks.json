@@ -4,6 +4,7 @@
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
   "blocked_on": null,
   "branch": "task-runner",
+  "companions": [],
   "direction": "task-list",
   "grilling_pairing": {
     "model": "claude-fable-5",

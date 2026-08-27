@@ -1589,6 +1589,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap();
 
+    // And the other Repo added to work alongside it, which is what a companion
+    // row on the setup card is drawn from — with the defaults an added one
+    // carries, because that is the shape every companion starts in.
+    assert_eq!(
+        store::add_companion(&pool, drafting, repos[1].id)
+            .await
+            .unwrap(),
+        store::Adding::Added,
+    );
+
     // A second one, so the sidebar is a list rather than a row — and against the
     // other Repo, because what a row names beside the branch is which repository
     // the work is in.

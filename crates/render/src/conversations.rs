@@ -204,6 +204,14 @@ pub struct ConversationView {
     /// grilling starts — which is why there is no value here to show instead.
     pub base_commit: Option<String>,
 
+    /// The other registered Repos this Conversation works alongside, by name.
+    ///
+    /// Empty is the ordinary Conversation. Beside the branch and the base
+    /// because it is the same kind of fact — what the work is configured with —
+    /// and settled in the same place and at the same moment: the setup card
+    /// while the Brief drafts, frozen when grilling starts.
+    pub companions: Vec<CompanionView>,
+
     pub state: Lifecycle,
 
     /// The Profile and model the grilling session will run under, whole rather
@@ -361,6 +369,43 @@ pub struct ConversationView {
     /// state of something the work is against. Empty is the ordinary case — a
     /// Conversation with no backlog has nothing to pin.
     pub pinned: Vec<PinnedEvent>,
+}
+
+/// One companion repo of a Conversation: which Repo, how far into it a session
+/// may reach, and what its checkout comes off.
+///
+/// The Repo in the shape the Repo list sends one, for [`ConversationView`]'s
+/// reason: the card names it and links nowhere else, and a second shape for a
+/// Repo would be a second opinion about what one is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CompanionView {
+    pub repo: RepoEntry,
+
+    pub mode: CompanionMode,
+
+    /// The branch this companion's checkout comes off, where the human named
+    /// one. `null` is the same rule the Conversation's own base follows: that
+    /// repository's default branch, as it stands when grilling starts.
+    pub base_ref: Option<String>,
+
+    /// What a read-write companion's branch will be called, or empty for
+    /// *mirroring* — the Conversation's own branch name, followed as it is
+    /// renamed. Empty on a read-only companion as well, there being no branch
+    /// to name: its checkout is detached at the commit the base resolved to.
+    pub branch: String,
+}
+
+/// How far into a companion a session may reach.
+///
+/// Two, and no third: a repository is there to be read, or it is there to be
+/// worked in. What the word decides is the sandbox's binds and whether a branch
+/// is cut for it, and neither of those has a halfway.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionMode {
+    ReadOnly,
+    ReadWrite,
 }
 
 /// The grilling's closing proposal as the Set it rides draws it: which direction
@@ -1894,6 +1939,61 @@ pub struct BaseBranchChoice {
     /// Stored as the name and resolved when grilling starts, so the work comes
     /// off wherever that branch stands then.
     pub branch: Option<String>,
+}
+
+/// Which registered Repo to work alongside.
+///
+/// The id and nothing else: everything a companion holds beyond which Repo it
+/// is has a default worth having, and a press in a menu is one decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct NewCompanion {
+    pub repo_id: i64,
+}
+
+/// What became of adding one.
+///
+/// Every refusal is named rather than collapsed into one, because each is a
+/// different sentence to put in front of the human — and two of them are about
+/// what a companion *is* rather than about anything that has gone wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionAdded {
+    /// Added, read-only, on the default-branch rule.
+    Added,
+
+    NoSuchConversation,
+
+    /// The Conversation is past drafting: its configuration froze when grilling
+    /// started, and the setup card it was changed on is gone with it.
+    NotDrafting,
+
+    /// There is no Repo with that id — taken off the registry between the menu
+    /// reading it and the press that picked one.
+    NoSuchRepo,
+
+    /// It is the Conversation's own Repo. The work is already being done in it,
+    /// and a companion checkout of it would be that repository twice in one
+    /// sandbox.
+    OwnRepo,
+
+    /// It is a companion of this Conversation already.
+    AlreadyAdded,
+}
+
+/// And of taking one away.
+///
+/// No *no such companion*: a row that is not there is the state the press asked
+/// for, so it comes back as [`CompanionRemoved::Removed`] like any other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionRemoved {
+    Removed,
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, for [`CompanionAdded::NotDrafting`]'s
+    /// reason.
+    NotDrafting,
 }
 
 /// What became of an edit to a Brief.

@@ -16,7 +16,7 @@ Roadmap stage: [01: Foundations](docs/roadmaps/companion-repos/01-foundations.md
 
 ## Tasks
 
-- [ ] 01: Add a companion, and take it away — [details](01-add-a-companion.md)
+- [x] 01: Add a companion, and take it away — [details](01-add-a-companion.md)
 - [ ] 02: Configure the companion — [details](02-configure-the-companion.md)
 - [ ] 03: Checked out at grill start — [details](03-checked-out-at-grill-start.md)
 - [ ] 04: What the session is given — [details](04-what-the-session-is-given.md)

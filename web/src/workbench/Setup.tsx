@@ -1,10 +1,11 @@
 //! A Conversation's setup: what has to be settled before anything will run it,
 //! drawn under the Brief it belongs to.
 //!
-//! The branch the work will be done on, the branch it will come off, and the
-//! two pairings its sessions run under. All four are facts about the
-//! Conversation rather than about any one Event, and all four are the human's to
-//! change for as long as it is still drafting.
+//! The branch the work will be done on, the branch it will come off, the other
+//! repos it works alongside, and the two pairings its sessions run under. Every
+//! one of them is a fact about the Conversation rather than about any one Event,
+//! and every one of them is the human's to change for as long as it is still
+//! drafting.
 //!
 //! Under the Brief rather than in a pane of its own, because setting a
 //! Conversation up and kicking it off are one act and both belong where the work
@@ -20,6 +21,7 @@
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
+  For,
   Match,
   Show,
   Switch,
@@ -27,17 +29,24 @@ import {
   type JSX,
 } from "solid-js";
 
+import { Menu, Nested } from "../Menu";
 import {
+  addCompanion,
   chooseGrillingPairing,
   chooseImplementationPairing,
   listBranches,
   listProfiles,
+  listRepos,
+  removeCompanion,
   renameBranch,
   setBaseBranch,
 } from "../api/client";
 import type {
   BaseRecorded,
   BranchRenamed,
+  CompanionAdded,
+  CompanionRemoved,
+  CompanionView,
   ConversationView,
   PairingView,
   ProfileChoice,
@@ -67,6 +76,25 @@ export const BASE_REFUSAL: Record<BaseRecorded, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "The base commit was captured when grilling started.",
   NoSuchBranch: "That repo has no branch by that name any more.",
+};
+
+/// And adding a repo to work alongside.
+export const COMPANION_REFUSAL: Record<CompanionAdded, string> = {
+  Added: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting:
+    "The grilling has started, so what this conversation works alongside is settled.",
+  NoSuchRepo: "That repo is not registered any more.",
+  OwnRepo: "That is this conversation's own repo — the work is in it already.",
+  AlreadyAdded: "That repo is on this conversation already.",
+};
+
+/// And taking one away again.
+export const COMPANION_REMOVAL_REFUSAL: Record<CompanionRemoved, string> = {
+  Removed: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting:
+    "The grilling has started, so what this conversation works alongside is settled.",
 };
 
 /// And a pairing choice.
@@ -110,7 +138,18 @@ export function Setup(props: {
             <BranchName conversation={props.conversation} />
           </Show>
           <BaseBranch conversation={props.conversation} />
+          {/* What is beyond the two fields: the other repositories this
+              conversation may work alongside. Behind a ⋯ rather than in the
+              row, because most work is one repository and a permanent control
+              for the exception would be a control most conversations never
+              press. */}
+          <AddCompanion conversation={props.conversation} />
         </div>
+
+        {/* And the ones already added, under the row they were added from —
+            they belong to the branch and the base rather than to the pairings,
+            and they go with them when the card freezes. */}
+        <Companions conversation={props.conversation} />
       </Show>
 
       <Profiles conversation={props.conversation} />
@@ -516,5 +555,212 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
         </ErrorLine>
       </Show>
     </div>
+  );
+}
+
+/// The ⋯ at the end of the branch row: what there is to settle about this
+/// conversation beyond the two fields beside it.
+///
+/// One row today — *Add companion repo* — and that row opens a level of the
+/// same menu listing every registered Repo, because the list is as long as the
+/// registry is and flattening it into the first level would put a dozen
+/// repositories in front of somebody who came for something else.
+///
+/// The Repos are read here rather than passed down, so the menu is whole
+/// wherever it is drawn — the sidebar's own repo menu does the same.
+///
+/// **Nothing is filtered out of the list.** This conversation's own Repo and
+/// one already added are both in it, and both are refused by name when they are
+/// pressed: the server is what decides either way, and a list that quietly left
+/// a repository out would leave the human hunting for one that is registered.
+function AddCompanion(props: { conversation: ConversationView }): JSX.Element {
+  const queries = useQueryClient();
+
+  const repos = useReading(() => ({
+    queryKey: ["repos"],
+    queryFn: listRepos,
+
+    // Merged by the id each row carries flat, for this menu rather than for any
+    // list: a rebuilt row is a new element, and a Nudge landing while the menu
+    // is open would take the focus off the row the human had tabbed to.
+    freshness: { reconcile: "id" },
+  }));
+
+  const [refused, setRefused] = createSignal<CompanionAdded | null>(null);
+
+  // The menu's own way to shut, held out here because what closes this one is a
+  // request coming back rather than the press that sent it.
+  let shut = (): void => {};
+
+  const add = useMutation(() => ({
+    mutationFn: (repoId: number) => addCompanion(props.conversation.id, repoId),
+    onSuccess: (outcome: CompanionAdded) => {
+      if (outcome !== "Added") {
+        setRefused(outcome);
+        // Every refusal is about one of two lists this menu was drawn over: the
+        // registered Repos, or the conversation the row would hang off.
+        // Reading both again is the correction and the explanation together,
+        // and the menu stays open to be read.
+        void queries.invalidateQueries({ queryKey: ["repos"] });
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        return;
+      }
+
+      // Straight back to the card, where the row it added is: the menu was a
+      // way to say which repository, and the row appearing under the branch is
+      // the confirmation.
+      setRefused(null);
+      shut();
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+    },
+  }));
+
+  return (
+    <Menu
+      class={styles.setupMenu!}
+      label="More setup"
+      name="More setup"
+      trigger="⋯"
+      closer={(close) => (shut = close)}
+      opening={() => setRefused(null)}
+    >
+      {() => (
+        <Nested label="Add companion repo">
+          {() => (
+            <>
+              <Switch>
+                <Match when={repos.isError}>
+                  <ErrorLine class={styles.failure}>
+                    Could not read the repos: {repos.error?.message}
+                  </ErrorLine>
+                </Match>
+                <Match when={repos.data?.length === 0}>
+                  {/* Nothing to work alongside, so the only thing to offer is
+                      the page that fixes that. */}
+                  <Empty class={styles.nothing}>
+                    No repos are registered yet —{" "}
+                    <A href="/settings">register one</A> to work alongside.
+                  </Empty>
+                </Match>
+                <Match when={repos.data}>
+                  {(registered) => (
+                    <For each={registered()}>
+                      {(repo) => (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={add.isPending}
+                          onClick={() => add.mutate(repo.id)}
+                        >
+                          {repo.name}
+                        </button>
+                      )}
+                    </For>
+                  )}
+                </Match>
+              </Switch>
+
+              {/* Said in the level the press was made in, which is where the
+                  human is still standing: this menu does not shut on a refusal,
+                  and the level it does not shut is this one. */}
+              <Show when={refused()}>
+                {(outcome) => (
+                  <ErrorLine class={styles.failure}>
+                    {COMPANION_REFUSAL[outcome()]}
+                  </ErrorLine>
+                )}
+              </Show>
+              <Show when={add.isError}>
+                <ErrorLine class={styles.failure}>
+                  The companion repo could not be added: {add.error?.message}
+                </ErrorLine>
+              </Show>
+            </>
+          )}
+        </Nested>
+      )}
+    </Menu>
+  );
+}
+
+/// The repos this conversation works alongside, one row each under the branch
+/// row they were added from.
+///
+/// Nothing at all where there are none, rather than an empty list with a
+/// heading over it: one repository is what most work needs, and a conversation
+/// with no companions has nothing here to say.
+function Companions(props: { conversation: ConversationView }): JSX.Element {
+  return (
+    <Show when={props.conversation.companions.length}>
+      <ul class={styles.companions} aria-label="Companion repos">
+        <For each={props.conversation.companions}>
+          {(companion) => (
+            <Companion
+              conversation={props.conversation}
+              companion={companion}
+            />
+          )}
+        </For>
+      </ul>
+    </Show>
+  );
+}
+
+/// One of them: what it is called, and the × that takes it away.
+///
+/// The name and the × are the whole row for now. What the work will do with the
+/// repository — read it or commit to it, off which branch, on a branch called
+/// what — is the pickers this row gets next.
+function Companion(props: {
+  conversation: ConversationView;
+  companion: CompanionView;
+}): JSX.Element {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<CompanionRemoved | null>(null);
+
+  const forget = useMutation(() => ({
+    mutationFn: () =>
+      removeCompanion(props.conversation.id, props.companion.repo.id),
+    onSuccess: (outcome: CompanionRemoved) => {
+      setRefused(outcome === "Removed" ? null : outcome);
+
+      // Either way: what came back is about a conversation this card read a
+      // moment ago, so reading it again is both the correction and — where the
+      // row is simply gone — the whole of what there was to do.
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+    },
+  }));
+
+  return (
+    <li class={styles.companion}>
+      <div class={styles.companionLine}>
+        <span class={styles.companionName}>{props.companion.repo.name}</span>
+        {/* A mark rather than a word, because the row is one line and the name
+            beside it is what says which repository is being taken away. The
+            screen reader gets the sentence. */}
+        <button
+          type="button"
+          class={styles.forget}
+          aria-label={`Remove ${props.companion.repo.name}`}
+          disabled={forget.isPending}
+          onClick={() => forget.mutate()}
+        >
+          ×
+        </button>
+      </div>
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>
+            {COMPANION_REMOVAL_REFUSAL[outcome()]}
+          </ErrorLine>
+        )}
+      </Show>
+      <Show when={forget.isError}>
+        <ErrorLine class={styles.failure}>
+          The companion repo could not be removed: {forget.error?.message}
+        </ErrorLine>
+      </Show>
+    </li>
   );
 }

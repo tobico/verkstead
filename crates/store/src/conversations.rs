@@ -181,6 +181,16 @@ pub struct Conversation {
     /// abandoned-roadmaps notice, and the directory name inside is the whole of
     /// what is stored about the roadmap — see [`start_adoption`].
     pub adopting: Option<String>,
+
+    /// The other registered Repos this Conversation works alongside, by the
+    /// Repo's name — see [`super::companions`].
+    ///
+    /// Empty is the ordinary Conversation: one repository is what most work
+    /// needs. Carried on the Conversation rather than fetched beside it,
+    /// because everything that acts on a Conversation acts on its companions
+    /// too — the sandbox it is worked in, the prompt its sessions are given,
+    /// and the summary of what it was set up with.
+    pub companions: Vec<super::Companion>,
 }
 
 /// One row of the conversations sidebar, drawn without reading a Timeline.
@@ -1198,6 +1208,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
         adopting: adopting(pool, id).await?,
+        companions: super::companions(pool, id).await?,
     }))
 }
 
@@ -2018,7 +2029,7 @@ pub async fn set_base_commit(pool: &SqlitePool, id: i64, commit: Option<&str>) -
 /// there is one human at the workbench, and what would be raced for here is
 /// their own two tabs editing one Brief. What matters is that a Conversation
 /// past drafting refuses, and that a Conversation that is not there says so.
-async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
+pub(crate) async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
         .fetch_optional(pool)
@@ -2045,7 +2056,7 @@ async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
 /// is whether there is a branch behind it. What is refused off this is the
 /// branch name and the base commit — a record that has both settled is not one
 /// a field should rewrite, whatever its state column says.
-async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
+pub(crate) async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
     let row: Option<(i64,)> =
         sqlx::query_as("SELECT conversation_id FROM worktrees WHERE conversation_id = ?")
             .bind(id)

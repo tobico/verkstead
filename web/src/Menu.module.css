@@ -114,6 +114,36 @@
   cursor: pointer;
 }
 
+/* A row that opens another level of the same menu, and the row back out of one.
+   Both are the ordinary row laid the other way — the words at one end and the
+   arrow saying which way it goes at the other — because a level is a place in
+   this card rather than another card, and a row that led somewhere else would
+   read as one.
+
+   Here rather than with either caller: nesting is the menu's, and the two rows
+   are the whole of what the human has to go on to know they are a level down. */
+.drop .nested,
+.drop .back {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.drop .nested {
+  justify-content: space-between;
+}
+
+/* The way back reads as the heading of the level it leaves rather than as
+   another thing to do: quieter than the rows under it, and ruled off from them
+   so the level below the rule is plainly a list of its own. */
+.drop .back {
+  margin-bottom: 0.3rem;
+  padding-bottom: 0.5rem;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--edge);
+  border-radius: 0.4rem 0.4rem 0 0;
+}
+
 /* The row the keyboard has walked to, which is no pointer's doing and so is
    not inside the query at the foot of this file. */
 .drop button:focus-visible,

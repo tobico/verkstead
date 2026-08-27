@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationClosed, GrillingStarted,
-    PairingView, Started, Worktree,
+    Adopted, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded, CompanionRemoved,
+    ConversationClosed, GrillingStarted, PairingView, Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -524,6 +524,40 @@ pub(crate) async fn set_base_branch(
         store::Edited::Saved => BaseRecorded::Recorded,
         store::Edited::NoSuchConversation => BaseRecorded::NoSuchConversation,
         store::Edited::NotDrafting => BaseRecorded::NotDrafting,
+    })
+}
+
+/// Add a registered Repo for the work to run alongside.
+///
+/// Thin over the store, and deliberately so: what a companion may be is decided
+/// where the rows are — its own Repo and one already added are questions about
+/// the table rather than about git — and nothing is made on disk until grilling
+/// starts.
+pub(crate) async fn add_companion(
+    pool: &SqlitePool,
+    id: i64,
+    repo_id: i64,
+) -> Result<CompanionAdded> {
+    Ok(match store::add_companion(pool, id, repo_id).await? {
+        store::Adding::Added => CompanionAdded::Added,
+        store::Adding::NoSuchConversation => CompanionAdded::NoSuchConversation,
+        store::Adding::NotDrafting => CompanionAdded::NotDrafting,
+        store::Adding::NoSuchRepo => CompanionAdded::NoSuchRepo,
+        store::Adding::OwnRepo => CompanionAdded::OwnRepo,
+        store::Adding::AlreadyAdded => CompanionAdded::AlreadyAdded,
+    })
+}
+
+/// And take one away again, for as long as the Conversation is still drafting.
+pub(crate) async fn remove_companion(
+    pool: &SqlitePool,
+    id: i64,
+    repo_id: i64,
+) -> Result<CompanionRemoved> {
+    Ok(match store::remove_companion(pool, id, repo_id).await? {
+        store::Removing::Removed => CompanionRemoved::Removed,
+        store::Removing::NoSuchConversation => CompanionRemoved::NoSuchConversation,
+        store::Removing::NotDrafting => CompanionRemoved::NotDrafting,
     })
 }
 
