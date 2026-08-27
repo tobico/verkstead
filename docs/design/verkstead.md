@@ -76,7 +76,11 @@ flowchart LR
   2026-08-26, building close-and-retirements*). **Follow-up** sits beside the
   ladder the way Closed sits off it: a steer from Done or Wrapping, on work
   that is already on a pull request, opens a session the human asks and is
-  asked in until they are finished with it (*added 2026-08-27, building
+  asked in until they are finished with it. It ends when they tick **Nothing
+  else** on the newest round they answer and the session goes idle with
+  nothing left open; the conversation then re-enters Wrapping over the same
+  pull request — with the checks put back to waiting where the follow-up
+  pushed — and settles to Done the ordinary way (*added 2026-08-27, building
   follow-ups*).
 - **Agent profiles** are minimal: name, claude home dir + config file pair, the
   list of models that account can run — plus an agent-type discriminator so

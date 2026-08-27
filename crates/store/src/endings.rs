@@ -21,6 +21,8 @@
 use anyhow::{Context, Result};
 use sqlx::{SqliteConnection, SqlitePool};
 
+use super::conversations::{Event, Lifecycle};
+
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS endings (
@@ -64,4 +66,63 @@ pub async fn ended_on(pool: &SqlitePool, set_id: i64) -> Result<bool> {
         .with_context(|| format!("reading the Nothing-else mark on Question Set {set_id}"))?;
 
     Ok(found.is_some())
+}
+
+/// Whether the follow-up on this Conversation has been marked as over: its
+/// latest answered Set carries the mark.
+///
+/// **The latest one decides, and the mark is never sticky.** A Set asked after
+/// an end-marked Response is the follow-up going round again — the human may
+/// pick Nothing else and write *one more thing* in the comment beside it — so
+/// what this reads is the newest Response of the round and never the newest mark.
+/// An answer without one puts the follow-up back to running.
+///
+/// **This follow-up's own**, which is what the window is for. A Conversation can
+/// be steered into Follow-up more than once, and a mark left by the round before
+/// it would end the next one before it had asked anything. So the window opens
+/// at the newest move into Follow-up, exactly as a wrap-up's proposals are
+/// counted from the newest move into Wrapping — see
+/// [`super::conversations::last_batch_proposal`].
+///
+/// **Answered rather than settled**, which is the one place the two part
+/// company: a Set locked unanswered carries no Response and so carries no mark,
+/// and reading one as the latest word would end a follow-up on a question the
+/// human never answered. It reads as *not marked*, which leaves the follow-up
+/// running.
+///
+/// **And never a Deferred Ask**, as nothing else here counts one: its Answers
+/// are for a later session by design, so a deferred Set answered in passing is
+/// not the round's own last word.
+pub async fn nothing_else(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
+    let found: Option<(i64,)> = sqlx::query_as(
+        "SELECT q.id
+         FROM question_sets q
+         JOIN set_events s ON s.set_id = q.id
+         JOIN timeline_events e ON e.id = s.event_id
+         JOIN responses r ON r.set_id = q.id
+         LEFT JOIN deferrals d ON d.set_id = q.id
+         WHERE e.conversation_id = ?
+           AND d.set_id IS NULL
+           AND e.id > COALESCE(
+                   (SELECT MAX(w.id) FROM timeline_events w
+                    WHERE w.conversation_id = ? AND w.kind = ? AND w.body = ?),
+                   0)
+         ORDER BY q.id DESC
+         LIMIT 1",
+    )
+    .bind(conversation_id)
+    .bind(conversation_id)
+    .bind(Event::Moved(Lifecycle::FollowUp).kind())
+    .bind(Lifecycle::FollowUp.stored())
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("looking for the last round Conversation {conversation_id} answered")
+    })?;
+
+    let Some((set_id,)) = found else {
+        return Ok(false);
+    };
+
+    ended_on(pool, set_id).await
 }

@@ -17,7 +17,7 @@ session.
 - [x] 02: Ship the following-up skill and its prompt — [details](02-following-up-skill.md)
 - [x] 03: The fifth steer target, the state, and the session it launches — [details](03-steer-into-follow-up.md)
 - [x] 04: The Nothing-else control on a follow-up's Sets — [details](04-nothing-else-control.md)
-- [ ] 05: End the follow-up on the mark, and land in the wrap-up — [details](05-follow-up-done-rule.md)
+- [x] 05: End the follow-up on the mark, and land in the wrap-up — [details](05-follow-up-done-rule.md)
 - [ ] 06: The rescue, and Resume, for Follow-up — [details](06-follow-up-rescue-and-resume.md)
 - [ ] 07: Extend the rescue to every session — [details](07-rescue-everywhere.md)
 - [ ] 08: The vocabulary — [details](08-vocabulary.md)

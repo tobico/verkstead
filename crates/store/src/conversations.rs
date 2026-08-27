@@ -693,6 +693,23 @@ pub enum Rebuilding {
     NoSuchConversation,
 }
 
+/// What became of landing a follow-up back in the wrap-up it was opened over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ending {
+    /// Landed: the Conversation is wrapping up again and the move is on its
+    /// Timeline, with the checks put back to waiting where the follow-up
+    /// pushed anything.
+    Wrapped,
+
+    /// It is not following anything up, so there is no follow-up here to end —
+    /// closed out from under the session, or steered somewhere else while this
+    /// was deciding.
+    NotFollowingUp,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
 /// What became of steering one.
 ///
 /// Nothing here is about the state the Conversation was in, and that is the
@@ -1935,6 +1952,25 @@ pub async fn unanswered_set_since(
     Ok(found.map(|(set_id,)| set_id))
 }
 
+/// A Question Set of this Conversation's that is still waiting to be answered,
+/// whoever asked it.
+///
+/// [`unanswered_set_since`] widened to the whole Timeline, which is the same
+/// question asked without a session to ask it *of*: what a follow-up's rule
+/// wants to know is whether the human is left holding a question, and a
+/// question is one of those whoever put it up.
+///
+/// Every Timeline Event's id is positive, so opening the window at zero leaves
+/// nothing out.
+///
+/// Blocking Asks alone and never a Deferred one, exactly as the read it is made
+/// of: a Deferred Ask idles nobody and holds nothing open, so a follow-up that
+/// waited on one would be waiting on a question that was working exactly as it
+/// was meant to.
+pub async fn open_set(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
+    unanswered_set_since(pool, conversation_id, 0).await
+}
+
 /// Which Conversation a Set was asked from, or `None` if it is on no Timeline
 /// at all.
 ///
@@ -2395,6 +2431,72 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
     tx.commit().await.context("building the split-out work")?;
 
     Ok(Rebuilding::Started)
+}
+
+/// Land a follow-up back in the wrap-up it was opened over, because the human
+/// has said there is nothing else.
+///
+/// The way out of Follow-up, and the only one there is short of a steer. A
+/// follow-up is something taken up about work that is already on a pull request,
+/// so where it ends is where it started: the wrap-up carries on over whatever
+/// the branch now holds, and *back to Done* is that wrap-up's own settling rule
+/// rather than anything decided here — see [`finish_wrap_up`].
+///
+/// Refused for anything but Follow-up, as every move here is refused outside the
+/// state it leaves: a Conversation closed or steered out from under the session
+/// is not one to wrap up.
+///
+/// **The checks go back to waiting where the follow-up pushed**, in the same
+/// transaction as the move. A follow-up that committed has given GitHub a new
+/// run to make up its mind about, and the settle standing over it is yesterday's
+/// green: without this the wrap-up's settling loop could reach Done in the gap
+/// before the checks watcher's first poll saw the new run. `pushed` is the
+/// caller's to know — it is what the Conversation recorded while the session ran
+/// — and a pure question-and-answer follow-up that committed nothing lands with
+/// everything settled and passes straight through.
+///
+/// The review's settle is deliberately left alone either way, which is the one
+/// place this parts company with [`implement_again`]. *Settled once and stays
+/// settled* is a rule about one wrap, and this is the same wrap: the human read
+/// the branch, said what they wanted about it, and watched it done. A second
+/// review of what they have just been through would be Verkstead reading over
+/// their shoulder.
+///
+/// One transaction, as every move is: a Conversation that says Wrapping always
+/// has the move on its Timeline to say when it got there.
+pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<Ending> {
+    let mut tx = pool.begin().await.context("ending a follow-up")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Ending::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::FollowUp {
+        return Ok(Ending::NotFollowingUp);
+    }
+
+    if pushed {
+        super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Checks).await?;
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Wrapping.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} back to wrapping up"))?;
+
+    moved(&mut tx, id, Lifecycle::Wrapping).await?;
+
+    tx.commit().await.context("ending a follow-up")?;
+
+    Ok(Ending::Wrapped)
 }
 
 /// Steer a Conversation into `target`: the human's own Event, the state, and

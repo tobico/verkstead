@@ -400,6 +400,21 @@ impl Grilling {
         .await
     }
 
+    /// The same, ticking **Nothing else** beside the comment box — which is the
+    /// human saying a follow-up is over, and no Answer to any Question the agent
+    /// asked. See the schema's `Response::nothing_else`.
+    async fn answer_ending(&self, set_id: i64) -> Submitted {
+        post(
+            &self.app,
+            &format!("/api/ui/sets/{set_id}/response"),
+            &serde_json::json!({
+                "answers": [{ "label": "Q9", "selected": 1 }],
+                "nothing_else": true,
+            }),
+        )
+        .await
+    }
+
     /// The same, picking a direction on the chooser — which is what accepts a
     /// proposal, and so what sets the picked direction's pipeline going.
     async fn pick(&self, set_id: i64, direction: &str) -> Submitted {
@@ -12393,9 +12408,12 @@ async fn an_instruction_session_that_commits_wraps_the_pull_request_up_again() {
 }
 
 /// The same backlog and wrap-up, plus a session that plays a follow-up: it does
-/// whatever `following_up` says, which is what each of these two tests differs
-/// by.
+/// whatever `following_up` says, which is what each of these tests differs by.
 fn a_backlog_then_a_follow_up(reviews: &Path, following_up: &str) -> String {
+    // Written as a word in the stubs below and spelled out here, exactly as the
+    // wrap-up's own stubs write it — see [`WHILE_NOBODY_HAS_ASKED`].
+    let following_up = following_up.replace("WHILE_NOBODY_HAS_ASKED", WHILE_NOBODY_HAS_ASKED);
+
     format!(
         r#"
 case "$2" in
@@ -12426,6 +12444,66 @@ const A_ROUND_THEN_WAITING: &str = r#"    printf 'it counts the 429s it sends\n'
     git add -A
     git commit --quiet -m 'docs: say what the limiter counts'
     sleep 300"#;
+
+/// One that does a round of work, waits to be answered, says its piece and then
+/// idles — which is every follow-up session between rounds, an interactive agent
+/// having nothing to do until it is spoken to.
+///
+/// The commit is what makes this follow-up one that pushed, which is what puts
+/// the wrap-up's checks back to waiting when it lands.
+const A_ROUND_THEN_IDLE: &str = "    printf 'it counts the 429s it sends\\n' >> notes.md\n    \
+     git add -A\n    \
+     git commit --quiet -m 'docs: say what the limiter counts'\n    \
+     SAYING='following it up'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'nothing else then\\n'\n    \
+     sleep 300";
+
+/// The same, committing nothing at all: a follow-up that was a question and an
+/// answer and no work, which is half of what the state is for.
+const A_QUESTION_THEN_IDLE: &str = "    SAYING='following it up'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'it counts them, yes\\n'\n    \
+     sleep 300";
+
+/// And one that goes round twice: it is answered, asks again, and idles once
+/// that second round has been answered too.
+///
+/// The two markers are the two rounds. A stub cannot idle on a blocking ask and
+/// wake up, so the test writes `answered` when it has answered the first Set and
+/// `again` when it has answered the second.
+const TWO_ROUNDS_THEN_IDLE: &str = "    SAYING='following it up'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     rm -f /tmp/verkstead/asked\n    \
+     SAYING='one more thing then'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/again ]; do sleep 0.1; done\n    \
+     printf 'nothing else then\\n'\n    \
+     sleep 300";
+
+/// What a follow-up round puts to the human: an ordinary Set, because that is
+/// all a follow-up's rounds ever are. What ends the follow-up is the viewer's
+/// own **Nothing else** option beside the comment box, which is no Question of
+/// the agent's — see the schema's `Response::nothing_else`.
+const A_FOLLOW_UP_ROUND: &str = r#"
+title: About the 429s
+questions:
+  - label: Q9
+    text: It counts them against the same window. Is that what you meant?
+    options:
+      - n: 1
+        text: Yes
+        recommended: true
+      - n: 2
+        text: No, see below
+"#;
 
 /// Steering a Conversation Verkstead has finished with into Follow-up starts a
 /// session inside the follow-up skill, on the brief the human wrote — and the
@@ -12520,17 +12598,16 @@ async fn steering_into_follow_up_runs_the_skill_on_the_brief_and_is_never_swept(
     );
 }
 
-/// A follow-up session that is over stops the Conversation, with the ordinary
+/// A follow-up session that is gone stops the Conversation, with the ordinary
 /// Notice saying what it was doing.
 ///
-/// What a follow-up ends *on* is not settled yet: it is over when the human says
-/// there is nothing else, and there is nowhere for them to say it. So a session
-/// that has finished leaves a Conversation with nobody following anything up,
-/// which is a stop like any other — the human is told, and the Steer button is
-/// what they have. What replaces this is the rule that reads their answer and
-/// lands the Conversation back in the wrap-up.
+/// The responding rule: a follow-up ends when the human says there is nothing
+/// else, and nobody is ever dispatched to finish somebody else's follow-up. So a
+/// session that has finished with the human not having said it leaves a
+/// Conversation with nobody following anything up, which is a stop like any
+/// other — the human is told, and the Steer button is what they have.
 #[tokio::test]
-async fn a_follow_up_session_that_is_over_stops_the_conversation() {
+async fn a_follow_up_session_that_is_gone_stops_the_conversation() {
     let spill = tempfile::tempdir().unwrap();
     let reviews = spill.path().join("review-prompts");
 
@@ -12570,6 +12647,12 @@ async fn a_follow_up_session_that_is_over_stops_the_conversation() {
         "and what came of it, which is nothing worse than an ending: {:?}",
         stopped.html,
     );
+    assert!(
+        stopped.html.contains("nobody is left to ask you anything"),
+        "and why that is a stop: nothing is dispatched to finish somebody \
+         else's follow-up: {:?}",
+        stopped.html,
+    );
 
     let view = fixture.view().await;
 
@@ -12583,6 +12666,350 @@ async fn a_follow_up_session_that_is_over_stops_the_conversation() {
         view.blocked_on,
         Some(stopped.id),
         "so the Conversation is blocked on the human, with the Notice to read",
+    );
+}
+
+/// A follow-up that pushed ends on the human's mark and lands back in the
+/// wrap-up, which waits on the new checks before it says Done again.
+///
+/// The three things that end one, together: the newest round they answered
+/// carries **Nothing else**, nothing is left open on the Conversation, and the
+/// session has gone quiet. Then it is ended where it stands and the Conversation
+/// goes back to Wrapping over the pull request it was opened about — with the
+/// checks put back to waiting, because the follow-up committed and GitHub has a
+/// new run to make up its mind about. *Back to Done* is the wrap-up's own
+/// settling rule and nothing the follow-up decides.
+///
+/// Which is what the suite here says: still running for as long as the mark the
+/// follow-up's commit left is there, and green once the test takes it away.
+/// Without the unsettle the wrap-up would land with yesterday's green standing
+/// and could reach Done before the checks watcher had looked once.
+#[tokio::test]
+async fn a_follow_up_ends_on_the_mark_and_lands_back_in_the_wrap_up() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let running = spill.path().join("checks-running");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, A_ROUND_THEN_IDLE),
+        &gh_about(&green_until(&running), "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let said = waiting_on_checks(&fixture.view().await).len();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    // What the follow-up pushed, and the new run GitHub is making up its mind
+    // about because of it: the stub commits, and this is that commit's suite.
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("docs: say what the limiter"))
+                .then_some(())
+        })
+        .await;
+
+    std::fs::write(&running, "").unwrap();
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    // Long enough for the grace several times over. The round is open, so
+    // nothing here ends anything however quiet the session goes.
+    tokio::time::sleep(BRISKLY.proposing * 3).await;
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::FollowUp,
+        "a session idling on a Blocking Ask is one working rather than one over",
+    );
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then(|| view.clone()))
+        .await;
+
+    assert!(
+        !view.working,
+        "the session was ended as the follow-up ended, so the Worktree is the \
+         wrap-up's again",
+    );
+    assert!(
+        !checks_settled(&fixture).await,
+        "and the checks are back to waiting: the follow-up pushed, so the green \
+         standing over them was the run before it",
+    );
+
+    let view = fixture
+        .until(|view| view.waiting_on_checks.then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "which is the wrap-up down to the one thing nothing here can hurry",
+    );
+    assert!(
+        waiting_on_checks(&view).len() > said,
+        "and it said so afresh, this being a narrowing of its own: {:?}",
+        waiting_on_checks(&view),
+    );
+
+    // The suite finishes, and the wrap-up settles the ordinary way.
+    std::fs::remove_file(&running).unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert!(
+        notices(&fixture.view().await).is_empty(),
+        "and nothing stopped anywhere along it: a follow-up that ends is not a \
+         run that stopped: {:?}",
+        notices(&fixture.view().await),
+    );
+}
+
+/// A follow-up that was questions and answers alone lands with everything
+/// settled and passes straight through to Done.
+///
+/// The other half of the landing. Nothing was pushed, so GitHub has nothing new
+/// to say and the wrap-up's settle facts stand exactly as the follow-up found
+/// them — checks green, review answered, comments dealt with. Which is the whole
+/// of the settling rule, so the Conversation is Done the moment it arrives.
+#[tokio::test]
+async fn a_follow_up_that_pushed_nothing_goes_straight_back_to_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, A_QUESTION_THEN_IDLE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let landed = commits(&fixture.view().await).len();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        commits(&view).len(),
+        landed,
+        "the follow-up was talk and nothing else, so the branch is where it was",
+    );
+    assert!(
+        checks_settled(&fixture).await,
+        "and nothing put the checks back to waiting, there being no new run to \
+         wait on",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// A Set asked after an end-marked Response keeps the follow-up open, and that
+/// newer Set's own Response is what decides.
+///
+/// The mark is never sticky. Picking **Nothing else** and writing *one more
+/// thing* in the comment beside it is the human doing exactly what the control
+/// is for: the agent reads the comment, does the thing, and asks again — and a
+/// follow-up that had already landed on the first mark would have taken the
+/// Worktree away from it mid-sentence. So what the rule reads is the newest
+/// Response of the round, every time round.
+#[tokio::test]
+async fn a_set_asked_after_the_mark_keeps_the_follow_up_open() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, TWO_ROUNDS_THEN_IDLE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let first = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(first).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    // The second round, which is the session reading the *one more thing* the
+    // human wrote beside their tick and coming back about it.
+    let second = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    // Long enough for the grace several times over. The first Response is marked
+    // and the session is quiet between its lines, so a rule that read the newest
+    // *mark* rather than the newest *Response* would have landed by now.
+    tokio::time::sleep(BRISKLY.proposing * 3).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "the follow-up is open again, and what it is waiting on is the answer to \
+         the round it has just asked",
+    );
+    assert!(
+        !responded(&view, second),
+        "which is still there to be answered: {:?}",
+        where_it_stands(&view, second),
+    );
+
+    // And answered without the mark, which is the human saying there is more:
+    // the follow-up goes on running rather than landing on the mark before it.
+    assert_eq!(fixture.answer(second).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("again"), "").unwrap();
+
+    tokio::time::sleep(BRISKLY.proposing * 3).await;
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::FollowUp,
+        "the newest Response decides, and it carried no mark",
+    );
+}
+
+/// A follow-up session that goes with a question of its own still up stops the
+/// Conversation, and the question goes off with it.
+///
+/// The failure a Set left standing would be: the session that asked it is gone,
+/// no other is ever handed somebody else's ask, and a card that stayed blocked
+/// on the human over a question nobody is behind is one they could answer for
+/// ever without anything reading it. So Verkstead reaches for the lock on their
+/// behalf, exactly as a wrap-up does for its own gone sessions.
+#[tokio::test]
+async fn a_gone_follow_up_session_takes_the_question_it_left_with_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_a_follow_up(
+            &reviews,
+            "    printf 'that is what I would have asked\\n'\n    \
+             WHILE_NOBODY_HAS_ASKED\n    \
+             printf 'gh: the connection dropped\\n'\n    \
+             exit 1",
+        ),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped
+            .html
+            .contains("any question it had put to you has been closed unanswered"),
+        "the stop says what became of what it left: {:?}",
+        stopped.html,
+    );
+
+    let view = fixture
+        .until(|view| {
+            matches!(
+                where_it_stands(view, set),
+                Some(verkstead_render::Standing::LockedUnanswered(_))
+            )
+            .then(|| view.clone())
+        })
+        .await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "stopped where it stood, as every stop is",
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "and what the human is blocked on is the Notice rather than a question \
+         nobody is behind",
     );
 }
 
