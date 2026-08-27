@@ -7542,6 +7542,15 @@ async fn what_a_session_commits_in_a_companion_lands_on_the_timeline_labelled() 
 /// two: that checkout is detached and bound read-only, so there is nothing there
 /// for a commit to land on — and the Conversation's own commits draw exactly as
 /// they always did.
+///
+/// The companion repository is given something a sweep of it would find: a
+/// branch named as this Conversation's is, a commit ahead of the base its
+/// checkout was made at. That is exactly what a read-write companion's watcher
+/// resolves *mirroring* to, so a sweep that reached this one would put that
+/// commit on the Timeline labelled `askance`. Nothing this session does can put
+/// it there — no session can commit in a read-only checkout, which is why the
+/// branch is made from outside — so what the Timeline still holding one commit
+/// says is that nothing swept the companion at all.
 #[tokio::test]
 async fn a_read_only_companion_is_not_swept_and_the_conversations_own_is_unlabelled() {
     let fixture = grilling_alongside(
@@ -7557,16 +7566,39 @@ async fn a_read_only_companion_is_not_swept_and_the_conversations_own_is_unlabel
     )
     .await;
 
+    // Put it there before waiting for anything, so it is in front of every sweep
+    // this test gives the watchers rather than only the last few.
+    let view = fixture.view().await;
+    let companion = Path::new(&view.companions[0].repo.path).to_owned();
+
+    git(&companion, &["checkout", "--quiet", "-b", &view.branch]);
+    std::fs::write(companion.join("halves.md"), "the other half\n").unwrap();
+    git(&companion, &["add", "halves.md"]);
+    git(
+        &companion,
+        &["commit", "--quiet", "-m", "feat: the other half"],
+    );
+
+    // Waited for by name rather than by there being one: what this is about is
+    // a commit that must never arrive, so the wait has to be one a commit
+    // arriving would not simply time out.
     let landed = fixture
         .until(|view| {
             let landed = commits(view);
-            (landed.len() == 1).then(|| landed.into_iter().cloned().collect::<Vec<_>>())
+            landed
+                .iter()
+                .any(|commit| commit.subject == "feat: rate limiting")
+                .then(|| landed.into_iter().cloned().collect::<Vec<_>>())
         })
         .await;
 
-    assert_eq!(landed[0].subject, "feat: rate limiting");
+    let ours = landed
+        .iter()
+        .find(|commit| commit.subject == "feat: rate limiting")
+        .expect("the wait above is for exactly this commit");
+
     assert_eq!(
-        landed[0].repo, None,
+        ours.repo, None,
         "an unlabelled card means the work's own repo",
     );
 
@@ -7574,7 +7606,17 @@ async fn a_read_only_companion_is_not_swept_and_the_conversations_own_is_unlabel
     // not being swept at all.
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    assert_eq!(commits(&fixture.view().await).len(), 1);
+    let drawn = fixture.view().await;
+    let subjects: Vec<&str> = commits(&drawn)
+        .into_iter()
+        .map(|commit| &*commit.subject)
+        .collect();
+
+    assert_eq!(
+        subjects,
+        ["feat: rate limiting"],
+        "the companion's branch is nobody's to sweep, so what is on it reaches no Timeline",
+    );
 }
 
 /// What a session leaves behind besides its output: the commits it lands on the
