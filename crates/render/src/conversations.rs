@@ -86,6 +86,18 @@ pub struct ConversationEntry {
     /// them. A Draft is never one of them: it is drawn as a draft, and that is
     /// the whole of what a draft has to say.
     pub waiting: bool,
+
+    /// Whether this one is a wrap-up that has narrowed to its checks: the review
+    /// and the comments settled, the checks not, and nothing running on it.
+    ///
+    /// A derived condition of Wrapping rather than a state, which is why it sits
+    /// beside `state` the way *blocked on you* does rather than in it. Nothing
+    /// is stored for it: it is the wrap-up's own settle facts read a particular
+    /// way, folded here so the row does not have to.
+    ///
+    /// The row draws no state in words, so what this comes out as is the label
+    /// read aloud — *Waiting on checks* where the plain state word would be.
+    pub waiting_on_checks: bool,
 }
 
 /// One Repo's notice under the new-conversation box: the roadmaps in it that
@@ -315,6 +327,24 @@ pub struct ConversationView {
     /// *Blocked on you* is a badge on an active state and never a state of its
     /// own, which is why this sits beside `state` rather than in it.
     pub blocked_on: Option<i64>,
+
+    /// Whether the wrap-up has narrowed to its checks: the review answered, the
+    /// comments dealt with, the checks alone outstanding, and nothing running in
+    /// the Worktree.
+    ///
+    /// What the *Waiting on checks* label is drawn from, and a condition of
+    /// Wrapping rather than a state of its own — the precedent is `blocked_on`
+    /// above, and this sits beside `state` for the same reason. Nothing is
+    /// stored for it: it is the settle facts and the register read together, at
+    /// the moment the page was read.
+    ///
+    /// A flag rather than an Event id, because unlike a stop there is nothing to
+    /// go and look at and nothing to do about it — the Notice saying so is on
+    /// the record where it happened, and the label is a label.
+    ///
+    /// `false` in every state but Wrapping, which is where the condition is
+    /// derived from and the only place it can hold.
+    pub waiting_on_checks: bool,
 
     /// What the stop shows about the account that ran out coming back, and
     /// `null` on every stop that is not a usage window's — which is nearly all

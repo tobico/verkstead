@@ -76,6 +76,7 @@ import { SPOKEN } from "./Mark";
 // opens.
 import marks from "./Mark.module.css";
 import { PaneHead } from "./PaneHead";
+import { WAITING_ON_CHECKS } from "./conditions";
 
 export function Conversations(props: {
   selected: string;
@@ -798,14 +799,20 @@ function mark(entry: ConversationEntry): "waiting" | "working" | "idle" | null {
 /// What the two rings say is [`SPOKEN`], the words the mark itself carries
 /// wherever it labels itself: the same ring should not mean one thing on a card
 /// and another on the row it opens.
+///
+/// And a wrap-up down to its checks is said in place of the state word rather
+/// than beside it — *Waiting on checks* is what Wrapping has narrowed to, so
+/// saying both would be saying it twice. The words are [`WAITING_ON_CHECKS`],
+/// which the Timeline's own header draws from the same constant.
 function spoken(entry: ConversationEntry): string {
   const which = mark(entry);
+  const where = entry.waiting_on_checks ? WAITING_ON_CHECKS : entry.state;
   const said =
     which === "waiting"
-      ? `${entry.state}, waiting on you`
+      ? `${where}, waiting on you`
       : which
-        ? `${entry.state}, ${SPOKEN[which]}`
-        : entry.state;
+        ? `${where}, ${SPOKEN[which]}`
+        : where;
 
   return `${entry.branch}, ${entry.repo}, ${said}`;
 }

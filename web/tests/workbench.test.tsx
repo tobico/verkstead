@@ -8516,6 +8516,63 @@ describe("the pinned carousel", () => {
 });
 });
 
+/// A wrap-up narrowed to its checks: the review answered, nothing said on the
+/// pull request left unaddressed, and nothing running in the worktree.
+///
+/// A condition of wrapping rather than a state, so the server hands it over as
+/// a flag beside the lifecycle and the page draws it beside the branch. It is a
+/// label and not a control: the checks are GitHub's to finish, so there is
+/// nothing to press and nowhere to go.
+describe("a wrap-up waiting on its checks", () => {
+  it("says so where the conversation is named", async () => {
+    theWrapping({ waiting_on_checks: true });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const label = await drawn(
+      container,
+      `.${paneHead.head} .${timeline.waitingOnChecks}`,
+    );
+
+    expect(label.textContent).toBe("Waiting on checks");
+    expect(label.tagName).toBe("SPAN");
+    expect(label.closest("button")).toBeNull();
+  });
+
+  it("says nothing where the wrap-up is still waiting on more than that", async () => {
+    expect(WRAPPING.waiting_on_checks).toBe(false);
+
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(container.querySelector(`.${timeline.waitingOnChecks}`)).toBeNull();
+  });
+
+  /// The sidebar draws no state in words at all — see the card's own marks — so
+  /// where the condition is said there is the label the row is read aloud by,
+  /// in place of the lifecycle word rather than beside it.
+  it("is what the sidebar row says in place of its state", async () => {
+    theSidebar(
+      { state: "Wrapping", working: false, waiting: false },
+      { state: "Wrapping", working: false, waiting: false, waiting_on_checks: true },
+    );
+    const { container } = mount();
+
+    const [plain, narrowed] = await cards(container);
+
+    expect(plain!.querySelector("button")!.getAttribute("aria-label")).toContain(
+      "Wrapping",
+    );
+    expect(
+      narrowed!.querySelector("button")!.getAttribute("aria-label"),
+    ).toContain("Waiting on checks");
+    expect(
+      narrowed!.querySelector("button")!.getAttribute("aria-label"),
+    ).not.toContain("Wrapping");
+  });
+});
+
 /// What somebody asked for by hand once, which the same conversation carries on
 /// the end of its record: a manual task, from before a steer was the way to set
 /// a session going.

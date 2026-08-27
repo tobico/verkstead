@@ -563,7 +563,20 @@ idle: boolean,
  * them. A Draft is never one of them: it is drawn as a draft, and that is
  * the whole of what a draft has to say.
  */
-waiting: boolean, };
+waiting: boolean, 
+/**
+ * Whether this one is a wrap-up that has narrowed to its checks: the review
+ * and the comments settled, the checks not, and nothing running on it.
+ *
+ * A derived condition of Wrapping rather than a state, which is why it sits
+ * beside `state` the way *blocked on you* does rather than in it. Nothing
+ * is stored for it: it is the wrap-up's own settle facts read a particular
+ * way, folded here so the row does not have to.
+ *
+ * The row draws no state in words, so what this comes out as is the label
+ * read aloud — *Waiting on checks* where the plain state word would be.
+ */
+waiting_on_checks: boolean, };
 
 /**
  * What became of submitting one.
@@ -738,6 +751,25 @@ direction: Direction | null,
  * own, which is why this sits beside `state` rather than in it.
  */
 blocked_on: number | null, 
+/**
+ * Whether the wrap-up has narrowed to its checks: the review answered, the
+ * comments dealt with, the checks alone outstanding, and nothing running in
+ * the Worktree.
+ *
+ * What the *Waiting on checks* label is drawn from, and a condition of
+ * Wrapping rather than a state of its own — the precedent is `blocked_on`
+ * above, and this sits beside `state` for the same reason. Nothing is
+ * stored for it: it is the settle facts and the register read together, at
+ * the moment the page was read.
+ *
+ * A flag rather than an Event id, because unlike a stop there is nothing to
+ * go and look at and nothing to do about it — the Notice saying so is on
+ * the record where it happened, and the label is a label.
+ *
+ * `false` in every state but Wrapping, which is where the condition is
+ * derived from and the only place it can hold.
+ */
+waiting_on_checks: boolean, 
 /**
  * What the stop shows about the account that ran out coming back, and
  * `null` on every stop that is not a usage window's — which is nearly all

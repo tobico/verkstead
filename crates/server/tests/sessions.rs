@@ -3972,6 +3972,85 @@ async fn checks_gh_cannot_answer_about_leave_the_wrap_up_waiting() {
     );
 }
 
+/// A wrap-up with everything but its checks settled and nothing running in its
+/// Worktree reads as **Waiting on checks**, and says so once.
+///
+/// A condition of Wrapping rather than a state: the Lifecycle is untouched and
+/// nothing new is stored on the Conversation, so what the card and the sidebar
+/// draw it from is the wrap-up's own settle facts read alongside the register of
+/// what is running. The review read the branch and found nothing to raise,
+/// nothing has been said on the pull request, and here the checks cannot be
+/// asked about at all — which is a wrap-up that will wait for as long as this
+/// test cares to look.
+///
+/// The Notice is written once per narrowing and not once per poll: the settling
+/// loop asks on a cadence, and a Timeline that grew a line every half second
+/// would be one nobody could read.
+#[tokio::test]
+async fn a_wrap_up_down_to_its_checks_reads_as_waiting_on_them_and_says_so_once() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(CHECKS_UNANSWERABLE, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| view.waiting_on_checks.then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "which is a condition of Wrapping rather than a state of its own",
+    );
+    assert!(
+        !view.working,
+        "and one only a wrap-up with nobody in it is ever in",
+    );
+    assert!(
+        !checks_settled(&fixture).await,
+        "the checks are the one thing left, and nothing can even ask about them",
+    );
+    assert!(
+        review_settled(&fixture).await,
+        "the review read the branch and found nothing to raise",
+    );
+
+    assert!(
+        fixture.row().await.waiting_on_checks,
+        "and the sidebar says the same thing about the same Conversation",
+    );
+
+    // Long enough for many more polls of a wrap-up that is still down to its
+    // checks, every one of them finding the line already written.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        waiting_on_checks(&view).len(),
+        1,
+        "one line per narrowing, not one per poll: {:?}",
+        waiting_on_checks(&view),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and it is a condition rather than a stop, so nothing stopped: {:?}",
+        notices(&view),
+    );
+    assert!(
+        view.waiting_on_checks,
+        "and the label goes on standing for as long as the condition does",
+    );
+}
+
 /// The checks are asked about for as long as the Conversation is wrapping up and
 /// no longer.
 ///
@@ -9007,14 +9086,38 @@ fn notices(view: &ConversationView) -> Vec<String> {
 }
 
 /// The same, as the Events they are — which is what a badge points at.
+///
+/// Every Notice but the one a wrap-up narrowing to its checks writes, which is
+/// [`waiting_on_checks`]'s to read. That line is a label on a condition rather
+/// than anything Verkstead did about the run: it is written on a wrap-up with
+/// nothing wrong with it, and it lands last, so the tests that ask what a
+/// Conversation had to say about its own run would otherwise be reading it.
 fn said(view: &ConversationView) -> Vec<&NoticeEvent> {
     view.timeline
         .iter()
         .filter_map(|event| match event {
-            TimelineEvent::Notice(notice) => Some(notice),
+            TimelineEvent::Notice(notice) if !narrowing(notice) => Some(notice),
             _ => None,
         })
         .collect()
+}
+
+/// And the lines a wrap-up down to its checks writes, which is the one kind
+/// [`said`] passes over.
+fn waiting_on_checks(view: &ConversationView) -> Vec<&NoticeEvent> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Notice(notice) if narrowing(notice) => Some(notice),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Which of the two a Notice is, by what it opens with — the rendered markdown
+/// the settling loop writes.
+fn narrowing(notice: &NoticeEvent) -> bool {
+    notice.html.contains("Waiting on checks")
 }
 
 /// The whole of stage auto-continue: a settled wrap-up on a roadmap Conversation

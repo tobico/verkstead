@@ -59,6 +59,21 @@
   cursor: pointer;
 }
 
+/* And what a wrap-up that has narrowed to its checks says, in the same place.
+   Not a button and nothing to press: the checks are GitHub's to finish and
+   there is nowhere to go about them, so this is a label where the one above is
+   a way in. Which is why it is drawn quietly — the outline in the edge grey
+   rather than a filled red — a condition being worth reading rather than worth
+   shouting. */
+.waitingOnChecks {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  border: 1px solid var(--edge);
+  border-radius: 0.3rem;
+}
+
 /* The pinned events, above the timeline and inside the chrome that holds the top
    of the pane: the fixed set — a task list, a stage list and a PR — each of
    which is the current state of something the work is against rather than a

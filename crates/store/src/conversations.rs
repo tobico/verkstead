@@ -206,6 +206,15 @@ pub struct ConversationRow {
     /// and which source said so is the Conversation's own page to show. The
     /// sources are [`conversations`]'s, all of them in the one query.
     pub waiting: bool,
+
+    /// Whether its wrap-up has narrowed to its checks — see
+    /// [`super::narrowed_to_checks`], which is the same reading of the same
+    /// facts, asked of one Conversation instead of the list.
+    ///
+    /// Half of what the row says as *Waiting on checks*. The other half is that
+    /// nothing is running on it, which the caller already reads once for the
+    /// whole sidebar rather than per row.
+    pub narrowed_to_checks: bool,
 }
 
 /// The word the `kind` column holds for a Question Set.
@@ -1071,6 +1080,11 @@ async fn started(
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
 /// is already an ask left open.
 ///
+/// `narrowed_to_checks` rides along in the same query for the same reason: it is
+/// a reading of the wrap-up's settle facts — see [`super::narrowed_to_checks`],
+/// which asks it of one Conversation — and a caller folding it itself would be
+/// issuing a query per row for something a subselect already has.
+///
 /// A **Draft** is none of them, whatever else is true of it: it is waiting on
 /// the human in the ordinary sense, and the sidebar says so by drawing it as a
 /// draft rather than by marking it as an ask.
@@ -1086,7 +1100,7 @@ async fn started(
 /// the choice would be a second place to get it wrong, and there is no other way
 /// the sidebar should ever be read.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
-    let rows: Vec<(i64, String, String, String, bool)> = sqlx::query_as(
+    let rows: Vec<(i64, String, String, String, bool, bool)> = sqlx::query_as(
         "SELECT c.id, c.branch, r.name, c.state,
                 c.state <> 'draft' AND (
                     EXISTS (
@@ -1101,7 +1115,20 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                           )
                     )
                     OR c.stopped_at IS NOT NULL
-                ) AS waiting
+                ) AS waiting,
+                c.state = 'wrapping'
+                  AND EXISTS (
+                      SELECT 1 FROM wrap_up_settled w
+                      WHERE w.conversation_id = c.id AND w.waiting_on = 'review'
+                  )
+                  AND EXISTS (
+                      SELECT 1 FROM wrap_up_settled w
+                      WHERE w.conversation_id = c.id AND w.waiting_on = 'comments'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM wrap_up_settled w
+                      WHERE w.conversation_id = c.id AND w.waiting_on = 'checks'
+                  ) AS narrowed_to_checks
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
          LEFT JOIN placements m ON m.conversation_id = c.id
@@ -1116,13 +1143,14 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     .context("listing the Conversations")?;
 
     rows.into_iter()
-        .map(|(id, branch, repo, state, waiting)| {
+        .map(|(id, branch, repo, state, waiting, narrowed_to_checks)| {
             Ok(ConversationRow {
                 id,
                 branch,
                 repo,
                 state: Lifecycle::read(&state)?,
                 waiting,
+                narrowed_to_checks,
             })
         })
         .collect()

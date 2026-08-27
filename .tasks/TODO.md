@@ -13,7 +13,7 @@ session.
 
 ## Tasks
 
-- [ ] 01: Draw the narrowed wrap-up as Waiting on checks — [details](01-waiting-on-checks.md)
+- [x] 01: Draw the narrowed wrap-up as Waiting on checks — [details](01-waiting-on-checks.md)
 - [ ] 02: Ship the following-up skill and its prompt — [details](02-following-up-skill.md)
 - [ ] 03: The fifth steer target, the state, and the session it launches — [details](03-steer-into-follow-up.md)
 - [ ] 04: The Nothing-else control on a follow-up's Sets — [details](04-nothing-else-control.md)

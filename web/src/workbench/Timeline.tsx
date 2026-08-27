@@ -115,6 +115,7 @@ import { PaneHead } from "./PaneHead";
 import { Setup } from "./Setup";
 import styles from "./Timeline.module.css";
 import shell from "./Workbench.module.css";
+import { WAITING_ON_CHECKS } from "./conditions";
 import { keeping } from "./settling";
 
 /// What the details pane is showing, as the card that opened it names itself.
@@ -409,6 +410,16 @@ export function Timeline(props: {
                 Blocked on you
               </button>
             )}
+          </Show>
+          {/* And what a wrap-up has narrowed to, in the same place and drawn
+              far more quietly: the review is answered, nothing said on the pull
+              request is left unaddressed, and the checks going green is all
+              that is left. A label rather than a control — there is nothing to
+              press and nowhere to go, the checks being GitHub's to finish — and
+              a condition of Wrapping rather than a state, which is why it is
+              drawn beside the branch and never in place of it. */}
+          <Show when={props.conversation.waiting_on_checks}>
+            <span class={styles.waitingOnChecks}>{WAITING_ON_CHECKS}</span>
           </Show>
           <Actions conversation={props.conversation} />
           {/* And the way on to the next level, drawn only where there is a next
