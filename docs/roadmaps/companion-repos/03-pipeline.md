@@ -44,6 +44,15 @@ finish left without a PR stops the run with a Notice naming it.
 1. **PR plurality in the store** — reshape `pull_requests` to one row per
    (conversation, repo), thread repo identity through the Event, the pinned
    block and the details pane.
+   - The reshape is a **rebuild migration** in `crates/store/src/migrations.rs`
+     rather than a new declaration: `UNIQUE (conversation_id)` is on a table
+     that already exists, SQLite will not drop a constraint by `ALTER TABLE`,
+     and the store's `CREATE TABLE IF NOT EXISTS` does nothing at all to a
+     database that has the old shape. Without it the stage passes on a fresh
+     database and refuses the second pull request on a real one.
+   - New table, rows copied across, old one dropped, new one renamed — the
+     module has read old rows, written new ones and dropped a table before,
+     but has never rebuilt one. Safe to run twice, like the rest of it.
 2. **Discovery per touched companion** — after the finish, ask each read-write
    companion repo for a PR on its branch; record what is found; stop with the
    naming Notice when a touched companion has none.
@@ -76,6 +85,8 @@ finish left without a PR stops the run with a Notice naming it.
 - `UNIQUE (conversation_id)` still on `pull_requests`
   (`crates/store/src/pull_requests.rs`), and the record-once branch inside
   `record_pull_request`.
+- What `crates/store/src/migrations.rs` has learned to do by then — still
+  row rewrites and a dropped table, or a rebuild to follow.
 - The finish text in `crates/server/skills/next-task/SKILL.md` (and
   implementing, staging) — where the companion sentence lands.
 - The single-PR language still in `crates/server/skills/reviewing`,
