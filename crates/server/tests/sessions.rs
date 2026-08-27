@@ -11231,6 +11231,23 @@ esac
 /// the branch saves is an account, so *no session spent* has to be asserted as a
 /// number rather than as a state that happens to look right.
 async fn implementing_sessions(fixture: &Grilling) -> usize {
+    sessions_on(fixture, "implementing/SKILL.md").await
+}
+
+/// The same count for a backlog's working sessions, which run on the other
+/// skill: a task list spends an account per task rather than one on the whole of
+/// the work.
+async fn working_sessions(fixture: &Grilling) -> usize {
+    sessions_on(fixture, "next-task/SKILL.md").await
+}
+
+/// How many of a Conversation's sessions were started on `skill`.
+///
+/// Counted by what each was run on rather than by how many there are, because a
+/// Conversation's sessions are not all the work's: a wrap-up reads the branch
+/// and answers comments in sessions of its own, and those are not what a *no
+/// session spent* assertion is about.
+async fn sessions_on(fixture: &Grilling, skill: &str) -> usize {
     let running: Vec<i64> = outputs(&fixture.view().await)
         .into_iter()
         .map(|output| output.id)
@@ -11239,11 +11256,7 @@ async fn implementing_sessions(fixture: &Grilling) -> usize {
     let mut spent = 0;
 
     for event in running {
-        if fixture
-            .capture(event)
-            .await
-            .contains("implementing/SKILL.md")
-        {
+        if fixture.capture(event).await.contains(skill) {
             spent += 1;
         }
     }
@@ -12274,6 +12287,115 @@ async fn an_instruction_session_that_commits_wraps_the_pull_request_up_again() {
     );
 }
 
+/// The same steer where the pull request is one the record never got: the
+/// instruction is done, and GitHub's answer is what carries the Conversation on
+/// to wrapping it up.
+///
+/// The other half of
+/// [`resuming_an_emptied_backlog_whose_branch_has_a_pull_request_wraps_it_up_unspent`],
+/// and the same failed ending seen from the third door. Its finish step pushed
+/// and opened the pull request and the recording of it did not happen, so the
+/// Conversation is implementing an empty backlog with the work out on GitHub —
+/// and a human who steers an instruction in to get it moving is doing the
+/// obvious thing.
+///
+/// What follows the instruction is read off GitHub rather than off the record,
+/// which is the whole of what this asks. The record is what Verkstead wrote down
+/// and the pull request is GitHub's fact; where they disagree it is because
+/// writing it down is what failed, so asking the record would tell the run what
+/// it already believes and stop the Conversation a second time over a pull
+/// request that is sitting there open.
+#[tokio::test]
+async fn an_instruction_session_wraps_up_a_pull_request_the_record_never_got() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let opened = spill.path().join("opened-by-hand");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_an_instruction(&reviews),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    // The ending that did not finish: the backlog is worked through and taken
+    // away, and nothing recorded a pull request.
+    let missing = fixture.stopped().await;
+
+    assert!(
+        missing.html.contains("no pull request"),
+        "the run stopped where the ending failed: {:?}",
+        missing.html,
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "and the Conversation is left implementing a backlog with nothing in it",
+    );
+    assert!(
+        pull_request(&view).is_none(),
+        "with no pull request on the record at all, which is the state this is about",
+    );
+
+    // And the pull request is there all along, which is what the record is wrong
+    // about.
+    std::fs::write(&opened, "https://github.com/tobico/verkstead/pull/41\n").unwrap();
+
+    let before = outputs(&view).len();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false },
+        "nothing is running: the run stopped where its ending failed",
+    );
+    assert_eq!(
+        fixture
+            .steer_instructed("Note what the limiter still does not do.\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let printed = fixture.printed_after(before).await;
+
+    assert!(
+        printed.contains("Note what the limiter still does not do."),
+        "the session is started on what the human wrote: {printed:?}",
+    );
+
+    let found = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(
+        found.number, 41,
+        "and what follows it is the pull request GitHub had all along, wrapped up \
+         rather than stopped over a second time",
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        commits(&view)
+            .iter()
+            .any(|commit| commit.subject.starts_with("docs: note what the limiter")),
+        "with what the instruction committed under it: {:?}",
+        commits(&view),
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "and nothing is waiting on the human any more",
+    );
+}
+
 /// The same steer over a backlog that still has work in it: the instruction is
 /// done first, and then the next task is worked.
 ///
@@ -13028,6 +13150,84 @@ async fn resuming_with_nothing_to_start_refuses_by_name_and_changes_nothing() {
     );
 }
 
+/// Resume on a backlog worked to empty whose branch is already on a pull request
+/// wraps that up, rather than refusing because `.tasks/` has nothing in it.
+///
+/// The refusal above with the other answer behind it, and the reason the two are
+/// worth telling apart. An empty backlog is a breakdown that never landed *or* a
+/// feature that is finished with, and the second one has had its finish step —
+/// which pushes and opens the pull request. So an empty backlog is the state a
+/// **failed ending** leaves behind: the work is out on GitHub and the record
+/// does not know, because recording it is what went wrong.
+///
+/// Before this, every way back in refused exactly that Conversation. Resume read
+/// the bare `.tasks/` and said there was nothing to work; a steer into Wrapping
+/// wanted the pull request the record did not have; an instruction steered in
+/// asked the record too and stopped a second time. The work sat on a pull request
+/// nothing would ever wrap up.
+///
+/// Asked of GitHub rather than of the branch, for
+/// [`resuming_an_inline_run_whose_branch_has_a_pull_request_wraps_it_up_unspent`]'s
+/// reason: a pull request is GitHub's fact and a branch cannot say there is one.
+/// Which is why the `gh` here changes its answer mid-test while nothing about the
+/// repository does.
+#[tokio::test]
+async fn resuming_an_emptied_backlog_whose_branch_has_a_pull_request_wraps_it_up_unspent() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-by-hand");
+
+    let fixture = grilling_spilling(spill, A_BACKLOG_OF_ONE, &gh_opened_by_hand(&opened)).await;
+
+    worked_to_empty(&fixture).await;
+
+    // The run stops where a finish step with no findable pull request stops: the
+    // backlog is worked through and taken away, and GitHub says there is nothing
+    // on the branch.
+    let missing = fixture.stopped().await;
+
+    assert!(
+        missing.html.contains("no pull request"),
+        "the run stopped on the pull request nothing could find: {:?}",
+        missing.html,
+    );
+
+    let spent = working_sessions(&fixture).await;
+
+    // And then there is one — the ending that half happened, or the human
+    // opening it by hand off the halt's own advice. Nothing on the branch
+    // changes, and nothing needs to.
+    std::fs::write(&opened, "https://github.com/tobico/verkstead/pull/41\n").unwrap();
+
+    assert_eq!(
+        fixture.resume().await,
+        Resumed::Resumed,
+        "the empty backlog is no longer the whole answer: GitHub has one",
+    );
+
+    let found = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(
+        found.number, 41,
+        "the pull request the branch was already on is the one it wraps up",
+    );
+    assert_eq!(
+        working_sessions(&fixture).await,
+        spent,
+        "and no session was spent working a backlog that has nothing in it",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        None,
+        "and nothing is waiting on the human any more",
+    );
+}
+
 /// And a Resume pressed twice is the first press arriving again.
 ///
 /// The second one finds something driving the Conversation — which is what the
@@ -13401,6 +13601,12 @@ async fn a_halt_nobody_chose_is_driven_again_by_the_next_server() {
 /// The stop it left is taken away first, which is the human having pressed Resume
 /// on it before the restart — what is being asked about here is the restart's own
 /// refusal rather than a stop it would have left alone.
+///
+/// The restarted server's `gh` finds none either, and that is load-bearing rather
+/// than incidental: an empty backlog refuses only where GitHub confirms the
+/// branch is on no pull request — see
+/// [`resuming_an_emptied_backlog_whose_branch_has_a_pull_request_wraps_it_up_unspent`],
+/// which is the same Conversation with the other answer behind it.
 #[tokio::test]
 async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline() {
     let fixture = grilling_asking(A_BACKLOG_OF_ONE, NO_PULL_REQUEST).await;
@@ -13413,7 +13619,7 @@ async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline
 
     fixture.drive_again().await;
 
-    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+    let _restarted = fixture.restarted("true", NO_PULL_REQUEST).await;
 
     let refused = fixture
         .until(|view| {
