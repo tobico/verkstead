@@ -54,6 +54,14 @@ finish left without a PR stops the run with a Notice naming it.
 5. **Review across PRs and the skill text** — the reviewing prompt lists every
    PR; finish sequences in the next-task, implementing and staging skills
    extend to touched companions.
+   - The skill *bodies* extend too, not only the prompts they are wrapped in:
+     `reviewing`, `addressing` and `responding` are each written for one
+     branch and one pull request throughout — `gh pr diff`, `gh pr checks`,
+     one push at the end, and "do not touch any other branch".
+   - A session is chdir'd into the **main** worktree and `gh` reads its
+     repository from where it runs, so a session sent at a companion's pull
+     request is told which worktree to work in — or it asks the wrong
+     repository how its checks are getting on.
 6. **Done** — settling waits on every PR's checks and comments plus the one
    review; the wrap-up settled bookkeeping gains the per-PR dimension.
 
@@ -70,5 +78,8 @@ finish left without a PR stops the run with a Notice naming it.
   `record_pull_request`.
 - The finish text in `crates/server/skills/next-task/SKILL.md` (and
   implementing, staging) — where the companion sentence lands.
+- The single-PR language still in `crates/server/skills/reviewing`,
+  `addressing` and `responding` — and whether the sandbox still chdirs into
+  the main worktree alone (`--chdir` in `crates/server/src/sandbox.rs`).
 - The review split-out path (`store::implement_again`, second wrap on the same
   PR row) — reconcile with plural rows.
