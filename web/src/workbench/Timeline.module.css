@@ -607,12 +607,13 @@
 }
 
 /* Every state the work can be moved into carries its own class, because the
-   card asks the module for one by name — see `Moved` in `Timeline.tsx`. Four of
-   them are the ordinary run of the ladder and say what the line already says;
-   the two below are the ones worth marking. */
+   card asks the module for one by name — see `Moved` in `Timeline.tsx`. Five of
+   them are the ordinary run of the work and say what the line already says; the
+   two below are the ones worth marking. */
 .timelineEvent > .moved.grilling,
 .timelineEvent > .moved.implementing,
 .timelineEvent > .moved.wrapping,
+.timelineEvent > .moved.followup,
 .timelineEvent > .moved.done {
   color: var(--ink-soft);
 }

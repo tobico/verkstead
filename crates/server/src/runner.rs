@@ -1076,6 +1076,77 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
     }
 }
 
+/// See out the session a steer into Follow-up started, and stop the
+/// Conversation when it is over.
+///
+/// **A driver rather than an errand beside the work**, exactly as an instruction
+/// session is: the registration it is handed says the Conversation is being
+/// driven for as long as this runs, so nothing sweeps it as standing still while
+/// the human is composing an answer on a phone.
+///
+/// **Nothing is watched for.** A follow-up is rounds of asking rather than a
+/// step with a landing: what it commits is the human's to have asked for, and a
+/// round that was a question and an answer commits nothing at all. So there is
+/// no committed-and-quiet to end it on and no artifact to read — the session
+/// runs until it is over, and the ending is what this waits for.
+///
+/// **And what its ending means is not settled here yet.** A follow-up is over
+/// when the human says there is nothing else, which is a thing they have no way
+/// to say so far; until they do, a session that has ended is a Conversation with
+/// nobody following anything up, so the run stops and says so and the human is
+/// left with the Timeline and the Steer button. What replaces this is the rule
+/// that reads their answer and lands the Conversation back in the wrap-up.
+pub(crate) async fn following_up(
+    state: AppState,
+    conversation_id: i64,
+    brief: String,
+    driving: Driving,
+) {
+    let Some(mut session) =
+        launch_in_turn(&state, conversation_id, Prompt::FollowingUp(brief)).await
+    else {
+        return;
+    };
+
+    let event_id = session.event_id;
+    let ended = session.ended().await;
+
+    // Held until the stop is written, which is what every driver here holds it
+    // for: dropping first would leave a moment where a sweep could find the
+    // Conversation undriven and stop it with a worse sentence.
+    let _driving = driving;
+
+    // Verkstead ended it — the human closed the Conversation or force-stopped it,
+    // or the account it was spending ran out of window. Each has already written
+    // the stop this would otherwise write. See
+    // [`crate::sessions::Ended::on_purpose`].
+    if ended.on_purpose() {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "the follow-up session was stopped from outside, so nothing is said about it",
+        );
+        return;
+    }
+
+    // How it ended, where the ending itself was the problem; otherwise the
+    // ending is the whole of it, there being nothing yet that carries a
+    // follow-up on from a session that has finished.
+    let how = ended
+        .badly()
+        .unwrap_or_else(|| "the follow-up session finished".to_owned());
+
+    stop(
+        &state,
+        conversation_id,
+        crate::stopping::Decided::Verkstead,
+        "following the work up",
+        &how,
+        Some(event_id),
+    )
+    .await;
+}
+
 /// Follow the grilling session as it stages the work into a roadmap.
 ///
 /// The roadmap's counterpart to [`follow_breakdown`], and the same move: the
@@ -1855,6 +1926,14 @@ enum Prompt {
     /// The responding skill, which a session answering a batch of comments runs
     /// inside — carrying the batch, which is the whole of what it is about.
     Responding(String),
+
+    /// The following-up skill, carrying the brief a steer into Follow-up sent
+    /// the session off with.
+    ///
+    /// The instruction's shape and never its meaning: what it carries opens a
+    /// conversation rather than naming one job, so the session answers it, does
+    /// what it asks and goes on asking — see [`following_up`].
+    FollowingUp(String),
 }
 
 /// Wait for the Conversation's Worktree, and then [`launch`] into it.
@@ -1949,6 +2028,7 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                 Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
                 Prompt::Reviewing(said) => skills::reviewing(&brief, handoff, said.as_deref()),
                 Prompt::Responding(said) => skills::responding(&brief, handoff, said),
+                Prompt::FollowingUp(follow_up) => skills::following_up(&brief, handoff, follow_up),
             }
         }
         Err(error) => {

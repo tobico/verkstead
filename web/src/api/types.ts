@@ -587,7 +587,7 @@ waiting_on_checks: boolean, };
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
 
 /**
  * What became of pressing Stop or Force stop.
@@ -880,7 +880,7 @@ html: string, };
  * the domain's, and the page says which one a Conversation is in rather than
  * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Done" | "Closed";
+export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done" | "Closed";
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -1732,9 +1732,10 @@ export type Started = { "Started": { id: number, } } | "NoSuchRepo";
  * The one Event that is sometimes a move and sometimes a document. A steer
  * into Wrapping or Done says nothing but the state, like the move it stands
  * above; a steer into Implementing carries the instruction the session was set
- * going on, which is the whole of what that session was asked to do. A steer
- * into Grilling carries a document too, and that one arrives as a Brief Event
- * of its own — it opens a round, and a round starts from a Brief.
+ * going on, and one into Follow-up the brief it was, which is the whole of what
+ * that session was asked to do. A steer into Grilling carries a document too,
+ * and that one arrives as a Brief Event of its own — it opens a round, and a
+ * round starts from a Brief.
  */
 export type SteerEvent = { id: number, 
 /**
@@ -1845,6 +1846,23 @@ brief: string | null,
  */
 instruction: string | null, 
 /**
+ * The brief, for a steer into Follow-up.
+ *
+ * It lands as the Steer Event's own body, exactly as the instruction above
+ * it does, and the session started on it opens the follow-up: it answers
+ * what the brief asks, does what it asks for, and asks the human what else
+ * there is until they say there is nothing.
+ *
+ * **Required**, which is what makes it the one written payload with no
+ * quiet meaning. Nothing on the branch could stand in for it — a follow-up
+ * is not a step of the run to be picked up — so a submit that names
+ * Follow-up without one is refused by name; see
+ * [`ConversationSteered::NoFollowUpBrief`].
+ *
+ * Whitespace alone is nothing written, as everywhere else here.
+ */
+follow_up: string | null, 
+/**
  * Whether the session is primed with everything the human has already
  * answered.
  *
@@ -1863,13 +1881,14 @@ digest: boolean, };
  * Where a steer can send a Conversation.
  *
  * Draft and Closed are not among them and never will be: each has a way in of
- * its own, and a steer is for the four states the work is *done in*. A target
- * the modal offers is a target something can be set going in, which is why
- * Wrapping is offered only where the work is already on a pull request — the
- * one of the four that is drawn out at all, an instruction being writable
- * anywhere and Done needing nothing.
+ * its own, and a steer is for the states the work is *done in* — the four rungs
+ * of the ladder, and Follow-up beside them, which has no other way in at all. A
+ * target the modal offers is a target something can be set going in, which is
+ * why the two that turn on a pull request are drawn out where there is none: an
+ * instruction is writable anywhere and Done needs nothing, but there is no
+ * wrapping up and no following up of work nobody can see.
  */
-export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "Done";
+export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done";
 
 /**
  * What became of the human's Response.

@@ -73,7 +73,11 @@ flowchart LR
   ladder rather than on it, since every other state is somewhere the work has
   got to. A conversation that is closed or Done is got back into by steering
   it, a steer into Grilling being what opens a new brief round (*refined
-  2026-08-26, building close-and-retirements*).
+  2026-08-26, building close-and-retirements*). **Follow-up** sits beside the
+  ladder the way Closed sits off it: a steer from Done or Wrapping, on work
+  that is already on a pull request, opens a session the human asks and is
+  asked in until they are finished with it (*added 2026-08-27, building
+  follow-ups*).
 - **Agent profiles** are minimal: name, claude home dir + config file pair, the
   list of models that account can run — plus an agent-type discriminator so
   other backends can slot in later (claude is the only type now). The model

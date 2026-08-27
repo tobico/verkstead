@@ -77,6 +77,7 @@ import { SPOKEN } from "./Mark";
 import marks from "./Mark.module.css";
 import { PaneHead } from "./PaneHead";
 import { WAITING_ON_CHECKS } from "./conditions";
+import { STATE } from "./states";
 
 export function Conversations(props: {
   selected: string;
@@ -806,7 +807,7 @@ function mark(entry: ConversationEntry): "waiting" | "working" | "idle" | null {
 /// which the Timeline's own header draws from the same constant.
 function spoken(entry: ConversationEntry): string {
   const which = mark(entry);
-  const where = entry.waiting_on_checks ? WAITING_ON_CHECKS : entry.state;
+  const where = entry.waiting_on_checks ? WAITING_ON_CHECKS : STATE[entry.state];
   const said =
     which === "waiting"
       ? `${where}, waiting on you`

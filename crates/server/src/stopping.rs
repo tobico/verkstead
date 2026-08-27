@@ -214,7 +214,10 @@ async fn undriven(state: &AppState, conversation_id: i64) -> bool {
 
     if matches!(
         lifecycle,
-        store::Lifecycle::Grilling | store::Lifecycle::Implementing | store::Lifecycle::Wrapping
+        store::Lifecycle::Grilling
+            | store::Lifecycle::Implementing
+            | store::Lifecycle::Wrapping
+            | store::Lifecycle::FollowUp
     ) {
         return false;
     }

@@ -173,7 +173,7 @@ pub(crate) async fn asked(state: &AppState, conversation_id: i64) -> bool {
 pub(crate) fn ready(lifecycle: Lifecycle, stopped: bool) -> bool {
     matches!(
         lifecycle,
-        Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping
+        Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping | Lifecycle::FollowUp
     ) && !stopped
 }
 

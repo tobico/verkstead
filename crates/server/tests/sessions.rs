@@ -546,6 +546,21 @@ impl Grilling {
         .await
     }
 
+    /// And the submit into Follow-up, which carries the payload that is always
+    /// required: the brief the session it starts opens the follow-up on.
+    async fn steer_following_up(&self, brief: &str) -> ConversationSteered {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/steer/submit", self.id),
+            &serde_json::json!({
+                "target": "FollowUp",
+                "interrupt": false,
+                "follow_up": brief,
+            }),
+        )
+        .await
+    }
+
     /// What the next session to start printed, waited for from a Timeline that
     /// held `before` of them.
     ///
@@ -12374,6 +12389,200 @@ async fn an_instruction_session_that_commits_wraps_the_pull_request_up_again() {
         steer.contains("Note what the limiter still does not do."),
         "and the instruction is on the record as the Steer's own body, which is \
          what says what this session was for: {steer:?}",
+    );
+}
+
+/// The same backlog and wrap-up, plus a session that plays a follow-up: it does
+/// whatever `following_up` says, which is what each of these two tests differs
+/// by.
+fn a_backlog_then_a_follow_up(reviews: &Path, following_up: &str) -> String {
+    format!(
+        r#"
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {reviews}
+{REVIEW_AND_FIND_NOTHING}
+    ;;
+*responding/SKILL.md*)
+{RESPOND_AND_FIND_NOTHING}
+    ;;
+*following-up/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+{following_up}
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+        reviews = quoted(reviews),
+    )
+}
+
+/// A follow-up session that does its round and then stays there, which is what
+/// one waiting on the human looks like: it has asked, and it is holding the
+/// Worktree until they answer.
+const A_ROUND_THEN_WAITING: &str = r#"    printf 'it counts the 429s it sends\n' >> notes.md
+    git add -A
+    git commit --quiet -m 'docs: say what the limiter counts'
+    sleep 300"#;
+
+/// Steering a Conversation Verkstead has finished with into Follow-up starts a
+/// session inside the follow-up skill, on the brief the human wrote — and the
+/// Conversation is driven for as long as that session runs.
+///
+/// The whole of what the state is: the work is on a pull request, the human has
+/// read it, and what they want now is to ask about it and have things done about
+/// it. So the brief is the whole of what the session is sent off with, and the
+/// commits it makes land on the Timeline the way every other session's do.
+///
+/// **And it is never swept as stalled.** The sweep here runs every tenth of a
+/// second — see [`SWEEPING`] — so a follow-up session sitting on an answer with
+/// nothing on the drivers register would be stopped out from under itself within
+/// a moment of the steer. Which is what a follow-up is: a Conversation waiting on
+/// a human who is on a phone.
+#[tokio::test]
+async fn steering_into_follow_up_runs_the_skill_on_the_brief_and_is_never_swept() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, A_ROUND_THEN_WAITING),
+        &gh_about(GREEN, "", ""),
+        SWEEPING,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+    let before = outputs(&view).len();
+    let said = notices(&view).len();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false },
+        "everything had finished, so the click found nothing to interrupt",
+    );
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let printed = fixture.printed_after(before).await;
+
+    assert!(
+        printed.contains("~/.claude/skills/following-up/SKILL.md"),
+        "the session is put inside the follow-up skill, which is the one that \
+         says to keep asking until the human is finished: {printed:?}",
+    );
+    assert!(
+        printed.contains("Does it count the 429s it sends?"),
+        "and it is started on what the human wrote: {printed:?}",
+    );
+
+    let view = fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("docs: say what the limiter"))
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "the Conversation is where the steer put it, with what the follow-up \
+         committed on its Timeline",
+    );
+
+    // Long enough for many sweeps. The session is sitting there waiting on the
+    // human, which is what a follow-up spends its time doing.
+    tokio::time::sleep(SWEEPING.stalls * 8).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(
+        notices(&view).len(),
+        said,
+        "and nothing stopped it: a follow-up session is registered as driving, \
+         so the sweep leaves it alone: {:?}",
+        notices(&view),
+    );
+}
+
+/// A follow-up session that is over stops the Conversation, with the ordinary
+/// Notice saying what it was doing.
+///
+/// What a follow-up ends *on* is not settled yet: it is over when the human says
+/// there is nothing else, and there is nowhere for them to say it. So a session
+/// that has finished leaves a Conversation with nobody following anything up,
+/// which is a stop like any other — the human is told, and the Steer button is
+/// what they have. What replaces this is the rule that reads their answer and
+/// lands the Conversation back in the wrap-up.
+#[tokio::test]
+async fn a_follow_up_session_that_is_over_stops_the_conversation() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, "    printf 'nothing more to say\\n'"),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("Following the work up"),
+        "what was being done, said in the words the state is judged by: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("the follow-up session finished"),
+        "and what came of it, which is nothing worse than an ending: {:?}",
+        stopped.html,
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "stopped where it stood: a stop is a condition an active state is in \
+         rather than a state of its own",
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "so the Conversation is blocked on the human, with the Notice to read",
     );
 }
 

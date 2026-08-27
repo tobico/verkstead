@@ -444,10 +444,6 @@ pub(crate) fn instruction(brief: &str, handoff: Option<&str>, instruction: &str)
 /// reason everything written under them goes there: it is the newest thing said
 /// and the least general. The documents say what the work is; this says what
 /// they want to follow up about it now.
-#[allow(
-    dead_code,
-    reason = "the steer target that launches a follow-up session lands next"
-)]
 pub(crate) fn following_up(brief: &str, handoff: Option<&str>, follow_up: &str) -> String {
     let prompt = on_the_documents(
         &format!(

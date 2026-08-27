@@ -56,9 +56,11 @@ fn direction_read(word: &str) -> Result<Direction> {
 /// the Conversation is still drafting — need the states they refuse on behalf of
 /// to exist before the stage that reaches them does.
 ///
-/// [`Lifecycle::Closed`] is off the ladder rather than on it. Every other state
-/// is somewhere the work has got to, and closing is the work stopping wherever
-/// it was — which is why it is reachable from all of them and leads nowhere.
+/// [`Lifecycle::Closed`] is off the ladder rather than on it: closing is the
+/// work stopping wherever it was, which is why it is reachable from all of them
+/// and leads nowhere. [`Lifecycle::FollowUp`] is beside it rather than on it
+/// too, being somewhere the human puts a Conversation whose work is already
+/// pushed — and it leads back into the wrap-up it came off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
     /// The Brief is being written, and with it everything else about the
@@ -75,6 +77,14 @@ pub enum Lifecycle {
 
     /// The work is on a PR and the wrap-up loop has it.
     Wrapping,
+
+    /// The human is following that pull request up: a session of their own,
+    /// asking and doing whatever they want taken up about work already pushed.
+    ///
+    /// The one state with no way in but a steer, and the one that is not a rung
+    /// of the ladder: it hangs off the wrap-up rather than following it, and
+    /// where it leads back to is Wrapping.
+    FollowUp,
 
     /// Finished. A steer is the way back in: one into [`Lifecycle::Grilling`]
     /// opens a second round with a Brief of its own — see
@@ -95,6 +105,7 @@ impl Lifecycle {
             Self::Grilling => "grilling",
             Self::Implementing => "implementing",
             Self::Wrapping => "wrapping",
+            Self::FollowUp => "follow-up",
             Self::Done => "done",
             Self::Closed => "closed",
         }
@@ -115,6 +126,7 @@ impl Lifecycle {
             "grilling" => Self::Grilling,
             "implementing" => Self::Implementing,
             "wrapping" => Self::Wrapping,
+            "follow-up" => Self::FollowUp,
             "done" => Self::Done,
             "closed" | "aborted" => Self::Closed,
             other => bail!("a Conversation is in the unknown state {other:?}"),
@@ -2385,9 +2397,9 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// it is what came of the act.
 ///
 /// **The Steer carries what the human wrote**, where a target takes anything
-/// written: the instruction a steer into Implementing sends a session off with
-/// is the Event's own body, so reading the Event back is reading the job that
-/// was set. See [`Event::Steer`] for how the two are held in the one column.
+/// written: the instruction a steer into Implementing sends a session off with,
+/// and the brief a steer into Follow-up does, are the Event's own body, so
+/// reading the Event back is reading the job that was set. See [`Event::Steer`] for how the two are held in the one column.
 ///
 /// **A third where the steer opens a round**: the Brief the human wrote for it,
 /// under the move rather than above it, because the move is where the round
@@ -2600,13 +2612,14 @@ pub struct Steer<'a> {
     /// The new round's Brief, for a steer that opens one.
     pub brief: Option<&'a str>,
 
-    /// The hand-written work a steer into Implementing carries, which lands as
-    /// the Steer Event's own body rather than beside it.
+    /// What the human wrote to steer it with: the instruction a steer into
+    /// Implementing carries, or the brief a steer into Follow-up does. Either
+    /// lands as the Steer Event's own body rather than beside it.
     ///
-    /// Not a Brief, however alike the two look on the page. A Brief is what a
-    /// round is grilled *about*; this is one session's whole job, said by the
-    /// human at the moment they steered — so it belongs to the steer, and
-    /// reading the Event back is reading what they asked for.
+    /// Not a Brief, however alike the three look on the page. A Brief is what a
+    /// round is grilled *about*; this is what one session was set going on,
+    /// said by the human at the moment they steered — so it belongs to the
+    /// steer, and reading the Event back is reading what they asked for.
     pub instruction: Option<&'a str>,
 
     /// How the work is being built from here, for a Conversation that has never

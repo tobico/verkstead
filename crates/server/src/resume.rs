@@ -288,7 +288,11 @@ pub(crate) async fn resume(
         // Refused above, where the refusal belongs: before the stop is read and
         // before a registration is taken. Answered again here because the match
         // has to be whole, and answered the same way.
-        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => {
+        //
+        // Follow-up is among them for now rather than for good: nothing here
+        // knows how to start a follow-up session again, so a follow-up that has
+        // lost its session is one the human steers afresh.
+        Lifecycle::Draft | Lifecycle::FollowUp | Lifecycle::Done | Lifecycle::Closed => {
             return Ok(Resumed::NotDriven);
         }
     }

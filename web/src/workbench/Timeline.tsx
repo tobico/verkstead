@@ -116,6 +116,7 @@ import { Setup } from "./Setup";
 import styles from "./Timeline.module.css";
 import shell from "./Workbench.module.css";
 import { WAITING_ON_CHECKS } from "./conditions";
+import { STATE } from "./states";
 import { keeping } from "./settling";
 
 /// What the details pane is showing, as the card that opened it names itself.
@@ -1462,7 +1463,7 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
       class={styles.moved}
       classList={{ [styles[props.moved.state.toLowerCase()]!]: true }}
     >
-      {props.from} → {props.moved.state}
+      {STATE[props.from]} → {STATE[props.moved.state]}
     </p>
   );
 }
@@ -1479,11 +1480,12 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
 /// above this one and is already on the page, and what a steer adds is the
 /// deciding.
 ///
-/// **A card where it carries an instruction**, which is a steer into
-/// implementing that wrote one: the instruction is what a session was sent off
-/// to do, so it is a document like the brief and the handoff and is read the
-/// same way — clamped here, whole in the details pane. A steer that carried
-/// nothing written stays the line it always was, there being nothing to open.
+/// **A card where it carries a document**, which is a steer into implementing
+/// that wrote an instruction, or one into follow-up, which always writes a
+/// brief: either is what a session was sent off to do, so it is a document like
+/// the brief and the handoff and is read the same way — clamped here, whole in
+/// the details pane. A steer that carried nothing written stays the line it
+/// always was, there being nothing to open.
 function Steered(props: {
   steer: SteerEvent;
   selected: boolean;
@@ -1494,7 +1496,7 @@ function Steered(props: {
       class={styles.steered}
       classList={{ [styles[props.steer.target.toLowerCase()]!]: true }}
     >
-      You steered this into {props.steer.target}
+      You steered this into {STATE[props.steer.target]}
     </p>
   );
 
