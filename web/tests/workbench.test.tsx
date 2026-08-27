@@ -1286,7 +1286,13 @@ describe("what a right-click on a card offers", () => {
 
     expect(
       [...menu.querySelectorAll("button")].map((button) => button.className),
-    ).toEqual([actions.stop, actions.forceStop, actions.steer, actions.close]);
+    ).toEqual([
+      actions.stop,
+      actions.forceStop,
+      actions.steer,
+      actions.close,
+      actions.closeAndArchive,
+    ]);
   });
 
   /// Which is the whole reason it is worth having: the list is where the human
@@ -4733,11 +4739,11 @@ describe("closing a conversation", () => {
     expect(container.querySelector(`.${actions.conversationActions} .${actions.close}`)).toBeNull();
   });
 
-  it("says when the worktree could not be removed", async () => {
+  it("says when the conversation it was pressed on has gone", async () => {
     theGrilling(
       whenever(
         `/api/ui/conversations/${GRILLING.id}/close`,
-        json("WorktreeStuck" satisfies ConversationClosed),
+        json("NoSuchConversation" satisfies ConversationClosed),
         "POST",
       ),
     );
@@ -4746,7 +4752,93 @@ describe("closing a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.close}`));
 
-    await waitFor(() => screen.getByText(/could not be removed/));
+    await waitFor(() => screen.getByText("This conversation is gone."));
+  });
+});
+
+/// Closing and archiving is the row under Close: the same press with the
+/// archive already made, for a conversation there is nothing left to read on.
+describe("closing and archiving a conversation", () => {
+  it("stands under close, and goes with it when close goes", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+    const offered = [...menu.querySelectorAll("button")].map(
+      (button) => button.className,
+    );
+    expect(offered.slice(-2)).toEqual([actions.close, actions.closeAndArchive]);
+
+    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    const closed = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(closed.container);
+    await waitFor(() =>
+      expect(closed.container.querySelector(`.${actions.archive}`)).toBeTruthy(),
+    );
+    expect(
+      closed.container.querySelector(`.${actions.closeAndArchive}`),
+    ).toBeNull();
+  });
+
+  it("posts to the conversation's own close-and-archive route", async () => {
+    const fetching = theGrilling(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}/close-and-archive`,
+        json("Closed" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.closeAndArchive}`),
+    );
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${GRILLING.id}/close-and-archive`),
+      ).toEqual({}),
+    );
+
+    // And nothing went to the two routes it stands for: one press is one
+    // request, which is what stops a dropped connection leaving it half made.
+    expect(askedFor(fetching, `/api/ui/conversations/${GRILLING.id}/close`)).toBe(0);
+    expect(askedFor(fetching, `/api/ui/conversations/${GRILLING.id}/archive`)).toBe(0);
+  });
+
+  /// It says both halves, because it does both: what cannot be undone first,
+  /// and the reversible half after it.
+  it("says it closes and that the record stays", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+
+    await waitFor(() =>
+      screen.getByText(
+        /The same, and take it off the conversations list. Its record stays/,
+      ),
+    );
+  });
+
+  it("says when the conversation it was pressed on has gone", async () => {
+    theGrilling(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}/close-and-archive`,
+        json("NoSuchConversation" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.closeAndArchive}`),
+    );
+
+    await waitFor(() => screen.getByText("This conversation is gone."));
   });
 });
 
@@ -5035,6 +5127,7 @@ describe("stopping a conversation", () => {
       actions.forceStop,
       actions.steer,
       actions.close,
+      actions.closeAndArchive,
     ]);
 
     expect(

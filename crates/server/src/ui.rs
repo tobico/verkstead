@@ -143,6 +143,13 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/close", post(close))
+        // And the two of those joined, which is one row of the menu rather than
+        // two pressed in turn: the close and the archive are one intention often
+        // enough to be worth a press of their own.
+        .route(
+            "/api/ui/conversations/{id}/close-and-archive",
+            post(close_and_archive),
+        )
         // And the one that puts a closed Conversation away, which is the row
         // beside Close in the same menu. Named in the path like everything
         // around it, and with no body for the same reason: which Conversation
@@ -1735,6 +1742,53 @@ async fn close(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "closing a Conversation failed");
             unavailable("the conversation could not be closed")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/close-and-archive` — end it and put it away
+/// in one press.
+///
+/// The menu's two rows joined, because they are one intention often enough: a
+/// Conversation the human is finished with is usually one they are finished
+/// looking at. Joined on this side rather than in the browser so that a
+/// connection dropped between the two cannot leave the pair half made.
+///
+/// Answered with what became of the close, that being the half that has
+/// anything to refuse: archiving a Conversation just closed is either the
+/// archiving asked for or one already made, and the browser reads the
+/// Conversation back either way. What comes back as a failure names which half
+/// it was, because *closed but still on the list* is a different thing to be
+/// told than *not closed*.
+async fn close_and_archive(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationClosed::NoSuchConversation).into_response();
+    };
+
+    let closed = match crate::conversations::close(&state, id).await {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "closing a Conversation failed");
+            return unavailable("the conversation could not be closed");
+        }
+    };
+
+    // Nothing to put away where there was nothing to close. The other outcomes
+    // are both a Conversation that is closed now, which is what archiving wants.
+    if closed == ConversationClosed::NoSuchConversation {
+        return Json(closed).into_response();
+    }
+
+    match store::archive_conversation(&state.pool, id).await {
+        // Whichever it says, the Conversation is off the list — and the close is
+        // what the browser is told about, as it is for the row that only closes.
+        Ok(_) => {
+            state.nudges.announce(Nudge::Conversations);
+            Json(closed).into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "putting a just-closed Conversation away failed");
+            unavailable("the conversation was closed, but could not be put away")
         }
     }
 }

@@ -377,6 +377,22 @@ export function closeConversation(id: number): Promise<ConversationClosed> {
   return post<ConversationClosed>(`/api/ui/conversations/${id}/close`, {});
 }
 
+/// And the same press with the archive already made: the Conversation ends and
+/// comes off the sidebar at once.
+///
+/// One request rather than the two it stands for, so that a connection dropped
+/// between them cannot leave a Conversation closed and still on the list. What
+/// comes back is what became of the close, the archive of a Conversation just
+/// closed having nothing left to refuse.
+export function closeAndArchiveConversation(
+  id: number,
+): Promise<ConversationClosed> {
+  return post<ConversationClosed>(
+    `/api/ui/conversations/${id}/close-and-archive`,
+    {},
+  );
+}
+
 /// Put a closed Conversation away: it comes off the sidebar, and nothing else
 /// about it moves.
 ///

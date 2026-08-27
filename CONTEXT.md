@@ -52,6 +52,10 @@ branch outlives it, because a branch is cheap and may hold work worth reading.
 A steered Conversation keeps the one it has; where the directory has gone, one
 is checked out again on the branch that was worked, which is the only time a
 Worktree is made without a branch being made with it.
+A removal git refuses — a directory it no longer reads as a Worktree — does not
+hold the close up: it is logged with its path and left on disk, closing being
+what the human asked for and a directory nobody can be rid of being what they
+were trying to escape.
 Named for the Repo and the branch, and it lives in the Data Directory rather
 than inside a Watched Path: Verkstead made it, so it goes among Verkstead's own
 things.
@@ -658,7 +662,9 @@ left to read on it. A fact about the list and nothing else: the Timeline, the
 branch and the Conversation's own page are exactly where they were, and opening
 it by its URL shows all of it. Offered on a Closed Conversation alone — a
 Conversation still being worked on belongs on the list it is being worked from,
-so it is closed first and archived after.
+so it is closed first and archived after. **Close and archive** is that order
+in one press, for a Conversation the human is finished with and finished
+looking at; it refuses what closing refuses and nothing more.
 
 Reversible, which is what tells it from **Locked**: nothing is confirmed,
 because nothing is lost. The two words are not each other's — one is a Question

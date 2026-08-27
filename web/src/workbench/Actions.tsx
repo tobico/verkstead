@@ -8,11 +8,12 @@
 //!
 //! In order of what each costs: stop, which waits for the task the run is on;
 //! force stop, which does not; steer, which moves the work somewhere else; and
-//! close, which is not a stop at all but the end of the Conversation. Each says
-//! what it does under it, because *stop* and *force stop* are two words apart
-//! and hours of work apart. Each is drawn only where it applies — the two stops
-//! need something to stop, which is the server's rule and not this page's — and
-//! where close has already been pressed, archive stands in its place.
+//! the two closes, which are not a stop at all but the end of the Conversation
+//! — one of them taking it off the list on the way out. Each says what it does
+//! under it, because *stop* and *force stop* are two words apart and hours of
+//! work apart. Each is drawn only where it applies — the two stops need
+//! something to stop, which is the server's rule and not this page's — and
+//! where close has already been pressed, archive stands in their place.
 //!
 //! Two menus and one set of rows. The pane's ⋯ is about the Conversation that is
 //! open, and the sidebar's right-click is about the card under the pointer,
@@ -33,6 +34,7 @@ import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
 import { ContextMenu, Menu } from "../Menu";
 import {
   archiveConversation,
+  closeAndArchiveConversation,
   closeConversation,
   forceStopConversation,
   loadConversation,
@@ -69,13 +71,16 @@ export const STOP_REFUSAL: Record<ConversationStopped, string> = {
   NoSuchConversation: "This conversation is gone.",
 };
 
-/// And each way of being refused a close.
+/// And each way of being refused a close, whichever of the two closing rows was
+/// pressed.
+///
+/// One refusal between them: a conversation that has gone. A worktree the server
+/// could not remove is not one of them — it is logged and left behind, and the
+/// conversation closes around it.
 export const CLOSE_REFUSAL: Record<ConversationClosed, string> = {
   Closed: "",
   AlreadyClosed: "",
   NoSuchConversation: "This conversation is gone.",
-  WorktreeStuck:
-    "The worktree could not be removed, so nothing was changed. The server log says why.",
 };
 
 /// And each way of being refused an archive.
@@ -205,10 +210,13 @@ function actions(): {
     },
   }));
 
-  const close = useMutation(() => ({
-    mutationFn: (id: number) => closeConversation(id),
+  /// Both closing rows answer the same way, so both are pressed the same way:
+  /// the one that only closes and the one that puts the conversation away as
+  /// well are the same press with the same refusal behind it.
+  const closing = (ending: (id: number) => Promise<ConversationClosed>) => ({
+    mutationFn: ending,
     onSuccess: (outcome: ConversationClosed) => {
-      if (outcome === "NoSuchConversation" || outcome === "WorktreeStuck") {
+      if (outcome === "NoSuchConversation") {
         setRefused(outcome);
         return;
       }
@@ -218,7 +226,14 @@ function actions(): {
       shut();
       reread();
     },
-  }));
+  });
+
+  const close = useMutation(() => closing(closeConversation));
+
+  /// The same press with the archive already made, which is one press rather
+  /// than two because it is one intention: a conversation the human is finished
+  /// with is usually one they are finished looking at.
+  const closeAway = useMutation(() => closing(closeAndArchiveConversation));
 
   /// And putting the closed conversation away, which reads the same way: both
   /// of its refusals are a page drawn against a conversation that has moved,
@@ -413,6 +428,26 @@ function actions(): {
               branch stays where it is.
             </Note>
           </div>
+
+          {/* And the same press with the archive already made, which saves
+              coming back to a conversation there is nothing left to read on.
+              Under Close rather than over it, because it is Close and more:
+              what it adds is the reversible half. */}
+          <div class={styles.action}>
+            <button
+              type="button"
+              role="menuitem"
+              class={styles.closeAndArchive}
+              disabled={closeAway.isPending}
+              onClick={() => closeAway.mutate(conversation().id)}
+            >
+              {closeAway.isPending ? "Closing…" : "Close and archive"}
+            </button>
+            <Note>
+              The same, and take it off the conversations list. Its record stays
+              where it is.
+            </Note>
+          </div>
         </Show>
 
         <Show when={stopped() && STOP_REFUSAL[stopped()!]}>
@@ -437,6 +472,17 @@ function actions(): {
         <Show when={close.isError}>
           <ErrorLine class={styles.failure}>
             The conversation could not be closed: {close.error?.message}
+          </ErrorLine>
+        </Show>
+
+        {/* Said less definitely than the line above it, because the press has
+            two halves and the server's own words say which of them went: a
+            conversation closed but still on the list is a different thing to be
+            told than one that was never closed. */}
+        <Show when={closeAway.isError}>
+          <ErrorLine class={styles.failure}>
+            Closing and archiving did not go through:{" "}
+            {closeAway.error?.message}
           </ErrorLine>
         </Show>
       </>

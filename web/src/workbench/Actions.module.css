@@ -20,7 +20,8 @@
    press that ends something should not read as the next line of prose. */
 .stop,
 .forceStop,
-.close {
+.close,
+.closeAndArchive {
   display: inline-block;
   width: auto;
   padding: 0.4rem 0.8rem;
@@ -52,9 +53,12 @@
 .unarchive {
 }
 
-/* The one that cannot be undone, in the colour of what cannot be undone. Both
-   stops are reversed by a resume, and read as the ordinary buttons they are. */
-.close {
+/* The two that cannot be undone, in the colour of what cannot be undone. Both
+   stops are reversed by a resume, and read as the ordinary buttons they are.
+   Closing and archiving is the same red as closing: the archive half is
+   reversible, and the half that is not is the whole of what it costs. */
+.close,
+.closeAndArchive {
   color: #b3382c;
   border-color: #b3382c;
 }

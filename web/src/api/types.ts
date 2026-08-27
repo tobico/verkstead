@@ -516,7 +516,7 @@ export type ConversationArchived = "Archived" | "AlreadyArchived" | "NotClosed" 
 /**
  * What became of closing one.
  */
-export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversation" | "WorktreeStuck";
+export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversation";
 
 /**
  * One row of the conversations sidebar.
