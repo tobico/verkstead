@@ -400,7 +400,18 @@ pub async fn narrowing(
             Narrowing::NoticedAlready
         }
     } else {
-        unmark(&mut tx, conversation_id).await?;
+        // Only where there is one to take off, which is what keeps the ordinary
+        // poll a read. A wrap-up waiting on its review is asked this on the
+        // settling loop's own cadence for as long as the review takes and
+        // answers *not narrowed* every time, so a delete run unconditionally
+        // would be a write and a commit per poll for a row that was never
+        // there — and two watchers asking at once, which this is arranged to be
+        // safe under, would be two write locks contending rather than two
+        // readers. A deferred transaction that has only read takes no write
+        // lock at all.
+        if marked(&mut tx, conversation_id).await? {
+            unmark(&mut tx, conversation_id).await?;
+        }
 
         Narrowing::NotNarrowed
     };
@@ -425,6 +436,29 @@ pub async fn forget_narrowing(pool: &SqlitePool, conversation_id: i64) -> Result
         .context("forgetting that a wrap-up was down to its checks")?;
 
     unmark(&mut connection, conversation_id).await
+}
+
+/// Whether the mark saying a narrowing was said out loud is there.
+///
+/// What [`narrowing`] asks before it deletes, so that the poll which changes
+/// nothing — every poll of a wrap-up that has not narrowed, which is most of
+/// one — costs a read rather than a write. Nothing else asks: the condition
+/// itself is [`narrowed`]'s to read off the settle facts, and this is only ever
+/// about the row.
+async fn marked(tx: &mut sqlx::SqliteConnection, conversation_id: i64) -> Result<bool> {
+    let found: Option<(i64,)> =
+        sqlx::query_as("SELECT conversation_id FROM wrap_up_narrowings WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| {
+                format!(
+                    "reading whether the wrap-up of Conversation {conversation_id} had been \
+                     said to be down to its checks"
+                )
+            })?;
+
+    Ok(found.is_some())
 }
 
 /// The delete both of them are, so the two cannot come to disagree about which
