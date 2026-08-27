@@ -12512,6 +12512,23 @@ const IDLE_WHATEVER_IT_IS_TOLD: &str = "    printf 'reading the branch\\n'\n    
      while read -r TOLD; do printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues; done\n    \
      sleep 300";
 
+/// One that is answered, works on for longer than the grace, and only then
+/// finishes: a session that is gone because it had nothing left to do.
+///
+/// The talking is what makes this a test of the ending rather than of the
+/// quiet. Anything a session prints puts the whole grace back on the clock, so
+/// a stub that goes on printing past [`BRISKLY`]'s `proposing` cannot be ended
+/// on quiet — which leaves the session going first as the only way this
+/// follow-up can end at all.
+const A_MARKED_ROUND_THEN_GONE: &str = "    SAYING='following it up'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     LEFT=20\n    \
+     while [ $LEFT -gt 0 ]; do \
+     printf 'still tidying up\\n'; sleep 0.1; LEFT=$((LEFT - 1)); done\n    \
+     printf 'that is that, then\\n'";
+
 /// A follow-up that does its round, is answered, and then finishes: a session
 /// that is gone with the human never having said there was nothing else, which
 /// is the stop a follow-up is picked up again from.
@@ -12706,6 +12723,69 @@ async fn a_follow_up_session_that_is_gone_stops_the_conversation() {
         Some(stopped.id),
         "so the Conversation is blocked on the human, with the Notice to read",
     );
+}
+
+/// And one that finishes on a round the human had already marked is a follow-up
+/// that is *over* rather than one nobody is left to have.
+///
+/// The mark is read where the session ends as well as where it idles, and that
+/// is the whole of what tells the two endings apart. **Finish your turn** is
+/// what the skill tells a session with nothing left to ask, and an interactive
+/// agent that decides there is nothing to do exits zero — so a session going
+/// before the grace beside it has run out is the ordinary shape of a follow-up
+/// ending rather than one that fell over. Read on the quiet alone, it would put
+/// a stop on the Timeline of a Conversation the human had finished with, and
+/// cost them a press to get back what they had already said.
+///
+/// The stub talks past the grace after it is answered, so nothing here can be
+/// ended on quiet: the session going is the only way this one lands anywhere.
+#[tokio::test]
+async fn a_follow_up_session_that_finishes_on_the_mark_lands_in_the_wrap_up() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, A_MARKED_ROUND_THEN_GONE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: a session that finished on the human's own mark is a \
+         follow-up that ended rather than one that is gone: {:?}",
+        notices(&view),
+    );
+    assert!(!view.working, "and nothing is left holding the Worktree",);
 }
 
 /// A follow-up that pushed ends on the human's mark and lands back in the

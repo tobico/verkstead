@@ -1155,6 +1155,14 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
 /// asking. The Notice says what happened and any question it left the human
 /// holding goes off with it.
 ///
+/// **Unless it is gone because it had finished**, which the mark is what says.
+/// A session whose last act was the round the human marked *Nothing else* is a
+/// follow-up that is over rather than one nobody is left to have, and an agent
+/// that finishes its turn and exits is the ordinary shape of that — so the mark
+/// and the open Set are read again where the session ends first, and a
+/// follow-up that reads as finished lands in the wrap-up instead of stopping.
+/// The same reading [`instructed`] gives its commits at the same point.
+///
 /// **So is one that will not ask.** A session that goes idle without a Set open
 /// leaves the human holding a Conversation they can neither answer nor end, so
 /// it is spoken to — twice, and then stopped where it stands. Nothing it left
@@ -1235,11 +1243,6 @@ pub(crate) async fn following_up(
         return over(&state, conversation_id, already, driving).await;
     };
 
-    // Held until the stop is written, which is what every driver here holds it
-    // for: dropping first would leave a moment where a sweep could find the
-    // Conversation undriven and stop it with a worse sentence.
-    let _driving = driving;
-
     // Verkstead ended it — the human closed the Conversation or force-stopped it,
     // or the account it was spending ran out of window. Each has already written
     // the stop this would otherwise write. See
@@ -1252,6 +1255,37 @@ pub(crate) async fn following_up(
         );
         return;
     }
+
+    // The session is over on its own account, which is not by itself a follow-up
+    // left unfinished. The human may have said there was nothing else and the
+    // agent gone before the grace beside this had run out — which is the
+    // ordinary shape of a session that finishes its turn rather than idling,
+    // [`crate::sessions::Ended::Well`] being what an interactive agent with
+    // nothing left to do exits as. So the record is asked once more before this
+    // is read as a follow-up nobody is left to have, exactly as an instruction
+    // session's commits are asked for again where it ends first.
+    //
+    // The same two questions [`nothing_else_and_quiet`] asks, and asked in the
+    // same order: a Set still standing is the human holding a question, and one
+    // is worth closing and stopping over whatever the newest answer said. Both
+    // read the safe way round for this — a store that will not answer reads as
+    // open and as not marked — so a record that cannot be asked leaves the stop
+    // below exactly as it was.
+    if !open(&state, conversation_id).await && marked(&state, conversation_id).await {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "the follow-up session finished on a round the human had already \
+             marked, so the follow-up is over rather than gone",
+        );
+
+        return over(&state, conversation_id, already, driving).await;
+    }
+
+    // Held until the stop is written, which is what every driver here holds it
+    // for: dropping first would leave a moment where a sweep could find the
+    // Conversation undriven and stop it with a worse sentence.
+    let _driving = driving;
 
     // And anything it left the human holding goes off as the stop is raised.
     // The session that asked is gone and no other is ever handed somebody else's
