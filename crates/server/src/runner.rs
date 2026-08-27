@@ -384,30 +384,132 @@ pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, dr
         // as every other turn of the run asks it — a stage's backlog included,
         // it being a backlog like any other by the time there is one. What is
         // next has not changed on account of nothing having been running.
-        Direction::TaskList => {
-            let step = decide(&working_in).await;
+        Direction::TaskList => backlog_again(state, conversation_id, &working_in, driving).await,
+    }
+}
 
-            if step == Step::Nothing {
-                // Either the breakdown never landed one or the finish took the
-                // last of it away, and nothing here can tell those apart. So
-                // nothing is launched — which the press has already refused by
-                // name, this being the reading after the spawn rather than the
-                // one in front of it. See [`crate::resume`].
-                tracing::info!(
-                    conversation_id,
-                    "there is no backlog left to work, so nothing was started again"
-                );
-                return;
-            }
+/// Work a backlog again — or, where it is worked out and the branch is already
+/// on a pull request, wrap that up instead.
+///
+/// The backlog's own answer to what is next, asked of `.tasks/` exactly as every
+/// other turn of the run asks it — a stage's backlog included, it being a
+/// backlog like any other by the time there is one. What is next has not changed
+/// on account of nothing having been running.
+///
+/// An empty one is two situations rather than one, and until [`nothing_left`]
+/// asks GitHub nothing can tell them apart: a breakdown that never landed, and a
+/// feature that is finished with. The second is the one worth handling, because
+/// it is what a *failed ending* looks like from here — the finish step pushed
+/// and opened the pull request, and what went wrong went wrong afterwards.
+async fn backlog_again(state: AppState, conversation_id: i64, working_in: &Path, driving: Driving) {
+    let step = decide(working_in).await;
 
-            tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
+    if step == Step::Nothing {
+        return nothing_left(state, conversation_id, driving).await;
+    }
 
-            let Some(session) = launch_in_turn(&state, conversation_id, Prompt::NextTask).await
-            else {
-                return;
-            };
+    tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
 
-            work(state, conversation_id, step, session, driving).await
+    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::NextTask).await else {
+        return;
+    };
+
+    work(state, conversation_id, step, session, driving).await
+}
+
+/// What to make of a backlog with nothing left in it, which is decided by asking
+/// GitHub what the branch is on.
+///
+/// [`inline_again`]'s question, asked at the other end of the run. An inline
+/// implementation asks it before spending a session, because a branch that is
+/// already on a pull request has nothing left to implement. A backlog asks it
+/// once it has nothing left to work, and the reasoning arrives at the same
+/// place: the finish step that emptied it is the step that opens the pull
+/// request, so a branch on one is a run whose ending got most of the way through.
+///
+/// Which is the case this is written for. Recording the pull request and moving
+/// the Conversation into Wrapping is one transaction — see
+/// [`store::record_pull_request`] — and a Conversation whose ending failed
+/// somewhere after the push is left implementing a backlog that is empty, with
+/// the work on a pull request nothing has written down. Every way back in used
+/// to refuse it: Resume for the empty backlog, a steer into Wrapping for the
+/// pull request it had no record of. So the run asks GitHub rather than the
+/// record, because GitHub is the one that knows.
+///
+/// Three answers, exactly as [`inline_again`] has them:
+///
+/// - a pull request, and [`crate::wrapping::opened`] records it and starts the
+///   wrap-up, finishing the ending that did not finish;
+/// - [`github::Trouble::NoPullRequest`], which is the ordinary case — a
+///   breakdown that never landed — and there is nothing to launch and nothing to
+///   wrap up, so this stops;
+/// - anything else, which is `gh` unable to answer at all, and that stops too,
+///   saying which trouble it was.
+///
+/// Both stops are stops rather than a line in the log, because what is on the
+/// other side of doing nothing here is the stall sweep finding the Conversation
+/// undriven a minute later and stopping it with a worse sentence than either of
+/// these.
+async fn nothing_left(state: AppState, conversation_id: i64, driving: Driving) {
+    let Some((branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
+        return;
+    };
+
+    // Held until the wrap-up's watchers have registrations of their own, or
+    // until the stop is written: dropping first would leave a moment where a
+    // sweep could find the Conversation undriven and stop it all over again.
+    let _driving = driving;
+
+    match found {
+        Ok(opened) => {
+            tracing::info!(
+                conversation_id,
+                number = opened.number,
+                "the backlog is worked out and the branch is on a pull request nothing \
+                 recorded, so this wraps it up rather than working it again",
+            );
+
+            // With no Event to read a tail off: the session that opened the pull
+            // request is long gone, and what it said is already on the Timeline
+            // above whatever stopped the run.
+            crate::wrapping::opened(&state, conversation_id, None).await
+        }
+        Err(github::Trouble::NoPullRequest) => {
+            tracing::info!(
+                conversation_id,
+                "there is no backlog left to work and the branch is on no pull request",
+            );
+
+            stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "working out what is left of the backlog",
+                "there is nothing left in `.tasks/` to work and the branch is on no pull \
+                 request to wrap up — the breakdown never landed, or the work is finished \
+                 with and its ending never happened",
+                None,
+            )
+            .await;
+        }
+        Err(trouble) => {
+            tracing::warn!(
+                conversation_id,
+                branch,
+                why = trouble.why(),
+                "GitHub cannot be asked what an emptied backlog's branch is on, so nothing \
+                 was started again",
+            );
+
+            stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "working out what is left of the backlog",
+                &trouble.why(),
+                None,
+            )
+            .await;
         }
     }
 }
@@ -1020,10 +1122,19 @@ pub(crate) async fn instructed(
 /// Wrapping over the record it already had, and starts the wrap-up's watchers
 /// afresh.
 ///
+/// Of `gh` rather than of the record, which is the difference between wrapping a
+/// Conversation up and stopping it a second time. A record is what Verkstead
+/// wrote down; a pull request is GitHub's fact. Where the two disagree it is
+/// because the writing down failed — and a Conversation whose ending failed
+/// after the push is exactly the Conversation a human steers an instruction into
+/// to get it moving. Asking the record would tell it what it already believes.
+///
 /// **And a stop where the branch holds neither**, because there is nothing left
 /// that could be started and a Conversation left implementing with nothing
 /// driving it would be one the stall sweep stopped a minute later with a worse
-/// sentence. `writing` is the Event the session printed into, so the Notice
+/// sentence. A `gh` that cannot answer stops it too, saying which trouble it
+/// was: a session launched into that could only dead-end on the same missing
+/// thing. `writing` is the Event the session printed into, so the Notice
 /// carries the tail of what it last said.
 async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: Driving) {
     let Some(worktree) = worktree(&state, conversation_id).await else {
@@ -1044,17 +1155,22 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
     // sweep could find the Conversation undriven and stop it all over again.
     let _driving = driving;
 
-    match store::pull_request(&state.pool, conversation_id).await {
-        Ok(Some(_)) => {
+    let Some((branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
+        return;
+    };
+
+    match found {
+        Ok(opened) => {
             tracing::info!(
                 conversation_id,
+                number = opened.number,
                 "the instruction is done and the branch is on a pull request, so it is \
                  wrapped up again",
             );
 
             crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
         }
-        Ok(None) => {
+        Err(github::Trouble::NoPullRequest) => {
             tracing::info!(
                 conversation_id,
                 "the instruction is done and the branch holds nothing to carry on with",
@@ -1070,8 +1186,23 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
             )
             .await;
         }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether the branch is on a pull request failed");
+        Err(trouble) => {
+            tracing::warn!(
+                conversation_id,
+                branch,
+                why = trouble.why(),
+                "GitHub cannot be asked what the branch an instruction left is on",
+            );
+
+            stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "carrying the work on from what the instruction left",
+                &trouble.why(),
+                Some(writing),
+            )
+            .await;
         }
     }
 }
