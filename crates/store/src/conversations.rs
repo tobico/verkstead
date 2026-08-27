@@ -997,7 +997,9 @@ async fn started(
     branch: &str,
     adopts: Option<&str>,
 ) -> Result<Option<i64>> {
-    let mut tx = pool.begin().await.context("starting a Conversation")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("starting a Conversation")?;
 
     let row: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO conversations (repo_id, created_at, branch, base_commit, state)
@@ -1360,8 +1362,7 @@ async fn choose(
         });
     }
 
-    let mut tx = pool
-        .begin()
+    let mut tx = super::begin_writing(pool)
         .await
         .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
 
@@ -1664,7 +1665,9 @@ pub async fn ask(
 ) -> Result<Option<SetCreated>> {
     let body = serde_json::to_string(set).context("serialising the Question Set")?;
 
-    let mut tx = pool.begin().await.context("putting a Question Set")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("putting a Question Set")?;
 
     let event: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO timeline_events (conversation_id, at, kind, body)
@@ -2108,7 +2111,9 @@ pub async fn start_grilling(
 ) -> Result<Grilling> {
     let worktree = super::repos::text(worktree)?;
 
-    let mut tx = pool.begin().await.context("starting a grilling")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("starting a grilling")?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
@@ -2176,7 +2181,9 @@ pub async fn start_grilling(
 /// Closing one that is closed already records nothing and is not an error. The
 /// human asked for it to be closed, and it is.
 pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
-    let mut tx = pool.begin().await.context("closing a Conversation")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("closing a Conversation")?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
@@ -2241,7 +2248,9 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
 /// One transaction, though there is only the one row to write: what a later pick
 /// overwrites is the row a watcher is armed from, and a restart reads back.
 pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) -> Result<Directing> {
-    let mut tx = pool.begin().await.context("acting on a picked direction")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("acting on a picked direction")?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
@@ -2290,7 +2299,9 @@ pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) ->
 /// One transaction, as every move is: a Conversation that says Implementing
 /// always has the move on its Timeline to say when it got there.
 pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementing> {
-    let mut tx = pool.begin().await.context("starting the implementation")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("starting the implementation")?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
@@ -2343,7 +2354,9 @@ pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementi
 /// One transaction, as every move is: a Conversation that says Implementing
 /// always has the move on its Timeline to say when it got there.
 pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
-    let mut tx = pool.begin().await.context("building the split-out work")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("building the split-out work")?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
@@ -2445,7 +2458,9 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         base_commit,
     } = steer;
 
-    let mut tx = pool.begin().await.context("steering a Conversation")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("steering a Conversation")?;
 
     let steer = Event::Steer(target, instruction.map(str::to_owned));
 
@@ -2740,8 +2755,7 @@ pub enum Landed {
 async fn landed(pool: &SqlitePool, id: i64, event: Event) -> Result<Landed> {
     let kind = event.kind();
 
-    let mut tx = pool
-        .begin()
+    let mut tx = super::begin_writing(pool)
         .await
         .with_context(|| format!("recording that {kind} landed on Conversation {id}"))?;
 
@@ -2834,7 +2848,9 @@ pub async fn start_stage(
 ) -> Result<Staged> {
     let worktree = super::repos::text(worktree)?;
 
-    let mut tx = pool.begin().await.context("starting a stage")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("starting a stage")?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)

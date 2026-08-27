@@ -62,8 +62,7 @@ async fn commits_that_named_no_repo(pool: &SqlitePool) -> Result<()> {
         return Ok(());
     }
 
-    let mut tx = pool
-        .begin()
+    let mut tx = super::begin_writing(pool)
         .await
         .context("attributing the commits recorded before this to a repository")?;
 
@@ -143,8 +142,7 @@ const OLD_STATE: &str = "aborted";
 /// [`super::Lifecycle::read`] still knows the word regardless, for a database
 /// that never came through here.
 async fn conversations_that_were_aborted(pool: &SqlitePool) -> Result<()> {
-    let mut tx = pool
-        .begin()
+    let mut tx = super::begin_writing(pool)
         .await
         .context("renaming the state of every Conversation that was aborted")?;
 
@@ -214,8 +212,7 @@ async fn stops_recorded_the_old_way(pool: &SqlitePool) -> Result<()> {
         String,
     );
 
-    let mut tx = pool
-        .begin()
+    let mut tx = super::begin_writing(pool)
         .await
         .context("rewriting the stops of before")?;
 

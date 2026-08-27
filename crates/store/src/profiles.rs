@@ -218,8 +218,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 ///
 /// `None` means another Profile is called that.
 pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<Option<Profile>> {
-    let mut tx = pool
-        .begin()
+    let mut tx = super::begin_writing(pool)
         .await
         .with_context(|| format!("saving the Profile {:?}", facts.name))?;
 
@@ -261,8 +260,7 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
 /// Rewrite a Profile, whole: everything about one is the human's to change, and
 /// nothing about it is an artifact that could have been built from it yet.
 pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) -> Result<Saving> {
-    let mut tx = pool
-        .begin()
+    let mut tx = super::begin_writing(pool)
         .await
         .with_context(|| format!("rewriting Profile {id}"))?;
 
@@ -336,8 +334,7 @@ pub async fn delete_profile(pool: &SqlitePool, id: i64) -> Result<Deleting> {
         return Ok(Deleting::InUse);
     }
 
-    let mut tx = pool
-        .begin()
+    let mut tx = super::begin_writing(pool)
         .await
         .with_context(|| format!("removing Profile {id}"))?;
 

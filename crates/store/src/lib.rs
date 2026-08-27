@@ -23,8 +23,8 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
-use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
@@ -509,6 +509,28 @@ pub async fn open_database(path: &Path) -> Result<SqlitePool> {
     apply_schema(&pool).await?;
 
     Ok(pool)
+}
+
+/// Begin a transaction that is going to write, taking the write lock with its
+/// first statement rather than reaching for it part way through.
+///
+/// SQLite's own `BEGIN` is deferred: the lock is taken by whichever statement
+/// first needs it, so a transaction that reads and then writes asks to be
+/// promoted from a reader to a writer half way through. Where another
+/// connection has become the writer in between, SQLite refuses that promotion
+/// outright — *database is locked*, answered straight away rather than waited
+/// on, because two connections each holding half of what the other wants is a
+/// deadlock rather than a delay. The busy timeout does not apply to it, so no
+/// amount of patience makes it come out any other way.
+///
+/// Nearly every transaction here reads before it writes — a state to check
+/// against, a row to count, an id to hang the rest off — so nearly every one of
+/// them is that shape. Beginning immediately takes the write lock up front,
+/// where the busy timeout *does* apply: a transaction that cannot have it waits
+/// its turn and then gets it, which is what a second writer arriving was always
+/// supposed to look like.
+pub(crate) async fn begin_writing(pool: &SqlitePool) -> sqlx::Result<Transaction<'static, Sqlite>> {
+    pool.begin_with("BEGIN IMMEDIATE").await
 }
 
 /// Bring an opened database up to the shape the server expects. Safe to run

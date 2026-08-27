@@ -119,7 +119,9 @@ pub async fn start_capture(
     conversation_id: i64,
     session_id: Option<&str>,
 ) -> Result<i64> {
-    let mut tx = pool.begin().await.context("starting a Capture")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("starting a Capture")?;
 
     let (event_id,): (i64,) = sqlx::query_as(
         "INSERT INTO timeline_events (conversation_id, at, kind, body)
@@ -161,7 +163,9 @@ pub async fn append_capture(
     text: &str,
     summary: &Summary,
 ) -> Result<()> {
-    let mut tx = pool.begin().await.context("adding to a Capture")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("adding to a Capture")?;
 
     sqlx::query(
         "INSERT INTO capture_chunks (event_id, seq, text)
@@ -198,7 +202,9 @@ pub async fn append_capture(
 /// [`append_capture`], which is what keeps a Timeline from saying something the
 /// details pane disagrees with.
 pub async fn summarise_capture(pool: &SqlitePool, event_id: i64, summary: &Summary) -> Result<()> {
-    let mut tx = pool.begin().await.context("summarising a Capture")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("summarising a Capture")?;
 
     write_summary(&mut tx, event_id, summary).await?;
 

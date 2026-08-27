@@ -269,7 +269,9 @@ pub async fn stop(
     markdown: &str,
     resets: Option<&str>,
 ) -> Result<Option<i64>> {
-    let mut tx = pool.begin().await.context("stopping a Conversation")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("stopping a Conversation")?;
 
     // Asked inside the transaction, so the answer still holds when the write
     // below acts on it.

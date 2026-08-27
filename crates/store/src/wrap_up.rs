@@ -368,8 +368,7 @@ pub async fn record_addressed_comments(
     conversation_id: i64,
     comments: &[String],
 ) -> Result<()> {
-    let mut tx = pool
-        .begin()
+    let mut tx = super::begin_writing(pool)
         .await
         .context("recording which comments have been dispatched for")?;
 
@@ -415,8 +414,7 @@ pub async fn forget_addressed_comments(
     conversation_id: i64,
     comments: &[String],
 ) -> Result<()> {
-    let mut tx = pool
-        .begin()
+    let mut tx = super::begin_writing(pool)
         .await
         .context("forgetting which comments have been dispatched for")?;
 
@@ -456,7 +454,9 @@ pub async fn forget_addressed_comments(
 /// What it does *not* wait for is the merge. Done means Verkstead has finished
 /// with the work, not that it is on `main`.
 pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<Finished> {
-    let mut tx = pool.begin().await.context("finishing a wrap-up")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("finishing a wrap-up")?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(conversation_id)

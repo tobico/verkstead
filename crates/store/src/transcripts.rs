@@ -59,7 +59,9 @@ pub async fn append_transcript(pool: &SqlitePool, event_id: i64, lines: &[String
         return Ok(());
     }
 
-    let mut tx = pool.begin().await.context("adding to a Transcript")?;
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("adding to a Transcript")?;
 
     let (last,): (i64,) =
         sqlx::query_as("SELECT COALESCE(MAX(seq), 0) FROM transcript_lines WHERE event_id = ?")
