@@ -44,12 +44,15 @@ _Avoid_: task, session, job, thread, ticket
 The checkout a Conversation's work is done in, made when grilling starts along
 with the branch it holds, and removed when the Conversation is closed — the
 branch outlives it, because a branch is cheap and may hold work worth reading.
-A steered Conversation keeps the one it has; where the directory has gone, one
-is checked out again on the branch that was worked, which is the only time a
-Worktree is made without a branch being made with it.
-Named for the Repo and the branch, and it lives in the Data Directory rather
-than inside a Watched Path: Verkstead made it, so it goes among Verkstead's own
-things.
+A Conversation may have more than one: its own, and one per Companion Repo,
+made when its own is made and given back when its own is. A steered
+Conversation keeps the one it has; where the directory has gone, one is checked
+out again on the branch that was worked, which is one of the two times a
+Worktree is made without a branch being made with it — a read-only companion's,
+checked out detached, is the other.
+Named for the Repo and what the checkout holds — the branch, or the base a
+detached one stands at — and it lives in the Data Directory rather than inside
+a Watched Path: Verkstead made it, so it goes among Verkstead's own things.
 _Avoid_: checkout, working copy, sandbox (that's what runs *in* it), clone
 
 **Data Directory**:
@@ -68,12 +71,15 @@ What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
 Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills and
 the Verkstead executable read-only, and nothing else of the machine at all
-— not even the checkout the Worktree was made from. The filesystem is the
-boundary and the network is not: inside, it is the host's own, whole and
-unfiltered, because what stops a session doing harm is that there is nothing
-within reach to harm. The `verkstead` a session asks with is the running
-server's own image, first on the `PATH` inside, so the CLI a session asks with
-and the server it asks are one build and cannot disagree about a schema.
+— not even the checkout the Worktree was made from. Each Companion Repo the
+Conversation was configured with is inside as well: its Worktree and the git
+directory behind it, both at that companion's own mode, so a read-only one is
+read-only through both. The filesystem is the boundary and the network is not:
+inside, it is the host's own, whole and unfiltered, because what stops a
+session doing harm is that there is nothing within reach to harm. The
+`verkstead` a session asks with is the running server's own image, first on the
+`PATH` inside, so the CLI a session asks with and the server it asks are one
+build and cannot disagree about a schema.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
@@ -83,6 +89,51 @@ composed over it. Configured where the Watched Paths are rather than anywhere
 the workbench can reach: every one of them is a hole in the boundary, and
 widening a boundary is the installer's to do.
 _Avoid_: sandbox settings, mounts, extra paths
+
+**Companion Repo**:
+Another registered Repo a Conversation is given to work alongside its own,
+**read-only** or **read-write**, checked out beside the Conversation's own
+Worktree and bound into every one of its sessions' Sandboxes at whichever of
+the two it is set to. Registered is the whole of the trust boundary: what a
+Conversation may compose is what the human has already put in the registry. The
+Conversation's own Repo is refused — it is the work's repository already, and a
+second checkout of it in one sandbox is not a companion — and so is a Repo
+added twice.
+
+**Configured beside the branch while the Brief drafts**, on the setup card and
+by the setup's own rules: freely added, edited and taken away, and frozen at
+grill start along with the branch and the base. What is configured is the mode,
+the branch the checkout comes off — that repository's default branch where none
+is picked, the rule the Conversation's own base follows — and, for a read-write
+one, what its branch is to be called. Empty is not a branch called nothing but
+*mirroring*: the Conversation's own branch name, followed as it is renamed,
+until a name is typed and stands on its own.
+
+**Always a Worktree of Verkstead's own, never the human's checkout.** At grill
+start each companion is fetched and then resolved, the Conversation's
+repository's order for the Conversation's repository's reasons. A read-only one
+is checked out **detached** at the commit its base resolved to, having nothing
+to commit and no business taking a name in somebody else's repository; a
+read-write one is cut a branch from its base, exactly as the Conversation's
+repository is. Every question is asked before anything is made, so an answer
+git will not give — the fetch that failed, the base that resolves to nothing,
+the branch already taken — refuses the grill start naming the repository and
+leaves neither a directory nor a branch behind. Closed the way the
+Conversation's own is: the directory goes and the branch stays.
+
+**A session gets the checkout, and is told it is there.** The worktree and the
+git directory behind it are both bound at the companion's mode — read-only
+reaches the git directory too, or the history would be writable around the back
+— and the companion Repo's own Sandbox Configuration binds are composed in
+beside them, because building in it needs them. Its flake is not entered for
+the session: the dev shell is the Conversation's own worktree's alone, and an
+agent that needs a companion's enters it itself, `nix` being on the sandbox
+`PATH`. The prompt carries one neutral `# Companion repositories` listing —
+each one named with its directory, what it holds and whether it may be written
+to — and no instructions with it, because what a companion is for is the
+Brief's to say. What a Conversation was configured with is read on the Brief's
+details pane ever after, the setup rows having gone when the card froze.
+_Avoid_: submodule, dependency, linked repo, sibling checkout, secondary repo
 
 **Skill**:
 One of the workflows Verkstead runs its sessions by — grilling, implementing,
