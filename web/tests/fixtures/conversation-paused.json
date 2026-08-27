@@ -5,6 +5,7 @@
   "blocked_on": 27,
   "branch": "deferred-asks",
   "direction": null,
+  "driven": false,
   "grilling_pairing": {
     "model": null,
     "profile": {
