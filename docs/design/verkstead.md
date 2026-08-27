@@ -100,9 +100,37 @@ flowchart LR
   `--sandbox-bind DIR` for every sandbox, `--sandbox-bind NAME=DIR` for the repo
   registered under that name — because each bind is a hole in the boundary and
   widening one is the installer's to do. Letting a **conversation** allow another
-  repository into its own sandbox, chosen while the brief is drafted, is wanted
-  and is not built: the sandbox takes a composed list, so it is a source to add
-  rather than anything to undo.
+  repository into its own sandbox is the companion-repos bullet below (*settled
+  2026-08-27, staging companion-repos*; this said "wanted and is not built"):
+  the sandbox takes a composed list, so it was a source to add rather than
+  anything to undo.
+- **Companion repos** (*settled 2026-08-27, staging companion-repos — being
+  built by that roadmap*): a conversation may add other registered repos to its
+  sandbox, each read-only or read-write. Configured while the brief drafts — an
+  ellipsis menu beside the branch row (the one `Menu` component, extended to
+  nest) adding a row per companion: a base-branch picker like the main one, a
+  mode switch, and for read-write a branch-name field that mirrors the main
+  branch name until one is typed. The conversation's own repo and duplicates
+  are refused. Frozen at grill start with the branch and base; a steer may add
+  companions or upgrade read-only to read-write — never remove or downgrade —
+  and an upgrade fetches and cuts from the branch's fresh tip. **Always a
+  Verkstead worktree; the human's checkout never enters a sandbox**: read-only
+  checks out detached at the selected branch's resolved commit (which also
+  sidesteps git's refusal to check a branch out twice), read-write always cuts
+  a new branch, exactly as the main repo does. Fetch-then-resolve per companion
+  at grill start, refusals naming the companion, teardown at close keeping the
+  branches. The sandbox binds each companion's worktree and git common dir by
+  mode and composes that repo's own per-repo binds; the prompt carries one
+  neutral companion listing and no instructions — the agent decides from the
+  brief what to use. Visibility: a commit sweep per read-write companion with
+  repo-labeled commit events, and Set diffs composed server-side per repo (the
+  main repo's diff derivation moves server-side too, for consistency).
+  Pipeline: **full, per touched companion** — the finish session pushes and PRs
+  each companion holding commits by that repo's own review process, a touched
+  companion without a PR is a deliberate stop, each PR gets its own checks and
+  comments watchers, one review session and one Set cover all the PRs, and Done
+  waits for every PR to settle; the merge is still not waited on. Roadmap
+  stages inherit the companion set, read-write branches named per stage.
 - **Repo files stay the source of truth** for task lists (`.tasks/`) and
   roadmaps (`docs/roadmaps/`). Verkstead parses and renders them; it never
   owns them. *Why:* keeps the skills' formats and the done-signal design
