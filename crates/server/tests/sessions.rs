@@ -516,8 +516,9 @@ impl Grilling {
             .await
     }
 
-    /// Whether anybody chose to stop, which is the half of a stop the Timeline
-    /// does not draw: a restart reads it rather than a human, so the record is
+    /// Who stopped it, which is the half of a stop the Timeline does not draw.
+    /// A restart reads it to decide whether to take the Conversation up, and
+    /// the marks read it to decide whether to say anything — so the record is
     /// the only place to ask.
     async fn chosen(&self) -> Decision {
         self.stop_on_the_record().await.decision
@@ -2779,7 +2780,7 @@ async fn an_inline_grilling_that_writes_no_handoff_halts_the_run() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "a session that ended short is a brake Verkstead pulled, so a restart \
          leaves it alone",
     );
@@ -4021,7 +4022,7 @@ async fn a_check_two_fix_sessions_could_not_fix_halts_and_tells_the_human() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "every fix session the branch was allowed has been spent, so a restart \
          that started the fixing over would spend them all again",
     );
@@ -4360,7 +4361,7 @@ async fn a_finish_that_opened_no_pull_request_leaves_the_conversation_where_it_i
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "what is missing is out here rather than in a driver that went away, so a \
          restart looking again would find the same missing thing",
     );
@@ -5340,7 +5341,7 @@ async fn a_review_session_that_dies_halts_the_run_rather_than_passing_the_branch
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "a branch nobody has read is not one a restart may carry on past",
     );
     assert_eq!(
@@ -7884,7 +7885,7 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "Verkstead pulled the brake on a session that fell over, so going again \
          is the human's press rather than a restart's to assume",
     );
@@ -7896,8 +7897,14 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
         "the Conversation is blocked on the human, and says which Event it is blocked on",
     );
     assert!(
+        !view.stopped_by_hand,
+        "loudly, nobody having pressed anything: the badge rather than the quiet \
+         label",
+    );
+    assert!(
         fixture.row().await.waiting,
-        "and the sidebar says so too, a stop being the whole of what is waiting",
+        "and the sidebar says so too, a stop from outside the human being the \
+         whole of what is waiting",
     );
     assert_eq!(
         view.state,
@@ -8029,7 +8036,7 @@ async fn a_backlog_halts_at_the_task_whose_session_died() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "a task nothing has moved is not one a restart may have another go at",
     );
 
@@ -8210,7 +8217,7 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
 
     assert_eq!(
         stop.decision,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "Verkstead pulled the brake, so a restart leaves it waiting",
     );
     assert_eq!(
@@ -8620,7 +8627,7 @@ async fn stop_lets_the_task_finish_and_halts_before_the_next_one() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Human,
         "a stop the human asked for is not one a restart may drive past",
     );
 
@@ -8719,7 +8726,7 @@ async fn force_stop_ends_the_session_where_it_stands_and_halts_at_once() {
         "the Notice says whose stop it was, and which of the two: {:?}",
         stopped.html,
     );
-    assert_eq!(fixture.chosen().await, Decision::Deliberate);
+    assert_eq!(fixture.chosen().await, Decision::Human);
 
     fixture
         .until(|view| {
@@ -8855,7 +8862,7 @@ async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
         "the run stopped because of the press: {:?}",
         stopped.html,
     );
-    assert_eq!(fixture.chosen().await, Decision::Deliberate);
+    assert_eq!(fixture.chosen().await, Decision::Human);
 
     // Long enough for the driver to have read the ending, taken the handoff and
     // reached the launch on the other side of it.
@@ -9107,12 +9114,25 @@ async fn stop_pressed_with_nothing_running_halts_where_it_stands() {
         "and what it was that stopped: {:?}",
         stopped.html,
     );
-    assert_eq!(fixture.chosen().await, Decision::Deliberate);
+    assert_eq!(fixture.chosen().await, Decision::Human);
+
+    let view = fixture.view().await;
 
     assert_eq!(
-        fixture.view().await.blocked_on,
+        view.blocked_on,
         Some(stopped.id),
-        "and the Conversation is waiting on the human from here",
+        "and nothing is driving the Conversation from here, with the Notice \
+         saying so where the record kept it",
+    );
+    assert!(
+        view.stopped_by_hand,
+        "said quietly, because they are the one who pressed it: the label \
+         rather than the badge",
+    );
+    assert!(
+        !fixture.row().await.waiting,
+        "and the sidebar's dot stays off, a dot on the work they stopped last \
+         being the one that teaches them to ignore the dots",
     );
 }
 
@@ -10940,7 +10960,7 @@ async fn a_halt_verkstead_decided_on_tells_the_devices_once() {
 
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "Verkstead pulled the brake, which is the kind of stop worth a phone",
     );
 
@@ -11389,7 +11409,7 @@ async fn an_inline_run_that_opened_no_pull_request_leaves_the_conversation_where
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "what is missing is out here rather than in a driver that went away, so a \
          restart looking again would find the same missing thing",
     );
@@ -11458,21 +11478,24 @@ async fn a_wrap_up_nothing_is_watching_halts_as_one() {
     assert_eq!(view.blocked_on, Some(stalled.id));
 }
 
-/// Stop a Conversation the way a stall does — nobody's decision, and the
-/// ordinary Notice on its Timeline saying what nothing was doing — without
-/// waiting for a sweep to find it.
+/// Stop a Conversation the way a stall does, with the ordinary Notice on its
+/// Timeline saying what nothing was doing — and stopped by whichever of the
+/// four words is being asked about, rather than by waiting for a sweep to find
+/// it.
 ///
 /// The record is written rather than provoked, for [`wrapping_unwatched`]'s
-/// reason: what the test is about is what the *next* server makes of a stop
-/// nobody chose, and a sweep left running would write a second one over the top
-/// of what it was watching.
-async fn halted_by_circumstance(fixture: &Grilling) {
+/// reason: what these tests are about is what the *next* server makes of a
+/// stored word, and a sweep left running would write a second stop over the top
+/// of what it was watching. It is also the only way to have a `deliberate` one
+/// at all — nothing writes that word any more, and what these tests are asking
+/// is what a database written before it stopped being written still does.
+async fn halted_by(fixture: &Grilling, decision: Decision) {
     let pool = open_database(&fixture.database).await.unwrap();
 
     let written = verkstead_store::stop(
         &pool,
         fixture.id,
-        Decision::Circumstance,
+        decision,
         "**Grilling the work** stopped.\n\nnothing is driving it: no session is \
          running, and nothing is left to start one\n\n### The worktree\n\nGit had \
          nothing pending, or the repository would not answer.\n\n### What the last \
@@ -12016,7 +12039,7 @@ async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "what is missing is out here, so a restart looking again would find it",
     );
 
@@ -13744,7 +13767,7 @@ async fn a_follow_up_session_that_will_not_ask_is_stopped_after_two_rescues() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "and Verkstead decided it, so a restart leaves it exactly here",
     );
 }
@@ -13970,7 +13993,7 @@ async fn a_grilling_that_goes_idle_without_its_artifact_is_told_and_then_stopped
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "and Verkstead decided it, so a restart leaves it exactly here",
     );
 }
@@ -15403,7 +15426,7 @@ async fn a_deliberate_halt_survives_a_restart_with_its_badge_intact() {
 
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "a step whose session ended without landing it is Verkstead pulling the \
          brake, which is the kind of stop a restart may not overrule",
     );
@@ -15431,7 +15454,7 @@ async fn a_deliberate_halt_survives_a_restart_with_its_badge_intact() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "and the stop is the same stop, not one written over the top of it",
     );
     assert_eq!(
@@ -15449,7 +15472,7 @@ async fn a_deliberate_halt_survives_a_restart_with_its_badge_intact() {
 /// stop goes with it, because nothing is stopped any more. The Notice stays where
 /// it is: it is a stop that really happened.
 ///
-/// The stop is written rather than waited for — see [`halted_by_circumstance`] —
+/// The stop is written rather than waited for — see [`halted_by`] —
 /// so that this server writes exactly one: a sweep that went on looking would
 /// stop the Conversation again while the next server was driving it.
 #[tokio::test]
@@ -15458,7 +15481,7 @@ async fn a_halt_nobody_chose_is_driven_again_by_the_next_server() {
 
     fixture.quiet().await;
 
-    halted_by_circumstance(&fixture).await;
+    halted_by(&fixture, Decision::Circumstance).await;
 
     let stalled = fixture.stopped().await;
 
@@ -15522,6 +15545,76 @@ async fn a_halt_nobody_chose_is_driven_again_by_the_next_server() {
     );
 }
 
+/// And the two words in between are left alone as well: a stop the human
+/// pressed, and one stored before their press and Verkstead's brake were told
+/// apart.
+///
+/// The marks tell those two from the brake above — neither draws a dot or a
+/// badge, because there is nobody to tell that they did not already know — but a
+/// restart does not, and that is the point of asking here. Whoever decided, it
+/// was decided, and the press that undoes it is the human's whichever mark the
+/// page happens to be drawing.
+///
+/// The stored word is put on the record directly, which is the only way to have
+/// a `deliberate` one at all: nothing writes that word any more, and what this
+/// is asking is what a database written before it stopped being written still
+/// does.
+#[tokio::test]
+async fn a_stop_the_human_pressed_survives_a_restart_quietly() {
+    for decision in [Decision::Human, Decision::Deliberate] {
+        let fixture = grilling(r#"printf 'the grilling has nothing to say\n'"#).await;
+
+        fixture.quiet().await;
+
+        halted_by(&fixture, decision).await;
+
+        let stopped = fixture.stopped().await;
+        let before = outputs(&fixture.view().await).len();
+
+        let _restarted = fixture
+            .restarted(
+                r#"
+                printf 'prompt was: %s\n' "$2"
+                sleep 300
+                "#,
+                PULL_REQUEST,
+            )
+            .await;
+
+        // Long enough for the second server to have taken up everything it was
+        // going to, and for the sweep that follows it to have looked as well.
+        tokio::time::sleep(BRISKLY.grace * 4).await;
+
+        let view = fixture.view().await;
+
+        assert_eq!(
+            outputs(&view).len(),
+            before,
+            "no session was launched over a {decision:?} stop: somebody decided \
+             it, and a restart is not the press that undoes one",
+        );
+        assert_eq!(
+            view.blocked_on,
+            Some(stopped.id),
+            "the mark is intact, and still points at the Notice that explained it",
+        );
+        assert!(
+            view.stopped_by_hand,
+            "drawn quietly, this one being the human's own: {decision:?}",
+        );
+        assert!(
+            !fixture.row().await.waiting,
+            "and the sidebar stays quiet about it too",
+        );
+        assert_eq!(
+            fixture.chosen().await,
+            decision,
+            "with the stored word exactly as it was, not rewritten by the server \
+             that read it",
+        );
+    }
+}
+
 /// A restart that can start nothing for a Conversation says so on the Timeline
 /// and stops there.
 ///
@@ -15579,7 +15672,7 @@ async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "Verkstead looked and decided nothing could be started, and nothing but \
          the human can change that — so the next restart leaves it alone",
     );

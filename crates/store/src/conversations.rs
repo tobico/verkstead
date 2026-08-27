@@ -1100,10 +1100,15 @@ async fn started(
 /// - A **Question Set with no Response and no lock** — an ask left open.
 ///   Blocking and Deferred alike: what draws the human is that there is
 ///   something answerable, not whether the asking session is idling on it.
-/// - A **stop**, which is a Conversation nothing is driving any more and which
-///   goes again only when the human says so — however it stopped, an account
-///   out of window included. A column on the row rather than a subselect, so
-///   the whole list costs one query.
+/// - A **stop that came from outside the human**, which is a Conversation
+///   nothing is driving any more and which goes again only when they say so —
+///   Verkstead's own brake, an account out of window, a driver a crash took
+///   away. Their own press is not one of them: it stops the run just the same
+///   and waits for the same press, but a mark saying *look here* about
+///   something they did themselves is what makes the marks worth ignoring. See
+///   [`super::Decision::waits_on_the_human`], which is that rule, and
+///   `stops::waited_on`, which is it said as the condition below. A column on
+///   the row rather than a subselect, so the whole list costs one query.
 ///
 /// A grilling waiting on its closing proposal is the first of them and not a
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
@@ -1129,7 +1134,7 @@ async fn started(
 /// the choice would be a second place to get it wrong, and there is no other way
 /// the sidebar should ever be read.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
-    let rows: Vec<(i64, String, String, String, bool, bool)> = sqlx::query_as(
+    let rows: Vec<(i64, String, String, String, bool, bool)> = sqlx::query_as(&format!(
         "SELECT c.id, c.branch, r.name, c.state,
                 c.state <> 'draft' AND (
                     EXISTS (
@@ -1143,7 +1148,7 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                               SELECT 1 FROM archivings a WHERE a.set_id = s.set_id
                           )
                     )
-                    OR c.stopped_at IS NOT NULL
+                    OR ({stopped})
                 ) AS waiting,
                 c.state = 'wrapping'
                   AND EXISTS (
@@ -1166,7 +1171,8 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                    SELECT 1 FROM archived_conversations a WHERE a.conversation_id = c.id
                )
          ORDER BY m.place IS NULL DESC, m.place, c.id DESC",
-    )
+        stopped = super::stops::waited_on(),
+    ))
     .fetch_all(pool)
     .await
     .context("listing the Conversations")?;

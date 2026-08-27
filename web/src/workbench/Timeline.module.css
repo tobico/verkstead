@@ -59,19 +59,31 @@
   cursor: pointer;
 }
 
-/* And what a wrap-up that has narrowed to its checks says, in the same place.
-   Not a button and nothing to press: the checks are GitHub's to finish and
-   there is nowhere to go about them, so this is a label where the one above is
-   a way in. Which is why it is drawn quietly — the outline in the edge grey
-   rather than a filled red — a condition being worth reading rather than worth
-   shouting. */
-.waitingOnChecks {
+/* And the quiet mark, in the same place and drawn the same way: an outline in
+   the edge grey rather than a filled red, which is what a condition worth
+   reading looks like beside one worth shouting.
+
+   Two of them wear it. What a wrap-up that has narrowed to its checks says is a
+   label and nothing to press — the checks are GitHub's to finish and there is
+   nowhere to go about them. A stop the human pressed themselves is a button
+   like the badge above, going to the same notice: they know why it stopped, so
+   the word is worth reading rather than worth shouting, but the way to what
+   stopped it is worth keeping. */
+.waitingOnChecks,
+.stopped {
   padding: 0.15rem 0.5rem;
+  font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--ink-soft);
+  background: none;
   border: 1px solid var(--edge);
   border-radius: 0.3rem;
+}
+
+/* And the one of the two that is a button carries the pointer that says so. */
+.stopped {
+  cursor: pointer;
 }
 
 /* The pinned events, above the timeline and inside the chrome that holds the top
@@ -1118,6 +1130,11 @@
 
   .blocked:hover {
     background: color-mix(in srgb, var(--stopped) 88%, var(--ink));
+  }
+
+  /* And the quiet one deepens its ink instead, having no fill to deepen. */
+  .stopped:hover {
+    color: var(--ink);
   }
 
   .dots button:not([aria-current]):hover::before {

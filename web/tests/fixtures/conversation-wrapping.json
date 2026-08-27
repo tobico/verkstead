@@ -59,6 +59,7 @@
   },
   "resets": null,
   "state": "Wrapping",
+  "stopped_by_hand": false,
   "timeline": [
     {
       "Brief": {

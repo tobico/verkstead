@@ -382,22 +382,31 @@ once, and a second stop raised against one already stopped is the same stop
 noticed twice.
 
 Nothing advances past one. Every launch asks first, so a Conversation waiting
-on **Resume** never quietly gets another agent spent on it, and its card carries
-*blocked on you* for as long as it is stopped. Nothing about being stopped
-reverts, resets or stashes anything: the repository is left exactly as the
-session left it, which is what makes taking the Worktree on by hand possible at
-all.
+on **Resume** never quietly gets another agent spent on it. Nothing about being
+stopped reverts, resets or stashes anything: the repository is left exactly as
+the session left it, which is what makes taking the Worktree on by hand possible
+at all.
 
-**Deliberate** or by **circumstance**, which is the one thing a restart has to
-know. Verkstead pulling the brake — a session that fell over, checks that would
-not go green, a finish Step that left no pull request, an Agent Profile out of
-usage window — and the human pressing **Stop** are both deliberate, and a
-restarting server leaves them alone. A driver a restart or a crash took away is
-circumstance: nobody decided anything, so the next server up carries the work on
-unasked. A deliberate stop Verkstead decided on is also pushed to the human's
-devices; one nobody chose is not, a restart being free to pick it up, and
-neither is the human's own Stop, they being the one person a notification would
-be telling their own news.
+Who stopped it is recorded, and two things follow from it. **Verkstead** is the
+brake it pulled — a session that fell over, checks that would not go green, a
+finish Step that left no pull request, an Agent Profile out of usage window.
+**Human** is their press on **Stop** or **Force stop**. **Circumstance** is a
+driver a restart or a crash took away, nobody having decided anything.
+**Deliberate** is the fourth word and the only one nothing writes any more: a
+stop recorded before the first two were told apart, read as the human's, because
+their own presses are what nearly all of those rows are.
+
+*Is it waiting for a press?* Everything but circumstance is: the next server up
+carries a circumstance stop on unasked, and leaves every other one exactly where
+it stands. *Is the human being told?* Verkstead's brake and a stop nobody chose
+carry the full marks — the sidebar's disc and the *blocked on you* badge — and a
+stop the human made themselves carries neither, showing a quiet **Stopped**
+label in the Conversation's header instead, which goes to the same stop Notice.
+They were there when they pressed it, and a mark that appears where nothing
+happened without them is the mark that teaches them to stop reading the marks.
+Push follows the same rule for the same reason: Verkstead's brake reaches a
+phone, a stop nobody chose does not — a restart being free to pick it up — and
+neither does the human's own Stop.
 
 **No stop resumes itself**, the usage-window one included. A run whose Agent
 Profile has exhausted its window stops the way everything else does, and all

@@ -1571,7 +1571,7 @@ pub(crate) async fn following_up(
 
 /// What a stop over a gone follow-up session says beyond how it went.
 ///
-/// [`store::Decision::Deliberate`], as every stop written here is: what to do
+/// [`store::Decision::Verkstead`], as every stop written here is: what to do
 /// about it is the human's, and steering is what they have.
 const NOBODY_FOLLOWING_UP: &str = "nobody is left to ask you anything or to act on what you say, and any question it had \
      put to you has been closed unanswered";

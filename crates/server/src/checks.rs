@@ -311,7 +311,7 @@ async fn fix(
 /// which checks failed, where their runs are, and the tail of what the last fix
 /// session said, which [`crate::stopping::stop`] reads off `writing`.
 ///
-/// [`store::Decision::Deliberate`]: every fix session the branch was allowed has
+/// [`store::Decision::Verkstead`]: every fix session the branch was allowed has
 /// been spent, and Verkstead stopping there is a decision. A restart that
 /// started the fixing over would spend them all again on checks that are still
 /// red for whatever reason they were red the first time.

@@ -2106,7 +2106,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::stop(
         &pool,
         tasked,
-        store::Decision::Deliberate,
+        // Verkstead's own brake: a session exited 1 and nobody pressed anything,
+        // which is the stop the accent badge is for.
+        store::Decision::Verkstead,
         "**The task in .tasks/03-commit-events.md** stopped.\n\n\
          the session exited with status 1\n\n\
          ### The worktree\n\n\
@@ -2200,7 +2202,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::stop(
         &pool,
         waiting,
-        store::Decision::Deliberate,
+        store::Decision::Verkstead,
         &format!(
             "**Implementing the work** stopped.\n\n\
              the account **{}** was being spent is out of window: {printed}\n\n\

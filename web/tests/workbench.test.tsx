@@ -8120,6 +8120,7 @@ describe("a conversation blocked on the human", () => {
 
     expect(badge.textContent).toBe("Blocked on you");
     expect(STOPPED.blocked_on).toBe(SAID.id);
+    expect(STOPPED.stopped_by_hand).toBe(false);
   });
 
   it("draws no badge where nothing is stopping the work", async () => {
@@ -8131,6 +8132,48 @@ describe("a conversation blocked on the human", () => {
     await drawn(container, `.${timeline.timeline}`);
 
     expect(container.querySelector(`.${timeline.blocked}`)).toBeNull();
+  });
+});
+
+/// And the other half of the same fact: a stop the human pressed themselves.
+///
+/// Still a stop, still waiting for their Resume — what changes is that nothing
+/// shouts about it. They pressed it; a badge in the accent telling them so is
+/// Verkstead reading them their own news, and the marks are worth reading only
+/// while they mean something happened without them.
+describe("a conversation the human stopped themselves", () => {
+  it("says stopped quietly where the badge would have been", async () => {
+    theStopped({ stopped_by_hand: true });
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const label = await drawn(container, `.${paneHead.head} .${timeline.stopped}`);
+
+    expect(label.textContent).toBe("Stopped");
+    expect(container.querySelector(`.${timeline.blocked}`)).toBeNull();
+
+    // Drawn as the condition beside it is — the outline in the edge grey rather
+    // than a filled red — which is the whole of what *quietly* means here.
+    expect(timelineCss).toContain(".waitingOnChecks,\n.stopped {");
+  });
+
+  /// Quiet is not the same as inert. There is one notice saying what stopped
+  /// and where it stands in a long record, and the human pressing Stop is no
+  /// reason to make them go and find it.
+  it("still goes to the notice that says what stopped", async () => {
+    theStopped({ stopped_by_hand: true });
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    fireEvent.click(await drawn(container, `.${paneHead.head} .${timeline.stopped}`));
+
+    const marked = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.notice}.${timeline.selected}`,
+    );
+
+    expect(marked.textContent).toContain(
+      "The task in .tasks/03-commit-events.md",
+    );
+    expect(frame(container).dataset.pane).toBe("timeline");
   });
 });
 

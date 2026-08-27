@@ -333,7 +333,26 @@ pub struct ConversationView {
     ///
     /// *Blocked on you* is a badge on an active state and never a state of its
     /// own, which is why this sits beside `state` rather than in it.
+    ///
+    /// Set for every stop, however it stopped. Which of the two marks the
+    /// header draws is `stopped_by_hand` below — both of them point here, a
+    /// stop the human has to find being the same Notice as a stop they made
+    /// themselves.
     pub blocked_on: Option<i64>,
+
+    /// Whether that stop is the human's own press, or a row from before the
+    /// two were told apart and read as one.
+    ///
+    /// Which of the two marks the header draws, decided here rather than in the
+    /// browser: `false` is the accent *Blocked on you* badge — Verkstead pulled
+    /// the brake, or a crash took the driver away — and `true` is the quiet
+    /// **Stopped** label, which goes to the same Notice and says nothing about
+    /// anybody waiting. The sidebar's disc follows the same rule from its own
+    /// end of the wire, where the row's `waiting` has already folded it in.
+    ///
+    /// `false` where nothing has stopped, which is the ordinary Conversation:
+    /// there is no mark to choose between.
+    pub stopped_by_hand: bool,
 
     /// Whether the wrap-up has narrowed to its checks: the review answered, the
     /// comments dealt with, the checks alone outstanding, and nothing running in

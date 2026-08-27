@@ -14,7 +14,7 @@ order is the dependency.
 
 ## Tasks
 
-- [ ] 01: Stop taxonomy — [details](01-stop-taxonomy.md)
+- [x] 01: Stop taxonomy — [details](01-stop-taxonomy.md)
 - [ ] 02: Closed is never waiting — [details](02-closed-never-waiting.md)
 - [ ] 03: The Done dot — [details](03-done-dot.md)
 - [ ] 04: Header state labels — [details](04-header-state-labels.md)

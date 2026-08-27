@@ -387,21 +387,33 @@ export function Timeline(props: {
         >
           {/* What the work has stopped on, said where the conversation is named
               rather than only down in the list: a timeline is long by the time a
-              run gets far enough to stop, and a badge the human had to go
+              run gets far enough to stop, and a mark the human had to go
               hunting behind would not be one. It points at the event that
               stopped it, which is what makes it worth pressing.
 
               Which is one kind of event now: whatever stopped a run — a session
-              that fell over, a press, an account out of window — the badge marks
-              the notice saying so, where it stands in the record. There is
+              that fell over, a press, an account out of window — the mark goes
+              to the notice saying so, where it stands in the record. There is
               nothing behind a pane for it, so a narrow window stays on the
               record rather than being sent away from the very thing there is to
-              read. */}
+              read.
+
+              Two marks over the one event, and which it is comes off the wire
+              rather than being weighed here. A stop that happened without the
+              human is loud: `Blocked on you`, in the accent, because it is the
+              one they have to go and look at. A stop they pressed themselves is
+              quiet: `Stopped`, drawn as the condition beside it is, because
+              they were there — the word is worth reading and there is nothing
+              to shout about. Both go to the same place. */}
           <Show when={props.conversation.blocked_on}>
             {(event) => (
               <button
                 type="button"
-                class={styles.blocked}
+                class={
+                  props.conversation.stopped_by_hand
+                    ? styles.stopped
+                    : styles.blocked
+                }
                 onClick={() => {
                   props.select(event());
 
@@ -410,7 +422,9 @@ export function Timeline(props: {
                   }
                 }}
               >
-                Blocked on you
+                {props.conversation.stopped_by_hand
+                  ? "Stopped"
+                  : "Blocked on you"}
               </button>
             )}
           </Show>

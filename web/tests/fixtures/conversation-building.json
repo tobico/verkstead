@@ -49,6 +49,7 @@
   },
   "resets": null,
   "state": "Implementing",
+  "stopped_by_hand": false,
   "timeline": [
     {
       "Brief": {

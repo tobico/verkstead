@@ -59,6 +59,7 @@
   },
   "resets": null,
   "state": "Grilling",
+  "stopped_by_hand": false,
   "timeline": [
     {
       "Brief": {

@@ -888,10 +888,19 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     .await
     .offerable();
 
-    // And the badge points at the stop's own Notice, whatever wrote it: a run
-    // that has stopped is stopped, and a badge with nowhere to go would be one
+    // And the mark points at the stop's own Notice, whatever wrote it: a run
+    // that has stopped is stopped, and a mark with nowhere to go would be one
     // the human could not act on.
     let blocked_on = stopped.as_ref().map(|stopped| stopped.notice);
+
+    // Which mark it is, decided here so the browser never weighs a stored word:
+    // Verkstead's brake and a driver a crash took away are things that happened
+    // without the human, so those get the accent badge; their own press gets the
+    // quiet label. See [`store::Decision::waits_on_the_human`], which is the
+    // same rule the sidebar's own `waiting` is folded by.
+    let stopped_by_hand = stopped
+        .as_ref()
+        .is_some_and(|stopped| !stopped.decision.waits_on_the_human());
 
     // With the words about the account coming back beside it, where the stop
     // carries any: the one thing that tells a run stopped by an exhausted window
@@ -952,6 +961,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         direction: conversation.direction,
         pinned,
         blocked_on,
+        stopped_by_hand,
         // A fix session actively working a red check is a wrap-up getting on
         // with it, so the label is drawn only where nothing is running — the
         // same reading `working` below is.
