@@ -89,8 +89,15 @@ flowchart LR
   telling it that nothing it prints reaches anybody and to put what it is
   waiting on as a set. Twice at most; a session still saying nothing after the
   second stops the conversation with a notice saying it would not ask.
-  Follow-up is where it starts, the state where an idle session is exactly the
-  failure (*added 2026-08-27, building follow-ups*).
+  Follow-up is where it started, the state where an idle session is exactly the
+  failure (*added 2026-08-27, building follow-ups*). It now watches **every
+  session Verkstead launches**, one loop with the state's own done-indicator as
+  its parameter: a grilling's artifact, a backlog step's task file, an
+  instruction's or a fix's commit, a follow-up's Nothing-else mark. A session
+  with a set open is waiting on the human and one still printing is at work, so
+  neither is ever spoken to; a fix session is ended rather than stopped over,
+  the wrap-up's two goes at a check being the stop it already has (*refined
+  2026-08-27, building follow-ups*).
 - **Agent profiles** are minimal: name, claude home dir + config file pair, the
   list of models that account can run — plus an agent-type discriminator so
   other backends can slot in later (claude is the only type now). The model

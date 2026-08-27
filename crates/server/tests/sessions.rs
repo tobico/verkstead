@@ -13240,6 +13240,300 @@ async fn a_follow_up_session_that_will_not_ask_is_stopped_after_two_rescues() {
     );
 }
 
+/// A grilling session that has been given its direction and then goes idle —
+/// nothing asked, nothing written — with every line typed into it written down
+/// where the test can read it.
+///
+/// The pick is what puts a watcher on a grilling session at all: from that
+/// moment there is an artifact it is supposed to be writing, and *not writing
+/// it and not asking about it either* is the shape nothing else here can see.
+fn a_grilling_that_never_writes_the_backlog() -> String {
+    format!(
+        "    SAYING='grilling'\n    \
+         printf '%s\\n' \"$SAYING\"\n    \
+         {WHILE_NOBODY_HAS_ASKED}\n    \
+         while read -r TOLD; do printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues; done\n    \
+         sleep 300"
+    )
+}
+
+/// A backlog of one whose step session comes up, says a word and then goes idle
+/// with the task file exactly where it found it.
+///
+/// The grilling half is [`A_BACKLOG_OF_ONE`]'s: what is being asked about here is
+/// the step, so the list it works has to land the ordinary way first.
+const A_BACKLOG_THEN_AN_IDLE_STEP: &str = r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    printf 'reading the task\n'
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#;
+
+/// The same, except that the step session asks before it falls silent: a session
+/// sitting on a Blocking Ask, which is one doing exactly what it should.
+const A_BACKLOG_THEN_A_STEP_THAT_ASKS: &str = r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    printf 'reading the task\n'
+    while [ ! -f /tmp/verkstead/asked ]; do sleep 0.1; done
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#;
+
+/// And the same again with a step session that never stops talking, which is one
+/// still at work however long it takes.
+///
+/// It reads its terminal beside the talking rather than instead of it, so that a
+/// line typed into it would be written down: a stub that could not have recorded
+/// a rescue would prove nothing about not having been sent one.
+const A_BACKLOG_THEN_A_STEP_THAT_KEEPS_TALKING: &str = r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    printf 'reading the task\n'
+    while :; do printf 'still at it\n'; sleep 0.1; done &
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#;
+
+/// What a step session would ask, where it has something to ask about.
+const A_STEP_QUESTION: &str = r#"
+title: About the counter
+questions:
+  - label: Q1
+    text: Per key or per address?
+    options:
+      - n: 1
+        text: Per key
+        recommended: true
+      - n: 2
+        text: Per address
+"#;
+
+/// Whatever the session has been told so far, which for these is nothing.
+///
+/// [`told`] read the other way round: that one waits for a line to arrive, and
+/// this one is what the tests about a session being left alone assert the
+/// absence of.
+fn anything_told(fixture: &Grilling) -> Vec<String> {
+    std::fs::read_to_string(handoff_directory(fixture).join("rescues"))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Take a grilling to the moment its direction has been picked, which is where
+/// every session Verkstead watches for an artifact starts.
+async fn picked(fixture: &Grilling, direction: &str) {
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+
+    assert_eq!(fixture.pick(set, direction).await, Submitted::Accepted);
+}
+
+/// A grilling session that goes idle without writing what the pick asked for is
+/// told to ask, and stopped after the second time it will not.
+///
+/// The rescue is one mechanism over every state, and this is the same condition
+/// a follow-up's is read against with a different done-indicator under it: a
+/// grilling is finished when its artifact has landed, and one that is idle, has
+/// nothing open and has written nothing is a run nobody can move. Today that sat
+/// there indefinitely with nothing saying so.
+#[tokio::test]
+async fn a_grilling_that_goes_idle_without_its_artifact_is_told_and_then_stopped() {
+    let fixture = grilling(&a_grilling_that_never_writes_the_backlog()).await;
+
+    picked(&fixture, "task-list").await;
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        said[0].contains("verkstead ask"),
+        "it is told what the human sees, which is a Question Set and nothing \
+         else: {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("reaking the work down"),
+        "what was being done, said in the words the step is judged by: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and why it is a stop: nothing was ever put to the human: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("being told twice"),
+        "with the rescue named, so that the Notice is not about a session that \
+         was never spoken to: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        told(&fixture, 2).await.len(),
+        2,
+        "twice and no more: the third time round is the stop rather than \
+         another line",
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Deliberate,
+        "and Verkstead decided it, so a restart leaves it exactly here",
+    );
+}
+
+/// And a backlog step that goes quiet without the commit that finishes it is
+/// told and stopped the same way.
+///
+/// The same loop with the same bound, over the done-indicator a step is judged
+/// by: the task file gone from the Worktree and git holding nothing pending for
+/// it. A hung step used to hold the whole run open with the human never told.
+#[tokio::test]
+async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_stopped() {
+    let fixture = grilling(A_BACKLOG_THEN_AN_IDLE_STEP).await;
+
+    picked(&fixture, "task-list").await;
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        said[0].contains("nothing you print here reaches me"),
+        "the same line, in the words somebody watching would have typed: \
+         {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("01-count.md"),
+        "the Notice names the step rather than the state, a human wanting to \
+         know which task: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and says why it stopped: {:?}",
+        stopped.html,
+    );
+    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// A session sitting on a Blocking Ask is never spoken to, however long it sits
+/// there.
+///
+/// The middle third of the condition, and the one that costs the most to get
+/// wrong: the ask blocks for as long as the human takes, which may be the next
+/// morning, and a line typed in over the top of it would be Verkstead telling a
+/// session to ask about the thing it is already asking about.
+#[tokio::test]
+async fn a_step_waiting_on_its_ask_is_never_told_to_ask() {
+    let fixture = grilling(A_BACKLOG_THEN_A_STEP_THAT_ASKS).await;
+
+    picked(&fixture, "task-list").await;
+
+    // Once the step's own session is running, so that the Set it is about to be
+    // handed is one asked *by* it: what a session has open is read from its own
+    // Event onwards.
+    fixture
+        .until(|view| (outputs(view).len() > 1).then_some(()))
+        .await;
+
+    fixture.ask(A_STEP_QUESTION).await;
+
+    // Several graces of a session saying nothing at all, which is what waiting
+    // on a human looks like from outside.
+    tokio::time::sleep(BRISKLY.proposing * 4).await;
+
+    assert!(
+        anything_told(&fixture).is_empty(),
+        "nothing was typed into a session that is waiting on the human: {:?}",
+        anything_told(&fixture),
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped over it: {:?}",
+        notices(&view),
+    );
+}
+
+/// And a session that is still printing is never spoken to either, whatever it
+/// has landed.
+///
+/// Quiet is the first third of the condition and the cheap one, so it is asked
+/// first and puts the whole grace back on the clock every time the session says
+/// anything. A step that talks its way through an hour of work is one at work.
+#[tokio::test]
+async fn a_step_that_keeps_talking_is_never_told_to_ask() {
+    let fixture = grilling(A_BACKLOG_THEN_A_STEP_THAT_KEEPS_TALKING).await;
+
+    picked(&fixture, "task-list").await;
+
+    fixture
+        .until(|view| (outputs(view).len() > 1).then_some(()))
+        .await;
+
+    tokio::time::sleep(BRISKLY.proposing * 4).await;
+
+    assert!(
+        anything_told(&fixture).is_empty(),
+        "nothing was typed into a session that has not stopped talking: {:?}",
+        anything_told(&fixture),
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped over it: {:?}",
+        notices(&view),
+    );
+}
+
 /// Resume on a stopped follow-up starts a fresh session on the brief it was
 /// opened with and the rounds it has already been through — and a restart leaves
 /// that stop alone, somebody having decided it.
