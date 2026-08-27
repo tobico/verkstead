@@ -60,6 +60,7 @@
       }
     }
   ],
+  "waiting_on_checks": false,
   "working": false,
   "worktree": null
 }

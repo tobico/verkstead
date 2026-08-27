@@ -293,6 +293,23 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         OffsetDateTime::now_utc(),
     );
 
+    // Whether the closing section carries the Nothing-else option, which is a
+    // fact about the Conversation rather than about the Set: a follow-up's
+    // rounds are ordinary Sets, and what makes one a follow-up's is where the
+    // work stands while it is being answered. A Conversation that cannot be read
+    // draws no option, which is what every state but Follow-up gets anyway.
+    let follow_up = match store::state(&state.pool, conversation).await {
+        Ok(state) => state == Some(store::Lifecycle::FollowUp),
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation,
+                "reading where a Set's Conversation stands failed"
+            );
+            false
+        }
+    };
+
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
     //
@@ -301,7 +318,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
     // work to do on an async worker thread while other requests wait behind it.
     let set_id = stored.id;
     let view = tokio::task::spawn_blocking(move || {
-        verkstead_render::set_view(set_id, conversation, set, standing)
+        verkstead_render::set_view(set_id, conversation, set, standing, follow_up)
     })
     .await;
 
@@ -550,6 +567,12 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // rather than left to the page that draws it.
                 idle: working && quiet.contains(&conversation.id),
                 waiting: conversation.waiting,
+                // And the same pairing again for the wrap-up that has got down
+                // to its checks: the settle facts came out of the query above,
+                // and whether anything is running on it is this register's to
+                // say. A fix session working a red check draws as plain
+                // Wrapping — waiting is what a wrap-up with nobody in it does.
+                waiting_on_checks: conversation.narrowed_to_checks && !working,
             }
         })
         .collect();
@@ -876,6 +899,18 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // on — no stop resumes itself, so every one of them waits for the same press.
     let resets = stopped.and_then(|stopped| stopped.resets);
 
+    // And whether the wrap-up has narrowed to its checks, which is a label
+    // beside the state rather than a state of its own: the review and the
+    // comments settled, the checks not. Half of the condition — the other half
+    // is that nothing is running in the Worktree, which is `writing` below.
+    let narrowed_to_checks = match store::narrowed_to_checks(&state.pool, id).await {
+        Ok(narrowed) => narrowed,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a wrap-up was down to its checks failed");
+            false
+        }
+    };
+
     // And whether the human has put this Conversation away, which is what the
     // actions menu offers Unarchive by. Read here rather than carried by the
     // Conversation the store loaded: it is a fact about the sidebar, and the
@@ -917,6 +952,10 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         direction: conversation.direction,
         pinned,
         blocked_on,
+        // A fix session actively working a red check is a wrap-up getting on
+        // with it, so the label is drawn only where nothing is running — the
+        // same reading `working` below is.
+        waiting_on_checks: narrowed_to_checks && writing.is_none(),
         resets,
         archived,
         // The same reading the Events above are drawn against, said as a fact
@@ -1911,6 +1950,7 @@ fn lifecycle(state: store::Lifecycle) -> Lifecycle {
         store::Lifecycle::Grilling => Lifecycle::Grilling,
         store::Lifecycle::Implementing => Lifecycle::Implementing,
         store::Lifecycle::Wrapping => Lifecycle::Wrapping,
+        store::Lifecycle::FollowUp => Lifecycle::FollowUp,
         store::Lifecycle::Done => Lifecycle::Done,
         store::Lifecycle::Closed => Lifecycle::Closed,
     }

@@ -115,6 +115,8 @@ import { PaneHead } from "./PaneHead";
 import { Setup } from "./Setup";
 import styles from "./Timeline.module.css";
 import shell from "./Workbench.module.css";
+import { WAITING_ON_CHECKS } from "./conditions";
+import { STATE } from "./states";
 import { keeping } from "./settling";
 
 /// What the details pane is showing, as the card that opened it names itself.
@@ -210,6 +212,8 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
     "Choose a grilling profile and model first, on the brief.",
   NoImplementationPairing:
     "Choose an implementation profile and model first, on the brief.",
+  NoFollowUpBrief:
+    "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
 };
 
 /// Whether the event the *blocked on you* badge points at has a details pane
@@ -409,6 +413,16 @@ export function Timeline(props: {
                 Blocked on you
               </button>
             )}
+          </Show>
+          {/* And what a wrap-up has narrowed to, in the same place and drawn
+              far more quietly: the review is answered, nothing said on the pull
+              request is left unaddressed, and the checks going green is all
+              that is left. A label rather than a control — there is nothing to
+              press and nowhere to go, the checks being GitHub's to finish — and
+              a condition of Wrapping rather than a state, which is why it is
+              drawn beside the branch and never in place of it. */}
+          <Show when={props.conversation.waiting_on_checks}>
+            <span class={styles.waitingOnChecks}>{WAITING_ON_CHECKS}</span>
           </Show>
           <Actions conversation={props.conversation} />
           {/* And the way on to the next level, drawn only where there is a next
@@ -1451,7 +1465,7 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
       class={styles.moved}
       classList={{ [styles[props.moved.state.toLowerCase()]!]: true }}
     >
-      {props.from} → {props.moved.state}
+      {STATE[props.from]} → {STATE[props.moved.state]}
     </p>
   );
 }
@@ -1468,11 +1482,12 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
 /// above this one and is already on the page, and what a steer adds is the
 /// deciding.
 ///
-/// **A card where it carries an instruction**, which is a steer into
-/// implementing that wrote one: the instruction is what a session was sent off
-/// to do, so it is a document like the brief and the handoff and is read the
-/// same way — clamped here, whole in the details pane. A steer that carried
-/// nothing written stays the line it always was, there being nothing to open.
+/// **A card where it carries a document**, which is a steer into implementing
+/// that wrote an instruction, or one into follow-up, which always writes a
+/// brief: either is what a session was sent off to do, so it is a document like
+/// the brief and the handoff and is read the same way — clamped here, whole in
+/// the details pane. A steer that carried nothing written stays the line it
+/// always was, there being nothing to open.
 function Steered(props: {
   steer: SteerEvent;
   selected: boolean;
@@ -1483,7 +1498,7 @@ function Steered(props: {
       class={styles.steered}
       classList={{ [styles[props.steer.target.toLowerCase()]!]: true }}
     >
-      You steered this into {props.steer.target}
+      You steered this into {STATE[props.steer.target]}
     </p>
   );
 

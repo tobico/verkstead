@@ -25,7 +25,7 @@ use verkstead_render::{
     ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered,
     RoadmapPane, ShowingArchived, Started, SteerOpened, TimelineEvent,
 };
-use verkstead_server::{WatchedPaths, open_database, router_watching};
+use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
 /// A router watching `watched`, plus the directory holding its database and its
 /// data directory alive.
@@ -818,6 +818,21 @@ async fn steer_instructed(app: &Router, id: i64, instruction: &str) -> Conversat
             "target": "Implementing",
             "interrupt": false,
             "instruction": instruction,
+        }),
+    )
+    .await
+}
+
+/// And the submit into Follow-up, which carries the one payload that is always
+/// required: the brief the session it starts opens the follow-up on.
+async fn steer_following_up(app: &Router, id: i64, brief: Option<&str>) -> ConversationSteered {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "FollowUp",
+            "interrupt": false,
+            "follow_up": brief,
         }),
     )
     .await
@@ -1859,6 +1874,173 @@ async fn a_finished_conversation_steered_into_grilling_opens_a_second_round() {
             ("steer", Lifecycle::Grilling),
             ("moved", Lifecycle::Grilling),
         ],
+    );
+}
+
+/// A steer into Follow-up moves a Conversation Verkstead has finished with, and
+/// keeps the brief the human wrote as the Steer Event's own body.
+///
+/// The one state with no other way in. What it is *for* is the work being on a
+/// pull request and there being something more to say about it — so the record
+/// it turns on is that pull request, and what it starts is whatever the human
+/// wrote.
+///
+/// **The brief is the Event**, rendered like every other document they write,
+/// which is what makes reading the Timeline back reading what the follow-up was
+/// opened about. Not a Brief of the Conversation's: a Brief is what a round is
+/// grilled about, and this is one session's whole job.
+#[tokio::test]
+async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::record_pull_request(
+            &pool,
+            id,
+            &store::PullRequest {
+                number: 41,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            },
+        )
+        .await
+        .unwrap(),
+        store::Wrapping::Started,
+    );
+
+    pool.close().await;
+
+    // Finished with, which is where a follow-up is steered from in the ordinary
+    // case: the wrap-up settled, the human read the pull request, and there is
+    // one more thing to ask about it.
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_following_up(&app, id, Some("Does it count the `429`s it sends?\n")).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(
+        steered(&view),
+        [
+            ("moved", Lifecycle::Grilling),
+            ("moved", Lifecycle::Wrapping),
+            ("steer", Lifecycle::Done),
+            ("moved", Lifecycle::Done),
+            ("steer", Lifecycle::FollowUp),
+            ("moved", Lifecycle::FollowUp),
+        ],
+        "the human's own line, and the plain move under it",
+    );
+
+    let brief = view
+        .timeline
+        .iter()
+        .rev()
+        .find_map(|event| match event {
+            TimelineEvent::Steer(steer) => steer.html.clone(),
+            _ => None,
+        })
+        .expect("the steer carries what was written on it");
+
+    assert!(
+        brief.contains("Does it count the <code>429</code>s it sends?"),
+        "rendered like every other document the human writes: {brief:?}",
+    );
+    assert!(
+        !view.timeline.iter().any(
+            |event| matches!(event, TimelineEvent::Brief(brief) if brief.markdown.contains("429"))
+        ),
+        "and it is the steer's own body rather than a Brief of the \
+         Conversation's: what a round is grilled about has not changed",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "and the stop the click wrote is gone",
+    );
+}
+
+/// A follow-up is whatever the human wrote it about, so a submit with nothing
+/// written is refused by name — and so is one on work nobody can see.
+///
+/// The one written payload with no quiet meaning. An empty instruction carries
+/// the branch on and an empty brief grills the one already written; a follow-up
+/// has nothing of its own to fall back on, being a thing the human wanted rather
+/// than a step of the run. And the pull request is the same rule Wrapping is
+/// refused by, asked of the target that turns on the same fact.
+#[tokio::test]
+async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_following_up(&app, id, Some("Does it count the 429s?\n")).await,
+        ConversationSteered::NoPullRequest,
+        "there is nothing pushed to follow up on",
+    );
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::record_pull_request(
+        &pool,
+        id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    pool.close().await;
+
+    assert_eq!(
+        steer_following_up(&app, id, None).await,
+        ConversationSteered::NoFollowUpBrief,
+        "and a pull request with nothing said about it is a session with \
+         nothing to do",
+    );
+    assert_eq!(
+        steer_following_up(&app, id, Some("   \n")).await,
+        ConversationSteered::NoFollowUpBrief,
+        "a textarea somebody tabbed through included",
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping, "so nothing moved");
+    assert_eq!(
+        steered(&view),
+        [
+            ("moved", Lifecycle::Grilling),
+            ("moved", Lifecycle::Wrapping),
+        ],
+        "and nothing on the record says it was steered",
     );
 }
 
@@ -4081,4 +4263,163 @@ async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
         Lifecycle::Draft,
         "and nothing about the roadmap was read to find that out",
     );
+}
+
+/// A wrap-up that has narrowed to its checks says so where the human reads a
+/// Conversation: on its card, and on the row in the sidebar they find it by.
+///
+/// Walked through the store rather than run, because what is under test is the
+/// reading rather than the watchers: nothing runs sessions here, so the
+/// Conversation sits in Wrapping with exactly the settle facts it is given. What
+/// the watchers make of the same facts is `sessions.rs`'s.
+///
+/// The condition is Wrapping's own and never a state: the Lifecycle does not
+/// move at either end of it.
+#[tokio::test]
+async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::record_pull_request(
+            &pool,
+            id,
+            &store::PullRequest {
+                number: 41,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            },
+        )
+        .await
+        .unwrap(),
+        store::Wrapping::Started,
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert!(
+        !view.waiting_on_checks,
+        "a wrap-up nobody has read yet is waiting on all three of them",
+    );
+
+    for waiting_on in [store::WaitingOn::Review, store::WaitingOn::Comments] {
+        store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+
+    let view = opened(&app, id).await;
+    assert!(
+        view.waiting_on_checks,
+        "the checks are the whole of what is left, so that is what it is waiting on",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "which is a condition of Wrapping and not a rung of its own",
+    );
+    assert!(
+        sidebar(&app)
+            .await
+            .into_iter()
+            .find(|row| row.id == id)
+            .expect("the Conversation is on the sidebar")
+            .waiting_on_checks,
+        "and the row says the same thing the card does",
+    );
+
+    store::settle_wrap_up(&pool, id, store::WaitingOn::Checks)
+        .await
+        .unwrap();
+
+    assert!(
+        !opened(&app, id).await.waiting_on_checks,
+        "nothing is waiting on checks that have come in",
+    );
+
+    pool.close().await;
+}
+
+/// The line saying a wrap-up is down to its checks is written once per
+/// narrowing: not once per poll, and not once ever.
+///
+/// The rule is the store's — the settling loop asks it on a cadence and writes
+/// the Notice when it is told to — so it is asked here as that loop asks it,
+/// including with a session running, which is the half of the condition no row
+/// can answer. A fix session working a red check is a wrap-up getting on with
+/// it, and the label is for one with nobody in it.
+#[tokio::test]
+async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::NotNarrowed,
+        "a Conversation that is not wrapping up is waiting on nothing",
+    );
+
+    store::record_pull_request(
+        &pool,
+        id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    for waiting_on in [store::WaitingOn::Review, store::WaitingOn::Comments] {
+        store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::Narrowed,
+        "the first look is the one that owes the Timeline a line",
+    );
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::NoticedAlready,
+        "and every look after it finds the line written",
+    );
+
+    assert_eq!(
+        store::narrowing(&pool, id, true).await.unwrap(),
+        store::Narrowing::NotNarrowed,
+        "a fix session in the Worktree is a wrap-up getting on with it",
+    );
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::Narrowed,
+        "and the wrap-up going quiet again is worth saying afresh",
+    );
+
+    store::unsettle_wrap_up(&pool, id, store::WaitingOn::Comments)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::NotNarrowed,
+        "a comment landing is something else to deal with, so it is not the checks alone",
+    );
+
+    store::settle_wrap_up(&pool, id, store::WaitingOn::Comments)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::Narrowed,
+        "and dealing with it narrows the wrap-up a second time, which is a second line",
+    );
+
+    pool.close().await;
 }

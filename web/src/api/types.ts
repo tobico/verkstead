@@ -563,7 +563,20 @@ idle: boolean,
  * them. A Draft is never one of them: it is drawn as a draft, and that is
  * the whole of what a draft has to say.
  */
-waiting: boolean, };
+waiting: boolean, 
+/**
+ * Whether this one is a wrap-up that has narrowed to its checks: the review
+ * and the comments settled, the checks not, and nothing running on it.
+ *
+ * A derived condition of Wrapping rather than a state, which is why it sits
+ * beside `state` the way *blocked on you* does rather than in it. Nothing
+ * is stored for it: it is the wrap-up's own settle facts read a particular
+ * way, folded here so the row does not have to.
+ *
+ * The row draws no state in words, so what this comes out as is the label
+ * read aloud — *Waiting on checks* where the plain state word would be.
+ */
+waiting_on_checks: boolean, };
 
 /**
  * What became of submitting one.
@@ -574,7 +587,7 @@ waiting: boolean, };
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
 
 /**
  * What became of pressing Stop or Force stop.
@@ -739,6 +752,25 @@ direction: Direction | null,
  */
 blocked_on: number | null, 
 /**
+ * Whether the wrap-up has narrowed to its checks: the review answered, the
+ * comments dealt with, the checks alone outstanding, and nothing running in
+ * the Worktree.
+ *
+ * What the *Waiting on checks* label is drawn from, and a condition of
+ * Wrapping rather than a state of its own — the precedent is `blocked_on`
+ * above, and this sits beside `state` for the same reason. Nothing is
+ * stored for it: it is the settle facts and the register read together, at
+ * the moment the page was read.
+ *
+ * A flag rather than an Event id, because unlike a stop there is nothing to
+ * go and look at and nothing to do about it — the Notice saying so is on
+ * the record where it happened, and the label is a label.
+ *
+ * `false` in every state but Wrapping, which is where the condition is
+ * derived from and the only place it can hold.
+ */
+waiting_on_checks: boolean, 
+/**
  * What the stop shows about the account that ran out coming back, and
  * `null` on every stop that is not a usage window's — which is nearly all
  * of them, and every Conversation that has not stopped.
@@ -873,7 +905,7 @@ html: string, };
  * the domain's, and the page says which one a Conversation is in rather than
  * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Done" | "Closed";
+export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done" | "Closed";
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -1382,7 +1414,25 @@ comment?: string | null,
  * left open, anything without a pick — so `None` on a proposal Set is the
  * human disagreeing, and `None` anywhere else is every ordinary Response.
  */
-direction?: Direction | null, };
+direction?: Direction | null, 
+/**
+ * The human saying there is nothing else, on a Set asked while its
+ * Conversation is in Follow-up.
+ *
+ * A field of the Response rather than an Answer for the reason
+ * [`Response::direction`] is one: the control is the viewer's, injected
+ * onto the Set's closing section, and it answers no Question anybody
+ * asked.
+ *
+ * **The agent never sees it.** The mark comes off the Response on the way
+ * into the store and is recorded beside it — see `verkstead_store`'s
+ * `endings` — so what a waiting session is handed is byte for byte what it
+ * would have been handed without one. How a follow-up ends is Verkstead's
+ * business rather than the session's: the agent writes an ordinary
+ * Postscript and reads an ordinary Response, and the ending is entirely
+ * the system's.
+ */
+nothing_else?: boolean, };
 
 /**
  * What became of pressing Resume.
@@ -1394,7 +1444,7 @@ direction?: Direction | null, };
  * A recompute that quietly found nothing to launch is exactly the failure this
  * whole feature is replacing.
  */
-export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing";
+export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
 
 /**
  * The roadmap opened: every stage brief of it, rendered.
@@ -1546,7 +1596,21 @@ standing: Standing,
  * about arrive together, so the page never draws the Questions above a
  * chooser that has not turned up yet.
  */
-proposal: ProposalView | null, };
+proposal: ProposalView | null, 
+/**
+ * Whether this Set was asked while its Conversation is in Follow-up, which
+ * is what puts the Nothing-else option in its closing section.
+ *
+ * The other control the viewer injects, and it arrives the same way the
+ * proposal does: with the Set, so the page never draws a closing section
+ * the option turns up in a moment later.
+ *
+ * A fact about the Conversation rather than about the Set, which is why it
+ * is decided here rather than read off the stored body. Nothing about what
+ * was asked changes — an ordinary Set is what a follow-up's rounds are made
+ * of — and a Set stored before any of this stays exactly as it was.
+ */
+follow_up: boolean, };
 
 /**
  * The settings as the human has just written them.
@@ -1725,9 +1789,10 @@ export type Started = { "Started": { id: number, } } | "NoSuchRepo";
  * The one Event that is sometimes a move and sometimes a document. A steer
  * into Wrapping or Done says nothing but the state, like the move it stands
  * above; a steer into Implementing carries the instruction the session was set
- * going on, which is the whole of what that session was asked to do. A steer
- * into Grilling carries a document too, and that one arrives as a Brief Event
- * of its own — it opens a round, and a round starts from a Brief.
+ * going on, and one into Follow-up the brief it was, which is the whole of what
+ * that session was asked to do. A steer into Grilling carries a document too,
+ * and that one arrives as a Brief Event of its own — it opens a round, and a
+ * round starts from a Brief.
  */
 export type SteerEvent = { id: number, 
 /**
@@ -1838,6 +1903,23 @@ brief: string | null,
  */
 instruction: string | null, 
 /**
+ * The brief, for a steer into Follow-up.
+ *
+ * It lands as the Steer Event's own body, exactly as the instruction above
+ * it does, and the session started on it opens the follow-up: it answers
+ * what the brief asks, does what it asks for, and asks the human what else
+ * there is until they say there is nothing.
+ *
+ * **Required**, which is what makes it the one written payload with no
+ * quiet meaning. Nothing on the branch could stand in for it — a follow-up
+ * is not a step of the run to be picked up — so a submit that names
+ * Follow-up without one is refused by name; see
+ * [`ConversationSteered::NoFollowUpBrief`].
+ *
+ * Whitespace alone is nothing written, as everywhere else here.
+ */
+follow_up: string | null, 
+/**
  * Whether the session is primed with everything the human has already
  * answered.
  *
@@ -1856,13 +1938,14 @@ digest: boolean, };
  * Where a steer can send a Conversation.
  *
  * Draft and Closed are not among them and never will be: each has a way in of
- * its own, and a steer is for the four states the work is *done in*. A target
- * the modal offers is a target something can be set going in, which is why
- * Wrapping is offered only where the work is already on a pull request — the
- * one of the four that is drawn out at all, an instruction being writable
- * anywhere and Done needing nothing.
+ * its own, and a steer is for the states the work is *done in* — the four rungs
+ * of the ladder, and Follow-up beside them, which has no other way in at all. A
+ * target the modal offers is a target something can be set going in, which is
+ * why the two that turn on a pull request are drawn out where there is none: an
+ * instruction is writable anywhere and Done needs nothing, but there is no
+ * wrapping up and no following up of work nobody can see.
  */
-export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "Done";
+export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done";
 
 /**
  * What became of the human's Response.

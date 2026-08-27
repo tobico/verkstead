@@ -695,13 +695,20 @@ function Reading(props: {
                         />
                       )}
                     </Match>
-                    {/* The instruction a steer sent a session off with, read the
-                        way every other document the human writes is read. Nothing
-                        opens a steer that carried none. */}
+                    {/* What a steer sent a session off with, read the way every
+                        other document the human writes is read. Nothing opens a
+                        steer that carried none — and what it is called follows
+                        the target, an instruction being one session's whole job
+                        and a follow-up's brief being what a conversation was
+                        opened on. */}
                     <Match when={steerIn(open())}>
                       {(steer) => (
                         <Document
-                          heading="Instruction"
+                          heading={
+                            steer().target === "FollowUp"
+                              ? "Follow-up"
+                              : "Instruction"
+                          }
                           html={steer().html ?? ""}
                           empty="Nothing was asked for."
                           back={() => props.pane("timeline")}

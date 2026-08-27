@@ -101,10 +101,7 @@ pub(crate) async fn resume(
     // is nothing to start driving again. The button is not drawn on one — this
     // is the same rule asked again on arrival, the way every named refusal here
     // is.
-    if !matches!(
-        conversation.state,
-        Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping
-    ) {
+    if !driven(conversation.state) {
         return Ok(Resumed::NotDriven);
     }
 
@@ -315,6 +312,36 @@ pub(crate) async fn resume(
             }
         }
 
+        // A fresh session on the follow-up skill, on the brief the steer opened
+        // it with and the rounds it has already been through — which is the
+        // grilling's shape, and for the grilling's reason: a follow-up is a
+        // conversation, so nothing of it is written on the branch and what
+        // outlives the session having it is the Timeline. See
+        // [`crate::follow_ups`].
+        //
+        // No pull request is read for here. The steer that opened this refused
+        // without one, and a follow-up is about the branch rather than about the
+        // record of it: what the session is sent to do is the brief.
+        Lifecycle::FollowUp => {
+            if conversation.implementation_pairing.is_none() {
+                return Ok(Resumed::NoImplementationPairing);
+            }
+
+            let Some(follow_up) = crate::follow_ups::opened(&state.pool, conversation_id).await?
+            else {
+                return Ok(Resumed::NoFollowUpBrief);
+            };
+
+            clear(state, conversation_id).await?;
+
+            tokio::spawn(crate::runner::following_up(
+                state.clone(),
+                conversation_id,
+                follow_up,
+                driving,
+            ));
+        }
+
         // Refused above, where the refusal belongs: before the stop is read and
         // before a registration is taken. Answered again here because the match
         // has to be whole, and answered the same way.
@@ -339,7 +366,8 @@ pub(crate) async fn resume(
 /// The whole of what a restart is: no driver survives the process, so every
 /// Conversation the last server was driving is one nothing is driving now — a
 /// grilling whose session was killed, a backlog between tasks, a wrap-up whose
-/// watchers went with the process. Each of them gets the recompute the button
+/// watchers went with the process, a follow-up the human was mid-round of. Each
+/// of them gets the recompute the button
 /// gives, and starts driving again with nobody asked. There is nothing for a
 /// human to press here: a restart is not a decision anybody took, and a
 /// Conversation left standing still because Verkstead was upgraded is one that
@@ -376,10 +404,7 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
         };
 
         for conversation in conversations {
-            if !matches!(
-                conversation.state,
-                Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping
-            ) {
+            if !driven(conversation.state) {
                 continue;
             }
 
@@ -498,6 +523,9 @@ fn why(refusal: Resumed) -> Option<&'static str> {
         Resumed::NoImplementationPairing => {
             "the implementation Profile and model the work runs under have gone"
         }
+        Resumed::NoFollowUpBrief => {
+            "nothing on the record says what the follow-up was opened about"
+        }
     })
 }
 
@@ -540,11 +568,27 @@ pub(crate) fn ready(
     lifecycle: Lifecycle,
     stopped: bool,
 ) -> bool {
+    driven(lifecycle)
+        && (stopped
+            || !state
+                .drivers
+                .driven(&state.sessions.working(), conversation_id, lifecycle))
+}
+
+/// Whether this is a state something ought to be driving, which is the whole of
+/// what Resume is offered on.
+///
+/// The four: a grilling has its session, an implementation its run, a wrap-up
+/// its watchers, and a follow-up the session the human is talking to. The three
+/// that are left — drafting, done and closed — were never being driven by
+/// anything, so a press on one is not a Conversation that stood still.
+///
+/// Said once here because three places ask it and none of them may answer it
+/// differently: the button the page draws, the press that arrives, and the
+/// restart that presses it for every Conversation the last server was driving.
+fn driven(lifecycle: Lifecycle) -> bool {
     matches!(
         lifecycle,
-        Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping
-    ) && (stopped
-        || !state
-            .drivers
-            .driven(&state.sessions.working(), conversation_id, lifecycle))
+        Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping | Lifecycle::FollowUp
+    )
 }

@@ -5267,6 +5267,110 @@ describe("steering a conversation", () => {
     expect(screen.getByText(/The branch looked at again/)).toBeTruthy();
   });
 
+  /// Following up is the same rule plus one: the work has to be on a pull
+  /// request, and the pipeline has to have seen it through. A conversation still
+  /// building has the ordinary ways of saying what to do next, so the target is
+  /// drawn out there — and a steer is the only way into the state at all, which
+  /// is why it is here rather than reachable some other way.
+  it("offers following up only from done or wrapping up on a pull request", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: true, pinned: WRAPPING.pinned },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
+
+    expect(targets(await openSteer(container))).toEqual([
+      "Grilling",
+      "Implementing",
+      "Wrapping",
+      "Done",
+    ]);
+    unmount();
+
+    theGrillingStanding(
+      {
+        ready_to_stop: false,
+        working: false,
+        state: "Done",
+        pinned: WRAPPING.pinned,
+      },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const finished = mount(`/conversations/${GRILLING.id}`);
+
+    expect(targets(await openSteer(finished.container))).toEqual([
+      "Grilling",
+      "Implementing",
+      "Wrapping",
+      "FollowUp",
+      "Done",
+    ]);
+    expect(screen.getByText(/The pull request followed up on/)).toBeTruthy();
+  });
+
+  /// And the brief a follow-up is opened on is required whatever the record
+  /// holds: nothing on the branch stands in for it, a follow-up being a thing
+  /// the human wanted rather than a step of the run. So the field is what the
+  /// target is, and the submit is held shut until it says something.
+  it("requires the brief a follow-up is opened on, and sends it", async () => {
+    const fetching = theGrillingStanding(
+      {
+        ready_to_stop: false,
+        working: false,
+        state: "Done",
+        ready_to_continue: true,
+        pinned: WRAPPING.pinned,
+      },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+
+    expect(modal.querySelector("#steer-follow-up")).toBeNull();
+
+    fireEvent.click(
+      await drawn(modal, `.${steerModal.steerTarget} input[value="FollowUp"]`),
+    );
+
+    const press = (await drawn(
+      modal,
+      `.${steerModal.steerButtons} .${steerModal.steer}`,
+    )) as HTMLButtonElement;
+
+    await waitFor(() => expect(press.disabled).toBe(true));
+
+    fireEvent.input(await drawn(modal, "#steer-follow-up"), {
+      target: { value: "Does it count the 429s it sends?" },
+    });
+
+    await waitFor(() => expect(press.disabled).toBe(false));
+    fireEvent.click(press);
+
+    const building = GRILLING.implementation_pairing!;
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toEqual({
+        target: "FollowUp",
+        interrupt: false,
+        // Work being built, so it is the implementation pairing a follow-up
+        // runs under.
+        pairing: { profile_id: building.profile.id, model: building.model },
+        // No round is being opened and no instruction written, so neither is
+        // sent.
+        brief: null,
+        digest: false,
+        instruction: null,
+        follow_up: "Does it count the 429s it sends?",
+      }),
+    );
+  });
+
   /// Implementing either carries on what the branch already holds or does what
   /// the human writes, so the instruction is required exactly where nothing
   /// stands to be carried on — and the submit is held shut until it says
@@ -5436,6 +5540,7 @@ describe("steering a conversation", () => {
         brief: null,
         digest: false,
         instruction: "Note the window the count is against.",
+        follow_up: null,
       }),
     );
   });
@@ -5508,6 +5613,7 @@ describe("steering a conversation", () => {
         brief: null,
         digest: false,
         instruction: null,
+        follow_up: null,
       }),
     );
   });
@@ -5546,6 +5652,7 @@ describe("steering a conversation", () => {
         brief: "# Retries\n\nThe backoff is wrong.\n",
         digest: true,
         instruction: null,
+        follow_up: null,
       }),
     );
   });
@@ -5621,6 +5728,7 @@ describe("steering a conversation", () => {
         brief: null,
         digest: false,
         instruction: null,
+        follow_up: null,
       }),
     );
 
@@ -8514,6 +8622,63 @@ describe("the pinned carousel", () => {
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBeGreaterThan(0);
   });
 });
+});
+
+/// A wrap-up narrowed to its checks: the review answered, nothing said on the
+/// pull request left unaddressed, and nothing running in the worktree.
+///
+/// A condition of wrapping rather than a state, so the server hands it over as
+/// a flag beside the lifecycle and the page draws it beside the branch. It is a
+/// label and not a control: the checks are GitHub's to finish, so there is
+/// nothing to press and nowhere to go.
+describe("a wrap-up waiting on its checks", () => {
+  it("says so where the conversation is named", async () => {
+    theWrapping({ waiting_on_checks: true });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const label = await drawn(
+      container,
+      `.${paneHead.head} .${timeline.waitingOnChecks}`,
+    );
+
+    expect(label.textContent).toBe("Waiting on checks");
+    expect(label.tagName).toBe("SPAN");
+    expect(label.closest("button")).toBeNull();
+  });
+
+  it("says nothing where the wrap-up is still waiting on more than that", async () => {
+    expect(WRAPPING.waiting_on_checks).toBe(false);
+
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(container.querySelector(`.${timeline.waitingOnChecks}`)).toBeNull();
+  });
+
+  /// The sidebar draws no state in words at all — see the card's own marks — so
+  /// where the condition is said there is the label the row is read aloud by,
+  /// in place of the lifecycle word rather than beside it.
+  it("is what the sidebar row says in place of its state", async () => {
+    theSidebar(
+      { state: "Wrapping", working: false, waiting: false },
+      { state: "Wrapping", working: false, waiting: false, waiting_on_checks: true },
+    );
+    const { container } = mount();
+
+    const [plain, narrowed] = await cards(container);
+
+    expect(plain!.querySelector("button")!.getAttribute("aria-label")).toContain(
+      "Wrapping",
+    );
+    expect(
+      narrowed!.querySelector("button")!.getAttribute("aria-label"),
+    ).toContain("Waiting on checks");
+    expect(
+      narrowed!.querySelector("button")!.getAttribute("aria-label"),
+    ).not.toContain("Wrapping");
+  });
 });
 
 /// What somebody asked for by hand once, which the same conversation carries on

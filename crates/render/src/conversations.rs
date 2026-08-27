@@ -33,6 +33,13 @@ pub enum Lifecycle {
     Grilling,
     Implementing,
     Wrapping,
+
+    /// Beside the ladder rather than on it: the human following up on work that
+    /// is already on a pull request, in a session they steered into being.
+    /// Reachable from Done and from Wrapping, and leading back into the
+    /// wrap-up.
+    FollowUp,
+
     Done,
 
     /// Off the ladder rather than on it: the work stopped wherever it had got
@@ -86,6 +93,18 @@ pub struct ConversationEntry {
     /// them. A Draft is never one of them: it is drawn as a draft, and that is
     /// the whole of what a draft has to say.
     pub waiting: bool,
+
+    /// Whether this one is a wrap-up that has narrowed to its checks: the review
+    /// and the comments settled, the checks not, and nothing running on it.
+    ///
+    /// A derived condition of Wrapping rather than a state, which is why it sits
+    /// beside `state` the way *blocked on you* does rather than in it. Nothing
+    /// is stored for it: it is the wrap-up's own settle facts read a particular
+    /// way, folded here so the row does not have to.
+    ///
+    /// The row draws no state in words, so what this comes out as is the label
+    /// read aloud — *Waiting on checks* where the plain state word would be.
+    pub waiting_on_checks: bool,
 }
 
 /// One Repo's notice under the new-conversation box: the roadmaps in it that
@@ -315,6 +334,24 @@ pub struct ConversationView {
     /// *Blocked on you* is a badge on an active state and never a state of its
     /// own, which is why this sits beside `state` rather than in it.
     pub blocked_on: Option<i64>,
+
+    /// Whether the wrap-up has narrowed to its checks: the review answered, the
+    /// comments dealt with, the checks alone outstanding, and nothing running in
+    /// the Worktree.
+    ///
+    /// What the *Waiting on checks* label is drawn from, and a condition of
+    /// Wrapping rather than a state of its own — the precedent is `blocked_on`
+    /// above, and this sits beside `state` for the same reason. Nothing is
+    /// stored for it: it is the settle facts and the register read together, at
+    /// the moment the page was read.
+    ///
+    /// A flag rather than an Event id, because unlike a stop there is nothing to
+    /// go and look at and nothing to do about it — the Notice saying so is on
+    /// the record where it happened, and the label is a label.
+    ///
+    /// `false` in every state but Wrapping, which is where the condition is
+    /// derived from and the only place it can hold.
+    pub waiting_on_checks: bool,
 
     /// What the stop shows about the account that ran out coming back, and
     /// `null` on every stop that is not a usage window's — which is nearly all
@@ -1045,9 +1082,10 @@ pub struct ManualTaskEvent {
 /// The one Event that is sometimes a move and sometimes a document. A steer
 /// into Wrapping or Done says nothing but the state, like the move it stands
 /// above; a steer into Implementing carries the instruction the session was set
-/// going on, which is the whole of what that session was asked to do. A steer
-/// into Grilling carries a document too, and that one arrives as a Brief Event
-/// of its own — it opens a round, and a round starts from a Brief.
+/// going on, and one into Follow-up the brief it was, which is the whole of what
+/// that session was asked to do. A steer into Grilling carries a document too,
+/// and that one arrives as a Brief Event of its own — it opens a round, and a
+/// round starts from a Brief.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct SteerEvent {
@@ -2070,6 +2108,11 @@ pub enum Resumed {
     /// And the implementation Pairing has gone, which is what every session of
     /// the work itself runs under.
     NoImplementationPairing,
+
+    /// It says it is following the work up and nothing on its Timeline says what
+    /// about: another record that cannot be true, a steer being the only way
+    /// into Follow-up and one without a brief being refused.
+    NoFollowUpBrief,
 }
 
 /// What clicking Steer found, which is what the modal it opens is drawn from.
@@ -2105,11 +2148,12 @@ pub enum SteerOpened {
 /// Where a steer can send a Conversation.
 ///
 /// Draft and Closed are not among them and never will be: each has a way in of
-/// its own, and a steer is for the four states the work is *done in*. A target
-/// the modal offers is a target something can be set going in, which is why
-/// Wrapping is offered only where the work is already on a pull request — the
-/// one of the four that is drawn out at all, an instruction being writable
-/// anywhere and Done needing nothing.
+/// its own, and a steer is for the states the work is *done in* — the four rungs
+/// of the ladder, and Follow-up beside them, which has no other way in at all. A
+/// target the modal offers is a target something can be set going in, which is
+/// why the two that turn on a pull request are drawn out where there is none: an
+/// instruction is writable anywhere and Done needs nothing, but there is no
+/// wrapping up and no following up of work nobody can see.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerTarget {
@@ -2155,6 +2199,22 @@ pub enum SteerTarget {
     /// one — see [`ConversationSteered::NoPullRequest`].
     Wrapping,
 
+    /// The pull request followed up on: a session started on the brief the human
+    /// wrote, which answers what they asked, does what they want done about work
+    /// that is already pushed, and goes on asking until they are finished.
+    ///
+    /// **The brief is required**, unlike either of the other written payloads:
+    /// there is nothing on the branch that could stand for it, a follow-up being
+    /// a thing the human wanted rather than a step of the run. A submit without
+    /// one is refused by name — see [`ConversationSteered::NoFollowUpBrief`].
+    ///
+    /// Offered only where the record holds a pull request, as Wrapping is and
+    /// refused by the same name, and only from Done and Wrapping: what a
+    /// follow-up follows up is work that has been seen through, and a
+    /// Conversation still building has the ordinary ways of saying what to do
+    /// next.
+    FollowUp,
+
     /// Finished with. Nothing runs, so there is no Pairing to settle and no
     /// payload to carry: a steer into Done is the move alone.
     Done,
@@ -2170,7 +2230,7 @@ impl SteerTarget {
     /// the same question could come to different answers.
     pub fn runs(self) -> bool {
         match self {
-            Self::Grilling | Self::Implementing | Self::Wrapping => true,
+            Self::Grilling | Self::Implementing | Self::Wrapping | Self::FollowUp => true,
             Self::Done => false,
         }
     }
@@ -2241,6 +2301,23 @@ pub struct SteerSubmission {
     #[serde(default)]
     pub instruction: Option<String>,
 
+    /// The brief, for a steer into Follow-up.
+    ///
+    /// It lands as the Steer Event's own body, exactly as the instruction above
+    /// it does, and the session started on it opens the follow-up: it answers
+    /// what the brief asks, does what it asks for, and asks the human what else
+    /// there is until they say there is nothing.
+    ///
+    /// **Required**, which is what makes it the one written payload with no
+    /// quiet meaning. Nothing on the branch could stand in for it — a follow-up
+    /// is not a step of the run to be picked up — so a submit that names
+    /// Follow-up without one is refused by name; see
+    /// [`ConversationSteered::NoFollowUpBrief`].
+    ///
+    /// Whitespace alone is nothing written, as everywhere else here.
+    #[serde(default)]
+    pub follow_up: Option<String>,
+
     /// Whether the session is primed with everything the human has already
     /// answered.
     ///
@@ -2272,13 +2349,14 @@ pub enum ConversationSteered {
 
     NoSuchConversation,
 
-    /// Wrapping was named for a Conversation whose work is on no pull request.
+    /// Wrapping or Follow-up was named for a Conversation whose work is on no
+    /// pull request.
     ///
     /// A wrapping Conversation is defined by the one under it — the store writes
     /// the move and the pull-request row as one act — so there is no wrapping up
-    /// to steer into here. The modal does not offer the target on such a
-    /// Conversation at all; this is the same rule asked again on arrival, the
-    /// way every named refusal here is.
+    /// to steer into here, and nothing for a follow-up to follow up either. The
+    /// modal does not offer either target on such a Conversation; this is the
+    /// same rule asked again on arrival, the way every named refusal here is.
     NoPullRequest,
 
     /// Implementing was named with nothing written, for a Conversation with
@@ -2293,6 +2371,15 @@ pub enum ConversationSteered {
     /// [`ConversationView::ready_to_continue`], which is what it draws that by
     /// — and this is the same rule asked again on arrival.
     NoInstruction,
+
+    /// Follow-up was named with no brief written.
+    ///
+    /// The one written payload that is always required. A steer into
+    /// Implementing with nothing written carries on what the branch holds and a
+    /// steer into Grilling with nothing written grills the Brief that is there;
+    /// a follow-up is neither the run's next step nor a round of it, so an empty
+    /// one is a session with nothing to follow up.
+    NoFollowUpBrief,
 
     /// Grilling was named with no brief written, for a Conversation whose newest
     /// Brief is empty.

@@ -384,7 +384,13 @@
   /* Nothing. The row around it is the mark. */
 }
 
-.directionPick .direction label {
+/* One row to pick, wherever the page offers one that answers no Question: the
+   three directions, and the Nothing-else option on a follow-up's Sets. The
+   Ending is drawn with them rather than beside them because it is the same kind
+   of control — a closing decision the viewer injects — and two rows that were
+   styled apart would read as two different kinds of thing. */
+.directionPick .direction label,
+.ending label {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
@@ -393,18 +399,21 @@
   border-radius: 0.4rem;
 }
 
-.directionPick .direction input {
+.directionPick .direction input,
+.ending input {
   flex: none;
   margin: 0;
   accent-color: var(--accent);
 }
 
-.directionPick .direction label:has(input:checked) {
+.directionPick .direction label:has(input:checked),
+.ending label:has(input:checked) {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.directionPick .direction label:has(input:focus-visible) {
+.directionPick .direction label:has(input:focus-visible),
+.ending label:has(input:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -424,8 +433,10 @@
   color: var(--ink-soft);
 }
 
-/* What picking does, said once for the whole chooser. */
-.directionPick .semantics {
+/* What picking does, said once for the whole chooser — and what ticking does,
+   said the same way under the Nothing-else option. */
+.directionPick .semantics,
+.ending .semantics {
   margin: 0.75rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -459,6 +470,24 @@
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/* The Nothing-else option, in the same card under the comment box: the human's
+   way of saying the follow-up is over, drawn on a follow-up's Sets and on no
+   others. See `Ending` in `Answering.tsx`.
+
+   The gap is its own because it follows the comment box rather than the agent's
+   prose, which is what `.postscriptBody + *` in `Postscript.module.css` spaces.
+   The row itself is a direction's row — see `.direction label` above, which the
+   two share. */
+.ending {
+  margin-top: 0.75rem;
+}
+
+/* The words of the option, which carry no paint of their own: the row around
+   them is what is drawn, exactly as a direction's name is. */
+.endingName {
+  /* Nothing. The row around it is the mark. */
 }
 
 /* The human's closing word, inside the Postscript's card with the agent's — see

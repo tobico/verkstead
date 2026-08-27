@@ -1,10 +1,11 @@
 //! What is driving each Conversation, so that something can say when nothing
 //! is.
 //!
-//! A Conversation in a driven state — Grilling, Implementing, Wrapping — is
-//! supposed to have a task of Verkstead's own seeing it along: the runner
-//! working a backlog, the driver following an inline run or a roadmap, the set
-//! of watchers a wrap-up has going. When one of those dies the Conversation is
+//! A Conversation in a driven state — Grilling, Implementing, Wrapping,
+//! Follow-up — is supposed to have a task of Verkstead's own seeing it along:
+//! the runner working a backlog, the driver following an inline run or a
+//! roadmap, the set of watchers a wrap-up has going, the one seeing a follow-up
+//! session out. When one of those dies the Conversation is
 //! left saying it is being worked on with nothing working on it, and there is
 //! nothing on the page for the human to press. This is the half of detecting
 //! that which knows what is alive.
@@ -130,7 +131,9 @@ impl Drivers {
             Lifecycle::Grilling => {
                 working.contains(&conversation_id) || self.registered(conversation_id)
             }
-            Lifecycle::Implementing | Lifecycle::Wrapping => self.registered(conversation_id),
+            Lifecycle::Implementing | Lifecycle::Wrapping | Lifecycle::FollowUp => {
+                self.registered(conversation_id)
+            }
             Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => true,
         }
     }
@@ -372,7 +375,11 @@ mod tests {
     fn implementing_and_wrapping_are_driven_by_the_task_that_runs_them() {
         let drivers = Drivers::new();
 
-        for state in [Lifecycle::Implementing, Lifecycle::Wrapping] {
+        for state in [
+            Lifecycle::Implementing,
+            Lifecycle::Wrapping,
+            Lifecycle::FollowUp,
+        ] {
             assert!(
                 !drivers.driven(&working(&[CONVERSATION]), CONVERSATION, state),
                 "{state:?} with a session running and no driver is a run nothing is seeing out",
@@ -381,7 +388,11 @@ mod tests {
 
         let driving = drivers.driving(CONVERSATION);
 
-        for state in [Lifecycle::Implementing, Lifecycle::Wrapping] {
+        for state in [
+            Lifecycle::Implementing,
+            Lifecycle::Wrapping,
+            Lifecycle::FollowUp,
+        ] {
             assert!(
                 drivers.driven(&working(&[]), CONVERSATION, state),
                 "{state:?} between one session and the next is still being driven",
@@ -390,7 +401,11 @@ mod tests {
 
         drop(driving);
 
-        for state in [Lifecycle::Implementing, Lifecycle::Wrapping] {
+        for state in [
+            Lifecycle::Implementing,
+            Lifecycle::Wrapping,
+            Lifecycle::FollowUp,
+        ] {
             assert!(
                 !drivers.driven(&working(&[]), CONVERSATION, state),
                 "{state:?} with the loop ended is not",

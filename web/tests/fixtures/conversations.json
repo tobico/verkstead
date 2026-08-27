@@ -6,6 +6,7 @@
     "repo": "verkstead",
     "state": "Implementing",
     "waiting": false,
+    "waiting_on_checks": false,
     "working": false
   },
   {
@@ -15,6 +16,7 @@
     "repo": "verkstead",
     "state": "Implementing",
     "waiting": false,
+    "waiting_on_checks": false,
     "working": false
   },
   {
@@ -24,6 +26,7 @@
     "repo": "verkstead",
     "state": "Grilling",
     "waiting": true,
+    "waiting_on_checks": false,
     "working": false
   },
   {
@@ -33,6 +36,7 @@
     "repo": "askance",
     "state": "Draft",
     "waiting": false,
+    "waiting_on_checks": false,
     "working": false
   },
   {
@@ -42,6 +46,7 @@
     "repo": "verkstead",
     "state": "Draft",
     "waiting": false,
+    "waiting_on_checks": false,
     "working": false
   }
 ]

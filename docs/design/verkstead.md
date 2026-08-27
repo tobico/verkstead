@@ -73,7 +73,35 @@ flowchart LR
   ladder rather than on it, since every other state is somewhere the work has
   got to. A conversation that is closed or Done is got back into by steering
   it, a steer into Grilling being what opens a new brief round (*refined
-  2026-08-26, building close-and-retirements*).
+  2026-08-26, building close-and-retirements*). **Follow-up** sits beside the
+  ladder the way Closed sits off it: a steer from Done or Wrapping, on work
+  that is already on a pull request, opens a session the human asks and is
+  asked in until they are finished with it. It ends when they tick **Nothing
+  else** on the newest round they answer and the session goes idle with
+  nothing left open; the conversation then re-enters Wrapping over the same
+  pull request — with the checks put back to waiting where the follow-up
+  pushed — and settles to Done the ordinary way (*added 2026-08-27, building
+  follow-ups*).
+- **The rescue.** A session that goes idle with nothing open and nothing to
+  show for itself leaves a conversation nobody can move: the human sees only
+  what arrives as a question set, and none has. So Verkstead types a canned
+  line into the running session — the channel a watcher's keystrokes take —
+  telling it that nothing it prints reaches anybody and to put what it is
+  waiting on as a set. Twice at most; a session still saying nothing after the
+  second stops the conversation with a notice saying it would not ask.
+  Follow-up is where it started, the state where an idle session is exactly the
+  failure (*added 2026-08-27, building follow-ups*). It now watches **every
+  session Verkstead launches**, one loop with the state's own done-indicator as
+  its parameter: a grilling's artifact, a backlog step's task file, an inline
+  implementation's, an instruction's or a fix's commit, a follow-up's
+  Nothing-else mark. A session
+  with a set open is waiting on the human and one still printing is at work, so
+  neither is ever spoken to; a fix session is ended rather than stopped over,
+  the wrap-up's two goes at a check being the stop it already has (*refined
+  2026-08-27, building follow-ups*). The inline session was the one the sweep
+  left out, and it had no quiet ending either — so it is ended on committed plus
+  quiet, the way the instruction session it is the same shape as always was
+  (*refined 2026-08-27, reviewing follow-ups*).
 - **Agent profiles** are minimal: name, claude home dir + config file pair, the
   list of models that account can run — plus an agent-type discriminator so
   other backends can slot in later (claude is the only type now). The model
@@ -196,7 +224,11 @@ flowchart LR
   advances past a stop, and the badge points at the notice. Getting going again
   is one standing **Resume** in the start-work menu, recomputed from the
   lifecycle and the branch rather than replaying whatever failed; steering the
-  work is what **Steer** is for, so Resume carries nothing. What replaced
+  work is what **Steer** is for, so Resume carries nothing. A follow-up is
+  recomputed like everything else: a fresh session on the brief its steer
+  opened it with and the rounds already answered, read off the timeline the way
+  a relaunched grilling reads what it settled (*refined 2026-08-27, building
+  follow-ups*). What replaced
   roadrunner's three remedies: retry is Resume, take over manually is the stop
   already standing, and abort is **Close**.
 - **Usage limits.** When a claude account exhausts its window mid-run, the

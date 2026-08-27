@@ -264,6 +264,7 @@ export function Sheet(props: {
             questions={props.set.questions}
             postscript={props.set.postscript_html}
             proposal={props.set.proposal}
+            followUp={props.set.follow_up}
           />
         }
       >

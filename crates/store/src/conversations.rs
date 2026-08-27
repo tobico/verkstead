@@ -56,9 +56,11 @@ fn direction_read(word: &str) -> Result<Direction> {
 /// the Conversation is still drafting — need the states they refuse on behalf of
 /// to exist before the stage that reaches them does.
 ///
-/// [`Lifecycle::Closed`] is off the ladder rather than on it. Every other state
-/// is somewhere the work has got to, and closing is the work stopping wherever
-/// it was — which is why it is reachable from all of them and leads nowhere.
+/// [`Lifecycle::Closed`] is off the ladder rather than on it: closing is the
+/// work stopping wherever it was, which is why it is reachable from all of them
+/// and leads nowhere. [`Lifecycle::FollowUp`] is beside it rather than on it
+/// too, being somewhere the human puts a Conversation whose work is already
+/// pushed — and it leads back into the wrap-up it came off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
     /// The Brief is being written, and with it everything else about the
@@ -75,6 +77,14 @@ pub enum Lifecycle {
 
     /// The work is on a PR and the wrap-up loop has it.
     Wrapping,
+
+    /// The human is following that pull request up: a session of their own,
+    /// asking and doing whatever they want taken up about work already pushed.
+    ///
+    /// The one state with no way in but a steer, and the one that is not a rung
+    /// of the ladder: it hangs off the wrap-up rather than following it, and
+    /// where it leads back to is Wrapping.
+    FollowUp,
 
     /// Finished. A steer is the way back in: one into [`Lifecycle::Grilling`]
     /// opens a second round with a Brief of its own — see
@@ -95,6 +105,7 @@ impl Lifecycle {
             Self::Grilling => "grilling",
             Self::Implementing => "implementing",
             Self::Wrapping => "wrapping",
+            Self::FollowUp => "follow-up",
             Self::Done => "done",
             Self::Closed => "closed",
         }
@@ -115,6 +126,7 @@ impl Lifecycle {
             "grilling" => Self::Grilling,
             "implementing" => Self::Implementing,
             "wrapping" => Self::Wrapping,
+            "follow-up" => Self::FollowUp,
             "done" => Self::Done,
             "closed" | "aborted" => Self::Closed,
             other => bail!("a Conversation is in the unknown state {other:?}"),
@@ -206,6 +218,15 @@ pub struct ConversationRow {
     /// and which source said so is the Conversation's own page to show. The
     /// sources are [`conversations`]'s, all of them in the one query.
     pub waiting: bool,
+
+    /// Whether its wrap-up has narrowed to its checks — see
+    /// [`super::narrowed_to_checks`], which is the same reading of the same
+    /// facts, asked of one Conversation instead of the list.
+    ///
+    /// Half of what the row says as *Waiting on checks*. The other half is that
+    /// nothing is running on it, which the caller already reads once for the
+    /// whole sidebar rather than per row.
+    pub narrowed_to_checks: bool,
 }
 
 /// The word the `kind` column holds for a Question Set.
@@ -672,6 +693,23 @@ pub enum Rebuilding {
     NoSuchConversation,
 }
 
+/// What became of landing a follow-up back in the wrap-up it was opened over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ending {
+    /// Landed: the Conversation is wrapping up again and the move is on its
+    /// Timeline, with the checks put back to waiting where the follow-up
+    /// pushed anything.
+    Wrapped,
+
+    /// It is not following anything up, so there is no follow-up here to end —
+    /// closed out from under the session, or steered somewhere else while this
+    /// was deciding.
+    NotFollowingUp,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
 /// What became of steering one.
 ///
 /// Nothing here is about the state the Conversation was in, and that is the
@@ -1071,6 +1109,11 @@ async fn started(
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
 /// is already an ask left open.
 ///
+/// `narrowed_to_checks` rides along in the same query for the same reason: it is
+/// a reading of the wrap-up's settle facts — see [`super::narrowed_to_checks`],
+/// which asks it of one Conversation — and a caller folding it itself would be
+/// issuing a query per row for something a subselect already has.
+///
 /// A **Draft** is none of them, whatever else is true of it: it is waiting on
 /// the human in the ordinary sense, and the sidebar says so by drawing it as a
 /// draft rather than by marking it as an ask.
@@ -1086,7 +1129,7 @@ async fn started(
 /// the choice would be a second place to get it wrong, and there is no other way
 /// the sidebar should ever be read.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
-    let rows: Vec<(i64, String, String, String, bool)> = sqlx::query_as(
+    let rows: Vec<(i64, String, String, String, bool, bool)> = sqlx::query_as(
         "SELECT c.id, c.branch, r.name, c.state,
                 c.state <> 'draft' AND (
                     EXISTS (
@@ -1101,7 +1144,20 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                           )
                     )
                     OR c.stopped_at IS NOT NULL
-                ) AS waiting
+                ) AS waiting,
+                c.state = 'wrapping'
+                  AND EXISTS (
+                      SELECT 1 FROM wrap_up_settled w
+                      WHERE w.conversation_id = c.id AND w.waiting_on = 'review'
+                  )
+                  AND EXISTS (
+                      SELECT 1 FROM wrap_up_settled w
+                      WHERE w.conversation_id = c.id AND w.waiting_on = 'comments'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM wrap_up_settled w
+                      WHERE w.conversation_id = c.id AND w.waiting_on = 'checks'
+                  ) AS narrowed_to_checks
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
          LEFT JOIN placements m ON m.conversation_id = c.id
@@ -1116,13 +1172,14 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     .context("listing the Conversations")?;
 
     rows.into_iter()
-        .map(|(id, branch, repo, state, waiting)| {
+        .map(|(id, branch, repo, state, waiting, narrowed_to_checks)| {
             Ok(ConversationRow {
                 id,
                 branch,
                 repo,
                 state: Lifecycle::read(&state)?,
                 waiting,
+                narrowed_to_checks,
             })
         })
         .collect()
@@ -1895,6 +1952,25 @@ pub async fn unanswered_set_since(
     Ok(found.map(|(set_id,)| set_id))
 }
 
+/// A Question Set of this Conversation's that is still waiting to be answered,
+/// whoever asked it.
+///
+/// [`unanswered_set_since`] widened to the whole Timeline, which is the same
+/// question asked without a session to ask it *of*: what a follow-up's rule
+/// wants to know is whether the human is left holding a question, and a
+/// question is one of those whoever put it up.
+///
+/// Every Timeline Event's id is positive, so opening the window at zero leaves
+/// nothing out.
+///
+/// Blocking Asks alone and never a Deferred one, exactly as the read it is made
+/// of: a Deferred Ask idles nobody and holds nothing open, so a follow-up that
+/// waited on one would be waiting on a question that was working exactly as it
+/// was meant to.
+pub async fn open_set(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
+    unanswered_set_since(pool, conversation_id, 0).await
+}
+
 /// Which Conversation a Set was asked from, or `None` if it is on no Timeline
 /// at all.
 ///
@@ -1920,6 +1996,22 @@ pub async fn asked_from(pool: &SqlitePool, set_id: i64) -> Result<Option<i64>> {
     })?;
 
     Ok(found.map(|(id,)| id))
+}
+
+/// Where a Conversation stands, and nothing else about it.
+///
+/// For the readers whose whole question is the state: whether the Set on the
+/// page in front of the human is a follow-up's, above all. The whole
+/// [`Conversation`] is a join across the Repo and both Pairings, which is more
+/// of the store read than one word is worth.
+pub async fn state(pool: &SqlitePool, id: i64) -> Result<Option<Lifecycle>> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    row.map(|(state,)| Lifecycle::read(&state)).transpose()
 }
 
 /// Rewrite the Brief of the round a drafting Conversation is in.
@@ -2341,6 +2433,72 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
     Ok(Rebuilding::Started)
 }
 
+/// Land a follow-up back in the wrap-up it was opened over, because the human
+/// has said there is nothing else.
+///
+/// The way out of Follow-up, and the only one there is short of a steer. A
+/// follow-up is something taken up about work that is already on a pull request,
+/// so where it ends is where it started: the wrap-up carries on over whatever
+/// the branch now holds, and *back to Done* is that wrap-up's own settling rule
+/// rather than anything decided here — see [`finish_wrap_up`].
+///
+/// Refused for anything but Follow-up, as every move here is refused outside the
+/// state it leaves: a Conversation closed or steered out from under the session
+/// is not one to wrap up.
+///
+/// **The checks go back to waiting where the follow-up pushed**, in the same
+/// transaction as the move. A follow-up that committed has given GitHub a new
+/// run to make up its mind about, and the settle standing over it is yesterday's
+/// green: without this the wrap-up's settling loop could reach Done in the gap
+/// before the checks watcher's first poll saw the new run. `pushed` is the
+/// caller's to know — it is what the Conversation recorded while the session ran
+/// — and a pure question-and-answer follow-up that committed nothing lands with
+/// everything settled and passes straight through.
+///
+/// The review's settle is deliberately left alone either way, which is the one
+/// place this parts company with [`implement_again`]. *Settled once and stays
+/// settled* is a rule about one wrap, and this is the same wrap: the human read
+/// the branch, said what they wanted about it, and watched it done. A second
+/// review of what they have just been through would be Verkstead reading over
+/// their shoulder.
+///
+/// One transaction, as every move is: a Conversation that says Wrapping always
+/// has the move on its Timeline to say when it got there.
+pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<Ending> {
+    let mut tx = super::writing(pool, "ending a follow-up").await?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Ending::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::FollowUp {
+        return Ok(Ending::NotFollowingUp);
+    }
+
+    if pushed {
+        super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Checks).await?;
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Wrapping.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} back to wrapping up"))?;
+
+    moved(&mut tx, id, Lifecycle::Wrapping).await?;
+
+    tx.commit().await.context("ending a follow-up")?;
+
+    Ok(Ending::Wrapped)
+}
+
 /// Steer a Conversation into `target`: the human's own Event, the state, and
 /// the move that says it got there.
 ///
@@ -2357,9 +2515,9 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// it is what came of the act.
 ///
 /// **The Steer carries what the human wrote**, where a target takes anything
-/// written: the instruction a steer into Implementing sends a session off with
-/// is the Event's own body, so reading the Event back is reading the job that
-/// was set. See [`Event::Steer`] for how the two are held in the one column.
+/// written: the instruction a steer into Implementing sends a session off with,
+/// and the brief a steer into Follow-up does, are the Event's own body, so
+/// reading the Event back is reading the job that was set. See [`Event::Steer`] for how the two are held in the one column.
 ///
 /// **A third where the steer opens a round**: the Brief the human wrote for it,
 /// under the move rather than above it, because the move is where the round
@@ -2572,13 +2730,14 @@ pub struct Steer<'a> {
     /// The new round's Brief, for a steer that opens one.
     pub brief: Option<&'a str>,
 
-    /// The hand-written work a steer into Implementing carries, which lands as
-    /// the Steer Event's own body rather than beside it.
+    /// What the human wrote to steer it with: the instruction a steer into
+    /// Implementing carries, or the brief a steer into Follow-up does. Either
+    /// lands as the Steer Event's own body rather than beside it.
     ///
-    /// Not a Brief, however alike the two look on the page. A Brief is what a
-    /// round is grilled *about*; this is one session's whole job, said by the
-    /// human at the moment they steered — so it belongs to the steer, and
-    /// reading the Event back is reading what they asked for.
+    /// Not a Brief, however alike the three look on the page. A Brief is what a
+    /// round is grilled *about*; this is what one session was set going on,
+    /// said by the human at the moment they steered — so it belongs to the
+    /// steer, and reading the Event back is reading what they asked for.
     pub instruction: Option<&'a str>,
 
     /// How the work is being built from here, for a Conversation that has never

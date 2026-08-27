@@ -60,6 +60,7 @@ function everySection(): SetView {
     diagrams: false,
     standing: { Waiting: "waiting" },
     proposal: null,
+    follow_up: false,
   };
 }
 
