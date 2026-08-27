@@ -24,7 +24,7 @@ Roadmap stage: [03: Pipeline](docs/roadmaps/companion-repos/03-pipeline.md)
 
 ## Tasks
 
-- [ ] 01: A pull request per repository — [details](01-a-pull-request-per-repo.md)
+- [x] 01: A pull request per repository — [details](01-a-pull-request-per-repo.md)
 - [ ] 02: A pull request per touched companion — [details](02-a-pull-request-per-touched-companion.md)
 - [ ] 03: Checks per pull request — [details](03-checks-per-pull-request.md)
 - [ ] 04: Comments per pull request — [details](04-comments-per-pull-request.md)

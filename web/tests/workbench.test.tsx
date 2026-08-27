@@ -33,6 +33,7 @@ import type {
   ConversationView,
   GrillingStarted,
   ProfileEntry,
+  PinnedEvent,
   PullRequestDetails,
   Resumed,
   RoadmapPane,
@@ -8549,6 +8550,23 @@ const OPENED = (() => {
   return pinned.PullRequest;
 })();
 
+/// And the pull request the same wrap-up opened in a read-write companion repo:
+/// a repository of its own, a number of its own, and its name on the card.
+///
+/// Composed rather than a fixture of its own, because what is being read here is
+/// how the pinned block draws more than one — the card itself is the same card
+/// the server's own fixture carries.
+const BESIDE_IT: PinnedEvent = {
+  PullRequest: {
+    id: OPENED.id + 1,
+    at: "2026-08-21T08:32:11.000Z",
+    number: 7,
+    title: "Rate limiting",
+    url: "https://github.com/tobico/askance/pull/7",
+    repo: "askance",
+  },
+};
+
 /// What is on it, which the details pane fetches from the server, which asks
 /// GitHub through the host's `gh`.
 const CARRIED: PullRequestDetails = {
@@ -8742,6 +8760,77 @@ describe("the pinned pull request", () => {
     await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
 
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(0);
+  });
+
+  /// A conversation ends on one pull request per repository it was worked in,
+  /// so the pinned block draws every one of them rather than the last it finds.
+  /// The work's own is unlabelled and a companion's carries its repository, by
+  /// the rule a commit's label follows.
+  it("draws every pull request, naming the ones in a companion repo", async () => {
+    theWrapping({ pinned: [...WRAPPING.pinned, BESIDE_IT] });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const dots = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.carousel} > .${timeline.dots}`,
+    );
+
+    expect(
+      [...dots.querySelectorAll("button")].map((dot) =>
+        dot.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Pull request", "Pull request in askance"]);
+
+    const own = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
+    expect(own.querySelector(`.${timeline.repo}`)).toBeNull();
+
+    fireEvent.click([...dots.querySelectorAll("button")][1]!);
+
+    const companions = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.pullRequest} .${timeline.repo}`,
+    );
+    expect(companions.textContent).toBe("askance");
+  });
+
+  /// And opening a companion's asks the server about that pull request's own
+  /// event, which is what says which repository to ask GitHub in.
+  it("opens a companion's pull request against its own event", async () => {
+    const fetching = theWrapping(
+      { pinned: [...WRAPPING.pinned, BESIDE_IT] },
+      whenever(
+        `/api/ui/conversations/${WRAPPING.id}/pull-request/${BESIDE_IT.PullRequest.id}`,
+        json(CARRIED),
+      ),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const dots = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.carousel} > .${timeline.dots}`,
+    );
+    fireEvent.click([...dots.querySelectorAll("button")][1]!);
+
+    const companions = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.pullRequest} .${timeline.repo}`,
+    );
+    fireEvent.click(
+      companions
+        .closest(`.${timeline.pullRequest}`)!
+        .querySelector(`.${timeline.openPullRequest}`)!,
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
+
+    expect(
+      askedFor(
+        fetching,
+        `/api/ui/conversations/${WRAPPING.id}/pull-request/${BESIDE_IT.PullRequest.id}`,
+      ),
+    ).toBe(1);
+    expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(0);
+  });
   });
 
 /// A conversation with all three kinds pinned at once: the backlog it was built
@@ -9022,7 +9111,6 @@ describe("the pinned carousel", () => {
     await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBeGreaterThan(0);
   });
-});
 });
 
 /// What somebody asked for by hand once, which the same conversation carries on

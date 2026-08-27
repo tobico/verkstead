@@ -19,6 +19,10 @@
 //! attributed to the Conversation's own repository, and the rule that keeps one
 //! commit per Conversation is rebuilt around the new column.
 //!
+//! And another rebuilt, for the same reason and against the same rule: a pull
+//! request used to be the Conversation's alone, and is now the Conversation's and
+//! the Repo's — a Conversation ends on one per repository it was worked in.
+//!
 //! Both old shapes are written here by hand rather than by the code that used to
 //! write them: that code has gone, and what has to keep working is a database
 //! rather than a function.
@@ -27,8 +31,9 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Commit, Decision, Event, Lifecycle, asked_to_stop, clear_stop, commit_repo, conversations,
-    load_conversation, open_database, record_commit, recorded_commits, register_repo,
+    Commit, Decision, Event, Lifecycle, PullRequest, asked_to_stop, clear_stop, commit_repo,
+    conversations, load_conversation, open_database, pull_request, pull_request_repo,
+    record_another_pull_request, record_commit, recorded_commits, register_repo,
     start_conversation, start_grilling, stop, stopped, timeline,
 };
 
@@ -964,6 +969,168 @@ async fn the_rebuilt_commits_table_keeps_one_commit_per_conversation_per_repo() 
     assert_eq!(
         commits(&pool, id).await.len(),
         1,
+        "and a database opened twice is rewritten once",
+    );
+}
+
+/// A database whose pull requests are the Conversation's alone, which is what
+/// every one recorded before a Conversation could end on more than one is.
+///
+/// The table is written out as the Verkstead that made it declared it — the
+/// migration finds a database rather than a call — and one pull request put in
+/// it, on the Event it hangs off.
+async fn pull_requests_of_before(dir: &Path) -> (i64, i64) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    sqlx::query("DROP TABLE pull_requests")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE pull_requests (
+             event_id        INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             number          INTEGER NOT NULL,
+             title           TEXT NOT NULL,
+             url             TEXT NOT NULL,
+             UNIQUE (conversation_id)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (event_id,): (i64,) = sqlx::query_as(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, '2026-08-01T09:14:22.000Z', 'pull-request', '')
+         RETURNING id",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO pull_requests (event_id, conversation_id, number, title, url)
+         VALUES (?, ?, 41, 'Rate limiting', 'https://github.com/tobico/verkstead/pull/41')",
+    )
+    .bind(event_id)
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    pool.close().await;
+
+    (id, repo)
+}
+
+/// A pull request recorded before this is the Conversation's own repository's,
+/// which is the only repository it was possible for it to be in — and it reads
+/// back exactly as it always did, unlabeled, in the repository the details pane
+/// asks GitHub in.
+#[tokio::test]
+async fn every_pull_request_of_before_is_the_conversations_own_repositorys() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo) = pull_requests_of_before(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        pull_request(&pool, id, repo).await.unwrap(),
+        Some(PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        }),
+        "the wrap-up's watchers still find the pull request they always did",
+    );
+
+    let event = timeline(&pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|event| matches!(event.event, Event::PullRequest(_)))
+        .expect("the pull request is on the Timeline")
+        .id;
+
+    assert_eq!(
+        pull_request_repo(&pool, id, event)
+            .await
+            .unwrap()
+            .map(|repo| repo.path),
+        Some(Path::new("/watched/verkstead").to_owned()),
+        "so the details pane asks GitHub in the Conversation's own repository",
+    );
+}
+
+/// And the rule the table carries is the rebuilt one: another repository's pull
+/// request stands beside the one that is there, and opening the database a
+/// second time rewrites nothing.
+#[tokio::test]
+async fn the_rebuilt_pull_requests_table_keeps_one_per_conversation_per_repo() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, _) = pull_requests_of_before(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let beside = register_repo(&pool, Path::new("/watched/askance"), "askance", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let companions = PullRequest {
+        number: 7,
+        title: "Rate limiting".to_owned(),
+        url: "https://github.com/tobico/askance/pull/7".to_owned(),
+        repo: None,
+    };
+
+    assert!(
+        record_another_pull_request(&pool, id, beside, &companions)
+            .await
+            .unwrap(),
+        "the old rule would have refused this outright",
+    );
+    assert!(
+        record_another_pull_request(&pool, id, beside, &companions)
+            .await
+            .unwrap(),
+        "and the new one keeps the row that repository already has",
+    );
+
+    pool.close().await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        timeline(&pool, id)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|event| matches!(event.event, Event::PullRequest(_)))
+            .count(),
+        2,
         "and a database opened twice is rewritten once",
     );
 }

@@ -309,6 +309,10 @@ pub(crate) fn pull_request(
         number: opened.number,
         title: opened.title,
         url: opened.url,
+        // Unnamed: which repository this was asked in is what the caller already
+        // knows, and the name on a recorded pull request is the label a reader
+        // wants rather than anything written here. See [`store::PullRequest`].
+        repo: None,
     })
 }
 
@@ -832,6 +836,9 @@ mod tests {
                 number: 41,
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                // Which repository is the caller's to know: what `gh` was asked
+                // in is not something it reads back.
+                repo: None,
             },
         );
     }

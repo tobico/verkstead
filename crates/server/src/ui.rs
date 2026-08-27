@@ -763,12 +763,16 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
             .map(verkstead_render::stage_list_event),
     );
 
-    // And the pull request the work ended up on, which is pinned beside it. This
-    // one *is* on the record — it is what moved the Conversation into Wrapping —
-    // so it is read off the Timeline for the reason the Brief is: it is already
-    // here. What is not read here is what the PR holds, which is a request of its
-    // own; see [`pull_request`].
-    pinned.extend(timeline.iter().rev().find_map(|event| match &event.event {
+    // And every pull request the work ended up on, which are pinned beside them.
+    // These *are* on the record — the Conversation's own repository's is what
+    // moved the Conversation into Wrapping, and a companion's is that wrap-up
+    // covering the repository it also committed in — so they are read off the
+    // Timeline for the reason the Brief is: they are already here. All of them
+    // rather than the last one found: a Conversation ends on one pull request per
+    // repository it was worked in, and the human wraps up all of them at once.
+    // What is not read here is what a PR holds, which is a request of its own;
+    // see [`pull_request`].
+    pinned.extend(timeline.iter().filter_map(|event| match &event.event {
         store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
             event.id,
             event.at.clone(),
@@ -776,6 +780,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                 number: opened.number,
                 title: opened.title.clone(),
                 url: opened.url.clone(),
+                repo: opened.repo.clone(),
             },
         )),
         _ => None,
@@ -1122,6 +1127,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             number: opened.number,
                             title: opened.title,
                             url: opened.url,
+                            repo: opened.repo,
                         },
                     ),
                     // And the two rows that carry nothing of their own: what is
@@ -1469,18 +1475,9 @@ async fn pull_request(
         return no_such_pull_request();
     };
 
-    // Which PR, and which repository to ask about it in. Both come off the
-    // Conversation's own record: the Event says which pull request, and an Event
-    // id belonging to another Conversation names nothing here.
-    let conversation = match store::load_conversation(&state.pool, id).await {
-        Ok(Some(conversation)) => conversation,
-        Ok(None) => return no_such_pull_request(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
-            return unavailable("the pull request could not be read");
-        }
-    };
-
+    // Which PR, off the Conversation's own record: the Event says which pull
+    // request, and an Event id belonging to another Conversation names nothing
+    // here.
     let timeline = match store::timeline(&state.pool, id).await {
         Ok(timeline) => timeline,
         Err(error) => {
@@ -1498,8 +1495,21 @@ async fn pull_request(
         return no_such_pull_request();
     };
 
+    // And which repository to ask about it in, which is the repository that pull
+    // request was opened in rather than the Conversation's own. A number means
+    // something else in another repository, or nothing at all — so a companion's
+    // pull request asked about in the work's own repo would come back as
+    // somebody else's work or as a 404. See [`store::pull_request_repo`].
+    let repo = match store::pull_request_repo(&state.pool, id, event).await {
+        Ok(Some(repo)) => repo.path,
+        Ok(None) => return no_such_pull_request(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a pull request failed");
+            return unavailable("the pull request could not be read");
+        }
+    };
+
     let gh = state.github.clone();
-    let repo = conversation.repo.path;
 
     let asked =
         tokio::task::spawn_blocking(move || crate::github::details(&gh, &repo, opened.number))

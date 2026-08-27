@@ -2377,10 +2377,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::record_pull_request(
         &pool,
         wrapping,
+        repos[0].id,
         &store::PullRequest {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
         },
     )
     .await

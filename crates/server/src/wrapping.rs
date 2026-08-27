@@ -58,7 +58,7 @@ use crate::store;
 /// unattended run with nobody watching, and what it has to say it says on the
 /// Timeline.
 pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Option<i64>) {
-    let Some((branch, found)) = asked(state, conversation_id).await else {
+    let Some((repo_id, branch, found)) = asked(state, conversation_id).await else {
         return;
     };
 
@@ -77,7 +77,7 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
         }
     };
 
-    match store::record_pull_request(&state.pool, conversation_id, &opened).await {
+    match store::record_pull_request(&state.pool, conversation_id, repo_id, &opened).await {
         Ok(store::Wrapping::Started) => {
             tracing::info!(
                 conversation_id,
@@ -287,7 +287,8 @@ pub(crate) async fn stopped(
 }
 
 /// Ask the host's `gh` what pull request `conversation_id`'s branch has, and
-/// hand back the branch it asked about alongside the answer.
+/// hand back the repository it asked in and the branch it asked about alongside
+/// the answer.
 ///
 /// Whether there is one is a question two phases ask. [`opened`] asks it at the
 /// end of a run, where a pull request is what the work was carried to, and
@@ -296,14 +297,17 @@ pub(crate) async fn stopped(
 /// implement — see [`crate::runner`]. What each makes of the answer is its own,
 /// so the answer is what this hands back rather than anything it does about it.
 ///
+/// The Repo comes back with it because a pull request is recorded against one:
+/// two repositories are two sets of numbers, and this is the Conversation's own.
+///
 /// `None` where there was nothing to ask about or the asking itself fell over,
 /// both of which are in the log already: neither leaves a caller anything to
 /// say.
 pub(crate) async fn asked(
     state: &AppState,
     conversation_id: i64,
-) -> Option<(String, Result<store::PullRequest, github::Trouble>)> {
-    let (repo, branch) = branch(state, conversation_id).await?;
+) -> Option<(i64, String, Result<store::PullRequest, github::Trouble>)> {
+    let (repo_id, repo, branch) = branch(state, conversation_id).await?;
 
     let asked = {
         let gh = state.github.clone();
@@ -315,7 +319,7 @@ pub(crate) async fn asked(
     };
 
     match asked {
-        Ok(found) => Some((branch, found)),
+        Ok(found) => Some((repo_id, branch, found)),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "asking gh for a pull request failed");
             None
@@ -323,14 +327,19 @@ pub(crate) async fn asked(
     }
 }
 
-/// Which repository to ask `gh` in, and which branch to ask about.
+/// Which registered Repo to ask `gh` in, where it is on disk, and which branch
+/// to ask about.
 ///
 /// The repository rather than the Worktree, exactly as the branch watcher asks
 /// it: the remotes and the refs are the repository's, and a Worktree may have
 /// been removed by the time this runs.
-async fn branch(state: &AppState, conversation_id: i64) -> Option<(PathBuf, String)> {
+async fn branch(state: &AppState, conversation_id: i64) -> Option<(i64, PathBuf, String)> {
     match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => Some((conversation.repo.path, conversation.branch)),
+        Ok(Some(conversation)) => Some((
+            conversation.repo.id,
+            conversation.repo.path,
+            conversation.branch,
+        )),
         Ok(None) => {
             tracing::error!(
                 conversation_id,

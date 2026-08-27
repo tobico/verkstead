@@ -435,6 +435,21 @@
   color: var(--ink-soft);
 }
 
+/* Which repository it was opened in, between the number and the way out. Drawn
+   only where that is not the conversation's own — see `Timeline.tsx` — so an
+   unlabelled card is the work's own repo, and every label in the pinned block
+   belongs to a companion.
+
+   The same quiet outline a commit's label wears, because it says the same
+   thing about the same set of repositories. */
+.pullRequest .repo {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
 /* The way out to GitHub, on the other end of the line: merging happens over
    there, and getting there must not depend on any pane of this page. */
 .pullRequest .out {

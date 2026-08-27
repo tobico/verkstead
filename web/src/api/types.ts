@@ -1356,7 +1356,17 @@ title: string,
  * The whole URL, because merging is the human's act and this is the way to
  * where they do it.
  */
-url: string, };
+url: string, 
+/**
+ * Which repository it was opened in, where that is not the Conversation's
+ * own.
+ *
+ * `None` is the work's own repository and draws nothing, by the rule a
+ * commit's label follows: an unlabeled card means the repo the Conversation
+ * is in, and the label earns its place when the pinned block holds a
+ * companion's pull request as well.
+ */
+repo: string | null, };
 
 /**
  * The public half of the server's VAPID keypair, base64url-encoded from the

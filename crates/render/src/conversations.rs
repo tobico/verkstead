@@ -879,6 +879,15 @@ pub struct PullRequestEvent {
     /// The whole URL, because merging is the human's act and this is the way to
     /// where they do it.
     pub url: String,
+
+    /// Which repository it was opened in, where that is not the Conversation's
+    /// own.
+    ///
+    /// `None` is the work's own repository and draws nothing, by the rule a
+    /// commit's label follows: an unlabeled card means the repo the Conversation
+    /// is in, and the label earns its place when the pinned block holds a
+    /// companion's pull request as well.
+    pub repo: Option<String>,
 }
 
 /// What is on a pull request now: the commits it carries, and what has been said
@@ -1802,6 +1811,7 @@ fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestE
         number: opened.number,
         title: opened.title,
         url: opened.url,
+        repo: opened.repo,
     }
 }
 
@@ -1809,12 +1819,16 @@ fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestE
 /// store holds it.
 ///
 /// Its own type rather than the store's, because this crate does not depend on
-/// the store — and rather than three parameters, two of which are strings.
+/// the store — and rather than four parameters, three of which are strings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestSummary {
     pub number: i64,
     pub title: String,
     pub url: String,
+
+    /// What the Repo it was opened in is called, where that is not the
+    /// Conversation's own — see [`PullRequestEvent::repo`].
+    pub repo: Option<String>,
 }
 
 /// What a pull request holds, as the details pane receives it: the commit list

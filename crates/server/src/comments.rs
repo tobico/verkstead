@@ -155,7 +155,8 @@ async fn once(state: &AppState, conversation_id: i64) -> Watching {
         return Watching::Again;
     }
 
-    let opened = match store::pull_request(&state.pool, conversation_id).await {
+    let opened = match store::pull_request(&state.pool, conversation_id, conversation.repo.id).await
+    {
         Ok(Some(opened)) => opened,
         // A Conversation wrapping up has a pull request — recording one *is* the
         // move — so this is a record that has been got at rather than a wrap-up
@@ -331,7 +332,8 @@ pub(crate) async fn for_the_review(state: &AppState, conversation_id: i64) -> Op
         }
     };
 
-    let opened = match store::pull_request(&state.pool, conversation_id).await {
+    let opened = match store::pull_request(&state.pool, conversation_id, conversation.repo.id).await
+    {
         Ok(Some(opened)) => opened,
         Ok(None) => return None,
         Err(error) => {

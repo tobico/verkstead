@@ -22,7 +22,8 @@ use super::{Lifecycle, stops::Decision};
 pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     stops_recorded_the_old_way(pool).await?;
     conversations_that_were_aborted(pool).await?;
-    commits_that_named_no_repo(pool).await
+    commits_that_named_no_repo(pool).await?;
+    pull_requests_that_named_no_repo(pool).await
 }
 
 /// Attribute every commit recorded before Verkstead swept more than one
@@ -114,6 +115,91 @@ async fn commits_that_named_no_repo(pool: &SqlitePool) -> Result<()> {
     tx.commit()
         .await
         .context("attributing the commits recorded before this to a repository")
+}
+
+/// Attribute every pull request recorded before a Conversation could end on more
+/// than one, and rebuild the index that keeps one of them per Conversation.
+///
+/// A pull request used to be the Conversation's alone — one branch per
+/// Conversation and one pull request per branch, so naming the repository would
+/// have been naming the only thing it could be. A Conversation now ends on one
+/// per repository it was worked in: its own, and one per touched read-write
+/// companion. Every row already there belongs to the Conversation's own
+/// repository, which is what it was possible for it to be.
+///
+/// The table is rebuilt rather than altered for the reason the commits table
+/// above is: `UNIQUE (conversation_id)` is declared inline, SQLite gives it its
+/// own index that no `DROP INDEX` reaches, and a `CREATE TABLE IF NOT EXISTS`
+/// does nothing at all to a table that is already there. So the shape is written
+/// out again here, filled from the old rows, and swapped in — the rename taking
+/// the rebuilt rule with it.
+///
+/// Written out rather than borrowed from [`super::pull_requests`], for that same
+/// migration's reason: this is a shape rows are put into once and never again.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn pull_requests_that_named_no_repo(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('pull_requests') WHERE name = ?")
+            .bind("repo_id")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the Repo of a recorded pull request")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("attributing the pull requests recorded before this to a repository")?;
+
+    sqlx::query(
+        "CREATE TABLE pull_requests_by_repo (
+             event_id        INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             number          INTEGER NOT NULL,
+             title           TEXT NOT NULL,
+             url             TEXT NOT NULL,
+             UNIQUE (conversation_id, repo_id)
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the pull requests table over with a repository on it")?;
+
+    // Joined to the Conversations rather than sub-selected per row, which is
+    // also what leaves behind a pull request whose Conversation has gone: there
+    // is no repository such a row could be attributed to, and it is on nobody's
+    // Timeline to be read off.
+    sqlx::query(
+        "INSERT INTO pull_requests_by_repo
+             (event_id, conversation_id, repo_id, number, title, url)
+         SELECT p.event_id, p.conversation_id, v.repo_id, p.number, p.title, p.url
+         FROM pull_requests p
+         JOIN conversations v ON v.id = p.conversation_id",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("attributing the pull requests recorded before this to a repository")?;
+
+    sqlx::query("DROP TABLE pull_requests")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the pull requests table as it was")?;
+
+    // Which takes the unique index with it, that being the table's own: the rule
+    // the rebuilt table carries is the Conversation and the Repo.
+    sqlx::query("ALTER TABLE pull_requests_by_repo RENAME TO pull_requests")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt pull requests table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("attributing the pull requests recorded before this to a repository")
 }
 
 /// The table the stops of before are kept in, named once: it is gone by the end

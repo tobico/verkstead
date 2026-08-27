@@ -1066,12 +1066,21 @@ function fronting(conversation: ConversationView): number {
 }
 
 /// What a pinned card is called, in the words its own heading uses.
+///
+/// A pull request in a companion repo is named with that repository, because a
+/// conversation ends on one per repository it was worked in: two dots both
+/// reading "Pull request" would be two cards a reader who cannot see them could
+/// not tell apart. The work's own stays unlabelled, by the rule the card itself
+/// follows.
 function named(event: PinnedEvent): string {
   if ("TaskList" in event) {
     return "Task list";
   }
   if ("StageList" in event) {
     return "Roadmap";
+  }
+  if ("PullRequest" in event && event.PullRequest.repo) {
+    return `Pull request in ${event.PullRequest.repo}`;
   }
   return "Pull request";
 }
@@ -1139,6 +1148,12 @@ function Card(props: {
 /// rather than part of the button: merging is the human's act and it happens
 /// over there, so getting there must not depend on this page's own panes.
 ///
+/// Which repository it was opened in is drawn beside the number, and only where
+/// that is not the conversation's own: an unlabelled card means the work's own
+/// repo, and the label earns its place when the pinned block holds a companion
+/// repo's pull request as well. The rule a commit's label follows — a
+/// conversation ends on one pull request per repository it was worked in.
+///
 /// Drawn twice, from the pinned block and from the record, because it belongs in
 /// both. The two are the same Event and so the same selection: opening either
 /// opens the one details pane, and both read as selected while it is open.
@@ -1155,6 +1170,9 @@ function PullRequest(props: {
       <div class={styles.eventHead}>
         <h2>Pull request</h2>
         <span class={styles.number}>#{props.opened.number}</span>
+        <Show when={props.opened.repo}>
+          {(repo) => <span class={styles.repo}>{repo()}</span>}
+        </Show>
         <a
           class={styles.out}
           href={props.opened.url}

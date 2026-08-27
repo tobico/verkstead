@@ -435,7 +435,7 @@ pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, dr
 ///   when it came to push, and the halt is what reaches the human on their
 ///   phone.
 async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
-    let Some((branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
+    let Some((_, branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
         return;
     };
 
@@ -846,7 +846,7 @@ async fn follow_inline(
             // A branch that could not be asked about at all falls the same way,
             // that being in the log already and no more of an answer than it
             // was.
-            Some((_, Err(github::Trouble::NoPullRequest))) | None => {
+            Some((_, _, Err(github::Trouble::NoPullRequest))) | None => {
                 "the session ended without committing anything".to_owned()
             }
             // Anything else is what the landed arm above makes of it, made in
@@ -1044,7 +1044,14 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
     // sweep could find the Conversation undriven and stop it all over again.
     let _driving = driving;
 
-    match store::pull_request(&state.pool, conversation_id).await {
+    // Which repository's pull request, which is the Conversation's own: a
+    // companion's is the wrap-up's to cover rather than anything that says
+    // whether there is a wrap-up at all.
+    let Some(repo_id) = own_repo(&state, conversation_id).await else {
+        return;
+    };
+
+    match store::pull_request(&state.pool, conversation_id, repo_id).await {
         Ok(Some(_)) => {
             tracing::info!(
                 conversation_id,
@@ -2014,6 +2021,30 @@ async fn worktree(state: &AppState, conversation_id: i64) -> Option<PathBuf> {
         }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading the Conversation to work in failed");
+            None
+        }
+    }
+}
+
+/// Which registered Repo a Conversation's own work is in, or `None` where there
+/// is no Conversation left to ask about.
+///
+/// What the record is asked with wherever the question is about the work's own
+/// repository rather than a companion's. A Conversation ends on one pull request
+/// per repository it was worked in, and the Conversation's own is the one that
+/// says whether there is a wrap-up at all — see [`store::pull_request`].
+async fn own_repo(state: &AppState, conversation_id: i64) -> Option<i64> {
+    match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => Some(conversation.repo.id),
+        Ok(None) => {
+            tracing::error!(
+                conversation_id,
+                "there is no Conversation left to read a repository off"
+            );
+            None
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation's own repository failed");
             None
         }
     }

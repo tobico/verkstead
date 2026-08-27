@@ -314,11 +314,12 @@ async fn refusal(
     submission: &SteerSubmission,
 ) -> anyhow::Result<Option<ConversationSteered>> {
     // A wrapping Conversation is defined by the pull request under it, so a steer
-    // into Wrapping is a move onto one that is already there. The modal does not
-    // offer the target where there is none; this is the same rule asked again on
-    // arrival.
+    // into Wrapping is a move onto one that is already there. The Conversation's
+    // own repository's: a companion's is something a wrap-up covers rather than
+    // something that makes one. The modal does not offer the target where there
+    // is none; this is the same rule asked again on arrival.
     if submission.target == SteerTarget::Wrapping
-        && store::pull_request(&state.pool, conversation.id)
+        && store::pull_request(&state.pool, conversation.id, conversation.repo.id)
             .await?
             .is_none()
     {

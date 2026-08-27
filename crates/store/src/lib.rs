@@ -76,7 +76,10 @@ pub use profiles::{
     AgentType, Deleting, Pairing, Profile, ProfileFacts, Saving, create_profile, delete_profile,
     load_profile, profiles, update_profile,
 };
-pub use pull_requests::{PullRequest, Wrapping, pull_request, record_pull_request};
+pub use pull_requests::{
+    PullRequest, Wrapping, pull_request, pull_request_repo, record_another_pull_request,
+    record_pull_request,
+};
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
     store_subscription, vapid_keys,

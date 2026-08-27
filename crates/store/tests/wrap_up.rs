@@ -53,10 +53,12 @@ async fn wrapping(pool: &SqlitePool) -> i64 {
     record_pull_request(
         pool,
         id,
+        repo.id,
         &verkstead_store::PullRequest {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
         },
     )
     .await
@@ -791,13 +793,18 @@ async fn the_first_wraps_review_is_not_the_second_wraps() {
     assert_eq!(last_proposal(&pool, id).await.unwrap(), Some(asked.id));
 
     implement_again(&pool, id).await.unwrap();
+
+    let repo = load_conversation(&pool, id).await.unwrap().unwrap().repo.id;
+
     record_pull_request(
         &pool,
         id,
+        repo,
         &verkstead_store::PullRequest {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
         },
     )
     .await

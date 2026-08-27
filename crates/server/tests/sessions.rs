@@ -5773,14 +5773,23 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
             .unwrap(),
         verkstead_server::store::Rebuilding::Started,
     );
+    let repo = verkstead_server::store::load_conversation(&pool, fixture.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .repo
+        .id;
+
     assert_eq!(
         verkstead_server::store::record_pull_request(
             &pool,
             fixture.id,
+            repo,
             &verkstead_server::store::PullRequest {
                 number: 41,
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                repo: None,
             },
         )
         .await
@@ -11361,18 +11370,26 @@ async fn halted_by_circumstance(fixture: &Grilling) {
 async fn wrapping_unwatched(fixture: &Grilling) {
     let pool = open_database(&fixture.database).await.unwrap();
 
+    let repo = verkstead_server::store::load_conversation(&pool, fixture.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .repo
+        .id;
+
     let recorded = verkstead_server::store::record_pull_request(
         &pool,
         fixture.id,
+        repo,
         &verkstead_server::store::PullRequest {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
         },
     )
     .await
     .unwrap();
-
     pool.close().await;
 
     assert_eq!(recorded, verkstead_server::store::Wrapping::Started);
