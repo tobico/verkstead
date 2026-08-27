@@ -41,6 +41,13 @@ configured with.
   per-repo sandbox binds (build caches) are composed in too, because its builds
   need them. Read-only extra binds are new — the extras loop today only knows
   `--bind`.
+- **The dev shell stays the main worktree's alone.** A session is launched
+  under `nix develop` for the Conversation's own repo where its flake provides
+  a shell, and nothing wraps a second one — so a companion with a flake of its
+  own is entered by the agent, `nix` being on the sandbox `PATH`. The binds are
+  half of what a companion's build needs and this is the other half; the prompt
+  listing says nothing about it, being neutral by design, so an agent that
+  needs the shell finds it the way it would in any checkout.
 - **The prompt carries one neutral listing and no instructions** — a
   `# Companion repositories` section naming each companion, its worktree path,
   its branch and its write status, on every session prompt of the Conversation,
@@ -102,6 +109,8 @@ configured with.
   always `-b` and `worktree_path` naming `<repo>-<branch>[-<id>]`.
 - The grill-start order (fetch → resolve → branch check → add) in
   `crates/server/src/conversations.rs::start_grilling`.
+- `under_dev_shell` still wrapping one worktree's flake, from the single call
+  site in `crates/server/src/sessions.rs`.
 - The setup card layout in `web/src/workbench/Setup.tsx` and the single
   dropdown in `web/src/Menu.tsx` (still no nesting).
 - The Brief's details pane — still the plain `Document` the three documents
