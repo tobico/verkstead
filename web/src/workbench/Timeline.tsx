@@ -83,6 +83,7 @@ import type {
   BriefEvent,
   BriefSaved,
   CommitEvent,
+  CompanionRefusal,
   ConversationView,
   GrillingStarted,
   HandoffEvent,
@@ -164,11 +165,14 @@ export const BRIEF_REFUSAL: Record<BriefSaved, string> = {
     "The brief was frozen when grilling started, so it cannot be edited.",
 };
 
-/// And each way of being refused a start.
+/// And each way of being refused a start, for the conversation's own repo.
 ///
 /// Every one of them is something different to go and do, which is the whole
 /// reason the server names them separately rather than saying "cannot start".
-export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
+const GRILL_REFUSAL: Record<
+  Exclude<GrillingStarted, { Companion: unknown }>,
+  string
+> = {
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
@@ -184,6 +188,30 @@ export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
   BranchExists: "That branch already exists, and Verkstead did not make it.",
   WorktreeRefused: "Git would not make the worktree. The server log says why.",
 };
+
+/// And the same four failings over a companion repo, which say the same things
+/// about a different repository.
+const COMPANION_REFUSAL: Record<CompanionRefusal, string> = {
+  FetchFailed:
+    "Git could not fetch from its remote, so nothing was started. The server log says why.",
+  NoBaseCommit: "It has nothing to check out any more.",
+  BranchExists:
+    "The branch already exists there, and Verkstead did not make it.",
+  WorktreeRefused: "Git would not make its worktree. The server log says why.",
+};
+
+/// What to say about a start that was refused.
+///
+/// A companion's refusal names the repository, because that is the whole of
+/// what makes it different from the same failing on the conversation's own: the
+/// thing to go and look at is one of several repos rather than the obvious one.
+export function grillRefusal(outcome: GrillingStarted): string {
+  if (typeof outcome === "object") {
+    return `${outcome.Companion.repo}: ${COMPANION_REFUSAL[outcome.Companion.why]}`;
+  }
+
+  return GRILL_REFUSAL[outcome];
+}
 
 /// And each way of being refused a resume.
 ///
@@ -1823,7 +1851,7 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
         <Show when={refused()}>
           {(outcome) => (
             <ErrorLine class={styles.failure}>
-              {GRILL_REFUSAL[outcome()]}
+              {grillRefusal(outcome())}
             </ErrorLine>
           )}
         </Show>

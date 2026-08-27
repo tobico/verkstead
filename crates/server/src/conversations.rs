@@ -21,7 +21,7 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
     Adopted, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded,
-    CompanionBranchRenamed, CompanionMode, CompanionModeChosen, CompanionRemoved,
+    CompanionBranchRenamed, CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved,
     ConversationClosed, GrillingStarted, PairingView, Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
@@ -722,6 +722,21 @@ pub(crate) async fn rename_companion_branch(
 /// reaches this any more — a second round opens where it is steered, past
 /// drafting already — so it is asked of the record rather than assumed away.
 ///
+/// **Every companion repo is checked out here too**, and every one of them is
+/// asked the same four questions in the same order and refused by the same
+/// names — with the repository said, because *which one* is the whole of what
+/// the human needs. A read-write companion is cut a branch of its own from its
+/// base, exactly as the Conversation's repository is; a read-only one is checked
+/// out detached at the commit its base resolved to, having nothing to commit.
+///
+/// **Every question is asked before any of them is answered.** The fetches, the
+/// resolutions and the branch checks for the Conversation's repository and for
+/// every companion come first, and only then is anything made — which is the
+/// cheapest way to hold that a refused start leaves nothing behind. What is left
+/// to unwind past that point is a `worktree add` that failed partway, and it is
+/// unwound directory and branch together: a branch cut moments ago by a start
+/// that then refused holds nothing worth keeping.
+///
 /// The whole state rather than the four pieces of it this needs: what starting a
 /// grilling reaches is most of what the server holds — the store, the boundary,
 /// the data directory, the sessions and whoever is watching them — and a
@@ -767,6 +782,8 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 
     let repo = conversation.repo.path.clone();
     let branch = conversation.branch.clone();
+    let companions = conversation.companions.clone();
+    let data_dir = state.data_dir.clone();
 
     // Where the work goes on. A Conversation that already has one works where it
     // has always worked and there is nothing here to make; one that has none is
@@ -780,16 +797,20 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // large repository is not a quick call, and every part of this blocks.
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
+        let branch = branch.clone();
         move || {
             // A Conversation that has a worktree resolves the commit its branch
             // was cut from and stops there: the branch is taken because this
             // Conversation took it, the checkout is already where the work will
             // happen, and a base that was frozen when the work started is not
-            // something a fetch could freshen.
+            // something a fetch could freshen. Its companions were checked out
+            // with it and are where they were left.
             if worked_in.is_some() {
                 let named = picked.unwrap_or(default);
 
-                return worktrees::resolve(&repo, &named).ok_or(GrillingStarted::NoBaseCommit);
+                return worktrees::resolve(&repo, &named)
+                    .map(|commit| (commit, Vec::new()))
+                    .ok_or(GrillingStarted::NoBaseCommit);
             }
 
             // Before anything resolves, because a remote-tracking ref is only as
@@ -823,20 +844,34 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 return Err(GrillingStarted::BranchExists);
             }
 
-            match worktrees::add(&repo, &path, &branch, &commit) {
-                true => Ok(commit),
-                false => Err(GrillingStarted::WorktreeRefused),
+            // The Conversation's own checkout is the first of the list, and
+            // every companion asks its way on to the end of it. Nothing is made
+            // until the whole list is there.
+            let mut planned = vec![Checkout {
+                companion: None,
+                repo,
+                path,
+                branch: Some(branch.clone()),
+                commit: commit.clone(),
+            }];
+
+            for companion in companions {
+                planned.push(plan(&data_dir, id, &branch, companion, &planned)?);
             }
+
+            make(&planned)?;
+
+            Ok((commit, recorded(&planned)))
         }
     })
     .await?;
 
-    let commit = match made {
-        Ok(commit) => commit,
+    let (commit, checkouts) = match made {
+        Ok(made) => made,
         Err(refusal) => return Ok(refusal),
     };
 
-    match store::start_grilling(pool, id, &commit, &path).await? {
+    match store::start_grilling(pool, id, &commit, &path, &checkouts).await? {
         store::Grilling::NoSuchConversation => return Ok(GrillingStarted::NoSuchConversation),
         store::Grilling::NotDrafting => return Ok(GrillingStarted::NotDrafting),
         store::Grilling::Started => {}
@@ -888,6 +923,187 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     }
 
     Ok(GrillingStarted::Started)
+}
+
+/// One checkout a grill start is about to make: which repository, where it goes,
+/// what it holds and what it came off.
+///
+/// The Conversation's own and each of its companions, in the one shape, because
+/// from the moment they are planned they are the same thing — a worktree of a
+/// registered repository. What differs between them is two fields, and both of
+/// them read as what they are: a companion is named, and a checkout that holds
+/// no branch is detached.
+struct Checkout {
+    /// The companion Repo this is a checkout of — its id and what it is called —
+    /// or `None` for the Conversation's own.
+    ///
+    /// The id is what the record is written against, and the name is what a
+    /// refusal says. Together they are the whole of what a companion's checkout
+    /// needs that the Conversation's does not.
+    companion: Option<(i64, String)>,
+
+    /// The repository the worktree is made from.
+    repo: PathBuf,
+
+    /// Where the checkout goes, under the Data Directory.
+    path: PathBuf,
+
+    /// The branch to cut, or `None` for a detached checkout — which is what a
+    /// read-only companion gets, having nothing to commit and no business
+    /// taking a name in somebody else's repository.
+    branch: Option<String>,
+
+    /// The commit its base resolved to.
+    commit: String,
+}
+
+impl Checkout {
+    /// How git refusing to make this checkout is refused back: the
+    /// Conversation's own repository says only that git would not, and a
+    /// companion says which repository it was.
+    fn refused(&self) -> GrillingStarted {
+        match &self.companion {
+            Some((_, repo)) => GrillingStarted::Companion {
+                repo: repo.clone(),
+                why: CompanionRefusal::WorktreeRefused,
+            },
+            None => GrillingStarted::WorktreeRefused,
+        }
+    }
+}
+
+/// Ask git everything one companion's checkout turns on, and come back with what
+/// it will be.
+///
+/// Fetch, then resolve, then check the branch — the Conversation's own
+/// repository's order, for the Conversation's own repository's reasons, and each
+/// failure refused by the same name with the repository said. A companion whose
+/// repository has no remote has nothing to fetch and is never refused for it.
+///
+/// Nothing is made here. What comes back is a plan, and the making waits until
+/// every companion has one: that is what lets a start that cannot deliver one
+/// companion refuse without having made another.
+///
+/// `planned` is what the start has claimed so far, which is what stops two
+/// companions being handed one directory — see [`worktrees::unclaimed_path`].
+fn plan(
+    data: &Path,
+    id: i64,
+    branch: &str,
+    companion: store::Companion,
+    planned: &[Checkout],
+) -> Result<Checkout, GrillingStarted> {
+    let repo = companion.repo.path.clone();
+    let refused = |why| GrillingStarted::Companion {
+        repo: companion.repo.name.clone(),
+        why,
+    };
+
+    if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+        tracing::error!(
+            said,
+            repo = %repo.display(),
+            "fetching a companion Repo's remotes failed, so the grilling is not being started",
+        );
+
+        return Err(refused(CompanionRefusal::FetchFailed));
+    }
+
+    // The branch of that repository's own the human picked, or its default
+    // branch as origin holds it — the rule the Conversation's base follows,
+    // asked of the companion's repository.
+    let named = match companion.base_ref.clone() {
+        Some(picked) => picked,
+        None => worktrees::default_ref(&repo, &companion.repo.default_branch),
+    };
+
+    let Some(commit) = worktrees::resolve(&repo, &named) else {
+        return Err(refused(CompanionRefusal::NoBaseCommit));
+    };
+
+    // A read-write companion is cut a branch of its own: the one that was typed,
+    // or the Conversation's where nothing was, which is what mirroring is. A
+    // read-only one takes no name at all.
+    let cut = companion.branch_for(branch);
+
+    if let Some(cut) = &cut
+        && worktrees::branch_exists(&repo, cut)
+    {
+        return Err(refused(CompanionRefusal::BranchExists));
+    }
+
+    // Named for the Repo and what the checkout holds, as the Conversation's own
+    // is: the branch where there is one, and otherwise the base it stands at —
+    // a read-only companion holds no branch to be named for.
+    let holding = cut.clone().unwrap_or_else(|| named.clone());
+    let claimed: Vec<PathBuf> = planned
+        .iter()
+        .map(|checkout| checkout.path.clone())
+        .collect();
+    let path = worktrees::unclaimed_path(data, id, &companion.repo.name, &holding, &claimed);
+
+    Ok(Checkout {
+        companion: Some((companion.repo.id, companion.repo.name)),
+        repo,
+        path,
+        branch: cut,
+        commit,
+    })
+}
+
+/// Make every checkout of a start, or unmake the ones already made and say which
+/// one would not be.
+///
+/// The one place a grill start creates anything, which is what makes *leaves
+/// nothing behind* something to hold rather than something to hope for. What is
+/// unwound is directory and branch together — see [`worktrees::unmake`] —
+/// because a branch cut moments ago by a start that then refused holds nothing
+/// worth keeping.
+fn make(planned: &[Checkout]) -> Result<(), GrillingStarted> {
+    for (nth, checkout) in planned.iter().enumerate() {
+        let made = match &checkout.branch {
+            Some(branch) => {
+                worktrees::add(&checkout.repo, &checkout.path, branch, &checkout.commit)
+            }
+            None => worktrees::add_detached(&checkout.repo, &checkout.path, &checkout.commit),
+        };
+
+        if made {
+            continue;
+        }
+
+        // This one included, and first: an `add` that fell over may have made
+        // the directory, or the branch, or neither, and what is being unwound is
+        // whatever it did get as far as. The rest newest first, which is the
+        // order they were made in reversed — nothing turns on it, no two of
+        // these being in one repository, but a list is undone backwards.
+        for done in planned[..=nth].iter().rev() {
+            worktrees::unmake(&done.repo, &done.path, done.branch.as_deref());
+        }
+
+        return Err(checkout.refused());
+    }
+
+    Ok(())
+}
+
+/// Where each companion of a start was checked out, for the record that follows
+/// the work.
+///
+/// The Conversation's own is not among them: it goes on the row the store has
+/// always kept for it, one per Conversation.
+fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
+    planned
+        .iter()
+        .filter_map(|checkout| {
+            let (repo_id, _) = checkout.companion.as_ref()?;
+
+            Some(store::CompanionWorktree {
+                repo_id: *repo_id,
+                path: checkout.path.clone(),
+            })
+        })
+        .collect()
 }
 
 /// Take a roadmap Verkstead did not write and start its next stage: one press,
@@ -1134,6 +1350,14 @@ fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
 /// made before one: what is recorded is what happened. A Conversation that said
 /// it had stopped while its directory was still on disk would be one nothing
 /// would ever come back and remove.
+///
+/// **Every companion's worktree goes the same way, and every companion's branch
+/// stays.** A companion is somewhere a Conversation was given to work and the
+/// Conversation has stopped, so the directory is given back; what a read-write
+/// companion committed is on its branch, which is a name and a commit and may
+/// hold work worth reading. And a companion worktree git will not remove stops
+/// the close exactly as the Conversation's own does — a close that reported
+/// itself done would be one nothing came back to finish.
 pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClosed> {
     let pool = &state.pool;
 
@@ -1152,6 +1376,24 @@ pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClose
             tracing::error!(
                 conversation_id = id,
                 "a Conversation's worktree could not be removed"
+            );
+            return Ok(ConversationClosed::WorktreeStuck);
+        }
+    }
+
+    for companion in conversation.companions.clone() {
+        let Some(path) = companion.worktree else {
+            continue;
+        };
+
+        let repo = companion.repo.path.clone();
+        let removed = tokio::task::spawn_blocking(move || worktrees::remove(&repo, &path)).await?;
+
+        if !removed {
+            tracing::error!(
+                conversation_id = id,
+                repo = companion.repo.name,
+                "a companion repo's worktree could not be removed"
             );
             return Ok(ConversationClosed::WorktreeStuck);
         }

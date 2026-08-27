@@ -2084,11 +2084,19 @@ pub(crate) async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// It is also where the Repo remembers what it was grilled with — see
 /// [`super::pairings::remember`] — because this is the moment the two Pairings
 /// stop being changeable and become what the work is actually running under.
+///
+/// `companions` is where each of the Conversation's companion repos was checked
+/// out, in the same transaction and for the same reason: they were made against
+/// git before this was called, and a Conversation saying it is grilling without
+/// saying where they went would be one nothing could bind into a sandbox and
+/// nothing would come back and remove. Empty is the ordinary Conversation, which
+/// has none.
 pub async fn start_grilling(
     pool: &SqlitePool,
     id: i64,
     base_commit: &str,
     worktree: &Path,
+    companions: &[super::CompanionWorktree],
 ) -> Result<Grilling> {
     let worktree = super::repos::text(worktree)?;
 
@@ -2132,6 +2140,8 @@ pub async fn start_grilling(
     .execute(&mut *tx)
     .await
     .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+
+    super::companions::record_worktrees(&mut tx, id, companions).await?;
 
     moved(&mut tx, id, Lifecycle::Grilling).await?;
 
@@ -2186,6 +2196,11 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
         .execute(&mut *tx)
         .await
         .with_context(|| format!("forgetting the worktree of Conversation {id}"))?;
+
+    // And every companion's beside it, for the same reason and by the same rule:
+    // the directories are gone by the time this runs, and the branches their
+    // read-write companions were worked on stay where they are.
+    super::companions::forget_worktrees(&mut tx, id).await?;
 
     moved(&mut tx, id, Lifecycle::Closed).await?;
 

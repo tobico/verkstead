@@ -293,6 +293,7 @@ async fn a_stopped_conversation_is_waiting_on_the_human_in_the_sidebar() {
         id,
         "abc1234",
         Path::new("/data/worktrees/rate-limiting"),
+        &[],
     )
     .await
     .unwrap();

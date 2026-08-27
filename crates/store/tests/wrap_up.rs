@@ -43,6 +43,7 @@ async fn wrapping(pool: &SqlitePool) -> i64 {
         id,
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
+        &[],
     )
     .await
     .unwrap();

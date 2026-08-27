@@ -1632,6 +1632,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         grilling,
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-outbound-retries"),
+        &[],
     )
     .await
     .unwrap();
@@ -1778,6 +1779,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         directing,
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-usage-limits"),
+        &[],
     )
     .await
     .unwrap();
@@ -1915,6 +1917,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         tasked,
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         &worktree,
+        &[],
     )
     .await
     .unwrap();
@@ -2058,6 +2061,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         waiting,
         "9e6cb584eeb157fd49f0c36e00bf87783fa2bfab",
         &worktree,
+        &[],
     )
     .await
     .unwrap();
@@ -2146,6 +2150,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         wrapping,
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+        &[],
     )
     .await
     .unwrap();
@@ -2307,7 +2312,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // A roadmap pick records the direction and moves nothing: the grilling
     // session writes the roadmap itself, so the Conversation says it is grilling
     // until the pull request that follows the roadmap is recorded.
-    store::start_grilling(&pool, staged, &base, &worktree)
+    store::start_grilling(&pool, staged, &base, &worktree, &[])
         .await
         .unwrap();
     store::pick_direction(&pool, staged, verkstead_schema::Direction::Roadmap)

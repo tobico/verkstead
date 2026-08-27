@@ -791,6 +791,21 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
+    // And each companion's, which is the same look at the filesystem: a
+    // Conversation with three companions has four checkouts, and every one of
+    // them is a directory somebody could have deleted.
+    let mut companions = Vec::new();
+
+    for reading in conversation.companions {
+        match companion(reading).await {
+            Ok(companion) => companions.push(companion),
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = id, "reading a companion worktree failed");
+                return unavailable("the Conversation could not be read");
+            }
+        }
+    }
+
     // The Brief decides whether the Conversation is ready to grill, so it is
     // read off the Timeline before the Timeline is spent building the view. The
     // newest of them: a Conversation gets one Brief per round, and what a
@@ -933,7 +948,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         },
         branch: conversation.branch,
         base_commit: conversation.base_commit,
-        companions: conversation.companions.into_iter().map(companion).collect(),
+        companions,
         state: lifecycle(conversation.state),
         ready_to_grill,
         ready_to_resume,
@@ -2033,10 +2048,18 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
 }
 
 /// A stored companion as the viewer receives it: the Repo in the shape every
-/// other Repo crosses this wire in, and the three facts about how the work will
-/// use it.
-fn companion(companion: store::Companion) -> CompanionView {
-    CompanionView {
+/// other Repo crosses this wire in, the three facts about how the work will use
+/// it, and where it was checked out once it has been.
+///
+/// The checkout is read off the filesystem the Conversation's own is —
+/// [`crate::conversations::worktree`] — because whether a directory is still
+/// there is not something a database knows, and a companion deleted by hand
+/// should read as a Conversation with a problem rather than as an obscure
+/// failure from whatever next works in it.
+async fn companion(companion: store::Companion) -> Result<CompanionView, anyhow::Error> {
+    let worktree = crate::conversations::worktree(companion.worktree).await?;
+
+    Ok(CompanionView {
         repo: RepoEntry {
             id: companion.repo.id,
             name: companion.repo.name,
@@ -2051,7 +2074,8 @@ fn companion(companion: store::Companion) -> CompanionView {
         },
         base_ref: companion.base_ref,
         branch: companion.branch,
-    }
+        worktree,
+    })
 }
 
 /// The store's lifecycle state as the viewer receives it. One word either side,

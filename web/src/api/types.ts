@@ -558,6 +558,16 @@ export type CompanionModeChoice = { mode: CompanionMode, };
 export type CompanionModeChosen = "Chosen" | "NoSuchConversation" | "NotDrafting" | "NoSuchCompanion";
 
 /**
+ * Which of a companion repo's four ways of not being checked out this was.
+ *
+ * The Conversation's own four, asked of a companion: everything git is asked
+ * for one is what it is asked for the other, in the same order and for the same
+ * reasons. Separate from [`GrillingStarted`] rather than four more variants of
+ * it, so that the repository is named once instead of four times.
+ */
+export type CompanionRefusal = "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+
+/**
  * And of taking one away.
  *
  * No *no such companion*: a row that is not there is the state the press asked
@@ -586,7 +596,16 @@ base_ref: string | null,
  * renamed. Empty on a read-only companion as well, there being no branch
  * to name: its checkout is detached at the commit the base resolved to.
  */
-branch: string, };
+branch: string, 
+/**
+ * Where this companion was checked out, once grilling has made its
+ * worktree.
+ *
+ * `null` while the Conversation drafts and again once it is closed, which
+ * is the Conversation's own worktree's rule: a companion has a directory
+ * for exactly as long as the work does.
+ */
+worktree: Worktree | null, };
 
 /**
  * And what became of archiving one: putting a Closed Conversation away, so the
@@ -913,8 +932,19 @@ export type Direction = "inline" | "task-list" | "roadmap";
  * is something different for the human to go and do: choose a Profile, write a
  * Brief, pick another commit, deal with a branch that is already there. A
  * single "cannot start" would leave them guessing which.
+ *
+ * A companion repo can fail in four of the same ways the Conversation's own
+ * does, and which repository it was is the thing the human needs — so those
+ * four are carried together under [`GrillingStarted::Companion`], named for
+ * the Repo they are about. Nothing gates the button on a companion: the
+ * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+/**
+ * What the companion Repo is called, which is what the human picked it
+ * by and what they will go and look at.
+ */
+repo: string, why: CompanionRefusal, } };
 
 /**
  * The handoff document as the page receives it.

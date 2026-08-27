@@ -29,18 +29,45 @@ use crate::repos::git;
 /// and a name already taken falls back to one with the Conversation's id on the
 /// end, which nothing else can collide with.
 pub(crate) fn worktree_path(data: &Path, id: i64, repo: &str, branch: &str) -> PathBuf {
+    unclaimed_path(data, id, repo, branch, &[])
+}
+
+/// The same directory, chosen where others are being chosen in the same breath.
+///
+/// [`worktree_path`]'s rule with one addition: a path `claimed` already holds
+/// counts as taken. A grill start names every directory it is about to make —
+/// the Conversation's own and one per companion — before it makes any of them,
+/// which is what lets it refuse without leaving half of them behind. Until they
+/// exist the filesystem cannot tell two of them apart, so two companion Repos
+/// of one name coming off one branch name would otherwise be handed the same
+/// directory and the second checkout would land on top of the first.
+pub(crate) fn unclaimed_path(
+    data: &Path,
+    id: i64,
+    repo: &str,
+    branch: &str,
+    claimed: &[PathBuf],
+) -> PathBuf {
     let worktrees = data.join("worktrees");
     let stem = format!("{}-{}", component(repo), component(branch));
 
-    let named = worktrees.join(&stem);
-
     // A directory that is already there is not one to check a branch out into,
     // whether it is another Conversation's or something else's entirely.
-    if named.exists() {
-        return worktrees.join(format!("{stem}-{id}"));
+    let free = |path: &PathBuf| !path.exists() && !claimed.contains(path);
+
+    let named = worktrees.join(&stem);
+
+    if free(&named) {
+        return named;
     }
 
-    named
+    // The Conversation's id, which nothing outside this Conversation collides
+    // with — and then a count, for the one thing that shares it: a second
+    // companion of this Conversation asking for the same name.
+    std::iter::once(worktrees.join(format!("{stem}-{id}")))
+        .chain((2..).map(|nth| worktrees.join(format!("{stem}-{id}-{nth}"))))
+        .find(free)
+        .expect("the count is unbounded, so some name is free")
 }
 
 /// A string as one path component: the name characters kept, everything else a
@@ -307,6 +334,77 @@ pub(crate) fn add(repo: &Path, path: &Path, branch: &str, commit: &str) -> bool 
         ],
     )
     .is_some()
+}
+
+/// Check `commit` out at `path` as a worktree of `repo`, holding no branch at
+/// all.
+///
+/// The shape a read-only companion is given. Every other worktree Verkstead
+/// makes is somewhere work will be committed, and so is cut a branch to commit
+/// on; a companion that is only ever read has nothing to commit and no name to
+/// take in somebody else's repository — so what it gets is git's detached
+/// checkout of the commit its base resolved to.
+pub(crate) fn add_detached(repo: &Path, path: &Path, commit: &str) -> bool {
+    if !room(path) {
+        return false;
+    }
+
+    git(
+        repo,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            "--end-of-options",
+            &path.to_string_lossy(),
+            commit,
+        ],
+    )
+    .is_some()
+}
+
+/// Take back a worktree that was just made, and the branch it cut with it.
+///
+/// The undoing of an [`add`] or an [`add_detached`] that a *later* one made
+/// pointless: a grill start makes the Conversation's checkout and each
+/// companion's one after another, and one that will not be made refuses the
+/// whole start — which has to leave nothing behind, no directory and no branch,
+/// including for the ones already made.
+///
+/// The opposite of [`remove`] in the one way that matters: this takes the branch
+/// too. Closing keeps a branch because it may hold work worth reading, and a
+/// branch cut moments ago by a start that then refused holds nothing at all.
+///
+/// Both halves are asked whether there is anything there first, because this is
+/// also what unwinds the checkout that *failed*: an [`add`] that fell over may
+/// have made the directory, or the branch, or neither, and complaining about the
+/// half it never got to would be complaining about the thing that went right.
+///
+/// Best effort, and says nothing back. It runs where something has already
+/// failed and the answer to the human is already decided; what it can do about
+/// a directory git will not give up is put it in the log.
+pub(crate) fn unmake(repo: &Path, path: &Path, branch: Option<&str>) {
+    if path.exists() && !remove(repo, path) {
+        tracing::error!(
+            path = %path.display(),
+            "a worktree made by a start that was then refused could not be removed",
+        );
+    }
+
+    let Some(branch) = branch.filter(|branch| branch_exists(repo, branch)) else {
+        return;
+    };
+
+    // `-D` rather than `-d`: what is being deleted is a branch this start made a
+    // moment ago, and git refusing it for being unmerged would be git refusing
+    // to tidy up after work that never happened.
+    if git(repo, &["branch", "-D", "--end-of-options", branch]).is_none() {
+        tracing::error!(
+            branch,
+            repo = %repo.display(),
+            "a branch cut by a start that was then refused could not be deleted",
+        );
+    }
 }
 
 /// The git directory `worktree` shares with the repository it was made from, in

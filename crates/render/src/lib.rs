@@ -35,7 +35,7 @@ pub use conversations::{
     BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
     BriefEvent, BriefSaved, Capture, Comment, CommitEvent, CommitPane, CommitRecord,
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
+    CompanionModeChoice, CompanionModeChosen, CompanionRefusal, CompanionRemoved, CompanionView,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, GrillingStarted, HandoffEvent,
     Lifecycle, ManualTaskEvent, MovedEvent, NewAdoption, NewCompanion, NewConversation, NewOrder,

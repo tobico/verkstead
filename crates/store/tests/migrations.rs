@@ -48,6 +48,7 @@ async fn before(dir: &Path) -> (SqlitePool, i64) {
         id,
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/data/worktrees/verkstead-rate-limiting"),
+        &[],
     )
     .await
     .unwrap();
@@ -375,6 +376,7 @@ async fn beside(dir: &Path) -> (SqlitePool, i64) {
         id,
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         Path::new("/data/worktrees/verkstead-rate-limiting"),
+        &[],
     )
     .await
     .unwrap();

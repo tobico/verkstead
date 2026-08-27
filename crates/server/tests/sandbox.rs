@@ -266,7 +266,7 @@ async fn grilling() -> Grilling {
         ],
     );
 
-    store::start_grilling(&pool, id, &commit, &worktree)
+    store::start_grilling(&pool, id, &commit, &worktree, &[])
         .await
         .unwrap();
 
