@@ -9998,6 +9998,154 @@ async fn adopting_a_roadmap_starts_its_next_stage_with_a_planning_session() {
     );
 }
 
+/// A stub whose planning session says one thing and goes, and plans the stage
+/// the second time it is run — the death that leaves a stage with no backlog,
+/// and then the session Resume starts.
+///
+/// Which time it is is remembered outside the worktree, because what the first
+/// one leaves behind is a worktree with nothing in it to remember by. Every
+/// session after the planning says which skill it was and stays, which is how
+/// the test tells the run carrying on from the planning being run a third time.
+fn plans_nothing_then_plans(planning: &Path, worked: &Path, remembered: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-stage/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {planning}
+
+    if [ ! -f {remembered} ]; then
+        printf 'once\n' > {remembered}
+        printf 'the planning has nothing to say\n'
+        exit 0
+    fi
+
+    printf 'planning the stage\n'
+    mkdir -p .tasks
+    printf '# Count the requests\n\n## Tasks\n\n- [ ] 01: count them — [details](01-count.md)\n' > .tasks/TODO.md
+    printf '# 01. count them\n' > .tasks/01-count.md
+    git add -A
+    git commit --quiet -m 'chore: plan counter tasks'
+    sleep 300
+    ;;
+*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {worked}
+    printf 'working the stage backlog\n'
+    sleep 300
+    ;;
+esac
+"#,
+        planning = quoted(planning),
+        worked = quoted(worked),
+        remembered = quoted(remembered),
+    )
+}
+
+/// Resume on a stage whose planning session died before it committed runs the
+/// planning again, rather than refusing on the backlog it never wrote.
+///
+/// The Conversation this half of the feature was written for. A stage's first
+/// step is its own: the fork of next-stage writes the `.tasks/` everything after
+/// it works through, and it is launched once, by the press or the settling that
+/// made the stage. So a planning session that dies before its commit leaves a
+/// Conversation implementing a backlog that does not exist, and nothing in
+/// Verkstead would ever write one — the run stops on the step, and the button
+/// that is supposed to unstick it used to answer that there was no backlog left
+/// to work. Which was true, and the reason it was true was the one thing the
+/// press could have put right.
+///
+/// `gh` finds no pull request here, which is what makes the reading the point:
+/// an empty backlog with no pull request behind it is exactly the shape Resume
+/// refuses on, so a stage that never planned has to be told apart from it before
+/// GitHub is asked at all.
+#[tokio::test]
+async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+    let remembered = spill.path().join("tried");
+
+    let fixture = adopting_asking(
+        spill,
+        &plans_nothing_then_plans(&planning, &worked, &remembered),
+        NO_PULL_REQUEST,
+    )
+    .await;
+
+    // The planning ran and came to nothing, so the run stopped on the step it
+    // could not see land. Waited for as the Notice the Conversation is blocked
+    // on rather than as the last one written: an adopted stage says what it was
+    // adopted from before anything has run in it at all.
+    let stopped = fixture
+        .until(|view| {
+            said(view)
+                .into_iter()
+                .find(|notice| Some(notice.id) == view.blocked_on)
+                .cloned()
+        })
+        .await;
+
+    assert!(
+        stopped
+            .html
+            .contains("Planning the roadmap stage into a backlog"),
+        "the stop says which step died: {:?}",
+        stopped.html,
+    );
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.expect("a stage has a Worktree").path);
+
+    assert!(
+        !worktree.join(".tasks").exists(),
+        "and it died before it wrote a backlog, which is the whole condition",
+    );
+    assert!(
+        view.ready_to_resume,
+        "so the Conversation is standing still with the button on offer",
+    );
+
+    assert_eq!(
+        fixture.resume().await,
+        Resumed::Resumed,
+        "and the press starts the planning again rather than refusing on the backlog",
+    );
+
+    // The proof that it is the *planning* that ran again rather than anything
+    // read off an empty `.tasks/`: a second session in the fork of next-stage,
+    // told what the first one was told.
+    let started = until_written_saying(&worked, "next-task").await;
+    let planned = std::fs::read_to_string(&planning).unwrap();
+
+    assert_eq!(
+        prompts(&planned).len(),
+        2,
+        "the planning ran twice and no more: {planned:?}",
+    );
+    assert!(
+        prompts(&planned)[1].contains("~/.claude/skills/next-stage/SKILL.md"),
+        "the second one is the fork of next-stage as well: {planned:?}",
+    );
+    assert!(
+        prompts(&planned)[1].contains("not stacked on anything"),
+        "and told where its branch came from, exactly as the first was: {planned:?}",
+    );
+
+    // And the run carried on from what the planning committed, which is what a
+    // stage's first step landing means: the backlog is worked from here.
+    assert!(
+        started.contains("~/.claude/skills/next-task/SKILL.md"),
+        "the backlog it wrote is being worked: {started:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::Implementing);
+    assert!(
+        view.blocked_on.is_none(),
+        "and nothing is waiting on the human any more: the press took the stop away",
+    );
+}
+
 /// A stub that carries a roadmap stage the whole way on its own: plans it, works
 /// the one task the plan wrote, finishes it, and reads the branch back finding
 /// nothing worth raising.

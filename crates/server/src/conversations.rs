@@ -944,7 +944,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         .announce(Nudge::Conversation { conversation: id });
     state.nudges.announce(Nudge::Repos);
 
-    tokio::spawn(crate::runner::plan_stage(state.clone(), id, None));
+    // Taken here rather than by the planning, which is started from more than one
+    // place and takes the registration from all of them — see
+    // [`crate::runner::plan_stage`].
+    let driving = state.drivers.driving(id);
+
+    tokio::spawn(crate::runner::plan_stage(state.clone(), id, None, driving));
 
     Ok(Adopted::Adopted)
 }

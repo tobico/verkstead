@@ -362,7 +362,17 @@ async fn start(
     // reloaded.
     state.nudges.announce(Nudge::Conversations);
 
-    tokio::spawn(crate::runner::plan_stage(state.clone(), id, stacked_on));
+    // Taken here rather than by the planning, which is started from more than one
+    // place and takes the registration from all of them — see
+    // [`crate::runner::plan_stage`].
+    let driving = state.drivers.driving(id);
+
+    tokio::spawn(crate::runner::plan_stage(
+        state.clone(),
+        id,
+        stacked_on,
+        driving,
+    ));
 }
 
 /// What the stage's own Timeline is told: which stage it is, and where its
