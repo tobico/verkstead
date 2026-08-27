@@ -9631,11 +9631,21 @@ async fn a_repository_with_no_stacking_recorded_gets_a_stage_off_the_default_bra
 /// The caller keeps the directory the upstream is in alive: the fetch this
 /// sets up is against a path rather than a server, and a tempdir that had gone
 /// would look exactly like being offline.
+///
+/// `--no-local` because `repo` is not sitting still while this runs. A clone
+/// from a path copies the object store file by file, and git's own manual says
+/// that races with anything writing to it — which is precisely what the session
+/// running in this Conversation's worktree does, its commits landing as loose
+/// objects in the very directory being copied. The clone dies on the temp file
+/// that was renamed out from under it. Going through the git transport instead
+/// asks the source what it holds and takes a pack of it, so a write arriving
+/// mid-clone is simply not in the answer.
 fn behind_an_origin(repo: &Path, upstream: &Path) {
     git(
         upstream.parent().unwrap(),
         &[
             "clone",
+            "--no-local",
             &repo.to_string_lossy(),
             &upstream.to_string_lossy(),
         ],
