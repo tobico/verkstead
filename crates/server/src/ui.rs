@@ -1061,6 +1061,10 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             insertions: commit.insertions,
                             deletions: commit.deletions,
                             summary: commit.summary,
+                            // Which repository it came out of, where that is not
+                            // this Conversation's own. The store decides that,
+                            // because it is the store that knows both.
+                            repo: commit.repo,
                         },
                     ),
                     // A wait a Verkstead of before put on a Timeline, said in
@@ -1322,14 +1326,19 @@ async fn commit_pane(
         }
     };
 
-    // Which repository to read it out of, which is the Conversation's own. A
-    // Conversation that has a commit on its Timeline and no row of its own is a
-    // record that has been got at.
-    let repo = match store::load_conversation(&state.pool, id).await {
-        Ok(Some(conversation)) => conversation.repo.path,
+    // Which repository to read it out of, which is the one the commit was
+    // recorded against rather than the Conversation's own: a companion's commit
+    // is in the companion's repository, and the Conversation's would know
+    // nothing about it.
+    //
+    // A commit whose repository can no longer say anything about it — taken off
+    // the registry, moved out from under Verkstead — is the *gone* a collected
+    // commit already is, and answers the same way.
+    let repo = match store::commit_repo(&state.pool, id, event).await {
+        Ok(Some(repo)) => repo.path,
         Ok(None) => return no_such_commit(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a commit failed");
             return unavailable("the commit could not be read");
         }
     };

@@ -1477,18 +1477,21 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
         Option<i64>,
         Option<i64>,
         Option<i64>,
+        Option<String>,
     );
 
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT e.id, e.at, e.kind, e.body,
                 q.id, q.body, r.submitted_at, r.body, a.archived_at AS locked_at,
-                c.sha, c.subject, c.files, c.insertions, c.deletions
+                c.sha, c.subject, c.files, c.insertions, c.deletions, cr.name
          FROM timeline_events e
+         JOIN conversations v ON v.id = e.conversation_id
          LEFT JOIN set_events s ON s.event_id = e.id
          LEFT JOIN question_sets q ON q.id = s.set_id
          LEFT JOIN responses r ON r.set_id = s.set_id
          LEFT JOIN archivings a ON a.set_id = s.set_id
          LEFT JOIN commits c ON c.event_id = e.id
+         LEFT JOIN repos cr ON cr.id = c.repo_id AND cr.id <> v.repo_id
          WHERE e.conversation_id = ?
          ORDER BY e.id",
     )
@@ -1547,6 +1550,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 files,
                 insertions,
                 deletions,
+                repo,
             ) = row;
 
             let commit = match (sha, subject, files, insertions, deletions) {
@@ -1560,6 +1564,10 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                         // Absent for most commits, which is what a commit that
                         // said nothing about itself looks like.
                         summary: summaries_of_commits.remove(&id),
+                        // And absent for every commit in the Conversation's own
+                        // repository, which is what the join above says: a label
+                        // is drawn where repos mix and nowhere else.
+                        repo,
                     })
                 }
                 // Every column of that row is `NOT NULL`, so the only way to be

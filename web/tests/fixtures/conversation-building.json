@@ -4,7 +4,24 @@
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
   "blocked_on": null,
   "branch": "usage-limits",
-  "companions": [],
+  "companions": [
+    {
+      "base_commit": "1f0b6d2e94a7c3518d0f2b6a4e9c7d31b5a08f4e",
+      "base_ref": null,
+      "branch": "",
+      "mode": "ReadWrite",
+      "repo": {
+        "default_branch": "trunk",
+        "id": 2,
+        "name": "askance",
+        "path": "/srv/repos/askance"
+      },
+      "worktree": {
+        "missing": true,
+        "path": "/var/lib/verkstead/worktrees/askance-usage-limits"
+      }
+    }
+  ],
   "direction": "inline",
   "grilling_pairing": {
     "model": "claude-fable-5",
@@ -117,6 +134,7 @@
         "files": 2,
         "id": 15,
         "insertions": 74,
+        "repo": null,
         "sha": "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93",
         "snippet": null,
         "subject": "chore: plan the usage-limit pause"
@@ -129,9 +147,23 @@
         "files": 5,
         "id": 16,
         "insertions": 213,
+        "repo": null,
         "sha": "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d",
         "snippet": "The relay reads the account's own limit error off stderr and hands the session's runner a time to wake at, instead of the fixed backoff it used to guess.",
         "subject": "feat: read the account's own limit error"
+      }
+    },
+    {
+      "Commit": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "deletions": 12,
+        "files": 3,
+        "id": 17,
+        "insertions": 46,
+        "repo": "askance",
+        "sha": "7d3a1c58e0b94f26a8d5c13f7b204e69a1c8d35f",
+        "snippet": null,
+        "subject": "feat: say which account a limit error was about"
       }
     }
   ],

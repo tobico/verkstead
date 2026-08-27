@@ -13,6 +13,12 @@
 //! press was called Abort, in the state column and in the body of the move that
 //! says the work got there. Both become `closed`.
 //!
+//! And one table rebuilt: a commit used to be the Conversation's and the sha's,
+//! there being one repository per Conversation to be in. It is now the
+//! Conversation's, the Repo's and the sha's — so the rows already there are
+//! attributed to the Conversation's own repository, and the rule that keeps one
+//! commit per Conversation is rebuilt around the new column.
+//!
 //! Both old shapes are written here by hand rather than by the code that used to
 //! write them: that code has gone, and what has to keep working is a database
 //! rather than a function.
@@ -21,8 +27,9 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Decision, Event, Lifecycle, asked_to_stop, clear_stop, conversations, load_conversation,
-    open_database, register_repo, start_conversation, start_grilling, stop, stopped, timeline,
+    Commit, Decision, Event, Lifecycle, asked_to_stop, clear_stop, commit_repo, conversations,
+    load_conversation, open_database, record_commit, recorded_commits, register_repo,
+    start_conversation, start_grilling, stop, stopped, timeline,
 };
 
 /// A database with the old table in it, and a Conversation to hang stops off.
@@ -776,5 +783,187 @@ async fn the_old_word_is_still_a_state_this_verkstead_can_read() {
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
         Lifecycle::Closed,
+    );
+}
+
+/// A database whose commits are the Conversation's and the sha's, which is what
+/// every commit recorded before Verkstead swept more than one repository is.
+///
+/// The table is written out as the Verkstead that made it declared it — the
+/// migration finds a database rather than a call — and one commit put in it, with
+/// the Commit Summary that hangs off the same Event.
+async fn commits_of_before(dir: &Path) -> (i64, i64) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    sqlx::query("DROP TABLE commits")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE commits (
+             event_id        INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             sha             TEXT NOT NULL,
+             subject         TEXT NOT NULL,
+             files           INTEGER NOT NULL,
+             insertions      INTEGER NOT NULL,
+             deletions       INTEGER NOT NULL,
+             UNIQUE (conversation_id, sha)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (event_id,): (i64,) = sqlx::query_as(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, '2026-08-01T09:14:22.000Z', 'commit', '')
+         RETURNING id",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO commits
+             (event_id, conversation_id, sha, subject, files, insertions, deletions)
+         VALUES (?, ?, 'a1b2c3d', 'feat: rate limiting', 2, 31, 4)",
+    )
+    .bind(event_id)
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO commit_summaries (event_id, summary) VALUES (?, 'A bucket per account.')",
+    )
+    .bind(event_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    pool.close().await;
+
+    (id, repo)
+}
+
+/// The commits on a Conversation's Timeline, in Timeline order.
+async fn commits(pool: &SqlitePool, id: i64) -> Vec<Commit> {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.event {
+            Event::Commit(commit) => Some(commit),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A commit recorded before this is the Conversation's own repository's, which
+/// is the only repository it was possible for it to be in — and it reads back
+/// exactly as it always did, unlabeled, with what it said about itself.
+#[tokio::test]
+async fn every_commit_of_before_is_the_conversations_own_repositorys() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo) = commits_of_before(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let landed = commits(&pool, id).await;
+
+    assert_eq!(landed.len(), 1, "the commit is still on the Timeline");
+    assert_eq!(landed[0].sha, "a1b2c3d");
+    assert_eq!(landed[0].subject, "feat: rate limiting");
+    assert_eq!(landed[0].files, 2);
+    assert_eq!(landed[0].insertions, 31);
+    assert_eq!(landed[0].deletions, 4);
+    assert_eq!(
+        landed[0].summary.as_deref(),
+        Some("A bucket per account."),
+        "and what it said about itself, which hangs off the same Event",
+    );
+    assert_eq!(
+        landed[0].repo, None,
+        "unlabeled, which is what the work's own repository draws as",
+    );
+
+    assert_eq!(
+        recorded_commits(&pool, id, repo).await.unwrap(),
+        vec!["a1b2c3d".to_owned()],
+        "and the sweep of that repository knows it has it",
+    );
+
+    let event = timeline(&pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|event| matches!(event.event, Event::Commit(_)))
+        .expect("the commit is on the Timeline")
+        .id;
+
+    assert_eq!(
+        commit_repo(&pool, id, event)
+            .await
+            .unwrap()
+            .map(|repo| repo.path),
+        Some(Path::new("/watched/verkstead").to_owned()),
+        "so the details pane reads its diff out of the Conversation's own repository",
+    );
+}
+
+/// And the rule the table carries is the rebuilt one: the same commit offered
+/// again is refused, and opening the database a second time rewrites nothing.
+#[tokio::test]
+async fn the_rebuilt_commits_table_keeps_one_commit_per_conversation_per_repo() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo) = commits_of_before(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let again = Commit {
+        sha: "a1b2c3d".to_owned(),
+        subject: "feat: rate limiting".to_owned(),
+        files: 2,
+        insertions: 31,
+        deletions: 4,
+        summary: None,
+        repo: None,
+    };
+
+    assert_eq!(
+        record_commit(&pool, id, repo, &again).await.unwrap(),
+        None,
+        "the next sweep of that branch finds nothing left to do",
+    );
+
+    pool.close().await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        commits(&pool, id).await.len(),
+        1,
+        "and a database opened twice is rewritten once",
     );
 }

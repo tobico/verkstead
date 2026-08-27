@@ -987,6 +987,13 @@ pub struct CommitEvent {
     /// what it carried was a Diagram and nothing else. Both draw the card that
     /// has always been drawn.
     pub snippet: Option<String>,
+
+    /// Which repository it landed in, where that is not the Conversation's own.
+    ///
+    /// `None` is the work's own repository and draws nothing: an unlabeled card
+    /// means the repo the Conversation is in, and the label earns its place when
+    /// a Timeline carries more than one repository's commits.
+    pub repo: Option<String>,
 }
 
 /// One commit, as the details pane receives it: what it said about itself, and
@@ -1589,6 +1596,7 @@ pub fn commit_event(id: i64, at: String, commit: CommitRecord) -> TimelineEvent 
             .as_deref()
             .map(crate::markdown::to_prose)
             .filter(|prose| !prose.is_empty()),
+        repo: commit.repo,
     })
 }
 
@@ -1610,6 +1618,10 @@ pub struct CommitRecord {
     /// The Commit Summary as the agent wrote it, or `None` where the commit
     /// carried none. Markdown, as everything an agent writes is.
     pub summary: Option<String>,
+
+    /// What the repository it landed in is called, where that is not the
+    /// Conversation's own — see [`CommitEvent::repo`].
+    pub repo: Option<String>,
 }
 
 /// One commit as the details pane receives it, rendered on the way.

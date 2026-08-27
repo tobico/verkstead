@@ -25,6 +25,20 @@
   color: var(--ink-soft);
 }
 
+/* Which repository it landed in, ahead of the hash — a hash is a thing to look
+   up somewhere, and this is the somewhere. Drawn only where the commit is a
+   companion repo's, so the ordinary pane is the pane it has always been.
+
+   A quiet outline rather than a colour: it is a name to read past on the way to
+   the counts, not something waiting on the human. */
+.header .repo {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
 /* And what it moved, which is the design's summary for a commit: the counts,
    in a row that reads left to right as files, added, removed. */
 .header .changed {

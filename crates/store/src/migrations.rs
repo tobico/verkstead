@@ -21,7 +21,100 @@ use super::{Lifecycle, stops::Decision};
 /// Run whatever this database still needs, in the order it needs them.
 pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     stops_recorded_the_old_way(pool).await?;
-    conversations_that_were_aborted(pool).await
+    conversations_that_were_aborted(pool).await?;
+    commits_that_named_no_repo(pool).await
+}
+
+/// Attribute every commit recorded before Verkstead swept more than one
+/// repository, and rebuild the index that keeps one commit per Conversation.
+///
+/// A commit used to be the Conversation's and the sha's — one repository per
+/// Conversation, so naming it would have been naming the only thing it could
+/// be. A Conversation now works alongside companion repos and a read-write one
+/// is swept like the work's own, so a commit is the Conversation's, the Repo's
+/// and the sha's. Every row already there belongs to the Conversation's own
+/// repository, which is what it was possible for it to be.
+///
+/// The table is rebuilt rather than altered because the rule is declared inline
+/// as a `UNIQUE`, and SQLite gives that its own index that no `DROP INDEX`
+/// reaches: a column can be added to a table, but the constraint on it is part
+/// of the table's own text. So the shape is written out again here, filled from
+/// the old rows, and swapped in — which is also what carries the rule forward,
+/// the rename taking the index with it.
+///
+/// The shape is written out rather than borrowed from [`super::commits`], for
+/// the reason the stop prose below is: this is a shape rows are put into once
+/// and never again, and a rewrite that moved with the declaration would make a
+/// database opened after the next column is added come out a different shape
+/// from one opened today.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn commits_that_named_no_repo(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('commits') WHERE name = ?")
+            .bind("repo_id")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the Repo of a recorded commit")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("attributing the commits recorded before this to a repository")?;
+
+    sqlx::query(
+        "CREATE TABLE commits_by_repo (
+             event_id        INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             sha             TEXT NOT NULL,
+             subject         TEXT NOT NULL,
+             files           INTEGER NOT NULL,
+             insertions      INTEGER NOT NULL,
+             deletions       INTEGER NOT NULL,
+             UNIQUE (conversation_id, repo_id, sha)
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the commits table over with a repository on it")?;
+
+    // Joined to the Conversations rather than sub-selected per row, which is
+    // also what leaves behind a commit whose Conversation has gone: there is no
+    // repository such a row could be attributed to, and it is on nobody's
+    // Timeline to be read off.
+    sqlx::query(
+        "INSERT INTO commits_by_repo
+             (event_id, conversation_id, repo_id, sha, subject, files, insertions, deletions)
+         SELECT c.event_id, c.conversation_id, v.repo_id, c.sha, c.subject,
+                c.files, c.insertions, c.deletions
+         FROM commits c
+         JOIN conversations v ON v.id = c.conversation_id",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("attributing the commits recorded before this to a repository")?;
+
+    sqlx::query("DROP TABLE commits")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the commits table as it was")?;
+
+    // Which takes the unique index with it, that being the table's own: the rule
+    // the rebuilt table carries is the Conversation, the Repo and the sha.
+    sqlx::query("ALTER TABLE commits_by_repo RENAME TO commits")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt commits table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("attributing the commits recorded before this to a repository")
 }
 
 /// The table the stops of before are kept in, named once: it is gone by the end

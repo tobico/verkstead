@@ -6821,8 +6821,30 @@ describe("a commit on the timeline", () => {
       ...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.commit} .${timeline.subject}`),
     ].map((it) => it.textContent);
 
-    expect(COMMITS).toHaveLength(2);
+    expect(COMMITS).toHaveLength(3);
     expect(subjects).toEqual(COMMITS.map((commit) => commit.subject));
+  });
+
+  /// Which repository a commit landed in, where that is not the conversation's
+  /// own. The fixture's timeline carries both — two commits in the repo the work
+  /// is in and one out of the companion — and only the companion's is labelled:
+  /// an unlabelled card means the work's own repo.
+  it("labels a commit that landed in a companion repo, and only that one", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`);
+
+    const labelled = COMMITS.filter((commit) => commit.repo !== null);
+    expect(labelled).toHaveLength(1);
+
+    const drawnLabels = [
+      ...container.querySelectorAll(
+        `.${timeline.timelineEvent} > .${timeline.commit} .${timeline.repo}`,
+      ),
+    ].map((it) => it.textContent);
+
+    expect(drawnLabels).toEqual([labelled[0]!.repo]);
   });
 
   /// There is nothing to decide about a commit. The design gives it no
@@ -6887,6 +6909,36 @@ describe("a commit on the timeline", () => {
 
     expect(header.textContent).toContain(COMMITS[0]!.subject);
     expect(header.textContent).toContain(COMMITS[0]!.sha.slice(0, 7));
+    expect(header.querySelector(`.${commitPane.repo}`)).toBeNull();
+  });
+
+  /// And which repository it landed in, where the pane is opened on a companion
+  /// repo's commit: the same label the card carries, said again beside the hash,
+  /// because the diff under it is that repository's rather than the work's own.
+  it("says which repository a companion's commit came from", async () => {
+    const companions = COMMITS.find((commit) => commit.repo !== null)!;
+
+    theBuilding(
+      {},
+      whenever(
+        `/api/ui/conversations/${BUILDING.id}/commit/${companions.id}`,
+        json(COMMIT_PANE),
+      ),
+    );
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`);
+
+    fireEvent.click(
+      [...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.commit}`)].find(
+        (card) =>
+          card.querySelector(`.${timeline.subject}`)!.textContent === companions.subject,
+      )!,
+    );
+
+    const header = await drawn(container, `.${shell.detailsPane} .${commitPane.header}`);
+
+    expect(header.querySelector(`.${commitPane.repo}`)!.textContent).toBe(companions.repo);
   });
 
   /// What the commit said about itself, between the header and the diff — the

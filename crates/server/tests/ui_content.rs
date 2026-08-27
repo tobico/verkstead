@@ -1774,12 +1774,31 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
+    // And the other Repo alongside it, in the mode a session may commit in: this
+    // is the Conversation whose Timeline carries commits, and a commit out of a
+    // companion is the one with a repository to name.
+    store::add_companion(&pool, directing, repos[1].id)
+        .await
+        .unwrap();
+    store::configure_companion(
+        &pool,
+        directing,
+        repos[1].id,
+        store::Change::Mode(store::CompanionMode::ReadWrite),
+    )
+    .await
+    .unwrap();
+
     store::start_grilling(
         &pool,
         directing,
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-usage-limits"),
-        &[],
+        &[store::CompanionWorktree {
+            repo_id: repos[1].id,
+            path: std::path::PathBuf::from("/var/lib/verkstead/worktrees/askance-usage-limits"),
+            base_commit: "1f0b6d2e94a7c3518d0f2b6a4e9c7d31b5a08f4e".to_owned(),
+        }],
     )
     .await
     .unwrap();
@@ -1839,31 +1858,54 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // grilling, because that is where a branch first has anything on it. One of
     // each kind, too: the bookkeeping commit that says only what it was, and the
     // one that delivered work and wrote a Commit Summary about it.
-    for commit in [
-        store::Commit {
-            sha: "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93".to_owned(),
-            subject: "chore: plan the usage-limit pause".to_owned(),
-            files: 2,
-            insertions: 74,
-            deletions: 3,
-            summary: None,
-        },
-        store::Commit {
-            sha: "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d".to_owned(),
-            subject: "feat: read the account's own limit error".to_owned(),
-            files: 5,
-            insertions: 213,
-            deletions: 41,
-            summary: Some(
-                "```mermaid\nflowchart LR\n  stderr --> reader --> pause\n```\n\n\
-                 The relay reads the account's own limit error off stderr and \
-                 hands the session's runner a time to wake at, instead of the \
-                 fixed backoff it used to guess."
-                    .to_owned(),
-            ),
-        },
+    // Three of them: two out of the Conversation's own repository and one out of
+    // the companion, because a labelled card is only worth drawing where a
+    // Timeline carries both — and the label is what tells them apart.
+    for (repo, commit) in [
+        (
+            repos[0].id,
+            store::Commit {
+                sha: "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93".to_owned(),
+                subject: "chore: plan the usage-limit pause".to_owned(),
+                files: 2,
+                insertions: 74,
+                deletions: 3,
+                summary: None,
+                repo: None,
+            },
+        ),
+        (
+            repos[0].id,
+            store::Commit {
+                sha: "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d".to_owned(),
+                subject: "feat: read the account's own limit error".to_owned(),
+                files: 5,
+                insertions: 213,
+                deletions: 41,
+                summary: Some(
+                    "```mermaid\nflowchart LR\n  stderr --> reader --> pause\n```\n\n\
+                     The relay reads the account's own limit error off stderr and \
+                     hands the session's runner a time to wake at, instead of the \
+                     fixed backoff it used to guess."
+                        .to_owned(),
+                ),
+                repo: None,
+            },
+        ),
+        (
+            repos[1].id,
+            store::Commit {
+                sha: "7d3a1c58e0b94f26a8d5c13f7b204e69a1c8d35f".to_owned(),
+                subject: "feat: say which account a limit error was about".to_owned(),
+                files: 3,
+                insertions: 46,
+                deletions: 12,
+                summary: None,
+                repo: None,
+            },
+        ),
     ] {
-        store::record_commit(&pool, directing, &commit)
+        store::record_commit(&pool, directing, repo, &commit)
             .await
             .unwrap()
             .unwrap();
@@ -1934,6 +1976,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::record_commit(
         &pool,
         tasked,
+        repos[0].id,
         &store::Commit {
             sha: "5c2a9e14b7f36d80a1c4e9b2f7d53081a6e4c9b2".to_owned(),
             subject: "chore: plan the task-runner tasks".to_owned(),
@@ -1941,6 +1984,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             insertions: 132,
             deletions: 0,
             summary: None,
+            repo: None,
         },
     )
     .await
@@ -2162,6 +2206,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::record_commit(
         &pool,
         wrapping,
+        repos[0].id,
         &store::Commit {
             sha: "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8".to_owned(),
             subject: "chore: finish rate-limiting".to_owned(),
@@ -2169,6 +2214,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             insertions: 0,
             deletions: 24,
             summary: None,
+            repo: None,
         },
     )
     .await

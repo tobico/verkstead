@@ -133,6 +133,14 @@ each one named with its directory, what it holds and whether it may be written
 to — and no instructions with it, because what a companion is for is the
 Brief's to say. What a Conversation was configured with is read on the Brief's
 details pane ever after, the setup rows having gone when the card froze.
+
+**A read-write one's branch is swept like the Conversation's own.** Every commit
+that lands on it reaches the same Timeline, labelled with the Repo's registered
+name — where a commit in the Conversation's own repository draws unlabelled,
+because an unlabelled card means the work's own repo and the label earns its
+place when repos mix. Opening one shows its diff read out of the companion's
+repository. A read-only companion is swept by nothing: its checkout is detached
+and bound read-only, so there is nothing there for a commit to land on.
 _Avoid_: submodule, dependency, linked repo, sibling checkout, secondary repo
 
 **Skill**:
@@ -189,7 +197,8 @@ _Avoid_: item, record, message, step
 
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose
-first, a delta Diagram after it — kept by the sweep with its trailers stripped,
+first, a delta Diagram after it — kept by the sweep of whichever repository it
+landed in with its trailers stripped,
 rendered as the **Message** above the diff in the commit's details pane —
 headed and boxed there the way a Set's Preface is — and clamped to a prose
 snippet on its Timeline card. Written for commits that deliver work; pure

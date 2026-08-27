@@ -45,10 +45,11 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, CompanionAdded,
-    ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
-    GrillingStarted, Lifecycle, NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent,
-    Registered, Resumed, Shown, Size, StageListReached, Started, SteerOpened, Submitted,
-    TaskListEvent, TaskListReached, TimelineEvent, TranscriptView, Turn, Watching,
+    CompanionMode, CompanionModeChosen, ConversationClosed, ConversationSteered,
+    ConversationStopped, ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PinnedEvent,
+    ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size, StageListReached, Started,
+    SteerOpened, Submitted, TaskListEvent, TaskListReached, TimelineEvent, TranscriptView, Turn,
+    Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::handoffs::Handoffs;
@@ -1081,7 +1082,21 @@ async fn grilling_alongside(stub: &str, companion: &str) -> Grilling {
         stub,
         PULL_REQUEST,
         BRISKLY,
-        &[companion],
+        &[(companion, CompanionMode::ReadOnly)],
+    )
+    .await
+}
+
+/// And the same with that companion in the other mode: a branch of its own, a
+/// sandbox that may write to it, and a sweep of that branch beside the
+/// Conversation's own.
+async fn grilling_building_in(stub: &str, companion: &str) -> Grilling {
+    grilling_at_pace(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        BRISKLY,
+        &[(companion, CompanionMode::ReadWrite)],
     )
     .await
 }
@@ -1119,7 +1134,7 @@ async fn grilling_at_pace(
     stub: &str,
     gh: &str,
     pace: Pace,
-    companions: &[&str],
+    companions: &[(&str, CompanionMode)],
 ) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace).await;
     let app = &bench.app;
@@ -1137,15 +1152,29 @@ async fn grilling_at_pace(
     bench.under_both_pairings(id).await;
 
     // While it is still drafting, which is the only time a companion can be
-    // added — and off the same endpoint the setup card presses.
-    for name in companions {
+    // added or configured — and off the same endpoints the setup card presses.
+    for (name, mode) in companions {
+        let repo_id = bench.register(name).await;
+
         let added: CompanionAdded = post(
             app,
             &format!("/api/ui/conversations/{id}/companions"),
-            &serde_json::json!({ "repo_id": bench.register(name).await }),
+            &serde_json::json!({ "repo_id": repo_id }),
         )
         .await;
         assert_eq!(added, CompanionAdded::Added);
+
+        // Only where it is not the mode one is added in, so the read-only case
+        // still goes through exactly the presses it always did.
+        if *mode != CompanionMode::ReadOnly {
+            let chosen: CompanionModeChosen = post(
+                app,
+                &format!("/api/ui/conversations/{id}/companions/{repo_id}/mode"),
+                &serde_json::json!({ "mode": mode }),
+            )
+            .await;
+            assert_eq!(chosen, CompanionModeChosen::Chosen);
+        }
     }
 
     let saved: BriefSaved = post(
@@ -7441,6 +7470,111 @@ async fn a_breakdown_question_reaches_the_human_as_an_ordinary_set() {
         "and nothing was launched: the session writing the backlog is the one that \
          proposed",
     );
+}
+
+/// The same watching, in a read-write companion: a commit landing on the
+/// companion's branch reaches the Timeline as a commit on the Conversation's
+/// own does, and says which repository it came from.
+///
+/// The stub commits in the companion's checkout — which is a directory beside
+/// the worktree it starts in, on a branch of its own — and then exits, so what
+/// this asks is both halves at once: that the companion is being watched at all,
+/// and that the last commit a session makes is caught for it too. Nothing tells
+/// Verkstead a commit happened in either repository.
+#[tokio::test]
+async fn what_a_session_commits_in_a_companion_lands_on_the_timeline_labelled() {
+    let fixture = grilling_building_in(
+        r#"
+        printf 'a limiter\n' > limiter.md
+        git add limiter.md
+        git commit --quiet -m 'feat: rate limiting'
+
+        cd ../askance-*
+        printf 'the other half\n' > halves.md
+        git add halves.md
+        git commit --quiet -m 'feat: the other half'
+        "#,
+        "askance",
+    )
+    .await;
+
+    let landed = fixture
+        .until(|view| {
+            let landed = commits(view);
+            (landed.len() == 2).then(|| landed.into_iter().cloned().collect::<Vec<_>>())
+        })
+        .await;
+
+    // Read by what each commit was called rather than by where it is in the
+    // list: two repositories swept at once are two repositories noticed in
+    // whichever order the sweeps got there, and the Timeline's order is the
+    // order Verkstead saw them.
+    let named = |subject: &str| {
+        landed
+            .iter()
+            .find(|commit| commit.subject == subject)
+            .unwrap_or_else(|| panic!("no commit called {subject:?} among {landed:#?}"))
+    };
+
+    assert_eq!(
+        named("feat: rate limiting").repo,
+        None,
+        "the work's own repository draws unlabelled",
+    );
+    assert_eq!(
+        named("feat: the other half").repo,
+        Some("askance".to_owned()),
+        "and a companion's commit says which repository it came from",
+    );
+
+    // And the pane, which is the other half of what a commit is: the diff read
+    // out of the repository it was recorded against rather than the
+    // Conversation's own, which knows nothing about it.
+    let pane = fixture.commit_pane(named("feat: the other half").id).await;
+
+    let diff = pane.diff.expect("a commit that added a file has a diff");
+
+    assert_eq!(diff.paths, vec!["halves.md".to_owned()]);
+    assert!(diff.html.contains("the other half"), "{}", diff.html);
+}
+
+/// A Conversation with a read-only companion has one branch being swept, not
+/// two: that checkout is detached and bound read-only, so there is nothing there
+/// for a commit to land on — and the Conversation's own commits draw exactly as
+/// they always did.
+#[tokio::test]
+async fn a_read_only_companion_is_not_swept_and_the_conversations_own_is_unlabelled() {
+    let fixture = grilling_alongside(
+        r#"
+        printf 'a limiter\n' > limiter.md
+        git add limiter.md
+        git commit --quiet -m 'feat: rate limiting'
+
+        printf 'committed\n'
+        sleep 300
+        "#,
+        "askance",
+    )
+    .await;
+
+    let landed = fixture
+        .until(|view| {
+            let landed = commits(view);
+            (landed.len() == 1).then(|| landed.into_iter().cloned().collect::<Vec<_>>())
+        })
+        .await;
+
+    assert_eq!(landed[0].subject, "feat: rate limiting");
+    assert_eq!(
+        landed[0].repo, None,
+        "an unlabelled card means the work's own repo",
+    );
+
+    // Long enough for several more sweeps of both repositories, one of which is
+    // not being swept at all.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    assert_eq!(commits(&fixture.view().await).len(), 1);
 }
 
 /// What a session leaves behind besides its output: the commits it lands on the

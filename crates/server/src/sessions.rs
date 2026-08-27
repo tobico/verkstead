@@ -837,11 +837,11 @@ impl Sessions {
 
         // What the session is about to commit, which is the other half of what
         // it leaves behind. Watched for as long as it runs and once more as it
-        // ends — see [`crate::commits`] — and its base commit is where the
-        // branch started, which is recorded by the time any session exists.
-        let branch = conversation.branch.clone();
-        let repo = conversation.repo.path.clone();
-        let base = conversation.base_commit.clone();
+        // ends — see [`crate::commits`].
+        //
+        // One branch per repository a commit can land in: the Conversation's
+        // own, and one for each read-write companion it was configured with.
+        let watched = crate::commits::watched(conversation);
 
         // Registered under the lock the relay will want in order to take itself
         // off again, and started while it is held. A session that ends the
@@ -861,35 +861,27 @@ impl Sessions {
                 let quiet = quiet.clone();
 
                 async move {
-                    // A Conversation with no base commit has never started
-                    // grilling, and a session is running in it — so this is a
-                    // record that has been got at rather than a Conversation
-                    // whose branch is not worth watching.
-                    let watching = match base {
-                        Some(base) => {
+                    // One watcher per branch, each with the word that stops it.
+                    // A record that cannot say what a branch was cut from
+                    // contributes none — see [`crate::commits::watched`], which
+                    // is also where a Conversation with no companions comes back
+                    // as the one watcher it always had.
+                    let watching: Vec<_> = watched
+                        .into_iter()
+                        .map(|branch| {
                             let (stop, stopping) = oneshot::channel();
 
                             let watcher = tokio::spawn(crate::commits::watch(
                                 pool.clone(),
                                 nudges.clone(),
                                 conversation_id,
-                                repo,
                                 branch,
-                                base,
                                 stopping,
                             ));
 
-                            Some((stop, watcher))
-                        }
-                        None => {
-                            tracing::error!(
-                                conversation_id,
-                                "a session is running on a Conversation with no base commit, \
-                                 so its commits cannot be told from what it branched off"
-                            );
-                            None
-                        }
-                    };
+                            (stop, watcher)
+                        })
+                        .collect();
 
                     let ended = relay(
                         &pool,
@@ -906,14 +898,24 @@ impl Sessions {
                     )
                     .await;
 
-                    // The session is over, so the branch is finished moving.
-                    // Waited on rather than only asked to stop, because what it
-                    // does when told is one last sweep: a session's final act is
-                    // usually a commit, and it lands a poll after the process
-                    // that made it has gone.
-                    if let Some((stop, watcher)) = watching {
-                        let _ = stop.send(());
+                    // The session is over, so the branches are finished moving.
+                    // Waited on rather than only asked to stop, because what
+                    // each does when told is one last sweep: a session's final
+                    // act is usually a commit, and it lands a poll after the
+                    // process that made it has gone.
+                    //
+                    // Every one of them, because a session may have been working
+                    // in more than one repository and the last commit in each is
+                    // the one most worth catching. Told to stop first and awaited
+                    // after, so the final sweeps run alongside each other rather
+                    // than one repository at a time.
+                    let (stops, watchers): (Vec<_>, Vec<_>) = watching.into_iter().unzip();
 
+                    for stop in stops {
+                        let _ = stop.send(());
+                    }
+
+                    for watcher in watchers {
                         if let Err(error) = watcher.await {
                             tracing::error!(error = ?error, conversation_id, "a branch watcher ended badly");
                         }

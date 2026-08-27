@@ -773,8 +773,8 @@ async fn follow_inline(
 
     // Taken before the waiting starts, so it is a count of what the run had
     // landed before this session rather than including what it goes on to do.
-    let already = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len(),
+    let already = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
             return;
@@ -801,8 +801,8 @@ async fn follow_inline(
     // Read after the session is over, which is after its relay has waited out the
     // final sweep of the branch: a session's last act is usually a commit, and it
     // lands a poll after the process that made it has gone.
-    let landed = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len() > already,
+    let landed = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed > already,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what an inline session committed failed");
             return;
@@ -915,8 +915,8 @@ pub(crate) async fn instructed(
     // Taken before the session starts, so it is a count of what the branch
     // carried before the instruction rather than one that includes what it goes
     // on to do.
-    let already = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len(),
+    let already = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
             return;
@@ -957,8 +957,8 @@ pub(crate) async fn instructed(
     // whichever way it ended, exactly as a step's landing is: what was committed
     // is committed, and an agent that did the work and then fell over on its way
     // out has left the human nothing to decide about.
-    let landed = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len() > already,
+    let landed = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed > already,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what an instruction session committed failed");
             return;
@@ -1165,8 +1165,8 @@ async fn follow_roadmap(
 pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &str) -> Option<i64> {
     // Taken before the session starts, so it is a count of what the branch
     // carried before this fix rather than one that includes it.
-    let already = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len(),
+    let already = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
             return None;
@@ -1484,8 +1484,8 @@ async fn committed_and_quiet(
     loop {
         tokio::time::sleep(pace.poll).await;
 
-        match store::recorded_commits(&state.pool, conversation_id).await {
-            Ok(recorded) if recorded.len() > already => {}
+        match store::commits_landed(&state.pool, conversation_id).await {
+            Ok(landed) if landed > already => {}
             // Nothing new, or a store that would not answer — which reads as
             // nothing new for the reason a repository that will not answer reads
             // as *not landed*: a session is ended on the strength of this.

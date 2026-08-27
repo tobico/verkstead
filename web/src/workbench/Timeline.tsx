@@ -1726,6 +1726,11 @@ function UnreadableSet(props: {
 /// nothing draws the card that has always been drawn, with nothing marking the
 /// absence.
 ///
+/// Which repository it landed in is drawn beside the word, and only where that
+/// is not the conversation's own: an unlabeled card means the work's own repo,
+/// and the label earns its place when a timeline carries the commits of a
+/// companion repo as well.
+///
 /// Nothing here asks the human for anything. Commits are viewable and have no
 /// state of their own: the design gives them no per-commit review, because
 /// feedback about the work consolidates in the wrap-up phase.
@@ -1747,6 +1752,9 @@ function Commit(props: {
     >
       <span class={styles.eventHead}>
         <span class={styles.what}>Commit</span>
+        <Show when={props.commit.repo}>
+          {(repo) => <span class={styles.repo}>{repo()}</span>}
+        </Show>
         <span class={styles.sha}>{props.commit.sha.slice(0, ABBREVIATED)}</span>
       </span>
 

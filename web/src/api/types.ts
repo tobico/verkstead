@@ -462,7 +462,15 @@ subject: string, files: number, insertions: number, deletions: number,
  * what it carried was a Diagram and nothing else. Both draw the card that
  * has always been drawn.
  */
-snippet: string | null, };
+snippet: string | null, 
+/**
+ * Which repository it landed in, where that is not the Conversation's own.
+ *
+ * `None` is the work's own repository and draws nothing: an unlabeled card
+ * means the repo the Conversation is in, and the label earns its place when
+ * a Timeline carries more than one repository's commits.
+ */
+repo: string | null, };
 
 /**
  * One commit, as the details pane receives it: what it said about itself, and
