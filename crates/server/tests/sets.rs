@@ -353,6 +353,7 @@ async fn a_dirty_worktree_is_read_for_the_diff_as_the_set_arrives() {
         block.repo, "askance",
         "the block names the repository it was read out of"
     );
+    assert!(block.own, "which here is the Conversation's own");
     assert!(
         block.diff.contains("+++ b/README.md") && block.diff.contains("+and a second line"),
         "a tracked file's changes belong in the Diff, got:\n{}",
@@ -390,6 +391,11 @@ async fn every_repository_a_session_may_write_in_is_read_in_turn() {
         diffs.iter().map(|block| &*block.repo).collect::<Vec<_>>(),
         ["askance", "verkstead"],
         "the Conversation's own repository first, then its read-write companion"
+    );
+    assert_eq!(
+        diffs.iter().map(|block| block.own).collect::<Vec<_>>(),
+        [true, false],
+        "and each says which of the two it is, which no name of a repository could"
     );
     assert!(
         diffs[0].diff.contains("+the work's own repository"),
@@ -429,6 +435,42 @@ async fn a_companion_with_nothing_uncommitted_contributes_no_block() {
             .collect::<Vec<_>>(),
         ["askance"],
         "a clean companion has nothing to show, and is not drawn saying so"
+    );
+}
+
+/// And the other way about, which is what the block saying whether it is the
+/// Conversation's own is for: a clean Worktree of the work's own leaves the
+/// companion's block as the whole of the Diff, and it is still the companion's.
+/// A block that could not say so would be drawn as the work's own repository's,
+/// that being what an unlabeled block means.
+#[tokio::test]
+async fn a_lone_block_says_whether_it_is_the_conversations_own_repositorys() {
+    let (dir, pool) = fresh_pool().await;
+    let (conversation, _worktree, companions) = asking_alongside(
+        &pool,
+        dir.path(),
+        &[("verkstead", store::CompanionMode::ReadWrite)],
+    )
+    .await;
+
+    dirty(&companions[0], "only the companion's");
+
+    let response = post_set_from(&pool, conversation, VALID_SET).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
+    let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
+
+    let [block] = &asked(&stored).diffs[..] else {
+        panic!(
+            "one dirty Worktree is one block, got {:?}",
+            asked(&stored).diffs
+        );
+    };
+    assert_eq!(block.repo, "verkstead");
+    assert!(
+        !block.own,
+        "the work's own repository had nothing uncommitted, so this is not its block"
     );
 }
 

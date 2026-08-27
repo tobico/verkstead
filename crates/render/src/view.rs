@@ -153,9 +153,13 @@ pub struct DiffView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct RepoDiffView {
-    /// The repository's registered name, and `null` on a Diff that is one block:
-    /// a lone block is the work's own repository said twice, and the label earns
-    /// its place when repos mix — which is the rule a commit card follows.
+    /// The repository's registered name, and `null` on the Conversation's own
+    /// repository drawn as the whole of the Diff: an unlabeled block *is* the
+    /// work's own repo, so saying it there would be saying it twice.
+    ///
+    /// A companion's block is named whether or not it is the only one — it is
+    /// somebody else's repository however little else is uncommitted that day —
+    /// which is the rule a commit card follows, asked the same way round.
     pub repo: Option<String>,
 
     pub diff: DiffView,
@@ -343,42 +347,58 @@ fn rendered(written: Option<&str>) -> Option<String> {
 ///
 /// A block with no files in it is the same as no block: an empty patch is not
 /// worth a name, and every block empty is a Set with no Diff at all. Which is
-/// also why the labels are decided after the rendering rather than before it —
-/// what makes a label worth drawing is a second block that is actually there.
+/// also why the one unlabeled case is decided after the rendering rather than
+/// before it — what a block is drawn beside is not known until the empty ones
+/// have gone.
+///
+/// The one unlabeled case is the Conversation's own repository drawn on its
+/// own: that is what an unlabeled block *means*, so it is the block's own
+/// repository that decides it rather than how many blocks there happen to be. A
+/// companion's block drawn alone keeps its name — it is somebody else's
+/// repository whether or not the work's own had anything uncommitted in it that
+/// day — which is the rule a commit card follows, asked the same way round.
 fn diffed(composed: &[verkstead_schema::RepoDiff], single: Option<&str>) -> Vec<RepoDiffView> {
     use crate::diff;
 
-    let patches: Vec<(Option<&str>, &str)> = match composed.is_empty() {
-        true => single.map(|patch| (None, patch)).into_iter().collect(),
+    // The name to draw, whether it is the Conversation's own repository, and
+    // the patch. A Set stored before the Diff was a list carries one patch and
+    // names no repository: it is the work's own, that being the only repository
+    // there was to read.
+    let patches: Vec<(Option<&str>, bool, &str)> = match composed.is_empty() {
+        true => single
+            .map(|patch| (None, true, patch))
+            .into_iter()
+            .collect(),
         false => composed
             .iter()
-            .map(|block| (Some(block.repo.as_str()), block.diff.as_str()))
+            .map(|block| (Some(block.repo.as_str()), block.own, block.diff.as_str()))
             .collect(),
     };
 
-    let mut blocks: Vec<RepoDiffView> = Vec::new();
+    let mut blocks: Vec<(bool, RepoDiffView)> = Vec::new();
     // Where the next block's first file is, counting from one across the whole
     // Diff — the ids are one page's, so they run on rather than restarting.
     let mut first = 1;
 
-    for (repo, patch) in patches {
+    for (repo, own, patch) in patches {
         let Some(view) = diff::block(patch, first) else {
             continue;
         };
         first += view.paths.len();
-        blocks.push(RepoDiffView {
-            repo: repo.map(str::to_owned),
-            diff: view,
-        });
+        blocks.push((
+            own,
+            RepoDiffView {
+                repo: repo.map(str::to_owned),
+                diff: view,
+            },
+        ));
     }
 
-    if blocks.len() < 2 {
-        for block in &mut blocks {
-            block.repo = None;
-        }
+    if let [(true, block)] = &mut blocks[..] {
+        block.repo = None;
     }
 
-    blocks
+    blocks.into_iter().map(|(_, block)| block).collect()
 }
 
 /// The Set's Questions as the page needs them: named as a Response answers them,

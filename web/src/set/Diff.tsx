@@ -8,10 +8,11 @@
 //! they work without a line of script.
 //!
 //! One section, and a block inside it per repository the work may be written in.
-//! Which repository a block came out of is drawn over it where the server named
-//! one, and a Diff of a single block is the work's own repository and is drawn
-//! without a name: the label earns its place when repos mix, exactly as a commit
-//! card's does.
+//! Which repository a block came out of is drawn over it wherever the server
+//! named one — which is everywhere except the conversation's own repository
+//! drawn as the whole of the Diff, an unlabelled block meaning the work's own
+//! repo already. A companion's block is named however alone it is, exactly as a
+//! commit card is.
 
 import { For, Show } from "solid-js";
 import type { JSX } from "solid-js";
@@ -47,9 +48,9 @@ export function Diff(props: {
       <For each={props.blocks}>
         {(block) => (
           <>
-            {/* Which repository this is, where more than one is being shown.
-                The table of contents says the same word over the same files,
-                which is how the two read as one account of the Diff. */}
+            {/* Which repository this is, wherever the server named one. The
+                table of contents says the same word over the same files, which
+                is how the two read as one account of the Diff. */}
             <Show when={block.repo}>
               {(repo) => <h3 class={styles.repo}>{repo()}</h3>}
             </Show>

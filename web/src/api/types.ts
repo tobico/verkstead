@@ -1477,9 +1477,13 @@ export type Registration = { path: string, };
  */
 export type RepoDiffView = { 
 /**
- * The repository's registered name, and `null` on a Diff that is one block:
- * a lone block is the work's own repository said twice, and the label earns
- * its place when repos mix — which is the rule a commit card follows.
+ * The repository's registered name, and `null` on the Conversation's own
+ * repository drawn as the whole of the Diff: an unlabeled block *is* the
+ * work's own repo, so saying it there would be saying it twice.
+ *
+ * A companion's block is named whether or not it is the only one — it is
+ * somebody else's repository however little else is uncommitted that day —
+ * which is the rule a commit card follows, asked the same way round.
  */
 repo: string | null, diff: DiffView, };
 

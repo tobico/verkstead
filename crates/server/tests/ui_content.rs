@@ -350,6 +350,26 @@ fn companion_diff() -> String {
     .to_owned()
 }
 
+/// The Conversation's own repository's block of a Diff — the one block that is
+/// drawn without a name where it is the whole of the Diff.
+fn own_block() -> RepoDiff {
+    RepoDiff {
+        repo: "verkstead".to_owned(),
+        own: true,
+        diff: modified_and_untracked_diff(),
+    }
+}
+
+/// And a read-write companion's, which is named wherever it is drawn: it is
+/// somebody else's repository however little else is uncommitted.
+fn companion_block() -> RepoDiff {
+    RepoDiff {
+        repo: "askance".to_owned(),
+        own: false,
+        diff: companion_diff(),
+    }
+}
+
 /// Ask for a stored Set the way the viewer does, and read back both the JSON as
 /// it went out and the Set it deserialises to.
 ///
@@ -937,10 +957,7 @@ async fn a_postscript_of_nothing_but_whitespace_is_the_same_as_none() {
 async fn the_attached_diff_is_rendered_per_file_and_highlighted_by_the_server() {
     let (_dir, pool, app) = fresh_app().await;
     let mut set = full_grammar_set();
-    set.diffs = vec![RepoDiff {
-        repo: "verkstead".to_owned(),
-        diff: modified_and_untracked_diff(),
-    }];
+    set.diffs = vec![own_block()];
 
     let (view, _) = set_json(&app, &pool, &set).await;
     let [block] = &view.diff[..] else {
@@ -979,20 +996,37 @@ async fn the_attached_diff_is_rendered_per_file_and_highlighted_by_the_server() 
 }
 
 #[tokio::test]
-async fn one_repositorys_changes_are_drawn_without_a_label() {
+async fn the_conversations_own_repository_drawn_alone_is_drawn_without_a_label() {
     let (_dir, pool, app) = fresh_app().await;
     let mut set = full_grammar_set();
-    set.diffs = vec![RepoDiff {
-        repo: "verkstead".to_owned(),
-        diff: modified_and_untracked_diff(),
-    }];
+    set.diffs = vec![own_block()];
 
     let (view, _) = set_json(&app, &pool, &set).await;
 
     assert_eq!(
         view.diff.first().and_then(|block| block.repo.clone()),
         None,
-        "a Diff of one block is the work's own repository, and says so by saying nothing"
+        "an unlabeled block means the work's own repo, so naming it would be naming it twice"
+    );
+}
+
+/// And the other way round, which is the whole reason the block says which
+/// repository is the Conversation's own: a companion's block is the whole of the
+/// Diff whenever the work's own Worktree is clean and the companion's is not.
+/// Unlabeled it would read as the work's own repository's, which is what an
+/// unlabeled block means.
+#[tokio::test]
+async fn a_companions_block_is_labeled_even_as_the_whole_of_the_diff() {
+    let (_dir, pool, app) = fresh_app().await;
+    let mut set = full_grammar_set();
+    set.diffs = vec![companion_block()];
+
+    let (view, _) = set_json(&app, &pool, &set).await;
+
+    assert_eq!(
+        view.diff.first().and_then(|block| block.repo.clone()),
+        Some("askance".to_owned()),
+        "it is somebody else's repository however little else is uncommitted"
     );
 }
 
@@ -1000,16 +1034,7 @@ async fn one_repositorys_changes_are_drawn_without_a_label() {
 async fn every_repositorys_block_is_labeled_once_more_than_one_is_drawn() {
     let (_dir, pool, app) = fresh_app().await;
     let mut set = full_grammar_set();
-    set.diffs = vec![
-        RepoDiff {
-            repo: "verkstead".to_owned(),
-            diff: modified_and_untracked_diff(),
-        },
-        RepoDiff {
-            repo: "askance".to_owned(),
-            diff: companion_diff(),
-        },
-    ];
+    set.diffs = vec![own_block(), companion_block()];
 
     let (view, _) = set_json(&app, &pool, &set).await;
 
@@ -1464,10 +1489,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // there could be more than one.
     let (_dir, pool, app) = fresh_app().await;
     let mut answering = marked_up_set();
-    answering.diffs = vec![RepoDiff {
-        repo: "verkstead".to_owned(),
-        diff: modified_and_untracked_diff(),
-    }];
+    answering.diffs = vec![own_block()];
     let (_, json) = set_json(&app, &pool, &answering).await;
     write("set-answering.json", &json);
 
@@ -1476,16 +1498,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // order they were composed.
     let (_dir, pool, app) = fresh_app().await;
     let mut alongside = marked_up_set();
-    alongside.diffs = vec![
-        RepoDiff {
-            repo: "verkstead".to_owned(),
-            diff: modified_and_untracked_diff(),
-        },
-        RepoDiff {
-            repo: "askance".to_owned(),
-            diff: companion_diff(),
-        },
-    ];
+    alongside.diffs = vec![own_block(), companion_block()];
     let (_, json) = set_json(&app, &pool, &alongside).await;
     write("set-alongside.json", &json);
 

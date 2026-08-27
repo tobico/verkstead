@@ -80,11 +80,20 @@ pub(crate) async fn compose(pool: &SqlitePool, conversation_id: i64) -> Vec<Repo
 /// is the ordinary state rather than a missing record. A read-only companion is
 /// left out for what it is: detached and bound read-only, with nothing to
 /// commit and so nothing uncommitted.
-fn writable(conversation: &store::Conversation) -> Vec<(String, PathBuf)> {
+///
+/// Each is marked for whether it is the Conversation's own repository, which is
+/// carried onto the block: a clean Worktree contributes none, so where the
+/// work's own repository comes in the list is not something a reader of the
+/// blocks could work out for itself.
+fn writable(conversation: &store::Conversation) -> Vec<Reading> {
     let mut worktrees = Vec::new();
 
     if let Some(worktree) = conversation.worktree.clone() {
-        worktrees.push((conversation.repo.name.clone(), worktree));
+        worktrees.push(Reading {
+            repo: conversation.repo.name.clone(),
+            own: true,
+            worktree,
+        });
     }
 
     for companion in &conversation.companions {
@@ -93,19 +102,36 @@ fn writable(conversation: &store::Conversation) -> Vec<(String, PathBuf)> {
         }
 
         if let Some(worktree) = companion.worktree.clone() {
-            worktrees.push((companion.repo.name.clone(), worktree));
+            worktrees.push(Reading {
+                repo: companion.repo.name.clone(),
+                own: false,
+                worktree,
+            });
         }
     }
 
     worktrees
 }
 
+/// One Worktree to read, and what the block read out of it is to say for itself.
+struct Reading {
+    repo: String,
+    own: bool,
+    worktree: PathBuf,
+}
+
 /// The blocks those Worktrees come to, in the order they were given. Blocking,
 /// which is why it is called from a worker of its own.
-fn blocks(worktrees: Vec<(String, PathBuf)>) -> Vec<RepoDiff> {
+fn blocks(worktrees: Vec<Reading>) -> Vec<RepoDiff> {
     worktrees
         .into_iter()
-        .filter_map(|(repo, worktree)| uncommitted(&worktree).map(|diff| RepoDiff { repo, diff }))
+        .filter_map(|read| {
+            uncommitted(&read.worktree).map(|diff| RepoDiff {
+                repo: read.repo,
+                own: read.own,
+                diff,
+            })
+        })
         .collect()
 }
 

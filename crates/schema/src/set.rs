@@ -96,6 +96,17 @@ pub struct QuestionSet {
 pub struct RepoDiff {
     pub repo: String,
 
+    /// Whether this is the Conversation's own repository rather than one of its
+    /// companions.
+    ///
+    /// True of exactly one block, and of the first, because that is the order
+    /// they are composed in. It says the one thing a name cannot: which of
+    /// these repositories the work itself is in. That is what decides whether a
+    /// block drawn on its own is labeled — the same question a commit card is
+    /// labeled by, asked the same way round.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own: bool,
+
     /// The patch, in the unified format git writes: everything not in the last
     /// commit, staged or not, plus the contents of untracked files.
     pub diff: String,

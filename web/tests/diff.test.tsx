@@ -191,14 +191,27 @@ describe("a Diff of more than one repository", () => {
     ).toEqual(["Diff"]);
   });
 
-  it("leaves one repository's changes unlabeled", async () => {
+  it("leaves the conversation's own repository unlabeled where it is the whole of it", async () => {
     const diff = diffOf(await reading(WAITING));
 
     expect(
       diff.querySelector(`h3.${styles.repo}`),
-      "a Diff of one block is the work's own repository, and the label earns " +
-        "its place when repos mix",
+      "an unlabelled block means the work's own repo, so naming it would be " +
+        "naming it twice",
     ).toBeNull();
+  });
+
+  /// And a companion's block drawn alone keeps its name, which the server
+  /// decides: unlabelled it would read as the work's own repository's.
+  it("names a companion's block even where it is the whole of the Diff", async () => {
+    const lone = {
+      ...ALONGSIDE,
+      diff: [ALONGSIDE.diff[1]!],
+    };
+
+    expect(texts(diffOf(await reading(lone)), `h3.${styles.repo}`)).toEqual([
+      "askance",
+    ]);
   });
 });
 

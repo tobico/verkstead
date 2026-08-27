@@ -27,10 +27,10 @@
   gap: 0.6rem;
 }
 
-/* Which repository the block under it came out of, drawn only where the Diff
-   holds more than one — see `Diff.tsx`. A name over a run of files rather than a
-   heading of the page's own: the section is the Diff, and this says which part
-   of it the reader is in.
+/* Which repository the block under it came out of, drawn wherever the Diff
+   names one — see `Diff.tsx`. A name over a run of files rather than a heading
+   of the page's own: the section is the Diff, and this says which part of it
+   the reader is in.
 
    The table of contents says the same word over the same files, in `.group`
    there, and the two are meant to read as one name. */

@@ -724,9 +724,11 @@ trust from what was sent.
 One block per repository a session may write in — the Conversation's own first,
 then each read-write Companion Repo — each named by its Repo. A repository with
 a clean Worktree contributes no block, and every one of them clean is a Set with
-no Diff. The page draws the blocks under one *Diff* heading and labels them,
-except where the Diff is a single block: the label earns its place when repos
-mix, which is the rule a commit card follows.
+no Diff. The page draws the blocks under one *Diff* heading and labels every one
+of them but the Conversation's own drawn alone — an unlabelled block means the
+work's own repo, so naming it there would be naming it twice, and a companion's
+block is named however alone it is. Which is the rule a commit card follows,
+asked the same way round.
 _Avoid_: patch, changeset
 
 **Diagram**:

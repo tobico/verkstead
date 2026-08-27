@@ -95,9 +95,9 @@ export type Entry = {
   /// this is where the truncated line can be read out in full.
   whole: string;
 
-  /// The repository whose block this file belongs to, where the Diff is drawn
-  /// with more than one and the page labels them. `null` everywhere else — on a
-  /// Question, and on the files of a Diff that is one repository's.
+  /// The repository whose block this file belongs to, wherever the page labels
+  /// that block. `null` everywhere else — on a Question, and on the files of
+  /// the conversation's own repository drawn as the whole of the Diff.
   ///
   /// What the nav puts a heading in front of rather than a line of its own: the
   /// runs of one name are what group the files under it, so the list says the

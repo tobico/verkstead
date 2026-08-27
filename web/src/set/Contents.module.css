@@ -438,10 +438,10 @@
   border-left: 1px solid var(--edge);
 }
 
-/* The repository a run of files came out of, said once above them — the Diff of
-   more than one repository, and nowhere else. Not a link: what it names is the
-   block, and the files under it are what the nav takes the reader to. Set small
-   and quiet, so the paths stay the thing being read. */
+/* The repository a run of files came out of, said once above them — wherever
+   the Diff names one, and nowhere else. Not a link: what it names is the block,
+   and the files under it are what the nav takes the reader to. Set small and
+   quiet, so the paths stay the thing being read. */
 .group {
   margin-top: 0.4rem;
   color: var(--ink-soft);
