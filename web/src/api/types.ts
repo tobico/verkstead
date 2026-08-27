@@ -1389,7 +1389,25 @@ comment?: string | null,
  * left open, anything without a pick — so `None` on a proposal Set is the
  * human disagreeing, and `None` anywhere else is every ordinary Response.
  */
-direction?: Direction | null, };
+direction?: Direction | null, 
+/**
+ * The human saying there is nothing else, on a Set asked while its
+ * Conversation is in Follow-up.
+ *
+ * A field of the Response rather than an Answer for the reason
+ * [`Response::direction`] is one: the control is the viewer's, injected
+ * onto the Set's closing section, and it answers no Question anybody
+ * asked.
+ *
+ * **The agent never sees it.** The mark comes off the Response on the way
+ * into the store and is recorded beside it — see `verkstead_store`'s
+ * `endings` — so what a waiting session is handed is byte for byte what it
+ * would have been handed without one. How a follow-up ends is Verkstead's
+ * business rather than the session's: the agent writes an ordinary
+ * Postscript and reads an ordinary Response, and the ending is entirely
+ * the system's.
+ */
+nothing_else?: boolean, };
 
 /**
  * What became of pressing Resume.
@@ -1553,7 +1571,21 @@ standing: Standing,
  * about arrive together, so the page never draws the Questions above a
  * chooser that has not turned up yet.
  */
-proposal: ProposalView | null, };
+proposal: ProposalView | null, 
+/**
+ * Whether this Set was asked while its Conversation is in Follow-up, which
+ * is what puts the Nothing-else option in its closing section.
+ *
+ * The other control the viewer injects, and it arrives the same way the
+ * proposal does: with the Set, so the page never draws a closing section
+ * the option turns up in a moment later.
+ *
+ * A fact about the Conversation rather than about the Set, which is why it
+ * is decided here rather than read off the stored body. Nothing about what
+ * was asked changes — an ordinary Set is what a follow-up's rounds are made
+ * of — and a Set stored before any of this stays exactly as it was.
+ */
+follow_up: boolean, };
 
 /**
  * The settings as the human has just written them.

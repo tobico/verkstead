@@ -293,6 +293,23 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         OffsetDateTime::now_utc(),
     );
 
+    // Whether the closing section carries the Nothing-else option, which is a
+    // fact about the Conversation rather than about the Set: a follow-up's
+    // rounds are ordinary Sets, and what makes one a follow-up's is where the
+    // work stands while it is being answered. A Conversation that cannot be read
+    // draws no option, which is what every state but Follow-up gets anyway.
+    let follow_up = match store::state(&state.pool, conversation).await {
+        Ok(state) => state == Some(store::Lifecycle::FollowUp),
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation,
+                "reading where a Set's Conversation stands failed"
+            );
+            false
+        }
+    };
+
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
     //
@@ -301,7 +318,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
     // work to do on an async worker thread while other requests wait behind it.
     let set_id = stored.id;
     let view = tokio::task::spawn_blocking(move || {
-        verkstead_render::set_view(set_id, conversation, set, standing)
+        verkstead_render::set_view(set_id, conversation, set, standing, follow_up)
     })
     .await;
 

@@ -33,6 +33,7 @@ mod captures;
 mod commits;
 mod conversations;
 mod deferrals;
+mod endings;
 mod migrations;
 mod pairings;
 mod pauses;
@@ -60,10 +61,11 @@ pub use conversations::{
     implement_again, last_batch_proposal, last_proposal, load_conversation, note, pick_direction,
     record_backlog, record_handoff, record_roadmap, rename_branch, save_brief, set_asked_from,
     set_base_commit, set_grilling_pairing, set_implementation_pairing, set_state, stacks_on,
-    start_adoption, start_conversation, start_grilling, start_implementing, start_stage,
+    start_adoption, start_conversation, start_grilling, start_implementing, start_stage, state,
     steer_conversation, timeline, unanswered_set_since,
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
+pub use endings::ended_on;
 pub use pairings::{RepoPairings, remembered_pairings};
 pub use pauses::Pause;
 pub use placements::place_conversations;
@@ -560,6 +562,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // prompt. It hangs off a Set for a lock's reason, said again there.
     deferrals::apply_schema(pool).await?;
 
+    // And which Responses said there was nothing else, which hangs off a Set for
+    // that reason too — and for one of its own: what is kept here is deliberately
+    // not in the body the agent is handed. See [`endings`].
+    endings::apply_schema(pool).await?;
+
     // The push identity and the devices subscribed to it, which also generates
     // the keypair when this is the database's first run.
     push::apply_schema(pool).await?;
@@ -691,12 +698,29 @@ pub async fn set_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// devices cannot leave the same Set both answered and locked by racing.
 ///
 /// The Response is expected to have been validated against its Set already.
+///
+/// The Nothing-else mark is the one thing that does not go into the body: it is
+/// taken off here and recorded beside the row, so the Response a waiting agent
+/// is handed is byte for byte the one it would have been handed without a mark
+/// — see [`endings`]. The two are written in one transaction, because a mark
+/// without its Response, or a Response whose mark did not land, would each be a
+/// follow-up nobody could say the state of.
 pub async fn insert_response(
     pool: &SqlitePool,
     set_id: i64,
     response: &Response,
 ) -> Result<Option<ResponseAccepted>> {
-    let body = serde_json::to_string(response).context("serialising the Response")?;
+    let ended = response.nothing_else;
+    let body = serde_json::to_string(&Response {
+        nothing_else: false,
+        ..response.clone()
+    })
+    .context("serialising the Response")?;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .with_context(|| format!("storing the Response to Question Set {set_id}"))?;
 
     let row: Option<(String,)> = sqlx::query_as(
         "INSERT INTO responses (set_id, submitted_at, body)
@@ -708,9 +732,19 @@ pub async fn insert_response(
     .bind(set_id)
     .bind(body)
     .bind(set_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("storing the Response to Question Set {set_id}"))?;
+
+    // Only where the Response is the one that landed: a second submitter is
+    // refused above, and their mark is refused with it.
+    if row.is_some() && ended {
+        endings::mark(&mut tx, set_id).await?;
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| format!("storing the Response to Question Set {set_id}"))?;
 
     Ok(row.map(|(submitted_at,)| ResponseAccepted {
         set_id,

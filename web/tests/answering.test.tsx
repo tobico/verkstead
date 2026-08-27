@@ -690,8 +690,10 @@ describe("the draft between visits", () => {
       ],
       comment: "back in an hour",
       // Nothing to pick on this Set: it carries no proposal, so the chooser is
-      // not on the page to have been left alone.
+      // not on the page to have been left alone — and it was not asked from a
+      // follow-up, so the Nothing-else option was not on it either.
       direction: null,
+      nothing_else: false,
     });
   });
 

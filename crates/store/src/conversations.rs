@@ -1962,6 +1962,22 @@ pub async fn asked_from(pool: &SqlitePool, set_id: i64) -> Result<Option<i64>> {
     Ok(found.map(|(id,)| id))
 }
 
+/// Where a Conversation stands, and nothing else about it.
+///
+/// For the readers whose whole question is the state: whether the Set on the
+/// page in front of the human is a follow-up's, above all. The whole
+/// [`Conversation`] is a join across the Repo and both Pairings, which is more
+/// of the store read than one word is worth.
+pub async fn state(pool: &SqlitePool, id: i64) -> Result<Option<Lifecycle>> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    row.map(|(state,)| Lifecycle::read(&state)).transpose()
+}
+
 /// Rewrite the Brief of the round a drafting Conversation is in.
 ///
 /// The Brief Event is edited in place rather than added to, and it is the
