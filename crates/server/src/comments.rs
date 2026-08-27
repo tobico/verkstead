@@ -51,6 +51,15 @@
 //! [`crate::responding::unattended`], which is where a proposal nobody is left
 //! behind is picked up.
 //!
+//! Nor while the Worktree is busy. The same trade means a batch that has only
+//! just started reads here exactly as one that is over — its comments are
+//! addressed and it has not asked anything yet — and a wrap-up has more than one
+//! of these watchers whenever a press starts its four over the top of the four
+//! already running. So the Turn is asked for before anything is settled, and a
+//! Worktree with a session in it settles nothing: without that, one watcher
+//! could settle over the batch the other had just dispatched, and the wrap-up
+//! reach Done with the session that was going to put the question still working.
+//!
 //! A `gh` that cannot answer changes nothing at all — it does not settle, it does
 //! not unsettle, and it dispatches nothing. That is the only honest reading of
 //! it: Verkstead does not know what has been said, and *nobody said anything* is
@@ -172,7 +181,30 @@ async fn once(state: &AppState, conversation_id: i64) -> Watching {
     };
 
     if fresh.is_empty() {
-        settle(state, conversation_id).await;
+        // Not while something is working in the Worktree. A batch is written down
+        // as addressed the moment it is dispatched and before its session has said
+        // a word, so *nothing is unaddressed* is also what a batch that has only
+        // just started looks like from a second watcher — and a wrap-up has more
+        // than one of these the moment a press starts its watchers over the top of
+        // the ones already running. Settling over a batch that has not asked yet
+        // is the same failure [`crate::responding::unattended`] refuses to settle
+        // over once it has: a Conversation carried to Done with the session that
+        // was going to put the question still working.
+        //
+        // The Turn is what tells the two apart, tried rather than waited for
+        // because this is a poll. A Worktree that is busy settles nothing and the
+        // next poll asks again, of a Worktree that by then is free — and the Turn
+        // is held across the settling itself, so that a batch dispatched between
+        // the asking and the writing cannot be settled over either.
+        if let Some(_turn) = state.sessions.try_turn(conversation_id) {
+            settle(state, conversation_id).await;
+        } else {
+            tracing::debug!(
+                conversation_id,
+                "something is working in the Worktree, so what was said is settled later",
+            );
+        }
+
         return Watching::Again;
     }
 
