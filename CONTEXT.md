@@ -429,7 +429,12 @@ note to write and one button rather than one per way of stopping. It is never
 silent either: either something starts, which the Timeline says by itself, or
 the press is refused by name and the page says which — the backlog that has
 gone, the Pairing that has, the Worktree that is nowhere. A Worktree the record
-names and git does not is made again from the branch rather than refused on.
+names and git does not is made again from the branch rather than refused on. And
+a **Stage** whose planning session died before it committed is started rather
+than refused: the plan session is launched as the Stage is made and by nothing
+else, so a Stage with no `.tasks/` is a run that never began rather than one
+that is worked out — read off what its branch has written since it was made,
+which the backlog of the Stage it stacks on is no part of.
 
 Offered on a Conversation that is merely undriven as much as on one that is
 **Stopped**, a run with nothing behind it being the same condition however it
