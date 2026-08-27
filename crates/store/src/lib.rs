@@ -24,7 +24,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use sqlx::SqlitePool;
-use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
 use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
@@ -490,6 +490,22 @@ async fn settled_set(pool: &SqlitePool, set_id: i64) -> Result<SettledSet> {
 
 /// Open the SQLite database at `path`, creating the file if it is absent and
 /// bringing its schema up to date.
+///
+/// **Write-ahead logging**, which sqlx will not turn on by itself — it leaves
+/// `journal_mode` alone because switching a database into or out of WAL takes an
+/// exclusive lock no busy timeout can wait on, and it will not do that behind an
+/// application's back. Here it is this application's decision to make, and the
+/// moment to make it is this one: a server that has just opened its database has
+/// nothing else running against it.
+///
+/// It is worth making because of what the default costs. Under a rollback
+/// journal a reader and a writer cannot hold the file at once, so every poll of
+/// a Timeline is something a session's Capture write has to queue behind. Verkstead
+/// writes continuously while a session runs and reads on every open page. WAL is
+/// the mode that shape of use is for.
+///
+/// It is not, on its own, what makes a write safe from a concurrent one — see
+/// [`writing`], which is the other half.
 pub async fn open_database(path: &Path) -> Result<SqlitePool> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)
@@ -498,7 +514,8 @@ pub async fn open_database(path: &Path) -> Result<SqlitePool> {
 
     let options = SqliteConnectOptions::new()
         .filename(path)
-        .create_if_missing(true);
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal);
 
     let pool = SqlitePool::connect_with(options)
         .await
@@ -507,6 +524,43 @@ pub async fn open_database(path: &Path) -> Result<SqlitePool> {
     apply_schema(&pool).await?;
 
     Ok(pool)
+}
+
+/// Open a transaction that is going to write, with `doing` as the words any
+/// failure of it is reported under.
+///
+/// `BEGIN IMMEDIATE` rather than the plain `BEGIN` sqlx opens, and every
+/// transaction in the store goes through here, because every transaction in the
+/// store writes. What each of them does is read the record, decide on it, and
+/// write — a state read before the move it authorises, a count read before the
+/// row that changes it — and that shape is the one SQLite handles worst.
+///
+/// A deferred `BEGIN` takes no lock. The first read takes a shared one, and the
+/// first write then has to promote it. **SQLite will not wait for that
+/// promotion**: where another connection is holding its own read of the same
+/// database, promoting would deadlock the pair of them, so rather than call the
+/// busy handler it fails the statement at once with *database is locked*. The
+/// five-second busy timeout never comes into it, and no amount of raising it
+/// would. Under a rollback journal that is a shared lock in the way; under WAL
+/// it is `SQLITE_BUSY_SNAPSHOT`, another connection having committed since the
+/// snapshot this transaction is reading. Both are the same bug to a caller.
+///
+/// `BEGIN IMMEDIATE` takes the write lock up front, before the first read, so
+/// there is no promotion to fail — and *waiting for a lock that is already
+/// held* is exactly the case the busy timeout does cover. The cost is that
+/// writers queue against each other from the first statement rather than the
+/// first write, which is the right trade for a store whose transactions are all
+/// short and all end in a write.
+///
+/// This was not a theoretical failure. A finish step recorded its pull request
+/// through [`record_pull_request`] while the session that opened it was still
+/// writing its Capture, the promotion failed, and the Conversation was left
+/// implementing with the work on a pull request nothing knew about.
+pub(crate) async fn writing(
+    pool: &SqlitePool,
+    doing: &'static str,
+) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    pool.begin_with("BEGIN IMMEDIATE").await.context(doing)
 }
 
 /// Bring an opened database up to the shape the server expects. Safe to run

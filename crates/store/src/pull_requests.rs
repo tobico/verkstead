@@ -125,7 +125,7 @@ pub async fn record_pull_request(
     conversation_id: i64,
     pull_request: &PullRequest,
 ) -> Result<Wrapping> {
-    let mut tx = pool.begin().await.context("recording a pull request")?;
+    let mut tx = super::writing(pool, "recording a pull request").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(conversation_id)

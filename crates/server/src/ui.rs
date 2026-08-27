@@ -964,6 +964,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         // — a Conversation whose session has ended is not working, whichever
         // Event it was writing into.
         working: writing.is_some(),
+        // And the register beside it, read raw: what is holding this
+        // Conversation as of now, whatever state it is in. The rule about which
+        // states ought to have one is `ready_to_resume`'s a few lines up — this
+        // is the register itself, which is the half a reader outside the process
+        // cannot see any other way.
+        driven: state.drivers.registered(id),
         timeline: timeline
             .into_iter()
             // Every kind in, none held back: the record is the whole of what

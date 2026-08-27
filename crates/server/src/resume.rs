@@ -29,6 +29,15 @@
 //! loose is the one thing that must not be guessed at, and a spawn is a moment
 //! later.
 //!
+//! One of them goes to the network, and it is the press that waits for it: a
+//! backlog with nothing left in it refuses only where GitHub confirms the branch
+//! is on no pull request. That is a `gh` the browser is held open across, which
+//! is worth it for what the alternative was — the button turning down the one
+//! Conversation that most needed pressing, because its ending failed *after* the
+//! pull request was opened and the empty backlog is all that failure leaves
+//! behind. Nothing else is asked over a network, and this one is asked only
+//! where the local answer would otherwise be a refusal.
+//!
 //! **And a restart presses it for itself.** No driver survives the process, so a
 //! server coming up holds a page full of Conversations nothing is driving, and
 //! every one of them wants exactly what the button does. So it does it unasked,
@@ -40,6 +49,7 @@ use verkstead_render::Resumed;
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
+use crate::github;
 use crate::store::{self, Decision, Lifecycle};
 
 /// Who asked for the run to start again.
@@ -224,10 +234,30 @@ pub(crate) async fn resume(
             // And the backlog's own answer to what is next, asked of `.tasks/`
             // exactly as every other turn of the run asks it. Nothing left in it
             // is a breakdown that never landed or a feature that is finished
-            // with, and neither is a thing to launch a session for.
+            // with — and those are two situations rather than one, which is what
+            // the second question is for.
+            //
+            // A feature that is finished with has had its finish step, and a
+            // finish step pushes and opens a pull request. So an empty backlog
+            // is the very case in which the branch is most likely to be on one
+            // that nothing recorded: the finish ran, and what failed was
+            // afterwards. Refusing on the backlog alone would be Resume turning
+            // down the one Conversation that most needs it — see
+            // [`crate::runner::backlog_again`], which is what the spawn below
+            // does about it.
+            //
+            // So `gh` is the tiebreak, and only its plain *no pull request*
+            // refuses. A `gh` that cannot answer at all does not: the run is
+            // stopped either way, and a stop that names the trouble on the
+            // Timeline is worth more than a button saying the backlog is empty —
+            // which would be true and beside the point.
             if direction == Direction::TaskList && !crate::runner::anything_to_work(&worktree).await
             {
-                return Ok(Resumed::NothingToWork);
+                let asked = crate::wrapping::asked(state, conversation_id).await;
+
+                if matches!(asked, None | Some((_, Err(github::Trouble::NoPullRequest)))) {
+                    return Ok(Resumed::NothingToWork);
+                }
             }
 
             clear(state, conversation_id).await?;
