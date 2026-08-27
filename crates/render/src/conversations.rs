@@ -342,6 +342,30 @@ pub struct ConversationView {
     /// is what each of them is.
     pub working: bool,
 
+    /// And whether any driver of Verkstead's own is registered for it as of
+    /// this read: the runner working a backlog, the driver following an inline
+    /// run or a roadmap, one of the watchers a wrap-up has going — see the
+    /// server's own drivers register.
+    ///
+    /// The same register [`ready_to_resume`] is decided against, reported raw
+    /// rather than judged: this says what *is* driving and that one says what
+    /// ought to be. So it is a plain `false` wherever nothing holds a
+    /// registration, including the states nothing is supposed to be driving —
+    /// a Closed Conversation is not one being driven, whatever the resume rule
+    /// makes of it.
+    ///
+    /// Read for the reason [`working`] is, one register along, and true only as
+    /// of the moment it was read. The pair is what says a Conversation has gone
+    /// quiet all the way through: no session running *and* nothing left holding
+    /// it. Which is a stronger thing than the first alone, because a driver
+    /// lets go only once its task has ended — so a watcher that is off here has
+    /// finished its last call to the outside world rather than merely started
+    /// it.
+    ///
+    /// [`ready_to_resume`]: ConversationView::ready_to_resume
+    /// [`working`]: ConversationView::working
+    pub driven: bool,
+
     /// Oldest first, which is reading order and puts the Brief at the top.
     pub timeline: Vec<TimelineEvent>,
 

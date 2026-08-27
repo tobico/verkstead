@@ -136,7 +136,12 @@ impl Drivers {
     }
 
     /// Whether any driver is registered for `conversation_id`.
-    fn registered(&self, conversation_id: i64) -> bool {
+    ///
+    /// The raw reading of the register, which is what the Conversation page
+    /// reports as `driven` — see [`crate::ui`]. [`Drivers::driven`] is this
+    /// question put through the rule about which states are supposed to have
+    /// one; this is the register itself.
+    pub(crate) fn registered(&self, conversation_id: i64) -> bool {
         self.driving
             .lock()
             .expect("the drivers register is not poisoned")
