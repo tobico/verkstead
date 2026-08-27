@@ -82,6 +82,15 @@ flowchart LR
   pull request — with the checks put back to waiting where the follow-up
   pushed — and settles to Done the ordinary way (*added 2026-08-27, building
   follow-ups*).
+- **The rescue.** A session that goes idle with nothing open and nothing to
+  show for itself leaves a conversation nobody can move: the human sees only
+  what arrives as a question set, and none has. So Verkstead types a canned
+  line into the running session — the channel a watcher's keystrokes take —
+  telling it that nothing it prints reaches anybody and to put what it is
+  waiting on as a set. Twice at most; a session still saying nothing after the
+  second stops the conversation with a notice saying it would not ask.
+  Follow-up is where it starts, the state where an idle session is exactly the
+  failure (*added 2026-08-27, building follow-ups*).
 - **Agent profiles** are minimal: name, claude home dir + config file pair, the
   list of models that account can run — plus an agent-type discriminator so
   other backends can slot in later (claude is the only type now). The model
@@ -204,7 +213,11 @@ flowchart LR
   advances past a stop, and the badge points at the notice. Getting going again
   is one standing **Resume** in the start-work menu, recomputed from the
   lifecycle and the branch rather than replaying whatever failed; steering the
-  work is what **Steer** is for, so Resume carries nothing. What replaced
+  work is what **Steer** is for, so Resume carries nothing. A follow-up is
+  recomputed like everything else: a fresh session on the brief its steer
+  opened it with and the rounds already answered, read off the timeline the way
+  a relaunched grilling reads what it settled (*refined 2026-08-27, building
+  follow-ups*). What replaced
   roadrunner's three remedies: retry is Resume, take over manually is the stop
   already standing, and abort is **Close**.
 - **Usage limits.** When a claude account exhausts its window mid-run, the

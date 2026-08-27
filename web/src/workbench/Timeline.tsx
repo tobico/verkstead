@@ -212,6 +212,8 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
     "Choose a grilling profile and model first, on the brief.",
   NoImplementationPairing:
     "Choose an implementation profile and model first, on the brief.",
+  NoFollowUpBrief:
+    "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
 };
 
 /// Whether the event the *blocked on you* badge points at has a details pane

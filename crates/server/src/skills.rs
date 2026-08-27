@@ -444,7 +444,21 @@ pub(crate) fn instruction(brief: &str, handoff: Option<&str>, instruction: &str)
 /// reason everything written under them goes there: it is the newest thing said
 /// and the least general. The documents say what the work is; this says what
 /// they want to follow up about it now.
-pub(crate) fn following_up(brief: &str, handoff: Option<&str>, follow_up: &str) -> String {
+///
+/// **Except where the follow-up is being picked up again**, which is what
+/// `settled` carries: the rounds it has already been through, under the brief
+/// they were about. A follow-up that lost its session lost the conversation it
+/// was having — see [`crate::follow_ups`] — so the relaunch is a fresh session
+/// on the same brief, and what the digest adds is the one part of that
+/// conversation the Timeline kept. Every follow-up a steer starts hands in
+/// nothing here: a heading over an empty digest would tell the session that
+/// something had already been said.
+pub(crate) fn following_up(
+    brief: &str,
+    handoff: Option<&str>,
+    follow_up: &str,
+    settled: &str,
+) -> String {
     let prompt = on_the_documents(
         &format!(
             "Read {FOLLOWING_UP} and follow up on this branch's pull request, the way it says."
@@ -453,10 +467,18 @@ pub(crate) fn following_up(brief: &str, handoff: Option<&str>, follow_up: &str) 
         handoff,
     );
 
-    format!(
+    let prompt = format!(
         "{prompt}\n# What I want to follow up on\n\n{}\n",
         follow_up.trim()
-    )
+    );
+
+    let settled = settled.trim();
+
+    if settled.is_empty() {
+        return prompt;
+    }
+
+    format!("{prompt}\n# What you have already asked, and what I said\n\n{settled}\n")
 }
 
 /// The same prompt, with the Answers to the Conversation's Deferred Asks that
@@ -2003,6 +2025,7 @@ mod tests {
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
             "Why is the window a minute? And add a header saying when it resets.\n",
+            "",
         );
 
         assert!(
@@ -2028,6 +2051,31 @@ mod tests {
         );
     }
 
+    /// And a follow-up picked up again is the same session over: the same skill
+    /// and the same brief, with the rounds it has already been through under
+    /// them, so that it does not open by asking what was answered an hour ago.
+    #[test]
+    fn a_relaunched_follow_up_is_told_what_it_has_already_asked() {
+        let prompt = following_up(
+            "# Rate limiting\n\nThe API has none.\n",
+            None,
+            "Why is the window a minute?\n",
+            "## About the window\n\n**Q9** Is a minute right?\n\nYes\n",
+        );
+
+        assert!(
+            prompt.contains("# What I want to follow up on\n\nWhy is the window a minute?"),
+            "the brief it was opened with is what it is still about: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with(
+                "# What you have already asked, and what I said\n\n## About the window\n\n\
+                 **Q9** Is a minute right?\n\nYes\n"
+            ),
+            "and the rounds already answered come last, under it: {prompt:?}"
+        );
+    }
+
     /// A Conversation steered into Follow-up may have Deferred Answers nothing
     /// has been told about yet, and they fold in here as they do everywhere.
     #[test]
@@ -2037,6 +2085,7 @@ mod tests {
                 "# Rate limiting\n\nThe API has none.\n",
                 None,
                 "Add a header saying when the window resets.\n",
+                "",
             ),
             "## The wording\n\n**Q9** Which status?\n\n429 Too Many Requests\n",
         );

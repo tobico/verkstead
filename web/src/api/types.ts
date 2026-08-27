@@ -1419,7 +1419,7 @@ nothing_else?: boolean, };
  * A recompute that quietly found nothing to launch is exactly the failure this
  * whole feature is replacing.
  */
-export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing";
+export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
 
 /**
  * The roadmap opened: every stage brief of it, rendered.

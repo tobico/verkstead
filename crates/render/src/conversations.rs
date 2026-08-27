@@ -2084,6 +2084,11 @@ pub enum Resumed {
     /// And the implementation Pairing has gone, which is what every session of
     /// the work itself runs under.
     NoImplementationPairing,
+
+    /// It says it is following the work up and nothing on its Timeline says what
+    /// about: another record that cannot be true, a steer being the only way
+    /// into Follow-up and one without a brief being refused.
+    NoFollowUpBrief,
 }
 
 /// What clicking Steer found, which is what the modal it opens is drawn from.

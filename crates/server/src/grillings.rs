@@ -244,8 +244,8 @@ fn brief(timeline: &[store::TimelineEvent]) -> String {
         .unwrap_or_default()
 }
 
-/// Everything the human has already answered, as one markdown document in the
-/// order it was asked.
+/// Everything the human has already answered on this stretch of Timeline, as one
+/// markdown document in the order it was asked.
 ///
 /// Answered Sets only. One locked unanswered is one nobody ever replied to —
 /// including, now, the one this very relaunch locked — and a heading over
@@ -254,7 +254,13 @@ fn brief(timeline: &[store::TimelineEvent]) -> String {
 /// Empty where nothing has been answered, which is a grilling that died before
 /// its first Set came back. What that leaves is the Brief alone, which is where
 /// every grilling starts.
-fn settled(timeline: &[store::TimelineEvent]) -> String {
+///
+/// A stretch rather than the whole Timeline, which is what lets a follow-up
+/// being picked up again use this one: what it is primed with is the rounds
+/// under its own steer rather than every Set the Conversation has ever answered
+/// — see [`crate::follow_ups`]. A grilling hands in the whole of it, that being
+/// the whole of what it settled.
+pub(crate) fn settled(timeline: &[store::TimelineEvent]) -> String {
     let mut digest = String::new();
 
     for event in timeline {

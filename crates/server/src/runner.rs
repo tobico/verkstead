@@ -48,6 +48,7 @@ use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
 use crate::drivers::Driving;
+use crate::follow_ups::FollowUp;
 use crate::github;
 use crate::repos::git;
 use crate::sessions::{Quiet, Session};
@@ -1076,8 +1077,13 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
     }
 }
 
-/// See out the session a steer into Follow-up started, and land the Conversation
-/// back in its wrap-up once the human says there is nothing else.
+/// See out a follow-up's session, and land the Conversation back in its wrap-up
+/// once the human says there is nothing else.
+///
+/// `follow_up` is what the session is started on: the brief a steer into
+/// Follow-up carried, and — where this is a follow-up being picked up again
+/// rather than opened — the rounds it has already been through. See
+/// [`crate::follow_ups`], which is where a press of Resume reads both back from.
 ///
 /// **A driver rather than an errand beside the work**, exactly as an instruction
 /// session is: the registration it is handed says the Conversation is being
@@ -1102,10 +1108,16 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
 /// what it was about to do and what it made of the last answer are all beyond
 /// asking. The Notice says what happened and any question it left the human
 /// holding goes off with it.
+///
+/// **So is one that will not ask.** A session that goes idle without a Set open
+/// leaves the human holding a Conversation they can neither answer nor end, so
+/// it is spoken to — twice, and then stopped where it stands. Nothing it left
+/// open goes off with that one: there being nothing open is half of what said it
+/// was stuck.
 pub(crate) async fn following_up(
     state: AppState,
     conversation_id: i64,
-    brief: String,
+    follow_up: FollowUp,
     driving: Driving,
 ) {
     // Taken before the session starts, so what it lands is counted as this
@@ -1120,8 +1132,18 @@ pub(crate) async fn following_up(
         }
     };
 
+    // What the session before this one left standing, where there was one. A
+    // Blocking Ask outlives the session that asked it, and nobody is ever handed
+    // somebody else's — so a question left over from the follow-up that died is
+    // one the human could answer for ever with nothing reading it, and one this
+    // follow-up would never end while it stood. Locked unanswered as the fresh
+    // session starts, which is what a relaunched grilling does with its own.
+    if follow_up.again {
+        left_open(&state, conversation_id).await;
+    }
+
     let Some(mut session) =
-        launch_in_turn(&state, conversation_id, Prompt::FollowingUp(brief)).await
+        launch_in_turn(&state, conversation_id, Prompt::FollowingUp(follow_up)).await
     else {
         return;
     };
@@ -1132,7 +1154,31 @@ pub(crate) async fn following_up(
 
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        () = nothing_else_and_quiet(&state, conversation_id, &quiet, pace) => None,
+        over = nothing_else_and_quiet(&state, conversation_id, event_id, &quiet, pace) => {
+            match over {
+                Over::NothingElse => None,
+                // The session is still there and still saying nothing, having
+                // been asked twice to say it where the human would hear. So it
+                // is ended here rather than waited on any longer, and the stop
+                // written over it is one the human presses Resume on — which
+                // starts a fresh follow-up session on the same brief.
+                Over::WouldNotAsk => {
+                    let _driving = driving;
+
+                    state.sessions.end(conversation_id).await;
+
+                    return stop(
+                        &state,
+                        conversation_id,
+                        crate::stopping::Decided::Verkstead,
+                        "following the work up",
+                        WOULD_NOT_ASK,
+                        Some(event_id),
+                    )
+                    .await;
+                }
+            }
+        }
     };
 
     let Some(ended) = ended else {
@@ -1188,6 +1234,19 @@ pub(crate) async fn following_up(
 /// about it is the human's, and steering is what they have.
 const NOBODY_FOLLOWING_UP: &str = "nobody is left to ask you anything or to act on what you say, and any question it had \
      put to you has been closed unanswered";
+
+/// And what a stop over a session that would not ask says.
+///
+/// The rescue spent: the session was idle with nothing open, it was told twice
+/// that a Question Set is the whole of how you are spoken to, and it went on
+/// saying nothing. Which leaves a follow-up nobody can move — there is nothing
+/// to answer and no way to say it is over — so it stops rather than sitting
+/// there, and Resume starts a fresh session on the same brief.
+///
+/// [`store::Decision::Deliberate`], as every stop written here is: Verkstead
+/// looked at this session and decided it was not going to ask.
+const WOULD_NOT_ASK: &str = "the follow-up session went quiet without asking you anything, and asked nothing after \
+     being told twice that a Question Set is the only thing that reaches you";
 
 /// The human has said there is nothing else: end the session, and put the
 /// Conversation back in the wrap-up it was opened over.
@@ -1275,6 +1334,11 @@ async fn over(state: &AppState, conversation_id: i64, already: usize, driving: D
 /// The Conversation's rather than the session's, which is what the follow-up's
 /// own rule asks everywhere: what matters is whether the human is left holding a
 /// question, and a question is one whoever put it up.
+///
+/// Asked at both ends of a follow-up that lost its session: as the stop over one
+/// is raised, and again as a fresh session is started over one nothing stopped —
+/// a restart leaves no stop behind, so what a dead session left standing is
+/// still standing when the next server picks the follow-up up.
 async fn left_open(state: &AppState, conversation_id: i64) {
     let standing = match store::open_set(&state.pool, conversation_id).await {
         Ok(standing) => standing,
@@ -1289,9 +1353,10 @@ async fn left_open(state: &AppState, conversation_id: i64) {
     }
 }
 
-/// Wait until the follow-up is over: the human has marked their newest answer
-/// *Nothing else*, nothing is left open on the Conversation, and the session has
-/// printed nothing for [`Pace::proposing`].
+/// Wait until the follow-up is over one way or the other: the human has marked
+/// their newest answer *Nothing else*, nothing is left open on the Conversation,
+/// and the session has printed nothing for [`Pace::proposing`] — or the session
+/// went idle without ever asking and would not be talked into it.
 ///
 /// All three, and none of them is enough alone. **The mark alone** would end a
 /// follow-up in the middle of the work the last round asked for — the human
@@ -1314,14 +1379,31 @@ async fn left_open(state: &AppState, conversation_id: i64) {
 /// the follow-up back to running through the open-Set arm above, and its own
 /// answer is what this reads when it comes.
 ///
-/// A follow-up whose human never says *nothing else* is one this waits on for
-/// ever, and a session that has gone idle without asking is one they cannot
-/// answer either — which is today's behaviour for a session with nothing to do
-/// in any state, and not this rule's to see to.
-async fn nothing_else_and_quiet(state: &AppState, conversation_id: i64, quiet: &Quiet, pace: Pace) {
-    // When a Set of the Conversation's was last seen open, and `None` while
-    // none has been.
-    let mut asked: Option<Instant> = None;
+/// **And a follow-up whose human never says *nothing else* is rescued rather
+/// than waited on for ever.** Quiet, nothing open and no mark is a Conversation
+/// nobody can move — nothing was asked, so there is nothing to answer, and
+/// there is no Set to say *nothing else* on either. So the session is spoken to:
+/// see [`crate::rescues`], whose line tells it what it cannot see from inside,
+/// and whose second failure ends this with [`Over::WouldNotAsk`].
+async fn nothing_else_and_quiet(
+    state: &AppState,
+    conversation_id: i64,
+    event_id: i64,
+    quiet: &Quiet,
+    pace: Pace,
+) -> Over {
+    // When the follow-up was last stirred: a Set of the Conversation's seen
+    // open, or a rescue typed in. Both start the grace again, and for the one
+    // reason — each is something the session has just been given to act on, and
+    // a session that has just been given something has had no time to act on it
+    // yet. `None` while neither has happened, which is a session that has asked
+    // nothing since it started.
+    let mut stirred: Option<Instant> = None;
+
+    // How many times it has been told. Never reset: a session that asked and
+    // then went quiet again has had its round, and the bound is on this
+    // session's whole life rather than on a run of silences.
+    let mut rescues = 0;
 
     loop {
         let owed = pace.proposing.saturating_sub(quiet.for_how_long());
@@ -1332,12 +1414,12 @@ async fn nothing_else_and_quiet(state: &AppState, conversation_id: i64, quiet: &
         }
 
         if open(state, conversation_id).await {
-            asked = Some(Instant::now());
+            stirred = Some(Instant::now());
             tokio::time::sleep(pace.poll).await;
             continue;
         }
 
-        let owed = asked
+        let owed = stirred
             .map(|at| pace.proposing.saturating_sub(at.elapsed()))
             .unwrap_or_default();
 
@@ -1346,13 +1428,40 @@ async fn nothing_else_and_quiet(state: &AppState, conversation_id: i64, quiet: &
             continue;
         }
 
-        if !marked(state, conversation_id).await {
-            tokio::time::sleep(pace.poll).await;
-            continue;
+        if marked(state, conversation_id).await {
+            return Over::NothingElse;
         }
 
-        return;
+        // Idle, with nothing open and no mark on what was last answered: the
+        // human is holding a Conversation they can neither answer nor end.
+        if rescues >= crate::rescues::AT_MOST {
+            return Over::WouldNotAsk;
+        }
+
+        // Counted only where it reached a session. One that has ended between
+        // the last look and this one is not a rescue that failed — the ending
+        // is being waited on beside this, and it is the ending that decides.
+        if crate::rescues::rescue(state, conversation_id, event_id).await {
+            rescues += 1;
+            stirred = Some(Instant::now());
+        }
+
+        tokio::time::sleep(pace.poll).await;
     }
+}
+
+/// How a follow-up stops being one, where the session is still running.
+///
+/// The endings a session's own can reach are elsewhere — see
+/// [`following_up`], which waits on both.
+enum Over {
+    /// The human has said there is nothing else, with nothing left open and the
+    /// session gone quiet. Which is the follow-up ending the way it is meant to.
+    NothingElse,
+
+    /// The session went idle without asking, twice over, with the rescue spent
+    /// on it. Which is a stop.
+    WouldNotAsk,
 }
 
 /// Whether anything on the Conversation is still waiting on the human.
@@ -2166,12 +2275,13 @@ enum Prompt {
     Responding(String),
 
     /// The following-up skill, carrying the brief a steer into Follow-up sent
-    /// the session off with.
+    /// the session off with — and, where this is a follow-up being picked up
+    /// again, the rounds it has already been through.
     ///
     /// The instruction's shape and never its meaning: what it carries opens a
     /// conversation rather than naming one job, so the session answers it, does
     /// what it asks and goes on asking — see [`following_up`].
-    FollowingUp(String),
+    FollowingUp(FollowUp),
 }
 
 /// Wait for the Conversation's Worktree, and then [`launch`] into it.
@@ -2266,7 +2376,9 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                 Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
                 Prompt::Reviewing(said) => skills::reviewing(&brief, handoff, said.as_deref()),
                 Prompt::Responding(said) => skills::responding(&brief, handoff, said),
-                Prompt::FollowingUp(follow_up) => skills::following_up(&brief, handoff, follow_up),
+                Prompt::FollowingUp(follow_up) => {
+                    skills::following_up(&brief, handoff, &follow_up.brief, &follow_up.settled)
+                }
             }
         }
         Err(error) => {

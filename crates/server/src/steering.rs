@@ -299,7 +299,7 @@ pub(crate) async fn submit(
                 tokio::spawn(crate::runner::following_up(
                     state.clone(),
                     conversation_id,
-                    follow_up.to_owned(),
+                    crate::follow_ups::FollowUp::opening(follow_up.to_owned()),
                     driving,
                 ));
             }
