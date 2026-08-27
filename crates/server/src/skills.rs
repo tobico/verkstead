@@ -86,6 +86,15 @@ const RESPONDING: &str = "~/.claude/skills/responding/SKILL.md";
 /// [`crate::runner::instructed`].
 const INSTRUCTION: &str = "~/.claude/skills/instruction/SKILL.md";
 
+/// And the following-up skill's, which the session a steer into Follow-up
+/// launches runs inside.
+///
+/// A conversation rather than a step: the human's follow-up brief is acted on,
+/// and then rounds of ordinary Question Sets go back and forth until they have
+/// nothing else. What ends one is the system's business rather than the
+/// session's, so the skill says nothing about it.
+const FOLLOWING_UP: &str = "~/.claude/skills/following-up/SKILL.md";
+
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
 pub struct Skills {
@@ -419,6 +428,38 @@ pub(crate) fn instruction(brief: &str, handoff: Option<&str>, instruction: &str)
     format!(
         "{prompt}\n# What I have asked for\n\n{}\n",
         instruction.trim()
+    )
+}
+
+/// What a follow-up session is started on: the documents the work is written
+/// down in, and under them the brief the human steered it into Follow-up with.
+///
+/// The instruction session's shape, and for the same reason — this is a session
+/// the human set going by hand, so it is told what the work is and then told
+/// what they want taken up about it. What differs is that the brief opens a
+/// conversation rather than naming one job: the session answers it, does what it
+/// asks, and goes on asking until they are done.
+///
+/// The brief goes *last*, under the documents rather than over them, for the
+/// reason everything written under them goes there: it is the newest thing said
+/// and the least general. The documents say what the work is; this says what
+/// they want to follow up about it now.
+#[allow(
+    dead_code,
+    reason = "the steer target that launches a follow-up session lands next"
+)]
+pub(crate) fn following_up(brief: &str, handoff: Option<&str>, follow_up: &str) -> String {
+    let prompt = on_the_documents(
+        &format!(
+            "Read {FOLLOWING_UP} and follow up on this branch's pull request, the way it says."
+        ),
+        brief,
+        handoff,
+    );
+
+    format!(
+        "{prompt}\n# What I want to follow up on\n\n{}\n",
+        follow_up.trim()
     )
 }
 
@@ -1861,6 +1902,160 @@ mod tests {
         );
     }
 
+    /// The follow-up brief is the human's own words typed at this session, so it
+    /// is acted on rather than put back to them — the instruction doctrine, and
+    /// not responding's propose-everything-first.
+    #[test]
+    fn the_following_up_skill_acts_on_the_brief_rather_than_proposing_it_back() {
+        let following_up = skill("following-up/SKILL.md");
+
+        assert!(
+            following_up.contains("The brief is written to this session"),
+            "the words are theirs and they are aimed here: {following_up}"
+        );
+        assert!(
+            following_up.contains("ambiguous, destructive, or beyond"),
+            "and what is asked about first is only that: {following_up}"
+        );
+        assert!(
+            !following_up.contains("Change nothing yet"),
+            "nothing is held back for a proposal round, unlike a batch of comments: \
+             {following_up}"
+        );
+    }
+
+    /// And what it does with the human is what every other session does: an
+    /// ordinary Set, put through the CLI, with the answers they are owed leading
+    /// it so that each round reaches their phone.
+    #[test]
+    fn the_following_up_skill_runs_rounds_of_ordinary_question_sets() {
+        let following_up = skill("following-up/SKILL.md");
+
+        assert!(
+            following_up.contains("verkstead guide") && following_up.contains("verkstead ask"),
+            "the Guide is where an agent learns to ask, and the CLI is how a Set goes: \
+             {following_up}"
+        );
+        assert!(
+            following_up.contains("ordinary Question Set"),
+            "nothing about this session's Sets is special: {following_up}"
+        );
+        assert!(
+            following_up.contains("The answers lead"),
+            "and what they asked, answered, is what opens each one: {following_up}"
+        );
+        assert!(
+            following_up.contains("`postscript` is an ordinary postscript"),
+            "the close of the Set is the close of any Set: {following_up}"
+        );
+        assert!(
+            following_up.contains("go round again"),
+            "and one Set is a round rather than the session: {following_up}"
+        );
+    }
+
+    /// Each round's work is pushed before the next ask, so the pull request shows
+    /// what has been done and its checks run while the human composes.
+    #[test]
+    fn the_following_up_skill_pushes_each_round_before_it_asks() {
+        let following_up = skill("following-up/SKILL.md");
+
+        assert!(
+            following_up.contains("git push"),
+            "this branch is already on a pull request, so a round that stayed local \
+             is one nobody can see: {following_up}"
+        );
+        assert!(
+            following_up.contains("before you ask them anything"),
+            "and it goes before the Set rather than after the answers: {following_up}"
+        );
+        assert!(
+            !following_up.contains("gh pr create"),
+            "the pull request exists, and this session opens nothing: {following_up}"
+        );
+    }
+
+    /// How a follow-up ends is the system's business: the mark rides the human's
+    /// Response and never reaches the agent, so the skill has nothing to say
+    /// about it and must not invent a mechanism of its own.
+    #[test]
+    fn the_following_up_skill_says_nothing_about_how_a_follow_up_ends() {
+        let following_up = skill("following-up/SKILL.md");
+
+        assert!(
+            following_up.contains("finish your turn"),
+            "it simply stops asking when it has nothing to ask: {following_up}"
+        );
+        for ending in ["Nothing else", "Wrapping", "Done"] {
+            assert!(
+                !following_up.contains(ending),
+                "and {ending} is Verkstead's rather than the session's to know about: \
+                 {following_up}"
+            );
+        }
+        assert!(
+            !following_up.contains("gh pr ready") && !following_up.contains("gh pr merge"),
+            "nor does it wrap anything up itself: {following_up}"
+        );
+    }
+
+    /// A follow-up session is put inside the skill by its prompt, primed with the
+    /// two documents, and told last what the human wants followed up.
+    #[test]
+    fn a_follow_up_session_is_started_on_the_documents_and_the_brief() {
+        let prompt = following_up(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+            "Why is the window a minute? And add a header saying when it resets.\n",
+        );
+
+        assert!(
+            prompt.contains(FOLLOWING_UP),
+            "the skill is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains(INSTRUCTION) && !prompt.contains(RESPONDING),
+            "and no other skill is named: a follow-up is neither a one-shot \
+             instruction nor a batch of comments — {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
+            "both documents go in whole, this being a session on the same work as \
+             every other: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with(
+                "# What I want to follow up on\n\nWhy is the window a minute? And add a \
+                 header saying when it resets.\n"
+            ),
+            "and the follow-up brief is the last thing said, under them: {prompt:?}"
+        );
+    }
+
+    /// A Conversation steered into Follow-up may have Deferred Answers nothing
+    /// has been told about yet, and they fold in here as they do everywhere.
+    #[test]
+    fn deferred_answers_fold_into_a_following_up_prompt() {
+        let prompt = folded(
+            &following_up(
+                "# Rate limiting\n\nThe API has none.\n",
+                None,
+                "Add a header saying when the window resets.\n",
+            ),
+            "## The wording\n\n**Q9** Which status?\n\n429 Too Many Requests\n",
+        );
+
+        assert!(
+            prompt.contains("# What I want to follow up on"),
+            "the brief the follow-up was steered with is still there: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with("**Q9** Which status?\n\n429 Too Many Requests\n"),
+            "and what the human has since decided comes last, as in every other \
+             prompt: {prompt:?}"
+        );
+    }
+
     /// A grilling started again is the same grilling — the same skill and the
     /// same Brief — with the log of what has already been settled under it, so
     /// that it does not open by asking what the human answered yesterday.
@@ -1933,8 +2128,8 @@ mod tests {
 
     /// The workbench shows a commit's message body beside its diff, and nothing
     /// else tells a session to write one — so every skill that commits work has
-    /// to say it. One wording across the six, because six wordings would be
-    /// six things to keep true and the human reads them as one convention.
+    /// to say it. One wording across the seven, because seven wordings would be
+    /// seven things to keep true and the human reads them as one convention.
     #[test]
     fn every_skill_that_commits_work_asks_for_the_commits_summary() {
         let block = summary_block("next-task/SKILL.md");
@@ -1945,6 +2140,7 @@ mod tests {
             "addressing/SKILL.md",
             "reviewing/SKILL.md",
             "responding/SKILL.md",
+            "following-up/SKILL.md",
         ] {
             assert_eq!(
                 summary_block(name),
