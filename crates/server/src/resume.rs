@@ -327,6 +327,11 @@ pub(crate) async fn resume(
 /// cannot be started is exactly the one somebody has to look at: it stops, with
 /// the refusal as its Notice — see [`refused`].
 ///
+/// **And never, on a server that runs no sessions**, which is the stand-down the
+/// sweep makes for the same reason: nothing there can be started for any
+/// Conversation, so every take-up would refuse and every refusal would stop a
+/// Conversation to say the server has no agents. See [`crate::stalls::sweeping`].
+///
 /// The task is handed back rather than let go, because the stall sweep waits for
 /// it: every Conversation here is undriven until this has taken it up, and a
 /// sweep that looked first would call each of them stalled. See
@@ -334,6 +339,26 @@ pub(crate) async fn resume(
 #[must_use = "the sweep waits for what a restart takes up before it judges \
               whether anything is driving it"]
 pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
+    // Nothing to take up on a server that runs no sessions — see
+    // [`crate::sessions::Sessions::runs_sessions`], which is the same stand-down
+    // [`crate::stalls::sweeping`] makes right after this one and for the same
+    // reason. Such a server can start nothing for any Conversation, ever: every
+    // take-up below would refuse, and what the refusals leave is a stop on each
+    // mid-run Conversation saying so — a report of the server rather than of the
+    // work.
+    //
+    // Only the tests' routers are ever built that way, and what it costs them is
+    // what it would cost a server: `router()` over a store the test then fills is
+    // exactly how the viewer's fixtures are written, and a take-up landing
+    // mid-write stops the Conversation being serialised.
+    //
+    // The handle is still handed back, because the sweep waits on it whatever it
+    // did — and it is a task that has nothing to do rather than no task at all,
+    // so the two stand down together rather than one waiting on the other.
+    if !state.sessions.runs_sessions() {
+        return tokio::spawn(std::future::ready(()));
+    }
+
     let state = state.clone();
 
     tokio::spawn(async move {
@@ -517,4 +542,64 @@ pub(crate) fn ready(
         || !state
             .drivers
             .driven(&state.sessions.working(), conversation_id, lifecycle))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A server that runs no sessions takes nothing up, so a Conversation
+    /// mid-run is left exactly as it was found.
+    ///
+    /// The take-up would refuse — there is no agent to start anything with —
+    /// and a refusal stops the Conversation with a Notice on its Timeline. That
+    /// is a report of the server rather than of the work, and it lands
+    /// asynchronously: [`crate::router`] over a store a test is still writing
+    /// into is how the viewer's fixtures are written, and a stop arriving
+    /// mid-write is a fixture nobody asked for. The stall sweep stands down for
+    /// the same reason — see [`crate::stalls::sweeping`].
+    #[tokio::test]
+    async fn a_server_with_no_agents_leaves_a_conversation_mid_run_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let repo = store::register_repo(&pool, dir.path(), "verkstead", "main")
+            .await
+            .unwrap()
+            .expect("nothing is registered at that path yet");
+
+        let conversation = store::start_conversation(&pool, repo.id, "outbound-retries")
+            .await
+            .unwrap()
+            .expect("the Repo was just registered");
+
+        // Grilling before the router exists, which is the shape that makes the
+        // take-up certain rather than a race: what a restart looks at is
+        // whatever the store already holds.
+        store::start_grilling(
+            &pool,
+            conversation,
+            "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+            std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-outbound-retries"),
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let _app = crate::router(pool.clone());
+
+        // Long enough for a take-up to have listed the Conversations and
+        // written its refusal down. Nothing is being waited *for* here — the
+        // assertion is that nothing happened — so a generous wait only makes it
+        // a firmer answer.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        assert!(
+            store::stopped(&pool, conversation).await.unwrap().is_none(),
+            "a server with no agents has nothing to say about a Conversation it \
+             was never going to drive",
+        );
+    }
 }
