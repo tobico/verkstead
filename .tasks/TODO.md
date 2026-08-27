@@ -20,4 +20,4 @@ session.
 - [x] 05: End the follow-up on the mark, and land in the wrap-up — [details](05-follow-up-done-rule.md)
 - [x] 06: The rescue, and Resume, for Follow-up — [details](06-follow-up-rescue-and-resume.md)
 - [x] 07: Extend the rescue to every session — [details](07-rescue-everywhere.md)
-- [ ] 08: The vocabulary — [details](08-vocabulary.md)
+- [x] 08: The vocabulary — [details](08-vocabulary.md)
