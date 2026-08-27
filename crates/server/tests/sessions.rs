@@ -28,7 +28,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use avt::Vt;
@@ -69,11 +69,74 @@ const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
 /// thing worth reading back.
 const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
 
+/// How much longer than its own clock this suite is allowed to take, read once
+/// from `VERKSTEAD_TEST_PACE`.
+///
+/// Every one of these fixtures stands a real server up and launches real
+/// sessions into real sandboxes, and the runner decides on wall clock. So a
+/// machine running the suite at half speed is one where a session gets
+/// descheduled past a budget and is ended by the wrong rule — a failure about
+/// the machine wearing the clothes of a failure about the code, and a different
+/// test every run. There is nothing to observe instead, because on the tests
+/// that matter here the budgets *are* the thing under test.
+///
+/// So the fix is a ruler that stretches: one factor, read from the environment,
+/// applied to everything time-shaped in this file at once. Unset is `1.0`,
+/// which is what a developer's own machine runs at; CI sets `2`, because a
+/// two-core runner building the workspace alongside is the loaded shape these
+/// flakes came from.
+///
+/// **Uniformly, and that is not a detail.** [`BRISKLY`] keeps `grace` under
+/// `proposing` deliberately, so that a review ended after the shorter of them
+/// is a review ended by the wrong rule — scaling the two by different factors
+/// would quietly delete the thing several tests here exist to prove. One
+/// multiplier over the whole file keeps every such ordering as it was written.
+///
+/// Only this suite reads it. A server's own [`Pace::default`] is untouched:
+/// this is a test harness deciding how long to wait, not Verkstead deciding
+/// how fast to work.
+static PACE: LazyLock<f64> = LazyLock::new(|| {
+    let Ok(factor) = std::env::var("VERKSTEAD_TEST_PACE") else {
+        return 1.0;
+    };
+
+    factor
+        .parse::<f64>()
+        .ok()
+        .filter(|factor| factor.is_finite() && *factor > 0.0)
+        .unwrap_or_else(|| panic!("VERKSTEAD_TEST_PACE is a positive number, not {factor:?}"))
+});
+
+/// A span of this suite's own, stretched by [`PACE`].
+///
+/// Everything written as a literal duration in this file goes through here.
+/// Anything derived from a [`Pace`] — `BRISKLY.grace * 4`, and the others like
+/// it — does not, and must not: the Pace it came from was paced already, and
+/// pacing it twice would stretch the window past the ordering it was chosen
+/// against.
+fn paced(span: Duration) -> Duration {
+    span.mul_f64(*PACE)
+}
+
+/// Wait out a span of this suite's own — see [`paced`].
+///
+/// Two shapes use one: the gap between two reads in a loop that is waiting for
+/// something to happen, and the do-nothing window a negative assertion holds
+/// open. Both stretch for the same reason. A window has to stay long against
+/// whatever else is running, or it stops being evidence that nothing happened;
+/// and a loop that reads less often on a loaded machine is a loop taking less
+/// of the machine the thing it is waiting for needs.
+async fn pause(span: Duration) {
+    tokio::time::sleep(paced(span)).await;
+}
+
 /// How long to wait for something a session does. Generously long, because what
 /// is being waited on is a process starting: the flush that carries its output
 /// is half a second, and a loaded machine can take a while to get bwrap and a
 /// shell going.
-const PATIENCE: Duration = Duration::from_secs(30);
+///
+/// And longer again where the machine says so — see [`PACE`].
+static PATIENCE: LazyLock<Duration> = LazyLock::new(|| paced(Duration::from_secs(30)));
 
 /// What every sandbox here is equipped with as `verkstead`.
 ///
@@ -104,6 +167,10 @@ struct Grilling {
     /// Where the database is, for the tests that stand a second server up over
     /// it.
     database: PathBuf,
+
+    /// This fixture's place in the suite — see [`ROOM`]. Last, so that it is
+    /// handed back only once everything above has been let go of.
+    _room: tokio::sync::OwnedSemaphorePermit,
 }
 
 impl Grilling {
@@ -141,7 +208,7 @@ impl Grilling {
         &self,
         reached: impl Fn(&verkstead_render::ConversationEntry) -> Option<T>,
     ) -> T {
-        let deadline = Instant::now() + PATIENCE;
+        let deadline = Instant::now() + *PATIENCE;
 
         loop {
             let row = self.row().await;
@@ -155,13 +222,13 @@ impl Grilling {
                 "the row never got there. It says: {row:?}"
             );
 
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            pause(Duration::from_millis(25)).await;
         }
     }
 
     /// Read it back until the session has got somewhere, or give up.
     async fn until<T>(&self, reached: impl Fn(&ConversationView) -> Option<T>) -> T {
-        let deadline = Instant::now() + PATIENCE;
+        let deadline = Instant::now() + *PATIENCE;
 
         loop {
             let view = self.view().await;
@@ -178,7 +245,7 @@ impl Grilling {
                 );
             }
 
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            pause(Duration::from_millis(25)).await;
         }
     }
 
@@ -237,7 +304,7 @@ impl Grilling {
     /// And the same Transcript as the details pane fetches it: read, rendered,
     /// and read back until it holds `turns` of them.
     async fn spoken(&self, event: i64, turns: usize) -> TranscriptView {
-        let deadline = Instant::now() + PATIENCE;
+        let deadline = Instant::now() + *PATIENCE;
 
         loop {
             let view: TranscriptView = get(
@@ -255,13 +322,13 @@ impl Grilling {
                 "the session's log was never drawn that far. The pane says: {view:?}"
             );
 
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            pause(Duration::from_millis(25)).await;
         }
     }
 
     /// Read it back until it has that many lines, or give up.
     async fn transcript_of(&self, event: i64, lines: usize) -> Vec<String> {
-        let deadline = Instant::now() + PATIENCE;
+        let deadline = Instant::now() + *PATIENCE;
 
         loop {
             let transcript = self.transcript(event).await;
@@ -276,7 +343,7 @@ impl Grilling {
                  The Transcript says: {transcript:?}"
             );
 
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            pause(Duration::from_millis(25)).await;
         }
     }
 
@@ -303,7 +370,7 @@ impl Grilling {
                 Handoffs::under(self.state.path()),
                 Settings::in_data_dir(self.state.path()),
             )
-            .at_pace(BRISKLY),
+            .at_pace(*BRISKLY),
             gh_stub(gh),
         )
     }
@@ -755,22 +822,26 @@ questions:
 /// being asked here is whether a session is ended once its step has landed *and*
 /// it has gone quiet, and the number of seconds that takes is not part of the
 /// answer.
-const BRISKLY: Pace = Pace {
-    poll: Duration::from_millis(100),
-    grace: Duration::from_millis(300),
-    checks: Duration::from_millis(100),
+///
+/// Every span here goes through [`paced`], so a loaded machine gets budgets it
+/// can meet — and all of them by the same factor, which is what keeps the
+/// ordering below saying what it was written to say.
+static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
+    poll: paced(Duration::from_millis(100)),
+    grace: paced(Duration::from_millis(300)),
+    checks: paced(Duration::from_millis(100)),
     // Longer than the grace above, as a server's is: the tests that watch a
     // review being ended on quiet want the two apart, so that a session ended
     // after the shorter of them is one ended by the wrong rule.
-    proposing: Duration::from_millis(900),
+    proposing: paced(Duration::from_millis(900)),
     // Longer than any of these run for, so that the sweep for a stalled
     // Conversation is the one thing that never fires by itself here. Every one
     // of these fixtures is a Conversation whose grilling session has printed and
     // exited, which is a stall by every rule there is — so the tests that are
     // about something else say nothing about it, and the ones that are about it
     // keep [`SWEEPING`].
-    stalls: Duration::from_secs(600),
-};
+    stalls: paced(Duration::from_secs(600)),
+});
 
 /// And the same at a pace that does look, for the tests that are about the
 /// looking.
@@ -778,10 +849,10 @@ const BRISKLY: Pace = Pace {
 /// A server sweeps every minute. What is being asked here is whether a
 /// Conversation nothing is driving is noticed while the server runs, and the
 /// number of seconds it waits before noticing is not part of the answer.
-const SWEEPING: Pace = Pace {
-    stalls: Duration::from_millis(100),
-    ..BRISKLY
-};
+static SWEEPING: LazyLock<Pace> = LazyLock::new(|| Pace {
+    stalls: paced(Duration::from_millis(100)),
+    ..*BRISKLY
+});
 
 /// What stands where the host's `gh` goes: a branch with a pull request on it,
 /// and nothing said on it yet.
@@ -1081,14 +1152,14 @@ async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
 /// The same, on a server that sweeps for a stalled Conversation briskly enough
 /// to watch it do so — see [`SWEEPING`].
 async fn grilling_swept(stub: &str) -> Grilling {
-    grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, SWEEPING).await
+    grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, *SWEEPING).await
 }
 
 /// The same, over a directory the caller already has the name of — which is
 /// what a stub that has to write somewhere the worktree is not needs, the
 /// script naming the path being written before there is a fixture to ask.
 async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    grilling_at_pace(spill, stub, gh, BRISKLY).await
+    grilling_at_pace(spill, stub, gh, *BRISKLY).await
 }
 
 /// And the same again at a pace of the caller’s choosing.
@@ -1145,6 +1216,10 @@ struct Bench {
     /// is started against.
     repo: PathBuf,
     repo_id: i64,
+
+    /// Held from the moment this bench was built and handed on to the
+    /// [`Grilling`] it becomes — see [`ROOM`].
+    room: tokio::sync::OwnedSemaphorePermit,
 }
 
 impl Bench {
@@ -1180,18 +1255,53 @@ impl Bench {
             app: self.app,
             id,
             database: self.database,
+            _room: self.room,
         }
     }
 }
 
+/// How many of these fixtures may be standing at once.
+///
+/// Each one is a real server, a real repository on disk and a run of real
+/// sessions in real sandboxes, and `cargo test` will happily start every test
+/// in this file at once — which on this suite is a hundred and more benches
+/// competing for two cores. What comes out of that is not a slow run but a
+/// wrong one: sessions descheduled past the budgets they are being judged
+/// against, and a different test failing every time.
+///
+/// Twice the cores the machine admits to, and never fewer than four or more
+/// than sixteen. These fixtures are mostly waiting — on a process starting, on
+/// a poll coming round — so more of them than cores is right; what broke was
+/// having no ceiling at all. The floor keeps a single-core machine from running
+/// the suite one test at a time, and the ceiling keeps a large machine from
+/// putting the load back.
+///
+/// Taken in [`bench_at_pace`], which every fixture in this file is built
+/// through, and held for the fixture's whole life. It bounds how far load can
+/// stretch the clock in the first place; [`PACE`] is what copes with the
+/// stretch that is left.
+static ROOM: LazyLock<Arc<tokio::sync::Semaphore>> = LazyLock::new(|| {
+    let cores = std::thread::available_parallelism().map_or(1, |cores| cores.get());
+
+    Arc::new(tokio::sync::Semaphore::new((cores * 2).clamp(4, 16)))
+});
+
 async fn bench(spill: tempfile::TempDir, stub: &str, gh: &str) -> Bench {
-    bench_at_pace(spill, stub, gh, BRISKLY).await
+    bench_at_pace(spill, stub, gh, *BRISKLY).await
 }
 
 /// The same, at a pace of the caller’s choosing — which is what the tests about
 /// the stall sweep need, that being the one thing [`BRISKLY`] deliberately keeps
 /// slow.
 async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pace) -> Bench {
+    // Before anything is built, so that a bench queued behind the suite's
+    // ceiling costs nothing while it waits — see [`ROOM`].
+    let room = ROOM
+        .clone()
+        .acquire_owned()
+        .await
+        .expect("the suite's room is never closed");
+
     let watched = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
@@ -1247,6 +1357,7 @@ async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pac
         database,
         repo,
         repo_id,
+        room,
     }
 }
 
@@ -2210,6 +2321,22 @@ async fn a_conversation_reports_that_it_is_working_while_its_session_runs() {
         "nothing is being asked, so the card turns rather than marks",
     );
 
+    // And then wait for the session to have got as far as printing, which the
+    // half above deliberately does not: a session is on the register from the
+    // moment it is spawned, so the row turns before the sandbox inside it has a
+    // shell in it.
+    //
+    // The close below is what needs the difference. Ending a session is a
+    // signal to the sandbox, and a sandbox signalled while it is still setting
+    // its namespace up can leave what it was starting behind — a stub with five
+    // minutes of `sleep` left in it, a terminal that therefore never closes, and
+    // a close that waits the whole five minutes out. Which is a test that hangs
+    // rather than one that fails, and hangs the more reliably the quieter the
+    // machine is.
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 
     fixture.row_until(|row| (!row.working).then_some(())).await;
@@ -2290,7 +2417,7 @@ async fn a_session_speaking_again_is_announced_to_the_open_pages() {
     // been and gone, so the next thing down this stream is the one this test is
     // about.
     fixture.row_until(|row| row.idle.then_some(())).await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    pause(Duration::from_millis(200)).await;
 
     let mut page = Listening::open(&fixture.app).await;
 
@@ -2719,18 +2846,18 @@ async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
     // Written and sitting there, which is what makes the rest of this a test: a
     // handoff nothing takes has to be one there was something to take.
     let written = handoff_directory(&fixture).join("handoff.md");
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !written.is_file() {
         assert!(
             Instant::now() < deadline,
             "the stub never wrote the handoff the superseded pick asked for",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     // Long enough for many more polls than the handoff watcher would have needed:
     // it wakes every 100ms and ends a session on 300ms of quiet.
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    pause(Duration::from_millis(1500)).await;
 
     let view = fixture.view().await;
 
@@ -3423,7 +3550,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
     );
 
     // Long enough for many more polls of a backlog that has nothing left in it.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    pause(Duration::from_secs(2)).await;
 
     assert_eq!(
         outputs(&fixture.view().await).len(),
@@ -3797,14 +3924,14 @@ async fn a_green_suite_settles_the_checks_and_dispatches_nothing() {
         .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
         .await;
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !checks_settled(&fixture).await {
         assert!(Instant::now() < deadline, "the checks never settled");
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        pause(Duration::from_millis(50)).await;
     }
 
     // Long enough for many more polls of a suite that has nothing wrong with it.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     let view = fixture.view().await;
 
@@ -3915,7 +4042,7 @@ async fn a_check_two_fix_sessions_could_not_fix_halts_and_tells_the_human() {
     }
 
     // Long enough for many more polls, had anything still been dispatching.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     let view = fixture.view().await;
 
@@ -3950,7 +4077,7 @@ async fn checks_gh_cannot_answer_about_leave_the_wrap_up_waiting() {
         .await;
 
     // Long enough for many polls, every one of them unable to ask.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     let view = fixture.view().await;
 
@@ -4000,24 +4127,35 @@ async fn the_checks_stop_being_asked_about_once_the_conversation_leaves_wrapping
         .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
         .await;
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !checks_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the checks were never asked about"
         );
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        pause(Duration::from_millis(50)).await;
     }
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 
-    // One more poll's worth, so that a watcher part way through a question has
-    // finished asking it before the count is taken.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // And then wait for the Conversation to have gone quiet all the way
+    // through, rather than sleeping a poll's worth and hoping.
+    //
+    // The watcher holds the Conversation on the drivers register for as long as
+    // its task runs, and its task ends *after* the question it was part way
+    // through has come back — so an empty register is the mark that question
+    // left already being on the file. A sleep here was a guess at how long that
+    // took, and a guess taken on a loaded machine is a baseline with a question
+    // still in flight behind it, which reads afterwards as polling that never
+    // stopped.
+    fixture
+        .until(|view| (!view.working && !view.driven).then_some(()))
+        .await;
+
     let when_stopped = std::fs::metadata(&asked).map(|it| it.len()).unwrap();
 
     // Long enough for many more polls, had anything still been polling.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     assert_eq!(
         std::fs::metadata(&asked).map(|it| it.len()).unwrap(),
@@ -4067,17 +4205,17 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
             Handoffs::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         )
-        .at_pace(BRISKLY),
+        .at_pace(*BRISKLY),
         gh_stub(&gh_checking("SUCCESS")),
     );
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !checks_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the restarted server never looked at the checks it was left with",
         );
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        pause(Duration::from_millis(50)).await;
     }
 
     // And it was never called a Conversation nothing was driving, which is the
@@ -4464,7 +4602,7 @@ impl Listening {
     /// The next Nudge, past the keep-alives that are the stream's other
     /// traffic, as the page reads it: the JSON of the `data` line.
     async fn nudge(&mut self) -> verkstead_schema::Nudge {
-        let waited_for = tokio::time::timeout(PATIENCE, async {
+        let waited_for = tokio::time::timeout(*PATIENCE, async {
             loop {
                 let frame = self.frame().await;
 
@@ -4507,7 +4645,7 @@ impl Listening {
 /// Wait until a session has written its prompt down, and hand back what is
 /// there.
 async fn until_written(path: &Path) -> String {
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
 
     loop {
         if let Ok(written) = std::fs::read_to_string(path) {
@@ -4522,7 +4660,7 @@ async fn until_written(path: &Path) -> String {
             path.display(),
         );
 
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 }
 
@@ -4530,7 +4668,7 @@ async fn until_written(path: &Path) -> String {
 /// tests where an earlier session has already written to the file, so that
 /// merely finding it there says nothing about the one being waited on.
 async fn until_written_saying(path: &Path, said: &str) -> String {
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
 
     loop {
         if let Ok(written) = std::fs::read_to_string(path) {
@@ -4545,7 +4683,7 @@ async fn until_written_saying(path: &Path, said: &str) -> String {
             path.display(),
         );
 
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 }
 
@@ -4608,7 +4746,7 @@ async fn the_review_proposes_its_findings_and_then_fixes_what_was_accepted() {
     let set = fixture.ask(REVIEW).await;
 
     // Long enough for the ask to have ended a session, had anything been going to.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     let view = fixture.view().await;
 
@@ -4644,13 +4782,13 @@ async fn the_review_proposes_its_findings_and_then_fixes_what_was_accepted() {
 
     fixture.until(|view| (fixes(view) == 1).then_some(())).await;
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !review_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the session landed the fix and the review never settled",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     let view = fixture.view().await;
@@ -4699,10 +4837,10 @@ async fn a_review_that_finds_nothing_raises_no_question_set_and_says_so() {
 
     worked_to_empty(&fixture).await;
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !review_settled(&fixture).await {
         assert!(Instant::now() < deadline, "the review never settled");
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        pause(Duration::from_millis(50)).await;
     }
 
     let view = fixture.view().await;
@@ -4842,13 +4980,13 @@ async fn a_review_waiting_on_its_ask_is_left_alone_until_the_answers_are_in() {
 
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !review_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the answers were in and the session that read them was never ended",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     let view = fixture.view().await;
@@ -4914,14 +5052,14 @@ async fn a_deferred_ask_of_a_reviews_own_does_not_hold_its_session_open() {
         sets(&view),
     );
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !review_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the session was seen out and the review never settled: {:?}",
             notices(&fixture.view().await),
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     let view = fixture.view().await;
@@ -5205,13 +5343,13 @@ async fn a_review_that_dies_on_its_own_ask_closes_its_questions_and_reads_the_br
 
     assert_eq!(fixture.resume().await, Resumed::Resumed);
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !review_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the resume never reviewed anything, so the wrap-up never settled",
         );
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        pause(Duration::from_millis(50)).await;
     }
 
     assert_eq!(
@@ -5416,13 +5554,13 @@ async fn a_review_that_landed_nothing_still_settles_on_its_session_ending() {
 
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !review_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the review session ended and the review never settled",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     let view = fixture.view().await;
@@ -5539,13 +5677,13 @@ async fn a_review_that_dies_after_the_answers_stops_the_run_and_dispatches_nothi
 
     assert_eq!(fixture.resume().await, Resumed::Resumed);
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !review_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the press never reviewed anything, so the wrap-up never settled",
         );
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        pause(Duration::from_millis(50)).await;
     }
 
     assert_eq!(
@@ -5611,13 +5749,13 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
 
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !review_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the first wrap's review never settled",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     assert_eq!(
@@ -5667,7 +5805,7 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
     // it finds wrapping up — the whole of a wrap-up, its review included.
     let _restarted = fixture.restarted(&stub, &gh).await;
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     let read_again = loop {
         let written = std::fs::read_to_string(&reviews).unwrap_or_default();
 
@@ -5679,7 +5817,7 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
             Instant::now() < deadline,
             "the second wrap never read the branch: {written}",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     };
 
     assert_eq!(
@@ -5854,7 +5992,7 @@ async fn a_review_that_split_a_finding_out_sends_the_work_back_to_be_built() {
         .until(|view| (moves_into(view, Lifecycle::Wrapping) == 2).then_some(()))
         .await;
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     let read_again = loop {
         let written = std::fs::read_to_string(&reviews).unwrap_or_default();
 
@@ -5866,7 +6004,7 @@ async fn a_review_that_split_a_finding_out_sends_the_work_back_to_be_built() {
             Instant::now() < deadline,
             "the second wrap never read the branch: {written}",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     };
 
     assert_eq!(
@@ -6155,14 +6293,28 @@ async fn a_split_no_backlog_was_written_for_settles_like_any_other_review() {
 
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !review_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the review session ended and the review never settled",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
+
+    // And then let the wrap-up run to its ordinary end, which is the whole of
+    // what *like any other review* means: the review is answered, the checks are
+    // green and nothing is left unaddressed, so the Conversation is Done.
+    //
+    // Waited for rather than read. The state a moment after the review settles
+    // is a fact about which of two things won a race — this read, or the loop
+    // that ends a wrap-up — and *still Wrapping* is the answer only on a machine
+    // with nothing else to do. Done is where it comes to rest either way, and
+    // reaching it says more than catching it on the way: a run that had gone
+    // back down the ladder would never arrive.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
 
     let view = fixture.view().await;
 
@@ -6175,11 +6327,6 @@ async fn a_split_no_backlog_was_written_for_settles_like_any_other_review() {
         moves_into(&view, Lifecycle::Implementing),
         1,
         "and nothing went back down the ladder: there is no backlog to build",
-    );
-    assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
-        "the Conversation is where the wrap-up left it",
     );
     assert!(
         !dispatched.exists(),
@@ -6239,7 +6386,7 @@ async fn a_red_check_waits_for_the_worktree_rather_than_ending_the_review() {
     );
 
     // Long enough for many polls of a suite that is red the whole time.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     assert!(
         !dispatched.exists(),
@@ -6339,17 +6486,17 @@ async fn what_was_already_said_reaches_the_review_rather_than_a_session_of_its_o
 
     // Written down as the review was dispatched, so what is left unaddressed is
     // nothing — which is what says no batch session is owed about them.
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !comments_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "what was said to the review was never recorded as addressed",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     // Long enough for many more polls of a pull request with five comments on it.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     assert!(
         !dispatched.exists(),
@@ -6400,7 +6547,7 @@ async fn comments_said_while_the_review_runs_reach_one_batch_session_afterwards(
 
     // Long enough for many polls of a pull request that now has five comments on
     // it, while the review still holds the Worktree.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     assert!(
         !dispatched.exists(),
@@ -6425,18 +6572,18 @@ async fn comments_said_while_the_review_runs_reach_one_batch_session_afterwards(
 
     let told = until_written(&dispatched).await;
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !comments_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "what was said was never addressed",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     // Long enough for many more polls of a pull request whose comments have all
     // been dispatched for.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     let told = std::fs::read_to_string(&dispatched).unwrap_or(told);
 
@@ -6520,7 +6667,7 @@ async fn a_batch_of_comments_is_proposed_about_and_then_fixed_in_the_same_sessio
     );
 
     // Long enough for a session told to do what it was given to have done it.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     assert_eq!(
         fixes(&fixture.view().await),
@@ -6557,13 +6704,13 @@ async fn a_batch_of_comments_is_proposed_about_and_then_fixed_in_the_same_sessio
 
     fixture.until(|view| (fixes(view) == 1).then_some(())).await;
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !comments_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the batch landed its fix and what was said never settled",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     let view = fixture.view().await;
@@ -6607,13 +6754,13 @@ async fn a_batch_with_nothing_to_do_asks_nothing_and_settles_as_addressed() {
     worked_to_empty(&fixture).await;
     until_written(&batches).await;
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !comments_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the batch was answered and never settled",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     let view = fixture.view().await;
@@ -6782,13 +6929,13 @@ async fn a_batch_that_landed_nothing_still_leaves_what_was_said_addressed() {
 
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !comments_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the batch session ended and what was said never settled",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     let view = fixture.view().await;
@@ -6914,13 +7061,13 @@ async fn a_batch_that_dies_after_the_answers_stops_the_run_and_dispatches_nothin
 
     assert_eq!(fixture.resume().await, Resumed::Resumed);
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !comments_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "the press never answered what was said, so it never settled",
         );
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        pause(Duration::from_millis(50)).await;
     }
 
     assert_eq!(
@@ -6960,7 +7107,7 @@ async fn comments_already_dispatched_for_are_not_dispatched_for_again_after_a_re
     worked_to_empty(&fixture).await;
     until_written(&dispatched).await;
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
     assert_eq!(
         prompts(&std::fs::read_to_string(&dispatched).unwrap()).len(),
         1,
@@ -6972,7 +7119,7 @@ async fn comments_already_dispatched_for_are_not_dispatched_for_again_after_a_re
     let _restarted = fixture.restarted(&stub, &gh).await;
 
     // Long enough for many polls of both of them.
-    tokio::time::sleep(Duration::from_millis(800)).await;
+    pause(Duration::from_millis(800)).await;
 
     let told = std::fs::read_to_string(&dispatched).unwrap();
 
@@ -7240,25 +7387,25 @@ async fn a_commit_landing_on_the_pull_request_puts_the_checks_back_to_waiting() 
 
     worked_to_empty(&fixture).await;
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !checks_settled(&fixture).await {
         assert!(Instant::now() < deadline, "the checks never settled");
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     std::fs::write(&landed, "").unwrap();
 
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while checks_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
             "a commit landed and the checks stayed settled from the run before it",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     // Long enough for many more polls of a run that has not finished.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     assert!(
         !checks_settled(&fixture).await,
@@ -7440,7 +7587,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>'
     );
 
     // Long enough for several more sweeps of a branch that has not moved.
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    pause(Duration::from_secs(5)).await;
 
     let view = fixture.view().await;
     assert_eq!(
@@ -7530,7 +7677,7 @@ async fn closing_ends_the_session_before_the_worktree_goes() {
     );
 
     // Long enough for many more ticks, had anything still been ticking.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    pause(Duration::from_millis(500)).await;
 
     assert_eq!(
         std::fs::metadata(&ticks).map(|it| it.len()).ok(),
@@ -7786,7 +7933,7 @@ async fn a_backlog_halts_at_the_task_whose_session_died() {
     let sessions = outputs(&fixture.view().await).len();
 
     // Long enough for several more turns of a runner that was still turning.
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    pause(Duration::from_secs(3)).await;
 
     assert_eq!(
         outputs(&fixture.view().await).len(),
@@ -7987,7 +8134,7 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
     let sessions = outputs(&fixture.view().await).len();
 
     // Long enough for several more turns of a runner that was still turning.
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    pause(Duration::from_secs(3)).await;
 
     assert_eq!(
         outputs(&fixture.view().await).len(),
@@ -8130,10 +8277,22 @@ async fn a_reset_that_has_been_and_gone_starts_nothing() {
         "the reset is on the stop in the words the session printed it in",
     );
 
-    let landed = commits(&fixture.view().await).len();
+    // The baseline, taken once the run has gone quiet all the way through: no
+    // session running and nothing left on the drivers register.
+    //
+    // The Notice appearing is not that moment. The stop ends the session that
+    // printed the banner and the driver seeing it out lets go a little after,
+    // and on a loaded machine a commit already in flight lands in between — so
+    // a count read at the Notice is a count read before the run had finished
+    // stopping, and the window below then reads the tail of the stop as the
+    // backlog going on. Read in the same view as the quiet is established, so
+    // there is no gap between the two.
+    let landed = fixture
+        .until(|view| (!view.working && !view.driven).then(|| commits(view).len()))
+        .await;
 
     // Long enough for anything running on a clock to have come round.
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    pause(Duration::from_secs(3)).await;
 
     let view = fixture.view().await;
 
@@ -8234,7 +8393,7 @@ async fn closing_a_run_is_not_something_to_ask_the_human_about() {
 
     // Long enough for the driver to have noticed its session go and decided what
     // that meant.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    pause(Duration::from_secs(2)).await;
 
     let view = fixture.view().await;
 
@@ -8379,7 +8538,7 @@ async fn stop_lets_the_task_finish_and_halts_before_the_next_one() {
 
     // Long enough for the runner to have launched the next task if it were still
     // going to, several times over.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    pause(Duration::from_secs(2)).await;
 
     assert_eq!(
         outputs(&fixture.view().await).len(),
@@ -8479,7 +8638,7 @@ async fn force_stop_ends_the_session_where_it_stands_and_halts_at_once() {
 
     // Long enough for the driver that was seeing the session out to have decided
     // what its ending meant, and for anything else to have been launched.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    pause(Duration::from_secs(2)).await;
 
     let view = fixture.view().await;
 
@@ -8569,13 +8728,13 @@ async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
     // The handoff on disk with the session still talking, which is the state the
     // press has to arrive in: the driver is watching for it and has not taken it.
     let written = handoff_directory(&fixture).join("handoff.md");
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
     while !written.is_file() {
         assert!(
             Instant::now() < deadline,
             "the grilling never wrote the handoff its pick asked for",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 
     assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
@@ -8591,7 +8750,7 @@ async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
 
     // Long enough for the driver to have read the ending, taken the handoff and
     // reached the launch on the other side of it.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    pause(Duration::from_secs(2)).await;
 
     let view = fixture.view().await;
 
@@ -8694,7 +8853,7 @@ async fn steering_into_done_with_interrupt_ends_the_session_where_it_stands() {
 
     // Long enough for the driver that was seeing the session out to have decided
     // what its ending meant, and for anything else to have been launched.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    pause(Duration::from_secs(2)).await;
 
     let view = fixture.view().await;
 
@@ -8762,7 +8921,7 @@ async fn steering_into_done_without_interrupt_sees_the_session_out() {
 
     // Long enough for the runner to have launched the next task if it were still
     // going to, several times over.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    pause(Duration::from_secs(2)).await;
 
     let view = fixture.view().await;
     let worktree = PathBuf::from(view.worktree.clone().unwrap().path);
@@ -8957,7 +9116,7 @@ async fn conversations(app: &Router) -> Vec<verkstead_render::ConversationEntry>
 /// test that read it the moment the row appeared would be reading a half-made
 /// one.
 async fn stage_of(fixture: &Grilling) -> ConversationView {
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
 
     loop {
         let started = conversations(&fixture.app)
@@ -8980,7 +9139,7 @@ async fn stage_of(fixture: &Grilling) -> ConversationView {
             notices(&fixture.view().await),
         );
 
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        pause(Duration::from_millis(25)).await;
     }
 }
 
@@ -9910,7 +10069,7 @@ impl Watcher {
     /// The next thing the server says, or a panic if it says nothing for long
     /// enough.
     async fn shown(&mut self) -> Shown {
-        let said = tokio::time::timeout(PATIENCE, self.socket.next())
+        let said = tokio::time::timeout(*PATIENCE, self.socket.next())
             .await
             .expect("the server to say something")
             .expect("the socket to still be open")
@@ -9933,7 +10092,7 @@ impl Watcher {
     /// Follow the socket until the grid says something, and hand back what it is
     /// showing.
     async fn until(&mut self, enough: impl Fn(&str) -> bool) -> Vec<String> {
-        let deadline = Instant::now() + PATIENCE;
+        let deadline = Instant::now() + *PATIENCE;
 
         loop {
             let showing = self.showing();
@@ -10289,7 +10448,7 @@ async fn what_a_watcher_puts_in_reaches_the_session_and_commits_nothing() {
 
     // Long enough for something to have been registered if anything were going
     // to be.
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    pause(Duration::from_secs(1)).await;
 
     let after = fixture.view().await;
     assert!(
@@ -10441,7 +10600,7 @@ async fn nothing_a_watcher_puts_in_tells_the_devices() {
     // Long enough for a notification to have gone out if anything here sent
     // one, and for the socket dropping to have been noticed as well.
     drop(watcher);
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    pause(Duration::from_secs(3)).await;
 
     assert!(
         taken.lock().unwrap().is_empty(),
@@ -10545,7 +10704,7 @@ async fn a_halt_verkstead_decided_on_tells_the_devices_once() {
 
     // Long enough for that sweep to have looked, and to have said something if
     // it were going to.
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    pause(Duration::from_secs(3)).await;
 
     assert_eq!(
         notices(&fixture.view().await).len(),
@@ -10608,7 +10767,7 @@ async fn a_stop_nobody_chose_tells_nobody() {
 
     // Long enough for the push to have gone out if a stop nobody chose were one
     // to send.
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    pause(Duration::from_secs(3)).await;
 
     assert!(
         taken.lock().unwrap().is_empty(),
@@ -10712,7 +10871,7 @@ impl Device {
 
 /// Wait until the push service has taken `count` pushes, then hand them over.
 async fn pushes(taken: &Arc<Mutex<Vec<Push>>>, count: usize) -> Vec<Push> {
-    let deadline = Instant::now() + PATIENCE;
+    let deadline = Instant::now() + *PATIENCE;
 
     loop {
         {
@@ -10727,7 +10886,7 @@ async fn pushes(taken: &Arc<Mutex<Vec<Push>>>, count: usize) -> Vec<Push> {
             );
         }
 
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        pause(Duration::from_millis(20)).await;
     }
 }
 
@@ -12007,7 +12166,7 @@ async fn steering_into_implementing_carries_on_a_backlog_whose_worktree_has_gone
         spill,
         &a_backlog_then_once_then_staying(&remembered),
         PULL_REQUEST,
-        SWEEPING,
+        *SWEEPING,
     )
     .await;
 
@@ -12974,7 +13133,7 @@ async fn resuming_a_conversation_whose_worktree_has_gone_makes_it_again() {
         spill,
         &once_then_staying(&remembered),
         PULL_REQUEST,
-        SWEEPING,
+        *SWEEPING,
     )
     .await;
 
@@ -13027,7 +13186,7 @@ async fn resuming_leaves_a_worktree_that_is_still_one_alone() {
         spill,
         &once_then_staying(&remembered),
         PULL_REQUEST,
-        SWEEPING,
+        *SWEEPING,
     )
     .await;
 
@@ -13068,7 +13227,7 @@ async fn a_worktree_that_cannot_be_made_again_refuses_by_name() {
         spill,
         &once_then_staying(&remembered),
         PULL_REQUEST,
-        SWEEPING,
+        *SWEEPING,
     )
     .await;
 

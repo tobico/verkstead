@@ -5,6 +5,7 @@
   "blocked_on": 22,
   "branch": "task-runner",
   "direction": "task-list",
+  "driven": false,
   "grilling_pairing": {
     "model": "claude-fable-5",
     "profile": {
