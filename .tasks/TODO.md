@@ -17,5 +17,5 @@ Roadmap stage: [02: Visibility](docs/roadmaps/companion-repos/02-visibility.md)
 ## Tasks
 
 - [x] 01: Per-companion commit sweeps — [details](01-per-companion-commit-sweeps.md)
-- [ ] 02: The server composes the Diff — [details](02-the-server-composes-the-diff.md)
+- [x] 02: The server composes the Diff — [details](02-the-server-composes-the-diff.md)
 - [ ] 03: A block per repo under the Set — [details](03-a-block-per-repo.md)

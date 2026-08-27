@@ -150,6 +150,15 @@ fn name(path: &Path) -> String {
 /// Conversation raises — whether a name is one it would take for a branch, and
 /// what commit something resolves to.
 pub(crate) fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    accepting(dir, args, &[0])
+}
+
+/// The same run, accepting any of the `ok` exit codes rather than success alone.
+///
+/// There is one read here that is not a failure when it exits non-zero:
+/// `git diff --no-index` exits 1 when the two files differ, which for the
+/// untracked file [`crate::diffs`] asks it about is the ordinary case.
+pub(crate) fn accepting(dir: &Path, args: &[&str], ok: &[i32]) -> Option<String> {
     let output = Command::new("git")
         // Reading a repository should never take a lock on it: an agent may well
         // be working in this one right now.
@@ -161,8 +170,11 @@ pub(crate) fn git(dir: &Path, args: &[&str]) -> Option<String> {
         .output()
         .ok()?;
 
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    if !ok.contains(&output.status.code()?) {
+        return None;
+    }
+
+    // Paths and patches are whatever bytes the filesystem holds; a Set is UTF-8
+    // either way, so anything else is replaced rather than refused.
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }

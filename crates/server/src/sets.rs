@@ -6,6 +6,10 @@
 //! Set explicitly without knowing it is doing so, and nothing is inferred from
 //! the project or the branch it derived. Two Conversations grilling one Repo
 //! would be indistinguishable by either of those.
+//!
+//! Knowing the Conversation is also what lets the Diff be read here rather than
+//! sent: the Worktree it names is on this host, so its uncommitted changes are
+//! composed as the Set arrives — see [`crate::diffs`].
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -59,7 +63,7 @@ pub(crate) async fn create_set(
     Query(asking): Query<Asking>,
     body: String,
 ) -> Response {
-    let set = match QuestionSet::from_yaml(&body) {
+    let mut set = match QuestionSet::from_yaml(&body) {
         Ok(set) => set,
         Err(error) => {
             return yaml(
@@ -78,6 +82,11 @@ pub(crate) async fn create_set(
             ),
         );
     }
+
+    // Whatever the Set claims its Diff is, the Conversation's Worktree is the
+    // authority — and this is where that read happens now, close enough to the
+    // Worktree to do it. See [`crate::diffs`].
+    set.diff = crate::diffs::compose(&state.pool, conversation_id).await;
 
     match store::ask(&state.pool, conversation_id, &set, asking.kind()).await {
         Ok(Some(created)) => {

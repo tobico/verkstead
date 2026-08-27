@@ -1,6 +1,7 @@
 //! Submitting a Question Set: what the store keeps, and what the API refuses.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -86,9 +87,86 @@ async fn asking_from(pool: &SqlitePool) -> i64 {
         .expect("the Repo was just registered")
 }
 
+/// A Conversation with a real Worktree on disk, and where that Worktree is.
+///
+/// What the Diff needs and [`asking_from`] has not got: the server reads the
+/// Conversation's own checkout as a Set arrives, so a test about the Diff has to
+/// give it one to read. A repository with a commit in it, a worktree git itself
+/// made, and a Conversation grilling in it.
+async fn asking_from_a_worktree(pool: &SqlitePool, dir: &Path) -> (i64, PathBuf) {
+    let repo = repository(dir.join("askance"));
+    let registered = store::register_repo(pool, &repo, "askance", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let conversation = store::start_conversation(pool, registered.id, "rate-limiting")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    let worktree = dir.join("worktrees/askance-rate-limiting");
+    let base = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "rate-limiting",
+            &worktree.to_string_lossy(),
+            &base,
+        ],
+    );
+
+    store::start_grilling(pool, conversation, &base, &worktree, &[])
+        .await
+        .unwrap();
+
+    (conversation, worktree)
+}
+
+/// A git repository with one commit in it, at `path`.
+fn repository(path: PathBuf) -> PathBuf {
+    std::fs::create_dir_all(&path).unwrap();
+    git(&path, &["init", "--initial-branch", "main"]);
+    git(&path, &["config", "user.email", "tests@verkstead.invalid"]);
+    git(&path, &["config", "user.name", "Verkstead Tests"]);
+    git(&path, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
+    git(&path, &["add", "README.md"]);
+    git(&path, &["commit", "-m", "first"]);
+
+    path
+}
+
+/// Run git in `dir`, insisting it worked. Scaffolding rather than the code under
+/// test, so a failure here is a broken test.
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .expect("git should be on the PATH for these tests");
+
+    assert!(
+        output.status.success(),
+        "git {args:?} failed in {}",
+        dir.display()
+    );
+
+    String::from_utf8(output.stdout).unwrap()
+}
+
 async fn post_set(pool: &SqlitePool, yaml: &str) -> Response {
     let conversation = asking_from(pool).await;
 
+    post_set_from(pool, conversation, yaml).await
+}
+
+async fn post_set_from(pool: &SqlitePool, conversation: i64, yaml: &str) -> Response {
     router(pool.clone())
         .oneshot(
             Request::builder()
@@ -182,9 +260,113 @@ questions:
 }
 
 #[tokio::test]
-async fn a_diff_is_stored_opaquely() {
+async fn a_dirty_worktree_is_read_for_the_diff_as_the_set_arrives() {
+    let (dir, pool) = fresh_pool().await;
+    let (conversation, worktree) = asking_from_a_worktree(&pool, dir.path()).await;
+
+    // A tracked file changed, and one git has never heard of.
+    std::fs::write(
+        worktree.join("README.md"),
+        "# a repository\nand a second line\n",
+    )
+    .unwrap();
+    std::fs::write(
+        worktree.join("open-questions.md"),
+        "a line only in the working tree\n",
+    )
+    .unwrap();
+
+    let response = post_set_from(&pool, conversation, VALID_SET).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
+    let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
+
+    let diff = asked(&stored)
+        .diff
+        .clone()
+        .expect("a dirty Worktree carries a Diff");
+    assert!(
+        diff.contains("+++ b/README.md") && diff.contains("+and a second line"),
+        "a tracked file's changes belong in the Diff, got:\n{diff}"
+    );
+    assert!(
+        diff.contains("+++ b/open-questions.md")
+            && diff.contains("+a line only in the working tree"),
+        "an untracked file's contents belong in the Diff, got:\n{diff}"
+    );
+}
+
+#[tokio::test]
+async fn a_clean_worktree_carries_no_diff() {
+    let (dir, pool) = fresh_pool().await;
+    let (conversation, _worktree) = asking_from_a_worktree(&pool, dir.path()).await;
+
+    let response = post_set_from(&pool, conversation, VALID_SET).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
+    let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
+
+    assert_eq!(
+        asked(&stored).diff,
+        None,
+        "there is nothing uncommitted to attach"
+    );
+}
+
+#[tokio::test]
+async fn a_claimed_diff_is_replaced_by_what_the_server_read() {
+    let (dir, pool) = fresh_pool().await;
+    let (conversation, worktree) = asking_from_a_worktree(&pool, dir.path()).await;
+
+    std::fs::write(
+        worktree.join("README.md"),
+        "# a repository\nreally changed\n",
+    )
+    .unwrap();
+
+    let response = post_set_from(
+        &pool,
+        conversation,
+        "
+title: Please review
+diff: |
+  diff --git a/invented.md b/invented.md
+  @@ -1 +1,2 @@
+   first
+  +what the agent wishes were there
+questions:
+  - label: Q1
+    text: Land it?
+",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
+    let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
+
+    let diff = asked(&stored)
+        .diff
+        .clone()
+        .expect("the Worktree is dirty, so there is a Diff");
+    assert!(
+        diff.contains("+really changed"),
+        "the Diff is the server's own read of the Worktree, got:\n{diff}"
+    );
+    assert!(
+        !diff.contains("invented.md"),
+        "what the Set claimed is overwritten rather than kept, got:\n{diff}"
+    );
+}
+
+#[tokio::test]
+async fn a_conversation_with_no_worktree_attaches_nothing_rather_than_refusing() {
     let (_dir, pool) = fresh_pool().await;
 
+    // The Conversation every other test here asks from: started, never grilled,
+    // so nothing has been checked out for it.
     let response = post_set(
         &pool,
         "
@@ -206,8 +388,9 @@ questions:
     let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
 
     assert_eq!(
-        asked(&stored).diff.as_deref(),
-        Some("diff --git a/notes.md b/notes.md\n@@ -1 +1,2 @@\n first\n+second\n")
+        asked(&stored).diff,
+        None,
+        "there is no Worktree to read, and the Set lands anyway"
     );
 }
 

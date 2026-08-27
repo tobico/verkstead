@@ -20,6 +20,8 @@ mod commits;
 mod continuing;
 mod conversations;
 mod deferrals;
+/// The uncommitted changes the server reads for a Question Set's Diff.
+mod diffs;
 mod drivers;
 mod exchanges;
 mod followers;

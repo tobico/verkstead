@@ -716,9 +716,11 @@ May contain zero Answers.
 _Avoid_: submission, result
 
 **Diff**:
-The uncommitted changes (including untracked files) of the asking repo,
-captured by the CLI at send time and attached to every Question Set, so code
-approval can happen in the web UI.
+The uncommitted changes (including untracked files) of the asking Worktree,
+read by the server as the Question Set arrives and attached to it, so code
+approval can happen in the web UI. The server knows which Conversation a Set
+was asked from and can read that Worktree itself, so nothing about it is taken
+on trust from what was sent.
 _Avoid_: patch, changeset
 
 **Diagram**:
