@@ -888,19 +888,27 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     .await
     .offerable();
 
+    // The stop the header draws a mark for, which is every stop but the one on a
+    // Conversation the human has closed. Closing is them saying the work is over
+    // wherever it had got to, so whatever it stopped on stopped being something
+    // to come back to — a Conversation they closed themselves is the last place
+    // a mark saying *look here* belongs. The stop record itself is untouched: it
+    // is history, and the Notice it points at is still on the Timeline.
+    let marked = stopped
+        .as_ref()
+        .filter(|_| conversation.state != store::Lifecycle::Closed);
+
     // And the mark points at the stop's own Notice, whatever wrote it: a run
     // that has stopped is stopped, and a mark with nowhere to go would be one
     // the human could not act on.
-    let blocked_on = stopped.as_ref().map(|stopped| stopped.notice);
+    let blocked_on = marked.map(|stopped| stopped.notice);
 
     // Which mark it is, decided here so the browser never weighs a stored word:
     // Verkstead's brake and a driver a crash took away are things that happened
     // without the human, so those get the accent badge; their own press gets the
     // quiet label. See [`store::Decision::waits_on_the_human`], which is the
     // same rule the sidebar's own `waiting` is folded by.
-    let stopped_by_hand = stopped
-        .as_ref()
-        .is_some_and(|stopped| !stopped.decision.waits_on_the_human());
+    let stopped_by_hand = marked.is_some_and(|stopped| !stopped.decision.waits_on_the_human());
 
     // With the words about the account coming back beside it, where the stop
     // carries any: the one thing that tells a run stopped by an exhausted window

@@ -1123,6 +1123,13 @@ async fn started(
 /// the human in the ordinary sense, and the sidebar says so by drawing it as a
 /// draft rather than by marking it as an ask.
 ///
+/// **Closed** is none of them either, and for the opposite reason: nothing is
+/// waiting because nothing is left. Closing shuts the Sets it found open — see
+/// the server's `conversations::close` — so what this excludes is mostly the
+/// stop the Conversation carried, which stays on the record as history. A
+/// **Done** Conversation is not excluded: its Sets are still answerable, and an
+/// answerable ask is still an ask.
+///
 /// What the human has archived is not here at all, unless they have asked to be
 /// shown it — see [`super::archive_conversation`] and
 /// [`super::showing_archived`]. Archiving is the one thing that takes a
@@ -1136,7 +1143,7 @@ async fn started(
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     let rows: Vec<(i64, String, String, String, bool, bool)> = sqlx::query_as(&format!(
         "SELECT c.id, c.branch, r.name, c.state,
-                c.state <> 'draft' AND (
+                c.state NOT IN ('draft', 'closed') AND (
                     EXISTS (
                         SELECT 1 FROM set_events s
                         JOIN timeline_events e ON e.id = s.event_id

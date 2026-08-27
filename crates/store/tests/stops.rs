@@ -12,8 +12,8 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{
     ConversationRow, Decision, Event, Stopped, ask_to_stop, asked_to_stop, clear_stop,
-    conversations, forget_stop, open_database, register_repo, start_conversation, start_grilling,
-    stop, stopped, timeline,
+    close_conversation, conversations, forget_stop, open_database, register_repo,
+    start_conversation, start_grilling, stop, stopped, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -424,4 +424,54 @@ async fn the_humans_own_stop_is_not_waiting_on_them_in_the_sidebar() {
              this one is {kind:?}",
         );
     }
+}
+
+/// And a stop on a Conversation the human has closed is not either, however it
+/// stopped.
+///
+/// Closing is them saying the work is over wherever it had got to, so the stop
+/// stops being something to come back to: the dot means *there is something here
+/// for you*, and there is not. The record is left exactly as it was — it is what
+/// happened, and the Notice explaining it is still on the Timeline — so what
+/// changes is only what the sidebar makes of it.
+#[tokio::test]
+async fn a_closed_conversation_is_not_waiting_on_them_whatever_stopped_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    start_grilling(
+        &pool,
+        id,
+        "abc1234",
+        Path::new("/data/worktrees/rate-limiting"),
+    )
+    .await
+    .unwrap();
+
+    stop(&pool, id, Decision::Verkstead, SAID, None)
+        .await
+        .unwrap();
+
+    let waiting = |rows: Vec<ConversationRow>| {
+        rows.into_iter()
+            .find(|row| row.id == id)
+            .expect("the Conversation is on the list")
+            .waiting
+    };
+
+    assert!(
+        waiting(conversations(&pool).await.unwrap()),
+        "Verkstead pulled the brake, so until it is closed this is waiting on them",
+    );
+
+    close_conversation(&pool, id).await.unwrap();
+
+    assert!(
+        !waiting(conversations(&pool).await.unwrap()),
+        "and closing takes the dot away, whatever the stop was",
+    );
+    assert!(
+        stopped(&pool, id).await.unwrap().is_some(),
+        "leaving the stop itself where it is: closing reads it, and writes nothing",
+    );
 }

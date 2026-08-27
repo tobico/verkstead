@@ -42,7 +42,12 @@ request, and landing back in the wrap-up when they are finished with it.
 *Waiting on checks* is a condition of Wrapping read the same way — where
 **Closed** is a state of its own, off the ladder rather than on it: every other
 state is somewhere the work has got to, and closing is the work stopping
-wherever it was.
+wherever it was. Nothing about a Closed Conversation waits on the human:
+closing shuts every Question Set it left open — those read *closed unanswered*
+on the Timeline — and neither waiting mark is drawn over the stop it carries,
+which stays on the record as history. Done is not Closed in this. A Done
+Conversation's Sets are still there to be answered, so one left open goes on
+drawing the marks: an answerable ask is still an ask.
 _Avoid_: task, session, job, thread, ticket
 
 **Worktree**:
@@ -834,12 +839,14 @@ and it went when the last gate did.
 _Avoid_: section, chapter
 
 **Locked**:
-What a Question Set becomes once it is settled — its Response delivered, or an
-orphaned Set put away unanswered by hand. Permanent decision history, and no
-place of its own to browse: a locked Set stays on the Timeline it was asked
-from, saying what became of it, and takes no Response ever again. Locking one
-by hand is the single irreversible act in the workbench, which is why it is the
-single one confirmed in as many words. Nothing leaves a Timeline.
+What a Question Set becomes once it is settled — its Response delivered, or a
+Set nobody will ever answer put away unanswered: by the human, from the page it
+is on, or by Verkstead where the asking is over — a grilling relaunched over the
+session that asked, or the Conversation itself closing. Permanent decision
+history, and no place of its own to browse: a locked Set stays on the Timeline
+it was asked from, saying what became of it, and takes no Response ever again.
+Locking one by hand is the single irreversible act in the workbench, which is
+why it is the single one confirmed in as many words. Nothing leaves a Timeline.
 _Avoid_: archived (**Archived** is a Conversation coming off the sidebar, which
 is reversible and about a list rather than about a Set), filed, history, log
 

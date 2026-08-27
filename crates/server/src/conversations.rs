@@ -986,6 +986,10 @@ fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
 /// made before one: what is recorded is what happened. A Conversation that said
 /// it had stopped while its directory was still on disk would be one nothing
 /// would ever come back and remove.
+///
+/// And what it was asking goes last of all — see [`asked`]. The record says
+/// Closed by then, which is the order the rest of this is in: what has happened
+/// is written down, and then the questions that outlived it are shut.
 pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClosed> {
     let pool = &state.pool;
 
@@ -1016,11 +1020,56 @@ pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClose
     let handoffs = Handoffs::under(&state.data_dir);
     tokio::task::spawn_blocking(move || handoffs.remove(id)).await?;
 
-    Ok(match store::close_conversation(pool, id).await? {
+    let closing = store::close_conversation(pool, id).await?;
+
+    if closing == store::Closing::Closed {
+        asked(state, id).await;
+    }
+
+    Ok(match closing {
         store::Closing::Closed => ConversationClosed::Closed,
         store::Closing::AlreadyClosed => ConversationClosed::AlreadyClosed,
         store::Closing::NoSuchConversation => ConversationClosed::NoSuchConversation,
     })
+}
+
+/// Lock whatever the Conversation was still asking, now that it has closed.
+///
+/// Closing takes away every session there will ever be, so an open Set is a
+/// question with no reader and no reader coming: what the human wrote into one
+/// would go nowhere, and the marks over it would go on saying somebody was
+/// waiting. Locking unanswered is what that Set has always meant — see
+/// [`crate::sets::lock`], which a relaunched grilling reaches for over the same
+/// facts.
+///
+/// **Every open Set, Deferred Asks included**, which is the wider of the two
+/// readings [`crate::sets::Open`] holds. A relaunch leaves a Deferred Ask
+/// standing because the session after it will fold the answer in; here there is
+/// no session after it, so the question is over with the Conversation.
+///
+/// The stop the Conversation carries is left exactly as it was. That is history
+/// rather than something outstanding, and what stops it reading as *waiting on
+/// you* is the Closed state itself — see [`crate::ui`], where the header's mark
+/// is decided, and the sidebar's own `waiting` in the store.
+///
+/// Nothing is refused for, and nothing is read back: a Conversation is closed
+/// whether or not the questions it left could be shut.
+async fn asked(state: &AppState, id: i64) {
+    let timeline = match store::timeline(&state.pool, id).await {
+        Ok(timeline) => timeline,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a closed Conversation was asking failed");
+            return;
+        }
+    };
+
+    crate::sets::lock(
+        state,
+        id,
+        &crate::sets::open(&timeline, crate::sets::Open::Either),
+        "the Conversation that asked it is closed",
+    )
+    .await;
 }
 
 /// Why these two Pairings are not something to run the work under, or `None`

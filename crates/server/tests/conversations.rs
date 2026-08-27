@@ -23,7 +23,7 @@ use verkstead_render::{
     Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
     ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered,
-    RoadmapPane, ShowingArchived, Started, SteerOpened, TimelineEvent,
+    RoadmapPane, ShowingArchived, Standing, Started, SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
@@ -2570,12 +2570,22 @@ questions:
 
 /// Put a Set to the human the way a session does, and hand back its id.
 async fn ask(app: &Router, conversation: i64, yaml: &str) -> i64 {
+    asking(app, conversation, yaml, "").await
+}
+
+/// The same Set asked as a **Deferred Ask**: on the Timeline to be answered like
+/// any other, with nobody waiting on the Answer.
+async fn defer(app: &Router, conversation: i64, yaml: &str) -> i64 {
+    asking(app, conversation, yaml, "?deferred=true").await
+}
+
+async fn asking(app: &Router, conversation: i64, yaml: &str, kind: &str) -> i64 {
     let response = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/conversations/{conversation}/api/v1/sets"))
+                .uri(format!("/conversations/{conversation}/api/v1/sets{kind}"))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -2831,6 +2841,132 @@ async fn a_draft_is_never_marked_as_waiting() {
     assert_eq!(
         answer_ordinary(&app, set).await,
         verkstead_render::Submitted::Accepted
+    );
+}
+
+/// How each Question Set on a Conversation's Timeline stands, in the order it
+/// was asked.
+fn standings(view: &ConversationView) -> Vec<&Standing> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::QuestionSet(asked) => Some(&asked.standing),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Closing shuts whatever the Conversation was still asking. The sessions that
+/// asked are gone for good and no other is coming, so a Set left open would be
+/// one the human could write an Answer into that nothing would ever read.
+///
+/// Every kind of ask, which is where this differs from a grilling being
+/// relaunched: that leaves a Deferred Ask standing for the session after it, and
+/// closing has no session after it to leave one for.
+#[tokio::test]
+async fn closing_locks_every_set_it_finds_open() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    let answered = ask(&app, id, ORDINARY).await;
+    answer_ordinary(&app, answered).await;
+    ask(&app, id, ORDINARY).await;
+    defer(&app, id, ORDINARY).await;
+
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    let view = opened(&app, id).await;
+    let standings = standings(&view);
+
+    assert!(
+        matches!(standings[0], Standing::Answered(_)),
+        "what the human decided is left exactly as they decided it: {:?}",
+        standings[0],
+    );
+    assert!(
+        matches!(standings[1], Standing::LockedUnanswered(_)),
+        "the blocking Ask nobody answered is closed unanswered: {:?}",
+        standings[1],
+    );
+    assert!(
+        matches!(standings[2], Standing::LockedUnanswered(_)),
+        "and so is the Deferred one, there being no session left to fold an \
+         Answer into: {:?}",
+        standings[2],
+    );
+    assert!(
+        !only_row(&app).await.waiting,
+        "so nothing on the Conversation is left drawing the human",
+    );
+}
+
+/// And a closed Conversation carries neither waiting mark, whatever stopped it
+/// on the way.
+///
+/// Closing is the human saying the work is over wherever it had got to, so the
+/// stop stops being something to come back to: the marks mean *there is
+/// something here for you*, and there is not. The stop itself is untouched —
+/// it is what happened, and the Notice explaining it is still on the Timeline.
+#[tokio::test]
+async fn a_closed_conversation_carries_neither_waiting_mark() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    // The click is the shortest way to a stop written down: it stops the drive
+    // and opens the modal, and nothing here submits one.
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert!(
+        opened(&app, id).await.blocked_on.is_some(),
+        "the drive has stopped, and the header says so until it is closed",
+    );
+
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.blocked_on, None, "so there is no header mark to press");
+    assert!(!view.stopped_by_hand, "of either kind");
+    assert!(!only_row(&app).await.waiting, "and no disc beside the row");
+    assert!(
+        view.timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::Notice(_))),
+        "with the Notice the stop wrote still on the record: closing reads the \
+         stop and writes nothing over it",
+    );
+}
+
+/// **Done is not Closed here**, and the difference is what the marks are for: a
+/// Done Conversation is one Verkstead has finished with rather than one the
+/// human has put away, and its Sets are still there to be answered. An
+/// answerable ask is still an ask.
+#[tokio::test]
+async fn a_done_conversation_with_an_open_set_is_still_waiting() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    ask(&app, id, ORDINARY).await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let row = only_row(&app).await;
+
+    assert_eq!(row.state, Lifecycle::Done);
+    assert!(row.waiting, "the Set is open, and nothing has closed it");
+    assert!(
+        matches!(standings(&opened(&app, id).await)[0], Standing::Waiting(_)),
+        "because it is still there to answer",
     );
 }
 
