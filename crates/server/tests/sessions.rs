@@ -6230,6 +6230,12 @@ async fn a_split_out_backlog_lands_on_the_record_of_a_run_that_never_had_one() {
 /// would have written the list, and it committed a fix and no list. Which is a
 /// session that thought better of the spin-off between the ask and the doing,
 /// and that is its to think better of.
+///
+/// The checks cannot be asked about, which is what leaves the review the only
+/// thing this wrap-up is still waiting on. A `gh` that answered them green would
+/// settle the last of the three the moment the review settled, and *where the
+/// wrap-up left it* would be a state that held for one poll of the settling loop
+/// rather than a fact — read after that poll on a loaded machine, it reads Done.
 #[tokio::test]
 async fn a_split_no_backlog_was_written_for_settles_like_any_other_review() {
     let spill = tempfile::tempdir().unwrap();
@@ -6239,7 +6245,7 @@ async fn a_split_no_backlog_was_written_for_settles_like_any_other_review() {
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX),
-        PULL_REQUEST,
+        &gh_about(CHECKS_UNANSWERABLE, "", ""),
     )
     .await;
 
