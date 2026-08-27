@@ -18,5 +18,5 @@ pub use api::{ApiError, ResponseAccepted, SetCreated};
 pub use liveness::Liveness;
 pub use nudge::Nudge;
 pub use response::{Answer, Response};
-pub use set::{Direction, Proposal, Question, QuestionOption, QuestionSet, Subquestion};
+pub use set::{Direction, Proposal, Question, QuestionOption, QuestionSet, RepoDiff, Subquestion};
 pub use validate::{ValidationError, Violation};

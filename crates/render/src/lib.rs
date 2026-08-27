@@ -66,8 +66,8 @@ pub use transcript::{
 };
 pub use update::UpdateNotice;
 pub use view::{
-    Answered, AskView, DiffView, OptionView, QuestionView, SetReading, SetView, Standing,
-    UnreadableSet,
+    Answered, AskView, DiffView, OptionView, QuestionView, RepoDiffView, SetReading, SetView,
+    Standing, UnreadableSet,
 };
 
 pub mod diff;

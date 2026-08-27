@@ -279,7 +279,8 @@ Three things to get right:
 - **Never supply `project`, `branch` or `diff`.** All three are overwritten
   whatever the Set claims: the CLI derives the project and the branch from the
   working directory, and Verkstead attaches the uncommitted Diff from its own
-  read of the worktree, so the human can see what has already been written.
+  read of the worktrees — the work's own and each companion repo it may write
+  in, a labeled block each — so the human can see what has already been written.
 - **Prose does not survive plain YAML scalars.** A colon-space anywhere in a
   Question, an Option or the Preface ends the scalar and the server refuses the
   whole Set — and quoting a command or a log line is exactly when it bites. Use

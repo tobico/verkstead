@@ -155,10 +155,11 @@ long-poll on Question Set 1. There is no timeout: only an answer or a kill ends
 the wait ([ADR-0001](adr/0001-blocking-cli-for-agent-integration.md)).
 
 The **Diff** on the Set is not the CLI's doing: the server reads it off the
-Conversation's own Worktree as the Set arrives. A Conversation started this way
-has never been grilled and so has no Worktree, which is why the Set below
-carries no Diff — one asked from inside a real session carries whatever that
-session has left uncommitted.
+Worktrees as the Set arrives — the Conversation's own, and each read-write
+companion repo beside it, one labeled block each. A Conversation started this
+way has never been grilled and so has no Worktree at all, which is why the Set
+below carries no Diff — one asked from inside a real session carries whatever
+that session has left uncommitted, in whichever repository it left it.
 
 A Set can also arrive on stdin, which is how an agent usually sends one:
 
@@ -179,7 +180,7 @@ notification opens on a phone. It draws the same sheet and answers through the
 same endpoint; what it has that the pane does not is a way back to the
 Conversation it belongs to.)
 
-The sheet is the whole ask: the Preface, the Diff of the Worktree the agent
+The sheet is the whole ask: the Preface, the Diff of the Worktrees the agent
 asked from, and each Question with its Options. Pick one, or write your own
 words, or both — an Option with a ★ is the agent's Recommendation, and
 **Accept all ★ Recommendations** fills in every question you have not answered

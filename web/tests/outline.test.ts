@@ -15,6 +15,7 @@ import type { QuestionView, SetView } from "../src/api/types";
 import contents from "../src/set/Contents.module.css";
 import {
   anchor,
+  blocks,
   inside,
   lit,
   mark,
@@ -39,10 +40,15 @@ function everySection(): SetView {
     branch: "solid-viewer",
     preface_html: "<p>no rate limit</p>",
     postscript_html: null,
-    diff: {
-      html: "<details id=\"diff-1\"></details><details id=\"diff-2\"></details>",
-      paths: ["src/limits.rs", "notes.txt"],
-    },
+    diff: [
+      {
+        repo: null,
+        diff: {
+          html: "<details id=\"diff-1\"></details><details id=\"diff-2\"></details>",
+          paths: ["src/limits.rs", "notes.txt"],
+        },
+      },
+    ],
     questions: [
       question("Q1", "Where should the request counter live?"),
       {
@@ -167,7 +173,7 @@ describe("the parts of the page the spy watches", () => {
   });
 
   it("offer it nowhere on a Set with no Diff", () => {
-    const set = { ...everySection(), diff: null };
+    const set = { ...everySection(), diff: [] };
 
     expect(
       spied(outline(set)).every((watched) => watched.section !== "diff"),
@@ -176,7 +182,7 @@ describe("the parts of the page the spy watches", () => {
   });
 
   it("leave out a section the Set does not have", () => {
-    const set = { ...everySection(), preface_html: null, diff: null };
+    const set = { ...everySection(), preface_html: null, diff: [] };
 
     expect(
       anchors(set),
@@ -226,12 +232,55 @@ describe("the parts of the page the spy watches", () => {
 
   it("name a path the bar reads out as the nav cuts it", () => {
     const set = everySection();
-    set.diff = { html: "", paths: ["crates/app/src/set_view.rs"] };
+    set.diff = [
+      { repo: null, diff: { html: "", paths: ["crates/app/src/set_view.rs"] } },
+    ];
 
     expect(
       spied(outline(set))[2]!.text,
       "the bar shows the same one line the sidebar does, cut the same way",
     ).toBe("…/app/src/set_view.rs");
+  });
+});
+
+describe("a Diff of several repositories", () => {
+  /// Two blocks: two files out of the work's own repository, one out of the
+  /// companion beside it — labeled, which is what a Diff of more than one is.
+  const TWO = [
+    {
+      repo: "verkstead",
+      diff: { html: "", paths: ["src/limits.rs", "notes.txt"] },
+    },
+    { repo: "askance", diff: { html: "", paths: ["src/set.rs"] } },
+  ];
+
+  it("numbers the folds across the blocks rather than per block", () => {
+    expect(
+      blocks(TWO).map((entry) => entry.anchor),
+      "the anchors are ids on one page, and the renderer stamped them the " +
+        "same way round",
+    ).toEqual(["diff-1", "diff-2", "diff-3"]);
+  });
+
+  it("says which repository each file came out of", () => {
+    expect(
+      blocks(TWO).map((entry) => [entry.group, entry.whole]),
+      "a run of files under one name is what the nav groups by",
+    ).toEqual([
+      ["verkstead", "src/limits.rs"],
+      ["verkstead", "notes.txt"],
+      ["askance", "src/set.rs"],
+    ]);
+  });
+
+  it("groups nothing where the Diff is one repository's", () => {
+    const one = [{ repo: null, diff: { html: "", paths: ["src/limits.rs"] } }];
+
+    expect(
+      blocks(one).map((entry) => entry.group),
+      "an unlabeled block is the work's own repository, and the nav says as " +
+        "much as the page does",
+    ).toEqual([null]);
   });
 });
 

@@ -94,6 +94,23 @@ async fn asking_from(pool: &SqlitePool) -> i64 {
 /// give it one to read. A repository with a commit in it, a worktree git itself
 /// made, and a Conversation grilling in it.
 async fn asking_from_a_worktree(pool: &SqlitePool, dir: &Path) -> (i64, PathBuf) {
+    let (conversation, worktree, _) = asking_alongside(pool, dir, &[]).await;
+
+    (conversation, worktree)
+}
+
+/// The same, with a companion repo checked out beside it per entry in
+/// `companions`: what it is called and how far into it a session may reach.
+///
+/// The checkouts come back in the order they were asked for, so a test can dirty
+/// the one it means. Each is the shape its mode gives it, exactly as a grill
+/// start makes one: a branch of its own for a read-write companion, and a
+/// detached checkout for a read-only one, which has nothing to commit.
+async fn asking_alongside(
+    pool: &SqlitePool,
+    dir: &Path,
+    companions: &[(&str, store::CompanionMode)],
+) -> (i64, PathBuf, Vec<PathBuf>) {
     let repo = repository(dir.join("askance"));
     let registered = store::register_repo(pool, &repo, "askance", "main")
         .await
@@ -119,11 +136,65 @@ async fn asking_from_a_worktree(pool: &SqlitePool, dir: &Path) -> (i64, PathBuf)
         ],
     );
 
-    store::start_grilling(pool, conversation, &base, &worktree, &[])
+    let mut checkouts = Vec::new();
+
+    for (name, mode) in companions {
+        let path = repository(dir.join(name));
+        let companion = store::register_repo(pool, &path, name, "main")
+            .await
+            .unwrap()
+            .expect("nothing is registered at that path yet");
+
+        store::add_companion(pool, conversation, companion.id)
+            .await
+            .unwrap();
+        store::configure_companion(pool, conversation, companion.id, store::Change::Mode(*mode))
+            .await
+            .unwrap();
+
+        let at = git(&path, &["rev-parse", "HEAD"]).trim().to_owned();
+        let checkout = dir.join(format!("worktrees/{name}-rate-limiting"));
+
+        let cut = match mode {
+            store::CompanionMode::ReadOnly => vec!["worktree", "add", "--detach"],
+            store::CompanionMode::ReadWrite => vec!["worktree", "add", "-b", "rate-limiting"],
+        };
+        git(
+            &path,
+            &[&cut[..], &[&checkout.to_string_lossy(), &at]].concat(),
+        );
+
+        checkouts.push(store::CompanionWorktree {
+            repo_id: companion.id,
+            path: checkout,
+            base_commit: at,
+        });
+    }
+
+    store::start_grilling(pool, conversation, &base, &worktree, &checkouts)
         .await
         .unwrap();
 
-    (conversation, worktree)
+    (
+        conversation,
+        worktree,
+        checkouts.into_iter().map(|made| made.path).collect(),
+    )
+}
+
+/// Leave something uncommitted in a checkout: a tracked file changed, and one
+/// git has never heard of.
+fn dirty(worktree: &Path, line: &str) {
+    std::fs::write(
+        worktree.join("README.md"),
+        format!("# a repository\n{line}\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        worktree.join("open-questions.md"),
+        format!("{line}, and untracked\n"),
+    )
+    .unwrap();
 }
 
 /// A git repository with one commit in it, at `path`.
@@ -264,17 +335,7 @@ async fn a_dirty_worktree_is_read_for_the_diff_as_the_set_arrives() {
     let (dir, pool) = fresh_pool().await;
     let (conversation, worktree) = asking_from_a_worktree(&pool, dir.path()).await;
 
-    // A tracked file changed, and one git has never heard of.
-    std::fs::write(
-        worktree.join("README.md"),
-        "# a repository\nand a second line\n",
-    )
-    .unwrap();
-    std::fs::write(
-        worktree.join("open-questions.md"),
-        "a line only in the working tree\n",
-    )
-    .unwrap();
+    dirty(&worktree, "and a second line");
 
     let response = post_set_from(&pool, conversation, VALID_SET).await;
     assert_eq!(response.status(), StatusCode::CREATED);
@@ -282,18 +343,119 @@ async fn a_dirty_worktree_is_read_for_the_diff_as_the_set_arrives() {
     let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
     let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
 
-    let diff = asked(&stored)
-        .diff
-        .clone()
-        .expect("a dirty Worktree carries a Diff");
-    assert!(
-        diff.contains("+++ b/README.md") && diff.contains("+and a second line"),
-        "a tracked file's changes belong in the Diff, got:\n{diff}"
+    let [block] = &asked(&stored).diffs[..] else {
+        panic!(
+            "one dirty Worktree is one block, got {:?}",
+            asked(&stored).diffs
+        );
+    };
+    assert_eq!(
+        block.repo, "askance",
+        "the block names the repository it was read out of"
     );
     assert!(
-        diff.contains("+++ b/open-questions.md")
-            && diff.contains("+a line only in the working tree"),
-        "an untracked file's contents belong in the Diff, got:\n{diff}"
+        block.diff.contains("+++ b/README.md") && block.diff.contains("+and a second line"),
+        "a tracked file's changes belong in the Diff, got:\n{}",
+        block.diff
+    );
+    assert!(
+        block.diff.contains("+++ b/open-questions.md")
+            && block.diff.contains("+and a second line, and untracked"),
+        "an untracked file's contents belong in the Diff, got:\n{}",
+        block.diff
+    );
+}
+
+#[tokio::test]
+async fn every_repository_a_session_may_write_in_is_read_in_turn() {
+    let (dir, pool) = fresh_pool().await;
+    let (conversation, worktree, companions) = asking_alongside(
+        &pool,
+        dir.path(),
+        &[("verkstead", store::CompanionMode::ReadWrite)],
+    )
+    .await;
+
+    dirty(&worktree, "the work's own repository");
+    dirty(&companions[0], "the companion's");
+
+    let response = post_set_from(&pool, conversation, VALID_SET).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
+    let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
+
+    let diffs = &asked(&stored).diffs;
+    assert_eq!(
+        diffs.iter().map(|block| &*block.repo).collect::<Vec<_>>(),
+        ["askance", "verkstead"],
+        "the Conversation's own repository first, then its read-write companion"
+    );
+    assert!(
+        diffs[0].diff.contains("+the work's own repository"),
+        "each block is that repository's own read, got:\n{}",
+        diffs[0].diff
+    );
+    assert!(
+        diffs[1].diff.contains("+the companion's"),
+        "each block is that repository's own read, got:\n{}",
+        diffs[1].diff
+    );
+}
+
+#[tokio::test]
+async fn a_companion_with_nothing_uncommitted_contributes_no_block() {
+    let (dir, pool) = fresh_pool().await;
+    let (conversation, worktree, _companions) = asking_alongside(
+        &pool,
+        dir.path(),
+        &[("verkstead", store::CompanionMode::ReadWrite)],
+    )
+    .await;
+
+    dirty(&worktree, "only the work's own repository");
+
+    let response = post_set_from(&pool, conversation, VALID_SET).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
+    let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
+
+    assert_eq!(
+        asked(&stored)
+            .diffs
+            .iter()
+            .map(|block| &*block.repo)
+            .collect::<Vec<_>>(),
+        ["askance"],
+        "a clean companion has nothing to show, and is not drawn saying so"
+    );
+}
+
+#[tokio::test]
+async fn a_read_only_companion_is_not_read_at_all() {
+    let (dir, pool) = fresh_pool().await;
+    let (conversation, _worktree, companions) = asking_alongside(
+        &pool,
+        dir.path(),
+        &[("verkstead", store::CompanionMode::ReadOnly)],
+    )
+    .await;
+
+    // Something uncommitted in it all the same, which is not work a session put
+    // there: its checkout is detached and its sandbox bind is read-only.
+    dirty(&companions[0], "not this session's doing");
+
+    let response = post_set_from(&pool, conversation, VALID_SET).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
+    let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
+
+    assert!(
+        asked(&stored).diffs.is_empty(),
+        "a read-only companion is nothing to sweep, got {:?}",
+        asked(&stored).diffs
     );
 }
 
@@ -308,9 +470,8 @@ async fn a_clean_worktree_carries_no_diff() {
     let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
     let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
 
-    assert_eq!(
-        asked(&stored).diff,
-        None,
+    assert!(
+        asked(&stored).diffs.is_empty(),
         "there is nothing uncommitted to attach"
     );
 }
@@ -347,17 +508,27 @@ questions:
     let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
     let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
 
-    let diff = asked(&stored)
-        .diff
-        .clone()
-        .expect("the Worktree is dirty, so there is a Diff");
+    let [block] = &asked(&stored).diffs[..] else {
+        panic!(
+            "the Worktree is dirty, so there is a Diff, got {:?}",
+            asked(&stored).diffs
+        );
+    };
     assert!(
-        diff.contains("+really changed"),
-        "the Diff is the server's own read of the Worktree, got:\n{diff}"
+        block.diff.contains("+really changed"),
+        "the Diff is the server's own read of the Worktree, got:\n{}",
+        block.diff
     );
     assert!(
-        !diff.contains("invented.md"),
-        "what the Set claimed is overwritten rather than kept, got:\n{diff}"
+        !block.diff.contains("invented.md"),
+        "what the Set claimed is overwritten rather than kept, got:\n{}",
+        block.diff
+    );
+    assert_eq!(
+        asked(&stored).diff,
+        None,
+        "the field a claim arrived in is left empty, being the record of the \
+         Sets stored before the Diff was a list"
     );
 }
 
@@ -387,9 +558,8 @@ questions:
     let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
     let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
 
-    assert_eq!(
-        asked(&stored).diff,
-        None,
+    assert!(
+        asked(&stored).diff.is_none() && asked(&stored).diffs.is_empty(),
         "there is no Worktree to read, and the Set lands anyway"
     );
 }

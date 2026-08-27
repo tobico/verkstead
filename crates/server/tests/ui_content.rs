@@ -24,7 +24,8 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{Answered, SetReading, SetView, Standing};
 use verkstead_schema::{
-    Answer, Liveness, Question, QuestionOption, QuestionSet, Response, SetCreated, Subquestion,
+    Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
+    Subquestion,
 };
 use verkstead_server::{Gh, open_database, router, router_asking_github, store};
 
@@ -189,6 +190,7 @@ fn full_grammar_set() -> QuestionSet {
         project: Some("verkstead".to_owned()),
         branch: Some("solid-viewer".to_owned()),
         diff: None,
+        diffs: Vec::new(),
     }
 }
 
@@ -327,6 +329,23 @@ fn modified_and_untracked_diff() -> String {
         "@@ -0,0 +1,2 @@\n",
         "+the queue backed up at 40k/min\n",
         "+a shared counter needs redis\n",
+    )
+    .to_owned()
+}
+
+/// A companion repository's uncommitted work: one file, so that a Diff of two
+/// blocks has a countable second one.
+fn companion_diff() -> String {
+    concat!(
+        "diff --git a/src/set.rs b/src/set.rs\n",
+        "index 4cb29ea..ddc897f 100644\n",
+        "--- a/src/set.rs\n",
+        "+++ b/src/set.rs\n",
+        "@@ -1,3 +1,3 @@\n",
+        " pub struct QuestionSet {\n",
+        "-    pub diff: Option<String>,\n",
+        "+    pub diffs: Vec<RepoDiff>,\n",
+        " }\n",
     )
     .to_owned()
 }
@@ -918,28 +937,98 @@ async fn a_postscript_of_nothing_but_whitespace_is_the_same_as_none() {
 async fn the_attached_diff_is_rendered_per_file_and_highlighted_by_the_server() {
     let (_dir, pool, app) = fresh_app().await;
     let mut set = full_grammar_set();
-    set.diff = Some(modified_and_untracked_diff());
+    set.diffs = vec![RepoDiff {
+        repo: "verkstead".to_owned(),
+        diff: modified_and_untracked_diff(),
+    }];
 
     let (view, _) = set_json(&app, &pool, &set).await;
-    let diff = view.diff.expect("this Set has a Diff attached");
+    let [block] = &view.diff[..] else {
+        panic!(
+            "one repository's changes are one block, got {:?}",
+            view.diff
+        );
+    };
 
     // The paths travel beside the HTML and in Diff order, because the viewer's
     // table of contents is built from both: `paths[0]` is what `#diff-1` shows.
-    assert_eq!(diff.paths, ["src/limits.rs", "notes.txt"]);
+    assert_eq!(block.diff.paths, ["src/limits.rs", "notes.txt"]);
     assert_eq!(
-        diff.html.matches(r#"class="diffFile""#).count(),
+        block.diff.html.matches(r#"class="diffFile""#).count(),
         2,
         "expected one section per file, whatever git knew of it:\n{}",
-        diff.html
+        block.diff.html
     );
 
     // The colouring comes from the server: the viewer gets no diff parser.
-    assert!(diff.html.contains("diffLine add"), "{}", diff.html);
-    assert!(diff.html.contains("diffLine del"), "{}", diff.html);
     assert!(
-        diff.html.contains(r#"<span class="tok-"#),
+        block.diff.html.contains("diffLine add"),
+        "{}",
+        block.diff.html
+    );
+    assert!(
+        block.diff.html.contains("diffLine del"),
+        "{}",
+        block.diff.html
+    );
+    assert!(
+        block.diff.html.contains(r#"<span class="tok-"#),
         "expected the Rust file highlighted server-side:\n{}",
-        diff.html
+        block.diff.html
+    );
+}
+
+#[tokio::test]
+async fn one_repositorys_changes_are_drawn_without_a_label() {
+    let (_dir, pool, app) = fresh_app().await;
+    let mut set = full_grammar_set();
+    set.diffs = vec![RepoDiff {
+        repo: "verkstead".to_owned(),
+        diff: modified_and_untracked_diff(),
+    }];
+
+    let (view, _) = set_json(&app, &pool, &set).await;
+
+    assert_eq!(
+        view.diff.first().and_then(|block| block.repo.clone()),
+        None,
+        "a Diff of one block is the work's own repository, and says so by saying nothing"
+    );
+}
+
+#[tokio::test]
+async fn every_repositorys_block_is_labeled_once_more_than_one_is_drawn() {
+    let (_dir, pool, app) = fresh_app().await;
+    let mut set = full_grammar_set();
+    set.diffs = vec![
+        RepoDiff {
+            repo: "verkstead".to_owned(),
+            diff: modified_and_untracked_diff(),
+        },
+        RepoDiff {
+            repo: "askance".to_owned(),
+            diff: companion_diff(),
+        },
+    ];
+
+    let (view, _) = set_json(&app, &pool, &set).await;
+
+    assert_eq!(
+        view.diff
+            .iter()
+            .map(|block| block.repo.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("verkstead"), Some("askance")],
+        "the blocks are labeled and in the order they were composed"
+    );
+
+    // The anchors are ids on one page, so the second block's files carry on from
+    // where the first left off rather than restarting at `diff-1`.
+    assert_eq!(view.diff[1].diff.paths, ["src/set.rs"]);
+    assert!(
+        view.diff[1].diff.html.contains(r#"id="diff-3""#),
+        "the second block's file is the Diff's third:\n{}",
+        view.diff[1].diff.html
     );
 }
 
@@ -947,11 +1036,38 @@ async fn the_attached_diff_is_rendered_per_file_and_highlighted_by_the_server() 
 async fn a_set_with_no_diff_carries_none() {
     let (_dir, pool, app) = fresh_app().await;
     let set = full_grammar_set();
-    assert!(set.diff.is_none(), "this Set is the one without a Diff");
+    assert!(
+        set.diff.is_none() && set.diffs.is_empty(),
+        "this Set is the one without a Diff"
+    );
 
     let (view, _) = set_json(&app, &pool, &set).await;
 
-    assert_eq!(view.diff, None, "there is no Diff section to draw");
+    assert!(view.diff.is_empty(), "there is no Diff section to draw");
+}
+
+#[tokio::test]
+async fn a_set_stored_before_the_diff_was_a_list_is_drawn_from_the_one_it_has() {
+    let (_dir, pool, app) = fresh_app().await;
+    let mut set = full_grammar_set();
+
+    // What every Set carried until the Diff became a block per repository: one
+    // patch, no repository named. Nothing writes one again, and the ones already
+    // stored go on being read.
+    set.diff = Some(modified_and_untracked_diff());
+
+    let (view, _) = set_json(&app, &pool, &set).await;
+    let [block] = &view.diff[..] else {
+        panic!("the one patch is the one block, got {:?}", view.diff);
+    };
+
+    assert_eq!(block.repo, None, "there is no repository to name it by");
+    assert_eq!(block.diff.paths, ["src/limits.rs", "notes.txt"]);
+    assert!(
+        block.diff.html.contains(r#"id="diff-1""#),
+        "anchored from one, exactly as it always was:\n{}",
+        block.diff.html
+    );
 }
 
 #[tokio::test]
@@ -1293,6 +1409,7 @@ fn wrap_up_proposal() -> QuestionSet {
         project: Some("verkstead".to_owned()),
         branch: Some("usage-limits".to_owned()),
         diff: None,
+        diffs: Vec::new(),
     }
 }
 
@@ -1342,12 +1459,35 @@ const FIXTURES: &str = "../../web/tests/fixtures";
 #[tokio::test]
 async fn the_viewers_own_tests_are_fed_from_here() {
     // A Set to answer: every feature of the question grammar, the agent's markup
-    // throughout, and a Diff attached.
+    // throughout, and a Diff attached — one repository's, which is the Diff a
+    // Conversation with no companions has and the one every page drew until
+    // there could be more than one.
     let (_dir, pool, app) = fresh_app().await;
     let mut answering = marked_up_set();
-    answering.diff = Some(modified_and_untracked_diff());
+    answering.diffs = vec![RepoDiff {
+        repo: "verkstead".to_owned(),
+        diff: modified_and_untracked_diff(),
+    }];
     let (_, json) = set_json(&app, &pool, &answering).await;
     write("set-answering.json", &json);
+
+    // And the same Set asked with a read-write companion beside the work, which
+    // is the Diff of more than one repository: a labeled block each, in the
+    // order they were composed.
+    let (_dir, pool, app) = fresh_app().await;
+    let mut alongside = marked_up_set();
+    alongside.diffs = vec![
+        RepoDiff {
+            repo: "verkstead".to_owned(),
+            diff: modified_and_untracked_diff(),
+        },
+        RepoDiff {
+            repo: "askance".to_owned(),
+            diff: companion_diff(),
+        },
+    ];
+    let (_, json) = set_json(&app, &pool, &alongside).await;
+    write("set-alongside.json", &json);
 
     // The same Set answered, which is the same page read rather than filled in.
     let (_dir, pool, app) = fresh_app().await;

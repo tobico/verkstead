@@ -1,11 +1,18 @@
-//! The Diff a Question Set carries: the uncommitted changes of the Worktree the
-//! Set was asked from, read here rather than sent.
+//! The Diff a Question Set carries: the uncommitted changes of every Worktree
+//! the Set was asked from, read here rather than sent.
 //!
 //! The server knows which Conversation a Set arrives from without inferring it —
 //! the endpoint is conversation-scoped, because that is the base URL the sandbox
-//! was given — and it knows where that Conversation was checked out. So the
-//! Diff is composed from its own read of that Worktree, and whatever the Set
-//! claimed is overwritten.
+//! was given — and it knows where that Conversation was checked out, its
+//! companions along with its own. So the Diff is composed from its own read of
+//! those Worktrees, one block per repository, and whatever the Set claimed is
+//! overwritten.
+//!
+//! One block per repository a session can write in: the Conversation's own
+//! first, then each read-write companion. A read-only companion is checked out
+//! detached and bound read-only, so there is nothing uncommitted in it to find.
+//! Uncommitted only, throughout — committed work is on the Timeline as Events
+//! already — and a repository with a clean Worktree contributes no block at all.
 //!
 //! Determinism over trust (ADR-0001), strengthened rather than bent: the field
 //! was already never the agent's to fill, and the authority for it moves from a
@@ -19,43 +26,87 @@
 //! waiting on this Set may hold `index.lock`, and a reader that waited on one
 //! would be waiting on itself.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use verkstead_schema::RepoDiff;
 
 use sqlx::SqlitePool;
 
 use crate::repos::{accepting, git};
 use crate::store;
 
-/// What to attach to a Set asked from `conversation_id`.
+/// What to attach to a Set asked from `conversation_id`, one block per
+/// repository with something uncommitted in it.
 ///
-/// `None` where there is nothing to attach: a clean Worktree, a Conversation
-/// with none — nothing has been checked out, or it has been closed — or a
-/// repository that will not answer. None of those refuses the Set: a Question
+/// Empty where there is nothing to attach: every Worktree clean, a Conversation
+/// with none — nothing has been checked out, or it has been closed — or
+/// repositories that will not answer. None of those refuses the Set: a Question
 /// is worth putting to the human whether or not there is code beside it.
-pub(crate) async fn compose(pool: &SqlitePool, conversation_id: i64) -> Option<String> {
-    let read = match store::load_conversation(pool, conversation_id).await {
-        Ok(conversation) => conversation?.worktree?,
+pub(crate) async fn compose(pool: &SqlitePool, conversation_id: i64) -> Vec<RepoDiff> {
+    let conversation = match store::load_conversation(pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Vec::new(),
         Err(error) => {
             tracing::error!(
                 error = ?error,
                 conversation_id,
                 "reading a Conversation to compose its Set's Diff failed"
             );
-            return None;
+            return Vec::new();
         }
     };
 
-    match tokio::task::spawn_blocking(move || uncommitted(&read)).await {
-        Ok(diff) => diff,
+    let read = writable(&conversation);
+
+    match tokio::task::spawn_blocking(move || blocks(read)).await {
+        Ok(diffs) => diffs,
         Err(error) => {
             tracing::error!(
                 error = ?error,
                 conversation_id,
                 "reading a Worktree's uncommitted changes failed"
             );
-            None
+            Vec::new()
         }
     }
+}
+
+/// Every Worktree a session running for this Conversation can leave uncommitted
+/// work in, named by the Repo it is a checkout of: the Conversation's own first,
+/// then each read-write companion in the order the Conversation carries them.
+///
+/// A repository with no Worktree is not among them — a Conversation before
+/// grilling or after closing has none, and neither has a companion of one, which
+/// is the ordinary state rather than a missing record. A read-only companion is
+/// left out for what it is: detached and bound read-only, with nothing to
+/// commit and so nothing uncommitted.
+fn writable(conversation: &store::Conversation) -> Vec<(String, PathBuf)> {
+    let mut worktrees = Vec::new();
+
+    if let Some(worktree) = conversation.worktree.clone() {
+        worktrees.push((conversation.repo.name.clone(), worktree));
+    }
+
+    for companion in &conversation.companions {
+        if companion.mode != store::CompanionMode::ReadWrite {
+            continue;
+        }
+
+        if let Some(worktree) = companion.worktree.clone() {
+            worktrees.push((companion.repo.name.clone(), worktree));
+        }
+    }
+
+    worktrees
+}
+
+/// The blocks those Worktrees come to, in the order they were given. Blocking,
+/// which is why it is called from a worker of its own.
+fn blocks(worktrees: Vec<(String, PathBuf)>) -> Vec<RepoDiff> {
+    worktrees
+        .into_iter()
+        .filter_map(|(repo, worktree)| uncommitted(&worktree).map(|diff| RepoDiff { repo, diff }))
+        .collect()
 }
 
 /// A Worktree's uncommitted changes: everything not in the last commit, staged

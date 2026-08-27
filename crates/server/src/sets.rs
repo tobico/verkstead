@@ -8,8 +8,9 @@
 //! would be indistinguishable by either of those.
 //!
 //! Knowing the Conversation is also what lets the Diff be read here rather than
-//! sent: the Worktree it names is on this host, so its uncommitted changes are
-//! composed as the Set arrives — see [`crate::diffs`].
+//! sent: the Worktrees it names are on this host, so their uncommitted changes
+//! are composed as the Set arrives, one block per repository — see
+//! [`crate::diffs`].
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -83,10 +84,14 @@ pub(crate) async fn create_set(
         );
     }
 
-    // Whatever the Set claims its Diff is, the Conversation's Worktree is the
-    // authority — and this is where that read happens now, close enough to the
-    // Worktree to do it. See [`crate::diffs`].
-    set.diff = crate::diffs::compose(&state.pool, conversation_id).await;
+    // Whatever the Set claims its Diff is, the Conversation's Worktrees are the
+    // authority — and this is where that read happens now, close enough to them
+    // to do it. One block per repository the work may be written in, and the
+    // single field a Set used to carry left empty: it is what the Sets stored
+    // before the Diff became a list are read back through, and not somewhere for
+    // a claim of the agent's to survive. See [`crate::diffs`].
+    set.diff = None;
+    set.diffs = crate::diffs::compose(&state.pool, conversation_id).await;
 
     match store::ask(&state.pool, conversation_id, &set, asking.kind()).await {
         Ok(Some(created)) => {

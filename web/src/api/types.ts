@@ -1467,6 +1467,23 @@ export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPa
 export type Registration = { path: string, };
 
 /**
+ * One repository's block of a Set's Diff: what it is called, and its
+ * uncommitted changes rendered as any other Diff is.
+ *
+ * The blocks come in the order they were composed in — the Conversation's own
+ * repository first, then its read-write companions — and the anchors inside
+ * them run on across the whole Diff, so `paths[0]` of the second block is
+ * whichever `diff-n` the first one left off before.
+ */
+export type RepoDiffView = { 
+/**
+ * The repository's registered name, and `null` on a Diff that is one block:
+ * a lone block is the work's own repository said twice, and the label earns
+ * its place when repos mix — which is the rule a commit card follows.
+ */
+repo: string | null, diff: DiffView, };
+
+/**
  * One row of the Repo list.
  *
  * The path is the resolved one the server recorded rather than whatever was
@@ -1639,7 +1656,13 @@ export type SetView = { id: number,
  * a way back that arrived a moment later would be a page that briefly led
  * nowhere.
  */
-conversation: number, title: string, project: string | null, branch: string | null, preface_html: string | null, diff: DiffView | null, questions: Array<QuestionView>, 
+conversation: number, title: string, project: string | null, branch: string | null, preface_html: string | null, 
+/**
+ * The uncommitted changes the Set was asked over, one block per repository
+ * — see [`RepoDiffView`]. Empty where there were none, which is what leaves
+ * the Diff off the page altogether.
+ */
+diff: Array<RepoDiffView>, questions: Array<QuestionView>, 
 /**
  * What the agent closed the Set with, for the page to draw above the
  * set-level comment box. Rendered here like the Preface, because it is the

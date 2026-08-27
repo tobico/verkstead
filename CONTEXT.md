@@ -716,11 +716,17 @@ May contain zero Answers.
 _Avoid_: submission, result
 
 **Diff**:
-The uncommitted changes (including untracked files) of the asking Worktree,
-read by the server as the Question Set arrives and attached to it, so code
-approval can happen in the web UI. The server knows which Conversation a Set
-was asked from and can read that Worktree itself, so nothing about it is taken
-on trust from what was sent.
+The uncommitted changes (including untracked files) of the Worktrees a Question
+Set was asked from, read by the server as it arrives and attached to it, so code
+approval can happen in the web UI. The server knows which Conversation a Set was
+asked from and can read those Worktrees itself, so nothing about it is taken on
+trust from what was sent.
+One block per repository a session may write in — the Conversation's own first,
+then each read-write Companion Repo — each named by its Repo. A repository with
+a clean Worktree contributes no block, and every one of them clean is a Set with
+no Diff. The page draws the blocks under one *Diff* heading and labels them,
+except where the Diff is a single block: the label earns its place when repos
+mix, which is the rule a commit card follows.
 _Avoid_: patch, changeset
 
 **Diagram**:

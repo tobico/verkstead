@@ -6699,14 +6699,15 @@ const COMMITS = BUILDING.timeline.flatMap((event) =>
 /// One commit, as the details pane fetches it: no summary, which is the
 /// bookkeeping commit and every commit recorded before summaries were kept.
 ///
-/// The diff is built from the answering set's own attached diff rather than
-/// written by hand: it is the same `DiffView`, rendered by the same server-side
-/// renderer that a commit's diff goes through — which is the whole reason a
-/// commit needs no diff machinery of its own.
+/// The diff is built from the one block of the answering set's own attached
+/// Diff rather than written by hand: it is the same `DiffView`, rendered by the
+/// same server-side renderer that a commit's diff goes through — which is the
+/// whole reason a commit needs no diff machinery of its own. One repository's,
+/// because a commit lands in one.
 const COMMIT_PANE: CommitPane = {
   summary: null,
   diagrams: false,
-  diff: readable(answeringSet).diff,
+  diff: readable(answeringSet).diff[0]!.diff,
 };
 
 /// The same commit with something to say for itself: the summary as the server

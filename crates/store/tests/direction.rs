@@ -102,6 +102,7 @@ fn proposing(direction: Direction) -> QuestionSet {
         project: None,
         branch: None,
         diff: None,
+        diffs: Vec::new(),
     }
 }
 

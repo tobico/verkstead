@@ -12,7 +12,16 @@
             "notes.txt"
           ]
         },
-        "repo": null
+        "repo": "verkstead"
+      },
+      {
+        "diff": {
+          "html": "<details class=\"diffFile\" id=\"diff-3\" open><summary><span class=\"diffPath\">src/set.rs</span><span class=\"diffStat\"><span class=\"add\">+1</span><span class=\"del\">−1</span></span></summary><div class=\"diffHunk\"><p class=\"diffHunkHeader\">@@ -1,3 +1,3 @@</p><pre class=\"diffLines\"><code><span class=\"diffLine ctx\"><span class=\"diffNumber\">1</span><span class=\"marker\"> </span><span class=\"tok-source tok-rust\"><span class=\"tok-meta tok-struct tok-rust\"><span class=\"tok-storage tok-modifier tok-rust\">pub</span> <span class=\"tok-storage tok-type tok-struct tok-rust\">struct</span> </span><span class=\"tok-meta tok-struct tok-rust\"><span class=\"tok-entity tok-name tok-struct tok-rust\">QuestionSet</span> </span><span class=\"tok-meta tok-struct tok-rust\"><span class=\"tok-meta tok-block tok-rust\"><span class=\"tok-punctuation tok-section tok-block tok-begin tok-rust\">{</span></span></span></span></span><span class=\"diffLine del\"><span class=\"diffNumber\"></span><span class=\"marker\">-</span><span class=\"tok-source tok-rust\">    <span class=\"tok-storage tok-modifier tok-rust\">pub</span> diff<span class=\"tok-punctuation tok-separator tok-rust\">:</span> <span class=\"tok-meta tok-generic tok-rust\"><span class=\"tok-support tok-type tok-rust\">Option</span><span class=\"tok-punctuation tok-definition tok-generic tok-begin tok-rust\">&lt;</span><span class=\"tok-support tok-type tok-rust\">String</span><span class=\"tok-punctuation tok-definition tok-generic tok-end tok-rust\">&gt;</span></span><span class=\"tok-punctuation tok-separator tok-rust\">,</span></span></span><span class=\"diffLine add\"><span class=\"diffNumber\">2</span><span class=\"marker\">+</span><span class=\"tok-source tok-rust\">    <span class=\"tok-storage tok-modifier tok-rust\">pub</span> diffs<span class=\"tok-punctuation tok-separator tok-rust\">:</span> <span class=\"tok-meta tok-generic tok-rust\"><span class=\"tok-support tok-type tok-rust\">Vec</span><span class=\"tok-punctuation tok-definition tok-generic tok-begin tok-rust\">&lt;</span>RepoDiff<span class=\"tok-punctuation tok-definition tok-generic tok-end tok-rust\">&gt;</span></span><span class=\"tok-punctuation tok-separator tok-rust\">,</span></span></span><span class=\"diffLine ctx\"><span class=\"diffNumber\">3</span><span class=\"marker\"> </span><span class=\"tok-source tok-rust\">}</span></span></code></pre></div></details>",
+          "paths": [
+            "src/set.rs"
+          ]
+        },
+        "repo": "askance"
       }
     ],
     "id": 1,

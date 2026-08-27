@@ -17,6 +17,7 @@ import styles from "../src/set/Diff.module.css";
 import toggle from "../src/Switch.module.css";
 import { mount, reading, texts } from "./reading";
 import { json, readable, reads, serving, whenever } from "./serving";
+import alongside from "./fixtures/set-alongside.json" with { type: "json" };
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
 
@@ -24,6 +25,10 @@ import answering from "./fixtures/set-answering.json" with { type: "json" };
 /// file the server has highlighted.
 const WAITING = readable(answering);
 const UNDIFFED = readable(answered);
+
+/// And one asked with a read-write companion beside the work: the same two
+/// files, and a third out of the other repository.
+const ALONGSIDE = readable(alongside);
 
 /// Where the wrap setting is kept — the key `src/device.ts` writes, asked for
 /// here by the name a browser would find it under.
@@ -147,6 +152,52 @@ describe("the attached Diff", () => {
     expect(
       page.querySelector(`.${toggle.switch}`),
       "and nowhere for word wrap to belong: it governs a Diff, and there is none",
+    ).toBeNull();
+  });
+});
+
+describe("a Diff of more than one repository", () => {
+  it("draws a block per repository, each named and in the order composed", async () => {
+    const diff = diffOf(await reading(ALONGSIDE));
+
+    expect(
+      texts(diff, `h3.${styles.repo}`),
+      "the work's own repository first, then the companion it was asked beside",
+    ).toEqual(["verkstead", "askance"]);
+  });
+
+  it("anchors the folds across the blocks rather than restarting at each", async () => {
+    const diff = diffOf(await reading(ALONGSIDE));
+
+    const folds = diff.querySelectorAll<HTMLDetailsElement>("details.diffFile");
+    expect(
+      [...folds].map((fold) => fold.id),
+      "the ids are one page's, so a jump lands on the fold it names",
+    ).toEqual(["diff-1", "diff-2", "diff-3"]);
+    expect(texts(diff, "details.diffFile .diffPath")).toEqual([
+      "src/limits.rs",
+      "notes.txt",
+      "src/set.rs",
+    ]);
+  });
+
+  it("is one Diff section, whatever it is made of", async () => {
+    const page = await reading(ALONGSIDE);
+
+    expect(page.querySelectorAll(`section.${styles.diff}`)).toHaveLength(1);
+    expect(
+      texts(page, `h2.${app.sectionHeading}`).filter((name) => name === "Diff"),
+      "one heading over the lot: the blocks are inside it",
+    ).toEqual(["Diff"]);
+  });
+
+  it("leaves one repository's changes unlabeled", async () => {
+    const diff = diffOf(await reading(WAITING));
+
+    expect(
+      diff.querySelector(`h3.${styles.repo}`),
+      "a Diff of one block is the work's own repository, and the label earns " +
+        "its place when repos mix",
     ).toBeNull();
   });
 });

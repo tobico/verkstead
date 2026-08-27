@@ -23,11 +23,15 @@ import contents from "../src/set/Contents.module.css";
 import diff from "../src/set/Diff.module.css";
 import { reading, texts } from "./reading";
 import { readable } from "./serving";
+import alongside from "./fixtures/set-alongside.json" with { type: "json" };
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
 import locked from "./fixtures/set-locked.json" with { type: "json" };
 
 const WAITING = readable(answering);
+
+/// The Set whose Diff is two repositories': what the nav groups.
+const ALONGSIDE = readable(alongside);
 
 /// The two settled standings, each given the Diff the waiting fixture carries:
 /// a Set is read for what it asked about however it stands, so the nav has the
@@ -36,7 +40,7 @@ const ANSWERED: SetView = { ...readable(answered), diff: WAITING.diff };
 const LOCKED: SetView = { ...readable(locked), diff: WAITING.diff };
 
 /// A Set with neither of the two sections a Set can be without.
-const BARE: SetView = { ...WAITING, preface_html: null, diff: null };
+const BARE: SetView = { ...WAITING, preface_html: null, diff: [] };
 
 /// What one crossing of the reading line says, as the spy is told it.
 type Crossing = { target: { id: string }; isIntersecting: boolean };
@@ -249,6 +253,41 @@ describe("the table of contents", () => {
       line(nav, "diff-1").title,
       "the column is narrow, so the whole of a cut path is readable here",
     ).toBe("src/limits.rs");
+  });
+
+  it("groups a Diff's files under the repository each came out of", async () => {
+    const nav = navOf(await reading(ALONGSIDE));
+
+    expect(
+      texts(nav, `li.${contents.group}`),
+      "one heading per block, in the order the Diff draws them",
+    ).toEqual(["verkstead", "askance"]);
+
+    // Still one *Diff* entry with the files under it, and a file still jumps
+    // to the fold it names — the grouping is a heading among the lines rather
+    // than a section of its own.
+    expect(jumps(nav)).toEqual([
+      "#preface",
+      "#diff",
+      "#diff-1",
+      "#diff-2",
+      "#diff-3",
+      "#questions",
+      "#q1",
+      "#q2",
+      "#q3",
+      "#postscript",
+    ]);
+    expect(line(nav, "diff-3").textContent).toBe("src/set.rs");
+  });
+
+  it("names no repository over a Diff of one", async () => {
+    const nav = navOf(await reading(WAITING));
+
+    expect(
+      nav.querySelectorAll(`li.${contents.group}`),
+      "the label earns its place when repos mix, in the nav as on the page",
+    ).toHaveLength(0);
   });
 
   it("lists only the sections the Set has", async () => {
