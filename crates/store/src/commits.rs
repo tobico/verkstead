@@ -123,7 +123,7 @@ pub async fn record_commit(
     conversation_id: i64,
     commit: &Commit,
 ) -> Result<Option<i64>> {
-    let mut tx = pool.begin().await.context("recording a commit")?;
+    let mut tx = super::writing(pool, "recording a commit").await?;
 
     // Asked inside the transaction, so that the answer still holds when the
     // insert below acts on it. The unique index is what settles it either way:

@@ -456,7 +456,7 @@ pub async fn forget_addressed_comments(
 /// What it does *not* wait for is the merge. Done means Verkstead has finished
 /// with the work, not that it is on `main`.
 pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<Finished> {
-    let mut tx = pool.begin().await.context("finishing a wrap-up")?;
+    let mut tx = super::writing(pool, "finishing a wrap-up").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(conversation_id)

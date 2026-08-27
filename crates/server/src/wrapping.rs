@@ -127,10 +127,16 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "recording a pull request failed");
 
+            // `{error:#}` rather than `{error}`, because what a Notice is for is
+            // the human working out what to do about it. Displayed plainly, an
+            // anyhow error is its outermost context and nothing else — *putting
+            // a pull request on the Timeline of Conversation 43* — which names
+            // the step and withholds the reason it failed. The alternate form
+            // carries the chain down to what the database actually said.
             stopped(
                 state,
                 conversation_id,
-                &format!("the pull request could not be recorded: {error}"),
+                &format!("the pull request could not be recorded: {error:#}"),
                 writing,
             )
             .await;
