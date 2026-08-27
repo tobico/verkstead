@@ -750,6 +750,22 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// what it committed, which the branch watcher is putting on the Timeline while
 /// it runs.
 ///
+/// **Ended on committed plus quiet**, which is [`instructed`]'s rule on a
+/// session of the same shape: there is no path to watch, and a commit is the one
+/// report an agent cannot half make. Work does not always stop at the commit —
+/// the push and the pull request come after one — so the session is ended only
+/// once it has printed nothing for the grace, and anything it prints puts the
+/// whole grace back on the clock. Waiting for the process to exit instead would
+/// be waiting for something that never comes: every session here is an
+/// interactive agent that idles when its work is done.
+///
+/// **And one that will not ask is spoken to**, on the same commit. Idle with
+/// nothing committed and nothing put to the human is the whole of an inline run
+/// come to nothing with a process still holding the Worktree — a Conversation
+/// nobody can move, driven so nothing sweeps it and silent so nothing says so.
+/// Told twice and then stopped where it stands, as every other driver here does
+/// it. See [`crate::rescues`].
+///
 /// Landing is measured against what was already there rather than against zero,
 /// which is what makes a second go answerable: a first attempt that committed
 /// twice and then died leaves two commits behind, and a second that commits
@@ -790,7 +806,69 @@ async fn follow_inline(
         }
     };
 
-    let ended = session.ended().await;
+    let quiet = session.quiet.clone();
+    let pace = state.sessions.pace();
+
+    let ended = tokio::select! {
+        ended = session.ended() => Some(ended),
+        // What an inline session that has done its work looks like from here:
+        // more on the branch than it started with, and nothing printed for the
+        // grace. Waited for rather than left to the exit, because an
+        // interactive agent idles when its work is done rather than exiting —
+        // which is [`instructed`]'s rule, on a session whose whole job is the
+        // same shape.
+        () = committed_and_quiet(&state, conversation_id, already, &quiet, pace) => None,
+        // And one that is idle with nothing committed and nothing put to the
+        // human: the whole of an inline run come to nothing, with a process
+        // still holding the Worktree and nothing on the page to press. Told
+        // twice and then stopped where it stands, the commit being its
+        // done-indicator — see [`crate::rescues`].
+        () = crate::rescues::until_it_will_not_ask(
+            &state,
+            conversation_id,
+            event_id,
+            &quiet,
+            pace,
+            crate::rescues::Done::Committed { already },
+        ) => {
+            tracing::warn!(
+                conversation_id,
+                event_id,
+                "the inline session went quiet without committing anything or asking \
+                 about it, so the Conversation stops here",
+            );
+
+            state.sessions.end(conversation_id).await;
+
+            return stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "implementing the work inline",
+                crate::rescues::WOULD_NOT_ASK,
+                Some(event_id),
+            )
+            .await;
+        }
+    };
+
+    // Committed and gone quiet, which is an inline implementation done. The
+    // session is ended rather than waited out, and what follows is the ending a
+    // landed run has always had: the skill carried the branch to a pull request
+    // on its way out, and [`crate::wrapping::opened`] is what finds it — or
+    // stops naming what it could not find, which is the same answer this has
+    // always given a branch with nothing on it.
+    let Some(ended) = ended else {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "an inline session has committed and gone quiet, so it is being ended",
+        );
+
+        state.sessions.end(conversation_id).await;
+
+        return crate::wrapping::opened(&state, conversation_id, Some(event_id)).await;
+    };
 
     // Verkstead ended it — the human closed the Conversation or force-stopped
     // it, or the account it was spending ran out of window. Whichever it was,
@@ -2101,7 +2179,7 @@ async fn see_out(
         // The step is not landing and the session is not asking about it: it has
         // gone idle with nothing open and nothing on the branch, which is a run
         // nobody can move. Told twice and then stopped where it stands — see
-        // [`crate::rescues`], whose loop this is one of four callers of.
+        // [`crate::rescues`], whose loop this is one of five callers of.
         () = crate::rescues::until_it_will_not_ask(
             state,
             conversation_id,

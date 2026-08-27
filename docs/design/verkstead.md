@@ -92,12 +92,16 @@ flowchart LR
   Follow-up is where it started, the state where an idle session is exactly the
   failure (*added 2026-08-27, building follow-ups*). It now watches **every
   session Verkstead launches**, one loop with the state's own done-indicator as
-  its parameter: a grilling's artifact, a backlog step's task file, an
-  instruction's or a fix's commit, a follow-up's Nothing-else mark. A session
+  its parameter: a grilling's artifact, a backlog step's task file, an inline
+  implementation's, an instruction's or a fix's commit, a follow-up's
+  Nothing-else mark. A session
   with a set open is waiting on the human and one still printing is at work, so
   neither is ever spoken to; a fix session is ended rather than stopped over,
   the wrap-up's two goes at a check being the stop it already has (*refined
-  2026-08-27, building follow-ups*).
+  2026-08-27, building follow-ups*). The inline session was the one the sweep
+  left out, and it had no quiet ending either — so it is ended on committed plus
+  quiet, the way the instruction session it is the same shape as always was
+  (*refined 2026-08-27, reviewing follow-ups*).
 - **Agent profiles** are minimal: name, claude home dir + config file pair, the
   list of models that account can run — plus an agent-type discriminator so
   other backends can slot in later (claude is the only type now). The model

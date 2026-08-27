@@ -610,8 +610,9 @@ the grace again.
 
 **Every session Verkstead launches**, one loop with the state's own
 done-indicator as its parameter: a grilling's artifact, a backlog Step's task
-file, an instruction's or a fix's commit, a follow-up's Nothing-else mark. What
-differs from one state to the next is only what *finished* looks like.
+file, an inline implementation's, an instruction's or a fix's commit, a
+follow-up's Nothing-else mark. What differs from one state to the next is only
+what *finished* looks like.
 
 **Twice at most**, the second silence being evidence rather than bad luck. A
 session still saying nothing after the second is ended where it stands and the

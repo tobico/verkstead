@@ -13337,6 +13337,48 @@ fn a_grilling_that_never_writes_the_backlog() -> String {
     )
 }
 
+/// An inline pick whose implementation session comes up, says a word and then
+/// goes idle with nothing committed.
+///
+/// The grilling half writes its handoff and waits, which is what ends a grilling
+/// on an inline pick; what is being asked about is the session on the other side
+/// of it.
+const AN_INLINE_RUN_THAT_GOES_IDLE: &str = r#"
+case "$1" in
+claude-grilling-5)
+    printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+*)
+    printf 'reading the handoff\n'
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#;
+
+/// The same, except that the implementation session commits its work and then
+/// idles rather than exiting — which is what an interactive agent with nothing
+/// left to do actually does.
+const AN_INLINE_RUN_THAT_COMMITS_AND_IDLES: &str = r#"
+case "$1" in
+claude-grilling-5)
+    printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+*)
+    printf 'reading the handoff\n'
+    printf 'a limiter\n' > limiter.md
+    git add limiter.md
+    git commit --quiet -m 'feat: rate limiting'
+    printf 'pushed, and the pull request is open\n'
+    sleep 300
+    ;;
+esac
+"#;
+
 /// A backlog of one whose step session comes up, says a word and then goes idle
 /// with the task file exactly where it found it.
 ///
@@ -13538,6 +13580,86 @@ async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_stopped() {
         stopped.html,
     );
     assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// And an inline implementation that goes quiet without committing anything is
+/// told and stopped the same way.
+///
+/// The one driver the sweep had been left out of, and the worst place to leave
+/// it: an inline run is the whole of a Conversation's work in one session, so
+/// one sitting there with its turn over held the Worktree and the registration
+/// that says the Conversation is being driven — for ever, with nothing swept
+/// because it *was* driven and nothing said because it never spoke.
+#[tokio::test]
+async fn an_inline_session_that_goes_quiet_without_committing_is_told_and_then_stopped() {
+    let fixture = grilling(AN_INLINE_RUN_THAT_GOES_IDLE).await;
+
+    picked(&fixture, "inline").await;
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        said[0].contains("nothing you print here reaches me"),
+        "the same line, in the words somebody watching would have typed: \
+         {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("Implementing the work inline"),
+        "the Notice names what was being done: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and says why it stopped: {:?}",
+        stopped.html,
+    );
+    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// And one that commits and then idles is ended on that, rather than waited out.
+///
+/// Every session here is an interactive agent that idles when its work is done
+/// rather than exiting, so a run that waited to see one exit was waiting for
+/// something that need never come. What says an inline implementation did its
+/// work is what it committed, and the grace after the commit is what lets the
+/// push and the pull request come after it.
+#[tokio::test]
+async fn an_inline_session_that_commits_and_idles_is_ended_on_that_and_wraps_up() {
+    let fixture = grilling(AN_INLINE_RUN_THAT_COMMITS_AND_IDLES).await;
+
+    picked(&fixture, "inline").await;
+
+    // Both facts off the one view, read at the moment it got there: what the
+    // wrap-up goes on to dispatch is not this test's, and a second read would be
+    // asking about a Worktree the review had by then.
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
+                .then(|| view.clone())
+        })
+        .await;
+
+    // Which is proof enough that the session was ended rather than waited out:
+    // the Worktree is handed on only once it is, and the stub is still sitting
+    // in its `sleep` — so nothing here could have reached a pull request by
+    // waiting for the process to go.
+    assert_eq!(
+        pull_request(&view)
+            .expect("a wrapping Conversation has a pull request")
+            .number,
+        41,
+        "the branch went for review the way a landed inline run always has",
+    );
+
+    assert!(
+        notices(&view).is_empty(),
+        "with nothing stopped on the way: a session that committed and went \
+         quiet is one that did its work: {:?}",
+        notices(&view),
+    );
 }
 
 /// A session sitting on a Blocking Ask is never spoken to, however long it sits

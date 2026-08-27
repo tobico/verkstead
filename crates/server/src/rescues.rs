@@ -19,9 +19,9 @@
 //! Resume is what they have.
 //!
 //! **The same condition in every state.** A grilling writing the artifact its
-//! pick asked for, a backlog step, an instruction, a fix, a follow-up: each of
-//! them is a session that should be either working, asking or finished, and
-//! *none of the three* is the shape this watches for. What differs from one to
+//! pick asked for, a backlog step, an inline implementation, an instruction, a
+//! fix, a follow-up: each of them is a session that should be either working,
+//! asking or finished, and *none of the three* is the shape this watches for. What differs from one to
 //! the next is only what *finished* looks like — a path on the branch, a commit,
 //! the human's own mark — so that is the parameter and the loop is not. See
 //! [`Done`], and [`until_it_will_not_ask`], which is the whole of the mechanism.
