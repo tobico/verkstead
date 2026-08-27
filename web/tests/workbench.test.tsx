@@ -62,8 +62,10 @@ import { STOP_REFUSAL } from "../src/workbench/Actions";
 import actions from "../src/workbench/Actions.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import adoption from "../src/workbench/Adoption.module.css";
-// The detail panes, each a module of its own: a commit, a document read whole,
-// one session's record and the terminal it was printed on, and a pull request.
+// The detail panes, each a module of its own: the brief and what the
+// conversation was configured with, a commit, a document read whole, one
+// session's record and the terminal it was printed on, and a pull request.
+import briefPane from "../src/workbench/Brief.module.css";
 import commitPane from "../src/workbench/Commit.module.css";
 // The Diff section the commit pane draws, which is the Set page's own component
 // and so the Set page's own module.
@@ -103,7 +105,12 @@ import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // jsdom lays nothing out for, and the pane names everything else is found by.
 import shell from "../src/workbench/Workbench.module.css";
 import shellCss from "../src/workbench/Workbench.module.css?raw";
-import { CLAMPED_LINES, RESUME_REFUSAL, SWIPE } from "../src/workbench/Timeline";
+import {
+  ABBREVIATED,
+  CLAMPED_LINES,
+  RESUME_REFUSAL,
+  SWIPE,
+} from "../src/workbench/Timeline";
 import {
   COMPANION_BRANCH_REFUSAL,
   COMPANION_MODE_REFUSAL,
@@ -9138,7 +9145,9 @@ describe("the documents on a timeline", () => {
 
     fireEvent.click(brief);
 
-    const opened = await drawn(details(), `.${documentPane.document}`);
+    // Its own pane rather than the one the handoff and the instruction share,
+    // because it carries the configuration summary under the markdown.
+    const opened = await drawn(details(), `.${briefPane.brief}`);
 
     expect(details().querySelector("h1")!.textContent).toBe("Brief");
     // The whole of it, and not inside a clamp: the pane is where a document
@@ -9249,6 +9258,200 @@ describe("the documents on a timeline", () => {
 
     expect(notice.querySelector(`.${timeline.clamp}`)).toBeNull();
     expect(notice.getAttribute("role")).toBeNull();
+  });
+});
+
+/// What the conversation was configured with, under the brief that started it.
+///
+/// The setup card goes when the brief freezes, so this is the only place the
+/// rest of a conversation's life says what it was set up with — a read-write
+/// companion surfaces later through its commits and its pull request, and a
+/// read-only one never does. The worktree directories and the two pairings are
+/// as unfindable, which is why they are here too.
+describe("the configuration on the brief's pane", () => {
+  /// The details pane, and the summary it has drawn.
+  const details = () => screen.getByLabelText("Details");
+  const summary = () => details().querySelector(`.${briefPane.configuration}`);
+
+  /// Every term the summary lays out against what it says, which is how the
+  /// pane is read: down the terms, past the ones it was not opened for.
+  function facts(list: Element): Record<string, string> {
+    return Object.fromEntries(
+      [...list.querySelectorAll(`.${briefPane.fact}`)].map((fact) => [
+        fact.querySelector("dt")!.textContent,
+        fact.querySelector("dd")!.textContent,
+      ]),
+    );
+  }
+
+  /// The conversation's own facts, which are the first list on the pane — a
+  /// companion's are inside the block that names it.
+  function configuration(): Record<string, string> {
+    return facts(summary()!.querySelector(`.${briefPane.facts}`)!);
+  }
+
+  /// Every companion block, in the order the conversation carries them.
+  function companions(): Record<string, string>[] {
+    return [...summary()!.querySelectorAll(`.${briefPane.companion}`)].map(
+      (block) => ({
+        Repo: block.querySelector(`.${briefPane.companionName}`)!.textContent!,
+        ...facts(block.querySelector(`.${briefPane.facts}`)!),
+      }),
+    );
+  }
+
+  /// The brief opened, whichever conversation is being served.
+  async function openBrief(conversation: ConversationView): Promise<void> {
+    const { container } = mount(`/conversations/${conversation.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`),
+    );
+
+    await drawn(details(), `.${briefPane.configuration}`);
+  }
+
+  /// A read-only companion left on the rule, and a read-write one left
+  /// mirroring: the two shapes a companion row can freeze in, which no fixture
+  /// holds — a golden file is one payload, and these are a conversation
+  /// configured two ways at once.
+  const READING: CompanionView = {
+    repo: {
+      id: 2,
+      name: "askance",
+      path: "/srv/repos/askance",
+      default_branch: "trunk",
+    },
+    mode: "ReadOnly",
+    base_ref: null,
+    branch: "",
+    worktree: {
+      path: "/var/lib/verkstead/worktrees/askance-trunk",
+      missing: false,
+    },
+  };
+
+  const WRITING: CompanionView = {
+    repo: {
+      id: 3,
+      name: "tobico-skills",
+      path: "/srv/repos/tobico-skills",
+      default_branch: "main",
+    },
+    mode: "ReadWrite",
+    base_ref: "main",
+    branch: "",
+    worktree: {
+      path: `/var/lib/verkstead/worktrees/tobico-skills-${GRILLING.branch}`,
+      missing: false,
+    },
+  };
+
+  it("says the repo, the branch, the base commit, the worktree and both pairings", async () => {
+    theGrilling();
+    await openBrief(GRILLING);
+
+    // Under the brief itself rather than over it: the document is what the pane
+    // is titled for, and this is what follows it.
+    const panes = [...details().children];
+    const markdown = panes.findIndex((pane) =>
+      pane.classList.contains(briefPane.brief!),
+    );
+    expect(markdown).toBeGreaterThan(-1);
+    expect(
+      panes.findIndex((pane) =>
+        pane.classList.contains(briefPane.configuration!),
+      ),
+    ).toBeGreaterThan(markdown);
+
+    expect(configuration()).toEqual({
+      Repo: GRILLING.repo.name,
+      Branch: GRILLING.branch,
+      // The commit, abbreviated the way every other commit on the page is.
+      Base: GRILLING.base_commit!.slice(0, ABBREVIATED),
+      Worktree: GRILLING.worktree!.path,
+      Grilling: "fable — claude-fable-5",
+      Implementation: "opus — claude-opus-5",
+    });
+  });
+
+  it("lists each companion with its mode, its branch and its directory", async () => {
+    theGrillingStanding({ companions: [READING, WRITING] });
+    await openBrief(GRILLING);
+
+    expect(companions()).toEqual([
+      {
+        Repo: "askance",
+        Access: "Read-only",
+        // No branch, because a read-only companion is checked out detached —
+        // and left on the rule, so what it came off is that repo's own default
+        // branch rather than the conversation's.
+        "Detached at": "trunk",
+        Worktree: READING.worktree!.path,
+      },
+      {
+        Repo: "tobico-skills",
+        Access: "Read-write",
+        // Left mirroring, which is the conversation's own branch name — the
+        // record holds nothing, and this is what nothing resolves to.
+        Branch: GRILLING.branch,
+        Worktree: WRITING.worktree!.path,
+      },
+    ]);
+  });
+
+  it("summarises a conversation with no companions all the same", async () => {
+    theGrilling();
+    await openBrief(GRILLING);
+
+    expect(GRILLING.companions).toHaveLength(0);
+    expect(Object.keys(configuration())).toContain("Worktree");
+    // No heading over an empty list: a section saying a conversation has no
+    // companions would read as something having gone missing.
+    expect(summary()!.querySelector(`.${briefPane.companions}`)).toBeNull();
+  });
+
+  /// A directory somebody deleted by hand is a conversation with a problem,
+  /// said where the directory is said rather than left for whatever next tries
+  /// to work in it to fall over on.
+  it("says which checkout is gone from disk", async () => {
+    theGrillingStanding({
+      worktree: { ...GRILLING.worktree!, missing: true },
+    });
+    await openBrief(GRILLING);
+
+    expect(configuration().Worktree).toContain(GRILLING.worktree!.path);
+    expect(summary()!.querySelector(`.${briefPane.gone}`)!.textContent).toBe(
+      "gone from disk",
+    );
+  });
+
+  /// The pane reports the configuration; the setup card is still the only place
+  /// any of it is changed. So there is nothing on it to press, and a
+  /// conversation past drafting has nothing here it could press anyway.
+  it("changes nothing", async () => {
+    theGrillingStanding({ companions: [READING, WRITING] });
+    await openBrief(GRILLING);
+
+    expect(
+      summary()!.querySelectorAll("button, input, select, textarea, a"),
+    ).toHaveLength(0);
+  });
+
+  /// The other two documents are unchanged by it: they are read in the plain
+  /// pane they have always been read in, and neither has a configuration to
+  /// carry.
+  it("leaves the handoff and the instruction panes alone", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timelineEvent} > .${timeline.handoff}`),
+    );
+
+    await drawn(details(), `.${documentPane.document}`);
+
+    expect(details().querySelector(`.${briefPane.configuration}`)).toBeNull();
   });
 });
 

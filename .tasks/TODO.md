@@ -20,5 +20,5 @@ Roadmap stage: [01: Foundations](docs/roadmaps/companion-repos/01-foundations.md
 - [x] 02: Configure the companion — [details](02-configure-the-companion.md)
 - [x] 03: Checked out at grill start — [details](03-checked-out-at-grill-start.md)
 - [x] 04: What the session is given — [details](04-what-the-session-is-given.md)
-- [ ] 05: What the Conversation was configured with — [details](05-the-configuration-summary.md)
+- [x] 05: What the Conversation was configured with — [details](05-the-configuration-summary.md)
 - [ ] 06: The vocabulary this stage adds — [details](06-the-vocabulary.md)

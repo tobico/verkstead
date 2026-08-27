@@ -73,6 +73,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Asked } from "./Asked";
 import { Backlog } from "./Backlog";
+import { Brief } from "./Brief";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
 import { Document } from "./Document";
@@ -671,16 +672,17 @@ function Reading(props: {
                         />
                       )}
                     </Match>
-                    {/* And the three documents, which are one pane: each is
-                        rendered markdown under the heading its card carries, and
-                        the pane is the whole of what the card showed five lines
-                        of. */}
+                    {/* And the three documents, each the whole of what its
+                        card showed five lines of. The handoff and the
+                        instruction are one pane — rendered markdown under the
+                        heading the card carries — and the Brief has one of its
+                        own, because it carries the summary of what the
+                        Conversation was configured with as well. */}
                     <Match when={briefIn(open())}>
                       {(brief) => (
-                        <Document
-                          heading="Brief"
-                          html={brief().html}
-                          empty="Nothing was written."
+                        <Brief
+                          conversation={conversation()}
+                          brief={brief()}
                           back={() => props.pane("timeline")}
                         />
                       )}

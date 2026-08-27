@@ -1,0 +1,126 @@
+/* The Brief, opened, and what the Conversation was configured with under it. See
+   `Brief.tsx`. */
+
+/* The markdown at the width prose is read at everywhere else, which is what the
+   pane the handoff and the instruction are read in says of its own — see
+   `Document.module.css`. */
+.brief {
+  max-width: var(--measure);
+}
+
+/* Ruled off from the Brief above it, the way the setup card is ruled off from
+   the Brief it stands under: the document is what the pane is titled for, and
+   this is what follows it. */
+.configuration {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--edge);
+}
+
+.configuration h2 {
+  font-size: 1rem;
+  margin: 0 0 0.6rem;
+}
+
+.configuration h3 {
+  font-size: 0.9rem;
+  margin: 1.25rem 0 0.5rem;
+  color: var(--ink-soft);
+}
+
+/* The facts themselves: a term and what it says, side by side wherever there is
+   room for the pair and stacked where there is not. The term column is as wide
+   as the longest of them — "Implementation" — so the values line up down the
+   pane and the eye can run past the ones it did not come for. No breakpoint,
+   the width that matters being the pane's rather than the window's. */
+.facts {
+  margin: 0;
+}
+
+.fact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.75rem;
+  padding: 0.25rem 0;
+  font-size: 0.9rem;
+}
+
+.fact + .fact {
+  border-top: 1px solid var(--edge);
+}
+
+.fact > dt {
+  flex: 0 0 8.5rem;
+  color: var(--ink-soft);
+}
+
+.fact > dd {
+  flex: 1 1 12rem;
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.5rem;
+}
+
+/* A branch, a base and a commit are things to type back into a terminal, so
+   they are set in the face a terminal sets them in — and so is a path, which is
+   the same thing at greater length. */
+.ref,
+.path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* What stands where there is no value: the rule a base falls back to, a
+   checkout that is not there, a pairing nobody picked. Words rather than a
+   blank, and soft rather than plain, so a pane scanned down the values does not
+   read a sentence as one. */
+.rule {
+  color: var(--ink-soft);
+}
+
+/* A directory somebody deleted by hand, said beside the path it is the fate of:
+   a Conversation with a problem rather than an obscure failure from whatever
+   next tries to work in it. */
+.gone {
+  font-size: 0.8rem;
+  color: var(--stopped);
+}
+
+/* One block per companion, drawn the way the setup card draws the rows these
+   were configured on — the name over what the work did with the repository. */
+.companions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.companion {
+  padding: 0.4rem 0.6rem;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.companion + .companion {
+  margin-top: 0.5rem;
+}
+
+.companionName {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Inside a block that already names the repository the terms are shorter, so
+   the column is narrower — and the values still line up with each other, which
+   is what the column is for. */
+.companion .fact > dt {
+  flex-basis: 6.5rem;
+}
