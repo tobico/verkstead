@@ -28,6 +28,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rust_embed::Embed;
 
+use crate::store;
+
 /// The skills as they are written in this repository, one directory per skill.
 ///
 /// Compiled in for a release build and read off disk for a debug one, exactly
@@ -442,6 +444,82 @@ pub(crate) fn folded(prompt: &str, answers: &str) -> String {
     }
 
     format!("{prompt}\n# What I have since said about the deferred questions\n\n{answers}\n")
+}
+
+/// The same prompt again, with the companion repos the Conversation was
+/// configured with listed under it.
+///
+/// One listing, on **every** session prompt of the Conversation — the grilling
+/// one included — because a companion is checked out from grill start to close
+/// and a session that was not told about it would be one standing beside a
+/// directory it has no reason to look in. Appended where every session is
+/// launched from rather than written into each prompt builder, so that a
+/// builder added later cannot forget it.
+///
+/// Neutral, and deliberately: each companion is named with where it is, what it
+/// holds and whether it may be written to, and nothing here says what to do
+/// about any of that. The Brief is what says what the work is, and the agent
+/// reads it — a prompt that told a session to go and use a repository would be
+/// Verkstead deciding the work from a configuration screen.
+///
+/// Nothing about dev shells either, for the same reason. A companion with a
+/// flake of its own is entered by the agent, `nix` being on the sandbox's
+/// `PATH` — see [`crate::sandbox::under_dev_shell`].
+///
+/// A Conversation with no companions is the prompt unchanged, which is most of
+/// them: a heading over an empty list would tell a session that something had
+/// been configured.
+///
+/// `branch` is the Conversation's own, which is what a companion left to
+/// mirror is called.
+pub(crate) fn alongside(prompt: &str, branch: &str, companions: &[store::Companion]) -> String {
+    let listed: Vec<String> = companions
+        .iter()
+        .filter_map(|companion| {
+            // Only the ones that are actually checked out. Before grilling
+            // starts there are none, and there is no session then either — so
+            // this is the companion added to a Conversation whose checkout is
+            // somehow gone, which is a row to leave unsaid rather than a path to
+            // send a session to.
+            let worktree = companion.worktree.as_ref()?;
+
+            // A read-write companion holds a branch, mirroring resolved; a
+            // read-only one is detached at whatever its base resolved to, and
+            // the base is what there is to name it by.
+            let holding = match companion.branch_for(branch) {
+                Some(branch) => format!("on branch `{branch}`"),
+                None => format!(
+                    "detached at `{}`",
+                    companion
+                        .base_ref
+                        .clone()
+                        .unwrap_or_else(|| companion.repo.default_branch.clone())
+                ),
+            };
+
+            let mode = match companion.mode {
+                store::CompanionMode::ReadOnly => "read-only",
+                store::CompanionMode::ReadWrite => "read-write",
+            };
+
+            Some(format!(
+                "- `{}` at `{}`, {holding}, {mode}.",
+                companion.repo.name,
+                worktree.display(),
+            ))
+        })
+        .collect();
+
+    if listed.is_empty() {
+        return prompt.to_owned();
+    }
+
+    format!(
+        "{}\n\n# Companion repositories\n\nThis Conversation is configured with other \
+         repositories, checked out beside the worktree this session starts in.\n\n{}\n",
+        prompt.trim_end(),
+        listed.join("\n"),
+    )
 }
 
 /// The body they are all primed with, under whichever opening line names the
@@ -1929,6 +2007,143 @@ mod tests {
         let prompt = next_task("# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(folded(&prompt, "  \n"), prompt);
+    }
+
+    /// A companion of a Conversation, made by hand: the store is where one comes
+    /// from, and what the listing is written against is the shape rather than
+    /// the query.
+    fn companion(
+        name: &str,
+        mode: store::CompanionMode,
+        branch: &str,
+        worktree: &str,
+    ) -> store::Companion {
+        store::Companion {
+            repo: store::Repo {
+                id: 7,
+                path: PathBuf::from(format!("/home/tobi/src/{name}")),
+                name: name.to_owned(),
+                default_branch: "main".to_owned(),
+            },
+            mode,
+            base_ref: None,
+            branch: branch.to_owned(),
+            worktree: Some(PathBuf::from(worktree)),
+        }
+    }
+
+    /// What a session is told about the companions: where each one is, what it
+    /// holds and whether it may be written to, under one heading and under
+    /// whatever the prompt already said.
+    #[test]
+    fn every_companion_is_named_with_its_path_its_branch_and_its_write_status() {
+        let prompt = alongside(
+            &next_task("# Rate limiting\n\nThe API has none.\n", None),
+            "rate-limiting",
+            &[
+                companion(
+                    "askance",
+                    store::CompanionMode::ReadOnly,
+                    "",
+                    "/var/lib/verkstead/worktrees/askance-main",
+                ),
+                companion(
+                    "tobico-skills",
+                    store::CompanionMode::ReadWrite,
+                    "",
+                    "/var/lib/verkstead/worktrees/tobico-skills-rate-limiting",
+                ),
+            ],
+        );
+
+        assert!(
+            prompt.contains("# The Brief this started from"),
+            "the work is still what the session is being told about: {prompt:?}"
+        );
+        assert_eq!(
+            prompt.matches("# Companion repositories").count(),
+            1,
+            "one listing, whatever the prompt was built by: {prompt:?}"
+        );
+        assert!(
+            prompt.contains(
+                "- `askance` at `/var/lib/verkstead/worktrees/askance-main`, \
+                 detached at `main`, read-only."
+            ),
+            "a read-only companion is detached at the base it was cut from: {prompt:?}"
+        );
+        assert!(
+            prompt.contains(
+                "- `tobico-skills` at \
+                 `/var/lib/verkstead/worktrees/tobico-skills-rate-limiting`, on branch \
+                 `rate-limiting`, read-write."
+            ),
+            "and a read-write one is on the branch cut for it, mirroring the \
+             Conversation's: {prompt:?}"
+        );
+    }
+
+    /// The listing says what is there and nothing about what to do with it. What
+    /// the work is, is the Brief's to say — a prompt that told a session to go
+    /// and use a repository would be Verkstead deciding the work off a
+    /// configuration screen.
+    #[test]
+    fn the_listing_tells_a_session_nothing_about_what_to_do_with_them() {
+        let prompt = alongside(
+            "",
+            "rate-limiting",
+            &[companion(
+                "askance",
+                store::CompanionMode::ReadOnly,
+                "",
+                "/var/lib/verkstead/worktrees/askance-main",
+            )],
+        );
+
+        for instructed in [
+            "you should",
+            "use it",
+            "make sure",
+            "read the",
+            "nix develop",
+        ] {
+            assert!(
+                !prompt.to_lowercase().contains(instructed),
+                "the listing is neutral, and {instructed:?} is not: {prompt:?}"
+            );
+        }
+    }
+
+    /// A companion named with a branch of its own is on that branch rather than
+    /// on the Conversation's — mirroring is what an empty name means, not what
+    /// every name means.
+    #[test]
+    fn a_companion_with_a_branch_of_its_own_is_listed_on_it() {
+        let prompt = alongside(
+            "",
+            "rate-limiting",
+            &[companion(
+                "askance",
+                store::CompanionMode::ReadWrite,
+                "the-typed-one",
+                "/var/lib/verkstead/worktrees/askance-the-typed-one",
+            )],
+        );
+
+        assert!(
+            prompt.contains("on branch `the-typed-one`"),
+            "a typed branch name stands on its own: {prompt:?}"
+        );
+    }
+
+    /// Which is most Conversations: one repository is what most work needs, and
+    /// a heading over an empty list would tell a session that something had been
+    /// configured.
+    #[test]
+    fn a_conversation_with_no_companions_is_started_on_the_prompt_as_it_stands() {
+        let prompt = next_task("# Rate limiting\n\nThe API has none.\n", None);
+
+        assert_eq!(alongside(&prompt, "rate-limiting", &[]), prompt);
     }
 
     /// The workbench shows a commit's message body beside its diff, and nothing

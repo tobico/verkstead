@@ -40,7 +40,7 @@ use crate::runner::Pace;
 use crate::sandbox::{Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::screen::Live;
 use crate::settings::Settings;
-use crate::skills::Skills;
+use crate::skills::{self, Skills};
 use crate::store;
 use crate::terminal::Terminal;
 use crate::transcript::Tail;
@@ -707,7 +707,14 @@ impl Sessions {
         // the whole of why the log it writes can be found at all — see
         // [`session_name`].
         let session = session_name();
-        let argv = agents.argv(pairing, prompt, session.as_deref());
+
+        // And the companion repos this Conversation was configured with, listed
+        // under whatever prompt the caller built. Here rather than in each
+        // builder because this is the one place every session is launched from
+        // — the grilling one included, which is built nowhere near the rest —
+        // so a prompt builder added later cannot forget it.
+        let prompt = skills::alongside(prompt, &conversation.branch, &conversation.companions);
+        let argv = agents.argv(pairing, &prompt, session.as_deref());
         let conversation_id = conversation.id;
 
         // The sandbox asks git where the worktree's object database is, and the
@@ -721,7 +728,7 @@ impl Sessions {
             let skills = agents.skills.clone();
             let handoffs = agents.handoffs.clone();
             let settings = agents.settings.clone();
-            let extra = agents.config.binds_for(&conversation.repo.name);
+            let extra = agents.config.binds_for(&conversation);
 
             move || {
                 // Read here rather than held from startup: this is the moment a

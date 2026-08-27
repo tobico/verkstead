@@ -44,11 +44,11 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, ConversationClosed,
-    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Lifecycle,
-    NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size,
-    StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
-    TimelineEvent, TranscriptView, Turn, Watching,
+    Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, CompanionAdded,
+    ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
+    GrillingStarted, Lifecycle, NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent,
+    Registered, Resumed, Shown, Size, StageListReached, Started, SteerOpened, Submitted,
+    TaskListEvent, TaskListReached, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::handoffs::Handoffs;
@@ -1072,6 +1072,20 @@ async fn grilling(stub: &str) -> Grilling {
     grilling_spilling(tempfile::tempdir().unwrap(), stub, PULL_REQUEST).await
 }
 
+/// The same, with a second repository registered beside this one and added to
+/// the Conversation as a companion before the press — which is a companion in
+/// the mode one is added in, read-only.
+async fn grilling_alongside(stub: &str, companion: &str) -> Grilling {
+    grilling_at_pace(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        BRISKLY,
+        &[companion],
+    )
+    .await
+}
+
 /// The same, with something else where `gh` goes — for the tests about what
 /// Verkstead does when GitHub cannot be asked.
 async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
@@ -1081,18 +1095,32 @@ async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
 /// The same, on a server that sweeps for a stalled Conversation briskly enough
 /// to watch it do so — see [`SWEEPING`].
 async fn grilling_swept(stub: &str) -> Grilling {
-    grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, SWEEPING).await
+    grilling_at_pace(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        SWEEPING,
+        &[],
+    )
+    .await
 }
 
 /// The same, over a directory the caller already has the name of — which is
 /// what a stub that has to write somewhere the worktree is not needs, the
 /// script naming the path being written before there is a fixture to ask.
 async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    grilling_at_pace(spill, stub, gh, BRISKLY).await
+    grilling_at_pace(spill, stub, gh, BRISKLY, &[]).await
 }
 
-/// And the same again at a pace of the caller’s choosing.
-async fn grilling_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pace) -> Grilling {
+/// And the same again at a pace of the caller’s choosing, alongside whatever
+/// `companions` names — no repository at all being the ordinary Conversation.
+async fn grilling_at_pace(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    pace: Pace,
+    companions: &[&str],
+) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace).await;
     let app = &bench.app;
 
@@ -1107,6 +1135,18 @@ async fn grilling_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: 
     };
 
     bench.under_both_pairings(id).await;
+
+    // While it is still drafting, which is the only time a companion can be
+    // added — and off the same endpoint the setup card presses.
+    for name in companions {
+        let added: CompanionAdded = post(
+            app,
+            &format!("/api/ui/conversations/{id}/companions"),
+            &serde_json::json!({ "repo_id": bench.register(name).await }),
+        )
+        .await;
+        assert_eq!(added, CompanionAdded::Added);
+    }
 
     let saved: BriefSaved = post(
         app,
@@ -1168,6 +1208,31 @@ impl Bench {
             .await;
             assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
         }
+    }
+
+    /// Register a second repository under the watched directory, and hand back
+    /// the id a Conversation would add it as a companion by.
+    ///
+    /// A repository of its own rather than a checkout of this one: what a
+    /// companion is, is another registered Repo, and two Repos over one
+    /// directory is a different thing entirely.
+    async fn register(&self, name: &str) -> i64 {
+        let path = repository(self.watched.path().join(name));
+        let registered: Registered = post(
+            &self.app,
+            "/api/ui/repos",
+            &serde_json::json!({ "path": path }),
+        )
+        .await;
+        assert_eq!(registered, Registered::Added);
+
+        let repos: Vec<verkstead_render::RepoEntry> = get(&self.app, "/api/ui/repos").await;
+
+        repos
+            .into_iter()
+            .find(|repo| repo.name == name)
+            .expect("the repository was just registered")
+            .id
     }
 
     /// The fixture the tests read, once there is a Conversation running in it.
@@ -1492,6 +1557,40 @@ async fn fetch(app: &Router, request: Request<Body>) -> (StatusCode, String) {
 
 fn read<T: DeserializeOwned>(body: &str) -> T {
     serde_json::from_str(body).unwrap_or_else(|err| panic!("reading {body:?}: {err}"))
+}
+
+/// And what a Conversation with a companion repo tells its grilling session:
+/// the same prompt, with the companion named under it.
+///
+/// The grilling session and not one of the ones that build, because it is the
+/// one whose prompt is built nowhere near the rest — if the listing reaches
+/// this one, it reaches them by the same line.
+#[tokio::test]
+async fn a_grilling_session_is_told_about_the_companion_repos_too() {
+    let fixture = grilling_alongside(r#"printf 'prompt=%s' "$2""#, "askance").await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(BRIEF),
+        "the Brief is still what the grilling starts from: {said:?}"
+    );
+    assert!(
+        said.contains("# Companion repositories"),
+        "and the companion is named under it: {said:?}"
+    );
+    assert!(
+        said.contains("`askance` at `"),
+        "with where it was checked out: {said:?}"
+    );
+    assert!(
+        said.contains("detached at `main`, read-only."),
+        "and what it holds and whether it may be written to: {said:?}"
+    );
 }
 
 /// The whole of what pressing the button now does: the Profile's agent, on the
@@ -11995,6 +12094,7 @@ async fn steering_into_implementing_carries_on_a_backlog_whose_worktree_has_gone
         &a_backlog_then_once_then_staying(&remembered),
         PULL_REQUEST,
         SWEEPING,
+        &[],
     )
     .await;
 
@@ -12853,6 +12953,7 @@ async fn resuming_a_conversation_whose_worktree_has_gone_makes_it_again() {
         &once_then_staying(&remembered),
         PULL_REQUEST,
         SWEEPING,
+        &[],
     )
     .await;
 
@@ -12906,6 +13007,7 @@ async fn resuming_leaves_a_worktree_that_is_still_one_alone() {
         &once_then_staying(&remembered),
         PULL_REQUEST,
         SWEEPING,
+        &[],
     )
     .await;
 
@@ -12947,6 +13049,7 @@ async fn a_worktree_that_cannot_be_made_again_refuses_by_name() {
         &once_then_staying(&remembered),
         PULL_REQUEST,
         SWEEPING,
+        &[],
     )
     .await;
 

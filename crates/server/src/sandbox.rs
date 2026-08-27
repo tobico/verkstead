@@ -15,6 +15,9 @@
 //! - **read-only** — `/nix` and the system paths, the bundled skills over
 //!   `~/.claude/skills`, and the executable serving all this, as `verkstead`
 //! - **tmpfs** — `/tmp`, and everything else in HOME simply absent
+//! - **by mode** — each companion repo the Conversation was configured with,
+//!   its worktree and its git directory together, read-only or read-write as
+//!   the human said — see [`companion_binds`]
 //!
 //! Credentials are on none of those lists, and neither is who a session commits
 //! as. Both arrive in the environment out of the settings files the human filled
@@ -258,6 +261,57 @@ impl Reachable {
     }
 }
 
+/// One directory bound into a sandbox beyond the surface every one of them has,
+/// and how far into it a session may reach.
+///
+/// The reach travels with the path because the two are one decision. Everything
+/// bound out here used to be read-write — a build cache is written to or it is
+/// no cache at all — and a companion repo added read-only is a checkout a
+/// session is meant to read and leave alone. A list of bare paths could not say
+/// which of the two a directory is, and a second list beside it would be two
+/// things to keep in step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Bind {
+    path: PathBuf,
+
+    reach: Reach,
+}
+
+impl Bind {
+    /// One a session may write in: a build cache, a read-write companion's
+    /// checkout.
+    pub fn writable(path: PathBuf) -> Bind {
+        Bind {
+            path,
+            reach: Reach::ReadWrite,
+        }
+    }
+
+    /// And one it may only read: a read-only companion's checkout, and the git
+    /// directory behind it.
+    pub fn readable(path: PathBuf) -> Bind {
+        Bind {
+            path,
+            reach: Reach::ReadOnly,
+        }
+    }
+
+    /// The bwrap flag that makes it what it is.
+    fn flag(&self) -> &'static str {
+        match self.reach {
+            Reach::ReadOnly => "--ro-bind",
+            Reach::ReadWrite => "--bind",
+        }
+    }
+}
+
+/// How far into a bind a session may reach.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    ReadOnly,
+    ReadWrite,
+}
+
 /// Sandbox Configuration: the extra read-write binds a sandbox gets beyond the
 /// surface every one of them has.
 ///
@@ -317,21 +371,47 @@ impl SandboxConfig {
         Ok(config)
     }
 
-    /// What a sandbox for the Repo called `repo` binds beyond the decided
-    /// surface: the global set, then that Repo's own.
+    /// What a sandbox for `conversation` binds beyond the decided surface: the
+    /// global set, then its own Repo's, then each of its companions' own.
     ///
-    /// In that order, and both kept: a Repo's set composes over the global one
-    /// rather than replacing it, because the global set is what the machine
-    /// gives every session and a repository asking for a cache of its own is not
-    /// asking to give the rest up.
-    pub fn binds_for(&self, repo: &str) -> Vec<PathBuf> {
-        let mut binds = self.global.clone();
+    /// In that order, and all of them kept: a Repo's set composes over the
+    /// global one rather than replacing it, because the global set is what the
+    /// machine gives every session and a repository asking for a cache of its
+    /// own is not asking to give the rest up.
+    ///
+    /// A companion brings what is configured for its own name and nothing else.
+    /// Its builds need its caches like any other repository's — the checkout is
+    /// half of what building in a companion takes and this is the other half —
+    /// and the global set is already in by way of the Conversation's own Repo,
+    /// so binding it again per companion would say something this does not mean.
+    ///
+    /// Writable, every one of them, and a companion's whatever its mode. A
+    /// configured bind is a build cache or a package registry — somewhere a
+    /// build writes — and the installer opened the hole on purpose. They sit
+    /// outside the repository besides, so a read-only companion whose cache
+    /// could not be written to would fail on a cold cache for nothing gained.
+    pub fn binds_for(&self, conversation: &store::Conversation) -> Vec<Bind> {
+        let mut binds: Vec<Bind> = self.global.iter().cloned().map(Bind::writable).collect();
 
-        if let Some(own) = self.per_repo.get(repo) {
-            binds.extend(own.iter().cloned());
+        binds.extend(self.own_binds(&conversation.repo.name));
+
+        for companion in &conversation.companions {
+            binds.extend(self.own_binds(&companion.repo.name));
         }
 
         binds
+    }
+
+    /// What only the Repo of that name asked for, without the global set in
+    /// front of it.
+    pub fn own_binds(&self, repo: &str) -> Vec<Bind> {
+        self.per_repo
+            .get(repo)
+            .into_iter()
+            .flatten()
+            .cloned()
+            .map(Bind::writable)
+            .collect()
     }
 
     /// Every bind configured, for the line the server logs about what it will
@@ -445,9 +525,15 @@ pub struct Sandbox {
     /// URL, which is what `verkstead ask` puts its Sets to.
     server: String,
 
-    /// The extra read-write binds Sandbox Configuration asks for, global ones
-    /// first and the Repo's own after them.
-    extra: Vec<PathBuf>,
+    /// Everything bound beyond that surface: the Conversation's companion repos
+    /// first, each by its own mode, and then what Sandbox Configuration asked
+    /// for.
+    ///
+    /// The companions first because a bind is applied in the order it is given,
+    /// so a configured cache inside a read-only companion's tree lands over the
+    /// read-only bind rather than under it — and a cache that could not be
+    /// written to is no cache.
+    binds: Vec<Bind>,
 }
 
 impl Sandbox {
@@ -463,13 +549,19 @@ impl Sandbox {
     /// and every one that has been closed. Its handoff directory is made here
     /// where it is not already there, and failing to make one is the same
     /// answer: a bind with nothing behind it is a sandbox that will not start.
+    /// A companion whose checkout git will not own is that answer too: it was
+    /// made at grill start and the session was told about it, so a sandbox
+    /// missing it is not a smaller sandbox but a wrong one.
     ///
     /// Git is asked here and the filesystem is written to, so this blocks.
     ///
     /// The parameter list is the surface: every one of these is something the
     /// session gets, and spelling them out is what lets a reader of a call site
     /// see the whole of what one is given. A struct grouping them would hide
-    /// exactly the thing worth reading.
+    /// exactly the thing worth reading. The companions are the one thing not in
+    /// it — they come off the Conversation, as its own worktree does, and by the
+    /// same rule: the mode on the row decides the bind, and no caller is in a
+    /// position to decide otherwise.
     #[allow(clippy::too_many_arguments)]
     pub fn for_conversation(
         conversation: &store::Conversation,
@@ -481,11 +573,14 @@ impl Sandbox {
         handoffs: &Handoffs,
         secrets: &Secrets,
         config: &Config,
-        extra: Vec<PathBuf>,
+        extra: Vec<Bind>,
     ) -> Option<Sandbox> {
         let worktree = conversation.worktree.clone()?;
         let git_dir = crate::worktrees::common_git_dir(&worktree)?;
         let handoff_dir = handoffs.directory(conversation.id)?;
+
+        let mut binds = companion_binds(conversation)?;
+        binds.extend(extra);
 
         Some(Sandbox {
             worktree,
@@ -499,7 +594,7 @@ impl Sandbox {
             github_token: secrets.github_token().map(str::to_owned),
             git_author: config.git_author().clone(),
             server: reachable.asking_from(conversation.id),
-            extra,
+            binds,
         })
     }
 
@@ -581,8 +676,8 @@ impl Sandbox {
             .arg(&self.verkstead)
             .arg(VERKSTEAD_INSIDE);
 
-        for extra in &self.extra {
-            bwrap.arg("--bind").arg(extra).arg(extra);
+        for bind in &self.binds {
+            bwrap.arg(bind.flag()).arg(&bind.path).arg(&bind.path);
         }
 
         bwrap
@@ -709,6 +804,45 @@ impl Sandbox {
     }
 }
 
+/// What a Conversation's companion repos put inside the sandbox: each one's
+/// worktree and the git directory behind it, both at the companion's own mode.
+///
+/// Both of them, for the reason the Conversation's own repository needs both: a
+/// worktree's git directory lives inside the repository's rather than beside the
+/// checkout, so a checkout bound without it has no object database behind it and
+/// git inside would not call it a repository at all.
+///
+/// The mode is the row's, and it is the whole of the difference: a read-write
+/// companion is somewhere the work is done, and a read-only one is somewhere to
+/// read. Read-only reaches the git directory too — the checkout alone would
+/// leave the history writable through the back door.
+///
+/// A companion with no checkout is skipped rather than refused: that is a
+/// Conversation still drafting, which has no session to build a sandbox for
+/// anyway. One with a checkout git will not own is `None`, which is no sandbox
+/// and so no session — see [`Sandbox::for_conversation`].
+fn companion_binds(conversation: &store::Conversation) -> Option<Vec<Bind>> {
+    let mut binds = Vec::new();
+
+    for companion in &conversation.companions {
+        let Some(worktree) = companion.worktree.clone() else {
+            continue;
+        };
+
+        let git_dir = crate::worktrees::common_git_dir(&worktree)?;
+
+        let bind = match companion.mode {
+            store::CompanionMode::ReadOnly => Bind::readable,
+            store::CompanionMode::ReadWrite => Bind::writable,
+        };
+
+        binds.push(bind(worktree));
+        binds.push(bind(git_dir));
+    }
+
+    Some(binds)
+}
+
 /// `argv` wrapped in `nix develop` where the worktree's flake actually provides
 /// a shell, and `argv` as it stands where it does not.
 ///
@@ -721,6 +855,12 @@ impl Sandbox {
 /// Asked on the host, before the sandbox exists, because the answer decides what
 /// the sandbox is told to run. It is a `nix eval` per attribute and it is asked
 /// once per session.
+///
+/// One worktree, and only the Conversation's own. A companion repo with a flake
+/// of its own is not wrapped in a second shell — there is nowhere for one to go,
+/// a session being one command — and it does not need to be: `nix` is on the
+/// sandbox's `PATH`, so an agent that has to build in a companion enters its
+/// shell there the way it would in any checkout it had walked into.
 pub fn under_dev_shell(worktree: &Path, argv: &[String]) -> Vec<String> {
     if !dev_shell(worktree) {
         return argv.to_vec();
