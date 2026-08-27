@@ -7,7 +7,9 @@ of them checked out and bound into every session's sandbox by mode, named in
 the session prompt, refused cleanly at grill start when git cannot deliver one,
 and torn down at close. Demonstrable end to end: add a read-only and a
 read-write companion on the setup card, start grilling, and the session can
-read one, commit to the other on a fresh branch, and was told about both.
+read one, commit to the other on a fresh branch, and was told about both —
+with the Brief's details pane saying, ever after, what the Conversation was
+configured with.
 
 ## Decisions in force
 
@@ -50,6 +52,13 @@ read one, commit to the other on a fresh branch, and was told about both.
   switch, mirroring branch-name field for read-write, × while drafting.
 - **Close removes companion worktrees and keeps their branches**, like the main
   one.
+- **The Brief's details pane summarises the whole of a Conversation's
+  configuration.** The setup rows go when the card freezes, so without this a
+  read-only companion would leave no trace anywhere for the rest of the
+  Conversation's life — read-write ones surface later through their commits and
+  pull requests, and a read-only one never does. The summary is not only the
+  companions: the worktree directories and the picked Pairings are shown
+  nowhere today either, and they belong in the same place.
 
 ## Proposed tasks (provisional)
 
@@ -74,6 +83,15 @@ read one, commit to the other on a fresh branch, and was told about both.
    - A read-only companion's git dir refuses a push from inside.
 5. **Prompt section** — the listing threaded through every prompt builder,
    grilling included.
+6. **Configuration summary on the Brief's details pane** — everything the
+   Conversation was set up with, read where the frozen Brief is read: the repo,
+   the branch and the base it came off, every worktree directory, the grilling
+   and implementation Pairings, and each companion with its mode, its branch
+   and its directory.
+   - A Conversation with no companions still gets the summary — the worktree
+     directory and the Pairings are as unfindable today as a companion is.
+   - Read-only throughout: the pane reports the configuration, and the setup
+     card is still the only place it is changed.
 
 ## Re-verify at start
 
@@ -86,5 +104,8 @@ read one, commit to the other on a fresh branch, and was told about both.
   `crates/server/src/conversations.rs::start_grilling`.
 - The setup card layout in `web/src/workbench/Setup.tsx` and the single
   dropdown in `web/src/Menu.tsx` (still no nesting).
+- The Brief's details pane — still the plain `Document` the three documents
+  share, in `web/src/workbench/Workbench.tsx` — and what the Conversation view
+  already carries to it (`ConversationView`, `web/src/api`).
 - Prompt builders all in `crates/server/src/skills.rs`; grilling's built
   separately from `on_the_documents`.

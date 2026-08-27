@@ -111,7 +111,10 @@ flowchart LR
   nest) adding a row per companion: a base-branch picker like the main one, a
   mode switch, and for read-write a branch-name field that mirrors the main
   branch name until one is typed. The conversation's own repo and duplicates
-  are refused. Frozen at grill start with the branch and base; a steer may add
+  are refused. Frozen at grill start with the branch and base, and read from
+  then on off the Brief's details pane, which summarises the whole of a
+  conversation's configuration — the worktree directories and the picked
+  pairings included, neither of which is shown anywhere today. A steer may add
   companions or upgrade read-only to read-write — never remove or downgrade —
   and an upgrade fetches and cuts from the branch's fresh tip. **Always a
   Verkstead worktree; the human's checkout never enters a sandbox**: read-only
