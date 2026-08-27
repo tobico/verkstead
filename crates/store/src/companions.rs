@@ -14,10 +14,10 @@
 //! twice* something the insert refuses rather than something a read-then-write
 //! has to notice in time.
 //!
-//! All four of a companion's facts are columns from the start, though only the
-//! first two are the human's to set today: the mode switch, the base picker and
-//! the branch field arrive next, and a relation reshaped between two tasks is a
-//! migration nobody needed.
+//! All four of a companion's facts are columns, and all four are the human's:
+//! which Repo when it is added, and then the mode, the base and the branch name
+//! from the row it draws — every one of them refused the moment the
+//! Conversation is past drafting.
 
 use anyhow::{Context, Result, bail};
 use sqlx::SqlitePool;
@@ -227,6 +227,109 @@ pub async fn remove_companion(pool: &SqlitePool, id: i64, repo_id: i64) -> Resul
         .with_context(|| format!("taking Repo {repo_id} off Conversation {id}"))?;
 
     Ok(Removing::Removed)
+}
+
+/// What became of configuring one.
+///
+/// One outcome for all three changes, the way [`Edited`] is one for the Brief
+/// and the branch and the base: they are refused for the same reasons, and a
+/// caller telling them apart would be telling apart the same sentence three
+/// times. What is different between them — a branch git will not take, a branch
+/// the companion's repository does not have — is decided above the store, where
+/// git is asked.
+///
+/// [`Edited`]: super::Edited
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Configured {
+    /// Recorded.
+    Saved,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// It is past drafting, so its configuration froze when grilling started.
+    NotDrafting,
+
+    /// That Repo is not a companion of this Conversation — taken off between
+    /// the card drawing the row and the press that configured it. Said rather
+    /// than reported as done: the press asked a row to hold something, and
+    /// there is no row to hold it.
+    NoSuchCompanion,
+}
+
+/// What a press on a companion's row changes about it.
+///
+/// The three of them as one type because they are one write with one guard in
+/// front of it: which column moves is the whole of the difference, and three
+/// functions would be three copies of the same two questions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Change<'a> {
+    /// The mode switch. Flipping to read-only takes the branch name with it:
+    /// a read-only companion is checked out detached and has no branch, so a
+    /// name left behind would be a name for a branch nobody will cut.
+    Mode(CompanionMode),
+
+    /// The base picker. `None` is the default-branch rule, which is what a
+    /// companion starts on.
+    Base(Option<&'a str>),
+
+    /// The branch field, where empty is *mirroring* — the Conversation's own
+    /// branch name, followed as it is renamed.
+    Branch(&'a str),
+}
+
+/// Configure a companion of a drafting Conversation: its mode, its base, or the
+/// name of the branch its work is done on.
+///
+/// Refused for what adding one is refused for, and off the same two questions:
+/// a configuration frozen at grill start is one no press of the setup card
+/// rewrites.
+pub async fn configure_companion(
+    pool: &SqlitePool,
+    id: i64,
+    repo_id: i64,
+    change: Change<'_>,
+) -> Result<Configured> {
+    if let Some(refusal) = editable(pool, id).await? {
+        return Ok(match refusal {
+            Adding::NoSuchConversation => Configured::NoSuchConversation,
+            _ => Configured::NotDrafting,
+        });
+    }
+
+    let update = match change {
+        // Two columns rather than one, for [`Change::Mode`]'s reason — and the
+        // branch is left alone going the other way, there being nothing to
+        // clear and mirroring to go back to.
+        Change::Mode(CompanionMode::ReadOnly) => sqlx::query(
+            "UPDATE companions SET mode = ?, branch = '' WHERE conversation_id = ? AND repo_id = ?",
+        )
+        .bind(CompanionMode::ReadOnly.stored()),
+        Change::Mode(mode) => {
+            sqlx::query("UPDATE companions SET mode = ? WHERE conversation_id = ? AND repo_id = ?")
+                .bind(mode.stored())
+        }
+        Change::Base(base) => sqlx::query(
+            "UPDATE companions SET base_ref = ? WHERE conversation_id = ? AND repo_id = ?",
+        )
+        .bind(base),
+        Change::Branch(branch) => sqlx::query(
+            "UPDATE companions SET branch = ? WHERE conversation_id = ? AND repo_id = ?",
+        )
+        .bind(branch),
+    };
+
+    let done = update
+        .bind(id)
+        .bind(repo_id)
+        .execute(pool)
+        .await
+        .with_context(|| format!("configuring Repo {repo_id} on Conversation {id}"))?;
+
+    Ok(match done.rows_affected() {
+        0 => Configured::NoSuchCompanion,
+        _ => Configured::Saved,
+    })
 }
 
 /// Every companion of a Conversation, by the Repo's name.

@@ -21,8 +21,10 @@ import styles from "./Switch.module.css";
 /// flight.
 export function Switch(props: {
   /// The words beside it. They are the control's name, so they are also what a
-  /// screen reader reads.
-  label: string;
+  /// screen reader reads — which is why this takes markup and not only a
+  /// string: a name that has to say more than the switch shows carries the
+  /// rest of itself in a span nobody sees.
+  label: JSX.Element;
   /// Whether it reads as on.
   on: boolean;
   /// Whether it will take a flip. A disabled switch still says where it stands

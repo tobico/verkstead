@@ -20,7 +20,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Adopted, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded, CompanionRemoved,
+    Adopted, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionMode, CompanionModeChosen, CompanionRemoved,
     ConversationClosed, GrillingStarted, PairingView, Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
@@ -559,6 +560,124 @@ pub(crate) async fn remove_companion(
         store::Removing::NoSuchConversation => CompanionRemoved::NoSuchConversation,
         store::Removing::NotDrafting => CompanionRemoved::NotDrafting,
     })
+}
+
+/// Say how far into a companion the work may reach.
+///
+/// Thin over the store for [`add_companion`]'s reason: what the switch decides
+/// is what the sandbox binds and whether a branch is cut, and neither of those
+/// happens until grilling starts.
+pub(crate) async fn set_companion_mode(
+    pool: &SqlitePool,
+    id: i64,
+    repo_id: i64,
+    mode: CompanionMode,
+) -> Result<CompanionModeChosen> {
+    let mode = match mode {
+        CompanionMode::ReadOnly => store::CompanionMode::ReadOnly,
+        CompanionMode::ReadWrite => store::CompanionMode::ReadWrite,
+    };
+
+    Ok(
+        match store::configure_companion(pool, id, repo_id, store::Change::Mode(mode)).await? {
+            store::Configured::Saved => CompanionModeChosen::Chosen,
+            store::Configured::NoSuchConversation => CompanionModeChosen::NoSuchConversation,
+            store::Configured::NotDrafting => CompanionModeChosen::NotDrafting,
+            store::Configured::NoSuchCompanion => CompanionModeChosen::NoSuchCompanion,
+        },
+    )
+}
+
+/// Record the branch a companion's checkout comes off, or put it back on the
+/// default-branch rule.
+///
+/// The same shape as [`set_base_branch`] and for the same reasons — a name
+/// rather than a commit, resolved at grill start, and refused unless the
+/// repository really has a branch by it. The repository asked is the
+/// *companion's* own: two Conversations against one companion are looking at
+/// the same list, and neither is looking at the Conversation's.
+pub(crate) async fn set_companion_base(
+    pool: &SqlitePool,
+    id: i64,
+    repo_id: i64,
+    asked: Option<&str>,
+) -> Result<CompanionBaseRecorded> {
+    let asked = asked.map(str::trim).filter(|asked| !asked.is_empty());
+
+    if let Some(branch) = asked {
+        // Where the Conversation has got to before the branches, so that a
+        // Conversation frozen months ago is told *that* rather than told about
+        // a branch the companion's repository has since lost. The store asks
+        // again, this read and that write not being one moment.
+        let Some(conversation) = store::load_conversation(pool, id).await? else {
+            return Ok(CompanionBaseRecorded::NoSuchConversation);
+        };
+
+        if conversation.state != store::Lifecycle::Draft {
+            return Ok(CompanionBaseRecorded::NotDrafting);
+        }
+
+        let Some(companion) = conversation
+            .companions
+            .into_iter()
+            .find(|companion| companion.repo.id == repo_id)
+        else {
+            return Ok(CompanionBaseRecorded::NoSuchCompanion);
+        };
+
+        let branch = branch.to_owned();
+        let known = tokio::task::spawn_blocking(move || {
+            worktrees::branches(&companion.repo.path).contains(&branch)
+        })
+        .await?;
+
+        if !known {
+            return Ok(CompanionBaseRecorded::NoSuchBranch);
+        }
+    }
+
+    Ok(
+        match store::configure_companion(pool, id, repo_id, store::Change::Base(asked)).await? {
+            store::Configured::Saved => CompanionBaseRecorded::Recorded,
+            store::Configured::NoSuchConversation => CompanionBaseRecorded::NoSuchConversation,
+            store::Configured::NotDrafting => CompanionBaseRecorded::NotDrafting,
+            store::Configured::NoSuchCompanion => CompanionBaseRecorded::NoSuchCompanion,
+        },
+    )
+}
+
+/// Name the branch a read-write companion's work will be done on, or empty to
+/// put it back on mirroring the Conversation's own.
+///
+/// Whether the name is usable is git's to say, as it is for the Conversation's
+/// own branch — and the empty name is never asked about, because it is not a
+/// name: it is the record holding none, which is what mirroring is.
+pub(crate) async fn rename_companion_branch(
+    pool: &SqlitePool,
+    id: i64,
+    repo_id: i64,
+    branch: &str,
+) -> Result<CompanionBranchRenamed> {
+    let branch = branch.trim().to_owned();
+
+    if !branch.is_empty()
+        && !tokio::task::spawn_blocking({
+            let branch = branch.clone();
+            move || is_branch_name(&branch)
+        })
+        .await?
+    {
+        return Ok(CompanionBranchRenamed::NotABranchName);
+    }
+
+    Ok(
+        match store::configure_companion(pool, id, repo_id, store::Change::Branch(&branch)).await? {
+            store::Configured::Saved => CompanionBranchRenamed::Renamed,
+            store::Configured::NoSuchConversation => CompanionBranchRenamed::NoSuchConversation,
+            store::Configured::NotDrafting => CompanionBranchRenamed::NotDrafting,
+            store::Configured::NoSuchCompanion => CompanionBranchRenamed::NoSuchCompanion,
+        },
+    )
 }
 
 /// Give a drafting Conversation somewhere to work: a branch off its base commit

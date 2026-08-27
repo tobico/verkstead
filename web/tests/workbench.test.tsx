@@ -23,6 +23,7 @@ import type {
   BriefEvent,
   Capture,
   CommitPane,
+  CompanionView,
   ConversationArchived,
   ConversationClosed,
   ConversationEntry,
@@ -104,12 +105,15 @@ import shell from "../src/workbench/Workbench.module.css";
 import shellCss from "../src/workbench/Workbench.module.css?raw";
 import { CLAMPED_LINES, RESUME_REFUSAL, SWIPE } from "../src/workbench/Timeline";
 import {
+  COMPANION_BRANCH_REFUSAL,
+  COMPANION_MODE_REFUSAL,
   COMPANION_REFUSAL,
   COMPANION_REMOVAL_REFUSAL,
 } from "../src/workbench/Setup";
 import { STEER_REFUSAL } from "../src/workbench/Steer";
 import {
   BRANCHES,
+  COMPANION_BRANCHES,
   HIDING_ARCHIVED,
   OPEN,
   PROFILES,
@@ -2644,6 +2648,280 @@ describe("a conversation's companion repos", () => {
 
     expect(container.querySelector(`.${setup.companions}`)).toBeNull();
     expect(container.querySelector(`.${setup.setupMenu}`)).toBeNull();
+  });
+});
+
+
+/// What a companion row settles about the repository it names: where its
+/// checkout comes off, whether the work may write to it, and — where it may —
+/// what its branch is called.
+///
+/// Whether any of it may be changed at all is the server's, and the tests in
+/// `crates/server/tests/conversations.rs` are what say so. What is asked here
+/// is that each control draws what the record holds, that its save goes out,
+/// and that a refusal is said on the row it was refused for.
+describe("configuring a companion repo", () => {
+  /// The fixture's one companion, which every test here alters.
+  const ASKANCE = OPEN.companions[0]!;
+
+  /// Where each of the three saves goes.
+  const MODE = `/api/ui/conversations/${OPEN.id}/companions/${ASKANCE.repo.id}/mode`;
+  const BASE = `/api/ui/conversations/${OPEN.id}/companions/${ASKANCE.repo.id}/base`;
+  const NAMING = `/api/ui/conversations/${OPEN.id}/companions/${ASKANCE.repo.id}/branch`;
+
+  /// The workbench with that companion altered — and both repositories'
+  /// branches served, the conversation's row and the companion's each having a
+  /// dropdown over a list of its own.
+  function theCompanion(
+    over: Partial<CompanionView>,
+    ...answers: Parameters<typeof serving>
+  ) {
+    return theWorkbenchWith(
+      { companions: [{ ...ASKANCE, ...over }] },
+      whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
+      whenever(
+        `/api/ui/repos/${ASKANCE.repo.id}/branches`,
+        json(COMPANION_BRANCHES),
+      ),
+      ...answers,
+    );
+  }
+
+  /// What one of that row's controls is called: the words on the label, and
+  /// the repository it belongs to, which the label carries where nobody sees
+  /// it — a card with two companions on it has two of every control.
+  const named = (control: string) => `${control} for ${ASKANCE.repo.name}`;
+
+  /// The branch field on the companion's row, which is told from the
+  /// conversation's own by the repository its label names.
+  function branchField(): HTMLInputElement {
+    return screen.getByLabelText(named("Branch")) as HTMLInputElement;
+  }
+
+  /// The rule first and then the branches, as the conversation's own base
+  /// dropdown offers them — but read off the companion's repository, which is a
+  /// different repository with a default branch and a list of its own.
+  it("offers the companion repo's own rule and then its own branches", async () => {
+    theCompanion({});
+    mount(`/conversations/${OPEN.id}`);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText(named("Base")),
+    )) as HTMLSelectElement;
+
+    await waitFor(() => expect(picker.options).toHaveLength(3));
+    expect([...picker.options].map((option) => option.value)).toEqual([
+      "",
+      ...COMPANION_BRANCHES,
+    ]);
+    expect(picker.options[0]!.textContent).toContain(
+      ASKANCE.repo.default_branch,
+    );
+    expect(picker.options[0]!.textContent).not.toContain(
+      OPEN.repo.default_branch,
+    );
+  });
+
+  it("records the base branch that was picked, by name", async () => {
+    const fetching = theCompanion({}, whenever(BASE, json("Recorded"), "POST"));
+    mount(`/conversations/${OPEN.id}`);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText(named("Base")),
+    )) as HTMLSelectElement;
+    await waitFor(() =>
+      expect([...picker.options].map((option) => option.value)).toContain(
+        "trunk",
+      ),
+    );
+
+    fireEvent.change(picker, { target: { value: "trunk" } });
+
+    await waitFor(() =>
+      expect(sent(fetching, BASE)).toEqual({ branch: "trunk" }),
+    );
+  });
+
+  /// The switch is what says whether the work may commit to the repository, and
+  /// it is the one control on the row that changes what the row is: there is no
+  /// branch to name until it is on.
+  it("flips to read-write, and there is nothing to name until it is on", async () => {
+    const fetching = theCompanion({}, whenever(MODE, json("Chosen"), "POST"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const toggle = (await waitFor(() =>
+      screen.getByLabelText(named("Read-write")),
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(
+      container.querySelector(`#companion-${ASKANCE.repo.id}-branch`),
+    ).toBeNull();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(sent(fetching, MODE)).toEqual({ mode: "ReadWrite" }),
+    );
+  });
+
+  /// A read-write companion the human has never typed a name into is
+  /// *mirroring*: the field is drawn prefilled with the conversation's own
+  /// branch, so what they read is what they will get.
+  it("prefills a mirroring branch with the conversation's own name", async () => {
+    theCompanion({ mode: "ReadWrite", branch: "" });
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => expect(branchField().value).toBe(OPEN.branch));
+  });
+
+  /// And it follows that name: renaming the conversation's branch renames this
+  /// one with it, for as long as nothing has been typed here.
+  it("moves a mirroring branch with the conversation's own", async () => {
+    theWorkbenchWith(
+      {
+        branch: "counter-in-redis",
+        companions: [{ ...ASKANCE, mode: "ReadWrite", branch: "" }],
+      },
+      whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
+      whenever(
+        `/api/ui/repos/${ASKANCE.repo.id}/branches`,
+        json(COMPANION_BRANCHES),
+      ),
+    );
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => expect(branchField().value).toBe("counter-in-redis"));
+  });
+
+  /// A name that has been typed stands on its own and stops following.
+  it("leaves a named branch where it is, whatever the conversation's is called", async () => {
+    theCompanion({ mode: "ReadWrite", branch: "alongside" });
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => expect(branchField().value).toBe("alongside"));
+    expect(branchField().value).not.toBe(OPEN.branch);
+  });
+
+  /// It keeps itself the way the conversation's own branch field does: there is
+  /// nothing to press, and leaving the field is what sends what is in it.
+  it("saves a typed branch name on the way out of the field", async () => {
+    const fetching = theCompanion(
+      { mode: "ReadWrite", branch: "" },
+      whenever(NAMING, json("Renamed"), "POST"),
+    );
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => branchField());
+
+    expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
+    fireEvent.input(branchField(), { target: { value: "alongside" } });
+    fireEvent.blur(branchField());
+
+    await waitFor(() =>
+      expect(sent(fetching, NAMING)).toEqual({ branch: "alongside" }),
+    );
+  });
+
+  /// And clearing it is going back to mirroring rather than a branch called
+  /// nothing — so the record is asked to hold no name, and the field fills
+  /// itself in again with what mirroring will now give.
+  it("goes back to mirroring when the field is cleared", async () => {
+    let held = "alongside";
+    const fetching = serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
+      whenever(
+        `/api/ui/repos/${ASKANCE.repo.id}/branches`,
+        json(COMPANION_BRANCHES),
+      ),
+      // The record as the save leaves it, so that what the field falls back to
+      // is read rather than assumed.
+      whenever(`/api/ui/conversations/${OPEN.id}`, () =>
+        json({
+          ...OPEN,
+          companions: [{ ...ASKANCE, mode: "ReadWrite", branch: held }],
+        })(),
+      ),
+      whenever(
+        NAMING,
+        () => {
+          held = "";
+          return json("Renamed")();
+        },
+        "POST",
+      ),
+    );
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => expect(branchField().value).toBe("alongside"));
+
+    fireEvent.input(branchField(), { target: { value: "" } });
+    fireEvent.blur(branchField());
+
+    await waitFor(() => expect(sent(fetching, NAMING)).toEqual({ branch: "" }));
+    await waitFor(() => expect(branchField().value).toBe(OPEN.branch));
+  });
+
+  /// A refusal is a sentence about the row it was refused for, said on that
+  /// row: the card draws one per companion, and a refusal said anywhere else
+  /// would be about a repository the human has to guess at.
+  it("says why a change was refused, on the row it was refused for", async () => {
+    theCompanion({}, whenever(MODE, json("NotDrafting"), "POST"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await waitFor(() => screen.getByLabelText(named("Read-write"))));
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${setup.companion} .${setup.failure}`)
+          ?.textContent,
+      ).toBe(COMPANION_MODE_REFUSAL.NotDrafting),
+    );
+  });
+
+  /// The same for the field, which is refused for a name git will not take as
+  /// well as for a conversation that has moved on — and heals, for the reason
+  /// the conversation's own branch field does: the keystroke after a refusal
+  /// may well be what fixes it.
+  it("says why a branch name was refused, and heals when it is valid", async () => {
+    let outcome = "NotABranchName";
+    const fetching = theCompanion(
+      { mode: "ReadWrite", branch: "" },
+      whenever(NAMING, () => json(outcome)(), "POST"),
+    );
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => branchField());
+
+    fireEvent.input(branchField(), { target: { value: "two..dots" } });
+    fireEvent.blur(branchField());
+
+    await waitFor(() =>
+      expect(screen.getAllByText(COMPANION_BRANCH_REFUSAL.NotABranchName)),
+    );
+
+    outcome = "Renamed";
+    fireEvent.input(branchField(), { target: { value: "two-dots" } });
+    fireEvent.blur(branchField());
+
+    await waitFor(() => expect(writes(fetching, NAMING)).toBe(2));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(COMPANION_BRANCH_REFUSAL.NotABranchName),
+      ).toBeNull(),
+    );
+  });
+
+  /// The three of them go with the branch and the base when the card freezes,
+  /// because the server freezes every one of them at the same moment.
+  it("goes with the rest of the setup when the card freezes", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
+
+    expect(screen.queryByLabelText(named("Base"))).toBeNull();
+    expect(screen.queryByLabelText(named("Read-write"))).toBeNull();
   });
 });
 

@@ -28,14 +28,15 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, CompanionAdded, CompanionMode,
-    CompanionRemoved, CompanionView, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
-    GrillingStarted, Lifecycle, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Standing,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, CompanionAdded,
+    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
+    CompanionModeChosen, CompanionRemoved, CompanionView, ConversationArchived, ConversationClosed,
+    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
+    ConversationView, Cursor, GrillingStarted, Lifecycle, Locked, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -142,6 +143,22 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/conversations/{id}/companions/{repo}/remove",
             post(remove_companion),
+        )
+        // And what each of those rows is configured with — the same three
+        // things the Conversation's own branch row settles, about a companion
+        // instead: how far in the work may reach, what its checkout comes off,
+        // and what its branch is called.
+        .route(
+            "/api/ui/conversations/{id}/companions/{repo}/mode",
+            post(set_companion_mode),
+        )
+        .route(
+            "/api/ui/conversations/{id}/companions/{repo}/base",
+            post(set_companion_base),
+        )
+        .route(
+            "/api/ui/conversations/{id}/companions/{repo}/branch",
+            post(rename_companion_branch),
         )
         // The two that make and unmake what a Conversation works in. Named in
         // the path rather than in the verb, as closing a Set unanswered is: the
@@ -1583,6 +1600,70 @@ async fn remove_companion(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "removing a companion repo failed");
             unavailable("the companion repo could not be removed")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/companions/{repo}/mode` — how far into one
+/// of them the work may reach.
+async fn set_companion_mode(
+    State(state): State<AppState>,
+    Path((id, repo)): Path<(String, String)>,
+    Json(choice): Json<CompanionModeChoice>,
+) -> HttpResponse {
+    let (Ok(id), Ok(repo)) = (id.parse::<i64>(), repo.parse::<i64>()) else {
+        return Json(CompanionModeChosen::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::set_companion_mode(&state.pool, id, repo, choice.mode).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "setting a companion's mode failed");
+            unavailable("the companion repo's mode could not be set")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/companions/{repo}/base` — the branch of the
+/// companion's own repository its checkout comes off, or the default-branch
+/// rule.
+async fn set_companion_base(
+    State(state): State<AppState>,
+    Path((id, repo)): Path<(String, String)>,
+    Json(choice): Json<BaseBranchChoice>,
+) -> HttpResponse {
+    let (Ok(id), Ok(repo)) = (id.parse::<i64>(), repo.parse::<i64>()) else {
+        return Json(CompanionBaseRecorded::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::set_companion_base(&state.pool, id, repo, choice.branch.as_deref())
+        .await
+    {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "recording a companion's base branch failed");
+            unavailable("the companion repo's base branch could not be recorded")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/companions/{repo}/branch` — what a
+/// read-write companion's branch is called, or nothing at all for mirroring.
+async fn rename_companion_branch(
+    State(state): State<AppState>,
+    Path((id, repo)): Path<(String, String)>,
+    Json(rename): Json<BranchRename>,
+) -> HttpResponse {
+    let (Ok(id), Ok(repo)) = (id.parse::<i64>(), repo.parse::<i64>()) else {
+        return Json(CompanionBranchRenamed::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::rename_companion_branch(&state.pool, id, repo, &rename.branch).await
+    {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "naming a companion's branch failed");
+            unavailable("the companion repo's branch could not be named")
         }
     }
 }

@@ -20,7 +20,8 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded, CompanionMode,
+    Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded,
+    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChosen,
     CompanionRemoved, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationSteered, ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle,
     PinnedEvent, ProfileSaved, Registered, RoadmapPane, ShowingArchived, Started, SteerOpened,
@@ -621,6 +622,236 @@ async fn a_repo_is_added_to_work_alongside_and_taken_away_again() {
     assert!(companions(&app, id).await.is_empty());
 }
 
+async fn companion_mode(
+    app: &Router,
+    id: i64,
+    repo_id: i64,
+    mode: CompanionMode,
+) -> CompanionModeChosen {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/companions/{repo_id}/mode"),
+        &serde_json::json!({ "mode": mode }),
+    )
+    .await
+}
+
+async fn companion_base(
+    app: &Router,
+    id: i64,
+    repo_id: i64,
+    branch: Option<&str>,
+) -> CompanionBaseRecorded {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/companions/{repo_id}/base"),
+        &serde_json::json!({ "branch": branch }),
+    )
+    .await
+}
+
+async fn companion_branch(
+    app: &Router,
+    id: i64,
+    repo_id: i64,
+    branch: &str,
+) -> CompanionBranchRenamed {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/companions/{repo_id}/branch"),
+        &serde_json::json!({ "branch": branch }),
+    )
+    .await
+}
+
+/// The one companion of a Conversation, for the tests that configure it.
+async fn only_companion(app: &Router, id: i64) -> verkstead_render::CompanionView {
+    let mut companions = opened(app, id).await.companions;
+    assert_eq!(companions.len(), 1);
+    companions.remove(0)
+}
+
+/// The three things a row settles about a companion, each landing on its own.
+#[tokio::test]
+async fn a_companion_is_configured_on_the_row_it_draws() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, watched.path(), "askance").await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        add_companion(&app, id, askance).await,
+        CompanionAdded::Added
+    );
+
+    assert_eq!(
+        companion_mode(&app, id, askance, CompanionMode::ReadWrite).await,
+        CompanionModeChosen::Chosen
+    );
+    assert_eq!(
+        only_companion(&app, id).await.mode,
+        CompanionMode::ReadWrite
+    );
+
+    // The branch of the *companion's* own repository, which is a different
+    // repository with a list of its own.
+    assert_eq!(
+        companion_base(&app, id, askance, Some("main")).await,
+        CompanionBaseRecorded::Recorded
+    );
+    assert_eq!(
+        only_companion(&app, id).await.base_ref,
+        Some("main".to_owned())
+    );
+
+    assert_eq!(
+        companion_branch(&app, id, askance, "alongside").await,
+        CompanionBranchRenamed::Renamed
+    );
+    assert_eq!(only_companion(&app, id).await.branch, "alongside");
+}
+
+/// Empty is not a name git is asked about: it is *mirroring* — the
+/// Conversation's own branch name, followed as it is renamed — which is what a
+/// companion starts on and what clearing the field goes back to.
+#[tokio::test]
+async fn an_empty_companion_branch_is_mirroring_rather_than_a_name() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, watched.path(), "askance").await;
+    let id = started(&app, repo_id).await;
+
+    add_companion(&app, id, askance).await;
+
+    assert_eq!(only_companion(&app, id).await.branch, "");
+    assert_eq!(
+        companion_branch(&app, id, askance, "alongside").await,
+        CompanionBranchRenamed::Renamed
+    );
+    assert_eq!(
+        companion_branch(&app, id, askance, "").await,
+        CompanionBranchRenamed::Renamed
+    );
+    assert_eq!(only_companion(&app, id).await.branch, "");
+
+    // And a name git will not take is refused, as the Conversation's own is.
+    assert_eq!(
+        companion_branch(&app, id, askance, "not a branch").await,
+        CompanionBranchRenamed::NotABranchName
+    );
+    assert_eq!(only_companion(&app, id).await.branch, "");
+}
+
+/// A read-only companion has no branch, being checked out detached — so the
+/// name goes with the mode rather than sitting in the record for a branch
+/// nobody will cut.
+#[tokio::test]
+async fn flipping_a_companion_back_to_read_only_takes_its_branch_name_with_it() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, watched.path(), "askance").await;
+    let id = started(&app, repo_id).await;
+
+    add_companion(&app, id, askance).await;
+    companion_mode(&app, id, askance, CompanionMode::ReadWrite).await;
+    companion_branch(&app, id, askance, "alongside").await;
+
+    assert_eq!(
+        companion_mode(&app, id, askance, CompanionMode::ReadOnly).await,
+        CompanionModeChosen::Chosen
+    );
+
+    let companion = only_companion(&app, id).await;
+    assert_eq!(companion.mode, CompanionMode::ReadOnly);
+    assert_eq!(companion.branch, "");
+
+    // The base is left where it was: what a checkout comes off is the same
+    // question either way round.
+    assert_eq!(companion.base_ref, None);
+}
+
+/// The base is one of the companion repository's own branches, and nothing
+/// else: a sha or a tag resolves and is still not something there is a way to
+/// pick.
+#[tokio::test]
+async fn a_companions_base_is_one_of_its_own_branches() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, watched.path(), "askance").await;
+    let id = started(&app, repo_id).await;
+
+    add_companion(&app, id, askance).await;
+
+    // A branch of the *Conversation's* repository is not a branch of the
+    // companion's, however plausible it reads.
+    git(&repo, &["branch", "release-1.4"]);
+    assert_eq!(
+        companion_base(&app, id, askance, Some("release-1.4")).await,
+        CompanionBaseRecorded::NoSuchBranch
+    );
+    assert_eq!(only_companion(&app, id).await.base_ref, None);
+
+    // And the first entry of the dropdown is the override taken away rather
+    // than a branch called nothing.
+    companion_base(&app, id, askance, Some("main")).await;
+    for cleared in [None, Some("")] {
+        assert_eq!(
+            companion_base(&app, id, askance, cleared).await,
+            CompanionBaseRecorded::Recorded
+        );
+        assert_eq!(only_companion(&app, id).await.base_ref, None);
+    }
+}
+
+/// The whole configuration freezes together: past grill start every one of the
+/// three is refused, whatever a stale page believed.
+#[tokio::test]
+async fn configuring_a_companion_is_settled_once_the_grilling_has_started() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, watched.path(), "askance").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    add_companion(&app, id, askance).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        companion_mode(&app, id, askance, CompanionMode::ReadWrite).await,
+        CompanionModeChosen::NotDrafting
+    );
+    assert_eq!(
+        companion_base(&app, id, askance, Some("main")).await,
+        CompanionBaseRecorded::NotDrafting
+    );
+    assert_eq!(
+        companion_branch(&app, id, askance, "alongside").await,
+        CompanionBranchRenamed::NotDrafting
+    );
+
+    let companion = only_companion(&app, id).await;
+    assert_eq!(companion.mode, CompanionMode::ReadOnly);
+    assert_eq!(companion.base_ref, None);
+    assert_eq!(companion.branch, "");
+}
+
+/// A row taken off in one tab and configured in another: the press did nothing,
+/// which is worth saying rather than reporting as done.
+#[tokio::test]
+async fn a_repo_that_is_not_a_companion_is_not_configured() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, watched.path(), "askance").await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        companion_mode(&app, id, askance, CompanionMode::ReadWrite).await,
+        CompanionModeChosen::NoSuchCompanion
+    );
+    assert_eq!(
+        companion_base(&app, id, askance, Some("main")).await,
+        CompanionBaseRecorded::NoSuchCompanion
+    );
+    assert_eq!(
+        companion_branch(&app, id, askance, "alongside").await,
+        CompanionBranchRenamed::NoSuchCompanion
+    );
+    assert!(companions(&app, id).await.is_empty());
+}
+
 /// The work is being done in its own repository already, so adding it beside
 /// itself would be that repository twice in one sandbox.
 #[tokio::test]
@@ -731,6 +962,18 @@ async fn a_conversation_that_is_not_there_says_so_however_it_is_asked_about() {
     assert_eq!(
         remove_companion(&app, 404, 1).await,
         CompanionRemoved::NoSuchConversation
+    );
+    assert_eq!(
+        companion_mode(&app, 404, 1, CompanionMode::ReadWrite).await,
+        CompanionModeChosen::NoSuchConversation
+    );
+    assert_eq!(
+        companion_base(&app, 404, 1, Some("main")).await,
+        CompanionBaseRecorded::NoSuchConversation
+    );
+    assert_eq!(
+        companion_branch(&app, 404, 1, "alongside").await,
+        CompanionBranchRenamed::NoSuchConversation
     );
 }
 

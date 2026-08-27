@@ -513,6 +513,25 @@ diff: DiffView | null, };
 export type CompanionAdded = "Added" | "NoSuchConversation" | "NotDrafting" | "NoSuchRepo" | "OwnRepo" | "AlreadyAdded";
 
 /**
+ * And of choosing the branch a companion's checkout comes off.
+ *
+ * The Conversation's own [`BaseRecorded`] with the companion refusal added,
+ * rather than that enum reused: the branch this is about is the companion
+ * repository's own, and a Conversation and a companion of it are two
+ * repositories with two lists of branches.
+ */
+export type CompanionBaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "NoSuchCompanion" | "NoSuchBranch";
+
+/**
+ * And of naming the branch a read-write companion's work is done on.
+ *
+ * The empty name is not refused, because empty is not a name: it is
+ * *mirroring*, which is what a companion nobody has typed into is on and what
+ * clearing the field goes back to.
+ */
+export type CompanionBranchRenamed = "Renamed" | "NoSuchConversation" | "NotDrafting" | "NoSuchCompanion" | "NotABranchName";
+
+/**
  * How far into a companion a session may reach.
  *
  * Two, and no third: a repository is there to be read, or it is there to be
@@ -520,6 +539,23 @@ export type CompanionAdded = "Added" | "NoSuchConversation" | "NotDrafting" | "N
  * is cut for it, and neither of those has a halfway.
  */
 export type CompanionMode = "ReadOnly" | "ReadWrite";
+
+/**
+ * How far into a companion a session may reach, as the switch on its row sends
+ * it.
+ */
+export type CompanionModeChoice = { mode: CompanionMode, };
+
+/**
+ * What became of flipping that switch.
+ *
+ * *No such companion* is among these and is not among a removal's refusals: a
+ * removal asked for a row to be gone, and a row that was never there is that.
+ * A configuration asked for a row to say something, and where there is no row
+ * there is nothing to say it — so the press did nothing, which is worth
+ * saying rather than reporting as done.
+ */
+export type CompanionModeChosen = "Chosen" | "NoSuchConversation" | "NotDrafting" | "NoSuchCompanion";
 
 /**
  * And of taking one away.

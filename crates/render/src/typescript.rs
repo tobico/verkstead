@@ -18,14 +18,16 @@ use ts_rs::TS;
 
 use crate::{
     AbandonedRepo, Adopted, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename,
-    BranchRenamed, BriefEdit, BriefSaved, Capture, CommitPane, CompanionAdded, CompanionRemoved,
-    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, GrillingStarted, Locked,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RepoEntry, Resumed, RoadmapPane, Screen, SetReading, SettingsEdit,
-    SettingsSaved, SettingsView, ShowingArchived, Shown, Started, SteerOpened, SteerSubmission,
-    Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    BranchRenamed, BriefEdit, BriefSaved, Capture, CommitPane, CompanionAdded,
+    CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen,
+    CompanionRemoved, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
+    GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
+    PushKey, Registered, Registration, RepoEntry, Resumed, RoadmapPane, Screen, SetReading,
+    SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Shown, Started, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -90,6 +92,14 @@ fn the_viewers_types_are_written_from_these() {
     NewCompanion::export_all(&config).unwrap();
     CompanionAdded::export_all(&config).unwrap();
     CompanionRemoved::export_all(&config).unwrap();
+
+    // And what the row it draws is configured with: the mode switch, the base
+    // picker and the branch field, each with a named outcome of its own for the
+    // reason the Conversation's own three have one.
+    CompanionModeChoice::export_all(&config).unwrap();
+    CompanionModeChosen::export_all(&config).unwrap();
+    CompanionBaseRecorded::export_all(&config).unwrap();
+    CompanionBranchRenamed::export_all(&config).unwrap();
 
     // And the two actions that make and unmake what a Conversation works in.
     // Neither takes a request shape — which Conversation is in the path, and

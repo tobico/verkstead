@@ -1996,6 +1996,78 @@ pub enum CompanionRemoved {
     NotDrafting,
 }
 
+/// How far into a companion a session may reach, as the switch on its row sends
+/// it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CompanionModeChoice {
+    pub mode: CompanionMode,
+}
+
+/// What became of flipping that switch.
+///
+/// *No such companion* is among these and is not among a removal's refusals: a
+/// removal asked for a row to be gone, and a row that was never there is that.
+/// A configuration asked for a row to say something, and where there is no row
+/// there is nothing to say it — so the press did nothing, which is worth
+/// saying rather than reporting as done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionModeChosen {
+    Chosen,
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, for [`CompanionAdded::NotDrafting`]'s
+    /// reason.
+    NotDrafting,
+
+    /// That Repo is not a companion of this Conversation — taken off between
+    /// the card drawing the row and the press that configured it.
+    NoSuchCompanion,
+}
+
+/// And of choosing the branch a companion's checkout comes off.
+///
+/// The Conversation's own [`BaseRecorded`] with the companion refusal added,
+/// rather than that enum reused: the branch this is about is the companion
+/// repository's own, and a Conversation and a companion of it are two
+/// repositories with two lists of branches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionBaseRecorded {
+    Recorded,
+    NoSuchConversation,
+    NotDrafting,
+
+    /// That Repo is not a companion of this Conversation any more.
+    NoSuchCompanion,
+
+    /// The companion's own repository has no branch by that name — see
+    /// [`BaseRecorded::NoSuchBranch`], which is the same refusal about the
+    /// Conversation's own.
+    NoSuchBranch,
+}
+
+/// And of naming the branch a read-write companion's work is done on.
+///
+/// The empty name is not refused, because empty is not a name: it is
+/// *mirroring*, which is what a companion nobody has typed into is on and what
+/// clearing the field goes back to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionBranchRenamed {
+    Renamed,
+    NoSuchConversation,
+    NotDrafting,
+
+    /// That Repo is not a companion of this Conversation any more.
+    NoSuchCompanion,
+
+    /// Not a name git would take for a branch, asked of git itself — see
+    /// [`BranchRenamed::NotABranchName`].
+    NotABranchName,
+}
+
 /// What became of an edit to a Brief.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
