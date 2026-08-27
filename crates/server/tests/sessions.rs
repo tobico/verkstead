@@ -6302,6 +6302,20 @@ async fn a_split_no_backlog_was_written_for_settles_like_any_other_review() {
         pause(Duration::from_millis(25)).await;
     }
 
+    // And then let the wrap-up run to its ordinary end, which is the whole of
+    // what *like any other review* means: the review is answered, the checks are
+    // green and nothing is left unaddressed, so the Conversation is Done.
+    //
+    // Waited for rather than read. The state a moment after the review settles
+    // is a fact about which of two things won a race — this read, or the loop
+    // that ends a wrap-up — and *still Wrapping* is the answer only on a machine
+    // with nothing else to do. Done is where it comes to rest either way, and
+    // reaching it says more than catching it on the way: a run that had gone
+    // back down the ladder would never arrive.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
     let view = fixture.view().await;
 
     assert!(
@@ -6313,11 +6327,6 @@ async fn a_split_no_backlog_was_written_for_settles_like_any_other_review() {
         moves_into(&view, Lifecycle::Implementing),
         1,
         "and nothing went back down the ladder: there is no backlog to build",
-    );
-    assert_eq!(
-        view.state,
-        Lifecycle::Wrapping,
-        "the Conversation is where the wrap-up left it",
     );
     assert!(
         !dispatched.exists(),
