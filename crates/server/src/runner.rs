@@ -393,7 +393,16 @@ pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, dr
         // as every other turn of the run asks it — a stage's backlog included,
         // it being a backlog like any other by the time there is one. What is
         // next has not changed on account of nothing having been running.
-        Direction::TaskList => backlog_again(state, conversation_id, &working_in, driving).await,
+        Direction::TaskList => {
+            backlog_again(
+                state,
+                conversation_id,
+                &working_in,
+                conversation.base_commit.as_deref(),
+                driving,
+            )
+            .await
+        }
     }
 }
 
@@ -405,15 +414,41 @@ pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, dr
 /// backlog like any other by the time there is one. What is next has not changed
 /// on account of nothing having been running.
 ///
-/// An empty one is two situations rather than one, and until [`nothing_left`]
-/// asks GitHub nothing can tell them apart: a breakdown that never landed, and a
-/// feature that is finished with. The second is the one worth handling, because
-/// it is what a *failed ending* looks like from here — the finish step pushed
-/// and opened the pull request, and what went wrong went wrong afterwards.
-async fn backlog_again(state: AppState, conversation_id: i64, working_in: &Path, driving: Driving) {
+/// An empty one is three situations rather than one. A stage whose planning
+/// never landed is the one that is answered here, because it is the only one
+/// with a step left to run: its backlog was never written, and the session that
+/// would have written it is launched once and by nobody else — see
+/// [`stage_to_plan`]. The other two are a breakdown that never landed and a
+/// feature that is finished with, and nothing can tell those apart until
+/// [`nothing_left`] asks GitHub.
+///
+/// `base` is the commit this Conversation's branch was made on, which is what
+/// the first of the three is read against: what a branch has written is asked of
+/// what it has written *since it branched*, the predecessor's own backlog being
+/// in the history of a stage stacked on one.
+async fn backlog_again(
+    state: AppState,
+    conversation_id: i64,
+    working_in: &Path,
+    base: Option<&str>,
+    driving: Driving,
+) {
     let step = decide(working_in).await;
 
     if step == Step::Nothing {
+        // Asked before GitHub is, and before anything is read as an ending that
+        // half happened: a stage that has planned nothing has pushed nothing and
+        // opened nothing, so what an empty backlog means there is that the run
+        // has not started rather than that it is over.
+        if let Some(stacked_on) = stage_to_plan(&state, conversation_id, working_in, base).await {
+            tracing::info!(
+                conversation_id,
+                "a stage's backlog was never planned, so the planning is being run again",
+            );
+
+            return plan_stage(state, conversation_id, stacked_on, driving).await;
+        }
+
         return nothing_left(state, conversation_id, driving).await;
     }
 
@@ -637,16 +672,29 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
 /// [`crate::continuing`]. Everything after that is the same run a task list has,
 /// because from the plan commit onwards it *is* one.
 ///
+/// Started as the stage is made — by the stage before it settling, or by a human
+/// adopting the roadmap it belongs to — and started again by a run taken up over
+/// a stage that has no backlog. That second way in is what makes the first
+/// recoverable: a planning session that died before it committed leaves a stage
+/// whose backlog nothing else would ever write, so what is read there is a run
+/// that never began rather than one that is worked out — see [`stage_to_plan`].
+///
 /// `stacked_on` is the branch this stage's branch was made on top of, which the
 /// fork is told because it is the one thing about a stage the repository does not
 /// say.
-pub(crate) async fn plan_stage(state: AppState, conversation_id: i64, stacked_on: Option<String>) {
-    // Taken here rather than by [`crate::continuing`], which is the one place
-    // that could have taken it earlier and has nothing to gain from doing so: a
-    // stage is a Conversation made moments ago, and this is spawned as the last
-    // thing that makes it.
-    let driving = state.drivers.driving(conversation_id);
-
+///
+/// `driving` is the registration that says this Conversation is being driven,
+/// taken by whoever is starting the planning rather than here — the stage being
+/// made, or a run that has found the planning never happened. Handed over rather
+/// than taken at this end, for the reason every other driver here hands one
+/// over: the launch is the slow part, and a gap in the middle of one is a
+/// Conversation a sweep reads as standing still. See [`crate::drivers`].
+pub(crate) async fn plan_stage(
+    state: AppState,
+    conversation_id: i64,
+    stacked_on: Option<String>,
+    driving: Driving,
+) {
     let Some(session) =
         launch_in_turn(&state, conversation_id, Prompt::PlanningStage(stacked_on)).await
     else {
@@ -2502,6 +2550,107 @@ fn pending(worktree: &Path, path: &Path) -> Option<bool> {
     Some(!said.trim().is_empty())
 }
 
+/// The stage whose backlog was never planned, and what its branch was made on
+/// top of.
+///
+/// The one step a stage has that no other Conversation has: its first, run in
+/// the fork of next-stage, which is what writes the `.tasks/` every step after
+/// it works through. It is launched as the stage is made and by nothing else —
+/// [`crate::continuing`] where the stage before it settled, and
+/// [`crate::conversations::adopt`] where a human adopted the roadmap — so a
+/// planning session that died before it committed leaves a Conversation
+/// implementing a backlog that was never written, with nothing in Verkstead that
+/// would ever write one. That is a stage stuck for good, and it is stuck under
+/// both readings that exist for getting a run going again: [`nothing_left`]
+/// stops it, and a pressed Resume refuses it by name.
+///
+/// So it is asked for here. `Some` is that stage, carrying what
+/// [`crate::skills::next_stage`] has to be told — the branch this stage's branch
+/// stacks on, or `None` inside where it came off the default branch. `None` is
+/// every other Conversation: one that is not a stage, one whose backlog has been
+/// written already, and one with no base commit to read a branch's writing
+/// against.
+///
+/// Asked of the repository rather than of the record, by the rule the rest of
+/// this module reads a run's position by — what a branch has written is the
+/// branch's own to say, and it is the same answer however the Conversation got
+/// here. A git that will not answer says *written*, which is the right way round
+/// for the one thing this decides: a stage planned a second time over a backlog
+/// that is already there would be an agent let loose on somebody else's work.
+pub(crate) async fn stage_to_plan(
+    state: &AppState,
+    conversation_id: i64,
+    worktree: &Path,
+    base: Option<&str>,
+) -> Option<Option<String>> {
+    // No base commit is a Conversation that never branched, which is not a stage
+    // — a stage is made by branching — and is not something a branch's own
+    // writing can be read against either.
+    let base = base?;
+
+    let stacked_on = match store::stacks_on(&state.pool, conversation_id).await {
+        // The outer answer is whether this is a stage at all, and the inner one
+        // is what its branch was made on top of. Only the outer one decides
+        // anything here; the inner is carried through to the fork, which is the
+        // one thing about a stage the repository does not say.
+        Ok(stacked_on) => stacked_on?,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "reading whether a Conversation is a roadmap stage failed",
+            );
+
+            return None;
+        }
+    };
+
+    // Off the runtime's threads: two git reads.
+    let written = {
+        let worktree = worktree.to_owned();
+        let base = base.to_owned();
+
+        tokio::task::spawn_blocking(move || backlog_written(&worktree, &base))
+            .await
+            .unwrap_or(true)
+    };
+
+    (!written).then_some(stacked_on)
+}
+
+/// Whether this branch has written a backlog since `base`.
+///
+/// Two questions, as [`crate::stages::touched`] asks two, because git answers
+/// them separately: what the history holds — every commit that touched
+/// `.tasks/`, the finish step's own deletion of it included — and what is in the
+/// Worktree that no commit has taken yet. A backlog that was written and then
+/// finished with is in the first; one a session wrote and died before committing
+/// is in the second. A stage that never planned is in neither.
+///
+/// Since `base` rather than over the whole history, because a stage's branch is
+/// stacked on the branch of the stage before it: the predecessor's backlog and
+/// the finish that emptied it are commits this branch is descended from, and a
+/// reading that counted those would say every stage had planned already.
+///
+/// A repository that will not answer says *written* — see [`stage_to_plan`] for
+/// why that is the safe way round.
+fn backlog_written(worktree: &Path, base: &str) -> bool {
+    let since = format!("{base}..HEAD");
+
+    // `--` rather than `--end-of-options`: what follows it is a pathspec, which
+    // is git's own name for a path, and the base is a commit Verkstead resolved
+    // itself rather than anything a human typed here.
+    let committed = git(worktree, &["log", "--format=%H", &since, "--", BACKLOG]);
+    let uncommitted = git(worktree, &["status", "--porcelain", "--", BACKLOG]);
+
+    match (committed, uncommitted) {
+        (Some(committed), Some(uncommitted)) => {
+            !committed.trim().is_empty() || !uncommitted.trim().is_empty()
+        }
+        _ => true,
+    }
+}
+
 /// Whether `.tasks/` has anything left in it to work.
 ///
 /// The one thing about a backlog anybody outside the runner asks: Resume refuses
@@ -2973,6 +3122,110 @@ mod tests {
         run(path, &["commit", "-m", "chore: plan rate-limiting tasks"]);
 
         assert!(landed(path, &landing), "written and committed");
+    }
+
+    /// A repository at the moment a roadmap stage's branch is made on top of the
+    /// stage before it: that one planned a backlog, worked it, and finished with
+    /// it, so `.tasks/` is all through the history and gone from the tree.
+    ///
+    /// Returns the worktree and the commit the stage's branch stands on, which
+    /// is what a stage's writing is read against.
+    fn stacked() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        run(path, &["init", "--initial-branch", "main"]);
+        run(path, &["config", "user.email", "test@verkstead.invalid"]);
+        run(path, &["config", "user.name", "Verkstead Test"]);
+        std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "first"]);
+
+        let backlog = path.join(BACKLOG);
+        std::fs::create_dir_all(&backlog).unwrap();
+        std::fs::write(backlog.join(TODO), "# Visibility\n").unwrap();
+        std::fs::write(backlog.join("01-first.md"), "# a task\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: plan Visibility tasks"]);
+
+        std::fs::remove_dir_all(&backlog).unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: finish Visibility"]);
+
+        let base = run(path, &["rev-parse", "HEAD"]).trim().to_owned();
+
+        (dir, base)
+    }
+
+    /// The reading the whole recovery turns on: a stage that was made and then
+    /// lost its planning session has written no backlog, however much of one is
+    /// behind it in the history it stacks on.
+    #[test]
+    fn a_stage_that_never_planned_has_written_no_backlog() {
+        let (dir, base) = stacked();
+
+        assert!(
+            !backlog_written(dir.path(), &base),
+            "the backlog in the history is the stage before this one's",
+        );
+    }
+
+    /// And the moment the planning lands, which is what stops it being planned
+    /// twice: the commit is this branch's own, so it counts.
+    #[test]
+    fn a_backlog_this_stage_committed_is_written() {
+        let (dir, base) = stacked();
+        let path = dir.path();
+
+        let backlog = path.join(BACKLOG);
+        std::fs::create_dir_all(&backlog).unwrap();
+        std::fs::write(backlog.join(TODO), "# Pipeline\n").unwrap();
+
+        assert!(
+            backlog_written(path, &base),
+            "written and not committed is still written — a session is mid-plan",
+        );
+
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: plan Pipeline tasks"]);
+
+        assert!(backlog_written(path, &base), "written and committed");
+    }
+
+    /// The case that must never be read as a stage to plan again: the backlog
+    /// was written, worked to empty, and the finish took `.tasks/` away. The
+    /// tree looks exactly like a stage that planned nothing, and the history is
+    /// what tells them apart.
+    #[test]
+    fn a_backlog_this_stage_finished_with_is_still_written() {
+        let (dir, base) = stacked();
+        let path = dir.path();
+
+        let backlog = path.join(BACKLOG);
+        std::fs::create_dir_all(&backlog).unwrap();
+        std::fs::write(backlog.join(TODO), "# Pipeline\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: plan Pipeline tasks"]);
+
+        std::fs::remove_dir_all(&backlog).unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: finish Pipeline"]);
+
+        assert_eq!(next_step(path), Step::Nothing, "nothing left to work");
+
+        assert!(
+            backlog_written(path, &base),
+            "this stage planned, and a finished backlog is not an unplanned one",
+        );
+    }
+
+    /// A repository git will not answer about says *written*, because the one
+    /// thing this decides is whether to plan a stage again — and planning one
+    /// over a backlog that is already there is the failure worth being careful
+    /// about.
+    #[test]
+    fn a_repository_that_will_not_answer_says_written() {
+        assert!(backlog_written(Path::new("/nonexistent"), "HEAD"));
     }
 
     /// The same rule for the roadmap step, and the reason it cannot be a path

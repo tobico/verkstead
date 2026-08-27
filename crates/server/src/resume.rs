@@ -233,9 +233,9 @@ pub(crate) async fn resume(
 
             // And the backlog's own answer to what is next, asked of `.tasks/`
             // exactly as every other turn of the run asks it. Nothing left in it
-            // is a breakdown that never landed or a feature that is finished
-            // with — and those are two situations rather than one, which is what
-            // the second question is for.
+            // is a stage that was never planned, a breakdown that never landed,
+            // or a feature that is finished with — three situations rather than
+            // one, which is what the two questions after it are for.
             //
             // A feature that is finished with has had its finish step, and a
             // finish step pushes and opens a pull request. So an empty backlog
@@ -253,10 +253,32 @@ pub(crate) async fn resume(
             // which would be true and beside the point.
             if direction == Direction::TaskList && !crate::runner::anything_to_work(&worktree).await
             {
-                let asked = crate::wrapping::asked(state, conversation_id).await;
+                // Except where it is a roadmap stage whose backlog was never
+                // planned, which is the third thing an empty one can be and the
+                // one this refusal would be most wrong about: its first step has
+                // not run, and the session that runs it is launched once and by
+                // nobody the human can press. Asked before GitHub is — a stage
+                // that has planned nothing has pushed nothing to have a pull
+                // request on — and asked here for the reason every other refusal
+                // is asked here, so that the press either starts something or
+                // says why not. See [`crate::runner::stage_to_plan`], which is
+                // the same reading [`crate::runner::backlog_again`] makes a
+                // moment later to decide what to launch.
+                let planned = crate::runner::stage_to_plan(
+                    state,
+                    conversation_id,
+                    &worktree,
+                    conversation.base_commit.as_deref(),
+                )
+                .await
+                .is_none();
 
-                if matches!(asked, None | Some((_, Err(github::Trouble::NoPullRequest)))) {
-                    return Ok(Resumed::NothingToWork);
+                if planned {
+                    let asked = crate::wrapping::asked(state, conversation_id).await;
+
+                    if matches!(asked, None | Some((_, Err(github::Trouble::NoPullRequest)))) {
+                        return Ok(Resumed::NothingToWork);
+                    }
                 }
             }
 
