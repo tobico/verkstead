@@ -4,8 +4,9 @@
 //! The CLI is the agent-facing compatibility surface (ADR-0001): agents run it
 //! as a background shell command, so the wait outlives any harness tool
 //! timeout, and nothing but a shell is needed to integrate. It also derives
-//! `project`, `branch` and the Diff from the working directory, so those are
-//! never at the mercy of what an agent claims.
+//! `project` and `branch` from the working directory, so neither is ever at the
+//! mercy of what an agent claims. The Diff is the same rule answered by the
+//! other end: the server reads it off the Worktrees the Set was asked from.
 
 use std::path::PathBuf;
 
