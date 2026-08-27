@@ -2075,6 +2075,7 @@ async fn companion(companion: store::Companion) -> Result<CompanionView, anyhow:
         base_ref: companion.base_ref,
         branch: companion.branch,
         worktree,
+        base_commit: companion.base_commit,
     })
 }
 

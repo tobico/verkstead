@@ -6,6 +6,7 @@
   "branch": "rate-limiting",
   "companions": [
     {
+      "base_commit": null,
       "base_ref": null,
       "branch": "",
       "mode": "ReadOnly",

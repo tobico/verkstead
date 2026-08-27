@@ -605,7 +605,20 @@ branch: string,
  * is the Conversation's own worktree's rule: a companion has a directory
  * for exactly as long as the work does.
  */
-worktree: Worktree | null, };
+worktree: Worktree | null, 
+/**
+ * The commit its base resolved to when that checkout was made.
+ *
+ * What a read-only companion is detached at, and what a read-write one's
+ * branch was cut from. Kept beside [`Self::base_ref`] rather than instead
+ * of it, because the two say different things: the ref is the *name* the
+ * human picked and what a rename or a steer would follow, and this is where
+ * that name stood at the one moment it mattered.
+ *
+ * `null` wherever [`Self::worktree`] is, and on a checkout made before
+ * Verkstead kept the commit.
+ */
+base_commit: string | null, };
 
 /**
  * And what became of archiving one: putting a Closed Conversation away, so the

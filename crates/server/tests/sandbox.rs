@@ -360,6 +360,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         checkouts.push(store::CompanionWorktree {
             repo_id: registered.id,
             path: checkout,
+            base_commit: at,
         });
     }
 

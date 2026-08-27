@@ -1087,8 +1087,13 @@ fn make(planned: &[Checkout]) -> Result<(), GrillingStarted> {
     Ok(())
 }
 
-/// Where each companion of a start was checked out, for the record that follows
-/// the work.
+/// Where each companion of a start was checked out and what it was cut from,
+/// for the record that follows the work.
+///
+/// The commit as well as the directory, because a companion's base is a *name*
+/// on its row and a name moves: a read-only companion is detached at whatever
+/// that name came to at this moment, and this is the only thing that will ever
+/// know which commit that was.
 ///
 /// The Conversation's own is not among them: it goes on the row the store has
 /// always kept for it, one per Conversation.
@@ -1101,6 +1106,7 @@ fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
             Some(store::CompanionWorktree {
                 repo_id: *repo_id,
                 path: checkout.path.clone(),
+                base_commit: checkout.commit.clone(),
             })
         })
         .collect()

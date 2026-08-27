@@ -1649,15 +1649,17 @@ async fn starting_is_refused_when_the_branch_is_already_there() {
     assert_eq!(opened(&app, id).await.state, Lifecycle::Draft);
 }
 
-/// Where a companion was checked out, as the Conversation reports it.
-fn checked_out(view: &ConversationView, name: &str) -> PathBuf {
-    let companion = view
-        .companions
+/// The companion of that name, as the Conversation reports it.
+fn companion<'a>(view: &'a ConversationView, name: &str) -> &'a verkstead_render::CompanionView {
+    view.companions
         .iter()
         .find(|companion| companion.repo.name == name)
-        .unwrap_or_else(|| panic!("{name} should be a companion of this Conversation"));
+        .unwrap_or_else(|| panic!("{name} should be a companion of this Conversation"))
+}
 
-    let worktree = companion
+/// And where it was checked out.
+fn checked_out(view: &ConversationView, name: &str) -> PathBuf {
+    let worktree = companion(view, name)
         .worktree
         .clone()
         .unwrap_or_else(|| panic!("{name} should have been checked out"));
@@ -1747,6 +1749,57 @@ async fn starting_a_grilling_checks_every_companion_out() {
     // than copies of some files.
     assert!(worktrees(&askance).contains(&read.canonicalize().unwrap()));
     assert!(worktrees(&granit).contains(&written.canonicalize().unwrap()));
+
+    // And what each of them came off is written down, which nothing else knows:
+    // the base on a companion's row is a *name*, and the only moment the commit
+    // that name stood at is knowable is the one that has just passed.
+    assert_eq!(
+        companion(&view, "askance").base_commit.as_deref(),
+        Some(tip.as_str()),
+        "a read-only companion is detached at a commit nothing else records"
+    );
+    assert_eq!(
+        companion(&view, "granit").base_commit.as_deref(),
+        Some(git(&granit, &["rev-parse", "HEAD"]).trim()),
+        "and a read-write one says what its branch was cut from"
+    );
+}
+
+/// What a companion's base came to, as the Conversation reports it once it has
+/// been checked out.
+#[tokio::test]
+async fn a_companion_left_on_the_rule_records_what_the_rule_came_to() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let reading = second_repo(&app, watched.path(), "askance").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    add_companion(&app, id, reading).await;
+
+    let askance = watched.path().join("askance");
+
+    // A commit made after the companion was added and before the start, so what
+    // is recorded can only have come from resolving the rule at grill start
+    // rather than from anything the row was holding.
+    std::fs::write(askance.join("LATER.md"), "later\n").unwrap();
+    git(&askance, &["add", "LATER.md"]);
+    git(&askance, &["commit", "-m", "later"]);
+
+    let moved_on = git(&askance, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(
+        companion(&view, "askance").base_ref,
+        None,
+        "the row still holds the rule rather than a name"
+    );
+    assert_eq!(
+        companion(&view, "askance").base_commit.as_deref(),
+        Some(moved_on.as_str()),
+        "and what the rule came to at the start is what was written down"
+    );
 }
 
 /// Each of the three questions a companion can fail refuses the whole start, and

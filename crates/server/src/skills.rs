@@ -484,16 +484,21 @@ pub(crate) fn alongside(prompt: &str, branch: &str, companions: &[store::Compani
             let worktree = companion.worktree.as_ref()?;
 
             // A read-write companion holds a branch, mirroring resolved; a
-            // read-only one is detached at whatever its base resolved to, and
-            // the base is what there is to name it by.
+            // read-only one is detached at the commit its base came to when the
+            // checkout was made. The commit rather than the branch it was
+            // resolved through, because the two are only the same thing on the
+            // day: a session told it was on `main` would be told something that
+            // stops being true the next time anybody pushes. The name is what a
+            // checkout recorded before Verkstead kept the commit has to fall
+            // back on.
             let holding = match companion.branch_for(branch) {
                 Some(branch) => format!("on branch `{branch}`"),
                 None => format!(
                     "detached at `{}`",
-                    companion
+                    companion.base_commit.clone().unwrap_or_else(|| companion
                         .base_ref
                         .clone()
-                        .unwrap_or_else(|| companion.repo.default_branch.clone())
+                        .unwrap_or_else(|| companion.repo.default_branch.clone()))
                 ),
             };
 
@@ -2029,8 +2034,13 @@ mod tests {
             base_ref: None,
             branch: branch.to_owned(),
             worktree: Some(PathBuf::from(worktree)),
+            base_commit: Some(COMMIT.to_owned()),
         }
     }
+
+    /// What a companion's base resolved to when it was checked out, which is
+    /// what a detached one is named by.
+    const COMMIT: &str = "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7";
 
     /// What a session is told about the companions: where each one is, what it
     /// holds and whether it may be written to, under one heading and under
@@ -2066,11 +2076,12 @@ mod tests {
             "one listing, whatever the prompt was built by: {prompt:?}"
         );
         assert!(
-            prompt.contains(
+            prompt.contains(&format!(
                 "- `askance` at `/var/lib/verkstead/worktrees/askance-main`, \
-                 detached at `main`, read-only."
-            ),
-            "a read-only companion is detached at the base it was cut from: {prompt:?}"
+                 detached at `{COMMIT}`, read-only."
+            )),
+            "a read-only companion is detached at the commit its base came to, \
+             rather than at a branch name that has moved on since: {prompt:?}"
         );
         assert!(
             prompt.contains(

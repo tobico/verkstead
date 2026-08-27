@@ -9329,6 +9329,7 @@ describe("the configuration on the brief's pane", () => {
       path: "/var/lib/verkstead/worktrees/askance-trunk",
       missing: false,
     },
+    base_commit: "8b1c3d5e76f32b11a0c4d1e8f5b3a97c2d0e4f6a",
   };
 
   const WRITING: CompanionView = {
@@ -9345,6 +9346,7 @@ describe("the configuration on the brief's pane", () => {
       path: `/var/lib/verkstead/worktrees/tobico-skills-${GRILLING.branch}`,
       missing: false,
     },
+    base_commit: "0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e76f32b11a",
   };
 
   it("says the repo, the branch, the base commit, the worktree and both pairings", async () => {
@@ -9384,9 +9386,11 @@ describe("the configuration on the brief's pane", () => {
         Repo: "askance",
         Access: "Read-only",
         // No branch, because a read-only companion is checked out detached —
-        // and left on the rule, so what it came off is that repo's own default
-        // branch rather than the conversation's.
-        "Detached at": "trunk",
+        // and the commit it is detached at rather than the branch that was
+        // picked, which is the same honesty the base row above is written for:
+        // a name that has moved since would say the checkout is somewhere it
+        // is not. Abbreviated the way every other commit on the page is.
+        "Detached at": READING.base_commit!.slice(0, ABBREVIATED),
         Worktree: READING.worktree!.path,
       },
       {
@@ -9398,6 +9402,18 @@ describe("the configuration on the brief's pane", () => {
         Worktree: WRITING.worktree!.path,
       },
     ]);
+  });
+
+  /// A checkout made before Verkstead kept the commit has only the name to fall
+  /// back on — the base that was picked, or that repo's own default branch
+  /// where nothing was.
+  it("falls back to the base's name where no commit was recorded", async () => {
+    theGrillingStanding({
+      companions: [{ ...READING, base_commit: null }],
+    });
+    await openBrief(GRILLING);
+
+    expect(companions()[0]!["Detached at"]).toBe(READING.repo.default_branch);
   });
 
   it("summarises a conversation with no companions all the same", async () => {

@@ -170,8 +170,13 @@ function Fact(props: { term: string; children: JSX.Element }): JSX.Element {
 ///
 /// A read-write companion is on a branch cut for it — the Conversation's own
 /// name where it was left mirroring, which is what mirroring resolves to. A
-/// read-only one has no branch at all: it is detached at whatever its base
-/// resolved to, so the base is what there is to name it by.
+/// read-only one has no branch at all: it is detached at the commit its base
+/// came to when the checkout was made, which is the same honesty the base row
+/// above is written for — the branch that was picked is a name, and a name that
+/// has moved since says the checkout is somewhere it is not.
+///
+/// The name is the fallback and not the answer: it is what a checkout made
+/// before Verkstead kept the commit has left to say.
 function Holding(props: {
   conversation: ConversationView;
   companion: CompanionView;
@@ -182,7 +187,16 @@ function Holding(props: {
       fallback={
         <Fact term="Detached at">
           <span class={styles.ref}>
-            {props.companion.base_ref ?? props.companion.repo.default_branch}
+            <Show
+              when={props.companion.base_commit}
+              fallback={
+                props.companion.base_ref ?? props.companion.repo.default_branch
+              }
+            >
+              {(base) =>
+                COMMIT.test(base()) ? base().slice(0, ABBREVIATED) : base()
+              }
+            </Show>
           </span>
         </Fact>
       }

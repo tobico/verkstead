@@ -96,6 +96,20 @@ pub struct Companion {
     /// Conversation's own worktree's rule and the same fact by it: a companion
     /// has a directory for exactly as long as the work does.
     pub worktree: Option<PathBuf>,
+
+    /// The commit its base resolved to when that checkout was made.
+    ///
+    /// The Conversation's own base commit, asked of a companion, and kept for
+    /// the same reason: [`Self::base_ref`] is a *name* the human picked while
+    /// drafting, and what a name points at moves. A read-only companion is
+    /// detached at this commit and nothing else records it, so without it the
+    /// most anything could say about that checkout is a branch it may long since
+    /// have fallen behind.
+    ///
+    /// `None` wherever [`Self::worktree`] is — there is no checkout to have
+    /// resolved anything — and on a checkout recorded by a Verkstead that did
+    /// not keep it, which reads as the base's name the way it always did.
+    pub base_commit: Option<String>,
 }
 
 impl Companion {
@@ -120,17 +134,23 @@ impl Companion {
     }
 }
 
-/// Where a companion's checkout was put, for the record that follows the work.
+/// Where a companion's checkout was put and what it was cut from, for the
+/// record that follows the work.
 ///
-/// The path alone, because the path is the whole of what the grill start
-/// decided that the configuration does not already say: which Repo, which mode
-/// and which branch are all on the companion's own row, and the branch resolves
-/// through [`Companion::branch_for`] wherever it is wanted.
+/// The two things a start decides that the configuration does not already say.
+/// Which Repo, which mode and which branch are all on the companion's own row,
+/// and the branch resolves through [`Companion::branch_for`] wherever it is
+/// wanted; where the checkout went and which commit its base came to are
+/// knowable only at the moment it was made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompanionWorktree {
     pub repo_id: i64,
 
     pub path: PathBuf,
+
+    /// The commit the companion's base resolved to — see
+    /// [`Companion::base_commit`].
+    pub base_commit: String,
 }
 
 /// What became of adding one.
@@ -217,12 +237,35 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              conversation_id INTEGER NOT NULL REFERENCES conversations(id),
              repo_id         INTEGER NOT NULL REFERENCES repos(id),
              path            TEXT NOT NULL,
+             base_commit     TEXT,
              PRIMARY KEY (conversation_id, repo_id)
          ) STRICT",
     )
     .execute(pool)
     .await
     .context("creating the companion worktrees table")?;
+
+    // And the commit each of those checkouts was cut from, through `ALTER TABLE`
+    // as well as in the declaration above — [`super::stops::apply_schema`]'s
+    // rule, for its reason: a database made this morning and one written before
+    // the commit was kept take the same path and end with the same shape.
+    //
+    // Nullable, which is what lets it be added at all and what it honestly is: a
+    // row written before this column existed says where the checkout went and
+    // cannot be made to say what it came off.
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('companion_worktrees') WHERE name = ?")
+            .bind("base_commit")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the base commit column of a companion's worktree")?;
+
+    if there.is_none() {
+        sqlx::query("ALTER TABLE companion_worktrees ADD COLUMN base_commit TEXT")
+            .execute(pool)
+            .await
+            .context("adding the base commit column to the companion worktrees")?;
+    }
 
     Ok(())
 }
@@ -244,12 +287,15 @@ pub(crate) async fn record_worktrees(
 ) -> Result<()> {
     for worktree in worktrees {
         sqlx::query(
-            "INSERT INTO companion_worktrees (conversation_id, repo_id, path) VALUES (?, ?, ?)
-             ON CONFLICT (conversation_id, repo_id) DO UPDATE SET path = excluded.path",
+            "INSERT INTO companion_worktrees (conversation_id, repo_id, path, base_commit)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT (conversation_id, repo_id) DO UPDATE SET
+                 path = excluded.path, base_commit = excluded.base_commit",
         )
         .bind(id)
         .bind(worktree.repo_id)
         .bind(super::repos::text(&worktree.path)?)
+        .bind(&worktree.base_commit)
         .execute(&mut **tx)
         .await
         .with_context(|| {
@@ -465,6 +511,7 @@ pub async fn companions(pool: &SqlitePool, id: i64) -> Result<Vec<Companion>> {
         Option<String>,
         String,
         Option<String>,
+        Option<String>,
     );
 
     // The checkout by an outer join, because a companion has one only once
@@ -472,7 +519,8 @@ pub async fn companions(pool: &SqlitePool, id: i64) -> Result<Vec<Companion>> {
     // nowhere on disk yet, and that is the ordinary state rather than a missing
     // one.
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT r.id, r.path, r.name, r.default_branch, c.mode, c.base_ref, c.branch, w.path
+        "SELECT r.id, r.path, r.name, r.default_branch, c.mode, c.base_ref, c.branch,
+                w.path, w.base_commit
          FROM companions c
          JOIN repos r ON r.id = c.repo_id
          LEFT JOIN companion_worktrees w
@@ -487,7 +535,17 @@ pub async fn companions(pool: &SqlitePool, id: i64) -> Result<Vec<Companion>> {
 
     rows.into_iter()
         .map(
-            |(repo_id, path, name, default_branch, mode, base_ref, branch, worktree)| {
+            |(
+                repo_id,
+                path,
+                name,
+                default_branch,
+                mode,
+                base_ref,
+                branch,
+                worktree,
+                base_commit,
+            )| {
                 Ok(Companion {
                     repo: Repo {
                         id: repo_id,
@@ -499,6 +557,7 @@ pub async fn companions(pool: &SqlitePool, id: i64) -> Result<Vec<Companion>> {
                     base_ref: base_ref.filter(|base| !base.is_empty()),
                     branch,
                     worktree: worktree.map(PathBuf::from),
+                    base_commit,
                 })
             },
         )

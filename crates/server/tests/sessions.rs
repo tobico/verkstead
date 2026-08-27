@@ -1587,8 +1587,17 @@ async fn a_grilling_session_is_told_about_the_companion_repos_too() {
         said.contains("`askance` at `"),
         "with where it was checked out: {said:?}"
     );
+
+    // The commit it is detached at rather than the branch that was picked: the
+    // two are the same thing only on the day, and a session told it was on
+    // `main` would be told something the next push makes untrue.
+    let at = fixture.view().await.companions[0]
+        .base_commit
+        .clone()
+        .expect("a checked-out companion says what its base came to");
+
     assert!(
-        said.contains("detached at `main`, read-only."),
+        said.contains(&format!("detached at `{at}`, read-only.")),
         "and what it holds and whether it may be written to: {said:?}"
     );
 }
