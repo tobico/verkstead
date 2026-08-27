@@ -589,6 +589,24 @@ mod tests {
         rest[..end].to_string()
     }
 
+    /// The heading the shared companion block opens with. The three skills that
+    /// end a piece of work carry it word for word, and it runs to the next
+    /// heading — there being nothing else in the section.
+    const COMPANION_BLOCK: &str = "### And every companion repository you committed in";
+
+    /// That block as one skill carries it, cut out so that the three can be held
+    /// against each other.
+    fn companion_block(name: &str) -> String {
+        let text = skill(name);
+        let start = text.find(COMPANION_BLOCK).unwrap_or_else(|| {
+            panic!("{name} should carry every companion it committed in to a pull request:\n{text}")
+        });
+        let rest = &text[start + COMPANION_BLOCK.len()..];
+        let end = rest.find("\n#").map_or(rest.len(), |at| at + 1);
+
+        format!("{COMPANION_BLOCK}{}", &rest[..end])
+    }
+
     /// The whole reason the fork exists: the twelve lines it came from say to
     /// interview the human and never say how, because on a workstation the
     /// global `CLAUDE.md` said it — and inside a sandbox there is no such file.
@@ -1338,6 +1356,48 @@ mod tests {
             next_task.contains("Nothing waits on approval here either"),
             "and there is no gate in front of that either, as there is in front of none: \
              {next_task}"
+        );
+    }
+
+    /// And the finish extends to the companions. A Conversation working alongside
+    /// read-write repositories ends on one pull request per repository it
+    /// committed in, opened the way *that* repository says — and the three skills
+    /// that end a piece of work are the only place a session is told so.
+    ///
+    /// Word for word across the three, the way the commit-summary block is: what a
+    /// finish does about a companion is one instruction, and three wordings of it
+    /// would be three things to keep true.
+    #[test]
+    fn the_finish_skills_carry_every_companion_they_committed_in_to_its_own_pull_request() {
+        let block = companion_block("next-task/SKILL.md");
+
+        for named in ["implementing/SKILL.md", "staging/SKILL.md"] {
+            assert_eq!(
+                companion_block(named),
+                block,
+                "{named} should say what a finish does about a companion in the same \
+             words the others do",
+            );
+        }
+
+        assert!(
+            block.contains("docs/agents/git-workflow.md"),
+            "the process followed is the companion's own, read out of its own file: \
+         {block}"
+        );
+        assert!(
+            block.contains("worktree"),
+            "and it is followed in that companion's checkout rather than this one: \
+         {block}"
+        );
+        assert!(
+            block.contains("Only the ones holding commits"),
+            "a companion nobody committed in is nothing to carry anywhere: {block}"
+        );
+        assert!(
+            block.contains("stops the run"),
+            "and one committed in and left without a pull request is a stop rather \
+         than something wrap-up carries on past: {block}"
         );
     }
 

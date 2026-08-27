@@ -151,6 +151,25 @@ at this terminal: the pull request opens unasked, and it opens as a *draft*
 because merging is the human's act and nothing here is allowed to look like it
 was theirs. Then stop.
 
+### And every companion repository you committed in
+
+This Conversation may be working alongside other repositories — the prompt
+lists them under *Companion repositories*, each with where it is and what it is
+holding. Every one of them you have committed in goes the same way, and nothing
+you did above carried it anywhere: `cd` into that companion's worktree, read
+*that* repository's own `docs/agents/git-workflow.md`, and follow its finish
+sequence there. Its process rather than this one's, on its own branch, ending
+in a pull request of its own.
+
+Only the ones holding commits. A companion you read from and never committed in
+needs nothing at all, and a read-only one could hold nothing to begin with —
+`git log --oneline <base>..HEAD` in its worktree, against the commit its branch
+was cut from, is what says which is which.
+
+Verkstead asks GitHub about each of them once you have gone quiet, so a
+companion holding commits and no pull request stops the run rather than being
+carried on past.
+
 ## When you need the human
 
 Only when the work genuinely cannot go on without them: something the task file,

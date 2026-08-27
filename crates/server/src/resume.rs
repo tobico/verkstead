@@ -244,7 +244,7 @@ pub(crate) async fn resume(
 
         // The wrap-up's watchers over the top of nothing, which is what a
         // restarting server does with a Conversation it left wrapping up. Each
-        // of the four decides for itself whether there is anything left to do,
+        // of the five decides for itself whether there is anything left to do,
         // so there is nothing here that can come to nothing.
         //
         // The fix attempts are forgotten first: the human has read what stopped
@@ -259,7 +259,7 @@ pub(crate) async fn resume(
                     let state = state.clone();
 
                     tokio::spawn(async move {
-                        // Held until the four watchers have registrations of
+                        // Held until the five watchers have registrations of
                         // their own, which is what
                         // [`crate::wrapping::watching`] takes as it spawns them:
                         // dropping first would leave a moment where a sweep
@@ -269,9 +269,9 @@ pub(crate) async fn resume(
                         crate::checks::afresh(state, conversation_id).await;
                     });
                 }
-                // The same four watchers with the counters left standing — see
+                // The same five watchers with the counters left standing — see
                 // [`Resuming`]. Registered before this one is let go, each of
-                // the four taking a registration of its own as it is spawned,
+                // the five taking a registration of its own as it is spawned,
                 // which is the handover the press makes by holding its across
                 // the spawn.
                 Resuming::Restarted => {

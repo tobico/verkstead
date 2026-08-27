@@ -263,16 +263,16 @@ pub(crate) async fn submit(
             }
         },
 
-        // The wrap-up's four watchers over the top of whatever the branch now
+        // The wrap-up's five watchers over the top of whatever the branch now
         // holds, with the fix attempts forgotten: exactly what a pressed Resume
         // does for a wrapping Conversation, reused rather than forked. Each of
-        // the four decides for itself whether there is anything left to do, so
+        // the five decides for itself whether there is anything left to do, so
         // there is nothing here that can come to nothing.
         SteerTarget::Wrapping => {
             let state = state.clone();
 
             tokio::spawn(async move {
-                // Held until the four watchers have registrations of their own,
+                // Held until the five watchers have registrations of their own,
                 // which is what [`crate::wrapping::watching`] takes as it spawns
                 // them: dropping first would leave a moment where a sweep could
                 // find the Conversation undriven all over again.

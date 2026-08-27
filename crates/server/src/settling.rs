@@ -16,6 +16,15 @@
 //! pipeline is built around rather than a step in it. Done means Verkstead has
 //! finished with the work, not that it is on `main`.
 //!
+//! **And never over a stop.** Every other stop a wrap-up can take leaves
+//! something unsettled behind it — red checks, a review nobody finished, a batch
+//! nobody answered — so the rule never had to ask whether the run was stopped.
+//! A companion whose pull request was never found leaves nothing unsettled,
+//! because nothing was recorded to be unsettled about: the pull requests that
+//! were found could all go green and the Conversation would sail to Done past
+//! its own Notice. So this asks too, the way every watcher already asks before
+//! it dispatches anything — see [`crate::stopping::stopped`].
+//!
 //! A loop rather than a call from each of the three, and deliberately so: the
 //! things that settle are in three different places — a poll of GitHub, another
 //! poll of GitHub, and the endpoint that takes a Response — and a wrap-up left
@@ -34,6 +43,19 @@ use crate::store;
 /// what it has to say it says on the Timeline or in the log.
 pub(crate) async fn watch(state: AppState, conversation_id: i64) {
     loop {
+        // Before the rule rather than inside it, because what a stop means here
+        // is the same as what it means in front of a launch: the run does not
+        // advance past one, and Done is as much an advance as a session is.
+        // Started again by the press that clears it — see [`crate::resume`],
+        // which starts the whole of a wrap-up over.
+        if crate::stopping::stopped(&state, conversation_id).await {
+            tracing::info!(
+                conversation_id,
+                "driving has stopped, so the wrap-up is not being finished",
+            );
+            return;
+        }
+
         match store::finish_wrap_up(&state.pool, conversation_id).await {
             Ok(store::Finished::StillWaiting) => {}
             Ok(store::Finished::Done) => {

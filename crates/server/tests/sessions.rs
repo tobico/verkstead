@@ -1056,6 +1056,53 @@ printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
 exit 1
 "#;
 
+/// A `gh` that answers for two repositories at once: the Conversation's own,
+/// and the companion beside it.
+///
+/// Told apart by the directory the call is made in, which is how the real one
+/// tells them apart too — Verkstead runs `gh` in the repository it is asking
+/// about, `#41` meaning something else entirely in another one. `companion` is
+/// the whole of what it does when it is asked in `askance`.
+///
+/// The Conversation's own pull request is green and nothing has been said on
+/// it, so what a wrap-up is left waiting on is the companion and nothing else.
+fn gh_alongside(companion: &str) -> String {
+    format!(
+        r#"
+case "$(pwd -P)" in
+*/askance)
+{companion}
+    ;;
+esac
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+case "$5" in
+*statusCheckRollup*)
+{green}
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#,
+        green = GREEN,
+    )
+}
+
+/// What that companion says when the finish opened a pull request in it.
+const COMPANION_PULL_REQUEST: &str = r#"    printf '{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}'
+    exit 0"#;
+
+/// And what it says when the finish left it without one, in the words the real
+/// `gh` uses.
+const COMPANION_NO_PULL_REQUEST: &str = r#"    printf 'no pull requests found for branch "%s"\n' "$3" >&2
+    exit 1"#;
+
 /// One of those scripts as a `gh` the server can run: `sh -c` gives `$0` the
 /// program's own name, so what Verkstead passes lands in `$1` onwards.
 fn gh_stub(script: &str) -> Gh {
@@ -1095,6 +1142,32 @@ async fn grilling_building_in(stub: &str, companion: &str) -> Grilling {
         tempfile::tempdir().unwrap(),
         stub,
         PULL_REQUEST,
+        BRISKLY,
+        &[(companion, CompanionMode::ReadWrite)],
+    )
+    .await
+}
+
+/// The same with the companion in the mode one is added in — read-only — and a
+/// `gh` of the caller's choosing.
+async fn grilling_alongside_asking(stub: &str, companion: &str, gh: &str) -> Grilling {
+    grilling_at_pace(
+        tempfile::tempdir().unwrap(),
+        stub,
+        gh,
+        BRISKLY,
+        &[(companion, CompanionMode::ReadOnly)],
+    )
+    .await
+}
+
+/// And the same again with something else where `gh` goes, for the tests about
+/// what a wrap-up makes of the pull requests a finish opened in the companion.
+async fn grilling_building_in_asking(stub: &str, companion: &str, gh: &str) -> Grilling {
+    grilling_at_pace(
+        tempfile::tempdir().unwrap(),
+        stub,
+        gh,
         BRISKLY,
         &[(companion, CompanionMode::ReadWrite)],
     )
@@ -1456,6 +1529,19 @@ fn pull_request(view: &ConversationView) -> Option<&PullRequestEvent> {
         PinnedEvent::PullRequest(opened) => Some(opened),
         _ => None,
     })
+}
+
+/// And every pull request pinned, which is one per repository the work was
+/// carried to: the Conversation's own, and one for each companion it committed
+/// in.
+fn pull_requests(view: &ConversationView) -> Vec<&PullRequestEvent> {
+    view.pinned
+        .iter()
+        .filter_map(|pinned| match pinned {
+            PinnedEvent::PullRequest(opened) => Some(opened),
+            _ => None,
+        })
+        .collect()
 }
 
 /// A Conversation's own directory outside its worktree, as the host sees it —
@@ -3724,6 +3810,52 @@ claude-grilling-5)
 esac
 "#;
 
+/// The same backlog again, in a Conversation with a read-write companion — and a
+/// finish that carries that companion to a pull request of its own, which is what
+/// the bundled forks tell a session to do about every repository it committed in.
+///
+/// The companion's commit lands after the finish commit and before the session
+/// says anything, exactly as a finish sequence worked in order leaves it: the
+/// Conversation's own repository first, then each companion in its own worktree.
+const A_BACKLOG_ALONGSIDE: &str = r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
+    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        rm ".tasks/$next"
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+    else
+        git rm --quiet .tasks/TODO.md
+        git commit --quiet -m 'chore: finish rate-limiting'
+        cd ../askance-*
+        printf 'the other half\n' > halves.md
+        git add halves.md
+        git commit --quiet -m 'feat: the other half'
+        printf 'pushed both, and the pull requests are open\n'
+    fi
+    sleep 300
+    ;;
+esac
+"#;
+
 /// Take a Conversation from the pick on its closing Set to a worked-through
 /// backlog, with nothing pressed on the way: the whole point of the run is that
 /// nobody is asked anything between the direction and the pull request.
@@ -4268,6 +4400,254 @@ async fn a_finish_that_opened_no_pull_request_leaves_the_conversation_where_it_i
         Some(stopped.id),
         "what is waiting is the human, which is what the badge is for",
     );
+}
+
+/// A finish that carried a companion it committed in to a pull request of its
+/// own has both of them pinned: the Conversation's own unlabelled, and the
+/// companion's named with the repository it was opened in.
+///
+/// Which is the whole of the split, one repository further out: the push and the
+/// pull requests are the session's, and what is Verkstead's is knowing that they
+/// happened — asked of the host's `gh` in each repository in turn, `#41` and `#7`
+/// being numbers in two different places.
+#[tokio::test]
+async fn a_companion_the_work_committed_in_is_pinned_beside_the_conversations_own() {
+    let fixture = grilling_building_in_asking(
+        A_BACKLOG_ALONGSIDE,
+        "askance",
+        &gh_alongside(COMPANION_PULL_REQUEST),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| (pull_requests(view).len() == 2).then(|| view.clone()))
+        .await;
+
+    let pinned = pull_requests(&view);
+    let named = |repo: Option<&str>| {
+        pinned
+            .iter()
+            .find(|opened| opened.repo.as_deref() == repo)
+            .unwrap_or_else(|| panic!("no pull request from {repo:?} among {pinned:#?}"))
+    };
+
+    assert_eq!(
+        named(None).number,
+        41,
+        "the work's own repository draws unlabelled, as its commits do",
+    );
+    assert_eq!(
+        named(Some("askance")).number,
+        7,
+        "and the companion's says which repository it was opened in",
+    );
+    assert_eq!(
+        named(Some("askance")).url,
+        "https://github.com/tobico/askance/pull/7",
+        "with the URL of that repository's own pull request rather than a number \
+         built onto this one's",
+    );
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(
+        view.blocked_on, None,
+        "and nothing is waiting on the human: every repository the work committed \
+         in is on a pull request",
+    );
+}
+
+/// A read-write companion nobody committed in is ignored by the whole of
+/// wrap-up: nothing asked of GitHub, nothing recorded, nothing waited on.
+///
+/// The `gh` this is given would stop the run if it were asked about `askance` at
+/// all — it answers there the way one does for a branch nothing was opened on —
+/// so a Conversation that reaches a settled wrap-up with one pull request pinned
+/// and no Notice is one that never asked.
+#[tokio::test]
+async fn a_companion_nothing_was_committed_in_is_never_asked_about() {
+    let fixture = grilling_building_in_asking(
+        A_BACKLOG_OF_ONE,
+        "askance",
+        &gh_alongside(COMPANION_NO_PULL_REQUEST),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    // Waited on rather than read straight off: what says nothing was asked is
+    // the wrap-up getting past the point where it would have asked.
+    let deadline = Instant::now() + PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up never got as far as its checks: {}",
+            standing(&fixture.view().await),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        pull_requests(&view).len(),
+        1,
+        "one pull request, for the one repository the work committed in: {:#?}",
+        pull_requests(&view),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing to say about a companion nobody wrote in: {:?}",
+        notices(&view),
+    );
+    assert_eq!(view.blocked_on, None);
+}
+
+/// And a read-only companion is not asked at all, whatever its repository holds.
+///
+/// Its checkout is detached and bound read-only, so nothing a session did can be
+/// on it — which is why the branch given to it here is made from outside, the way
+/// the sweep's own read-only test makes one. A wrap-up that asked git about it
+/// would find a branch a commit ahead of where that checkout was cut, ask GitHub
+/// about it, and stop over the answer.
+#[tokio::test]
+async fn a_read_only_companion_is_not_asked_about_a_pull_request() {
+    let fixture = grilling_alongside_asking(
+        A_BACKLOG_OF_ONE,
+        "askance",
+        &gh_alongside(COMPANION_NO_PULL_REQUEST),
+    )
+    .await;
+
+    // Put there before anything reaches a wrap-up, so it is in front of the
+    // asking rather than behind it.
+    let view = fixture.view().await;
+    let companion = Path::new(&view.companions[0].repo.path).to_owned();
+
+    git(&companion, &["checkout", "--quiet", "-b", &view.branch]);
+    std::fs::write(companion.join("halves.md"), "the other half\n").unwrap();
+    git(&companion, &["add", "halves.md"]);
+    git(
+        &companion,
+        &["commit", "--quiet", "-m", "feat: the other half"],
+    );
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up never got as far as its checks: {}",
+            standing(&fixture.view().await),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        pull_requests(&view).len(),
+        1,
+        "one pull request, for the one repository a session could commit in: {:#?}",
+        pull_requests(&view),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing to say about a repository nothing was ever asked about: {:?}",
+        notices(&view),
+    );
+}
+
+/// And a companion the work *did* commit in and left without a pull request stops
+/// the run, with a Notice naming the repository.
+///
+/// A deliberate stop, the shape a missing pull request already had: the work ran
+/// and left none, so what is wrong is out here rather than in a driver that went
+/// away. What was already found stays found — the Conversation's own pull request
+/// is pinned and clickable while the human sorts out the one that is missing.
+#[tokio::test]
+async fn a_committed_in_companion_without_a_pull_request_stops_the_run_naming_it() {
+    let fixture = grilling_building_in_asking(
+        A_BACKLOG_ALONGSIDE,
+        "askance",
+        &gh_alongside(COMPANION_NO_PULL_REQUEST),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("askance"),
+        "the Notice names the repository that was left without one: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("no pull request"),
+        "and the reason is `gh`'s, in words: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Deliberate,
+        "looking again would find the same missing thing",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "the work is on a pull request of its own, which is what wrapping up is",
+    );
+    assert_eq!(
+        pull_requests(&view).len(),
+        1,
+        "and the one that was found stays found: {:#?}",
+        pull_requests(&view),
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human, which is what the badge is for",
+    );
+
+    // And it must not reach Done past its own Notice. A wrap-up that stopped on
+    // a companion has nothing unsettled to hold it — nothing was recorded about
+    // the missing pull request to be unsettled about — so the recorded one going
+    // green, the review answered and nothing outstanding is exactly the state
+    // the rule that ends a wrap-up would finish on. Written here rather than
+    // waited for, the watchers having stopped along with everything else.
+    settle_everything(&fixture).await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "a stopped wrap-up is not finished, however little is left outstanding",
+    );
+}
+
+/// Everything a wrap-up waits on, recorded as settled without any of it having
+/// happened.
+///
+/// What a green suite, an answered review and a quiet pull request would leave
+/// behind, put there directly because the watchers that would have written it
+/// stop when the run does — see [`verkstead_server::store::settle_wrap_up`].
+async fn settle_everything(fixture: &Grilling) {
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    for waiting_on in verkstead_server::store::WAITED_ON {
+        verkstead_server::store::settle_wrap_up(&pool, fixture.id, waiting_on)
+            .await
+            .unwrap();
+    }
+
+    pool.close().await;
 }
 
 /// The findings of a review, as the bundled reviewing skill writes them: a

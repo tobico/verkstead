@@ -1752,7 +1752,7 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
 ///
 /// Answered as soon as the decision is made rather than once the session is up.
 /// What Resume starts takes as long as it takes — a grilling relaunch waits for
-/// the Worktree, and a wrap-up is four watchers — and the browser is waiting for
+/// the Worktree, and a wrap-up is five watchers — and the browser is waiting for
 /// *whether* it started, which is what the named outcomes say.
 async fn resume(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {

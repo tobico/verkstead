@@ -54,7 +54,7 @@
 //! Nor while the Worktree is busy. The same trade means a batch that has only
 //! just started reads here exactly as one that is over — its comments are
 //! addressed and it has not asked anything yet — and a wrap-up has more than one
-//! of these watchers whenever a press starts its four over the top of the four
+//! of these watchers whenever a press starts its five over the top of the five
 //! already running. So the Turn is asked for before anything is settled, and a
 //! Worktree with a session in it settles nothing: without that, one watcher
 //! could settle over the batch the other had just dispatched, and the wrap-up

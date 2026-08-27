@@ -403,6 +403,49 @@ fn trailer(line: &str) -> bool {
     })
 }
 
+/// Whether anything has landed on `branch` past the commit it was cut from.
+///
+/// What *touched* means about a companion repository, and the whole of what
+/// decides whether a wrap-up expects a pull request of it: a read-write
+/// companion the work committed in is carried to one of its own, and one nobody
+/// committed in is ignored by the whole of wrap-up — nothing asked of GitHub,
+/// nothing recorded, nothing waited on. A read-only companion is never asked
+/// this at all: its checkout is detached and bound read-only, so nothing can
+/// have landed on it.
+///
+/// Asked of git rather than of the commits the sweep has already put on the
+/// Timeline. The sweep should agree — it sweeps once more as a session ends —
+/// but it is a poller's record, and one that failed on a busy repository would
+/// leave a touched companion looking untouched, and Verkstead would silently
+/// expect no pull request from it.
+///
+/// A repository that will not say reads as untouched, with a line in the log.
+/// It is the only answer with anything behind it: a branch git cannot list is
+/// one nothing could have opened a pull request on either, and the other way
+/// round would stop a run over a repository nothing can be read from.
+///
+/// Blocking, like everything that shells out to git.
+pub(crate) fn touched(repo: &Path, base: &str, branch: &str) -> bool {
+    let Some(counted) = git(
+        repo,
+        &[
+            "rev-list",
+            "--count",
+            "--end-of-options",
+            &format!("{base}..{branch}"),
+        ],
+    ) else {
+        tracing::warn!(
+            repo = %repo.display(),
+            branch,
+            "the repository would not say what is on this branch, so nothing is expected of it",
+        );
+        return false;
+    };
+
+    counted.trim().parse::<i64>().unwrap_or(0) > 0
+}
+
 /// One commit's diff, as the renderer takes it: the patch alone, with no commit
 /// header above it.
 ///
@@ -683,6 +726,41 @@ mod tests {
                 .map(|it| it.subject.as_str())
                 .collect::<Vec<_>>(),
             vec!["three"],
+        );
+    }
+
+    /// What a wrap-up asks of a companion repository before it expects a pull
+    /// request of it: whether the work committed in it at all.
+    ///
+    /// The base is the commit its checkout was cut from, so a branch sitting
+    /// exactly where it started is untouched however much history is behind it —
+    /// which is the ordinary state of a companion somebody only read.
+    #[test]
+    fn a_branch_is_touched_once_something_has_landed_past_its_base() {
+        let dir = repository();
+        let path = dir.path();
+        let base = head(path);
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+
+        assert!(
+            !touched(path, &base, "rate-limiting"),
+            "a branch cut and not committed on is one nothing is expected of",
+        );
+
+        std::fs::write(path.join("halves.md"), "the other half\n").unwrap();
+        run(path, &["add", "halves.md"]);
+        run(path, &["commit", "-m", "feat: the other half"]);
+
+        assert!(
+            touched(path, &base, "rate-limiting"),
+            "and one commit past the base is the whole of what touched means",
+        );
+
+        assert!(
+            !touched(path, &base, "no-such-branch"),
+            "a branch git cannot list is one nothing could have opened a pull \
+         request on either",
         );
     }
 

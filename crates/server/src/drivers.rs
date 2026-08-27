@@ -54,7 +54,7 @@ use crate::store::Lifecycle;
 /// by every clone: what is running is a fact about the process rather than
 /// about any one handler.
 ///
-/// A count rather than a flag, because a wrap-up is four tasks at once and any
+/// A count rather than a flag, because a wrap-up is five tasks at once and any
 /// one of them still going is a wrap-up still being driven — and because a
 /// Resume starts a second set over the top of the first without
 /// stopping it. Counting is what keeps the first of them to finish from taking
@@ -247,7 +247,7 @@ mod tests {
         );
     }
 
-    /// A wrap-up is four tasks at once and each of them ends in its own time, so
+    /// A wrap-up is five tasks at once and each of them ends in its own time, so
     /// a Conversation is driven while any one of them is left. Which is also
     /// what Resume needs: it starts a second set over the top of
     /// the first without stopping it.
