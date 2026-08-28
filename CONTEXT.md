@@ -688,6 +688,28 @@ _Avoid_: locked (the Question Set word), deleted, hidden, closed (the state
 being archived, not the archiving), done, restore or unhide (the word is
 unarchive)
 
+**Unseen**:
+A Conversation Verkstead has told the human about and they have not looked at
+yet. The only thing in the record about the person rather than about the work,
+and kept on the server for that reason: a mark held in a browser would be one
+their phone had never heard of, and news read on the phone would leave the
+laptop's sidebar still calling for attention.
+
+One thing writes it: the wrap-up that carries the work to **Done**, in the same
+breath as the push it sends about it. A milestone nobody was watching happen is
+what a mark saying *look here* is for — and a **Steer** to Done is the human's
+own act, so it pushes nothing and marks nothing. Opening the Conversation is
+what takes the mark away, said by the browser in a call of its own rather than
+happening on the way past a read.
+
+Drawn as the same accent disc a Conversation waiting on the human carries: one
+mark meaning *look here*, because two would be a list to decode instead of one
+to glance down. Which of the two it is is in the row's read-aloud label, and
+where both are true the waiting is what is said — a Conversation with something
+to answer is asking for a reply, one with news is only asking to be read.
+_Avoid_: unread (nothing here is a message), badge, alert, notification (that is
+the push, this is what is left behind it), new
+
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles
 the session until the Response arrives, as every ask does in askance. A

@@ -772,10 +772,18 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
 /// Which mark a card carries at its right edge, or nothing where it carries
 /// none.
 ///
-/// Waiting wins, and never both: a Conversation whose session is sitting on a
+/// The disc wins, and never both: a Conversation whose session is sitting on a
 /// Blocking Ask is working *and* waiting, and of the two the one the human can
 /// do something about is the ask. So the dot is what a card shows the moment
 /// there is anything to answer, and a ring is what is left.
+///
+/// Two things draw that one disc, because they say the same thing to the person
+/// glancing down the list: *look here*. One is something waiting on them; the
+/// other is news they have not looked at yet — a wrap-up that carried the work
+/// to Done while nobody was watching, which is stamped on the Conversation at
+/// the moment the push goes out and comes off when they open it. Two marks for
+/// one instruction would be a list to decode rather than one to glance at, so
+/// which of the two it is is said in the label instead — see [`spoken`].
 ///
 /// Which of the two rings it is says whether that session is doing anything: the
 /// turning one while it prints, and the empty one once it has gone quiet — the
@@ -784,10 +792,20 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
 /// an ask for an hour turning a spinner is the case this is for, and the reason
 /// the empty ring is the quieter mark of the two.
 function mark(entry: ConversationEntry): "waiting" | "working" | "idle" | null {
-  if (entry.waiting) return "waiting";
+  if (entry.waiting || entry.unseen) return "waiting";
   if (entry.working) return entry.idle ? "idle" : "working";
   return null;
 }
+
+/// What the disc says, for the two things that draw it.
+///
+/// Waiting first where both are true: a Conversation with something to answer
+/// on it is asking for a reply, and one with news on it is only asking to be
+/// read. The one the human can do something about is the one worth saying.
+const DISC = {
+  waiting: "waiting on you",
+  unseen: "not looked at yet",
+} as const;
 
 /// What a row says when it is read aloud.
 ///
@@ -801,6 +819,10 @@ function mark(entry: ConversationEntry): "waiting" | "working" | "idle" | null {
 /// wherever it labels itself: the same ring should not mean one thing on a card
 /// and another on the row it opens.
 ///
+/// And the disc is where the two reasons for it are told apart, because the
+/// mark itself does not tell them apart: the words are [`DISC`], and waiting
+/// wins where both are true for the reason [`mark`] gives.
+///
 /// And a wrap-up down to its checks is said in place of the state word rather
 /// than beside it — *Waiting on checks* is what Wrapping has narrowed to, so
 /// saying both would be saying it twice. The words are [`WAITING_ON_CHECKS`],
@@ -810,7 +832,7 @@ function spoken(entry: ConversationEntry): string {
   const where = entry.waiting_on_checks ? WAITING_ON_CHECKS : STATE[entry.state];
   const said =
     which === "waiting"
-      ? `${where}, waiting on you`
+      ? `${where}, ${entry.waiting ? DISC.waiting : DISC.unseen}`
       : which
         ? `${where}, ${SPOKEN[which]}`
         : where;

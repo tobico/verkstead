@@ -151,6 +151,13 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // And the way back out of it, which is the same row saying the other
         // word: archiving is reversible, and this is what reverses it.
         .route("/api/ui/conversations/{id}/unarchive", post(unarchive))
+        // And the browser saying the human has now looked at one, which takes
+        // the mark off the sidebar row. A press of its own rather than
+        // something the read of the Conversation does on the way past: a GET
+        // that wrote would be a GET a retry or a prefetch could spend, and what
+        // is being recorded is a person having looked rather than a page having
+        // fetched.
+        .route("/api/ui/conversations/{id}/seen", post(seen))
         // No route for how the work gets built: the direction rides the closing
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
@@ -573,6 +580,11 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // say. A fix session working a red check draws as plain
                 // Wrapping — waiting is what a wrap-up with nobody in it does.
                 waiting_on_checks: conversation.narrowed_to_checks && !working,
+                // And whether Verkstead has told the human something about it
+                // they have not looked at yet, which is the store's alone: it is
+                // written down rather than read off anything here, being a fact
+                // about the person rather than about the work.
+                unseen: conversation.unseen,
             }
         })
         .collect();
@@ -1818,6 +1830,36 @@ fn unarchived(outcome: store::Unarchiving) -> ConversationUnarchived {
         store::Unarchiving::Unarchived => ConversationUnarchived::Unarchived,
         store::Unarchiving::NotArchived => ConversationUnarchived::NotArchived,
         store::Unarchiving::NoSuchConversation => ConversationUnarchived::NoSuchConversation,
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/seen` — the human has looked at this one.
+///
+/// Takes the unseen mark off, which is the whole of it: the mark is one row or
+/// none, and there is nothing to be refused for. An id naming no Conversation
+/// clears nothing and says so the same way one that was never marked does —
+/// looking at something is not a claim that it is still there.
+///
+/// The Nudge goes out only where there was a mark to take away. The ordinary
+/// case is a Conversation opened for the second time in a session of reading,
+/// and every other device re-reading its sidebar because a page was scrolled
+/// past would be a cost paid for nothing.
+async fn seen(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NO_CONTENT.into_response();
+    };
+
+    match store::see_conversation(&state.pool, id).await {
+        Ok(cleared) => {
+            if cleared {
+                state.nudges.announce(Nudge::Conversations);
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "clearing the unseen mark on a Conversation failed");
+            unavailable("the conversation could not be marked as seen")
+        }
     }
 }
 

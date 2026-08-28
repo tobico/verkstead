@@ -16,7 +16,7 @@ order is the dependency.
 
 - [x] 01: Stop taxonomy — [details](01-stop-taxonomy.md)
 - [x] 02: Closed is never waiting — [details](02-closed-never-waiting.md)
-- [ ] 03: The Done dot — [details](03-done-dot.md)
+- [x] 03: The Done dot — [details](03-done-dot.md)
 - [ ] 04: Header state labels — [details](04-header-state-labels.md)
 - [ ] 05: Task done by checkbox — [details](05-task-done-by-checkbox.md)
 - [ ] 06: Skills keep task files — [details](06-skills-keep-task-files.md)

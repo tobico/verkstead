@@ -526,11 +526,11 @@ export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversatio
  *
  * Where it has got to is drawn rather than worded — a turning ring for a
  * session getting on with it, the same ring empty for one that has gone quiet,
- * a dot for a Conversation that wants answering, a dotted border for a draft
- * and a dimmed card for work that has stopped. Which is why the facts below are
- * facts and not one collapsed verdict: the row says what is true of the
- * Conversation, and which mark that comes out as is the one rule the viewer
- * keeps.
+ * a dot for a Conversation that wants answering or has news on it, a dotted
+ * border for a draft and a dimmed card for work that has stopped. Which is why
+ * the facts below are facts and not one collapsed verdict: the row says what is
+ * true of the Conversation, and which mark that comes out as is the one rule
+ * the viewer keeps.
  */
 export type ConversationEntry = { id: number, branch: string, 
 /**
@@ -576,7 +576,22 @@ waiting: boolean,
  * The row draws no state in words, so what this comes out as is the label
  * read aloud — *Waiting on checks* where the plain state word would be.
  */
-waiting_on_checks: boolean, };
+waiting_on_checks: boolean, 
+/**
+ * Whether Verkstead has told the human something about this Conversation
+ * that they have not looked at yet.
+ *
+ * One thing writes it: the wrap-up that carries a Conversation to Done and
+ * pushes the news to the devices, in the same breath as the push. A
+ * milestone nobody was watching happen is what a mark saying *look here*
+ * is for, and a Done the human steered to themselves is what it is not.
+ *
+ * Beside `waiting` rather than folded into it, because the row draws one
+ * disc for the two and says which of them it is in the label read aloud:
+ * *something wants you* against *there is news here*. Cleared by opening
+ * the Conversation, which the browser says in a call of its own.
+ */
+unseen: boolean, };
 
 /**
  * What became of submitting one.

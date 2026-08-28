@@ -55,6 +55,24 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
                      unaddressed, so the work is done",
                 );
 
+                // The sidebar keeps the news until the human has looked at it,
+                // which is what a push nobody was there for needs behind it: a
+                // notification read on a phone and swiped away is a milestone
+                // the laptop would otherwise never mention. Stamped here rather
+                // than wherever Done is reached, because it is this push it
+                // marks the trail of — a steer to Done is the human's own act,
+                // pushes nothing and stamps nothing.
+                //
+                // Before the Nudge, so that the sidebar the Nudge sends every
+                // open page back to read is one this has already written to.
+                if let Err(error) = store::stamp_unseen(&state.pool, conversation_id).await {
+                    tracing::error!(
+                        error = ?error,
+                        conversation_id,
+                        "stamping a finished Conversation unseen failed",
+                    );
+                }
+
                 // The Timeline has a move on it, and an open page should say so
                 // without being reloaded.
                 state.nudges.announce(Nudge::Conversation {

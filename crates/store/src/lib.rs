@@ -45,6 +45,7 @@ mod repos;
 mod session_names;
 mod stops;
 mod transcripts;
+mod unseen;
 mod waits;
 mod wrap_up;
 
@@ -84,6 +85,7 @@ pub use stops::{
     Decision, Stopped, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop, stopped,
 };
 pub use transcripts::{append_transcript, transcript, transcript_after};
+pub use unseen::{see_conversation, stamp_unseen};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
     Finished, Narrowing, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
@@ -690,6 +692,12 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // same way and for the same reason: what a list draws is not a fact about
     // the work either.
     archives::apply_schema(pool).await?;
+
+    // And which of them Verkstead has told the human about and they have not
+    // looked at yet, which sits beside the Conversations for that reason again —
+    // and is the one fact here about the person reading the list rather than
+    // about the work on it. See [`unseen`].
+    unseen::apply_schema(pool).await?;
 
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite

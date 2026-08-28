@@ -227,6 +227,14 @@ pub struct ConversationRow {
     /// nothing is running on it, which the caller already reads once for the
     /// whole sidebar rather than per row.
     pub narrowed_to_checks: bool,
+
+    /// Whether Verkstead has told the human something about this Conversation
+    /// they have not looked at yet — see [`super::stamp_unseen`], which is the
+    /// one thing that writes it.
+    ///
+    /// Read here rather than asked for per row, the way the two above are: the
+    /// mark is one `EXISTS` over a table with a row per Conversation at most.
+    pub unseen: bool,
 }
 
 /// The word the `kind` column holds for a Question Set.
@@ -1119,6 +1127,12 @@ async fn started(
 /// which asks it of one Conversation — and a caller folding it itself would be
 /// issuing a query per row for something a subselect already has.
 ///
+/// And `unseen` rides along for the same reason a third time: whether Verkstead
+/// has told the human something about this Conversation that they have not
+/// looked at yet — see [`super::stamp_unseen`]. Not one of the waiting sources
+/// above, because the two say different things and the row says which in words:
+/// *something wants you* against *there is news here*.
+///
 /// A **Draft** is none of them, whatever else is true of it: it is waiting on
 /// the human in the ordinary sense, and the sidebar says so by drawing it as a
 /// draft rather than by marking it as an ask.
@@ -1141,7 +1155,7 @@ async fn started(
 /// the choice would be a second place to get it wrong, and there is no other way
 /// the sidebar should ever be read.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
-    let rows: Vec<(i64, String, String, String, bool, bool)> = sqlx::query_as(&format!(
+    let rows: Vec<(i64, String, String, String, bool, bool, bool)> = sqlx::query_as(&format!(
         "SELECT c.id, c.branch, r.name, c.state,
                 c.state NOT IN ('draft', 'closed') AND (
                     EXISTS (
@@ -1169,7 +1183,11 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                   AND NOT EXISTS (
                       SELECT 1 FROM wrap_up_settled w
                       WHERE w.conversation_id = c.id AND w.waiting_on = 'checks'
-                  ) AS narrowed_to_checks
+                  ) AS narrowed_to_checks,
+                EXISTS (
+                    SELECT 1 FROM unseen_conversations u
+                    WHERE u.conversation_id = c.id
+                ) AS unseen
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
          LEFT JOIN placements m ON m.conversation_id = c.id
@@ -1185,16 +1203,19 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     .context("listing the Conversations")?;
 
     rows.into_iter()
-        .map(|(id, branch, repo, state, waiting, narrowed_to_checks)| {
-            Ok(ConversationRow {
-                id,
-                branch,
-                repo,
-                state: Lifecycle::read(&state)?,
-                waiting,
-                narrowed_to_checks,
-            })
-        })
+        .map(
+            |(id, branch, repo, state, waiting, narrowed_to_checks, unseen)| {
+                Ok(ConversationRow {
+                    id,
+                    branch,
+                    repo,
+                    state: Lifecycle::read(&state)?,
+                    waiting,
+                    narrowed_to_checks,
+                    unseen,
+                })
+            },
+        )
         .collect()
 }
 

@@ -571,6 +571,27 @@ impl Grilling {
         .await
     }
 
+    /// Open the Conversation, as far as the server is concerned: the press the
+    /// browser makes when the human walks into one, which takes the news mark
+    /// off its sidebar row.
+    ///
+    /// Answers nothing, and is refused for nothing — it rides every opening of
+    /// every Conversation, so there is nothing for it to be wrong about.
+    async fn see(&self) {
+        let (status, body) = fetch(
+            &self.app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/ui/conversations/{}/seen", self.id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NO_CONTENT, "the press failed: {body}");
+    }
+
     /// And click Steer, which is the row beside those in the same menu: it
     /// stops the drive so that nothing launches while the human composes, and
     /// says what it found running.
@@ -7323,6 +7344,10 @@ async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_
 /// The device subscribes after the direction is picked, so what is read back is
 /// the milestones alone: a Question Set's push is `push_delivery.rs`'s subject
 /// and there is none left to send after this point anyway.
+///
+/// And the news mark the Done push leaves behind it is here too, because the
+/// two are one act: the push is the moment, the mark is what is left of it on
+/// every device until somebody opens the Conversation.
 #[tokio::test]
 async fn a_pull_request_opening_and_a_conversation_finishing_reach_the_devices() {
     let spill = tempfile::tempdir().unwrap();
@@ -7387,6 +7412,37 @@ async fn a_pull_request_opening_and_a_conversation_finishing_reach_the_devices()
         taken.lock().unwrap().len(),
         2,
         "one push per milestone, and no reminders about a Conversation that is over",
+    );
+
+    // And the sidebar keeps the second of them until the human has looked. The
+    // push is a moment and the mark is what is left of it: a notification read
+    // on the phone and swiped away would otherwise be the only trace this ever
+    // finished.
+    assert!(
+        fixture.row().await.unseen,
+        "the Conversation Verkstead carried to Done has news on its row",
+    );
+
+    fixture.see().await;
+
+    assert!(
+        !fixture.row().await.unseen,
+        "and opening it is what takes the news off — everywhere, the mark being \
+         the server's rather than a browser's",
+    );
+
+    // Long enough again for the loops that were still running to have said
+    // anything they had left to say.
+    tokio::time::sleep(BRISKLY.checks * 3).await;
+
+    assert!(
+        !fixture.row().await.unseen,
+        "and it does not come back: this Done has been read",
+    );
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        2,
+        "and nothing was pushed a second time either",
     );
 }
 

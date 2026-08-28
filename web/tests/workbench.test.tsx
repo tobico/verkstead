@@ -681,6 +681,44 @@ describe("how a card says where its conversation has got to", () => {
     expect(container.querySelector(`.${sidebar.conversationRow} .${marks.mark}.${marks.idle}`)).toBeNull();
   });
 
+  /// News nobody has looked at draws the same disc, because it says the same
+  /// thing to somebody glancing down the list: *look here*. What put it there
+  /// is a wrap-up that carried the work to Done while nobody was watching, and
+  /// the push that went out about it.
+  it("marks a conversation with news on it with the same disc", async () => {
+    theSidebar({ state: "Done", working: false, waiting: false, unseen: true });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(`.${marks.mark}.${marks.waiting}`)).toBeTruthy();
+  });
+
+  /// One mark and two reasons for it, so the words are where they are told
+  /// apart: a screen reader gets the disc as a sentence rather than as a shape,
+  /// and *waiting on you* about a Conversation that only wants reading would be
+  /// a job nobody had.
+  it("says which of the two the disc is about", async () => {
+    theSidebar(
+      { branch: "over", state: "Done", working: false, waiting: false, unseen: true },
+      { branch: "asking", state: "Grilling", working: false, waiting: true },
+      // Both at once, which is a finished Conversation with an ask still
+      // answerable on it. The one the human can do something about is the ask.
+      { branch: "both", state: "Done", working: false, waiting: true, unseen: true },
+    );
+    const { container } = mount();
+
+    expect(
+      (await cards(container)).map((card) =>
+        card.querySelector("button")!.getAttribute("aria-label"),
+      ),
+    ).toEqual([
+      "over, verkstead, Done, not looked at yet",
+      "asking, verkstead, Grilling, waiting on you",
+      "both, verkstead, Done, waiting on you",
+    ]);
+  });
+
   it("marks nothing on a conversation that is neither", async () => {
     theSidebar({ state: "Implementing", working: false, waiting: false });
     const { container } = mount();
@@ -3197,6 +3235,82 @@ describe("switching between conversations", () => {
   });
 });
 
+
+/// Opening a Conversation is the human having looked at it, and the page says
+/// so out loud: the news mark lives on the server so that every device agrees
+/// about it, which means only the server can take it off.
+///
+/// A press of its own rather than something the read of the Conversation does
+/// on the way past — a GET that wrote would spend the mark on a prefetch or a
+/// retry, and what is being recorded is a person having looked.
+describe("opening a conversation is looking at it", () => {
+  /// The press for one Conversation, by the path it goes to.
+  const seen = (id: number) => `/api/ui/conversations/${id}/seen`;
+
+  /// The three, with the press answered as the server answers it: nothing at
+  /// all.
+  function theThreeSeen(...answers: Parameters<typeof serving>) {
+    return theThree(
+      ...[OPEN.id, SECOND.id, GRILLING.id].map((id) =>
+        whenever(seen(id), () => Promise.resolve(new Response(null, { status: 204 })), "POST"),
+      ),
+      ...answers,
+    );
+  }
+
+  it("says so when the URL names one", async () => {
+    const fetching = theThreeSeen();
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => expect(writes(fetching, seen(OPEN.id))).toBe(1));
+  });
+
+  /// A card pressed in the sidebar and a URL typed into the bar are the same
+  /// thing to the page — the click navigates, and the navigation is what this
+  /// hangs off — which is why Back is covered by the same one line.
+  it("says so again for the next one opened", async () => {
+    const fetching = theThreeSeen();
+    const { history } = mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => expect(writes(fetching, seen(OPEN.id))).toBe(1));
+
+    history.set({ value: `/conversations/${GRILLING.id}` });
+
+    await waitFor(() => expect(writes(fetching, seen(GRILLING.id))).toBe(1));
+    expect(
+      writes(fetching, seen(OPEN.id)),
+      "and not again for the one it left",
+    ).toBe(1);
+  });
+
+  it("says nothing on the bare workbench, there being nothing looked at", async () => {
+    const fetching = theThreeSeen();
+    const { container } = mount();
+
+    await cards(container);
+
+    expect(
+      fetching.mock.calls.filter(([asked, init]) =>
+        String(asked).endsWith("/seen") && init?.method === "POST",
+      ),
+    ).toEqual([]);
+  });
+
+  /// Nothing waits on it and nothing is done about a failure: the mark is a
+  /// nudge to look rather than a record to keep, and the worst a lost press
+  /// costs is a dot that comes off the next time the Conversation is opened.
+  it("draws the conversation whether or not the press lands", async () => {
+    theThree(
+      whenever(seen(OPEN.id), json({ error: "no" }, 503), "POST"),
+    );
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Brief") as HTMLTextAreaElement).value).toBe(
+        BRIEF.markdown,
+      ),
+    );
+  });
+});
 
 describe("starting the grilling", () => {
   it("offers the button under the timeline once the conversation is ready", async () => {

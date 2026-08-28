@@ -1345,6 +1345,11 @@ async fn steering_into_done_moves_it_and_starts_nothing() {
         !view.ready_to_resume && !view.ready_to_stop,
         "and there is nothing to drive in Done, so neither press is offered",
     );
+    assert!(
+        !unseen(&app, id).await,
+        "and no news mark: this Done is the human's own act, so there is nothing \
+         to tell them about",
+    );
 }
 
 /// Every state is a source, which is the one thing that makes a steer different
@@ -4558,4 +4563,127 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
     );
 
     pool.close().await;
+}
+
+/// The browser saying the human has looked at a Conversation takes the news
+/// mark off its row, and it does not come back.
+///
+/// Walked through the store at the writing end, because what is under test is
+/// the press: what puts the mark on is the wrap-up reaching Done, which
+/// `sessions.rs` runs for real.
+///
+/// Refused for nothing, and that matters more than it looks: the press rides
+/// every opening of every Conversation, and one that answered an error for a
+/// row with nothing to clear would be an error the human saw for reading their
+/// own list.
+#[tokio::test]
+async fn looking_at_a_conversation_takes_the_news_off_its_row() {
+    let (_watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert!(
+        !unseen(&app, id).await,
+        "nothing has been said about it yet"
+    );
+
+    // The press before anything is marked, which is every opening of every
+    // Conversation on an ordinary day.
+    see(&app, &id.to_string()).await;
+    assert!(!unseen(&app, id).await);
+
+    store::stamp_unseen(&pool, id).await.unwrap();
+    assert!(
+        unseen(&app, id).await,
+        "and the row says there is news on it",
+    );
+
+    see(&app, &id.to_string()).await;
+    assert!(!unseen(&app, id).await, "which looking at it takes off");
+
+    see(&app, &id.to_string()).await;
+    assert!(
+        !unseen(&app, id).await,
+        "and nothing brings it back: the mark is the one Done, not a counter",
+    );
+
+    // An id out of a URL the human may have typed, and one naming nothing:
+    // neither is something to refuse for, because looking at something is not a
+    // claim that it is there.
+    see(&app, "404").await;
+    see(&app, "nonsense").await;
+
+    pool.close().await;
+}
+
+/// The news mark and *waiting on you* are two facts, and the row carries both:
+/// one is something to answer and the other is something to read, and folding
+/// either into the other would lose the one the human can act on.
+#[tokio::test]
+async fn news_on_a_row_leaves_what_is_waiting_on_it_alone() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::stop(
+        &pool,
+        id,
+        store::Decision::Verkstead,
+        "The checks would not go green.\n",
+        None,
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation was running");
+    store::stamp_unseen(&pool, id).await.unwrap();
+
+    let both = row(&app, id).await;
+    assert!(both.waiting, "Verkstead's brake is waiting on the human");
+    assert!(both.unseen, "and there is news on the same Conversation");
+
+    see(&app, &id.to_string()).await;
+
+    let read = row(&app, id).await;
+    assert!(
+        read.waiting,
+        "looking at it read the news; it did not answer the stop",
+    );
+    assert!(!read.unseen);
+
+    pool.close().await;
+}
+
+/// Say the human has looked at one. Answers nothing, and is refused for
+/// nothing — see the two tests above.
+async fn see(app: &Router, id: &str) {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/ui/conversations/{id}/seen"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "the press failed: {body}");
+}
+
+/// One Conversation's row on the sidebar.
+async fn row(app: &Router, id: i64) -> ConversationEntry {
+    sidebar(app)
+        .await
+        .into_iter()
+        .find(|row| row.id == id)
+        .expect("the Conversation is on the sidebar")
+}
+
+/// And whether that row says there is news on it.
+async fn unseen(app: &Router, id: i64) -> bool {
+    row(app, id).await.unseen
 }

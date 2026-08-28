@@ -401,6 +401,23 @@ export function unarchiveConversation(
   );
 }
 
+/// Say the human has looked at a Conversation, which takes the news mark off
+/// its sidebar row.
+///
+/// A press of its own rather than something reading the Conversation does on
+/// the way past: what is being recorded is a person having looked, and a read
+/// that wrote it would spend the mark on a prefetch or a retry.
+///
+/// Answered with nothing at all, as the order and the archived switch are.
+/// There is nothing to be refused for — an id naming nothing clears nothing —
+/// and what the row does next arrives as a Nudge like every other change to the
+/// list.
+export async function seeConversation(id: string): Promise<void> {
+  await refused(
+    await sent(`/api/ui/conversations/${encodeURIComponent(id)}/seen`, {}),
+  );
+}
+
 /// Start driving a conversation again, from wherever the work now stands.
 ///
 /// Nothing is sent with it. What should be running is the server's to work out
