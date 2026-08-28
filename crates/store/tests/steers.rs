@@ -52,6 +52,7 @@ fn into(target: Lifecycle) -> Steer<'static> {
         worktree: None,
         base_commit: None,
         companions: &[],
+        opened: &[],
         checkouts: &[],
         said: None,
     }

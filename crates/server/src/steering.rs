@@ -48,14 +48,21 @@
 //! [`plan`], which is the one place any of it is decided, and [`make`], which is
 //! the one place any of it is created.
 //!
-//! **And a steer may widen the set it works alongside.** The modal's companion
-//! section puts another registered Repo in, and the steer checks it out as part
-//! of the move: fetch, resolve, cut or detach, bind — the grill start's shape,
+//! **And a steer may widen the set it works alongside, and open a row of it
+//! up.** The modal's companion section puts another registered Repo in and ticks
+//! a read-only one up to read-write, and the steer checks each out as part of
+//! the move: fetch, resolve, cut or detach, bind — the grill start's shape,
 //! including the fetch this deliberately skips for the Conversation's own
 //! repository, a companion joining now being new work rather than an old
-//! checkout being put back. Widening only, and never the other way: nothing here
-//! removes a companion or narrows one, so what a session was once given is never
-//! taken back mid-Conversation.
+//! checkout being put back. An upgrade is fresh for that reason and not pinned:
+//! the commit its detached checkout stands at is where that repository was when
+//! the Conversation started, and its branch is cut from where the base stands
+//! at the steer instead. The detached directory is then replaced, one companion
+//! being one checkout.
+//!
+//! **One direction, and never the other.** Nothing here removes a companion or
+//! narrows one, and the payload cannot spell either: what a session was once
+//! given is never taken back mid-Conversation.
 //!
 //! **The record is two Events, a Pairing and whatever was made.** The Steer is
 //! the human's — *I moved this* — the machine's plain Moved line stands under
@@ -143,19 +150,20 @@ pub(crate) async fn click(state: &AppState, conversation_id: i64) -> anyhow::Res
 ///
 /// In order: refuse what cannot be done at all; work out every checkout the
 /// work needs and has not got, without making any of it; end what is running
-/// where **Interrupt current task** was ticked; make those checkouts; clear the
-/// stop the click left; move the Conversation, recording the Steer, the Brief,
-/// the Pairing, the companions and what was just made as one act; and then start
-/// whatever the target needs starting.
+/// where **Interrupt current task** was ticked; make those checkouts and replace
+/// the ones they take the place of; clear the stop the click left; move the
+/// Conversation, recording the Steer, the Brief, the Pairing, the companions —
+/// the ones that came in and the ones that were opened up — and what was just
+/// made as one act; and then start whatever the target needs starting.
 ///
 /// **Every question goes first**, before anything is ended, rebuilt or cleared —
 /// the ones asked of the record and the ones asked of git alike. The browser is
 /// holding the request open for the answer, and a refusal that had already ended
 /// somebody's session would be a press that half happened. See [`refusal`],
-/// which is every one asked of the record alone, [`additions`], which is the
-/// three a companion is held to, and [`plan`], which asks git everything a
-/// directory turns on and makes none of it. What is after them either happens or
-/// is a failure.
+/// which is every one asked of the record alone, [`additions`] and [`upgrades`],
+/// which are what the record is asked about the companion section's two halves,
+/// and [`plan`], which asks git everything a directory turns on and makes none
+/// of it. What is after them either happens or is a failure.
 ///
 /// The stop goes before the move rather than after, because what it is in front
 /// of is the launch: a run does not advance past a stop — see
@@ -200,7 +208,15 @@ pub(crate) async fn submit(
         Additions::Ready(added) => added,
     };
 
-    let planned = match plan(state, &conversation, submission.target, &added).await? {
+    // And which of the companions it already has are being opened up, read back
+    // as the rows they will become: read-write, with the branch the modal typed
+    // or mirroring where it typed none.
+    let opened = match upgrades(state, &conversation, submission).await? {
+        Upgrades::Refused(refusal) => return Ok(refusal),
+        Upgrades::Ready(opened) => opened,
+    };
+
+    let planned = match plan(state, &conversation, submission.target, &added, &opened).await? {
         Planning::Refused(refusal) => return Ok(refusal),
         Planning::Ready(planned) => planned,
     };
@@ -247,7 +263,17 @@ pub(crate) async fn submit(
         })
         .collect();
 
-    let said = announced(&added);
+    // And the rows the opened companions become, borrowed the same way: the
+    // branch each was given, mirroring where the field was left empty.
+    let opening: Vec<store::Opening<'_>> = opened
+        .iter()
+        .map(|companion| store::Opening {
+            repo_id: companion.repo.id,
+            branch: &companion.branch,
+        })
+        .collect();
+
+    let said = announced(&added, &opened, &conversation.branch);
 
     let steer = store::Steer {
         target,
@@ -258,6 +284,7 @@ pub(crate) async fn submit(
         worktree: made.worktree.as_deref(),
         base_commit: made.base_commit.as_deref(),
         companions: &joining,
+        opened: &opening,
         checkouts: &made.checkouts,
         said: said.as_deref(),
     };
@@ -739,34 +766,64 @@ fn fixed(conversation: &Conversation, role: Role) -> Option<&store::Pairing> {
 }
 
 /// The line that goes under the Steer, naming every companion the steer put in
-/// and the mode it went in at — or `None` where it put none in.
+/// and the mode it went in at, and every one it opened up and the branch it was
+/// given — or `None` where it did neither.
 ///
 /// What a Conversation was configured with is read on the Brief's details pane
 /// ever after, and that pane says only what the set *is*. This is what says when
 /// it changed and who changed it: it sits under the human's own Event, so the
 /// Timeline reads as one moment rather than as a machine's aside beside it.
 ///
-/// The mode with each, because that is the difference between a repository a
-/// session may read and one it may commit in — and the whole of what a companion
-/// costs whoever reads the work afterwards.
-fn announced(added: &[store::Companion]) -> Option<String> {
-    if added.is_empty() {
-        return None;
+/// The mode with each addition, because that is the difference between a
+/// repository a session may read and one it may commit in — and the whole of
+/// what a companion costs whoever reads the work afterwards. The branch with
+/// each upgrade, for the same reason turned the other way: a companion that may
+/// now be committed in is a pull request somebody will have to look at, and the
+/// branch is where to find it.
+///
+/// Two sentences where a steer did both, because they are two different things
+/// to have done: one widened the set and the other opened a row that was
+/// already in it.
+fn announced(
+    added: &[store::Companion],
+    opened: &[store::Companion],
+    branch: &str,
+) -> Option<String> {
+    let mut said = Vec::new();
+
+    if !added.is_empty() {
+        let named: Vec<String> = added
+            .iter()
+            .map(|companion| {
+                let mode = match companion.mode {
+                    store::CompanionMode::ReadOnly => "read-only",
+                    store::CompanionMode::ReadWrite => "read-write",
+                };
+
+                format!("`{}` {mode}", companion.repo.name)
+            })
+            .collect();
+
+        said.push(format!("Steered into the sandbox: {}.", named.join(", ")));
     }
 
-    let named: Vec<String> = added
-        .iter()
-        .map(|companion| {
-            let mode = match companion.mode {
-                store::CompanionMode::ReadOnly => "read-only",
-                store::CompanionMode::ReadWrite => "read-write",
-            };
+    if !opened.is_empty() {
+        // Mirroring resolved, which is the record's own business rather than
+        // this line's: what the human reads is the branch that was cut, whether
+        // they typed the name or left the field to follow the Conversation's.
+        let named: Vec<String> = opened
+            .iter()
+            .map(|companion| {
+                let cut = companion.branch_for(branch).unwrap_or_default();
 
-            format!("`{}` {mode}", companion.repo.name)
-        })
-        .collect();
+                format!("`{}` on `{cut}`", companion.repo.name)
+            })
+            .collect();
 
-    Some(format!("Steered into the sandbox: {}.", named.join(", ")))
+        said.push(format!("Opened up for writing: {}.", named.join(", ")));
+    }
+
+    (!said.is_empty()).then(|| said.join(" "))
 }
 
 /// Which registered Repos the steer is putting into the sandbox, read back as
@@ -891,8 +948,127 @@ fn mode(mode: CompanionMode) -> store::CompanionMode {
     }
 }
 
-/// Whether a companion is joining the work now or coming back to a checkout it
-/// lost.
+/// Which companions the steer is opening up, read back as the rows they will
+/// become — or why one of them cannot be opened.
+///
+/// **One direction, and the payload is what makes it one.** An upgrade carries
+/// a Repo and a branch name and nothing else, so read-only is not something
+/// this can be asked for and neither is removal: what a session was once given
+/// is never taken back mid-Conversation, and the wire cannot spell the taking
+/// back. What is left to refuse is the two ways of naming the wrong row.
+///
+/// The Conversation's own set comes before the registry, for [`additions`]'
+/// reason: it is the cheaper question and the more specific answer, and a Repo
+/// this Conversation holds carries its name on the row. The registry is asked
+/// only about an id the set does not answer to, and only to say which
+/// repository the human was talking about — a registered Repo that is no
+/// companion of this Conversation is named, and an unregistered one is
+/// [`ConversationSteered::NoSuchCompanionRepo`], the refusal with no repository
+/// in it.
+///
+/// **Nothing here changes a row that is already open.** A companion that is
+/// read-write has nothing left to open, and obeying such a submit would be
+/// cutting its branch a second time over whatever has been committed to the
+/// first — see [`SteerCompanionRefusal::AlreadyReadWrite`]. Which is also what
+/// answers a page naming one Repo twice: the second row meets the first one's
+/// upgrade.
+///
+/// **And nothing at all where the target runs nothing**, for [`additions`]'
+/// reason: Done has no sandbox to open up.
+///
+/// What comes back is a [`store::Companion`] apiece — the row as it will stand
+/// after the steer, mode moved and branch set, with the worktree it is about to
+/// lose still on it. That directory is what [`alongside`] replaces.
+async fn upgrades(
+    state: &AppState,
+    conversation: &Conversation,
+    submission: &SteerSubmission,
+) -> anyhow::Result<Upgrades> {
+    if !submission.target.runs() {
+        return Ok(Upgrades::Ready(Vec::new()));
+    }
+
+    let mut opened: Vec<store::Companion> = Vec::new();
+
+    for upgrade in &submission.upgraded {
+        let refused = |repo: &str, why| {
+            Upgrades::Refused(ConversationSteered::Companion {
+                repo: repo.to_owned(),
+                why,
+            })
+        };
+
+        // The set this submit has opened so far before the record's own, so
+        // that one page naming a Repo twice meets the row it has already
+        // opened rather than the read-only one the record still holds.
+        if let Some(already) = opened
+            .iter()
+            .find(|companion| companion.repo.id == upgrade.repo_id)
+        {
+            return Ok(refused(
+                &already.repo.name,
+                SteerCompanionRefusal::AlreadyReadWrite,
+            ));
+        }
+
+        let Some(companion) = conversation
+            .companions
+            .iter()
+            .find(|companion| companion.repo.id == upgrade.repo_id)
+        else {
+            // The Conversation's own repository first, which is the one Repo a
+            // page could plausibly send here by mistake and the one the record
+            // has already named; then the registry, which can say what any
+            // other id is called; and then the refusal with nothing to name.
+            let named = match upgrade.repo_id == conversation.repo.id {
+                true => Some(conversation.repo.name.clone()),
+                false => store::load_repo(&state.pool, upgrade.repo_id)
+                    .await?
+                    .map(|repo| repo.name),
+            };
+
+            let Some(named) = named else {
+                return Ok(Upgrades::Refused(ConversationSteered::NoSuchCompanionRepo));
+            };
+
+            return Ok(refused(&named, SteerCompanionRefusal::NotACompanion));
+        };
+
+        if companion.mode == store::CompanionMode::ReadWrite {
+            return Ok(refused(
+                &companion.repo.name,
+                SteerCompanionRefusal::AlreadyReadWrite,
+            ));
+        }
+
+        opened.push(store::Companion {
+            mode: store::CompanionMode::ReadWrite,
+            branch: upgrade.branch.trim().to_owned(),
+
+            // The base stays exactly as the human picked it while drafting.
+            // What moves is where that name points: the upgrade fetches and
+            // resolves it again, the companion joining the work now rather than
+            // where that repository stood when the Conversation started.
+            //
+            // And the worktree it has now comes with it, which is the detached
+            // directory this upgrade replaces.
+            ..companion.clone()
+        });
+    }
+
+    Ok(Upgrades::Ready(opened))
+}
+
+/// What reading the companions the modal opened up came to.
+enum Upgrades {
+    Ready(Vec<store::Companion>),
+
+    /// One of them cannot be opened, and the human is told which and why.
+    Refused(ConversationSteered),
+}
+
+/// Whether a companion is joining the work now, being opened up, or coming back
+/// to a checkout it lost.
 ///
 /// The one thing that reads differently between them, and it is the whole of why
 /// this is a distinction: a branch already taken in that repository is somebody
@@ -903,6 +1079,17 @@ fn mode(mode: CompanionMode) -> store::CompanionMode {
 enum Joining {
     /// The modal has just named it. Everything about its checkout is new.
     Added,
+
+    /// The modal has just opened it up. It is joining the work now as much as an
+    /// added one is — the commit its detached checkout stands at is where that
+    /// repository was when the Conversation started, and this is a companion
+    /// beginning to be worked in *now* — so git is asked exactly what
+    /// [`Self::Added`] is asked, in the same order.
+    ///
+    /// What is different is on the far side of it: the detached directory it
+    /// had is replaced rather than left beside the new one. One companion is
+    /// one checkout, and a detached checkout has nothing left to be.
+    Opened,
 
     /// The record holds it and nothing on disk does: a steered Draft's
     /// companion, recorded on the setup card and never checked out, or one of a
@@ -965,6 +1152,7 @@ async fn plan(
     conversation: &Conversation,
     target: SteerTarget,
     added: &[store::Companion],
+    opened: &[store::Companion],
 ) -> anyhow::Result<Planning> {
     if !target.runs() {
         return Ok(Planning::Ready(Planned::default()));
@@ -992,18 +1180,34 @@ async fn plan(
         .clone()
         .unwrap_or_else(|| conversation.repo.default_branch.clone());
 
-    // Every companion this steer has to check out: the ones just added, and the
-    // ones the record holds with nowhere on disk. The added first because that
-    // is what the human is standing at; nothing else turns on the order.
+    // Every companion this steer has to check out: the ones just added, the
+    // ones just opened up, and the ones the record holds with nowhere on disk.
+    // The added and the opened first because that is what the human is standing
+    // at; nothing else turns on the order.
+    //
+    // A companion being opened is left out of the last group whether or not it
+    // has a directory, because the upgrade is what says what its checkout will
+    // be: one recorded with nowhere on disk — a steered Draft's read-only
+    // companion, ticked up in the same modal — would otherwise be planned twice
+    // and handed two directories.
+    let opening: Vec<i64> = opened.iter().map(|companion| companion.repo.id).collect();
+
     let checking_out: Vec<(Joining, store::Companion)> = added
         .iter()
         .cloned()
         .map(|companion| (Joining::Added, companion))
         .chain(
+            opened
+                .iter()
+                .cloned()
+                .map(|companion| (Joining::Opened, companion)),
+        )
+        .chain(
             conversation
                 .companions
                 .iter()
                 .filter(|companion| companion.worktree.is_none())
+                .filter(|companion| !opening.contains(&companion.repo.id))
                 .cloned()
                 .map(|companion| (Joining::Recorded, companion)),
         )
@@ -1038,6 +1242,7 @@ async fn plan(
                     repo,
                     path: path.clone(),
                     holding,
+                    replacing: None,
                 });
             }
 
@@ -1081,6 +1286,14 @@ async fn plan(
 /// than an old checkout being put back, so it comes off what the remote is
 /// holding at this moment. A companion whose repository has no remote has
 /// nothing to fetch and is never refused for it.
+///
+/// **A companion being opened up is asked all of it too**, and for the same
+/// reason twice over: the commit its detached checkout stands at is where that
+/// repository was when the Conversation started, and it is joining the work
+/// now. So the base on its row is re-resolved against what the fetch has just
+/// brought down, and the branch is cut from that tip. What it had is not a
+/// branch and cannot be carried forward — a detached checkout holds none — so
+/// there is nothing here that could be kept.
 ///
 /// **A companion coming back to a branch it still holds asks git none of it.**
 /// That branch was cut for this Conversation and holds everything that was
@@ -1130,8 +1343,21 @@ fn alongside(
             path: crate::worktrees::unclaimed_path(data, id, &companion.repo.name, cut, claimed),
             repo,
             holding: Holding::Kept(cut.clone()),
+            replacing: None,
         });
     }
+
+    // The detached directory an upgrade takes the place of, carried through to
+    // [`make`] and removed there rather than here: nothing is unmade until every
+    // checkout has been planned and made, which is what leaves a companion the
+    // steer then refuses over read-only with its checkout exactly where it was.
+    //
+    // `None` on anything else, and on an opened companion the record holds no
+    // directory for — a steered Draft's, which was never checked out.
+    let replacing = match joining {
+        Joining::Opened => companion.worktree.clone(),
+        Joining::Added | Joining::Recorded => None,
+    };
 
     if let crate::worktrees::Fetched::Failed(said) = crate::worktrees::fetch(&repo) {
         tracing::error!(
@@ -1174,6 +1400,7 @@ fn alongside(
             Some(cut) => Holding::Cut(cut, commit),
             None => Holding::Detached(commit),
         },
+        replacing,
     })
 }
 
@@ -1187,6 +1414,12 @@ fn alongside(
 /// refused holding nothing worth keeping — and the directory alone for one it
 /// did not: a branch that was already there is work somebody committed, and a
 /// checkout taken away again is the nothing this Conversation already had.
+///
+/// **And then, and only then, the directories the new ones replace**: the
+/// detached checkout of every companion the steer opened up. Last because a
+/// refusal anywhere in the plan has to leave those companions read-only with
+/// their checkouts where they were, and a directory removed on the way through
+/// could not be put back.
 ///
 /// Off the runtime's threads, every part of this blocking.
 async fn make(planned: Planned) -> anyhow::Result<Making> {
@@ -1223,6 +1456,29 @@ async fn make(planned: Planned) -> anyhow::Result<Making> {
             }
 
             return Err(checkout.refused());
+        }
+
+        // And only now the directories the new ones take the place of: the
+        // detached checkout of every companion that was opened up. After the
+        // whole plan is made rather than beside each one, which is what leaves
+        // a companion the steer went on to refuse over read-only with its
+        // checkout exactly where it stood.
+        //
+        // Nothing is refused for a directory that will not go. The branch is
+        // cut, the new worktree is there and the record is about to name it, so
+        // what is left is a directory nothing points at — worth the log it gets
+        // and not worth undoing the steer for.
+        for checkout in &checkouts {
+            let Some(replacing) = &checkout.replacing else {
+                continue;
+            };
+
+            if !crate::worktrees::remove(&checkout.repo, replacing) {
+                tracing::error!(
+                    path = %replacing.display(),
+                    "the detached checkout of a companion a steer opened up could not be removed",
+                );
+            }
         }
 
         Ok(recorded(&checkouts))
@@ -1280,6 +1536,19 @@ struct Checkout {
     path: PathBuf,
 
     holding: Holding,
+
+    /// The directory this checkout takes the place of, where it takes the place
+    /// of one: the detached checkout of a companion being opened up.
+    ///
+    /// Removed once every checkout is made rather than before this one is — see
+    /// [`make`]. One companion is one checkout, and a detached directory has
+    /// nothing left to be once the branch is cut; but a steer refused over
+    /// another companion has to leave this one exactly where it was, and a
+    /// directory removed early could not be put back.
+    ///
+    /// `None` on everything else, including an opened companion the record
+    /// holds no directory for.
+    replacing: Option<PathBuf>,
 }
 
 impl Checkout {

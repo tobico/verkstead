@@ -52,6 +52,7 @@ import { listProfiles, listRepos, steer } from "../api/client";
 import type {
   CompanionAddition,
   CompanionMode,
+  CompanionUpgrade,
   CompanionView,
   ConversationSteered,
   ConversationView,
@@ -102,6 +103,9 @@ const STEER_COMPANION_REFUSAL: Record<SteerCompanionRefusal, string> = {
   OwnRepo:
     "This conversation's own repo is already the work's, so it cannot go in beside itself.",
   AlreadyAdded: "It is already on this conversation.",
+  NotACompanion: "It is not on this conversation, so there is nothing to open.",
+  AlreadyReadWrite:
+    "It is read-write on this conversation already, which is as open as a repo gets.",
   FetchFailed:
     "Git could not fetch from its remote, so nothing was steered. The server log says why.",
   NoBaseCommit: "It has nothing to check out any more.",
@@ -229,6 +233,22 @@ type Addition = {
 /// repository in.
 const PLAINEST: Addition = { mode: "ReadOnly", base: RULE, branch: "" };
 
+/// And what one row of the set already there is holding while it is opened up.
+///
+/// One field rather than three, and the missing two are the point. There is no
+/// mode, because there is one direction — read-write, or the row is left alone.
+/// And there is no base: what the new branch comes off is the base already on
+/// the row, re-resolved at the steer because the repo is joining the work now.
+type Upgrade = {
+  /// What the branch cut in it is called, empty being *mirroring*: the
+  /// conversation's own branch name.
+  branch: string;
+};
+
+/// A row the human has just ticked up, before they have named anything: the
+/// branch mirrors the conversation's, which is what a setup row starts on.
+const MIRRORING: Upgrade = { branch: "" };
+
 /// The repos this conversation works alongside, and the ones it could.
 ///
 /// **Sandbox setup rather than a property of one state**, which is why it is
@@ -237,22 +257,28 @@ const PLAINEST: Addition = { mode: "ReadOnly", base: RULE, branch: "" };
 /// nothing running and so nothing a companion could be for, and the section is
 /// not drawn at all.
 ///
-/// **The set already there is something to read.** The setup rows that
-/// configured it went when the card froze, and this is the one other moment
-/// those questions can be asked — of a repository joining now, and of nothing
-/// else. Nothing here offers removal and no switch offers read-only: the frozen
-/// set only widens, which is what keeps the sandbox story simple.
+/// **The set already there is something to read, and a read-only row of it is
+/// something to open.** The setup rows that configured it went when the card
+/// froze, and this is the one other moment those questions can be asked — of a
+/// repository joining now, and of one that came in read-only and is joining the
+/// work properly now. Nothing here offers removal and no switch offers
+/// read-only: the frozen set only widens and a row only opens further, which is
+/// what keeps the sandbox story simple.
 ///
-/// **A repository already on the conversation is not offered**, unlike the setup
-/// card's own menu, which offers everything and refuses by name. The set is
-/// drawn directly above these rows, so a second row for a repo that is already
-/// listed would be the same list disagreeing with itself.
+/// **A repository already on the conversation is not offered below**, unlike the
+/// setup card's own menu, which offers everything and refuses by name. The set
+/// is drawn directly above these rows, so a second row for a repo that is
+/// already listed would be the same list disagreeing with itself.
 function Companions(props: {
   conversation: ConversationView;
   /// What has been ticked so far, by the Repo's id.
   added: Record<number, Addition>;
   /// A row ticked, changed, or unticked — `null` takes it off again.
   settle: (repo: number, addition: Addition | null) => void;
+  /// And which of the ones already there have been ticked up, by the same id.
+  upgraded: Record<number, Upgrade>;
+  /// One of those ticked up, renamed, or put back — `null` leaves it read-only.
+  open: (repo: number, upgrade: Upgrade | null) => void;
   disabled: boolean;
 }): JSX.Element {
   const repos = useReading(() => ({
@@ -285,7 +311,15 @@ function Companions(props: {
       <Show when={props.conversation.companions.length}>
         <ul class={styles.steerAlongside} aria-label="Repos already alongside">
           <For each={props.conversation.companions}>
-            {(companion) => <Alongside companion={companion} />}
+            {(companion) => (
+              <Alongside
+                conversation={props.conversation}
+                companion={companion}
+                upgrade={props.upgraded[companion.repo.id]}
+                open={(upgrade) => props.open(companion.repo.id, upgrade)}
+                disabled={props.disabled}
+              />
+            )}
           </For>
         </ul>
       </Show>
@@ -326,30 +360,93 @@ function Companions(props: {
 
       <Note class={styles.fieldNote}>
         What goes in is checked out as the steer lands and stays for the rest of
-        this conversation. Nothing here takes a repo away: what a session has
-        been given is not taken back.
+        this conversation, and a repo opened up is cut a branch off its base as
+        that stands now. Nothing here takes a repo away or closes one back down:
+        what a session has been given is not taken back.
       </Note>
     </fieldset>
   );
 }
 
 /// One repository this conversation already works alongside: what it is called,
-/// how far into it the work reaches, and what its checkout came off.
+/// how far into it the work reaches, what its checkout came off — and, where it
+/// came in read-only, the one thing about it that can still be changed.
 ///
-/// Something to read rather than to edit. Its mode and its base were settled
-/// while the conversation drafted, and a steer widens the set rather than
+/// **The mode and the base are something to read.** Both were settled while the
+/// conversation drafted, and a steer widens the set and opens a row rather than
 /// rewriting what is in it.
-function Alongside(props: { companion: CompanionView }): JSX.Element {
+///
+/// **A read-only row offers the upgrade, and a read-write one offers nothing**,
+/// being already as open as a companion gets. There is no switch back either
+/// way: what a session has been given is not taken back, so the control is a
+/// tick that opens rather than a toggle with two ends.
+function Alongside(props: {
+  conversation: ConversationView;
+  companion: CompanionView;
+  /// What this row holds once it has been ticked up, or `undefined` where it
+  /// has not been.
+  upgrade: Upgrade | undefined;
+  open: (upgrade: Upgrade | null) => void;
+  disabled: boolean;
+}): JSX.Element {
+  /// Whether the work may write in it once this steer lands: what the record
+  /// says, or what the tick has just asked for.
+  const writing = () =>
+    props.companion.mode === "ReadWrite" || props.upgrade !== undefined;
+
   return (
     <li class={styles.steerAlong}>
       <span class={styles.steerAlongName}>{props.companion.repo.name}</span>
       <span class={styles.steerAlongMode}>
-        {props.companion.mode === "ReadWrite" ? "read-write" : "read-only"}
+        {writing() ? "read-write" : "read-only"}
       </span>
       <span class={styles.steerAlongBase}>
         off{" "}
         {props.companion.base_ref ?? props.companion.repo.default_branch}
       </span>
+
+      {/* Only on a read-only row. A read-write one is already as open as a
+          companion gets, so there is nothing here for it to offer. */}
+      <Show when={props.companion.mode === "ReadOnly"}>
+        <label class={styles.steerOpenUp}>
+          <input
+            type="checkbox"
+            checked={props.upgrade !== undefined}
+            disabled={props.disabled}
+            onChange={(event) =>
+              props.open(event.currentTarget.checked ? MIRRORING : null)
+            }
+          />
+          Open it up
+        </label>
+
+        <Show when={props.upgrade}>
+          {(upgrade) => (
+            <div class={styles.steerOpenBranch}>
+              <label for={`steer-open-${props.companion.repo.id}-branch`}>
+                Branch in {props.companion.repo.name}
+              </label>
+              {/* Filled in with what has been typed, or with the conversation's
+                  own branch, which is what mirroring comes to — exactly as an
+                  added row's is, so what the human reads is what they get. */}
+              <input
+                id={`steer-open-${props.companion.repo.id}-branch`}
+                type="text"
+                value={upgrade().branch || props.conversation.branch}
+                disabled={props.disabled}
+                onInput={(event) =>
+                  props.open({ branch: event.currentTarget.value })
+                }
+              />
+              <Note class={styles.fieldNote}>
+                Cleared, it follows this conversation's own branch. It is cut
+                from this repo's base as that stands now — the detached checkout
+                it has been read through goes.
+              </Note>
+            </div>
+          )}
+        </Show>
+      </Show>
     </li>
   );
 }
@@ -608,6 +705,32 @@ export function Steer(props: {
     })),
   );
 
+  /// And the ones already there that are being opened up, by the id of each.
+  ///
+  /// Kept across a change of target for the reason everything else here is:
+  /// what is sent follows the target, and a tick undone by a change of mind
+  /// about where the work goes would be the form answering a question nobody
+  /// asked.
+  const [upgraded, setUpgraded] = createSignal<Record<number, Upgrade>>({});
+
+  const open = (repo: number, upgrade: Upgrade | null) =>
+    setUpgraded((upgraded) => {
+      const { [repo]: gone, ...rest } = upgraded;
+
+      return upgrade ? { ...rest, [repo]: upgrade } : rest;
+    });
+
+  /// What those come to on the wire: one entry per row ticked up, with no mode
+  /// on any of them — read-write is the one direction, and a row that could
+  /// carry read-only would be a row that could take back what a session was
+  /// given.
+  const upgrades = createMemo<CompanionUpgrade[]>(() =>
+    Object.entries(upgraded()).map(([repo, upgrade]) => ({
+      repo_id: Number(repo),
+      branch: upgrade.branch,
+    })),
+  );
+
   const [interrupt, setInterrupt] = createSignal(false);
   const [refused, setRefused] = createSignal<ConversationSteered | null>(null);
 
@@ -629,6 +752,7 @@ export function Steer(props: {
         // goes on in carries: it is setup rather than a payload of one state.
         // Into done nothing runs, so there is nothing for a companion to be for.
         added: runs() ? additions() : [],
+        upgraded: runs() ? upgrades() : [],
         instruction:
           target() === "Implementing" && instruction().trim()
             ? instruction()
@@ -814,6 +938,8 @@ export function Steer(props: {
             conversation={props.conversation}
             added={added()}
             settle={settle}
+            upgraded={upgraded()}
+            open={open}
             disabled={submit.isPending}
           />
         </Show>

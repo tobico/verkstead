@@ -173,6 +173,43 @@
   color: var(--ink);
 }
 
+/* The one control a line of that kind carries: the tick that opens a read-only
+   repo up. Pushed to the end of the line, so what reads as a sentence about the
+   repo stays one and the press sits after it. */
+.steerOpenUp {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* And the branch it opens into, which takes the whole width under the line
+   rather than crowding onto the end of it. */
+.steerOpenBranch {
+  flex-basis: 100%;
+  margin: 0.4rem 0 0.2rem 1.5rem;
+}
+
+.steerOpenBranch label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.steerOpenBranch input {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
 /* And a card apiece for the ones that could go in, because each of them opens
    into three questions the moment it is ticked. */
 .steerAdd {

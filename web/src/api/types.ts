@@ -608,6 +608,24 @@ export type CompanionRefusal = "FetchFailed" | "NoBaseCommit" | "BranchExists" |
 export type CompanionRemoved = "Removed" | "NoSuchConversation" | "NotDrafting";
 
 /**
+ * One companion of a Conversation the steer opens up: read-only until now,
+ * read-write from here.
+ *
+ * **Two fields rather than four, and the missing two are the point.** There is
+ * no mode, because there is one direction — a row that could carry read-only
+ * would be a row that could take back what a session was given. And there is
+ * no base: what the upgrade comes off is the base already on the row, picked
+ * while the Conversation drafted, re-resolved at this moment because the
+ * companion is joining the work now.
+ */
+export type CompanionUpgrade = { repo_id: number, 
+/**
+ * What the branch cut in it is to be called, or empty for *mirroring* —
+ * the Conversation's own branch name, exactly as at draft time.
+ */
+branch: string, };
+
+/**
  * One companion repo of a Conversation: which Repo, how far into it a session
  * may reach, and what its checkout comes off.
  *
@@ -1915,16 +1933,22 @@ export type Started = { "Started": { id: number, } } | "NoSuchRepo";
  * Which of a companion's ways of not being delivered by a steer this was.
  *
  * [`CompanionRefusal`]'s four asked again at the other moment a companion is
- * checked out, and two more that only a steer can meet: the setup card catches
- * them the moment a row is pressed, and a steer is where the same questions are
- * asked past drafting, with nothing in front of them but the submit.
+ * checked out, and four more that only a steer can meet: the setup card
+ * catches those the moment a row is pressed, and a steer is where the same
+ * questions are asked past drafting, with nothing in front of them but the
+ * submit.
+ *
+ * Two of the four are about the *set* rather than about git, and they come in
+ * a pair because a steer does two things to it: an add is refused where the
+ * Repo is a companion already, and an upgrade is refused where it is not one
+ * yet — or where it is already as open as a companion gets.
  *
  * A vocabulary of its own rather than more variants of the grill start's, for
  * the reason [`SteerTarget`] is not [`crate::Lifecycle`]: what a grilling can
  * be refused for and what a steer can be refused for are different lists, and
  * one list would say each press can be refused for things it never could.
  */
-export type SteerCompanionRefusal = "OwnRepo" | "AlreadyAdded" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+export type SteerCompanionRefusal = "OwnRepo" | "AlreadyAdded" | "NotACompanion" | "AlreadyReadWrite" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
 
 /**
  * A steer as the page receives it: when, where the human sent it, and what
@@ -2076,7 +2100,24 @@ digest: boolean,
  * Nothing anywhere else reads it: a target nothing runs in has no sandbox
  * to set up.
  */
-added: Array<CompanionAddition>, };
+added: Array<CompanionAddition>, 
+/**
+ * And the companions already there that the steer opens up: read-only
+ * until now, read-write from here, each with what the branch cut in it is
+ * called.
+ *
+ * **Upgrading only, which is why there is no mode on the rows.** Read-only
+ * is not something this can ask for and neither is removal, so a
+ * downgrade cannot be spelled here at all — what a session was once given
+ * is never taken back mid-Conversation. Nothing here may name a companion
+ * that is read-write already, or a Repo the Conversation has not got: both
+ * are refused rather than obeyed, the first being a row with nothing left
+ * to open and the second a page arguing with the record.
+ *
+ * Nothing anywhere else reads it, for [`Self::added`]'s reason: a target
+ * nothing runs in has no sandbox to open up.
+ */
+upgraded: Array<CompanionUpgrade>, };
 
 /**
  * Where a steer can send a Conversation.

@@ -547,6 +547,32 @@ impl Grilling {
         .await
     }
 
+    /// And the submit that opens a companion up as it moves: which of the ones
+    /// already there goes to read-write, and what the branch cut in it is
+    /// called — empty being *mirroring*, the Conversation's own branch name.
+    ///
+    /// No mode on the row, because there is one direction: read-only is not
+    /// something the modal can ask for.
+    async fn steer_opening(
+        &self,
+        target: &str,
+        instruction: &str,
+        repo_id: i64,
+        branch: &str,
+    ) -> ConversationSteered {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/steer/submit", self.id),
+            &serde_json::json!({
+                "target": target,
+                "interrupt": false,
+                "instruction": instruction,
+                "upgraded": [{ "repo_id": repo_id, "branch": branch }],
+            }),
+        )
+        .await
+    }
+
     /// What the next session to start printed, waited for from a Timeline that
     /// held `before` of them.
     ///
@@ -8060,6 +8086,98 @@ async fn what_a_session_commits_in_a_companion_lands_on_the_timeline_labelled() 
 
     assert_eq!(diff.paths, vec!["halves.md".to_owned()]);
     assert!(diff.html.contains("the other half"), "{}", diff.html);
+}
+
+/// And a companion a steer opened up is one the session that steer launches may
+/// write in: the commit it makes there lands on the Timeline labelled with the
+/// Repo's registered name, exactly as one in a companion that came in
+/// read-write does.
+///
+/// The whole of what an upgrade is for, end to end. The grilling session is
+/// running against a companion it may only read; the steer ticks it up and
+/// starts a session on an instruction; and that session commits in it. Nothing
+/// but the upgrade stands between the two — the same repository, the same
+/// Conversation, the same sandbox — so a commit landing at all is the sandbox
+/// binding the new checkout writable, and the label on it is the sweep having
+/// picked the branch up.
+#[tokio::test]
+async fn a_companion_a_steer_opened_up_is_one_the_next_session_writes_in() {
+    let fixture = grilling_alongside(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            sleep 300
+            ;;
+        *)
+            cd ../askance-*
+            printf 'the other half\n' > halves.md
+            git add halves.md
+            git commit --quiet -m 'feat: the other half'
+            printf 'committed in the companion\n'
+            sleep 300
+            ;;
+        esac
+        "#,
+        "askance",
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let view = fixture.view().await;
+    let askance = view
+        .companions
+        .first()
+        .expect("the fixture added one companion");
+
+    assert_eq!(
+        askance.mode,
+        CompanionMode::ReadOnly,
+        "a companion is added in the mode one is added in",
+    );
+
+    let repo_id = askance.repo.id;
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened { working: true });
+    assert_eq!(
+        fixture
+            .steer_opening("Implementing", "write the other half", repo_id, "")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    // The commit the session makes in it, which nothing tells Verkstead about:
+    // what puts it here is the sweep of the branch the upgrade cut.
+    let landed = fixture
+        .until(|view| {
+            commits(view)
+                .into_iter()
+                .find(|commit| commit.subject == "feat: the other half")
+                .cloned()
+        })
+        .await;
+
+    assert_eq!(
+        landed.repo,
+        Some("askance".to_owned()),
+        "a companion's commit says which repository it came from",
+    );
+
+    let view = fixture.view().await;
+    let opened = view
+        .companions
+        .first()
+        .expect("the companion is still the one companion");
+
+    assert_eq!(opened.mode, CompanionMode::ReadWrite);
+    assert_eq!(
+        opened.branch, "",
+        "the field was left empty, which is the row following the Conversation's \
+         own branch",
+    );
 }
 
 /// A Conversation with a read-only companion has one branch being swept, not

@@ -335,6 +335,64 @@ pub(crate) async fn join(
     Ok(())
 }
 
+/// A companion of a Conversation past drafting being opened up, as a steer
+/// opens one.
+///
+/// The two columns an upgrade moves, borrowed off what the modal submitted and
+/// living exactly as long as the call — [`Joining`]'s shape and for its reason.
+/// The mode is not among them because there is only one to move to: what this
+/// writes is read-write, and read-only is not something a steer can ask for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Opening<'a> {
+    pub repo_id: i64,
+
+    /// What the branch cut in it is called, or empty for mirroring — see
+    /// [`Companion::branch`].
+    pub branch: &'a str,
+}
+
+/// Open companions of a Conversation that is past drafting up to read-write.
+///
+/// [`join`]'s twin, past the same absent guard and for the same reason: past
+/// drafting is exactly where this writes, and a steer is the only caller.
+///
+/// **The one direction, which is why the mode is written here rather than
+/// passed in.** A steer may widen the set and may open a row further; nothing
+/// takes a companion away and nothing puts one back to read-only, so what a
+/// session was once given is never taken back mid-Conversation.
+///
+/// Written over the row that is there rather than inserted: a Repo that is not
+/// a companion of this Conversation is refused above this, and there is nothing
+/// here to insert — an upgrade is a row moving rather than a row arriving. The
+/// base is left exactly as the human picked it while drafting; what the upgrade
+/// re-resolves that name to is the server's business and lands on the checkout.
+///
+/// Takes the transaction the Conversation is moving in, for [`join`]'s reason:
+/// a Conversation that said it had moved without saying which of its
+/// repositories may now be written in would be one nothing could bind into a
+/// sandbox correctly.
+pub(crate) async fn open_up(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+    opening: &[Opening<'_>],
+) -> Result<()> {
+    for companion in opening {
+        sqlx::query(
+            "UPDATE companions SET mode = ?, branch = ?
+             WHERE conversation_id = ? AND repo_id = ?",
+        )
+        .bind(CompanionMode::ReadWrite.stored())
+        .bind(companion.branch)
+        .bind(id)
+        .bind(companion.repo_id)
+        .execute(&mut **tx)
+        .await
+        .with_context(|| format!("opening Repo {} up on Conversation {id}", companion.repo_id))?;
+    }
+
+    Ok(())
+}
+
 /// Record where a Conversation's companions were checked out.
 ///
 /// Written over whatever is there rather than inserted, which is the rule the

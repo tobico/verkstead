@@ -2445,6 +2445,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             )),
             base_commit: None,
             companions: &[],
+            opened: &[],
             checkouts: &[],
             said: None,
         },

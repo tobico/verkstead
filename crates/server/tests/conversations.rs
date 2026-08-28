@@ -4319,12 +4319,48 @@ async fn steer_alongside(
     target: &str,
     added: serde_json::Value,
 ) -> ConversationSteered {
+    steer_companions(app, id, target, added, serde_json::json!([])).await
+}
+
+/// And with its other half filled in: which of the companions already there are
+/// being opened up, and what the branch cut in each is called.
+///
+/// No mode on those rows, because there is one direction: read-only is not
+/// something the modal can ask for, so a downgrade cannot be spelled at all.
+async fn steer_opening(
+    app: &Router,
+    id: i64,
+    target: &str,
+    upgraded: serde_json::Value,
+) -> ConversationSteered {
+    steer_companions(app, id, target, serde_json::json!([]), upgraded).await
+}
+
+/// Both halves at once, which is what the modal always sends.
+async fn steer_companions(
+    app: &Router,
+    id: i64,
+    target: &str,
+    added: serde_json::Value,
+    upgraded: serde_json::Value,
+) -> ConversationSteered {
     post(
         app,
         &format!("/api/ui/conversations/{id}/steer/submit"),
-        &serde_json::json!({ "target": target, "interrupt": false, "added": added }),
+        &serde_json::json!({
+            "target": target,
+            "interrupt": false,
+            "added": added,
+            "upgraded": upgraded,
+        }),
     )
     .await
+}
+
+/// One row of the opening half, with the least a human has to say about it: the
+/// branch mirroring the Conversation's own.
+fn opening(repo_id: i64) -> serde_json::Value {
+    serde_json::json!({ "repo_id": repo_id, "branch": "" })
 }
 
 /// One row of that section, with the least a human has to say about it.
@@ -4444,7 +4480,8 @@ async fn steering_puts_a_companion_in_and_checks_it_out() {
     );
 }
 
-/// And a steer into Done puts nothing in, whatever the submit carried.
+/// And a steer into Done puts nothing in and opens nothing up, whatever the
+/// submit carried.
 ///
 /// Nothing runs there, so there is no sandbox to set up and nothing a companion
 /// could be for — which is why the modal draws no section on that target. A
@@ -4455,19 +4492,25 @@ async fn steering_puts_a_companion_in_and_checks_it_out() {
 async fn steering_into_done_puts_no_companion_in() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let joining = second_repo(&app, watched.path(), "granit").await;
+    let reading = second_repo(&app, watched.path(), "askance").await;
     let id = ready(&app, watched.path(), repo_id).await;
 
+    add_companion(&app, id, reading).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let detached = checked_out(&opened(&app, id).await, "askance");
+
     assert_eq!(
         steer(&app, id).await,
         SteerOpened::Opened { working: false }
     );
     assert_eq!(
-        steer_alongside(
+        steer_companions(
             &app,
             id,
             "Done",
             serde_json::json!([alongside(joining, "ReadWrite")]),
+            serde_json::json!([opening(reading)]),
         )
         .await,
         ConversationSteered::Steered,
@@ -4476,7 +4519,7 @@ async fn steering_into_done_puts_no_companion_in() {
     let view = opened(&app, id).await;
 
     assert_eq!(view.state, Lifecycle::Done);
-    assert!(companions(&app, id).await.is_empty());
+    assert_eq!(companions(&app, id).await, ["askance"]);
     assert!(
         notices(&view).iter().all(|said| !said.contains("granit")),
         "and nothing on the Timeline says a repository went anywhere",
@@ -4485,6 +4528,12 @@ async fn steering_into_done_puts_no_companion_in() {
         !has_branch(&watched.path().join("granit"), &view.branch),
         "nor is there a branch in it",
     );
+
+    // And the one that was there is untouched: still read-only, still detached
+    // where it was, and no branch cut in its repository either.
+    assert_eq!(companion(&view, "askance").mode, CompanionMode::ReadOnly);
+    assert_eq!(checked_out(&view, "askance"), detached);
+    assert!(!has_branch(&watched.path().join("askance"), &view.branch));
 }
 
 /// Each of the three questions git is asked about a companion refuses the whole
@@ -4619,6 +4668,343 @@ async fn a_repo_a_steer_cannot_put_in_is_refused_by_name() {
 
         assert_eq!(companions(&app, id).await, ["askance"]);
         assert_eq!(companion(&view, "askance").mode, CompanionMode::ReadWrite);
+        assert_eq!(view.state, Lifecycle::Grilling);
+    }
+}
+
+/// The whole of what opening a companion up costs a steer: the row moves to
+/// read-write with the branch it was given, a branch is cut off its base as that
+/// stands *now*, the detached checkout it was read through is replaced, and a
+/// line under the Steer says which repository was opened and on what.
+///
+/// Both branch names in one press, because they are one rule read two ways: the
+/// name typed in the field, and the Conversation's own where nothing was typed.
+///
+/// **The upgrade is fresh rather than pinned**, which is what the commit made in
+/// each companion between the grill start and the steer is here to show: the
+/// detached checkout stands at where that repository was when the Conversation
+/// started, and the branch is cut from where it stands at the steer.
+#[tokio::test]
+async fn steering_opens_a_read_only_companion_up() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let named = second_repo(&app, watched.path(), "askance").await;
+    let mirroring = second_repo(&app, watched.path(), "granit").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    add_companion(&app, id, named).await;
+    add_companion(&app, id, mirroring).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let branch = view.branch.clone();
+    let askance = watched.path().join("askance");
+    let granit = watched.path().join("granit");
+
+    // Where each of them was read through until now: detached, at the commit
+    // its base came to when the Conversation started.
+    let detached = [checked_out(&view, "askance"), checked_out(&view, "granit")];
+
+    for name in ["askance", "granit"] {
+        assert_eq!(companion(&view, name).mode, CompanionMode::ReadOnly);
+    }
+
+    // And then both repositories move on while the Conversation runs, which is
+    // the whole of what *fresh rather than pinned* means: what the upgrade cuts
+    // from is here, and not where the detached checkouts were left.
+    let moved_on = [commit(&askance, "halves.md"), commit(&granit, "halves.md")];
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_opening(
+            &app,
+            id,
+            "Grilling",
+            serde_json::json!([
+                { "repo_id": named, "branch": "alongside" },
+                opening(mirroring),
+            ]),
+        )
+        .await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(companions(&app, id).await, ["askance", "granit"]);
+
+    // The name typed, and the Conversation's own where nothing was — which is
+    // what mirroring comes to, exactly as at draft time: the row holds the empty
+    // name and the branch that was cut is the Conversation's.
+    let cut = [
+        ("askance", "alongside", "alongside"),
+        ("granit", "", branch.as_str()),
+    ];
+
+    for ((name, named, cut), (repo, (was, tip))) in cut.into_iter().zip([
+        (&askance, (&detached[0], &moved_on[0])),
+        (&granit, (&detached[1], &moved_on[1])),
+    ]) {
+        let row = companion(&view, name);
+        let worked = checked_out(&view, name);
+
+        assert_eq!(row.mode, CompanionMode::ReadWrite, "{name}");
+        assert_eq!(row.branch, named, "{name}");
+        assert!(has_branch(repo, cut), "{name}");
+        assert_eq!(
+            git(&worked, &["symbolic-ref", "--short", "HEAD"]).trim(),
+            cut,
+            "{name} is worked on the branch it was given",
+        );
+
+        // Cut from the tip as it stands at the steer rather than from the
+        // commit the detached checkout was left at.
+        assert_eq!(
+            git(&worked, &["rev-parse", "HEAD"]).trim(),
+            tip,
+            "{name} comes off its base as that stands now",
+        );
+        assert_eq!(row.base_commit.as_deref(), Some(tip.as_str()), "{name}");
+
+        // One companion is one checkout: the detached directory it was read
+        // through is replaced rather than left beside the new one.
+        assert_ne!(&worked, was, "{name}");
+        assert!(!was.exists(), "{name}'s detached directory is gone");
+        assert_eq!(
+            worktrees(repo),
+            vec![repo.canonicalize().unwrap(), worked.canonicalize().unwrap()],
+            "{name} has the repository itself and the one new checkout",
+        );
+        assert_eq!(
+            worked.parent(),
+            Some(dir.path().join("worktrees").as_path()),
+            "{name}",
+        );
+    }
+
+    // And the Timeline says which repositories were opened and on what branch,
+    // directly under the human's own line.
+    let mut after = view
+        .timeline
+        .iter()
+        .skip_while(|event| !matches!(event, TimelineEvent::Steer(_)))
+        .skip(1);
+
+    let Some(TimelineEvent::Notice(said)) = after.next() else {
+        panic!("what stands under the Steer is the line saying what was opened");
+    };
+
+    assert!(
+        said.html.contains("askance") && said.html.contains("alongside"),
+        "the one that was named says the name it was given: {}",
+        said.html,
+    );
+    assert!(
+        said.html.contains("granit") && said.html.contains(&branch),
+        "and the mirroring one says the branch mirroring came to: {}",
+        said.html,
+    );
+}
+
+/// Each of the three questions git is asked about an upgrade refuses the whole
+/// steer and says which repository it was — and leaves that companion read-only
+/// with its checkout exactly where it stood.
+///
+/// The same three [`alongside`] asks of a companion joining now, because an
+/// upgrade *is* one joining now: what it had was a detached checkout of where
+/// that repository stood when the Conversation started, and there is no branch
+/// in it to be carried forward.
+#[tokio::test]
+async fn an_upgrade_git_will_not_make_refuses_the_steer_by_name() {
+    for why in [
+        SteerCompanionRefusal::FetchFailed,
+        SteerCompanionRefusal::NoBaseCommit,
+        SteerCompanionRefusal::BranchExists,
+    ] {
+        let (watched, dir, app, _repo, repo_id) = workbench().await;
+        let reading = second_repo(&app, watched.path(), "askance").await;
+        let id = ready(&app, watched.path(), repo_id).await;
+        let askance = watched.path().join("askance");
+
+        add_companion(&app, id, reading).await;
+
+        // A base of its own for the one refusal that needs somewhere to point:
+        // the branch is there while the Conversation starts and gone by the
+        // steer, which is a base that resolves to nothing.
+        if why == SteerCompanionRefusal::NoBaseCommit {
+            git(&askance, &["branch", "release-1.4"]);
+            companion_base(&app, id, reading, Some("release-1.4")).await;
+        }
+
+        assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+        let before = opened(&app, id).await;
+        let detached = checked_out(&before, "askance");
+        let branch = before.branch.clone();
+
+        match why {
+            // A remote that answers to nothing: what the branch would come off
+            // cannot be trusted to be what the remote is holding.
+            SteerCompanionRefusal::FetchFailed => {
+                let nowhere = dir.path().join("no-such-remote");
+                git(
+                    &askance,
+                    &["remote", "add", "origin", &nowhere.to_string_lossy()],
+                );
+            }
+            // The base on its row, taken away between the start and the steer.
+            SteerCompanionRefusal::NoBaseCommit => {
+                git(&askance, &["branch", "-D", "release-1.4"]);
+            }
+            // And a name in that repository that is already somebody's work.
+            _ => {
+                git(&askance, &["branch", &branch]);
+            }
+        }
+
+        assert_eq!(
+            steer(&app, id).await,
+            SteerOpened::Opened { working: false }
+        );
+        assert_eq!(
+            steer_opening(&app, id, "Grilling", serde_json::json!([opening(reading)])).await,
+            ConversationSteered::Companion {
+                repo: "askance".to_owned(),
+                why,
+            },
+        );
+
+        // The press did not happen: the row is read-only, its checkout is the
+        // detached one it always had, and no move was made.
+        let view = opened(&app, id).await;
+        let row = companion(&view, "askance");
+
+        assert_eq!(row.mode, CompanionMode::ReadOnly, "{why:?}");
+        assert_eq!(row.branch, "", "{why:?}");
+        assert_eq!(checked_out(&view, "askance"), detached, "{why:?}");
+        assert!(detached.exists(), "{why:?}");
+        assert_eq!(
+            worktrees(&askance).len(),
+            2,
+            "the repository itself and the detached checkout, and nothing new: {why:?}",
+        );
+        assert_eq!(view.state, Lifecycle::Grilling, "{why:?}");
+        assert!(
+            view.blocked_on.is_some(),
+            "the stop is still there: {why:?}"
+        );
+    }
+}
+
+/// And there is no way back down: nothing offers read-only, nothing offers
+/// removal, and every way of asking for one of them is refused rather than
+/// obeyed.
+///
+/// Four asks and four refusals. An upgrade of a row that is read-write already
+/// has nothing left to open — and obeying it would cut its branch a second time
+/// over whatever has been committed to the first, which is the taking-back the
+/// whole of this is written to prevent. An upgrade of a Repo the Conversation
+/// has not got is the mirror of an add of one it already has. And an *add* of a
+/// companion that is there, at read-only, is how a downgrade would have to be
+/// spelled if it could be spelled at all.
+#[tokio::test]
+async fn no_downgrade_and_no_removal_is_obeyed() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let writing = second_repo(&app, watched.path(), "askance").await;
+    let reading = second_repo(&app, watched.path(), "granit").await;
+    let outside = second_repo(&app, watched.path(), "ember").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    add_companion(&app, id, writing).await;
+    companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
+    add_companion(&app, id, reading).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let worked = checked_out(&view, "askance");
+    let detached = checked_out(&view, "granit");
+
+    let asked: Vec<(serde_json::Value, serde_json::Value, ConversationSteered)> = vec![
+        // Already as open as a companion gets.
+        (
+            serde_json::json!([]),
+            serde_json::json!([opening(writing)]),
+            ConversationSteered::Companion {
+                repo: "askance".to_owned(),
+                why: SteerCompanionRefusal::AlreadyReadWrite,
+            },
+        ),
+        // And the same by one page naming a read-only one twice, the second row
+        // meeting the one this submit has already opened.
+        (
+            serde_json::json!([]),
+            serde_json::json!([opening(reading), opening(reading)]),
+            ConversationSteered::Companion {
+                repo: "granit".to_owned(),
+                why: SteerCompanionRefusal::AlreadyReadWrite,
+            },
+        ),
+        // A registered Repo that is no companion of this Conversation, and the
+        // Conversation's own, which is the work's repository rather than
+        // something beside it.
+        (
+            serde_json::json!([]),
+            serde_json::json!([opening(outside)]),
+            ConversationSteered::Companion {
+                repo: "ember".to_owned(),
+                why: SteerCompanionRefusal::NotACompanion,
+            },
+        ),
+        (
+            serde_json::json!([]),
+            serde_json::json!([opening(repo_id)]),
+            ConversationSteered::Companion {
+                repo: "verkstead".to_owned(),
+                why: SteerCompanionRefusal::NotACompanion,
+            },
+        ),
+        // An id nothing answers to at all, which is the refusal with no
+        // repository in it.
+        (
+            serde_json::json!([]),
+            serde_json::json!([opening(repo_id + 404)]),
+            ConversationSteered::NoSuchCompanionRepo,
+        ),
+        // And the only way a downgrade could be spelled: an add over the row
+        // that is there, at the mode it would be taken back to.
+        (
+            serde_json::json!([alongside(writing, "ReadOnly")]),
+            serde_json::json!([]),
+            ConversationSteered::Companion {
+                repo: "askance".to_owned(),
+                why: SteerCompanionRefusal::AlreadyAdded,
+            },
+        ),
+    ];
+
+    for (added, upgraded, refusal) in asked {
+        assert_eq!(
+            steer(&app, id).await,
+            SteerOpened::Opened { working: false }
+        );
+        assert_eq!(
+            steer_companions(&app, id, "Grilling", added, upgraded.clone()).await,
+            refusal,
+            "{upgraded}",
+        );
+
+        // And both that were there are exactly as they were: neither narrowed,
+        // neither opened, neither taken away, and each in the directory it had.
+        let view = opened(&app, id).await;
+
+        assert_eq!(companions(&app, id).await, ["askance", "granit"]);
+        assert_eq!(companion(&view, "askance").mode, CompanionMode::ReadWrite);
+        assert_eq!(checked_out(&view, "askance"), worked);
+        assert_eq!(companion(&view, "granit").mode, CompanionMode::ReadOnly);
+        assert_eq!(checked_out(&view, "granit"), detached);
         assert_eq!(view.state, Lifecycle::Grilling);
     }
 }

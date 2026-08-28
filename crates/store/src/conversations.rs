@@ -2444,12 +2444,13 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// the filesystem are the server's to reach, and what this writes is the record
 /// of work that has already happened. See [`Steer`].
 ///
-/// **And the companions the steer widened the set with**, their rows and their
-/// checkouts, and a line under the Steer naming what came in. Past drafting is
-/// exactly where this writes, so none of it goes through the setup card's own
-/// guarded writes — see [`super::companions::join`]. Widening only: nothing here
-/// takes a companion away or writes over one that is already on the row, the
-/// frozen set only ever growing.
+/// **And the companions the steer widened the set with and the ones it opened
+/// up**, their rows and their checkouts, and a line under the Steer naming what
+/// came in and what was opened. Past drafting is exactly where this writes, so
+/// none of it goes through the setup card's own guarded writes — see
+/// [`super::companions::join`] and [`super::companions::open_up`]. One direction
+/// only: nothing here takes a companion away, puts one back to read-only, or
+/// writes an add over a row that is already there.
 ///
 /// Nothing about the run is touched, and what has to stop running is stopped
 /// before this is called — see the server's `steering` module, which is the only
@@ -2464,6 +2465,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         worktree,
         base_commit,
         companions,
+        opened,
         checkouts,
         said,
     } = steer;
@@ -2553,13 +2555,16 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         .with_context(|| format!("recording the worktree of Conversation {id}"))?;
     }
 
-    // And the companions the steer widened the set with, and where every
-    // checkout it made went — the ones just added, and every one the record held
-    // with no directory behind it. Both in the move's own transaction, for the
-    // reason the Worktree above is: a Conversation that said it had moved
-    // without saying which repositories moved with it would be one nothing could
-    // bind into a sandbox and nothing would come back and remove.
+    // And the companions the steer widened the set with, the ones it opened up,
+    // and where every checkout it made went — the ones just added, the ones
+    // whose detached directory was replaced, and every one the record held with
+    // no directory behind it. All in the move's own transaction, for the reason
+    // the Worktree above is: a Conversation that said it had moved without
+    // saying which repositories moved with it, and how far into each the work
+    // now reaches, would be one nothing could bind into a sandbox correctly and
+    // nothing would come back and remove.
     super::companions::join(&mut tx, id, companions).await?;
+    super::companions::open_up(&mut tx, id, opened).await?;
     super::companions::record_worktrees(&mut tx, id, checkouts).await?;
 
     // And how the work is built from here, for a Conversation that has never
@@ -2693,8 +2698,18 @@ pub struct Steer<'a> {
     /// is the ordinary case: most steers widen nothing.
     pub companions: &'a [super::Joining<'a>],
 
+    /// And the companions it opened up, which are rows this moves and nothing
+    /// else could.
+    ///
+    /// The same absent guard for the same reason, and one direction only: each
+    /// of these goes to read-write with the branch it was given, and nothing
+    /// here puts one back — see [`super::companions::open_up`]. Empty is the
+    /// ordinary case: most steers open nothing up.
+    pub opened: &'a [super::Opening<'a>],
+
     /// And where every companion checkout the steer made went, which is the ones
-    /// just added and every one the record held with no directory behind it.
+    /// just added, the ones it opened up, and every one the record held with no
+    /// directory behind it.
     ///
     /// In the same transaction as the move, for the reason the Conversation's
     /// own Worktree is: one that said it had moved without saying where its

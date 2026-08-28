@@ -5893,6 +5893,7 @@ describe("steering a conversation", () => {
         brief: null,
         digest: false,
         added: [],
+        upgraded: [],
         instruction: "Note the window the count is against.",
       }),
     );
@@ -5966,6 +5967,7 @@ describe("steering a conversation", () => {
         brief: null,
         digest: false,
         added: [],
+        upgraded: [],
         instruction: null,
       }),
     );
@@ -6005,6 +6007,7 @@ describe("steering a conversation", () => {
         brief: "# Retries\n\nThe backoff is wrong.\n",
         digest: true,
         added: [],
+        upgraded: [],
         instruction: null,
       }),
     );
@@ -6083,6 +6086,7 @@ describe("steering a conversation", () => {
         // Nor a sandbox: nothing runs in done, so there is nothing a
         // companion could be for.
         added: [],
+        upgraded: [],
         instruction: null,
       }),
     );
@@ -6250,6 +6254,104 @@ describe("steering a conversation", () => {
         ],
       }),
     );
+  });
+
+  /// And a repo that came in read-only can be opened up on the row that says so,
+  /// with the branch to cut beside the tick — the same question the setup card
+  /// asked at draft time, asked at the one other moment it can be.
+  ///
+  /// One direction only: nothing here offers read-only and nothing offers
+  /// removal, so a read-write row carries no control at all.
+  it("opens a read-only repo up, and offers nothing on a read-write one", async () => {
+    const askance = REPOS[0]!;
+    const reading: CompanionView = {
+      repo: askance,
+      mode: "ReadOnly",
+      base_ref: null,
+      branch: "",
+      worktree: { path: "/state/worktrees/askance-trunk", missing: false },
+      base_commit: "c0ffee",
+    };
+    const fetching = theGrillingStanding(
+      {
+        ready_to_stop: true,
+        working: false,
+        ready_to_continue: true,
+        companions: [reading],
+      },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    const row = await drawn(modal, `.${steerModal.steerAlong}`);
+
+    // Nothing opens until the tick: the row says what the repo is and how far
+    // into it the work reaches, and that is all.
+    expect(row.querySelector(`.${steerModal.steerOpenBranch}`)).toBeNull();
+    expect(row.textContent).toContain("read-only");
+
+    fireEvent.click(await drawn(row, `.${steerModal.steerOpenUp} input`));
+
+    // Ticked, the row says what it will be rather than what it was, and the
+    // branch to cut opens under it.
+    await waitFor(() => expect(row.textContent).toContain("read-write"));
+    expect(row.textContent).not.toContain("read-only");
+
+    const branch = (await drawn(
+      row,
+      `#steer-open-${askance.id}-branch`,
+    )) as HTMLInputElement;
+
+    // Prefilled with the conversation's own, which is what mirroring comes to.
+    expect(branch.value).toBe(GRILLING.branch);
+
+    fireEvent.input(branch, { target: { value: "alongside" } });
+    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+
+    // No mode on the wire, because there is one direction: a row that could
+    // carry read-only would be a row that could take back what was given.
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toMatchObject({
+        added: [],
+        upgraded: [{ repo_id: askance.id, branch: "alongside" }],
+      }),
+    );
+  });
+
+  /// And a read-write companion offers nothing at all: it is already as open as
+  /// a repo gets, and there is no way back from it.
+  it("offers no control on a companion that is read-write already", async () => {
+    theGrillingStanding(
+      {
+        ready_to_stop: true,
+        working: false,
+        ready_to_continue: true,
+        companions: [
+          {
+            repo: REPOS[0]!,
+            mode: "ReadWrite",
+            base_ref: null,
+            branch: "",
+            worktree: null,
+            base_commit: null,
+          },
+        ],
+      },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    const row = await drawn(modal, `.${steerModal.steerAlong}`);
+
+    expect(row.querySelector(`.${steerModal.steerOpenUp}`)).toBeNull();
+    expect(row.querySelector("input")).toBeNull();
   });
 
   /// The record of one: the human's own line, and the machine's plain move under

@@ -2508,6 +2508,23 @@ pub struct SteerSubmission {
     /// to set up.
     #[serde(default)]
     pub added: Vec<CompanionAddition>,
+
+    /// And the companions already there that the steer opens up: read-only
+    /// until now, read-write from here, each with what the branch cut in it is
+    /// called.
+    ///
+    /// **Upgrading only, which is why there is no mode on the rows.** Read-only
+    /// is not something this can ask for and neither is removal, so a
+    /// downgrade cannot be spelled here at all — what a session was once given
+    /// is never taken back mid-Conversation. Nothing here may name a companion
+    /// that is read-write already, or a Repo the Conversation has not got: both
+    /// are refused rather than obeyed, the first being a row with nothing left
+    /// to open and the second a page arguing with the record.
+    ///
+    /// Nothing anywhere else reads it, for [`Self::added`]'s reason: a target
+    /// nothing runs in has no sandbox to open up.
+    #[serde(default)]
+    pub upgraded: Vec<CompanionUpgrade>,
 }
 
 /// One registered Repo a steer puts on a Conversation, with everything a setup
@@ -2533,6 +2550,25 @@ pub struct CompanionAddition {
     /// What a read-write one's branch is to be called, or empty for
     /// *mirroring* — the Conversation's own branch name. Empty on a read-only
     /// one as well, its checkout being detached and holding no branch.
+    pub branch: String,
+}
+
+/// One companion of a Conversation the steer opens up: read-only until now,
+/// read-write from here.
+///
+/// **Two fields rather than four, and the missing two are the point.** There is
+/// no mode, because there is one direction — a row that could carry read-only
+/// would be a row that could take back what a session was given. And there is
+/// no base: what the upgrade comes off is the base already on the row, picked
+/// while the Conversation drafted, re-resolved at this moment because the
+/// companion is joining the work now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CompanionUpgrade {
+    pub repo_id: i64,
+
+    /// What the branch cut in it is to be called, or empty for *mirroring* —
+    /// the Conversation's own branch name, exactly as at draft time.
     pub branch: String,
 }
 
@@ -2638,9 +2674,15 @@ pub enum ConversationSteered {
 /// Which of a companion's ways of not being delivered by a steer this was.
 ///
 /// [`CompanionRefusal`]'s four asked again at the other moment a companion is
-/// checked out, and two more that only a steer can meet: the setup card catches
-/// them the moment a row is pressed, and a steer is where the same questions are
-/// asked past drafting, with nothing in front of them but the submit.
+/// checked out, and four more that only a steer can meet: the setup card
+/// catches those the moment a row is pressed, and a steer is where the same
+/// questions are asked past drafting, with nothing in front of them but the
+/// submit.
+///
+/// Two of the four are about the *set* rather than about git, and they come in
+/// a pair because a steer does two things to it: an add is refused where the
+/// Repo is a companion already, and an upgrade is refused where it is not one
+/// yet — or where it is already as open as a companion gets.
 ///
 /// A vocabulary of its own rather than more variants of the grill start's, for
 /// the reason [`SteerTarget`] is not [`crate::Lifecycle`]: what a grilling can
@@ -2660,6 +2702,22 @@ pub enum SteerCompanionRefusal {
     /// widens, so a submit naming one that is already there is a page arguing
     /// with the record rather than a change to obey.
     AlreadyAdded,
+
+    /// An upgrade named a Repo that is not a companion of this Conversation at
+    /// all — its own repository, or one nothing ever put in.
+    ///
+    /// The mirror of [`Self::AlreadyAdded`], and refused for its reason: a
+    /// steer opens up a row that is there, and one that is not there is a page
+    /// arguing with the record rather than a change to obey.
+    NotACompanion,
+
+    /// An upgrade named a companion that is read-write already, which is as
+    /// open as a companion gets.
+    ///
+    /// Obeying it would be re-cutting a branch over work that has been
+    /// committed to one — the taking-back the whole of this is written to
+    /// prevent — so it is refused rather than done again.
+    AlreadyReadWrite,
 
     /// Git would not fetch from that repository's remote, so what its checkout
     /// would come off cannot be trusted to be what the remote is holding.
