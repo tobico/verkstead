@@ -93,8 +93,13 @@ export const STEER_REFUSAL: Record<
     "Nothing in the repository answers to what this branch would come off. Fix the base branch and steer it again.",
   WorktreeRefused:
     "Its worktree is not one any more, and git would not make it again from the branch.",
+  // Both halves of the companion section can reach this — a row ticked to go
+  // in, and a row ticked to be opened up — so it says which repo was picked
+  // rather than what was being done with it. It is also the one companion
+  // refusal with no name in it: an unregistered repo is a row Verkstead knows
+  // nothing about but the id the page sent.
   NoSuchCompanionRepo:
-    "One of the repos you added is not registered any more, so nothing was steered.",
+    "One of the repos you picked to work alongside is not registered any more, so nothing was steered.",
 };
 
 /// And each way one companion could not be put into the sandbox, which says the
