@@ -401,11 +401,12 @@ function Alongside(props: {
 
   return (
     <li class={styles.steerAlong}>
+      {/* Only the name is picked out. The mode and the base read as the quiet
+          half of the line, which is what the row's own rule already makes
+          them — so they carry no class of their own to say it again. */}
       <span class={styles.steerAlongName}>{props.companion.repo.name}</span>
-      <span class={styles.steerAlongMode}>
-        {writing() ? "read-write" : "read-only"}
-      </span>
-      <span class={styles.steerAlongBase}>
+      <span>{writing() ? "read-write" : "read-only"}</span>
+      <span>
         off{" "}
         {props.companion.base_ref ?? props.companion.repo.default_branch}
       </span>
