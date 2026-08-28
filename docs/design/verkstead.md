@@ -86,9 +86,12 @@ flowchart LR
   show for itself leaves a conversation nobody can move: the human sees only
   what arrives as a question set, and none has. So Verkstead types a canned
   line into the running session — the channel a watcher's keystrokes take —
-  telling it that nothing it prints reaches anybody and to put what it is
-  waiting on as a set. Twice at most; a session still saying nothing after the
-  second stops the conversation with a notice saying it would not ask.
+  asking it to summarize where it has got to and ask what to do next, as a set.
+  The line and the enter after it are typed a moment apart, because an agent's
+  terminal interface reads the two arriving together as a paste and a return
+  inside a paste is a line break rather than a send. Twice at most; a session
+  still saying nothing after the second stops the conversation with a notice
+  saying it would not ask.
   Follow-up is where it started, the state where an idle session is exactly the
   failure (*added 2026-08-27, building follow-ups*). It now watches **every
   session Verkstead launches**, one loop with the state's own done-indicator as
@@ -166,7 +169,14 @@ flowchart LR
   Auto-advance runs the whole pipeline unattended: fresh session per task,
   tasks auto-advance, stages auto-continue, and the finish sequence (push +
   draft PR per the repo's review process) runs without approval. Merging stays
-  a human act.
+  a human act. Every run ends on a PR and pushes after its last commit, so any
+  of them — a backlog's finish, an inline implementation, a roadmap's own
+  session — can land the whole of its work and still stop short of the PR.
+  One that did gets a session sent for the PR alone, told the work is already
+  built, and the stop is what is left if that leaves none either. Resume takes
+  the same go rather than repeating the Notice: an empty `.tasks/` is read
+  against the branch, which tells a backlog worked through from one that never
+  landed.
 - **Wrap-up phase, per PR.** After a PR opens: the agent re-reviews the PR in
   a fresh context and raises a question set for any issues it finds;
   meanwhile Verkstead monitors the CI run and dispatches fix sessions on

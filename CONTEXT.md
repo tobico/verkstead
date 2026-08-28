@@ -57,6 +57,10 @@ branch outlives it, because a branch is cheap and may hold work worth reading.
 A steered Conversation keeps the one it has; where the directory has gone, one
 is checked out again on the branch that was worked, which is the only time a
 Worktree is made without a branch being made with it.
+A removal git refuses — a directory it no longer reads as a Worktree — does not
+hold the close up: it is logged with its path and left on disk, closing being
+what the human asked for and a directory nobody can be rid of being what they
+were trying to escape.
 Named for the Repo and the branch, and it lives in the Data Directory rather
 than inside a Watched Path: Verkstead made it, so it goes among Verkstead's own
 things.
@@ -334,6 +338,25 @@ a grace period, never on done alone: work does not always stop at the commit, an
 output arriving puts the whole grace back on the clock. A session that keeps
 talking is never ended. One Step per session and one session per Step — a fresh
 context each time, which is what the backlog was broken into slices for.
+
+**A Step can be done and still be short**, because what a run's last Step is for
+happens after its commit: the finish takes the list away and commits it, and the
+push and the pull request come next — as they do for an inline implementation and
+for a roadmap's own session, every kind of work here ending on a pull request.
+One that stopped in between leaves the work built, committed and unreviewable, so
+the missing thing is asked for — a session of its own, sent to push and open the
+pull request and told the work is already built. Not a Step itself: nothing in
+the Repo says it is due and nothing there says it is done, GitHub being the one
+that knows. Once per go, and then the ordinary stop where the answer has not
+changed, because two agents that both stopped short of the same push is something
+for the human to look at.
+
+**Resume takes that same go**, so a run stopped at its push is one a press can
+finish. What it must not do is guess: an empty `.tasks/` is a backlog worked
+through or one that never landed, which are opposite situations, so the branch is
+read for which it is — a branch that has written a backlog since it came off its
+base has been worked and finished with, and one that has written none has nothing
+built to carry anywhere and stops.
 _Avoid_: job, iteration, unit of work, stage (that is a roadmap's)
 
 **Stage**:
@@ -396,13 +419,14 @@ the session left it, which is what makes taking the Worktree on by hand possible
 at all.
 
 Who stopped it is recorded, and two things follow from it. **Verkstead** is the
-brake it pulled — a session that fell over, checks that would not go green, a
-finish Step that left no pull request, an Agent Profile out of usage window.
-**Human** is their press on **Stop** or **Force stop**. **Circumstance** is a
-driver a restart or a crash took away, nobody having decided anything.
-**Deliberate** is the fourth word and the only one nothing writes any more: a
-stop recorded before the first two were told apart, read as the human's, because
-their own presses are what nearly all of those rows are.
+brake it pulled — a session that fell over, checks that would not go green, work
+whose pull request never arrived even after a session was sent for it, an Agent
+Profile out of usage window. **Human** is their press on **Stop** or **Force
+stop**. **Circumstance** is a driver a restart or a crash took away, nobody
+having decided anything. **Deliberate** is the fourth word and the only one
+nothing writes any more: a stop recorded before the first two were told apart,
+read as the human's, because their own presses are what nearly all of those rows
+are.
 
 *Is it waiting for a press?* Everything but circumstance is: the next server up
 carries a circumstance stop on unasked, and leaves every other one exactly where
@@ -452,6 +476,14 @@ than refused: the plan session is launched as the Stage is made and by nothing
 else, so a Stage with no `.tasks/` is a run that never began rather than one
 that is worked out — read off what its branch has written since it was made,
 which the backlog of the Stage it stacks on is no part of.
+
+**A press always has somewhere to go**, which is the whole point of recomputing
+rather than repeating: every state the pipeline can stop in has a next move, and
+work that stopped at its push has the plainest of them — the pull request is
+sent for again. What the branch has written since it came off its base is what
+says which situation an empty `.tasks/` is, the same reading a Stage's planning
+turns on, and the one press that is still refused by name is the branch with
+nothing built on it at all.
 
 Offered on a Conversation that is merely undriven as much as on one that is
 **Stopped**, a run with nothing behind it being the same condition however it
@@ -695,7 +727,9 @@ left to read on it. A fact about the list and nothing else: the Timeline, the
 branch and the Conversation's own page are exactly where they were, and opening
 it by its URL shows all of it. Offered on a Closed Conversation alone — a
 Conversation still being worked on belongs on the list it is being worked from,
-so it is closed first and archived after.
+so it is closed first and archived after. **Close and archive** is that order
+in one press, for a Conversation the human is finished with and finished
+looking at; it refuses what closing refuses and nothing more.
 
 Reversible, which is what tells it from **Locked**: nothing is confirmed,
 because nothing is lost. The two words are not each other's — one is a Question

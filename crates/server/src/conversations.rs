@@ -987,6 +987,16 @@ fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
 /// it had stopped while its directory was still on disk would be one nothing
 /// would ever come back and remove.
 ///
+/// But a worktree that will not go does not hold the close up. Git refuses to
+/// remove a directory it no longer reads as a worktree — one hollowed out, one
+/// whose `.git` file has gone, one whose repository has moved out from under it
+/// — and that is precisely the state a human is trying to get out of when they
+/// press Close. Refusing them would leave a Conversation nothing can ever end,
+/// which is worse than the directory it was protecting. So the removal is
+/// attempted, a failure is logged with the path in it, and the close is
+/// recorded regardless: what is left behind is one directory under the Data
+/// Directory, named in the log, for a human to delete.
+///
 /// And what it was still drawing the human with goes last of all — the questions
 /// it left open, in [`asked`], and the news mark it was carrying, in [`read`].
 /// The record says Closed by then, which is the order the rest of this is in:
@@ -1002,15 +1012,16 @@ pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClose
 
     if let Some(path) = conversation.worktree.clone() {
         let repo = conversation.repo.path.clone();
+        let left = path.clone();
 
         let removed = tokio::task::spawn_blocking(move || worktrees::remove(&repo, &path)).await?;
 
         if !removed {
-            tracing::error!(
+            tracing::warn!(
                 conversation_id = id,
-                "a Conversation's worktree could not be removed"
+                worktree = %left.display(),
+                "a Conversation's worktree could not be removed, so it was closed around it"
             );
-            return Ok(ConversationClosed::WorktreeStuck);
         }
     }
 

@@ -235,19 +235,27 @@ pub(crate) async fn resume(
             // exactly as every other turn of the run asks it. Nothing left in it
             // is a stage that was never planned, a breakdown that never landed,
             // or a feature that is finished with — three situations rather than
-            // one, which is what the two questions after it are for.
+            // one, which is what the questions after it are for.
             //
             // A feature that is finished with has had its finish step, and a
-            // finish step pushes and opens a pull request. So an empty backlog
-            // is the very case in which the branch is most likely to be on one
-            // that nothing recorded: the finish ran, and what failed was
-            // afterwards. Refusing on the backlog alone would be Resume turning
-            // down the one Conversation that most needs it — see
+            // finish step commits the list away, pushes, and opens a pull
+            // request. So an empty backlog is the very case in which the branch
+            // is most likely to be on one that nothing recorded — the finish ran
+            // and what failed was afterwards — and the very case in which the
+            // finish stopped between its commit and its push, which is a branch
+            // with the whole of the work on it and one `gh pr create` to go.
+            // Refusing on the backlog alone would be Resume turning down the one
+            // Conversation that most needs it — see
             // [`crate::runner::backlog_again`], which is what the spawn below
-            // does about it.
+            // does about both.
             //
-            // So `gh` is the tiebreak, and only its plain *no pull request*
-            // refuses. A `gh` that cannot answer at all does not: the run is
+            // So the branch is the tiebreak, and `gh` is the tiebreak after it.
+            // A branch that has written a backlog since it came off its base has
+            // been worked and finished with, so there is work built on it and a
+            // press has somewhere to go whatever GitHub says. A branch that has
+            // written none never had a breakdown land: there is nothing built to
+            // push, and only then does the plain *no pull request* refuse. A
+            // `gh` that cannot answer at all does not refuse either: the run is
             // stopped either way, and a stop that names the trouble on the
             // Timeline is worth more than a button saying the backlog is empty —
             // which would be true and beside the point.
@@ -273,7 +281,16 @@ pub(crate) async fn resume(
                 .await
                 .is_none();
 
-                if planned {
+                // And what the branch has written since it was made, which is
+                // the same reading again asked for the other thing it decides:
+                // a backlog written and worked to empty is a run that got as
+                // far as its push, and what is left of it is one session's
+                // worth of asking. See [`crate::runner::nothing_left`].
+                let built =
+                    crate::runner::wrote_a_backlog(&worktree, conversation.base_commit.as_deref())
+                        .await;
+
+                if planned && !built {
                     let asked = crate::wrapping::asked(state, conversation_id).await;
 
                     if matches!(asked, None | Some((_, Err(github::Trouble::NoPullRequest)))) {
@@ -541,8 +558,8 @@ fn why(refusal: Resumed) -> Option<&'static str> {
         }
         Resumed::NoDirection => "nothing on the record says how the work is being built",
         Resumed::NothingToWork => {
-            "there is nothing left in `.tasks/` to work — the backlog was never written, \
-             or it is finished with"
+            "there is nothing left in `.tasks/` to work and nothing on this branch ever \
+             wrote a backlog, so there is nothing built here to carry anywhere"
         }
         Resumed::NoGrillingPairing => "the grilling Profile and model it runs under have gone",
         Resumed::NoImplementationPairing => {

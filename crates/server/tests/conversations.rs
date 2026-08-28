@@ -738,6 +738,16 @@ async fn close(app: &Router, id: i64) -> ConversationClosed {
     .await
 }
 
+/// And the row that does both at once, which says as little as either of them.
+async fn close_and_archive(app: &Router, id: i64) -> ConversationClosed {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/close-and-archive"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
 /// And put a closed one away, which is Close's neighbour in the same menu and
 /// says as little for itself.
 async fn archive(app: &Router, id: i64) -> ConversationArchived {
@@ -2292,6 +2302,87 @@ async fn closing_a_conversation_whose_worktree_has_already_gone_works() {
     assert_eq!(close(&app, id).await, ConversationClosed::Closed);
     assert_eq!(opened(&app, id).await.state, Lifecycle::Closed);
     assert_eq!(worktrees(&repo).len(), 1, "git should have let it go too");
+}
+
+/// And a worktree git will not let go of is a close that works too. A directory
+/// hollowed out — its `.git` file gone — is one git refuses to remove and one
+/// the human has every reason to want the end of: the close goes through, and
+/// what is left on disk is left for them.
+#[tokio::test]
+async fn closing_a_conversation_whose_worktree_git_will_not_remove_still_closes() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    std::fs::remove_file(path.join(".git")).unwrap();
+
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.worktree, None);
+    assert!(
+        path.exists(),
+        "the directory git would not remove should still be there to be found"
+    );
+}
+
+/// Close and archive is the two rows in one press: the Conversation ends and
+/// comes off the sidebar, and the record is the record either press leaves.
+#[tokio::test]
+async fn closing_and_archiving_in_one_press_does_both() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+
+    assert_eq!(
+        close_and_archive(&app, id).await,
+        ConversationClosed::Closed
+    );
+
+    assert!(!path.exists(), "the worktree directory should be gone");
+    assert_eq!(
+        worktrees(&repo).len(),
+        1,
+        "git should hold only the repository"
+    );
+    assert!(sidebar(&app).await.is_empty());
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert!(view.archived);
+    assert_eq!(view.worktree, None);
+    assert_eq!(moves(&view), [Lifecycle::Grilling, Lifecycle::Closed]);
+}
+
+/// On one that is closed already it is the archive alone, which is the whole
+/// point of saying so rather than refusing: what the human asked for holds.
+#[tokio::test]
+async fn closing_and_archiving_one_already_closed_puts_it_away() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    close(&app, id).await;
+
+    assert_eq!(
+        close_and_archive(&app, id).await,
+        ConversationClosed::AlreadyClosed
+    );
+
+    assert!(sidebar(&app).await.is_empty());
+    assert!(opened(&app, id).await.archived);
+}
+
+#[tokio::test]
+async fn closing_and_archiving_a_conversation_that_is_not_there_says_so() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(
+        close_and_archive(&app, 404).await,
+        ConversationClosed::NoSuchConversation
+    );
 }
 
 #[tokio::test]

@@ -49,11 +49,14 @@
 .unarchive {
 }
 
-/* The one that cannot be undone, in the colour of what cannot be undone. Its
-   name only: the sentence under it keeps the quiet every other row's has, so
+/* The two that cannot be undone, in the colour of what cannot be undone. Their
+   names only: the sentence under each keeps the quiet every other row's has, so
    the colour marks the press rather than the whole row. Both stops are reversed
-   by a resume, and read as the ordinary rows they are. */
-.close {
+   by a resume, and read as the ordinary rows they are. Closing and archiving is
+   the same red as closing: the archive half is reversible, and the half that is
+   not is the whole of what it costs. */
+.close,
+.closeAndArchive {
   color: #b3382c;
 }
 

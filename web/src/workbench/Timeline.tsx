@@ -209,7 +209,7 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
   NoDirection:
     "Nothing on the record says how this work is being built, so there is no run to pick up.",
   NothingToWork:
-    "There is no backlog left to work — nothing was written, or it is finished with. Set the next thing going by hand.",
+    "There is no backlog left to work and nothing was ever written on this branch, so there is nothing built here to carry anywhere. Set the next thing going by hand.",
   NoGrillingPairing:
     "Choose a grilling profile and model first, on the brief.",
   NoImplementationPairing:
