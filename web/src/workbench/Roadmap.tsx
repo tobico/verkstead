@@ -3,9 +3,10 @@
 //! The backlog pane one level up, and the same pane end to end — see
 //! `Backlog.tsx`, whose module docs say why either of them is fetched rather
 //! than carried, and `Documents.tsx`, which draws the stack for both. A stage
-//! list's card is the entries — a number, a title and a box — and each entry
-//! names a brief beside `ROADMAP.md` that says what the stage is for. This is
-//! those briefs, in the roadmap's own order.
+//! list's card is the entries — a number, a title and a box — five of them
+//! around the stage being worked, and each entry names a brief beside
+//! `ROADMAP.md` that says what the stage is for. This is those briefs, every one
+//! of them, in the roadmap's own order.
 //!
 //! One thing is the roadmap's own: it is named by the roadmap rather than by the
 //! conversation, a worktree being allowed any number of roadmaps where it has

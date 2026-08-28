@@ -20,7 +20,7 @@ order is the dependency.
 - [x] 04: Header state labels — [details](04-header-state-labels.md)
 - [x] 05: Task done by checkbox — [details](05-task-done-by-checkbox.md)
 - [x] 06: Skills keep task files — [details](06-skills-keep-task-files.md)
-- [ ] 07: List windowing — [details](07-list-windowing.md)
+- [x] 07: List windowing — [details](07-list-windowing.md)
 - [ ] 08: Pull request card — [details](08-pull-request-card.md)
 - [ ] 09: Check rollup and icon — [details](09-check-rollup-icon.md)
 - [ ] 10: Checks in the details pane — [details](10-checks-details-pane.md)

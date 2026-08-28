@@ -38,8 +38,10 @@ import type {
   Screen,
   Shown,
   ShowingArchived,
+  StageListEvent,
   SteerOpened,
   Submitted,
+  TaskListEvent,
   TimelineEvent,
   TranscriptView,
   Turn,
@@ -7828,6 +7830,220 @@ describe("the pinned stage list", () => {
     await drawn(container, `.${timeline.pinned} .${timeline.taskList}`);
 
     expect(container.querySelector(`.${timeline.stageList}`)).toBeNull();
+  });
+});
+
+/// A backlog of ten, the first `done` of them ticked: longer than the five a
+/// card draws, which is the only thing the window shows up on.
+function ofTen(done: number): TaskListEvent {
+  return {
+    feature: BACKLOG.feature,
+    tasks: Array.from({ length: 10 }, (_, at) => ({
+      number: `${at + 1}`.padStart(2, "0"),
+      title: `Task ${at + 1}`,
+      done: at < done,
+    })),
+  };
+}
+
+/// The same roadmap one level up, so the two cards can be read against each
+/// other.
+function stagesOfTen(done: number): StageListEvent {
+  return {
+    name: ROADMAP.name,
+    title: ROADMAP.title,
+    stages: ofTen(done).tasks.map((task) => ({
+      number: task.number,
+      title: task.title,
+      done: task.done,
+    })),
+  };
+}
+
+/// That backlog in both of the places the card is drawn from — the pinned block
+/// and the row on the record — because the window has to be the same in both.
+function tenTasked(done: number): Partial<ConversationView> {
+  return {
+    pinned: [{ TaskList: ofTen(done) }],
+    timeline: TASKED.timeline.map((event) =>
+      "TaskList" in event
+        ? { TaskList: { ...event.TaskList, list: ofTen(done) } }
+        : event,
+    ),
+  };
+}
+
+/// What one card is showing: the numbers of the rows it drew, and whether there
+/// is an ellipsis above them and below them.
+function through(card: Element) {
+  const rows = [...card.querySelectorAll("ol > li")];
+  return {
+    entries: rows
+      .filter((row) => !row.classList.contains(timeline.more!))
+      .map((row) => row.querySelector(`.${timeline.n}`)!.textContent),
+    above: rows[0]?.classList.contains(timeline.more!) ?? false,
+    below: rows[rows.length - 1]?.classList.contains(timeline.more!) ?? false,
+  };
+}
+
+/// A card that stays the size of a phone's screen whatever the backlog behind
+/// it is: five entries around the one being worked, and a mark at whichever end
+/// the rest of them are at. The whole list is a press away, in the pane.
+describe("a checklist longer than its card", () => {
+  it("windows a backlog to five around the task being worked", async () => {
+    for (const [done, entries] of [
+      [0, ["01", "02", "03", "04", "05"]],
+      [5, ["04", "05", "06", "07", "08"]],
+      [9, ["06", "07", "08", "09", "10"]],
+    ] as const) {
+      theTasked(tenTasked(done));
+      const { container, unmount } = mount(`/conversations/${TASKED.id}`);
+
+      const card = await drawn(
+        container,
+        `.${timeline.pinned} .${timeline.taskList}`,
+      );
+
+      expect(through(card)).toEqual({
+        entries,
+        above: entries[0] !== "01",
+        below: entries[4] !== "10",
+      });
+
+      unmount();
+    }
+  });
+
+  /// The count the card cannot draw as an ellipsis: the glyph says the list
+  /// goes on and the word says how far, for the reader that hears the row
+  /// rather than sees it.
+  it("says how many are hidden at each end, in words", async () => {
+    theTasked(tenTasked(5));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.taskList}`,
+    );
+
+    expect(
+      [...card.querySelectorAll(`.${timeline.more}`)].map((row) => [
+        row.querySelector("[aria-hidden]")!.textContent,
+        row.querySelector(`.${timeline.state}`)!.textContent,
+      ]),
+    ).toEqual([
+      ["…", "3 more"],
+      ["…", "2 more"],
+    ]);
+  });
+
+  /// The progress line is the one thing on the card that still knows the whole
+  /// list — it is what the window is read against.
+  it("still counts the whole backlog above the window", async () => {
+    theTasked(tenTasked(5));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const head = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.taskList} .${timeline.eventHead}`,
+    );
+
+    expect(head.querySelector(`.${timeline.progress}`)!.textContent).toBe(
+      "5 of 10 done",
+    );
+  });
+
+  /// One reading behind two cards: the copy on the record is the same card, so
+  /// it is at the same place in the list.
+  it("windows the copy on the record to the same five", async () => {
+    theTasked(tenTasked(5));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.taskList}`,
+    );
+
+    expect(through(card)).toEqual({
+      entries: ["04", "05", "06", "07", "08"],
+      above: true,
+      below: true,
+    });
+  });
+
+  /// A stage list outlives its own completion — the roadmap card stays on a
+  /// conversation that has finished every stage of it — so there is no next
+  /// entry to centre on and the end of the list is where the work got to.
+  it("windows a roadmap the same way, and its finished one to the last five", async () => {
+    theStaged({ pinned: [{ StageList: stagesOfTen(4) }] });
+    const first = mount(`/conversations/${STAGED.id}`);
+
+    expect(
+      through(
+        await drawn(
+          first.container,
+          `.${timeline.pinned} .${timeline.stageList}`,
+        ),
+      ),
+    ).toEqual({
+      entries: ["03", "04", "05", "06", "07"],
+      above: true,
+      below: true,
+    });
+
+    first.unmount();
+
+    theStaged({ pinned: [{ StageList: stagesOfTen(10) }] });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    expect(
+      through(
+        await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+      ),
+    ).toEqual({
+      entries: ["06", "07", "08", "09", "10"],
+      above: true,
+      below: false,
+    });
+  });
+
+  /// The four-entry fixtures either side of this are the ordinary case, and
+  /// nothing about them changed: a list the card can hold is drawn whole, with
+  /// nothing to say about what is missing.
+  it("leaves a list that already fits alone", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.taskList}`,
+    );
+
+    expect(through(card)).toEqual({
+      entries: BACKLOG.tasks.map((task) => task.number),
+      above: false,
+      below: false,
+    });
+    expect(card.querySelectorAll(`.${timeline.more}`)).toHaveLength(0);
+  });
+
+  /// The pane the card opens is where the whole list is read, so nothing there
+  /// is windowed — that is the trade the card is making.
+  it("draws every task of it in the details pane all the same", async () => {
+    theTasked(tenTasked(5), whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    expect(
+      container.querySelectorAll(
+        `.${shell.detailsPane} .${documents.section}`,
+      ),
+    ).toHaveLength(BACKLOG_PANE.tasks.length);
   });
 });
 

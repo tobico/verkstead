@@ -1,10 +1,12 @@
 //! The backlog, opened: every task document of it in the details pane.
 //!
-//! What the card cannot show. A task list's card is the entries — a number, a
-//! title and a box — and each entry names a document in `.tasks/` that says what
-//! the task is and what *done* means for it. This is those documents, stacked in
-//! backlog order — see `Documents.tsx`, which draws them and is shared with the
-//! roadmap pane beside this one.
+//! What the card cannot show, which is two things. A task list's card is the
+//! entries — a number, a title and a box — five of them around the one being
+//! worked, and each entry names a document in `.tasks/` that says what the task
+//! is and what *done* means for it. This is those documents, every one of them
+//! whether the card had room for its entry or not, stacked in backlog order —
+//! see `Documents.tsx`, which draws them and is shared with the roadmap pane
+//! beside this one.
 //!
 //! Fetched here rather than carried by the conversation, for the reason a
 //! commit's diff is: the timeline is read again every time the page hears the

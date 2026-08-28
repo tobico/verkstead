@@ -118,6 +118,7 @@ import shell from "./Workbench.module.css";
 import { WAITING_ON_CHECKS } from "./conditions";
 import { ENDED, STATE } from "./states";
 import { keeping } from "./settling";
+import { windowed } from "./windowing";
 
 /// What the details pane is showing, as the card that opened it names itself.
 ///
@@ -1277,10 +1278,36 @@ function Box(props: { done: boolean }): JSX.Element {
   );
 }
 
-/// The backlog: every task of it, and how far through it the work has got.
+/// The entries a windowed list is not showing, at the end they are hidden at.
 ///
-/// The whole list rather than a summary, because the whole list is short and it
-/// is the one thing a conversation being built from a backlog is *about*.
+/// An ellipsis rather than a count, because what it says is that the list goes
+/// on and the card is not the place to read it in — the details pane the card
+/// opens is, and it holds every entry. Nothing at all where the list runs to
+/// that end already: a row saying none are hidden is a row about nothing.
+///
+/// The count itself is in words beside the glyph, out of the layout and still
+/// in the document, the way a row's own state word is: an ellipsis read aloud
+/// says nothing whatever.
+function Hidden(props: { count: number }): JSX.Element {
+  return (
+    <Show when={props.count > 0}>
+      <li class={styles.more}>
+        <span aria-hidden="true">…</span>
+        <span class={styles.state}>{props.count} more</span>
+      </li>
+    </Show>
+  );
+}
+
+/// The backlog: where the work has got to in it, and how far through it that
+/// is.
+///
+/// Five entries rather than the whole list — the ones around the task being
+/// worked, with an ellipsis wherever the rest of them are. It is the one thing
+/// a conversation being built from a backlog is *about*, so it is pinned above
+/// the record for the whole of one, and a card that grew with the backlog would
+/// push the record out from under itself. The progress line still counts the
+/// whole list; see `windowing.ts` for where the five sit.
 ///
 /// It opens, and what it opens is not the list again: each entry names a
 /// document in `.tasks/` that says what that task is, and those are what the
@@ -1301,6 +1328,13 @@ function TaskList(props: {
 }): JSX.Element {
   const done = () => props.tasks.tasks.filter((task) => task.done).length;
 
+  // What the card draws: five entries around the one being worked, and the
+  // count of what is out of sight at either end. The progress line above them
+  // keeps counting the whole list, which is what it is there for.
+  const shown = createMemo(() =>
+    windowed(props.tasks.tasks, (task) => task.done),
+  );
+
   return (
     <Openable
       kind={styles.taskList!}
@@ -1318,7 +1352,8 @@ function TaskList(props: {
       </div>
 
       <ol class={styles.tasks}>
-        <For each={props.tasks.tasks}>
+        <Hidden count={shown().before} />
+        <For each={shown().entries}>
           {(task) => (
             <li classList={{ [styles.done!]: task.done }}>
               <Box done={task.done} />
@@ -1334,15 +1369,17 @@ function TaskList(props: {
             </li>
           )}
         </For>
+        <Hidden count={shown().after} />
       </ol>
     </Openable>
   );
 }
 
-/// The roadmap: every stage of it, and how far through it the effort has got.
+/// The roadmap: where the effort has got to in it, and how far through it that
+/// is.
 ///
-/// Beside the task list and drawn the same way, because it is the same kind of
-/// thing one level up — and it is read out of `docs/roadmaps/` in the worktree
+/// Beside the task list and drawn the same way, windowed to five and all,
+/// because it is the same kind of thing one level up — and it is read out of `docs/roadmaps/` in the worktree
 /// every time the page reads the conversation, so a stage finishing moves this
 /// without anybody pressing anything, in both of the places it is drawn.
 ///
@@ -1363,6 +1400,12 @@ function StageList(props: {
 }): JSX.Element {
   const done = () => props.stages.stages.filter((stage) => stage.done).length;
 
+  // The same window the task list draws, because it is the same card one level
+  // up — see `windowing.ts`.
+  const shown = createMemo(() =>
+    windowed(props.stages.stages, (stage) => stage.done),
+  );
+
   return (
     <Openable
       kind={styles.stageList!}
@@ -1380,7 +1423,8 @@ function StageList(props: {
       </div>
 
       <ol class={styles.stages}>
-        <For each={props.stages.stages}>
+        <Hidden count={shown().before} />
+        <For each={shown().entries}>
           {(stage) => (
             <li classList={{ [styles.done!]: stage.done }}>
               <Box done={stage.done} />
@@ -1395,6 +1439,7 @@ function StageList(props: {
             </li>
           )}
         </For>
+        <Hidden count={shown().after} />
       </ol>
     </Openable>
   );

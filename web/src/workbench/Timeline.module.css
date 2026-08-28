@@ -430,6 +430,15 @@
   border: 0;
 }
 
+/* The ends of a list that is longer than the card shows: an ellipsis where the
+   entries carry on, in the column the boxes are in so it reads as part of the
+   list rather than as something under it. */
+.taskList .more,
+.stageList .more {
+  color: var(--ink-soft);
+  line-height: 1;
+}
+
 /* One that is done is struck through and taken down, the way a checked item
    reads on any list. */
 .taskList .tasks li.done .what,
