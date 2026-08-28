@@ -31,8 +31,6 @@
 //! grounds that nobody would read the answer, which is the one thing that is not
 //! true of it.
 
-use verkstead_schema::Nudge;
-
 use crate::AppState;
 use crate::drivers::Driving;
 use crate::exchanges::exchange;
@@ -154,15 +152,13 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
     drop(driving);
 }
 
-/// Lock every Question Set left open, so that nothing is left for the human
-/// to answer into.
+/// Lock every Question Set the dead grilling left open, so that nothing is left
+/// for the human to answer into.
 ///
-/// An open Set is a question with a reader, and the reader has gone: the badge
-/// still says *blocked on you*, the Set still takes an Answer, and what the
-/// human writes goes nowhere. Locking unanswered is what that Set has always
-/// meant — see [`store::lock_set`] — and this is Verkstead reaching for it on
-/// their behalf, because it knows something they cannot see: the session that
-/// asked is not there any more, or is about to not be.
+/// The reader has gone: the session that asked is not there any more, or is
+/// about to not be. What locking one means and what it costs is
+/// [`crate::sets::lock`], which a Conversation closing reaches for too — this
+/// is which Sets a relaunch means.
 ///
 /// The same on a steer, and for the same reason read forward rather than back: a
 /// session that is about to be replaced is a reader that has gone, and the
@@ -172,60 +168,17 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
 /// more than one open at once is unusual, but they were all orphaned by the same
 /// thing and none of them has anybody waiting on it.
 ///
-/// Nothing is refused for. A Set that will not lock is a Set the human can
-/// lock themselves from the page it is on, and stopping the relaunch over one
-/// would leave the Conversation standing still with the press spent.
+/// **Blocking Asks alone.** A Deferred Ask is one nothing was ever waiting on,
+/// so the session dying takes nothing away from it and it is left where it is —
+/// see the module note.
 async fn orphaned(state: &AppState, conversation_id: i64, timeline: &[store::TimelineEvent]) {
-    let mut locked = false;
-
-    for asked in open(timeline) {
-        match store::lock_set(&state.pool, &state.settlements, asked).await {
-            Ok(store::Locking::Locked(_)) => {
-                locked = true;
-
-                tracing::info!(
-                    conversation_id,
-                    set_id = asked,
-                    "a Question Set the dead grilling left open was locked as orphaned"
-                );
-            }
-            Ok(other) => tracing::info!(
-                conversation_id,
-                set_id = asked,
-                outcome = ?other,
-                "a Question Set the dead grilling left open was settled before the relaunch reached it",
-            ),
-            Err(error) => {
-                tracing::error!(error = ?error, conversation_id, set_id = asked, "locking an orphaned Question Set failed");
-            }
-        }
-    }
-
-    // The page the human is looking at is the page the Set was open on, and
-    // what has just changed there is that it no longer is. Only where something
-    // did change: a nudge is every open page going back to the store.
-    if locked {
-        state.nudges.announce(Nudge::Set {
-            conversation: conversation_id,
-        });
-    }
-}
-
-/// The Blocking Asks on the Timeline that are still waiting on the human.
-///
-/// Blocking alone: a Deferred Ask is one nothing was ever waiting on, so the
-/// session dying takes nothing away from it and it is left where it is — see the
-/// module note.
-fn open(timeline: &[store::TimelineEvent]) -> Vec<i64> {
-    timeline
-        .iter()
-        .filter_map(|event| match &event.event {
-            store::Event::QuestionSet(asked) => {
-                (asked.settlement.is_none() && !asked.deferred).then_some(asked.set_id)
-            }
-            _ => None,
-        })
-        .collect()
+    crate::sets::lock(
+        state,
+        conversation_id,
+        &crate::sets::open(timeline, crate::sets::Open::Blocking),
+        "the grilling that asked it is gone",
+    )
+    .await;
 }
 
 /// The Brief the round started from, which is what a grilling is a grilling of.
@@ -244,8 +197,8 @@ fn brief(timeline: &[store::TimelineEvent]) -> String {
         .unwrap_or_default()
 }
 
-/// Everything the human has already answered, as one markdown document in the
-/// order it was asked.
+/// Everything the human has already answered on this stretch of Timeline, as one
+/// markdown document in the order it was asked.
 ///
 /// Answered Sets only. One locked unanswered is one nobody ever replied to —
 /// including, now, the one this very relaunch locked — and a heading over
@@ -254,7 +207,13 @@ fn brief(timeline: &[store::TimelineEvent]) -> String {
 /// Empty where nothing has been answered, which is a grilling that died before
 /// its first Set came back. What that leaves is the Brief alone, which is where
 /// every grilling starts.
-fn settled(timeline: &[store::TimelineEvent]) -> String {
+///
+/// A stretch rather than the whole Timeline, which is what lets a follow-up
+/// being picked up again use this one: what it is primed with is the rounds
+/// under its own steer rather than every Set the Conversation has ever answered
+/// — see [`crate::follow_ups`]. A grilling hands in the whole of it, that being
+/// the whole of what it settled.
+pub(crate) fn settled(timeline: &[store::TimelineEvent]) -> String {
     let mut digest = String::new();
 
     for event in timeline {
@@ -446,7 +405,7 @@ comment: none of this is settled about the burst allowance
             "one of the three was answered, and it is the one that is said",
         );
         assert_eq!(
-            open(&timeline),
+            crate::sets::open(&timeline, crate::sets::Open::Blocking),
             vec![12],
             "and the one still waiting on the human is the one to lock as orphaned",
         );
@@ -465,6 +424,6 @@ comment: none of this is settled about the burst allowance
 
         assert_eq!(settled(&timeline), "");
         assert_eq!(brief(&timeline), "# Rate limiting\n");
-        assert!(open(&timeline).is_empty());
+        assert!(crate::sets::open(&timeline, crate::sets::Open::Blocking).is_empty());
     }
 }

@@ -9,19 +9,19 @@
 //! finishes. So the Event is a reading of the Worktree as it stands and cannot
 //! disagree with the branch it is read off.
 //!
-//! Where this parts company with a backlog is what says a stage is done. A task
-//! is done when its file has gone, because a session deletes one as it lands;
-//! a stage's brief stays where it is for ever, being the record of what the
-//! stage was for. So the checkbox in `ROADMAP.md` is the whole of the answer
-//! here, and it is what `/next-stage` reads too.
+//! What says a stage is done is the checkbox in `ROADMAP.md`, which is what
+//! `/next-stage` reads too — a stage's brief stays where it is for ever, being
+//! the record of what the stage was for, so there is no file going away to read
+//! it off. The same answer a backlog gives, for the same reason: see
+//! [`crate::tasks`].
 //!
-//! And *which* roadmap is the other difference. A Worktree has one `.tasks/`
-//! and may hold any number of roadmaps — a repository keeps the finished ones,
-//! which is what they are for. The one that is this Conversation's is the one
-//! its branch has written to, asked of git against the base commit the branch
-//! came off: the session that wrote a roadmap wrote it here, and a stage that
-//! ticks itself off ticks it here. Nothing is stored for it, so it cannot come
-//! to disagree with the branch it is read off.
+//! *Which* roadmap is the one thing this does differently. A Worktree has one
+//! `.tasks/` and may hold any number of roadmaps — a repository keeps the
+//! finished ones, which is what they are for. The one that is this
+//! Conversation's is the one its branch has written to, asked of git against the
+//! base commit the branch came off: the session that wrote a roadmap wrote it
+//! here, and a stage that ticks itself off ticks it here. Nothing is stored for
+//! it, so it cannot come to disagree with the branch it is read off.
 //!
 //! Those same files are what the details pane is built from, one level deeper:
 //! the index says what the roadmap is made of, and each `NN-<slug>.md` beside it

@@ -56,10 +56,12 @@
   color: var(--ink-soft);
 }
 
-/* The box the rendered markdown sits in. The same box a Set's Preface draws
-   around its body — see `.prefaceBody` in `set/Sheet.module.css`, which is the
-   same five lines and has to stay the same five, because these documents and a
-   Set's Preface are the same kind of thing read the same way. */
+/* The box the rendered markdown sits in. The same box a Set's Preface is drawn
+   in — see `.cardBody` in `Card.module.css`, which is the same five lines and
+   has to stay the same five, because these documents and a Set's Preface are the
+   same kind of thing read the same way. Not the shared component itself: a
+   section here carries a heading of its own make — a number, a title and a mark
+   — where the card's is one word. */
 .document,
 .missing {
   padding: 1rem;
@@ -68,10 +70,12 @@
   border-radius: 0.6rem;
 }
 
-/* A section with no document to draw: a task whose file has gone, which is what
-   says it is done, or a roadmap naming a brief nobody wrote. In the box where
-   the document would have been, so the section reads as what it is rather than
-   as a document that would not load. */
+/* A section with no document to draw: a list naming a file nobody wrote, which
+   is a backlog or a roadmap part way through being written. Never the ordinary
+   end of anything — a task document and a stage brief both stay where they are,
+   and what says either is done is the box on its entry. In the box where the
+   document would have been, so the section reads as what it is rather than as a
+   document that would not load. */
 .missing {
   margin: 0;
   color: var(--ink-soft);

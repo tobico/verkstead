@@ -6,6 +6,7 @@
   "branch": "mvp-roadmap",
   "companions": [],
   "direction": "roadmap",
+  "driven": false,
   "grilling_pairing": {
     "model": "claude-fable-5",
     "profile": {
@@ -78,6 +79,8 @@
   },
   "resets": null,
   "state": "Grilling",
+  "stop_asked": false,
+  "stopped_by_hand": false,
   "timeline": [
     {
       "Brief": {
@@ -137,6 +140,7 @@
       }
     }
   ],
+  "waiting_on_checks": false,
   "working": false,
   "worktree": {
     "missing": false,

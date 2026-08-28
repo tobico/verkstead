@@ -60,35 +60,8 @@
   font-weight: 600;
 }
 
-/* And under those, the Message: what the commit said about itself, read before
-   the diff it is an account of. A section headed like the Diff below it, so the
-   pane reads as two named parts rather than as loose prose above a section. A
-   commit that carried no message draws neither the heading nor the box.
-
-   Prose, so it is read at the measure — the width `Document.module.css` sets
-   for a document opened whole, said again here rather than shared, because the
-   two panes have nothing else in common. */
-.message {
-  max-width: var(--measure);
-  margin: 0 0 1.5rem;
-  /* Where a jump from the table of contents lands, clear of whatever is pinned
-     across the top edge — `--jump-clear` in `set/Contents.module.css`, which is
-     what does the pinning. The Diff below reads the same number from its own
-     module. */
-  scroll-margin-top: var(--jump-clear);
-}
-
-/* The box the rendered markdown sits in, and nothing about the markdown itself:
-   `.markdown` in `styles/markdown.css` holds the blocks' own rhythm, including
-   the flush top and bottom edges that let this padding be the whole of the gap.
-
-   The same box a Set's Preface draws around its body — see `.prefaceBody` in
-   `set/Sheet.module.css`, which is the same five lines and has to stay the same
-   five, because a commit's message and a Set's Preface are the same kind of
-   thing read the same way. */
-.messageBody {
-  padding: 1rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
-}
+/* And the Message under those is not here at all: it is drawn as the shared card
+   — `Card.module.css` — which is the same box a Set's Preface is drawn in and
+   the same rules for the Gutter and the bleed. It used to be a copy of those
+   rules in this file, plus a cap at the prose measure that the Preface never
+   had, which is exactly how the two came to look unalike. */

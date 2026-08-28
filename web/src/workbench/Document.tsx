@@ -1,10 +1,11 @@
 //! A timeline document, opened: the whole of its markdown in the details pane.
 //!
 //! Two events are a document and nothing else — the handoff the grilling wrote,
-//! and the instruction a steer sent a session off with. Their cards clamp to
-//! five lines so that a long one stops pushing the record down, which makes the
-//! rest of them something to open; and what is opened is the same markdown
-//! without the clamp, so one component draws both.
+//! and what a steer sent a session off with: an instruction, or the brief a
+//! follow-up was opened on. Their cards clamp to five lines so that a long one
+//! stops pushing the record down, which makes the rest of them something to
+//! open; and what is opened is the same markdown without the clamp, so one
+//! component draws both.
 //!
 //! The frozen Brief is the third card of that shape and is drawn by `Brief.tsx`
 //! instead: its pane carries the summary of what the Conversation was configured

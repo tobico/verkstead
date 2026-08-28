@@ -6,6 +6,7 @@
   "branch": "task-runner",
   "companions": [],
   "direction": "task-list",
+  "driven": false,
   "grilling_pairing": {
     "model": "claude-fable-5",
     "profile": {
@@ -77,6 +78,8 @@
   },
   "resets": null,
   "state": "Implementing",
+  "stop_asked": false,
+  "stopped_by_hand": false,
   "timeline": [
     {
       "Brief": {
@@ -153,6 +156,7 @@
       }
     }
   ],
+  "waiting_on_checks": false,
   "working": false,
   "worktree": {
     "missing": false,

@@ -2,19 +2,20 @@
 //! check, which comments it has already dispatched about — and the move to Done
 //! that having settled all three is.
 //!
-//! Three small tables and one Timeline Event, which is the whole shape of this
+//! Four small tables and one Timeline Event, which is the whole shape of this
 //! module. Everything else a human reads about wrap-up is already an Event — the
 //! pull request, the commits a fix session lands, the Notice of the stop where
 //! it stops asking the machine. What is kept here is the bookkeeping underneath:
 //! facts that decide what Verkstead does next and that nobody would want a row
 //! on a Timeline for.
 //!
-//! All three survive a restart, and all three have to. A server that came back
+//! All four survive a restart, and all four have to. A server that came back
 //! up having forgotten how many fix sessions a check had already had would
 //! dispatch them again for ever, which is exactly the failure *two attempts,
 //! then ask the human* exists to prevent; one that had forgotten which comments
 //! it had read would dispatch a session about feedback that was addressed
-//! yesterday.
+//! yesterday; one that had forgotten it had already said a wrap-up was down to
+//! its checks would say it a second time on the same Timeline.
 //!
 //! What is *settled* is written down and what is outstanding is not: the checks
 //! and the comments are asked of GitHub on every poll, so a red suite needs no
@@ -111,7 +112,7 @@ pub enum Finished {
     NoSuchConversation,
 }
 
-/// The three tables wrap-up keeps its bookkeeping in.
+/// The four tables wrap-up keeps its bookkeeping in.
 ///
 /// All of them hang off a Conversation rather than off a Timeline Event, unlike
 /// nearly everything else here, and that is the point: none of them is something
@@ -160,6 +161,25 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the addressed comments table")?;
+
+    // And the mark that says the Notice of a wrap-up narrowing to its checks
+    // has been written. One row or none per Conversation, because the condition
+    // is either on or off — and the row going away again is what makes a second
+    // narrowing a second Notice rather than a silence.
+    //
+    // Written down rather than remembered, for the reason the three above are:
+    // a wrap-up sits narrowed for as long as a suite takes, which is longer
+    // than a server being restarted stays up, and a watcher that came back
+    // having forgotten would say the same thing on the same Timeline twice.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS wrap_up_narrowings (
+             conversation_id INTEGER NOT NULL PRIMARY KEY REFERENCES conversations(id),
+             at              TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the wrap-up narrowings table")?;
 
     Ok(())
 }
@@ -251,6 +271,211 @@ pub async fn wrap_up_settled(pool: &SqlitePool, conversation_id: i64) -> Result<
     rows.into_iter()
         .map(|(waiting_on,)| WaitingOn::read(&waiting_on))
         .collect()
+}
+
+/// Whether a wrap-up has narrowed to its checks: the review answered and the
+/// comments dealt with, the checks alone left outstanding, and the Conversation
+/// still Wrapping.
+///
+/// Half of the condition the human reads as **Waiting on checks**. The other
+/// half is that nothing is running in the Worktree, which is a fact about a
+/// process rather than about a row and so belongs to the caller — see
+/// [`narrowing`], which takes it.
+///
+/// Derived every time it is asked rather than stored: it is the settle facts
+/// read a particular way, and a column saying the same thing would be a second
+/// answer to go wrong.
+pub async fn narrowed_to_checks(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .context("reading whether a wrap-up is down to its checks")?;
+
+    narrowed(&mut connection, conversation_id).await
+}
+
+/// The same question inside a transaction, which is where [`narrowing`] asks it.
+async fn narrowed(tx: &mut sqlx::SqliteConnection, conversation_id: i64) -> Result<bool> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(conversation_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {conversation_id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(false);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Wrapping {
+        return Ok(false);
+    }
+
+    let settled: Vec<(String,)> =
+        sqlx::query_as("SELECT waiting_on FROM wrap_up_settled WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_all(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("reading what the wrap-up of Conversation {conversation_id} has settled")
+            })?;
+
+    let settled: Vec<WaitingOn> = settled
+        .into_iter()
+        .map(|(waiting_on,)| WaitingOn::read(&waiting_on))
+        .collect::<Result<_>>()?;
+
+    // Everything else settled and the checks not: narrowing is a wrap-up having
+    // got down to the one of [`WAITED_ON`] nothing here can hurry, which is why
+    // it is worth saying out loud rather than leaving as plain Wrapping.
+    Ok(!settled.contains(&WaitingOn::Checks)
+        && WAITED_ON
+            .iter()
+            .filter(|one| **one != WaitingOn::Checks)
+            .all(|one| settled.contains(one)))
+}
+
+/// What a look at whether a wrap-up has narrowed found, and what the looker owes
+/// the Timeline for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Narrowing {
+    /// It has narrowed, and this is the first look to say so: the Notice is the
+    /// caller's to write.
+    Narrowed,
+
+    /// It has narrowed and the Notice is already on the Timeline, which is every
+    /// look after the first for as long as the condition holds.
+    NoticedAlready,
+
+    /// It has not — or not any more, in which case the mark is now gone and the
+    /// next narrowing is a fresh Notice rather than a silence.
+    NotNarrowed,
+}
+
+/// Ask whether a wrap-up has narrowed to its checks, and keep the mark that says
+/// its Notice has been written.
+///
+/// `working` is whether a session is running in the Conversation's Worktree,
+/// which is the half of the condition the store cannot see: a fix session
+/// actively working a red check is a wrap-up getting on with it rather than one
+/// waiting, and reads here as not narrowed.
+///
+/// One transaction, so that the answer still holds when the mark acts on it —
+/// which is what makes two watchers asking at once safe, a Resume over a stopped
+/// wrap-up being how there come to be two. The first is told to write the Notice
+/// and the second finds it written.
+///
+/// The mark going away again is the whole of what makes this *once per
+/// narrowing*: a fix session dispatched or a comment landing puts the answer
+/// back to no, the row goes with it, and the narrowing after that is a Notice of
+/// its own.
+pub async fn narrowing(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    working: bool,
+) -> Result<Narrowing> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("looking at whether a wrap-up has narrowed to its checks")?;
+
+    let has_narrowed = !working && narrowed(&mut tx, conversation_id).await?;
+
+    let outcome = if has_narrowed {
+        let written = sqlx::query(
+            "INSERT INTO wrap_up_narrowings (conversation_id, at)
+             VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT (conversation_id) DO NOTHING",
+        )
+        .bind(conversation_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!("marking the wrap-up of Conversation {conversation_id} as down to its checks")
+        })?
+        .rows_affected();
+
+        if written > 0 {
+            Narrowing::Narrowed
+        } else {
+            Narrowing::NoticedAlready
+        }
+    } else {
+        // Only where there is one to take off, which is what keeps the ordinary
+        // poll a read. A wrap-up waiting on its review is asked this on the
+        // settling loop's own cadence for as long as the review takes and
+        // answers *not narrowed* every time, so a delete run unconditionally
+        // would be a write and a commit per poll for a row that was never
+        // there — and two watchers asking at once, which this is arranged to be
+        // safe under, would be two write locks contending rather than two
+        // readers. A deferred transaction that has only read takes no write
+        // lock at all.
+        if marked(&mut tx, conversation_id).await? {
+            unmark(&mut tx, conversation_id).await?;
+        }
+
+        Narrowing::NotNarrowed
+    };
+
+    tx.commit()
+        .await
+        .context("looking at whether a wrap-up has narrowed to its checks")?;
+
+    Ok(outcome)
+}
+
+/// Take the mark off again without asking anything, so the next look at a
+/// wrap-up still down to its checks is told to write the line afresh.
+///
+/// What a caller does when the Notice it was told to write would not write: the
+/// mark says the line is on the Timeline, and one standing over a line that
+/// never landed is a narrowing said nowhere at all.
+pub async fn forget_narrowing(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .context("forgetting that a wrap-up was down to its checks")?;
+
+    unmark(&mut connection, conversation_id).await
+}
+
+/// Whether the mark saying a narrowing was said out loud is there.
+///
+/// What [`narrowing`] asks before it deletes, so that the poll which changes
+/// nothing — every poll of a wrap-up that has not narrowed, which is most of
+/// one — costs a read rather than a write. Nothing else asks: the condition
+/// itself is [`narrowed`]'s to read off the settle facts, and this is only ever
+/// about the row.
+async fn marked(tx: &mut sqlx::SqliteConnection, conversation_id: i64) -> Result<bool> {
+    let found: Option<(i64,)> =
+        sqlx::query_as("SELECT conversation_id FROM wrap_up_narrowings WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| {
+                format!(
+                    "reading whether the wrap-up of Conversation {conversation_id} had been \
+                     said to be down to its checks"
+                )
+            })?;
+
+    Ok(found.is_some())
+}
+
+/// The delete both of them are, so the two cannot come to disagree about which
+/// row it is.
+async fn unmark(tx: &mut sqlx::SqliteConnection, conversation_id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM wrap_up_narrowings WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!(
+                "forgetting that the wrap-up of Conversation {conversation_id} was down to \
+                 its checks"
+            )
+        })?;
+
+    Ok(())
 }
 
 /// When one of the things a wrap-up waits on was settled, where it has been.
@@ -368,9 +593,7 @@ pub async fn record_addressed_comments(
     conversation_id: i64,
     comments: &[String],
 ) -> Result<()> {
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("recording which comments have been dispatched for")?;
+    let mut tx = super::writing(pool, "recording which comments have been dispatched for").await?;
 
     for comment in comments {
         sqlx::query(
@@ -414,9 +637,7 @@ pub async fn forget_addressed_comments(
     conversation_id: i64,
     comments: &[String],
 ) -> Result<()> {
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("forgetting which comments have been dispatched for")?;
+    let mut tx = super::writing(pool, "forgetting which comments have been dispatched for").await?;
 
     for comment in comments {
         sqlx::query("DELETE FROM addressed_comments WHERE conversation_id = ? AND comment_id = ?")
@@ -454,9 +675,7 @@ pub async fn forget_addressed_comments(
 /// What it does *not* wait for is the merge. Done means Verkstead has finished
 /// with the work, not that it is on `main`.
 pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<Finished> {
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("finishing a wrap-up")?;
+    let mut tx = super::writing(pool, "finishing a wrap-up").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(conversation_id)
@@ -534,6 +753,13 @@ pub(crate) async fn forget_the_round(
         .with_context(|| {
             format!("forgetting what has been tried about Conversation {conversation_id}'s checks")
         })?;
+
+    // And the mark that says a narrowing was said out loud, so a second round
+    // that gets down to its checks says so on its own account. The watcher takes
+    // this one off itself the moment the condition ends — see [`narrowing`] —
+    // and this is the case it never sees: a round steered away while the server
+    // was down.
+    unmark(&mut *tx, conversation_id).await?;
 
     Ok(())
 }

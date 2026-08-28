@@ -450,6 +450,7 @@ async fn accepting_with_something_to_add_is_still_accepting() {
 
     let qualified = Response {
         direction: Some(Direction::Inline),
+        nothing_else: false,
         ..Response::from_yaml(
             "answers:\n  - label: Q14\n    free_text: Keep the config key as it is.\n",
         )
