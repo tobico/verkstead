@@ -71,9 +71,11 @@ async fn commits_that_named_no_repo(pool: &SqlitePool) -> Result<()> {
         return Ok(());
     }
 
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("attributing the commits recorded before this to a repository")?;
+    let mut tx = super::writing(
+        pool,
+        "attributing the commits recorded before this to a repository",
+    )
+    .await?;
 
     sqlx::query(
         "CREATE TABLE commits_by_repo (
@@ -159,9 +161,11 @@ async fn pull_requests_that_named_no_repo(pool: &SqlitePool) -> Result<()> {
         return Ok(());
     }
 
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("attributing the pull requests recorded before this to a repository")?;
+    let mut tx = super::writing(
+        pool,
+        "attributing the pull requests recorded before this to a repository",
+    )
+    .await?;
 
     sqlx::query(
         "CREATE TABLE pull_requests_by_repo (
@@ -239,9 +243,11 @@ async fn fix_attempts_that_named_no_repo(pool: &SqlitePool) -> Result<()> {
         return Ok(());
     }
 
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("attributing the fix sessions counted before this to a repository")?;
+    let mut tx = super::writing(
+        pool,
+        "attributing the fix sessions counted before this to a repository",
+    )
+    .await?;
 
     sqlx::query(
         "CREATE TABLE check_fix_attempts_by_repo (
@@ -317,9 +323,11 @@ async fn settlements_that_named_no_pull_request(pool: &SqlitePool) -> Result<()>
         return Ok(());
     }
 
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("attributing the settled checks of before to a pull request")?;
+    let mut tx = super::writing(
+        pool,
+        "attributing the settled checks of before to a pull request",
+    )
+    .await?;
 
     sqlx::query(
         "CREATE TABLE wrap_up_settled_by_repo (
@@ -395,9 +403,11 @@ async fn addressed_comments_that_named_no_pull_request(pool: &SqlitePool) -> Res
         return Ok(());
     }
 
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("attributing the comments dispatched for before this to a pull request")?;
+    let mut tx = super::writing(
+        pool,
+        "attributing the comments dispatched for before this to a pull request",
+    )
+    .await?;
 
     sqlx::query(
         "CREATE TABLE addressed_comments_by_repo (
@@ -468,9 +478,11 @@ const OLD_STATE: &str = "aborted";
 /// [`super::Lifecycle::read`] still knows the word regardless, for a database
 /// that never came through here.
 async fn conversations_that_were_aborted(pool: &SqlitePool) -> Result<()> {
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("renaming the state of every Conversation that was aborted")?;
+    let mut tx = super::writing(
+        pool,
+        "renaming the state of every Conversation that was aborted",
+    )
+    .await?;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE state = ?")
         .bind(Lifecycle::Closed.stored())
@@ -504,10 +516,11 @@ async fn conversations_that_were_aborted(pool: &SqlitePool) -> Result<()> {
 /// Conversation is stopped *now*. So the columns become the markdown they would
 /// have been written as, and each Event becomes the Notice it would have been.
 ///
-/// The ones still open become stops as well, and deliberate ones: an open stop
-/// was a run waiting on the human, which is exactly the stop a restart leaves
-/// alone. A Conversation that is stopped already keeps the stop it has — there
-/// is one per Conversation, and the first Notice is the one that explains it.
+/// The ones still open become stops as well, and Verkstead's own: an open stop
+/// of before was a step that failed and a run left waiting on the human, which
+/// is exactly the stop a restart leaves alone and exactly the stop the marks are
+/// for. A Conversation that is stopped already keeps the stop it has — there is
+/// one per Conversation, and the first Notice is the one that explains it.
 ///
 /// One transaction, and the table is dropped inside it: a Timeline holding rows
 /// that have been rewritten beside a table that still says otherwise would be
@@ -538,9 +551,7 @@ async fn stops_recorded_the_old_way(pool: &SqlitePool) -> Result<()> {
         String,
     );
 
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("rewriting the stops of before")?;
+    let mut tx = super::writing(pool, "rewriting the stops of before").await?;
 
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT i.event_id, i.conversation_id, i.what, i.how, i.git_status, i.tail,
@@ -589,7 +600,7 @@ async fn stops_recorded_the_old_way(pool: &SqlitePool) -> Result<()> {
                   WHERE id = ? AND stopped_at IS NULL",
             )
             .bind(at)
-            .bind(Decision::Deliberate.stored())
+            .bind(Decision::Verkstead.stored())
             .bind(event_id)
             .bind(conversation_id)
             .execute(&mut *tx)

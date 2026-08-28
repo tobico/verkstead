@@ -488,6 +488,7 @@ const WHAT_IS_ON_IT = `/api/ui/conversations/${WRAPPED.id}/pull-request/${PULL_R
 const CARRIED: PullRequestDetails = {
   commits: [{ sha: "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8", subject: "chore: finish" }],
   comments: [],
+  checks: [],
 };
 
 /// The workbench with that pull request to hand.
@@ -656,7 +657,7 @@ describe("what a Nudge is about", () => {
     const fetching = theWrapping();
     const { container } = render(() => <App />);
     const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
-    fireEvent.click(pinned.querySelector(`.${timeline.openPullRequest}`)!);
+    fireEvent.click(pinned);
     await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
     stream().opens();
     const before = askedFor(fetching, WHAT_IS_ON_IT);
@@ -677,7 +678,7 @@ describe("what a Nudge is about", () => {
     const fetching = theWrapping();
     const { container } = render(() => <App />);
     const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
-    fireEvent.click(pinned.querySelector(`.${timeline.openPullRequest}`)!);
+    fireEvent.click(pinned);
     await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
     stream().opens();
     const before = askedFor(fetching, WHAT_IS_ON_IT);

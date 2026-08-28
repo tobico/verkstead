@@ -83,6 +83,7 @@ fn picked() -> Response {
         }],
         comment: None,
         direction: None,
+        nothing_else: false,
     }
 }
 

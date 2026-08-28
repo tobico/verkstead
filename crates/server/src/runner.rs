@@ -6,15 +6,18 @@
 //! the repository alone, because the sessions are ordinary interactive ones and
 //! the repository is the only thing they report through.
 //!
-//! **What is next** is [`next_step`]: the lowest-numbered task file left, or the
-//! finish step once only `TODO.md` is. Read off the Worktree by the same rule
-//! the pinned Event is drawn by — see [`crate::tasks`] — so the list the human
-//! is watching and the list the runner is working are one list.
+//! **What is next** is [`next_step`]: the lowest-numbered entry of `TODO.md`
+//! whose box is not ticked, or the finish step once every box is. Read off the
+//! Worktree by the same rule the pinned Event is drawn by — see [`crate::tasks`]
+//! — so the list the human is watching and the list the runner is working are
+//! one list. An unticked entry naming a file nobody wrote is neither, and stops
+//! the run rather than putting a session at nothing to work from.
 //!
-//! **When a step is over** is [`Landing`]: a path gone from the Worktree, or
-//! arrived in it, *and* committed as it stands. A task file deleted but not
-//! committed is a session still mid-task, and a commit is the one report an
-//! agent cannot half make. The poll never takes `index.lock` — everything here
+//! **When a step is over** is [`Landing`]: an entry ticked in `TODO.md`, or a
+//! path gone from the Worktree or arrived in it — and, either way, committed as
+//! it stands. A box ticked but not committed is a session still mid-task, and a
+//! commit is the one report an agent cannot half make. The poll never takes
+//! `index.lock` — everything here
 //! goes through [`crate::repos::git`], which passes `--no-optional-locks`,
 //! because what it is reading is a repository a session is committing in and a
 //! watcher that tripped the session's own `git add` would break the step it is
@@ -40,20 +43,48 @@
 //! — see [`crate::stopping`]. The run does not go round again from there; getting
 //! going is a press of Resume, because a runner that relaunched a step nothing
 //! had moved would spend an account on the same failure with nobody watching.
+//!
+//! **And one whose session never ends at all** is spoken to before it is stopped
+//! over. A session that goes idle with nothing open and nothing landed has not
+//! ended and has not finished: it is sitting there with the turn over and no way
+//! of knowing that the screen it printed to has nobody in front of it. So it is
+//! told, twice, and then stopped where it stands — see [`crate::rescues`], which
+//! is one loop over every driver here and takes what *done* is read off as its
+//! parameter.
+//!
+//! **The pull request is the one thing that gets a second go.** Every run here
+//! ends on one — a backlog's finish step, an inline implementation, a roadmap's
+//! own session — and each of them commits its work and then pushes and opens the
+//! pull request after the commit. So each of them can land everything it was
+//! sent for and still stop short of the one act that makes the work readable,
+//! leaving it built, committed and unreviewable. That is not a step to run
+//! again: it is one push and one `gh pr create`, so it is asked for on its own,
+//! by a session sent for nothing else, and what follows is GitHub asked again
+//! and the ordinary stop where the answer has not changed. See
+//! [`to_a_pull_request`].
+//!
+//! **And Resume takes the same go**, which is what makes pressing it worth
+//! anything here: a run that stopped at its push is a Conversation whose work is
+//! built and whose branch is on nothing, and the press finds exactly that and
+//! sends for the pull request again. What Resume must never do is guess — an
+//! empty `.tasks/` is a finished backlog or one that never landed, and those are
+//! opposite situations — so the branch is read for which it is. See
+//! [`nothing_left`].
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use verkstead_schema::Direction;
+use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
 use crate::drivers::Driving;
+use crate::follow_ups::FollowUp;
 use crate::github;
 use crate::repos::git;
 use crate::sessions::{Quiet, Session};
 use crate::skills;
 use crate::store;
-use crate::tasks::{BACKLOG, TODO, numbered};
+use crate::tasks::{BACKLOG, TODO};
 
 /// How fast the runner works a backlog.
 ///
@@ -150,10 +181,26 @@ enum Step {
     /// is: it is the step the runner is handed rather than one it decides.
     Handoff(PathBuf),
 
-    /// Work this task file, the lowest-numbered one left.
-    Task(PathBuf),
+    /// Work this task: the lowest-numbered entry whose box is not ticked, and
+    /// the file in `.tasks/` that says what it is.
+    ///
+    /// Both, because the two answer different halves of the step. The number is
+    /// what says it is over — the entry's own box, ticked — and the file is what
+    /// the Notice names when it is not.
+    Task { number: u32, file: PathBuf },
 
-    /// Finish the feature: every task is done and only `TODO.md` is left.
+    /// An entry that is not ticked and names no file: a hand-edited backlog, or
+    /// a breakdown that stopped part way through writing one.
+    ///
+    /// Nothing to run. A session launched at it would have no task document to
+    /// read and nothing to tell it where to stop, so the run stops instead and a
+    /// Notice names the entry — see [`nothing_to_work_from`], which is the one
+    /// answer, and both places that ask what is next reach for it: [`carry_on`]
+    /// working a backlog, and [`backlog_again`] resuming one.
+    Broken { label: String },
+
+    /// Finish the feature: every entry is ticked, and what is left is taking
+    /// `.tasks/` away.
     Finish,
 
     /// Write the roadmap, which is where a roadmap Conversation starts and
@@ -172,9 +219,15 @@ enum Step {
 /// What says a step is over: a path in the Worktree that has to have gone, or
 /// one that has to have arrived — and, either way, be committed as it stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Landing {
+pub(crate) enum Landing {
     Gone(PathBuf),
     Arrived(PathBuf),
+
+    /// The entry with this number, ticked off in `.tasks/TODO.md` and committed
+    /// as it stands. What says a task is done — the same box the pinned card
+    /// draws, so the list the human is watching and the step the runner is
+    /// waiting on cannot disagree.
+    Ticked(u32),
 
     /// A roadmap this branch has written, committed as it stands. The commit
     /// the branch came off, because `docs/roadmaps/` is a directory a
@@ -201,13 +254,15 @@ impl Step {
             // reaches: nothing puts it under version control, so its being there
             // is the whole of the signal.
             Step::Handoff(path) => Some(Landing::Handoff(path.clone())),
-            // Finishing a task is what deletes its file.
-            Step::Task(file) => Some(Landing::Gone(file.clone())),
+            // Finishing a task is what ticks its entry off in the list.
+            Step::Task { number, .. } => Some(Landing::Ticked(*number)),
             // And the finish commit removes `TODO.md` with the rest of `.tasks/`.
             Step::Finish => Some(Landing::Gone(todo())),
             // The roadmap commit is what puts the stages under version control.
             Step::Staging(base) => Some(Landing::Roadmap(base.clone())),
-            Step::Nothing => None,
+            // Neither of these is a step to run, so neither has anything to
+            // watch for.
+            Step::Broken { .. } | Step::Nothing => None,
         }
     }
 
@@ -221,7 +276,8 @@ impl Step {
             Step::Planning => "breaking the work down into a backlog".to_owned(),
             Step::PlanningStage => "planning the roadmap stage into a backlog".to_owned(),
             Step::Handoff(_) => "writing the handoff for the session that builds".to_owned(),
-            Step::Task(file) => format!("the task in {}", file.display()),
+            Step::Task { file, .. } => format!("the task in {}", file.display()),
+            Step::Broken { .. } => "working the backlog".to_owned(),
             Step::Finish => "finishing the feature".to_owned(),
             Step::Staging(_) => "staging the work into a roadmap".to_owned(),
             Step::Nothing => "nothing".to_owned(),
@@ -232,6 +288,53 @@ impl Step {
 /// The backlog's list, as a path inside a Worktree.
 fn todo() -> PathBuf {
     Path::new(BACKLOG).join(TODO)
+}
+
+/// Why a run stopped at an entry with no task file, in the words the Notice
+/// carries.
+///
+/// The entry rather than the file, because the file is the thing that is not
+/// there: what the human has to go and look at is the line in `TODO.md`, and
+/// either writing the document it names or ticking it off gets the run going
+/// again.
+fn broken(label: &str) -> String {
+    format!(
+        "entry {label} of `{}/{TODO}` is not ticked off and names no task file, so there is \
+         nothing for a session to work from",
+        BACKLOG,
+    )
+}
+
+/// Stop the run at a [`Step::Broken`], with the Notice naming the entry there is
+/// nothing to work from.
+///
+/// Both places that decide what to run next reach for this, because both can be
+/// handed one: [`carry_on`] meets it as a backlog is worked, and
+/// [`backlog_again`] meets it when a Resume asks the same question of the same
+/// `.tasks/`. A press that launched a session where the loop would have refused
+/// to would be Resume undoing the rule rather than the human's leave to try
+/// again.
+///
+/// [`crate::stopping::Decided::Verkstead`]: nothing can be read out of the
+/// backlog, so a restart looking again would find the same unreadable list. What
+/// changes it is the human's, in the repository — writing the document the entry
+/// names, or ticking the entry off — and Resume is what picks it up afterwards.
+async fn nothing_to_work_from(state: &AppState, conversation_id: i64, step: &Step, label: &str) {
+    tracing::warn!(
+        conversation_id,
+        label,
+        "a backlog entry is not done and names no task file, so the run stops here",
+    );
+
+    stop(
+        state,
+        conversation_id,
+        crate::stopping::Decided::Verkstead,
+        &step.what(),
+        &broken(label),
+        None,
+    )
+    .await;
 }
 
 /// Follow the grilling session as it writes what the pick asked for.
@@ -385,29 +488,215 @@ pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, dr
         // it being a backlog like any other by the time there is one. What is
         // next has not changed on account of nothing having been running.
         Direction::TaskList => {
-            let step = decide(&working_in).await;
+            backlog_again(
+                state,
+                conversation_id,
+                &working_in,
+                conversation.base_commit.as_deref(),
+                driving,
+            )
+            .await
+        }
+    }
+}
 
-            if step == Step::Nothing {
-                // Either the breakdown never landed one or the finish took the
-                // last of it away, and nothing here can tell those apart. So
-                // nothing is launched — which the press has already refused by
-                // name, this being the reading after the spawn rather than the
-                // one in front of it. See [`crate::resume`].
-                tracing::info!(
-                    conversation_id,
-                    "there is no backlog left to work, so nothing was started again"
-                );
-                return;
-            }
+/// Work a backlog again — or, where it is worked out and the branch is already
+/// on a pull request, wrap that up instead.
+///
+/// The backlog's own answer to what is next, asked of `.tasks/` exactly as every
+/// other turn of the run asks it — a stage's backlog included, it being a
+/// backlog like any other by the time there is one. What is next has not changed
+/// on account of nothing having been running.
+///
+/// An empty one is three situations rather than one. A stage whose planning
+/// never landed is the one that is answered here, because it is the only one
+/// with a step left to run: its backlog was never written, and the session that
+/// would have written it is launched once and by nobody else — see
+/// [`stage_to_plan`]. The other two are a breakdown that never landed and a
+/// feature that is finished with, and nothing can tell those apart until
+/// [`nothing_left`] asks GitHub.
+///
+/// `base` is the commit this Conversation's branch was made on, which is what
+/// the first of the three is read against: what a branch has written is asked of
+/// what it has written *since it branched*, the predecessor's own backlog being
+/// in the history of a stage stacked on one.
+async fn backlog_again(
+    state: AppState,
+    conversation_id: i64,
+    working_in: &Path,
+    base: Option<&str>,
+    driving: Driving,
+) {
+    let step = decide(working_in).await;
 
-            tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
+    if step == Step::Nothing {
+        // Asked before GitHub is, and before anything is read as an ending that
+        // half happened: a stage that has planned nothing has pushed nothing and
+        // opened nothing, so what an empty backlog means there is that the run
+        // has not started rather than that it is over.
+        if let Some(stacked_on) = stage_to_plan(&state, conversation_id, working_in, base).await {
+            tracing::info!(
+                conversation_id,
+                "a stage's backlog was never planned, so the planning is being run again",
+            );
 
-            let Some(session) = launch_in_turn(&state, conversation_id, Prompt::NextTask).await
-            else {
-                return;
-            };
+            return plan_stage(state, conversation_id, stacked_on, driving).await;
+        }
 
-            work(state, conversation_id, step, session, driving).await
+        return nothing_left(state, conversation_id, working_in, base, driving).await;
+    }
+
+    // And an entry that is not ticked and names no file is refused here exactly
+    // as the loop refuses it — see [`nothing_to_work_from`]. A Resume is the
+    // human's leave to try the run again rather than their leave to work a
+    // backlog nothing can be read out of, and the press arriving before they
+    // have fixed `TODO.md` is the ordinary way this is met: the Notice that
+    // stopped the run is what they have just read.
+    //
+    // Held until the stop is written, for [`nothing_left`]'s reason: dropping
+    // the registration first would leave a moment where a sweep could find the
+    // Conversation undriven and stop it with a worse sentence.
+    if let Step::Broken { label } = &step {
+        let _driving = driving;
+
+        nothing_to_work_from(&state, conversation_id, &step, label).await;
+        return;
+    }
+
+    tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
+
+    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::NextTask).await else {
+        return;
+    };
+
+    work(state, conversation_id, step, session, driving).await
+}
+
+/// What to make of a backlog with nothing left in it, which is decided by asking
+/// GitHub what the branch is on and the branch what it has written.
+///
+/// [`inline_again`]'s question, asked at the other end of the run. An inline
+/// implementation asks it before spending a session, because a branch that is
+/// already on a pull request has nothing left to implement. A backlog asks it
+/// once it has nothing left to work, and the reasoning arrives at the same
+/// place: the finish step that emptied it is the step that opens the pull
+/// request, so a branch on one is a run whose ending got most of the way through.
+///
+/// Which is one of the cases this is written for. Recording the pull request and
+/// moving the Conversation into Wrapping is one transaction — see
+/// [`store::record_pull_request`] — and a Conversation whose ending failed
+/// somewhere after the push is left implementing a backlog that is empty, with
+/// the work on a pull request nothing has written down. Every way back in used
+/// to refuse it: Resume for the empty backlog, a steer into Wrapping for the
+/// pull request it had no record of. So the run asks GitHub rather than the
+/// record, because GitHub is the one that knows.
+///
+/// Three answers, exactly as [`inline_again`] has them:
+///
+/// - a pull request, and [`crate::wrapping::opened`] records it and starts the
+///   wrap-up, finishing the ending that did not finish;
+/// - [`github::Trouble::NoPullRequest`], which is the ending that got nowhere
+///   near as far, and what happens about it is below;
+/// - anything else, which is `gh` unable to answer at all, and that stops,
+///   saying which trouble it was.
+///
+/// **An empty backlog and no pull request is two situations, and the branch tells
+/// them apart.** A branch that has written a backlog since it came off its base
+/// has been worked through and finished with — the finish commit is what took
+/// `.tasks/` away — so the work is built and the one thing missing is the push
+/// that never happened, and a session is sent for it exactly as an ending that
+/// stopped short gets one. A branch that has written none never had a breakdown
+/// land on it at all: there is nothing built to open a pull request for, and
+/// pressing on would be pushing an empty branch. That one stops, and it is the
+/// only way out of here that still does.
+///
+/// Which is what makes Resume worth pressing on a run that stopped at its push.
+/// The press comes back through here, the branch still says the work is written,
+/// and the go is taken again — a human who has just logged `gh` in gets the
+/// pipeline finished rather than the Notice they were already looking at. See
+/// [`asked_for_a_pull_request`], which is the same move the automatic ending
+/// makes, and [`backlog_written`], which is the reading that separates the two.
+///
+/// The stop is a stop rather than a line in the log, because what is on the other
+/// side of doing nothing here is the stall sweep finding the Conversation undriven
+/// a minute later and stopping it with a worse sentence than this one.
+async fn nothing_left(
+    state: AppState,
+    conversation_id: i64,
+    working_in: &Path,
+    base: Option<&str>,
+    driving: Driving,
+) {
+    let Some((_repo_id, branch, found)) = crate::wrapping::asked(&state, conversation_id).await
+    else {
+        return;
+    };
+
+    // Held until the wrap-up's watchers have registrations of their own, or
+    // until the stop is written: dropping first would leave a moment where a
+    // sweep could find the Conversation undriven and stop it all over again.
+    let _driving = driving;
+
+    match found {
+        Ok(opened) => {
+            tracing::info!(
+                conversation_id,
+                number = opened.number,
+                "the backlog is worked out and the branch is on a pull request nothing \
+                 recorded, so this wraps it up rather than working it again",
+            );
+
+            // With no Event to read a tail off: the session that opened the pull
+            // request is long gone, and what it said is already on the Timeline
+            // above whatever stopped the run.
+            crate::wrapping::opened(&state, conversation_id, None).await
+        }
+        Err(github::Trouble::NoPullRequest) if wrote_a_backlog(working_in, base).await => {
+            tracing::info!(
+                conversation_id,
+                "the backlog was written, worked out and left on no pull request, so a \
+                 session is being sent to open one",
+            );
+
+            asked_for_a_pull_request(&state, conversation_id).await
+        }
+        Err(github::Trouble::NoPullRequest) => {
+            tracing::info!(
+                conversation_id,
+                "there is no backlog left to work, none was ever written here, and the \
+                 branch is on no pull request",
+            );
+
+            stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "working out what is left of the backlog",
+                "there is nothing in `.tasks/` to work, nothing on this branch ever wrote \
+                 a backlog, and there is no pull request to wrap up — the breakdown never \
+                 landed, so there is nothing built here to carry anywhere",
+                None,
+            )
+            .await;
+        }
+        Err(trouble) => {
+            tracing::warn!(
+                conversation_id,
+                branch,
+                why = trouble.why(),
+                "GitHub cannot be asked what an emptied backlog's branch is on, so nothing \
+                 was started again",
+            );
+
+            stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "working out what is left of the backlog",
+                &trouble.why(),
+                None,
+            )
+            .await;
         }
     }
 }
@@ -480,7 +769,10 @@ async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
 ///
 /// Two cases, one phase earlier than the finish's: a roadmap Conversation's own
 /// work is one session, and a run that stopped after it had written the roadmap
-/// stopped on the question of what became of it rather than on the writing.
+/// stopped on the question of what became of it rather than on the writing. So
+/// the press is worth something either way — a roadmap that is not written is
+/// written by a fresh session, and one that is written but on no pull request is
+/// sent for the pull request. See [`to_a_pull_request`].
 async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path, driving: Driving) {
     let Some(base) = base(&state, conversation_id).await else {
         return;
@@ -507,7 +799,7 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
         // [`store::record_roadmap`].
         crate::conversations::roadmap_landed(&state, conversation_id).await;
 
-        return crate::wrapping::opened(&state, conversation_id, None).await;
+        return to_a_pull_request(&state, conversation_id, None).await;
     }
 
     let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Staging).await else {
@@ -526,16 +818,29 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
 /// [`crate::continuing`]. Everything after that is the same run a task list has,
 /// because from the plan commit onwards it *is* one.
 ///
+/// Started as the stage is made — by the stage before it settling, or by a human
+/// adopting the roadmap it belongs to — and started again by a run taken up over
+/// a stage that has no backlog. That second way in is what makes the first
+/// recoverable: a planning session that died before it committed leaves a stage
+/// whose backlog nothing else would ever write, so what is read there is a run
+/// that never began rather than one that is worked out — see [`stage_to_plan`].
+///
 /// `stacked_on` is the branch this stage's branch was made on top of, which the
 /// fork is told because it is the one thing about a stage the repository does not
 /// say.
-pub(crate) async fn plan_stage(state: AppState, conversation_id: i64, stacked_on: Option<String>) {
-    // Taken here rather than by [`crate::continuing`], which is the one place
-    // that could have taken it earlier and has nothing to gain from doing so: a
-    // stage is a Conversation made moments ago, and this is spawned as the last
-    // thing that makes it.
-    let driving = state.drivers.driving(conversation_id);
-
+///
+/// `driving` is the registration that says this Conversation is being driven,
+/// taken by whoever is starting the planning rather than here — the stage being
+/// made, or a run that has found the planning never happened. Handed over rather
+/// than taken at this end, for the reason every other driver here hands one
+/// over: the launch is the slow part, and a gap in the middle of one is a
+/// Conversation a sweep reads as standing still. See [`crate::drivers`].
+pub(crate) async fn plan_stage(
+    state: AppState,
+    conversation_id: i64,
+    stacked_on: Option<String>,
+    driving: Driving,
+) {
     let Some(session) =
         launch_in_turn(&state, conversation_id, Prompt::PlanningStage(stacked_on)).await
     else {
@@ -588,7 +893,7 @@ async fn work(
     // afterwards, because this is the one place that knows *which* step just
     // landed.
     if first == Step::Finish {
-        crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+        to_a_pull_request(&state, conversation_id, Some(writing)).await;
         return;
     }
 
@@ -667,6 +972,15 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
             return;
         }
 
+        // An entry that is not ticked and names no file: there is nothing for a
+        // session to read and nothing to tell it where to stop, so the run stops
+        // here and the Notice names the entry — see [`nothing_to_work_from`],
+        // which a Resume asking the same question reaches for too.
+        if let Step::Broken { label } = &step {
+            nothing_to_work_from(&state, conversation_id, &step, label).await;
+            return;
+        }
+
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");
 
         let Some(started) = launch_in_turn(&state, conversation_id, Prompt::NextTask).await else {
@@ -678,10 +992,159 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
         };
 
         if step == Step::Finish {
-            crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+            to_a_pull_request(&state, conversation_id, Some(writing)).await;
             return;
         }
     }
+}
+
+/// Carry work that is built and committed on to the pull request it ends on —
+/// and where the session that should have opened one did not, ask for one before
+/// anything stops.
+///
+/// **Every run here ends on a pull request**, and each of them ends on it the
+/// same way: the session commits the last of the work and then follows the
+/// repository's own finish sequence to push and open one. A backlog's finish
+/// step, an inline implementation, a roadmap's own session — three endings, one
+/// shape. So they have one failure too: a session that landed its commit and
+/// stopped short of the push leaves the work built, committed and unreviewable,
+/// and the stop that used to follow said exactly that and left the human to open
+/// the pull request themselves.
+///
+/// **So the missing thing is asked for by a session of its own.** It is the
+/// cheapest ask there is — the work is committed, and what is left is a push and
+/// a `gh pr create` — and it is the one thing the run cannot go on without. A
+/// fresh session rather than the one that stopped short: that one is over by the
+/// time this is asked, and a context that already stopped short of the last step
+/// is not the one to send back to it. See [`skills::submitting`], which says the
+/// work is already built and that opening the pull request is the whole of the
+/// job.
+///
+/// **Only where GitHub says there is no pull request.** A `gh` that is missing,
+/// logged out, or looking at a repository with no remote is a wall a session
+/// would walk into at exactly the same place, so those stop where they always
+/// did — the reasoning [`inline_again`] follows a phase earlier. The answer is
+/// handed on to [`crate::wrapping::record`] whole, which makes of it what it
+/// always has.
+///
+/// `writing` is the Timeline Event the session that stopped short printed into,
+/// so that a stop written before anything else runs carries the tail of what *it*
+/// last said, and `None` where there is no session left to read one off.
+async fn to_a_pull_request(state: &AppState, conversation_id: i64, writing: Option<i64>) {
+    let Some((repo_id, branch, found)) = crate::wrapping::asked(state, conversation_id).await
+    else {
+        return;
+    };
+
+    if !matches!(found, Err(github::Trouble::NoPullRequest)) {
+        return crate::wrapping::record(state, conversation_id, repo_id, &branch, found, writing)
+            .await;
+    }
+
+    tracing::warn!(
+        conversation_id,
+        branch,
+        "the work is committed and on no pull request, so a session is being sent to open one",
+    );
+
+    asked_for_a_pull_request(state, conversation_id).await
+}
+
+/// Send one session for the pull request the work should already be on, and make
+/// of what it leaves what everything else here makes of it.
+///
+/// The move the automatic endings and a pressed Resume share, which is why it is
+/// a function: a run that stopped short of its push and a human pressing Resume
+/// on one are the same Conversation wanting the same thing, and answering them
+/// differently would mean the press was worth less than the run. See
+/// [`to_a_pull_request`] for the first and [`nothing_left`] for the second.
+///
+/// **Once per go.** What follows the session is GitHub asked again, and what it
+/// says then is the whole of it: a pull request wraps the Conversation up, and no
+/// pull request stops it in the words it has always stopped in — over the session
+/// that was sent to open one, whose last words are where the reason there is
+/// still none is written down. Verkstead does not go round a second time by
+/// itself, because two agents that both stopped short of the same push is
+/// something for the human to look at. What they have then is Resume, and a press
+/// is another go through here: the work is still built, so there is still exactly
+/// one thing to ask for.
+async fn asked_for_a_pull_request(state: &AppState, conversation_id: i64) {
+    let Some(writing) = submitted(state, conversation_id).await else {
+        return;
+    };
+
+    crate::wrapping::opened(state, conversation_id, Some(writing)).await
+}
+
+/// Run the one session sent to open a pull request the finish step did not, and
+/// wait until it is over.
+///
+/// **Ended on quiet with nothing of its own open**, which is the review's rule
+/// rather than a step's, and here for a reason of its own: what this session is
+/// sent to do happens on GitHub rather than in the repository, so there is no
+/// path to watch and no commit it has to make — a branch that only wanted pushing
+/// is one it finishes without writing a line. What is left is silence, and every
+/// session here is an interactive agent that idles when its work is done rather
+/// than exiting. Anything it prints puts the whole grace back on the clock, and a
+/// Set of its own left open holds it for as long as the human takes.
+///
+/// **No rescue on this one**, alone among the sessions here. The rescue is for a
+/// session nothing else can move on from — but this is already the second go at
+/// the same missing thing, and what follows it either way is GitHub asked and the
+/// Conversation wrapped up or stopped. Prodding it a third time would put the
+/// Notice off rather than save the human from it.
+///
+/// The Timeline Event it printed into, or `None` where nothing ran: no session
+/// could be started, or the run was stopped from outside while this one did. Both
+/// of those have already said whatever there was to say.
+async fn submitted(state: &AppState, conversation_id: i64) -> Option<i64> {
+    let mut session = launch_in_turn(state, conversation_id, Prompt::Submitting).await?;
+
+    let event_id = session.event_id;
+    let quiet = session.quiet.clone();
+    let pace = state.sessions.pace();
+
+    let ended = tokio::select! {
+        ended = session.ended() => Some(ended),
+        () = quiet_and_nothing_asked(state, conversation_id, event_id, &quiet, pace) => None,
+    };
+
+    match ended {
+        // Quiet with nothing of its own open, which is as much as a session whose
+        // work happened on GitHub can report from in here. Ended rather than left
+        // holding the Worktree, and what it did is GitHub's to say.
+        None => {
+            tracing::info!(
+                conversation_id,
+                event_id,
+                "the session sent to open the pull request has gone quiet, so it is \
+                 being ended",
+            );
+
+            state.sessions.end(conversation_id).await;
+        }
+        // Verkstead ended it — the human closed the Conversation or force-stopped
+        // it, or the account it was spending ran out of window. The stop is on the
+        // record already, so there is nothing to ask GitHub about. See
+        // [`crate::sessions::Ended::on_purpose`].
+        Some(ended) if ended.on_purpose() => {
+            tracing::info!(
+                conversation_id,
+                event_id,
+                "the session sent to open the pull request was stopped from outside, so \
+                 nothing is asked about it",
+            );
+
+            return None;
+        }
+        // And one that ended by itself is read by what it left on GitHub rather
+        // than by how it exited: an agent that opened the pull request and then
+        // fell over has done the job, and one that exited cleanly having done
+        // nothing has not. The ask that follows this is what tells them apart.
+        Some(_) => {}
+    }
+
+    Some(event_id)
 }
 
 /// Follow the grilling session as it writes the handoff, and start the session
@@ -741,6 +1204,22 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// what it committed, which the branch watcher is putting on the Timeline while
 /// it runs.
 ///
+/// **Ended on committed plus quiet**, which is [`instructed`]'s rule on a
+/// session of the same shape: there is no path to watch, and a commit is the one
+/// report an agent cannot half make. Work does not always stop at the commit —
+/// the push and the pull request come after one — so the session is ended only
+/// once it has printed nothing for the grace, and anything it prints puts the
+/// whole grace back on the clock. Waiting for the process to exit instead would
+/// be waiting for something that never comes: every session here is an
+/// interactive agent that idles when its work is done.
+///
+/// **And one that will not ask is spoken to**, on the same commit. Idle with
+/// nothing committed and nothing put to the human is the whole of an inline run
+/// come to nothing with a process still holding the Worktree — a Conversation
+/// nobody can move, driven so nothing sweeps it and silent so nothing says so.
+/// Told twice and then stopped where it stands, as every other driver here does
+/// it. See [`crate::rescues`].
+///
 /// Landing is measured against what was already there rather than against zero,
 /// which is what makes a second go answerable: a first attempt that committed
 /// twice and then died leaves two commits behind, and a second that commits
@@ -749,9 +1228,11 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// What follows a session that landed something is the same ending a backlog's
 /// finish step has: the session followed the repository's own review process on
 /// its way out, so the branch is pushed and on a pull request by the time it
-/// goes quiet, and [`crate::wrapping::opened`] is what finds that pull request
-/// and moves the Conversation on. An inline implementation is work like any
-/// other work and goes for review like any other work.
+/// goes quiet, and [`to_a_pull_request`] is what finds that pull request and
+/// moves the Conversation on — or, where the session stopped short of the push,
+/// sends for the one thing missing before anything stops. An inline
+/// implementation is work like any other work and goes for review like any other
+/// work.
 ///
 /// Which is why landing nothing is not the end of it either. A second session on
 /// the branch — the one [`inline_again`] launches where GitHub has no pull
@@ -781,7 +1262,68 @@ async fn follow_inline(
         }
     };
 
-    let ended = session.ended().await;
+    let quiet = session.quiet.clone();
+    let pace = state.sessions.pace();
+
+    let ended = tokio::select! {
+        ended = session.ended() => Some(ended),
+        // What an inline session that has done its work looks like from here:
+        // more on the branch than it started with, and nothing printed for the
+        // grace. Waited for rather than left to the exit, because an
+        // interactive agent idles when its work is done rather than exiting —
+        // which is [`instructed`]'s rule, on a session whose whole job is the
+        // same shape.
+        () = committed_and_quiet(&state, conversation_id, already, &quiet, pace) => None,
+        // And one that is idle with nothing committed and nothing put to the
+        // human: the whole of an inline run come to nothing, with a process
+        // still holding the Worktree and nothing on the page to press. Told
+        // twice and then stopped where it stands, the commit being its
+        // done-indicator — see [`crate::rescues`].
+        () = crate::rescues::until_it_will_not_ask(
+            &state,
+            conversation_id,
+            event_id,
+            &quiet,
+            pace,
+            crate::rescues::Done::Committed { already },
+        ) => {
+            tracing::warn!(
+                conversation_id,
+                event_id,
+                "the inline session went quiet without committing anything or asking \
+                 about it, so the Conversation stops here",
+            );
+
+            state.sessions.end(conversation_id).await;
+
+            return stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "implementing the work inline",
+                crate::rescues::WOULD_NOT_ASK,
+                Some(event_id),
+            )
+            .await;
+        }
+    };
+
+    // Committed and gone quiet, which is an inline implementation done. The
+    // session is ended rather than waited out, and what follows is the ending a
+    // landed run has always had: the skill carried the branch to a pull request
+    // on its way out, and [`to_a_pull_request`] is what finds it — or sends for
+    // it, and then stops naming what it still could not find.
+    let Some(ended) = ended else {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "an inline session has committed and gone quiet, so it is being ended",
+        );
+
+        state.sessions.end(conversation_id).await;
+
+        return to_a_pull_request(&state, conversation_id, Some(event_id)).await;
+    };
 
     // Verkstead ended it — the human closed the Conversation or force-stopped
     // it, or the account it was spending ran out of window. Whichever it was,
@@ -822,7 +1364,7 @@ async fn follow_inline(
                 "an inline session has landed its work"
             );
 
-            crate::wrapping::opened(&state, conversation_id, Some(event_id)).await;
+            to_a_pull_request(&state, conversation_id, Some(event_id)).await;
             return;
         }
         // Exited cleanly having committed nothing at all. An interactive agent
@@ -906,6 +1448,11 @@ async fn follow_inline(
 /// report that anything happened — and the pipeline reads the branch to decide
 /// what is next, so a branch nothing was written to is one there is nothing
 /// honest to carry on from.
+///
+/// **Including one that never ends at all.** Idle, with nothing committed and
+/// nothing put to the human, is the same instruction come to nothing with a
+/// process still holding the Worktree — so it is told twice and then stopped in
+/// the same words, the commit being its done-indicator. See [`crate::rescues`].
 pub(crate) async fn instructed(
     state: AppState,
     conversation_id: i64,
@@ -936,6 +1483,39 @@ pub(crate) async fn instructed(
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
         () = committed_and_quiet(&state, conversation_id, already, &quiet, pace) => None,
+        // Nothing committed and nothing asked, with the session sitting there:
+        // an instruction that has come to nothing and nobody to say so to.
+        // Told twice and then stopped where it stands, which is the same ending
+        // a step that would not land gets — see [`crate::rescues`].
+        () = crate::rescues::until_it_will_not_ask(
+            &state,
+            conversation_id,
+            event_id,
+            &quiet,
+            pace,
+            crate::rescues::Done::Committed { already },
+        ) => {
+            let _driving = driving;
+
+            tracing::warn!(
+                conversation_id,
+                event_id,
+                "the instruction session went quiet without committing anything or asking \
+                 about it, so the Conversation stops here",
+            );
+
+            state.sessions.end(conversation_id).await;
+
+            return stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "doing what the instruction said",
+                crate::rescues::WOULD_NOT_ASK,
+                Some(event_id),
+            )
+            .await;
+        }
     };
 
     let Some(ended) = ended else {
@@ -1020,10 +1600,19 @@ pub(crate) async fn instructed(
 /// Wrapping over the record it already had, and starts the wrap-up's watchers
 /// afresh.
 ///
+/// Of `gh` rather than of the record, which is the difference between wrapping a
+/// Conversation up and stopping it a second time. A record is what Verkstead
+/// wrote down; a pull request is GitHub's fact. Where the two disagree it is
+/// because the writing down failed — and a Conversation whose ending failed
+/// after the push is exactly the Conversation a human steers an instruction into
+/// to get it moving. Asking the record would tell it what it already believes.
+///
 /// **And a stop where the branch holds neither**, because there is nothing left
 /// that could be started and a Conversation left implementing with nothing
 /// driving it would be one the stall sweep stopped a minute later with a worse
-/// sentence. `writing` is the Event the session printed into, so the Notice
+/// sentence. A `gh` that cannot answer stops it too, saying which trouble it
+/// was: a session launched into that could only dead-end on the same missing
+/// thing. `writing` is the Event the session printed into, so the Notice
 /// carries the tail of what it last said.
 async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: Driving) {
     let Some(worktree) = worktree(&state, conversation_id).await else {
@@ -1044,24 +1633,23 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
     // sweep could find the Conversation undriven and stop it all over again.
     let _driving = driving;
 
-    // Which repository's pull request, which is the Conversation's own: a
-    // companion's is the wrap-up's to cover rather than anything that says
-    // whether there is a wrap-up at all.
-    let Some(repo_id) = own_repo(&state, conversation_id).await else {
+    let Some((_repo_id, branch, found)) = crate::wrapping::asked(&state, conversation_id).await
+    else {
         return;
     };
 
-    match store::pull_request(&state.pool, conversation_id, repo_id).await {
-        Ok(Some(_)) => {
+    match found {
+        Ok(opened) => {
             tracing::info!(
                 conversation_id,
+                number = opened.number,
                 "the instruction is done and the branch is on a pull request, so it is \
                  wrapped up again",
             );
 
             crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
         }
-        Ok(None) => {
+        Err(github::Trouble::NoPullRequest) => {
             tracing::info!(
                 conversation_id,
                 "the instruction is done and the branch holds nothing to carry on with",
@@ -1077,8 +1665,433 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
             )
             .await;
         }
+        Err(trouble) => {
+            tracing::warn!(
+                conversation_id,
+                branch,
+                why = trouble.why(),
+                "GitHub cannot be asked what the branch an instruction left is on",
+            );
+
+            stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "carrying the work on from what the instruction left",
+                &trouble.why(),
+                Some(writing),
+            )
+            .await;
+        }
+    }
+}
+
+/// See out a follow-up's session, and land the Conversation back in its wrap-up
+/// once the human says there is nothing else.
+///
+/// `follow_up` is what the session is started on: the brief a steer into
+/// Follow-up carried, and — where this is a follow-up being picked up again
+/// rather than opened — the rounds it has already been through. See
+/// [`crate::follow_ups`], which is where a press of Resume reads both back from.
+///
+/// **A driver rather than an errand beside the work**, exactly as an instruction
+/// session is: the registration it is handed says the Conversation is being
+/// driven for as long as this runs, so nothing sweeps it as standing still while
+/// the human is composing an answer on a phone.
+///
+/// **Nothing is watched for on the branch.** A follow-up is rounds of asking
+/// rather than a step with a landing: what it commits is the human's to have
+/// asked for, and a round that was a question and an answer commits nothing at
+/// all. So there is no committed-and-quiet to end it on and no artifact to read.
+///
+/// **What ends it is the human's own mark**, on the newest round they answered,
+/// with the session idle and nothing left open — see [`nothing_else_and_quiet`],
+/// which is the three of those waited on together. Then the session is ended and
+/// the Conversation goes back to Wrapping over the pull request it was opened
+/// about, with the wrap-up's watchers started over whatever the branch now
+/// holds. *Back to Done* is the wrap-up's own settling rule and nothing this
+/// decides — see [`over`].
+///
+/// **And a session that is gone is a stop**, which is the responding rule: no
+/// other session is ever sent to finish somebody else's, so what it had got to,
+/// what it was about to do and what it made of the last answer are all beyond
+/// asking. The Notice says what happened and any question it left the human
+/// holding goes off with it.
+///
+/// **Unless it is gone because it had finished**, which the mark is what says.
+/// A session whose last act was the round the human marked *Nothing else* is a
+/// follow-up that is over rather than one nobody is left to have, and an agent
+/// that finishes its turn and exits is the ordinary shape of that — so the mark
+/// and the open Set are read again where the session ends first, and a
+/// follow-up that reads as finished lands in the wrap-up instead of stopping.
+/// The same reading [`instructed`] gives its commits at the same point.
+///
+/// **So is one that will not ask.** A session that goes idle without a Set open
+/// leaves the human holding a Conversation they can neither answer nor end, so
+/// it is spoken to — twice, and then stopped where it stands. Nothing it left
+/// open goes off with that one: there being nothing open is half of what said it
+/// was stuck.
+pub(crate) async fn following_up(
+    state: AppState,
+    conversation_id: i64,
+    follow_up: FollowUp,
+    driving: Driving,
+) {
+    // Taken before the session starts, so what it lands is counted as this
+    // follow-up's own: whether the wrap-up's checks go back to waiting turns on
+    // whether *this* follow-up pushed anything, and a Conversation on a pull
+    // request has a run of commits behind it already.
+    let already = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed,
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether the branch is on a pull request failed");
+            tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
+            return;
+        }
+    };
+
+    // What the session before this one left standing, where there was one. A
+    // Blocking Ask outlives the session that asked it, and nobody is ever handed
+    // somebody else's — so a question left over from the follow-up that died is
+    // one the human could answer for ever with nothing reading it, and one this
+    // follow-up would never end while it stood. Locked unanswered as the fresh
+    // session starts, which is what a relaunched grilling does with its own.
+    if follow_up.again {
+        left_open(&state, conversation_id).await;
+    }
+
+    let Some(mut session) =
+        launch_in_turn(&state, conversation_id, Prompt::FollowingUp(follow_up)).await
+    else {
+        return;
+    };
+
+    let event_id = session.event_id;
+    let quiet = session.quiet.clone();
+    let pace = state.sessions.pace();
+
+    let ended = tokio::select! {
+        ended = session.ended() => Some(ended),
+        () = nothing_else_and_quiet(&state, conversation_id, &quiet, pace) => None,
+        // The session is still there and still saying nothing, having been asked
+        // twice to say it where the human would hear. So it is ended here rather
+        // than waited on any longer, and the stop written over it is one the
+        // human presses Resume on — which starts a fresh follow-up session on
+        // the same brief. Nothing it left open goes off with it: there being
+        // nothing open is half of what said it was stuck.
+        () = crate::rescues::until_it_will_not_ask(
+            &state,
+            conversation_id,
+            event_id,
+            &quiet,
+            pace,
+            crate::rescues::Done::NothingElse,
+        ) => {
+            let _driving = driving;
+
+            state.sessions.end(conversation_id).await;
+
+            return stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "following the work up",
+                crate::rescues::WOULD_NOT_ASK,
+                Some(event_id),
+            )
+            .await;
+        }
+    };
+
+    let Some(ended) = ended else {
+        return over(&state, conversation_id, already, driving).await;
+    };
+
+    // Verkstead ended it — the human closed the Conversation or force-stopped it,
+    // or the account it was spending ran out of window. Each has already written
+    // the stop this would otherwise write. See
+    // [`crate::sessions::Ended::on_purpose`].
+    if ended.on_purpose() {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "the follow-up session was stopped from outside, so nothing is said about it",
+        );
+        return;
+    }
+
+    // The session is over on its own account, which is not by itself a follow-up
+    // left unfinished. The human may have said there was nothing else and the
+    // agent gone before the grace beside this had run out — which is the
+    // ordinary shape of a session that finishes its turn rather than idling,
+    // [`crate::sessions::Ended::Well`] being what an interactive agent with
+    // nothing left to do exits as. So the record is asked once more before this
+    // is read as a follow-up nobody is left to have, exactly as an instruction
+    // session's commits are asked for again where it ends first.
+    //
+    // The same two questions [`nothing_else_and_quiet`] asks, and asked in the
+    // same order: a Set still standing is the human holding a question, and one
+    // is worth closing and stopping over whatever the newest answer said. Both
+    // read the safe way round for this — a store that will not answer reads as
+    // open and as not marked — so a record that cannot be asked leaves the stop
+    // below exactly as it was.
+    if !open(&state, conversation_id).await && marked(&state, conversation_id).await {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "the follow-up session finished on a round the human had already \
+             marked, so the follow-up is over rather than gone",
+        );
+
+        return over(&state, conversation_id, already, driving).await;
+    }
+
+    // Held until the stop is written, which is what every driver here holds it
+    // for: dropping first would leave a moment where a sweep could find the
+    // Conversation undriven and stop it with a worse sentence.
+    let _driving = driving;
+
+    // And anything it left the human holding goes off as the stop is raised.
+    // The session that asked is gone and no other is ever handed somebody else's
+    // ask, so a Set left standing would keep the card blocked on you over a
+    // question nobody is behind. See [`crate::responding`], whose rule this is.
+    left_open(&state, conversation_id).await;
+
+    // How it ended, where the ending itself was the problem; otherwise the
+    // ending is the whole of it, a session that has finished with the follow-up
+    // still running being exactly as gone as one that fell over.
+    let how = match ended.badly() {
+        Some(how) => format!("{how}, so {NOBODY_FOLLOWING_UP}"),
+        None => format!("the follow-up session finished, so {NOBODY_FOLLOWING_UP}"),
+    };
+
+    stop(
+        &state,
+        conversation_id,
+        crate::stopping::Decided::Verkstead,
+        "following the work up",
+        &how,
+        Some(event_id),
+    )
+    .await;
+}
+
+/// What a stop over a gone follow-up session says beyond how it went.
+///
+/// [`store::Decision::Verkstead`], as every stop written here is: what to do
+/// about it is the human's, and steering is what they have.
+const NOBODY_FOLLOWING_UP: &str = "nobody is left to ask you anything or to act on what you say, and any question it had \
+     put to you has been closed unanswered";
+
+/// The human has said there is nothing else: end the session, and put the
+/// Conversation back in the wrap-up it was opened over.
+///
+/// **Where a follow-up ends is where it started.** It is something taken up
+/// about work that is already on a pull request, so what is left when it is over
+/// is that pull request and a wrap-up to see it out — over whatever the branch
+/// now holds, with the review left settled and the fix attempts forgotten, which
+/// is exactly what a steer into Wrapping recomputes. *Back to Done* is that
+/// wrap-up's own settling rule and nothing decided here.
+///
+/// **The checks go back to waiting where the follow-up pushed.** `already` is
+/// what the Conversation had committed before the session started, so more than
+/// it now is a follow-up that gave GitHub a new run to make up its mind about —
+/// and a settle standing over it is yesterday's green, which the settling loop
+/// could reach Done on before the checks watcher's first poll had looked. A
+/// follow-up that was questions and answers alone lands with everything settled
+/// and passes straight through to Done. A count that will not read counts as
+/// *pushed*, which is the right way round: the cost is one poll of GitHub, and
+/// the cost the other way is a wrap-up finished over a suite nobody watched.
+///
+/// The session is ended first, because the Worktree is about to be handed to the
+/// wrap-up's own watchers: a review queueing behind an agent that has nothing
+/// left to do would wait for a session Verkstead is finished with.
+async fn over(state: &AppState, conversation_id: i64, already: usize, driving: Driving) {
+    tracing::info!(
+        conversation_id,
+        "the human has nothing else, so the follow-up is over and its session is being ended",
+    );
+
+    state.sessions.end(conversation_id).await;
+
+    let pushed = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed > already,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a follow-up had committed failed");
+            true
+        }
+    };
+
+    match store::follow_up_over(&state.pool, conversation_id, pushed).await {
+        Ok(store::Ending::Wrapped) => {}
+        Ok(outcome) => {
+            tracing::info!(
+                conversation_id,
+                ?outcome,
+                "there was no follow-up left to end, so nothing was moved",
+            );
+            return;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "landing a follow-up back in its wrap-up failed");
+            return;
+        }
+    }
+
+    tracing::info!(
+        conversation_id,
+        pushed,
+        "the follow-up is over, so the Conversation is wrapping up again",
+    );
+
+    // The Timeline has a move on it and the card reads differently, and an open
+    // page should say so without being reloaded.
+    state.nudges.announce(Nudge::Conversation {
+        conversation: conversation_id,
+    });
+
+    // Held until the wrap-up's watchers have registrations of their own, which
+    // is what [`crate::wrapping::watching`] takes as it spawns them: dropping
+    // first would leave a moment where a sweep could find the Conversation
+    // undriven and stop what has just been started.
+    let _driving = driving;
+
+    crate::checks::afresh(state.clone(), conversation_id).await;
+}
+
+/// Take off any Question Set the follow-up left standing on the Conversation.
+///
+/// Verkstead reaching for the lock on the human's behalf because it knows
+/// something they cannot see — that there is nobody behind the question any
+/// more — exactly as a wrap-up closes what its gone session left open. See
+/// [`crate::review::closed`].
+///
+/// The Conversation's rather than the session's, which is what the follow-up's
+/// own rule asks everywhere: what matters is whether the human is left holding a
+/// question, and a question is one whoever put it up.
+///
+/// Asked at both ends of a follow-up that lost its session: as the stop over one
+/// is raised, and again as a fresh session is started over one nothing stopped —
+/// a restart leaves no stop behind, so what a dead session left standing is
+/// still standing when the next server picks the follow-up up.
+async fn left_open(state: &AppState, conversation_id: i64) {
+    let standing = match store::open_set(&state.pool, conversation_id).await {
+        Ok(standing) => standing,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a follow-up left open failed");
+            return;
+        }
+    };
+
+    if let Some(set_id) = standing {
+        crate::review::closed(state, conversation_id, set_id).await;
+    }
+}
+
+/// Wait until the follow-up is over: the human has marked their newest answer
+/// *Nothing else*, nothing is left open on the Conversation, and the session has
+/// printed nothing for [`Pace::proposing`].
+///
+/// All three, and none of them is enough alone. **The mark alone** would end a
+/// follow-up in the middle of the work the last round asked for — the human
+/// answers and the agent goes off and does it, which is the whole point of the
+/// state. **Quiet alone** would reap a session idling on a Blocking Ask, which is
+/// a session doing exactly what it should: the ask blocks for as long as the
+/// human takes, and that may be the next morning. **Nothing open alone** would end
+/// every follow-up the moment it started, none of them having asked anything yet.
+///
+/// The grace is asked first because it is the cheap half, exactly as
+/// [`quiet_and_nothing_asked`] asks it: a session still talking is not one to ask
+/// the store about, and anything it prints puts the whole grace back on the
+/// clock. An answer arriving does the same — a session that has just been told
+/// what to do has everything it asked for and nothing done yet — so the grace
+/// runs again from the last time a Set was open, and this returns only once both
+/// are spent.
+///
+/// **The mark is read last and every time round**, which is what makes the
+/// latest Response the one that decides: a Set asked after an end-marked one puts
+/// the follow-up back to running through the open-Set arm above, and its own
+/// answer is what this reads when it comes.
+///
+/// **And a follow-up whose human never says *nothing else* is rescued rather
+/// than waited on for ever.** That is this condition read the other way round —
+/// quiet, nothing open and no mark — and it is watched for beside this rather
+/// than here, by the one loop that watches for it in every state. See
+/// [`crate::rescues::until_it_will_not_ask`], which takes the mark as its
+/// done-indicator.
+async fn nothing_else_and_quiet(state: &AppState, conversation_id: i64, quiet: &Quiet, pace: Pace) {
+    // When a Set of the Conversation's was last seen open. An answer arriving is
+    // something the session has just been given to act on, and one that has just
+    // been given something has had no time to act on it yet — so the grace runs
+    // again from here. `None` while it has asked nothing at all.
+    let mut asked: Option<Instant> = None;
+
+    loop {
+        let owed = pace.proposing.saturating_sub(quiet.for_how_long());
+
+        if !owed.is_zero() {
+            tokio::time::sleep(owed).await;
+            continue;
+        }
+
+        if open(state, conversation_id).await {
+            asked = Some(Instant::now());
+            tokio::time::sleep(pace.poll).await;
+            continue;
+        }
+
+        let owed = asked
+            .map(|at| pace.proposing.saturating_sub(at.elapsed()))
+            .unwrap_or_default();
+
+        if !owed.is_zero() {
+            tokio::time::sleep(owed).await;
+            continue;
+        }
+
+        if marked(state, conversation_id).await {
+            return;
+        }
+
+        tokio::time::sleep(pace.poll).await;
+    }
+}
+
+/// Whether anything on the Conversation is still waiting on the human.
+///
+/// The Conversation's rather than any one session's, which is the question both
+/// its readers are really asking: what matters is whether the human is left
+/// holding something to answer, and something to answer is one whoever put it
+/// up. See [`crate::rescues::until_it_will_not_ask`], which is the other reader
+/// — a session with a question standing in front of the human is not one to
+/// prod, whichever session wrote it.
+///
+/// A Deferred Ask is not one of them and neither is a Set the human closed
+/// unanswered: both are Sets nobody is idling on. See [`store::open_set`].
+///
+/// A store that will not answer reads as *open*, which is the right way round
+/// for what it decides: on the other side is a session being ended and a
+/// Conversation moved, and doing either over a question nobody has answered
+/// would take the answer away from the agent that asked for it.
+pub(crate) async fn open(state: &AppState, conversation_id: i64) -> bool {
+    match store::open_set(&state.pool, conversation_id).await {
+        Ok(open) => open.is_some(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a Conversation was still asking the human anything failed");
+            true
+        }
+    }
+}
+
+/// Whether the newest round the human answered carries the Nothing-else mark.
+///
+/// A store that will not answer reads as *not marked*, which leaves the
+/// follow-up running: the same way round as [`open`], read from the other side.
+pub(crate) async fn marked(state: &AppState, conversation_id: i64) -> bool {
+    match store::nothing_else(&state.pool, conversation_id).await {
+        Ok(marked) => marked,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a follow-up was over failed");
+            false
         }
     }
 }
@@ -1117,7 +2130,10 @@ async fn follow_staging(state: AppState, conversation_id: i64, writing: Session,
 /// in between. Implementing is where an agent is building the work, and on a
 /// roadmap the building belongs to the Stages: this Conversation's own work is
 /// the planning, which is the grilling carrying on. The move is
-/// [`crate::wrapping::opened`]'s, made as the pull request is recorded.
+/// [`crate::wrapping::opened`]'s, made as the pull request is recorded — and a
+/// roadmap that was committed and never pushed gets the go every other ending
+/// gets, the roadmap being this Conversation's whole work and a pull request
+/// being what it is finished by. See [`to_a_pull_request`].
 ///
 /// No handoff anywhere in it, and none in a task list either. A handoff is for
 /// a context boundary the work actually crosses, and a roadmap crosses none:
@@ -1147,7 +2163,7 @@ async fn follow_roadmap(
     // order the two happened in.
     crate::conversations::roadmap_landed(&state, conversation_id).await;
 
-    crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+    to_a_pull_request(&state, conversation_id, Some(writing)).await;
 }
 
 /// Run one fix session about `feedback`, and wait until it is over.
@@ -1169,6 +2185,13 @@ async fn follow_roadmap(
 /// nothing is not by itself something to stop over: what
 /// wrap-up is watching is the check, and the human is asked once the machine has
 /// had its two goes at it — see [`crate::checks`].
+///
+/// **A session that will not ask is still spoken to**, which is the one thing
+/// the rescue does here that it does everywhere — see [`crate::rescues`]. What
+/// it does *not* do here is write the stop the other callers write: a fix
+/// session is one of two goes at one check, and the state that dispatched it has
+/// a stop of its own for when they run out. So the rescue ends the session and
+/// the wrap-up carries on from the check, which is still red.
 pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &str) -> Option<i64> {
     // Taken before the session starts, so it is a count of what the branch
     // carried before this fix rather than one that includes it.
@@ -1194,6 +2217,29 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
         _ = committed_and_quiet(state, conversation_id, already, &quiet, pace) => None,
+        // Idle, with nothing committed and nothing put to the human, which is a
+        // fix nobody can move on. Told twice and then ended where it stands; the
+        // stop, where there is to be one, is the wrap-up's own once the branch
+        // has had its two goes.
+        () = crate::rescues::until_it_will_not_ask(
+            state,
+            conversation_id,
+            event_id,
+            &quiet,
+            pace,
+            crate::rescues::Done::Committed { already },
+        ) => {
+            tracing::warn!(
+                conversation_id,
+                event_id,
+                "the fix session went quiet without committing anything or asking about it, \
+                 so it is being ended and the check looked at again",
+            );
+
+            state.sessions.end(conversation_id).await;
+
+            return Some(event_id);
+        }
     };
 
     if ended.is_none() {
@@ -1502,16 +2548,8 @@ async fn committed_and_quiet(
     loop {
         tokio::time::sleep(pace.poll).await;
 
-        match store::commits_landed(&state.pool, conversation_id).await {
-            Ok(landed) if landed > already => {}
-            // Nothing new, or a store that would not answer — which reads as
-            // nothing new for the reason a repository that will not answer reads
-            // as *not landed*: a session is ended on the strength of this.
-            Ok(_) => continue,
-            Err(error) => {
-                tracing::error!(error = ?error, conversation_id, "reading what a fix session committed failed");
-                continue;
-            }
+        if !committed_since(state, conversation_id, already).await {
+            continue;
         }
 
         loop {
@@ -1525,6 +2563,32 @@ async fn committed_and_quiet(
         }
 
         return;
+    }
+}
+
+/// Whether the Conversation has more commits on it than the `already` a session
+/// started over.
+///
+/// The store rather than git, for [`committed_and_quiet`]'s reason: the branch
+/// watcher is sweeping this branch for as long as the session runs and putting
+/// what lands on the Timeline, so the Timeline is where a fresh commit shows up
+/// first.
+///
+/// A store that will not answer reads as *nothing new*, which is the right way
+/// round for both things this decides — a session ended, and a session left
+/// alone rather than spoken to. See [`crate::rescues::Done::Committed`], which
+/// is the other reader.
+pub(crate) async fn committed_since(
+    state: &AppState,
+    conversation_id: i64,
+    already: usize,
+) -> bool {
+    match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed > already,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a session committed failed");
+            false
+        }
     }
 }
 
@@ -1579,6 +2643,13 @@ async fn stop(
 /// step again on its own. The run stops, and it is the human who decides whether
 /// the step gets another run.
 ///
+/// **A session that hangs is one of those**, and until it is spoken to it is
+/// none of them: it has not crashed and it has not stopped short, it is sitting
+/// there with the turn finished. So it is told what it cannot see from inside —
+/// twice, and then ended where it stands and stopped over like any other step
+/// that did not land. See [`crate::rescues`], whose done-indicator here is the
+/// step's own [`Landing`].
+///
 /// `Some` is the Timeline Event the session printed into. The step landed, and
 /// what comes after it may still want the session's own last words — the finish
 /// step's does, because a stop over what the finish left behind is explained from
@@ -1604,6 +2675,43 @@ async fn see_out(
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
         _ = landed_and_quiet(&worktree, &landing, &quiet, pace) => None,
+        // The step is not landing and the session is not asking about it: it has
+        // gone idle with nothing open and nothing on the branch, which is a run
+        // nobody can move. Told twice and then stopped where it stands — see
+        // [`crate::rescues`], whose loop this is one of five callers of.
+        () = crate::rescues::until_it_will_not_ask(
+            state,
+            conversation_id,
+            event_id,
+            &quiet,
+            pace,
+            crate::rescues::Done::Landed {
+                worktree: worktree.clone(),
+                landing: landing.clone(),
+            },
+        ) => {
+            tracing::warn!(
+                conversation_id,
+                event_id,
+                step = ?step,
+                "a session went quiet without finishing its step or asking about it, so the \
+                 backlog stops here",
+            );
+
+            state.sessions.end(conversation_id).await;
+
+            stop(
+                state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                &step.what(),
+                crate::rescues::WOULD_NOT_ASK,
+                Some(event_id),
+            )
+            .await;
+
+            return None;
+        }
     };
 
     let Some(ended) = ended else {
@@ -1703,7 +2811,7 @@ async fn landed_and_quiet(worktree: &Path, landing: &Landing, quiet: &Quiet, pac
 
 /// Whether `landing` has landed, off the runtime's threads: a directory read and
 /// a `git status` of one path.
-async fn check(worktree: &Path, landing: &Landing) -> bool {
+pub(crate) async fn check(worktree: &Path, landing: &Landing) -> bool {
     let worktree = worktree.to_owned();
     let landing = landing.clone();
 
@@ -1726,6 +2834,17 @@ fn landed(worktree: &Path, landing: &Landing) -> bool {
     let (path, wanted) = match landing {
         Landing::Gone(path) => (path, false),
         Landing::Arrived(path) => (path, true),
+        // Not a path at all but a line inside one, so what is asked is the
+        // list: the entry's box ticked, and the commit that ticked it landed.
+        Landing::Ticked(number) => {
+            let ticked = crate::tasks::entries(&worktree.join(BACKLOG)).is_some_and(|entries| {
+                entries
+                    .iter()
+                    .any(|entry| entry.number == *number && entry.checked)
+            });
+
+            return ticked && pending(worktree, &todo()) == Some(false);
+        }
         // Not a path this branch was told about but one it went and wrote, so
         // what is asked is which roadmaps it has touched — the same reading the
         // pinned stage list is drawn by, so the list the human is watching and
@@ -1762,6 +2881,119 @@ fn pending(worktree: &Path, path: &Path) -> Option<bool> {
     Some(!said.trim().is_empty())
 }
 
+/// The stage whose backlog was never planned, and what its branch was made on
+/// top of.
+///
+/// The one step a stage has that no other Conversation has: its first, run in
+/// the fork of next-stage, which is what writes the `.tasks/` every step after
+/// it works through. It is launched as the stage is made and by nothing else —
+/// [`crate::continuing`] where the stage before it settled, and
+/// [`crate::conversations::adopt`] where a human adopted the roadmap — so a
+/// planning session that died before it committed leaves a Conversation
+/// implementing a backlog that was never written, with nothing in Verkstead that
+/// would ever write one. That is a stage stuck for good, and it is stuck under
+/// both readings that exist for getting a run going again: [`nothing_left`]
+/// stops it, and a pressed Resume refuses it by name.
+///
+/// So it is asked for here. `Some` is that stage, carrying what
+/// [`crate::skills::next_stage`] has to be told — the branch this stage's branch
+/// stacks on, or `None` inside where it came off the default branch. `None` is
+/// every other Conversation: one that is not a stage, one whose backlog has been
+/// written already, and one with no base commit to read a branch's writing
+/// against.
+///
+/// Asked of the repository rather than of the record, by the rule the rest of
+/// this module reads a run's position by — what a branch has written is the
+/// branch's own to say, and it is the same answer however the Conversation got
+/// here. A git that will not answer says *written*, which is the right way round
+/// for the one thing this decides: a stage planned a second time over a backlog
+/// that is already there would be an agent let loose on somebody else's work.
+pub(crate) async fn stage_to_plan(
+    state: &AppState,
+    conversation_id: i64,
+    worktree: &Path,
+    base: Option<&str>,
+) -> Option<Option<String>> {
+    // No base commit is a Conversation that never branched, which is not a stage
+    // — a stage is made by branching — and is not something a branch's own
+    // writing can be read against either.
+    let base = base?;
+
+    let stacked_on = match store::stacks_on(&state.pool, conversation_id).await {
+        // The outer answer is whether this is a stage at all, and the inner one
+        // is what its branch was made on top of. Only the outer one decides
+        // anything here; the inner is carried through to the fork, which is the
+        // one thing about a stage the repository does not say.
+        Ok(stacked_on) => stacked_on?,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "reading whether a Conversation is a roadmap stage failed",
+            );
+
+            return None;
+        }
+    };
+
+    (!wrote_a_backlog(worktree, Some(base)).await).then_some(stacked_on)
+}
+
+/// [`backlog_written`] as the two things that turn on it ask it: off the
+/// runtime's threads, and *written* wherever it cannot be read at all.
+///
+/// A git that will not answer and a Conversation with no base commit are the same
+/// unreadable branch, and every caller wants the same thing said about one. A
+/// stage read as unplanned would be planned again over somebody else's backlog;
+/// an emptied backlog read as never written would stop a run that has work on the
+/// branch and one push to go, and refuse the press that would have finished it.
+/// *Written* is the careful answer to all three.
+pub(crate) async fn wrote_a_backlog(worktree: &Path, base: Option<&str>) -> bool {
+    let Some(base) = base else {
+        return true;
+    };
+
+    let worktree = worktree.to_owned();
+    let base = base.to_owned();
+
+    tokio::task::spawn_blocking(move || backlog_written(&worktree, &base))
+        .await
+        .unwrap_or(true)
+}
+
+/// Whether this branch has written a backlog since `base`.
+///
+/// Two questions, as [`crate::stages::touched`] asks two, because git answers
+/// them separately: what the history holds — every commit that touched
+/// `.tasks/`, the finish step's own deletion of it included — and what is in the
+/// Worktree that no commit has taken yet. A backlog that was written and then
+/// finished with is in the first; one a session wrote and died before committing
+/// is in the second. A stage that never planned is in neither.
+///
+/// Since `base` rather than over the whole history, because a stage's branch is
+/// stacked on the branch of the stage before it: the predecessor's backlog and
+/// the finish that emptied it are commits this branch is descended from, and a
+/// reading that counted those would say every stage had planned already.
+///
+/// A repository that will not answer says *written* — see [`stage_to_plan`] for
+/// why that is the safe way round.
+fn backlog_written(worktree: &Path, base: &str) -> bool {
+    let since = format!("{base}..HEAD");
+
+    // `--` rather than `--end-of-options`: what follows it is a pathspec, which
+    // is git's own name for a path, and the base is a commit Verkstead resolved
+    // itself rather than anything a human typed here.
+    let committed = git(worktree, &["log", "--format=%H", &since, "--", BACKLOG]);
+    let uncommitted = git(worktree, &["status", "--porcelain", "--", BACKLOG]);
+
+    match (committed, uncommitted) {
+        (Some(committed), Some(uncommitted)) => {
+            !committed.trim().is_empty() || !uncommitted.trim().is_empty()
+        }
+        _ => true,
+    }
+}
+
 /// Whether `.tasks/` has anything left in it to work.
 ///
 /// The one thing about a backlog anybody outside the runner asks: Resume refuses
@@ -1788,39 +3020,38 @@ async fn decide(worktree: &Path) -> Step {
 
 /// What to run next, decided from `.tasks/` alone.
 ///
-/// The lowest-numbered task file left, because the order the backlog was written
-/// in is the order its slices depend on each other. Then the finish step, once
-/// the only thing left is the list itself. Then nothing — which is a `.tasks/`
+/// The lowest-numbered entry whose box is not ticked, because the order the
+/// backlog was written in is the order its slices depend on each other. Then the
+/// finish step, once every box is ticked. Then nothing — which is a `.tasks/`
 /// that was never written and one that has been finished with, and there is
 /// nothing for the runner to do about either.
+///
+/// The list decides all of it, and the directory beside it only says which file
+/// the session will be working from. A backlog part way through being written
+/// has entries with no files yet, and reading those as done would be the runner
+/// finishing a feature nobody had started: an entry that is not ticked and names
+/// nothing is [`Step::Broken`], which stops the run and says so.
 fn next_step(worktree: &Path) -> Step {
     let backlog = worktree.join(BACKLOG);
 
-    let mut left: Vec<(u32, String)> = match std::fs::read_dir(&backlog) {
-        Ok(listed) => listed
-            .flatten()
-            .filter_map(|file| {
-                let name = file.file_name().to_string_lossy().into_owned();
-                numbered(&name).map(|number| (number, name))
-            })
-            .collect(),
-        Err(_) => Vec::new(),
+    let Some(entries) = crate::tasks::entries(&backlog) else {
+        return Step::Nothing;
     };
 
-    // By the number rather than by the name, so `9-` comes before `10-` where a
-    // backlog was written without zero-padding. The name breaks the tie, which
-    // is only ever two files claiming one number.
-    left.sort();
-
-    if let Some((_, name)) = left.into_iter().next() {
-        return Step::Task(Path::new(BACKLOG).join(name));
-    }
-
-    if backlog.join(TODO).is_file() {
+    // In the list's own order rather than sorted: `TODO.md` is written in the
+    // order the tasks are meant to be worked, and renumbering somebody's backlog
+    // is not the runner's to do.
+    let Some(next) = entries.into_iter().find(|entry| !entry.checked) else {
         return Step::Finish;
-    }
+    };
 
-    Step::Nothing
+    match crate::tasks::files(&backlog).get(&next.number) {
+        Some(name) => Step::Task {
+            number: next.number,
+            file: Path::new(BACKLOG).join(name),
+        },
+        None => Step::Broken { label: next.label },
+    }
 }
 
 /// Which skill a session is being started inside.
@@ -1847,6 +3078,17 @@ enum Prompt {
 
     /// The implementation skill, which is the whole of an inline run.
     Implementing,
+
+    /// The submitting skill, which the session sent after a finish that left no
+    /// pull request runs inside.
+    ///
+    /// Carries nothing, like every other prompt that carries nothing: what it is
+    /// about is the branch, which the session reads for itself. A prompt of its
+    /// own rather than the finish step's again, because the work is built — a
+    /// session told to work the next task would find no backlog and nothing to
+    /// do, and the one thing left is the one thing that skill says last. See
+    /// [`to_a_pull_request`].
+    Submitting,
 
     /// The instruction skill, carrying the hand-written work a steer into
     /// Implementing sent the session off with.
@@ -1882,6 +3124,15 @@ enum Prompt {
     /// The responding skill, which a session answering a batch of comments runs
     /// inside — carrying the batch, which is the whole of what it is about.
     Responding(String),
+
+    /// The following-up skill, carrying the brief a steer into Follow-up sent
+    /// the session off with — and, where this is a follow-up being picked up
+    /// again, the rounds it has already been through.
+    ///
+    /// The instruction's shape and never its meaning: what it carries opens a
+    /// conversation rather than naming one job, so the session answers it, does
+    /// what it asks and goes on asking — see [`following_up`].
+    FollowingUp(FollowUp),
 }
 
 /// Wait for the Conversation's Worktree, and then [`launch`] into it.
@@ -1970,6 +3221,7 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                 Prompt::Staging => skills::staging(&brief),
                 Prompt::NextTask => skills::next_task(&brief, handoff),
                 Prompt::Implementing => skills::implementing(&brief, handoff),
+                Prompt::Submitting => skills::submitting(&brief, handoff),
                 Prompt::Instruction(instruction) => {
                     skills::instruction(&brief, handoff, instruction)
                 }
@@ -1978,6 +3230,9 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                     skills::reviewing(&brief, handoff, on.as_deref(), said.as_deref())
                 }
                 Prompt::Responding(said) => skills::responding(&brief, handoff, said),
+                Prompt::FollowingUp(follow_up) => {
+                    skills::following_up(&brief, handoff, &follow_up.brief, &follow_up.settled)
+                }
             }
         }
         Err(error) => {
@@ -2048,30 +3303,6 @@ async fn worktree(state: &AppState, conversation_id: i64) -> Option<PathBuf> {
     }
 }
 
-/// Which registered Repo a Conversation's own work is in, or `None` where there
-/// is no Conversation left to ask about.
-///
-/// What the record is asked with wherever the question is about the work's own
-/// repository rather than a companion's. A Conversation ends on one pull request
-/// per repository it was worked in, and the Conversation's own is the one that
-/// says whether there is a wrap-up at all — see [`store::pull_request`].
-async fn own_repo(state: &AppState, conversation_id: i64) -> Option<i64> {
-    match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => Some(conversation.repo.id),
-        Ok(None) => {
-            tracing::error!(
-                conversation_id,
-                "there is no Conversation left to read a repository off"
-            );
-            None
-        }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading the Conversation's own repository failed");
-            None
-        }
-    }
-}
-
 /// The commit the Conversation's branch came off, or `None` where there is none
 /// to read.
 ///
@@ -2107,10 +3338,10 @@ mod tests {
 
     use super::*;
 
-    /// A worktree with a backlog in it: `TODO.md` and whichever task files are
-    /// still to do, committed as a session that finished the ones before them
-    /// would have left it.
-    fn worktree(files: &[&str]) -> tempfile::TempDir {
+    /// A worktree with a backlog in it: `TODO.md` as `list` writes it and a task
+    /// document per file, committed as the breaking-down session would have left
+    /// it.
+    fn worktree(list: &str, files: &[&str]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path();
 
@@ -2120,7 +3351,7 @@ mod tests {
 
         let backlog = path.join(BACKLOG);
         std::fs::create_dir_all(&backlog).unwrap();
-        std::fs::write(backlog.join(TODO), "# Rate limiting\n").unwrap();
+        std::fs::write(backlog.join(TODO), list).unwrap();
 
         for file in files {
             std::fs::write(backlog.join(file), "# a task\n").unwrap();
@@ -2130,6 +3361,35 @@ mod tests {
         run(path, &["commit", "-m", "chore: plan rate-limiting tasks"]);
 
         dir
+    }
+
+    /// The list of a three-task backlog, with the first `done` of them ticked
+    /// off — which is what a run part way through looks like.
+    fn list(done: usize) -> String {
+        ["01: First", "02: Second", "03: Third"]
+            .iter()
+            .enumerate()
+            .map(|(at, entry)| match at < done {
+                true => format!("- [x] {entry}\n"),
+                false => format!("- [ ] {entry}\n"),
+            })
+            .collect::<String>()
+    }
+
+    /// The three task documents that backlog names.
+    const DOCUMENTS: [&str; 3] = ["01-first.md", "02-second.md", "03-third.md"];
+
+    /// Tick entry `number` off in the worktree's list and commit it, which is
+    /// what a session finishing a task does.
+    fn finish(path: &Path, number: &str) {
+        let list = path.join(BACKLOG).join(TODO);
+        let ticked = std::fs::read_to_string(&list)
+            .unwrap()
+            .replace(&format!("- [ ] {number}:"), &format!("- [x] {number}:"));
+
+        std::fs::write(&list, ticked).unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "feat: a task"]);
     }
 
     fn run(dir: &Path, args: &[&str]) -> String {
@@ -2147,21 +3407,61 @@ mod tests {
     }
 
     /// The order the backlog was written in is the order its slices depend on
-    /// each other, so the lowest number left is the only thing to run next.
+    /// each other, so the lowest entry still unticked is the only thing to run
+    /// next.
     #[test]
-    fn the_next_step_is_the_lowest_numbered_task_file_left() {
-        let dir = worktree(&["03-third.md", "01-first.md", "02-second.md"]);
+    fn the_next_step_is_the_lowest_unticked_entry() {
+        let dir = worktree(&list(0), &DOCUMENTS);
 
         assert_eq!(
             next_step(dir.path()),
-            Step::Task(Path::new(BACKLOG).join("01-first.md")),
+            Step::Task {
+                number: 1,
+                file: Path::new(BACKLOG).join("01-first.md"),
+            },
         );
 
-        std::fs::remove_file(dir.path().join(BACKLOG).join("01-first.md")).unwrap();
+        finish(dir.path(), "01");
 
         assert_eq!(
             next_step(dir.path()),
-            Step::Task(Path::new(BACKLOG).join("02-second.md")),
+            Step::Task {
+                number: 2,
+                file: Path::new(BACKLOG).join("02-second.md"),
+            },
+        );
+    }
+
+    /// And the file staying where it is says nothing: what a session leaves
+    /// behind is a ticked entry beside a document nobody deleted.
+    #[test]
+    fn a_task_file_left_behind_is_not_a_task_still_to_do() {
+        let dir = worktree(&list(2), &DOCUMENTS);
+
+        assert_eq!(
+            next_step(dir.path()),
+            Step::Task {
+                number: 3,
+                file: Path::new(BACKLOG).join("03-third.md"),
+            },
+            "the two ticked entries are done, documents and all",
+        );
+    }
+
+    /// The other way round, and the case the whole rule is for: a backlog part
+    /// way through being written has entries with no documents yet, and the
+    /// runner stops rather than putting a session at nothing to work from.
+    #[test]
+    fn an_unticked_entry_with_no_file_stops_the_run() {
+        let dir = worktree(&list(0), &["01-first.md"]);
+
+        finish(dir.path(), "01");
+
+        assert_eq!(
+            next_step(dir.path()),
+            Step::Broken {
+                label: "02".to_owned()
+            },
         );
     }
 
@@ -2169,19 +3469,25 @@ mod tests {
     /// zero-padded backlog and a different one for a backlog that got past nine.
     #[test]
     fn a_backlog_that_got_past_nine_is_still_worked_in_order() {
-        let dir = worktree(&["9-ninth.md", "10-tenth.md"]);
+        let dir = worktree(
+            "- [ ] 9: Ninth\n- [ ] 10: Tenth\n",
+            &["9-ninth.md", "10-tenth.md"],
+        );
 
         assert_eq!(
             next_step(dir.path()),
-            Step::Task(Path::new(BACKLOG).join("9-ninth.md")),
+            Step::Task {
+                number: 9,
+                file: Path::new(BACKLOG).join("9-ninth.md"),
+            },
         );
     }
 
-    /// `TODO.md` is the list rather than a task, and the runner has to be able
-    /// to tell them apart — it is what is left when every task is done.
+    /// Every box ticked is the feature built, whatever is still sitting in
+    /// `.tasks/` — the finish step is what takes the directory away.
     #[test]
-    fn the_finish_step_is_what_is_left_once_the_task_files_have_gone() {
-        let dir = worktree(&[]);
+    fn the_finish_step_is_what_is_left_once_every_entry_is_ticked() {
+        let dir = worktree(&list(3), &DOCUMENTS);
 
         assert_eq!(next_step(dir.path()), Step::Finish);
     }
@@ -2190,40 +3496,39 @@ mod tests {
     /// was never broken down, and one whose finish commit took `.tasks/` away.
     #[test]
     fn a_worktree_with_no_backlog_has_nothing_to_run() {
-        let dir = worktree(&[]);
+        let dir = worktree(&list(3), &DOCUMENTS);
         std::fs::remove_dir_all(dir.path().join(BACKLOG)).unwrap();
 
         assert_eq!(next_step(dir.path()), Step::Nothing);
         assert_eq!(next_step(Path::new("/nonexistent")), Step::Nothing);
     }
 
-    /// The done-signal, and the half of it that matters most: the file is gone,
-    /// but the commit removing it has not landed, so the session is still
-    /// mid-task.
+    /// The done-signal, and the half of it that matters most: the box is
+    /// ticked, but the commit that ticked it has not landed, so the session is
+    /// still mid-task.
     #[test]
-    fn a_task_file_deleted_but_not_committed_is_a_session_still_working() {
-        let dir = worktree(&["01-first.md"]);
-        let landing = Landing::Gone(Path::new(BACKLOG).join("01-first.md"));
+    fn an_entry_ticked_but_not_committed_is_a_session_still_working() {
+        let dir = worktree(&list(0), &DOCUMENTS);
+        let path = dir.path();
+        let landing = Landing::Ticked(1);
+        let todo = path.join(BACKLOG).join(TODO);
 
-        assert!(!landed(dir.path(), &landing), "the file is still there");
+        assert!(!landed(path, &landing), "the box is not ticked yet");
 
-        std::fs::remove_file(dir.path().join(BACKLOG).join("01-first.md")).unwrap();
-
-        assert!(
-            !landed(dir.path(), &landing),
-            "deleted, and the deletion is not committed",
-        );
-
-        run(dir.path(), &["add", "-A"]);
+        std::fs::write(&todo, list(1)).unwrap();
 
         assert!(
-            !landed(dir.path(), &landing),
-            "staged is not committed either",
+            !landed(path, &landing),
+            "ticked, and the tick is not committed",
         );
 
-        run(dir.path(), &["commit", "-m", "feat: count the requests"]);
+        run(path, &["add", "-A"]);
 
-        assert!(landed(dir.path(), &landing), "gone and committed");
+        assert!(!landed(path, &landing), "staged is not committed either");
+
+        run(path, &["commit", "-m", "feat: count the requests"]);
+
+        assert!(landed(path, &landing), "ticked and committed");
     }
 
     /// The other way round, which is the breakdown's signal: the plan is written
@@ -2256,6 +3561,162 @@ mod tests {
         run(path, &["commit", "-m", "chore: plan rate-limiting tasks"]);
 
         assert!(landed(path, &landing), "written and committed");
+    }
+
+    /// A repository at the moment a roadmap stage's branch is made on top of the
+    /// stage before it: that one planned a backlog, worked it, and finished with
+    /// it, so `.tasks/` is all through the history and gone from the tree.
+    ///
+    /// Returns the worktree and the commit the stage's branch stands on, which
+    /// is what a stage's writing is read against.
+    fn stacked() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        run(path, &["init", "--initial-branch", "main"]);
+        run(path, &["config", "user.email", "test@verkstead.invalid"]);
+        run(path, &["config", "user.name", "Verkstead Test"]);
+        std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "first"]);
+
+        let backlog = path.join(BACKLOG);
+        std::fs::create_dir_all(&backlog).unwrap();
+        std::fs::write(backlog.join(TODO), "# Visibility\n").unwrap();
+        std::fs::write(backlog.join("01-first.md"), "# a task\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: plan Visibility tasks"]);
+
+        std::fs::remove_dir_all(&backlog).unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: finish Visibility"]);
+
+        let base = run(path, &["rev-parse", "HEAD"]).trim().to_owned();
+
+        (dir, base)
+    }
+
+    /// The reading the whole recovery turns on: a stage that was made and then
+    /// lost its planning session has written no backlog, however much of one is
+    /// behind it in the history it stacks on.
+    #[test]
+    fn a_stage_that_never_planned_has_written_no_backlog() {
+        let (dir, base) = stacked();
+
+        assert!(
+            !backlog_written(dir.path(), &base),
+            "the backlog in the history is the stage before this one's",
+        );
+    }
+
+    /// And the moment the planning lands, which is what stops it being planned
+    /// twice: the commit is this branch's own, so it counts.
+    #[test]
+    fn a_backlog_this_stage_committed_is_written() {
+        let (dir, base) = stacked();
+        let path = dir.path();
+
+        let backlog = path.join(BACKLOG);
+        std::fs::create_dir_all(&backlog).unwrap();
+        std::fs::write(backlog.join(TODO), "# Pipeline\n").unwrap();
+
+        assert!(
+            backlog_written(path, &base),
+            "written and not committed is still written — a session is mid-plan",
+        );
+
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: plan Pipeline tasks"]);
+
+        assert!(backlog_written(path, &base), "written and committed");
+    }
+
+    /// The case that must never be read as a stage to plan again: the backlog
+    /// was written, worked to empty, and the finish took `.tasks/` away. The
+    /// tree looks exactly like a stage that planned nothing, and the history is
+    /// what tells them apart.
+    #[test]
+    fn a_backlog_this_stage_finished_with_is_still_written() {
+        let (dir, base) = stacked();
+        let path = dir.path();
+
+        let backlog = path.join(BACKLOG);
+        std::fs::create_dir_all(&backlog).unwrap();
+        std::fs::write(backlog.join(TODO), "# Pipeline\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: plan Pipeline tasks"]);
+
+        std::fs::remove_dir_all(&backlog).unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: finish Pipeline"]);
+
+        assert_eq!(next_step(path), Step::Nothing, "nothing left to work");
+
+        assert!(
+            backlog_written(path, &base),
+            "this stage planned, and a finished backlog is not an unplanned one",
+        );
+    }
+
+    /// And the other thing the same reading decides: which of two situations an
+    /// empty backlog is, when Resume is pressed on a branch that is on no pull
+    /// request. A branch that worked its backlog to empty has written one and
+    /// finished with it, so the work is built and the push is the only thing
+    /// left; one that never had a breakdown land on it has written none and has
+    /// nothing built to carry anywhere. The Worktree looks the same either way —
+    /// no `.tasks/` at all — and the history is the whole of the difference. See
+    /// [`nothing_left`].
+    #[test]
+    fn an_emptied_backlog_and_one_that_never_landed_are_told_apart_by_the_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        run(path, &["init", "--initial-branch", "main"]);
+        run(path, &["config", "user.email", "test@verkstead.invalid"]);
+        run(path, &["config", "user.name", "Verkstead Test"]);
+
+        std::fs::write(path.join("README.md"), "# A repository\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: the repository as it stood"]);
+
+        let base = run(path, &["rev-parse", "HEAD"]).trim().to_owned();
+
+        assert_eq!(next_step(path), Step::Nothing, "there is nothing to work");
+        assert!(
+            !backlog_written(path, &base),
+            "and nothing on this branch ever wrote a backlog, so there is nothing built \
+             to send for a pull request",
+        );
+
+        let backlog = path.join(BACKLOG);
+        std::fs::create_dir_all(&backlog).unwrap();
+        std::fs::write(backlog.join(TODO), "# Rate limiting\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: plan rate-limiting tasks"]);
+
+        std::fs::remove_dir_all(&backlog).unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: finish rate limiting"]);
+
+        assert_eq!(
+            next_step(path),
+            Step::Nothing,
+            "the finish took the list away, so there is nothing to work here either",
+        );
+        assert!(
+            backlog_written(path, &base),
+            "but this branch wrote a backlog and finished with it, which is a run that \
+             got as far as its push",
+        );
+    }
+
+    /// A repository git will not answer about says *written*, because the one
+    /// thing this decides is whether to plan a stage again — and planning one
+    /// over a backlog that is already there is the failure worth being careful
+    /// about.
+    #[test]
+    fn a_repository_that_will_not_answer_says_written() {
+        assert!(backlog_written(Path::new("/nonexistent"), "HEAD"));
     }
 
     /// The same rule for the roadmap step, and the reason it cannot be a path
@@ -2319,19 +3780,17 @@ mod tests {
     /// own `git commit` fail, on a machine with nobody watching.
     #[test]
     fn the_poll_reads_through_a_lock_a_session_is_holding() {
-        let dir = worktree(&["01-first.md"]);
+        let dir = worktree(&list(0), &DOCUMENTS);
         let path = dir.path();
 
-        std::fs::remove_file(path.join(BACKLOG).join("01-first.md")).unwrap();
-        run(path, &["add", "-A"]);
-        run(path, &["commit", "-m", "feat: count the requests"]);
+        finish(path, "01");
 
         // What a session mid-commit has left in the repository.
         let lock = path.join(".git/index.lock");
         std::fs::write(&lock, "").unwrap();
 
         assert!(
-            landed(path, &Landing::Gone(Path::new(BACKLOG).join("01-first.md"))),
+            landed(path, &Landing::Ticked(1)),
             "a locked repository is still a repository to read",
         );
         assert!(
@@ -2340,7 +3799,8 @@ mod tests {
         );
     }
 
-    /// Which path each step turns on. The plan arrives, everything else goes.
+    /// What each step turns on. The plan arrives, the finish takes the list
+    /// away, and a task is its own entry ticked off in it.
     #[test]
     fn every_step_but_nothing_has_something_to_watch_for() {
         assert_eq!(
@@ -2352,8 +3812,12 @@ mod tests {
             Some(Landing::Gone(Path::new(".tasks/TODO.md").to_owned())),
         );
         assert_eq!(
-            Step::Task(Path::new(".tasks/01-first.md").to_owned()).landing(),
-            Some(Landing::Gone(Path::new(".tasks/01-first.md").to_owned())),
+            Step::Task {
+                number: 1,
+                file: Path::new(".tasks/01-first.md").to_owned(),
+            }
+            .landing(),
+            Some(Landing::Ticked(1)),
         );
         assert_eq!(
             Step::Staging("d41f8a3b".to_owned()).landing(),
@@ -2366,6 +3830,14 @@ mod tests {
             ))),
         );
         assert_eq!(Step::Nothing.landing(), None);
+        assert_eq!(
+            Step::Broken {
+                label: "02".to_owned()
+            }
+            .landing(),
+            None,
+            "an entry with no file is nothing to run, so there is nothing to wait for",
+        );
     }
 
     /// The handoff is the one landing with no repository in it. Nothing puts the
@@ -2375,7 +3847,7 @@ mod tests {
     /// about it either way.
     #[test]
     fn the_handoff_lands_outside_the_worktree_entirely() {
-        let dir = worktree(&[]);
+        let dir = worktree(&list(3), &DOCUMENTS);
         let elsewhere = tempfile::tempdir().unwrap();
         let document = elsewhere.path().join("handoff.md");
         let landing = Landing::Handoff(document.clone());

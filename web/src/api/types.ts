@@ -419,6 +419,26 @@ export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
 export type Capture = { text: string, };
 
 /**
+ * How a pull request's checks are getting on, taken all together.
+ *
+ * The store's own word, carried across the wire — see the reading behind it
+ * there. Three states and no fourth: *nobody has asked* is the absence of one
+ * rather than a variant, which is a card with no icon on it.
+ */
+export type CheckRollup = "Passed" | "Running" | "Failed";
+
+/**
+ * How one check is getting on.
+ *
+ * The same three words as [`CheckRollup`] and not the same thing: this is one
+ * check and that is a whole suite taken together. Three rather than GitHub's
+ * dozen, because three is what anybody does anything about — a red one is the
+ * thing to go and look at, one still running is nothing to do yet, and the
+ * rest are green.
+ */
+export type Checked = "Passed" | "Running" | "Failed";
+
+/**
  * A commit as the Timeline shows it: what it was called, and how much of the
  * repository it moved.
  *
@@ -687,7 +707,7 @@ export type ConversationArchived = "Archived" | "AlreadyArchived" | "NotClosed" 
 /**
  * What became of closing one.
  */
-export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversation" | "WorktreeStuck";
+export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversation";
 
 /**
  * One row of the conversations sidebar.
@@ -697,11 +717,11 @@ export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversatio
  *
  * Where it has got to is drawn rather than worded — a turning ring for a
  * session getting on with it, the same ring empty for one that has gone quiet,
- * a dot for a Conversation that wants answering, a dotted border for a draft
- * and a dimmed card for work that has stopped. Which is why the facts below are
- * facts and not one collapsed verdict: the row says what is true of the
- * Conversation, and which mark that comes out as is the one rule the viewer
- * keeps.
+ * a dot for a Conversation that wants answering or has news on it, a dotted
+ * border for a draft and a dimmed card for work that has stopped. Which is why
+ * the facts below are facts and not one collapsed verdict: the row says what is
+ * true of the Conversation, and which mark that comes out as is the one rule
+ * the viewer keeps.
  */
 export type ConversationEntry = { id: number, branch: string, 
 /**
@@ -734,7 +754,35 @@ idle: boolean,
  * them. A Draft is never one of them: it is drawn as a draft, and that is
  * the whole of what a draft has to say.
  */
-waiting: boolean, };
+waiting: boolean, 
+/**
+ * Whether this one is a wrap-up that has narrowed to its checks: the review
+ * and the comments settled, the checks not, and nothing running on it.
+ *
+ * A derived condition of Wrapping rather than a state, which is why it sits
+ * beside `state` the way *blocked on you* does rather than in it. Nothing
+ * is stored for it: it is the wrap-up's own settle facts read a particular
+ * way, folded here so the row does not have to.
+ *
+ * The row draws no state in words, so what this comes out as is the label
+ * read aloud — *Waiting on checks* where the plain state word would be.
+ */
+waiting_on_checks: boolean, 
+/**
+ * Whether Verkstead has told the human something about this Conversation
+ * that they have not looked at yet.
+ *
+ * One thing writes it: the wrap-up that carries a Conversation to Done and
+ * pushes the news to the devices, in the same breath as the push. A
+ * milestone nobody was watching happen is what a mark saying *look here*
+ * is for, and a Done the human steered to themselves is what it is not.
+ *
+ * Beside `waiting` rather than folded into it, because the row draws one
+ * disc for the two and says which of them it is in the label read aloud:
+ * *something wants you* against *there is news here*. Cleared by opening
+ * the Conversation, which the browser says in a call of its own.
+ */
+unseen: boolean, };
 
 /**
  * What became of submitting one.
@@ -745,7 +793,7 @@ waiting: boolean, };
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -857,6 +905,24 @@ ready_to_resume: boolean,
  */
 ready_to_stop: boolean, 
 /**
+ * And whether a stop has already been asked for and is waiting for the step
+ * the run is on to finish.
+ *
+ * What takes **Stop** off the menu, the press having been made: it is
+ * recorded, the run halts the moment the step lands, and a row still
+ * offering it would be Verkstead asking for a decision it already has.
+ * Force stop is left where it is — it is the escalation from here, and the
+ * one thing a human who has changed their mind about waiting can still
+ * press.
+ *
+ * Beside [`ready_to_stop`] rather than folded into it, because the two say
+ * different things: that one is *there is a run to stop*, which is what
+ * draws Force stop, and this is *and you have already said so*.
+ *
+ * [`ready_to_stop`]: ConversationView::ready_to_stop
+ */
+stop_asked: boolean, 
+/**
  * And whether a steer into Implementing has anything to carry on: the
  * branch holds a backlog with work left in it, or a roadmap it has
  * written.
@@ -920,8 +986,47 @@ direction: Direction | null,
  *
  * *Blocked on you* is a badge on an active state and never a state of its
  * own, which is why this sits beside `state` rather than in it.
+ *
+ * Set for every stop, however it stopped. Which of the two marks the
+ * header draws is `stopped_by_hand` below — both of them point here, a
+ * stop the human has to find being the same Notice as a stop they made
+ * themselves.
  */
 blocked_on: number | null, 
+/**
+ * Whether that stop is the human's own press, or a row from before the
+ * two were told apart and read as one.
+ *
+ * Which of the two marks the header draws, decided here rather than in the
+ * browser: `false` is the accent *Blocked on you* badge — Verkstead pulled
+ * the brake, or a crash took the driver away — and `true` is the quiet
+ * **Stopped** label, which goes to the same Notice and says nothing about
+ * anybody waiting. The sidebar's disc follows the same rule from its own
+ * end of the wire, where the row's `waiting` has already folded it in.
+ *
+ * `false` where nothing has stopped, which is the ordinary Conversation:
+ * there is no mark to choose between.
+ */
+stopped_by_hand: boolean, 
+/**
+ * Whether the wrap-up has narrowed to its checks: the review answered, the
+ * comments dealt with, the checks alone outstanding, and nothing running in
+ * the Worktree.
+ *
+ * What the *Waiting on checks* label is drawn from, and a condition of
+ * Wrapping rather than a state of its own — the precedent is `blocked_on`
+ * above, and this sits beside `state` for the same reason. Nothing is
+ * stored for it: it is the settle facts and the register read together, at
+ * the moment the page was read.
+ *
+ * A flag rather than an Event id, because unlike a stop there is nothing to
+ * go and look at and nothing to do about it — the Notice saying so is on
+ * the record where it happened, and the label is a label.
+ *
+ * `false` in every state but Wrapping, which is where the condition is
+ * derived from and the only place it can hold.
+ */
+waiting_on_checks: boolean, 
 /**
  * What the stop shows about the account that ran out coming back, and
  * `null` on every stop that is not a usage window's — which is nearly all
@@ -950,6 +1055,31 @@ resets: string | null,
  * is what each of them is.
  */
 working: boolean, 
+/**
+ * And whether any driver of Verkstead's own is registered for it as of
+ * this read: the runner working a backlog, the driver following an inline
+ * run or a roadmap, one of the watchers a wrap-up has going — see the
+ * server's own drivers register.
+ *
+ * The same register [`ready_to_resume`] is decided against, reported raw
+ * rather than judged: this says what *is* driving and that one says what
+ * ought to be. So it is a plain `false` wherever nothing holds a
+ * registration, including the states nothing is supposed to be driving —
+ * a Closed Conversation is not one being driven, whatever the resume rule
+ * makes of it.
+ *
+ * Read for the reason [`working`] is, one register along, and true only as
+ * of the moment it was read. The pair is what says a Conversation has gone
+ * quiet all the way through: no session running *and* nothing left holding
+ * it. Which is a stronger thing than the first alone, because a driver
+ * lets go only once its task has ended — so a watcher that is off here has
+ * finished its last call to the outside world rather than merely started
+ * it.
+ *
+ * [`ready_to_resume`]: ConversationView::ready_to_resume
+ * [`working`]: ConversationView::working
+ */
+driven: boolean, 
 /**
  * Oldest first, which is reading order and puts the Brief at the top.
  */
@@ -1043,7 +1173,7 @@ html: string, };
  * the domain's, and the page says which one a Conversation is in rather than
  * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Done" | "Closed";
+export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done" | "Closed";
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -1321,6 +1451,26 @@ export type Prose = {
 id: number, html: string, };
 
 /**
+ * One check GitHub is running against a pull request, as the details pane
+ * receives it: what it is called, how it is getting on, and where its run is.
+ *
+ * A line of a list GitHub keeps, in the spirit [`PullRequestCommit`] is one:
+ * read at the moment the pane is opened rather than written down, because a
+ * suite is still running while the human is looking at it.
+ */
+export type PullRequestCheck = { 
+/**
+ * What GitHub calls it, which is what the human calls it by.
+ */
+name: string, how: Checked, 
+/**
+ * Where its run is, as GitHub gave it — the one thing a red check cannot
+ * be read without. Empty where GitHub gave none, which is a check drawn as
+ * its name and nothing to follow.
+ */
+link: string, };
+
+/**
  * One comment on a pull request: who said it, when, and what they said.
  *
  * The body arrives rendered, like everything else an outsider wrote — a comment
@@ -1359,8 +1509,8 @@ sha: string,
 subject: string, };
 
 /**
- * What is on a pull request now: the commits it carries, and what has been said
- * about it.
+ * What is on a pull request now: the commits it carries, what GitHub is running
+ * against it, and what has been said about it.
  *
  * Its own request rather than a field on the Conversation, for the reason a
  * commit's diff is one — and for a further reason of its own: reading this is
@@ -1375,7 +1525,17 @@ export type PullRequestDetails = {
 /**
  * Oldest first, as GitHub lists them, which is the order they landed.
  */
-commits: Array<PullRequestCommit>, comments: Array<PullRequestComment>, };
+commits: Array<PullRequestCommit>, comments: Array<PullRequestComment>, 
+/**
+ * Every check GitHub is running against it, in the order GitHub lists
+ * them. Empty where there are none, which is a repository with no CI.
+ *
+ * Each of them rather than the one word the card draws — see
+ * [`CheckRollup`]. What the card has room for is which of the three a
+ * suite is; this is the pane somebody opens to find out *which* check is
+ * red and where its run is.
+ */
+checks: Array<PullRequestCheck>, };
 
 /**
  * The pull request as the Timeline shows it: what it is called and what number
@@ -1416,7 +1576,21 @@ url: string,
  * is in, and the label earns its place when the pinned block holds a
  * companion's pull request as well.
  */
-repo: string | null, };
+repo: string | null, 
+/**
+ * How the checks on it were getting on the last time anything asked, or
+ * nothing where nothing has — a pull request in a repository with no CI,
+ * and one opened before Verkstead started writing this down.
+ *
+ * The aggregate rather than the checks, because what the card has room for
+ * is one icon: which of the three a suite is, and not what each of them is
+ * called.
+ *
+ * It can be stale, and on a Conversation nothing is watching any more it
+ * will be: what keeps it fresh is the checks watcher, and that stops when
+ * the wrap-up is over.
+ */
+checks: CheckRollup | null, };
 
 /**
  * The public half of the server's VAPID keypair, base64url-encoded from the
@@ -1591,7 +1765,25 @@ comment?: string | null,
  * left open, anything without a pick — so `None` on a proposal Set is the
  * human disagreeing, and `None` anywhere else is every ordinary Response.
  */
-direction?: Direction | null, };
+direction?: Direction | null, 
+/**
+ * The human saying there is nothing else, on a Set asked while its
+ * Conversation is in Follow-up.
+ *
+ * A field of the Response rather than an Answer for the reason
+ * [`Response::direction`] is one: the control is the viewer's, injected
+ * onto the Set's closing section, and it answers no Question anybody
+ * asked.
+ *
+ * **The agent never sees it.** The mark comes off the Response on the way
+ * into the store and is recorded beside it — see `verkstead_store`'s
+ * `endings` — so what a waiting session is handed is byte for byte what it
+ * would have been handed without one. How a follow-up ends is Verkstead's
+ * business rather than the session's: the agent writes an ordinary
+ * Postscript and reads an ordinary Response, and the ending is entirely
+ * the system's.
+ */
+nothing_else?: boolean, };
 
 /**
  * What became of pressing Resume.
@@ -1603,7 +1795,7 @@ direction?: Direction | null, };
  * A recompute that quietly found nothing to launch is exactly the failure this
  * whole feature is replacing.
  */
-export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing";
+export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
 
 /**
  * The roadmap opened: every stage brief of it, rendered.
@@ -1761,7 +1953,21 @@ standing: Standing,
  * about arrive together, so the page never draws the Questions above a
  * chooser that has not turned up yet.
  */
-proposal: ProposalView | null, };
+proposal: ProposalView | null, 
+/**
+ * Whether this Set was asked while its Conversation is in Follow-up, which
+ * is what puts the Nothing-else option in its closing section.
+ *
+ * The other control the viewer injects, and it arrives the same way the
+ * proposal does: with the Set, so the page never draws a closing section
+ * the option turns up in a moment later.
+ *
+ * A fact about the Conversation rather than about the Set, which is why it
+ * is decided here rather than read off the stored body. Nothing about what
+ * was asked changes — an ordinary Set is what a follow-up's rounds are made
+ * of — and a Set stored before any of this stays exactly as it was.
+ */
+follow_up: boolean, };
 
 /**
  * The settings as the human has just written them.
@@ -1961,9 +2167,10 @@ export type SteerCompanionRefusal = "OwnRepo" | "AlreadyAdded" | "NotACompanion"
  * The one Event that is sometimes a move and sometimes a document. A steer
  * into Wrapping or Done says nothing but the state, like the move it stands
  * above; a steer into Implementing carries the instruction the session was set
- * going on, which is the whole of what that session was asked to do. A steer
- * into Grilling carries a document too, and that one arrives as a Brief Event
- * of its own — it opens a round, and a round starts from a Brief.
+ * going on, and one into Follow-up the brief it was, which is the whole of what
+ * that session was asked to do. A steer into Grilling carries a document too,
+ * and that one arrives as a Brief Event of its own — it opens a round, and a
+ * round starts from a Brief.
  */
 export type SteerEvent = { id: number, 
 /**
@@ -2074,6 +2281,23 @@ brief: string | null,
  */
 instruction: string | null, 
 /**
+ * The brief, for a steer into Follow-up.
+ *
+ * It lands as the Steer Event's own body, exactly as the instruction above
+ * it does, and the session started on it opens the follow-up: it answers
+ * what the brief asks, does what it asks for, and asks the human what else
+ * there is until they say there is nothing.
+ *
+ * **Required**, which is what makes it the one written payload with no
+ * quiet meaning. Nothing on the branch could stand in for it — a follow-up
+ * is not a step of the run to be picked up — so a submit that names
+ * Follow-up without one is refused by name; see
+ * [`ConversationSteered::NoFollowUpBrief`].
+ *
+ * Whitespace alone is nothing written, as everywhere else here.
+ */
+follow_up: string | null, 
+/**
  * Whether the session is primed with everything the human has already
  * answered.
  *
@@ -2127,13 +2351,14 @@ upgraded: Array<CompanionUpgrade>, };
  * Where a steer can send a Conversation.
  *
  * Draft and Closed are not among them and never will be: each has a way in of
- * its own, and a steer is for the four states the work is *done in*. A target
- * the modal offers is a target something can be set going in, which is why
- * Wrapping is offered only where the work is already on a pull request — the
- * one of the four that is drawn out at all, an instruction being writable
- * anywhere and Done needing nothing.
+ * its own, and a steer is for the states the work is *done in* — the four rungs
+ * of the ladder, and Follow-up beside them, which has no other way in at all. A
+ * target the modal offers is a target something can be set going in, which is
+ * why the two that turn on a pull request are drawn out where there is none: an
+ * instruction is writable anywhere and Done needs nothing, but there is no
+ * wrapping up and no following up of work nobody can see.
  */
-export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "Done";
+export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done";
 
 /**
  * What became of the human's Response.
@@ -2167,9 +2392,19 @@ export type TaskDocument = {
  */
 number: string, title: string, 
 /**
- * The document rendered and sanitized, or `null` where there is no file to
- * render — which is a task that is done, the file going being what says so.
- * The pane says as much in words rather than drawing a gap.
+ * Whether the task is finished, which is the entry's checkbox — see
+ * [`TaskEntry::done`]. Carried on the document because a finished task
+ * still has one: its file stays in `.tasks/` until the feature is over, so
+ * the done state is something the section says about itself rather than the
+ * reason it is empty. The same way round as a stage's — see
+ * [`StageDocument::done`].
+ */
+done: boolean, 
+/**
+ * The document rendered and sanitized, or `null` where there is nothing to
+ * render. Not the ordinary end of a task's life but the list pointing at a
+ * file nobody wrote, which the pane says in words rather than drawing a
+ * gap.
  */
 html: string | null, };
 
@@ -2185,9 +2420,10 @@ export type TaskEntry = {
  */
 number: string, title: string, 
 /**
- * Whether the task is finished, which is the task file having gone from
- * `.tasks/`. That is the done-signal the task runner turns on, and a
- * checkbox is how an entry is written rather than what says it is done.
+ * Whether the task is finished, which is the entry's own checkbox. That is
+ * the done-signal the task runner turns on, and it is the list saying so
+ * rather than anything the directory beside it happens to hold — a task
+ * whose document has not been written yet is a task nobody has done.
  */
 done: boolean, };
 
@@ -2363,7 +2599,10 @@ cursor: string, };
 export type Turn = { "kind": "Prose" } & Prose | { "kind": "Reasoning" } & Reasoning | { "kind": "ToolUse" } & ToolUse | { "kind": "ToolResult" } & ToolResult | { "kind": "Put" } & Put | { "kind": "Unread" } & Unread;
 
 /**
- * A line nothing here knows how to draw.
+ * Something nothing here knows how to draw, in the conversation where it was
+ * found: a block of an unknown type inside a turn, a line that is not JSON at
+ * all, or one that does not say what type it is. A whole line whose type is
+ * merely unknown is not one of these — it folds away as [`Bookkeeping`].
  */
 export type Unread = { 
 /**

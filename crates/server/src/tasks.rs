@@ -16,14 +16,14 @@
 //!
 //! Two files say what the list is, and each says a different half of it.
 //! `TODO.md` holds the entries — their order, their numbers and their titles —
-//! and the `NN-<slug>.md` files say which of them are still outstanding, because
-//! finishing a task is what deletes one. So a checkbox is how an entry is
-//! written rather than what says it is done: what says that is the file being
-//! gone, which is the done-signal the whole task runner turns on.
+//! and its checkbox is what says an entry is done, which is the done-signal the
+//! whole task runner turns on. The `NN-<slug>.md` files beside it say what each
+//! task *is*, and nothing about whether it is finished: a session that has not
+//! written a document yet has not done the task, and a backlog half written
+//! would otherwise read as a backlog nearly finished.
 //!
-//! Which is the one place a backlog and a roadmap differ in the reading — see
-//! [`crate::stages`], which reads the same lines off `ROADMAP.md` and does take
-//! the box at its word.
+//! Which is the reading a roadmap makes too — see [`crate::stages`], which
+//! reads the same lines off `ROADMAP.md` and takes the same box at its word.
 //!
 //! Those same two files are what the details pane is built from, one level
 //! deeper: the entries say what the backlog is made of, and each `NN-<slug>.md`
@@ -92,17 +92,15 @@ fn backlog(worktree: &Path) -> Option<TaskListEvent> {
         }
     };
 
-    let outstanding = outstanding(&backlog);
-
-    // The box says nothing here: what says a task is done is its file being
-    // gone — see the module docs.
+    // The box is the whole of it — see the module docs. Whatever is or is not
+    // beside `TODO.md` says nothing about which tasks are done.
     let tasks: Vec<TaskEntry> = list
         .lines()
         .filter_map(checklist::entry)
         .map(|entry| TaskEntry {
             number: entry.label.to_owned(),
             title: entry.title.to_owned(),
-            done: !outstanding.contains_key(&entry.number),
+            done: entry.checked,
         })
         .collect();
 
@@ -150,7 +148,7 @@ fn opened(worktree: &Path) -> Option<BacklogPane> {
 
     let list = std::fs::read_to_string(backlog.join(TODO)).ok()?;
 
-    let files = outstanding(&backlog);
+    let files = files(&backlog);
 
     let tasks: Vec<verkstead_render::TaskSource> = list
         .lines()
@@ -158,10 +156,13 @@ fn opened(worktree: &Path) -> Option<BacklogPane> {
         .map(|entry| verkstead_render::TaskSource {
             number: entry.label.to_owned(),
             title: entry.title.to_owned(),
-            // Absent where the task is done, the file being gone from `.tasks/`
-            // saying so — and absent too where the file is there and will not be
-            // read, which the pane draws the same way. There is nothing the
-            // human can do about either from here.
+            done: entry.checked,
+            // There for a done task as much as for one still to do: a task
+            // file stays where it is until the feature is finished with, so a
+            // section with nothing in it is the list naming a file nobody
+            // wrote. Absent too where the file is there and will not be read,
+            // which the pane draws the same way — there is nothing the human
+            // can do about either from here.
             markdown: files
                 .get(&entry.number)
                 .and_then(|file| std::fs::read_to_string(backlog.join(file)).ok()),
@@ -178,18 +179,18 @@ fn opened(worktree: &Path) -> Option<BacklogPane> {
     ))
 }
 
-/// The task files still in the backlog directory, by the number each of them
-/// leads with.
+/// The task files in the backlog directory, by the number each of them leads
+/// with.
 ///
-/// The names rather than the numbers alone, because the pane opens them: which
-/// tasks are outstanding and which files say what they are is one reading of one
-/// directory, and two of them could come to disagree.
+/// The names rather than the numbers alone, because both readers open them: the
+/// pane renders one per entry, and the runner hands the file it found to the
+/// session that works it.
 ///
-/// A directory that will not be read comes back empty, which reads as every
-/// task being done. That is the right way round: `TODO.md` was read a moment
-/// ago, so a `.tasks/` with nothing listable in it is one whose task files have
-/// all gone.
-fn outstanding(backlog: &Path) -> HashMap<u32, String> {
+/// A directory that will not be read comes back empty, which says nothing about
+/// what is done — that is the list's to say. What it does say is that there is
+/// no document to open and nothing for a session to work from, which each
+/// reader answers in its own way.
+pub(crate) fn files(backlog: &Path) -> HashMap<u32, String> {
     let Ok(listed) = std::fs::read_dir(backlog) else {
         return HashMap::new();
     };
@@ -203,16 +204,52 @@ fn outstanding(backlog: &Path) -> HashMap<u32, String> {
         .collect()
 }
 
+/// One entry of the list as the runner needs it: the number it answers to, the
+/// label the list writes that number as, and whether its box is ticked.
+///
+/// [`checklist::Entry`] borrows the line it was read off, and the runner reads
+/// the list, drops it, and then goes and does something about what it said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Listed {
+    pub(crate) number: u32,
+    pub(crate) label: String,
+    pub(crate) checked: bool,
+}
+
+/// The entries of the backlog in `backlog`, in the list's own order, or `None`
+/// where there is no list to read.
+///
+/// The same reading the card is drawn from, so the list the human is watching
+/// and the list the runner is working are one list — see [`crate::runner`],
+/// which decides what to run next by the boxes this comes back with.
+///
+/// `None` is a `.tasks/` with no `TODO.md` in it, or one that will not be read.
+/// Both are a Conversation with no backlog to work, which is what the card says
+/// about them too.
+pub(crate) fn entries(backlog: &Path) -> Option<Vec<Listed>> {
+    let list = std::fs::read_to_string(backlog.join(TODO)).ok()?;
+
+    Some(
+        list.lines()
+            .filter_map(checklist::entry)
+            .map(|entry| Listed {
+                number: entry.number,
+                label: entry.label.to_owned(),
+                checked: entry.checked,
+            })
+            .collect(),
+    )
+}
+
 /// The number a task file leads with — `05` of `05-pinned-task-list.md` — or
 /// `None` where the name is not one the breaking-down session wrote.
 ///
 /// `TODO.md` is refused by the same rule that refuses everything else: it leads
 /// with no number. Nothing here has to know it by name.
 ///
-/// Shared with [`crate::runner`], which decides what to run next by the same
-/// reading: which task files are left is one fact about a Worktree, and a
-/// Timeline that drew one set of tasks while the runner worked through another
-/// would be two answers to one question.
+/// Shared with [`crate::stages`], whose briefs are named the same way: one rule
+/// for what a numbered document in a plan directory is called, because the
+/// skills that write the two are forks of each other.
 pub(crate) fn numbered(name: &str) -> Option<u32> {
     let (number, slug) = name.strip_suffix(".md")?.split_once('-')?;
 
@@ -278,10 +315,10 @@ Takes a Conversation from finished grilling to implemented work.
         );
     }
 
-    /// The file going is what says a task is done — see the module docs — so
-    /// this is the reading that matters most.
+    /// The box is what says a task is done — see the module docs — so this is
+    /// the reading that matters most.
     #[test]
-    fn a_task_is_done_when_its_file_has_gone() {
+    fn a_task_is_done_when_its_entry_is_ticked() {
         let dir = worktree(LIST, &["03-pinned-task-list.md"]);
 
         assert_eq!(
@@ -294,22 +331,36 @@ Takes a Conversation from finished grilling to implemented work.
         );
     }
 
-    /// And not the checkbox: a session that deleted its task file and never
-    /// ticked the box has finished the task.
+    /// And not the file: a ticked entry is done with its document still sitting
+    /// beside the list, which is every finished task until the feature is over.
     #[test]
-    fn a_file_that_has_gone_is_done_whatever_the_checkbox_says() {
-        let dir = worktree("# Feature\n\n- [ ] 01: Something\n", &[]);
+    fn a_ticked_entry_is_done_with_its_file_still_there() {
+        let dir = worktree("# Feature\n\n- [x] 01: Something\n", &["01-something.md"]);
 
         assert!(list(&dir).tasks[0].done);
     }
 
-    /// The other way round for the same reason: the box was ticked, the file
-    /// was not deleted, and the task is still there to be done.
+    /// The other way round for the same reason, and the case this is really
+    /// for: a backlog part way through being written has entries whose
+    /// documents nobody has got to yet, and none of those tasks is done.
     #[test]
-    fn a_ticked_entry_whose_file_is_still_there_is_not_done() {
-        let dir = worktree("# Feature\n\n- [x] 01: Something\n", &["01-something.md"]);
+    fn an_entry_with_no_file_yet_is_not_done() {
+        let dir = worktree("# Feature\n\n- [ ] 01: Something\n", &[]);
 
         assert!(!list(&dir).tasks[0].done);
+    }
+
+    /// The whole of a backlog mid-write: `TODO.md` committed and not one
+    /// document written. Every task is still to do, and a list that read them
+    /// as finished would be a feature nobody had started showing as complete.
+    #[test]
+    fn a_backlog_being_written_reads_as_nothing_done_yet() {
+        let dir = worktree(
+            "# Feature\n\n- [ ] 01: First\n- [ ] 02: Second\n- [ ] 03: Third\n",
+            &[],
+        );
+
+        assert!(list(&dir).tasks.iter().all(|task| !task.done));
     }
 
     #[test]
@@ -409,10 +460,10 @@ Takes a Conversation from finished grilling to implemented work.
         );
     }
 
-    /// What each of them holds: the file rendered where it is still there, and
-    /// nothing where finishing the task took it away.
+    /// What each of them holds: the file rendered where it is there, and nothing
+    /// where the list names one nobody wrote.
     #[test]
-    fn a_task_carries_its_document_until_the_file_that_says_it_has_gone() {
+    fn a_task_carries_its_document_wherever_there_is_one_to_read() {
         let dir = documented(
             LIST,
             &[(
@@ -424,7 +475,7 @@ Takes a Conversation from finished grilling to implemented work.
 
         assert_eq!(
             pane.tasks[0].html, None,
-            "a finished task's file is gone, and there is nothing to render",
+            "the list names a file nobody wrote, and there is nothing to render",
         );
         assert_eq!(pane.tasks[1].html, None);
 
@@ -464,6 +515,33 @@ Takes a Conversation from finished grilling to implemented work.
                 .contains("<pre class=\"mermaid\">"),
             "held for the renderer in the page rather than drawn here",
         );
+    }
+
+    /// A done task keeps its document, and the section says it is done rather
+    /// than standing empty — the way a roadmap's stages do. That is the whole
+    /// of what a finished task looks like in the pane now.
+    #[test]
+    fn a_done_task_shows_its_document_marked_done() {
+        let dir = documented(
+            LIST,
+            &[
+                ("01-direction-state.md", "# 01. Wrap-up proposal\n"),
+                ("03-pinned-task-list.md", "# 03. The pinned Event\n"),
+            ],
+        );
+        let pane = opened(dir.path()).unwrap();
+
+        assert!(pane.tasks[0].done, "the list ticks that entry off");
+        assert!(
+            pane.tasks[0]
+                .html
+                .as_deref()
+                .is_some_and(|html| html.contains("<h1>01. Wrap-up proposal</h1>")),
+            "and its document is still there to read",
+        );
+
+        assert!(!pane.tasks[2].done);
+        assert!(pane.tasks[2].html.is_some());
     }
 
     /// A file left behind with nothing in it is the same as no file: what it

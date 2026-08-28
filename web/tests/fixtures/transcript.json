@@ -4,9 +4,14 @@
       "id": 1,
       "kind": "attachment",
       "line": "{\n  \"attachment\": {\n    \"content\": \"three things still to do\",\n    \"type\": \"todos\"\n  },\n  \"type\": \"attachment\"\n}"
+    },
+    {
+      "id": 2,
+      "kind": "atis-latch",
+      "line": "{\n  \"latched\": \"a kind from a version nobody here has met\",\n  \"type\": \"atis-latch\"\n}"
     }
   ],
-  "cursor": "7.6.1",
+  "cursor": "8.6.2",
   "turns": [
     {
       "html": "<p>What should the queue do with a delivery that keeps failing?</p>\n",
@@ -41,7 +46,7 @@
     {
       "id": 6,
       "kind": "Unread",
-      "line": "{\n  \"omen\": \"a kind from a version nobody here has met\",\n  \"type\": \"divination\"\n}"
+      "line": "{\n  \"omen\": \"a block from a version nobody here has met\",\n  \"type\": \"divination\"\n}"
     }
   ],
   "whole": true

@@ -16,9 +16,13 @@
 //! body, with git's trailers off it, rendered and sanitized on the server like
 //! every other document on a timeline. So there is no markdown parser here
 //! either — and a commit that carried none draws the pane as it always did.
-//! Headed and boxed the way a Set's Preface is, because it is the same kind of
-//! thing read the same way: the agent's markdown, in one padded card under a
-//! heading the table of contents offers a way to.
+//! Drawn by the same component a Set's Preface is — `Card` — because it is the
+//! same kind of thing read the same way: the agent's markdown, in one padded
+//! card under a heading the table of contents offers a way to. So it spans the
+//! pane's column with the Gutter hanging off its left, and a wide Diagram in it
+//! bleeds back across that Gutter exactly as one in a Preface does. They were
+//! the same box copied into two stylesheets until they were one component,
+//! which is how they came to look unalike in the first place.
 //!
 //! The one thing that is drawn here is a Diagram in that Message, which is the
 //! Set page's own arrangement: the server leaves the source block, the client
@@ -27,7 +31,11 @@
 //! The file list down its margin is the Set page's own table of contents, drawn
 //! from the paths that travel beside the rendered markup: the same entries, the
 //! same scroll-spy and the same jump into a folded file. Which shape it takes is
-//! the pane's width's answer — see `set/Contents`.
+//! the pane's width's answer — see `set/Contents`. It sits directly under what
+//! the pane says the commit is, above everything it lists, which is where a Set
+//! puts its own: the sidebar is pinned from where it stands in the flow, so a
+//! nav written below the Message would start level with the diff and leave the
+//! margin beside the Message empty.
 //!
 //! What the commit was called comes off the event rather than out of the diff.
 //! The diff arrives headerless on purpose: the renderer splits on `diff --git`,
@@ -51,6 +59,7 @@ import {
 } from "solid-js";
 
 import app from "../App.module.css";
+import { Card } from "../Card";
 import { Switch as Toggle } from "../Switch";
 import { loadCommitPane } from "../api/client";
 import type { CommitEvent, ConversationView } from "../api/types";
@@ -80,10 +89,11 @@ const MESSAGE = "commit-message";
 /// What the commit said about itself, put in the page and — where it holds one
 /// — drawn.
 ///
-/// Its own component so that the drawing is worked out from the message rather
-/// than from the pane: the message arrives with the fetch, and a pane that
-/// reached for the renderer on its own mount would be reaching before there was
-/// anything to draw over.
+/// The card is the shared one, so what the section looks like is settled in one
+/// place for this and a Set's Preface both. What is this component's own is the
+/// drawing, and it is worked out from the message rather than from the pane: the
+/// message arrives with the fetch, and a pane that reached for the renderer on
+/// its own mount would be reaching before there was anything to draw over.
 ///
 /// The renderer is turned loose on this block alone rather than on the document,
 /// because a Set's page can be open behind the workbench and its Diagrams are its
@@ -118,21 +128,12 @@ function Message(props: { html: string; diagrams: boolean }): JSX.Element {
   );
 
   return (
-    /* Named and anchored the way a Set's Preface is: the heading is what a jump
-       from the table of contents lands on, the id is what it jumps to, and the
-       heading stays outside the box, which is what makes the two look alike.
-
-       The body is marked as rendered markdown, so the agent's headings, tables
-       and code get the same rules here as they get in a Preface — the box
-       around it is all that is this section's own. */
-    <section id={MESSAGE} class={styles.message}>
-      <h2 class={app.sectionHeading}>Message</h2>
-      <div
-        class={`${styles.messageBody} markdown`}
-        ref={block}
-        innerHTML={props.html}
-      />
-    </section>
+    <Card
+      anchor={MESSAGE}
+      heading="Message"
+      html={props.html}
+      ref={(body) => (block = body)}
+    />
   );
 }
 
@@ -213,6 +214,17 @@ export function Commit(props: {
         </p>
       </div>
 
+      {/* Above everything it lists, which is where a Set's page puts its own:
+          the stylesheet takes it out of the flow and hangs it in the pane's
+          margin from where it stands here, so this is the top of the sidebar as
+          well as a place in the reading order. Written below the Message it
+          would have started level with the diff, leaving the margin beside the
+          Message empty. A commit with neither a message nor a file changed has
+          nothing to list, and gets no nav. */}
+      <Show when={sections().length > 0}>
+        <Contents sections={sections()} watched={watched()} nav={nav} paned />
+      </Show>
+
       {/* Between the header and the diff, which is the order it is read in:
           what the commit says about itself, then what it changed. A commit that
           said nothing — a bookkeeping one, or any commit recorded before
@@ -221,13 +233,6 @@ export function Commit(props: {
         {(summary) => (
           <Message html={summary()} diagrams={opened.data?.diagrams ?? false} />
         )}
-      </Show>
-
-      {/* After the Message and before the diff. The stylesheet takes it out of
-          the flow and puts it in the pane's margin where there is one. A commit
-          that changed no files has no folds to list, and gets none. */}
-      <Show when={sections().length > 0}>
-        <Contents sections={sections()} watched={watched()} nav={nav} paned />
       </Show>
 
       <Switch>

@@ -15,13 +15,14 @@ handoff document the grilling settled — they say what the backlog is a breakdo
 
 ## 1. Find the step
 
-Look in `.tasks/`. The next step is the **lowest-numbered `NN-<slug>.md` file
-that is still there** — `TODO.md` is the list rather than a task, and never
-matches. Finishing a task is what deletes its file, so what is left is what is
-still to do.
+Read `.tasks/TODO.md`. The next step is the **lowest-numbered entry whose box is
+not ticked** — the box is what says a task is done, so an unticked one is what
+is still to do. The `NN-<slug>.md` file it links to is that task's document, and
+every task's document stays in `.tasks/` from the moment it is written until the
+feature is finished: what is there says nothing about what is done.
 
-**If no numbered task files remain, the feature is done**: go to *Finishing the
-feature* below instead.
+**If every entry is ticked, the feature is done**: go to *Finishing the feature*
+below instead.
 
 ## 2. Read the task
 
@@ -50,16 +51,16 @@ this terminal to ask for one. The branch is reviewed as a whole later, and a
 session that stopped to ask permission to commit would idle until somebody
 noticed.
 
-Delete the task file and tick its entry in `TODO.md`, and commit both alongside
-the code:
+Tick this task's entry in `TODO.md`, and commit that alongside the code. Leave
+the task file where it is — the whole of `.tasks/` goes at the finish, rather
+than a file at a time:
 
-    rm .tasks/NN-<slug>.md
     # edit .tasks/TODO.md: "- [ ] NN: ..." becomes "- [x] NN: ..."
     git add -A
     git commit -m "<type>: <what the task delivered>"
 
 Pick a conventional-commit type — `feat`, `fix`, `refactor`, `test`, `docs`,
-`chore`. The commit is how the task is reported done: the file being gone *and*
+`chore`. The commit is how the task is reported done: the box ticked *and*
 committed is what says this step is over, so leave nothing uncommitted.
 
 ### What the message body says
@@ -69,8 +70,8 @@ carries a summary as its message body. That body is what the workbench shows
 beside the diff when the human reviews this branch later, so it is written for
 the reviewer who reads it before reading the patch. Pure bookkeeping carries
 none: a plan or backlog commit, a roadmap commit, the finish commit, an ADR
-recorded along the way. A commit still counts as delivering work when a task
-file's deletion rides along with the code.
+recorded along the way. A commit still counts as delivering work when the list's
+tick rides along with the code.
 
 - **The prose first** — what you built and how it hangs together.
 - **The diagram after it**, whenever the diff is more than three changed lines.
@@ -107,13 +108,13 @@ wrong session.
 
 ## Finishing the feature
 
-Reached when `.tasks/` holds nothing but `TODO.md`: every task has been worked.
-There is no gate in front of this either — the backlog is empty, which is the
+Reached when every entry in `TODO.md` is ticked: every task has been worked.
+There is no gate in front of this either — nothing is left to do, which is the
 only thing finishing was ever waiting on.
 
-Take the list away and commit that:
+Take the backlog away — the list and the task files together — and commit that:
 
-    git rm .tasks/TODO.md
+    git rm -r .tasks/
     git add -A
     git commit -m "chore: finish <feature-name>"
 

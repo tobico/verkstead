@@ -34,7 +34,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::Repo;
@@ -67,6 +67,53 @@ pub struct PullRequest {
     /// repository, and it draws unlabeled — an unlabeled card means the work's
     /// own repo, and the label earns its place when repos mix.
     pub repo: Option<String>,
+}
+
+/// How a pull request's checks are getting on, taken all together.
+///
+/// One word for a whole suite, which is what a card has room to draw: any
+/// check failed reads as failed, else anything still running reads as
+/// running, else they passed. That order because it is the order a human
+/// wants it in — a red check is the thing to go and look at, and a suite half
+/// way through is not green yet.
+///
+/// There is no variant for *nobody has asked*, and there is no room for one:
+/// not knowing is the absence of a row, in the same spirit the checks watcher
+/// reads a `gh` that could not answer as neither green nor red.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rollup {
+    /// Every check finished and none of them is red.
+    Passed,
+
+    /// Nothing is red, and something has not finished.
+    Running,
+
+    /// Something is red, whatever else is still going on.
+    Failed,
+}
+
+impl Rollup {
+    /// The word the column holds. Lowercase and spelled out, so a database
+    /// opened by hand says something.
+    fn stored(self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Running => "running",
+            Self::Failed => "failed",
+        }
+    }
+
+    /// The one a stored word names. An unknown word is a database written by a
+    /// Verkstead this one does not understand, exactly as an unknown lifecycle
+    /// state is.
+    fn read(word: &str) -> Result<Self> {
+        Ok(match word {
+            "passed" => Self::Passed,
+            "running" => Self::Running,
+            "failed" => Self::Failed,
+            other => bail!("a pull request's checks are the unknown {other:?}"),
+        })
+    }
 }
 
 /// What became of recording one.
@@ -119,6 +166,32 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the pull requests table")?;
 
+    // How the checks on it are getting on, which is the one thing about a pull
+    // request that is written down here and moves. The three facts above are
+    // what was opened and never change; this is a reading of GitHub as it
+    // stood the last time anything asked, kept because the card draws it and
+    // the card is read long after anything is watching.
+    //
+    // Beside the pull request rather than on its row, which is where a fact
+    // that moves belongs: the row hangs off a Timeline Event, and a Timeline
+    // Event is a thing that happened.
+    //
+    // One row or none per Conversation, there being one pull request per
+    // Conversation — and it survives a restart, which is the whole reason it
+    // is written down rather than held in the watcher: the watcher stops when
+    // the wrap-up is over, and a Done Conversation would otherwise lose its
+    // icon the next time the server came up.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS pull_request_checks (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             rollup          TEXT NOT NULL,
+             at              TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the pull request checks table")?;
+
     Ok(())
 }
 
@@ -165,9 +238,7 @@ pub async fn record_pull_request(
     repo_id: i64,
     pull_request: &PullRequest,
 ) -> Result<Wrapping> {
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("recording a pull request")?;
+    let mut tx = super::writing(pool, "recording a pull request").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(conversation_id)
@@ -221,9 +292,7 @@ pub async fn record_another_pull_request(
     repo_id: i64,
     pull_request: &PullRequest,
 ) -> Result<bool> {
-    let mut tx = super::begin_writing(pool)
-        .await
-        .context("recording another pull request")?;
+    let mut tx = super::writing(pool, "recording another pull request").await?;
 
     let there: Option<(i64,)> = sqlx::query_as("SELECT id FROM conversations WHERE id = ?")
         .bind(conversation_id)
@@ -498,4 +567,68 @@ pub(crate) async fn on_timeline(
             )
         })
         .collect())
+}
+
+/// Write down how the pull request's checks are, and say whether that is news.
+///
+/// Called on every poll of the checks watcher, which is every half minute for as
+/// long as a Conversation is wrapping up — so what it answers is *did this
+/// change anything*, and the caller Nudges the open pages on the strength of it.
+/// A suite that is still running is the same word half an hour running, and a
+/// page told about it every thirty seconds would be a page re-reading a Timeline
+/// nothing had happened on.
+///
+/// Written over rather than appended to: this is how the checks are now, and
+/// what they were an hour ago is what the runs on GitHub are for.
+pub async fn record_check_rollup(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    rollup: Rollup,
+) -> Result<bool> {
+    let mut tx = super::writing(pool, "recording how a pull request's checks are").await?;
+
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT rollup FROM pull_request_checks WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| format!("reading how Conversation {conversation_id}'s checks were"))?;
+
+    let before = row.map(|(word,)| Rollup::read(&word)).transpose()?;
+
+    sqlx::query(
+        "INSERT INTO pull_request_checks (conversation_id, rollup, at)
+         VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (conversation_id)
+         DO UPDATE SET rollup = excluded.rollup, at = excluded.at",
+    )
+    .bind(conversation_id)
+    .bind(rollup.stored())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording how Conversation {conversation_id}'s checks are"))?;
+
+    tx.commit()
+        .await
+        .context("recording how a pull request's checks are")?;
+
+    Ok(before != Some(rollup))
+}
+
+/// And how they were the last time anything asked, or `None` where nothing has.
+///
+/// What the Conversation view carries to the card. It may be stale, and on a
+/// Conversation nothing is watching any more it will be: the watching stops when
+/// the wrap-up is over, and what is drawn after that is the last thing anybody
+/// asked GitHub — which is a card an hour behind rather than a card that is
+/// wrong.
+pub async fn check_rollup(pool: &SqlitePool, conversation_id: i64) -> Result<Option<Rollup>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT rollup FROM pull_request_checks WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading how Conversation {conversation_id}'s checks are"))?;
+
+    row.map(|(word,)| Rollup::read(&word)).transpose()
 }

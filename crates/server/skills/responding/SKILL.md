@@ -206,8 +206,8 @@ carries a summary as its message body. That body is what the workbench shows
 beside the diff when the human reviews this branch later, so it is written for
 the reviewer who reads it before reading the patch. Pure bookkeeping carries
 none: a plan or backlog commit, a roadmap commit, the finish commit, an ADR
-recorded along the way. A commit still counts as delivering work when a task
-file's deletion rides along with the code.
+recorded along the way. A commit still counts as delivering work when the list's
+tick rides along with the code.
 
 - **The prose first** — what you built and how it hangs together.
 - **The diagram after it**, whenever the diff is more than three changed lines.

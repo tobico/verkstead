@@ -53,12 +53,20 @@
 }
 
 /* The one row of that menu that is a setting rather than a way out of the pane.
-   Padded to the rows beside it so the words line up with Settings under them,
-   and given the room a whole sentence needs: the label says what it shows, and
-   a switch labelled "Archived" would be one nobody could read the sense of. */
+   Padded to the row above it so the words line up with Settings over them, and
+   held to the width a failure needs to wrap inside. */
 .showArchived {
   padding: 0.4rem 0.6rem;
   max-width: 15rem;
+}
+
+/* Two words and a switch, on one line however narrow the menu is: a label that
+   wrapped would put the switch on a line of its own with nothing to say what it
+   was for. The switch is `Switch.module.css`'s and its label is the span it
+   holds, which is what this reaches — the failure under it is a paragraph of
+   its own and still wraps. */
+.showArchived label > span {
+  white-space: nowrap;
 }
 
 /* Starting a conversation: which repo the work is in, and nothing else — the

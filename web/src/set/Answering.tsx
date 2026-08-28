@@ -79,6 +79,11 @@ export function Answering(props: {
   /// The wrap-up proposal this Set carries, on the one Set that carries one.
   /// What puts the direction chooser on the sheet; `null` leaves it off.
   proposal: ProposalView | null;
+
+  /// Whether this Set was asked from a Conversation in Follow-up, which is what
+  /// puts the Nothing-else option in the closing section. `false` on every
+  /// other Set, which leaves the option off it.
+  followUp: boolean;
 }): JSX.Element {
   // Read once rather than through a memo: the fields are the Set's own shape,
   // and rebuilding them under a human who is typing into them would throw away
@@ -95,6 +100,7 @@ export function Answering(props: {
     filled: kept?.filled ?? asked.map(blank),
     comment: kept?.comment ?? "",
     direction: kept?.direction ?? null,
+    nothing_else: kept?.nothing_else ?? false,
   });
 
   // Whether this Set is done with: it has an answer, or it can never take one.
@@ -111,6 +117,7 @@ export function Answering(props: {
       filled: sheet.filled.map((field) => ({ ...field })),
       comment: sheet.comment,
       direction: sheet.direction,
+      nothing_else: sheet.nothing_else,
     };
 
     if (settled()) {
@@ -122,7 +129,7 @@ export function Answering(props: {
 
   /// What the sheet says right now, as a Response.
   const response = (): Decided =>
-    drafted(sheet.filled, sheet.comment, sheet.direction);
+    drafted(sheet.filled, sheet.comment, sheet.direction, sheet.nothing_else);
 
   const queries = useQueryClient();
 
@@ -278,6 +285,15 @@ export function Answering(props: {
             />
           </div>
         </section>
+        {/* And, on a follow-up's Sets alone, the way to say there is nothing
+            else — under the box rather than beside it, because it is what the
+            human reaches for once they have finished writing. */}
+        <Show when={props.followUp}>
+          <Ending
+            ticked={() => sheet.nothing_else}
+            tick={(ticked) => setSheet("nothing_else", ticked)}
+          />
+        </Show>
       </Postscript>
       <section class={styles.submit}>
         <button type="button" onClick={start} disabled={submit.isPending}>
@@ -421,6 +437,48 @@ function Choosing(props: {
           nothing picked here — sends it back for another round.
         </p>
       </div>
+    </section>
+  );
+}
+
+/// The Nothing-else option, drawn in the closing section of a follow-up's Sets
+/// and nowhere else: the human saying that there is nothing more they want from
+/// this follow-up.
+///
+/// Inside the Postscript's card with the comment box, because the two are one
+/// closing move — what they have to say about the round, and whether there is to
+/// be another one. It is not a Question and it is not the agent's: the agent
+/// writes an ordinary Postscript, is handed an ordinary Response, and never
+/// learns whether this was ticked. Ending the follow-up is Verkstead's own.
+///
+/// A checkbox rather than an Option, because there is nothing here to choose
+/// between: it is on or it is off, and a second click takes it off again — the
+/// clearing an Option needs a rule of its own for.
+///
+/// And it says what ticking does, for the reason the direction chooser does:
+/// what a control means has to be on the control, rather than left to whatever
+/// the agent happened to write above it.
+function Ending(props: {
+  ticked: () => boolean;
+  tick: (ticked: boolean) => void;
+}): JSX.Element {
+  return (
+    <section class={page.ending}>
+      <label>
+        <input
+          type="checkbox"
+          id="nothing-else"
+          name="nothing-else"
+          checked={props.ticked()}
+          onChange={(event) => props.tick(event.currentTarget.checked)}
+        />
+        <span class={page.endingName}>Nothing else</span>
+      </label>
+      <p class={page.semantics}>
+        Tick this when there is nothing more you want from this follow-up.
+        Everything you have written here still goes back, and the agent finishes
+        the round; the follow-up then ends and the Conversation wraps up.
+      </p>
     </section>
   );
 }

@@ -55,37 +55,18 @@
   margin-left: auto;
 }
 
-/* Where a jump from the table of contents lands, on the two sections and the
-   one heading this module names. What the number is, and why there is one at
-   all, is `--jump-clear` in `Contents.module.css`.
+/* Where a jump from the table of contents lands, on the section and the one
+   heading this module names. What the number is, and why there is one at all,
+   is `--jump-clear` in `Contents.module.css`. The Preface is not here any more:
+   it is drawn as the shared card, which says this of itself in
+   `Card.module.css`.
 
    The Questions have no class to land on — the heading carries the id the nav
    jumps to and nothing else — so that one is read through `:global`, an id
    being scoped exactly as a class is otherwise. */
-.preface,
 .question,
 :global(#questions) {
   scroll-margin-top: var(--jump-clear);
-}
-
-.preface {
-  margin-bottom: 1.5rem;
-}
-
-/* The box the rendered markdown sits in, and nothing about the markdown itself:
-   `.markdown` in `styles/markdown.css` holds the blocks' own rhythm, including
-   the flush top and bottom edges that let this padding be the whole of the gap.
-
-   The Postscript's card is the same box drawn around its body — see
-   `.postscriptCard` in `Postscript.module.css`, which is the same five lines
-   and has to stay the same five, and so is a commit's Message in
-   `workbench/Commit.module.css`. The heading stays outside the box in all
-   three, which is what makes the sections look alike. */
-.prefaceBody {
-  padding: 1rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
 }
 
 .questions,
@@ -384,7 +365,13 @@
   /* Nothing. The row around it is the mark. */
 }
 
-.directionPick .direction label {
+/* One row to pick, wherever the page offers one that answers no Question: the
+   three directions, and the Nothing-else option on a follow-up's Sets. The
+   Ending is drawn with them rather than beside them because it is the same kind
+   of control — a closing decision the viewer injects — and two rows that were
+   styled apart would read as two different kinds of thing. */
+.directionPick .direction label,
+.ending label {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
@@ -393,18 +380,21 @@
   border-radius: 0.4rem;
 }
 
-.directionPick .direction input {
+.directionPick .direction input,
+.ending input {
   flex: none;
   margin: 0;
   accent-color: var(--accent);
 }
 
-.directionPick .direction label:has(input:checked) {
+.directionPick .direction label:has(input:checked),
+.ending label:has(input:checked) {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.directionPick .direction label:has(input:focus-visible) {
+.directionPick .direction label:has(input:focus-visible),
+.ending label:has(input:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -424,8 +414,10 @@
   color: var(--ink-soft);
 }
 
-/* What picking does, said once for the whole chooser. */
-.directionPick .semantics {
+/* What picking does, said once for the whole chooser — and what ticking does,
+   said the same way under the Nothing-else option. */
+.directionPick .semantics,
+.ending .semantics {
   margin: 0.75rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -459,6 +451,24 @@
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/* The Nothing-else option, in the same card under the comment box: the human's
+   way of saying the follow-up is over, drawn on a follow-up's Sets and on no
+   others. See `Ending` in `Answering.tsx`.
+
+   The gap is its own because it follows the comment box rather than the agent's
+   prose, which is what `.postscriptBody + *` in `Postscript.module.css` spaces.
+   The row itself is a direction's row — see `.direction label` above, which the
+   two share. */
+.ending {
+  margin-top: 0.75rem;
+}
+
+/* The words of the option, which carry no paint of their own: the row around
+   them is what is drawn, exactly as a direction's name is. */
+.endingName {
+  /* Nothing. The row around it is the mark. */
 }
 
 /* The human's closing word, inside the Postscript's card with the agent's — see
@@ -641,81 +651,19 @@
   border-color: var(--edge);
 }
 
-/* The Gutter: the width every section of a Set page reserves down its left once
-   the window is wide, so that the marks which are *about* the content rather
-   than part of it have somewhere of their own to sit — a Question's label, the
-   radio and the number a row of an Answer Table is picked by, the Diff's line
-   numbers — and everything there is to read starts one axis past them. Prose, a
-   question's words, an Option's words and a line of code all begin in the same
-   place, however unalike the blocks holding them are, and the marks become a
-   column to run the eye down instead of a jog in the left edge of every third
-   block.
-
-   Three edges, and the page uses all three. The *column edge* is where a
-   section's heading sits and where its card is drawn. The *card edge* is the
-   card's own inset from that, 1rem, which nothing about the Gutter changes: it is
-   how far out a block that was never prose — a table, a fence, a Diagram, the
-   Answer Table's frame — may come to take the whole card, exactly as the widened
-   column above was widened to let it. The *content edge* is the Gutter's right
-   edge, a card edge plus one Gutter, and that is the axis.
-
-   The Gutter is given up rather than spent, though: a table or a fence comes out
-   of it only as far as it will not otherwise fit, so one narrow enough to sit in
-   the content area stays on the axis with the prose and only one that would
-   overrun it reaches back, by exactly what it overruns by. See
-   `.markdown > .wide` in `styles/markdown.css`, which is the row that works
-   that out, and the frame in the markup that exists for no other reason.
-
-   Two blocks take the whole card whether they need it or not, and for the same
-   reason inverted: neither has a width of its own to be measured against the room.
-   A Diagram fits whatever it is given, so it would never ask, and giving it less
-   only draws it smaller. The Answer Table's picking column has to be in the Gutter
-   or the Option's words come off the axis, which is what all of this is for.
-
-   4.5rem is what its widest residents ask for, and there are two of them within
-   half a rem of one another. The Diff wants four columns of line number and one
-   of marker, set in the 0.8rem monospace its lines are, plus the padding those
-   two cells carry between them: a little over 3.5rem in the faces monospace is
-   usually set in. The Answer Table's picking column wants a radio, a gap and an
-   Option's number, and that comes out about the same — a shade more once the
-   Option is numbered in three digits and the browser draws a fat radio, neither
-   of which the width may be caught out by, because a column that outgrows the
-   Gutter pushes the Option's words off the axis. 4.5rem is the round number
-   above both with room to spare.
-
-   Everything is cut to this rather than the page measuring itself against any of
-   them. The Diff's own width is written in `ch`, and a `ch` is only a length
-   inside the font it was measured for, which nothing outside the code is; the
-   Answer Table's is whatever a radio button happens to be today. One name and
-   everything else derived, for the reason the Diff's gutter is already one name:
-   two copies of a width drift, and a drift here is a page that does not line up
-   with itself.
-
-   Only where the window holds the column at its widest — the same 60rem the
-   column itself asks for, so the Gutter travels with the full-width card
-   however the window ranks against the breakpoints elsewhere. On a narrower
-   window the card would be paying for the Gutter out of the measure, so there is
-   none, and the marks sit inline as they always did. Only on this page, too:
-   the two widths are named on the column every page sits in, because the Diff's
-   own rules read them from outside this module — but nothing on a list page
-   reads them, a list row having no marks to hang. */
+/* The Gutter this page's sections reserve down their left once the column is
+   wide, and what hangs in it. What the Gutter is, why it is 4.5rem and where it
+   is named is `styles/base.css`, on the column every page sits in. This is the
+   page's own half of it: which of its blocks reserve the width, and which of
+   them hang a mark there. */
 @media (min-width: 60rem) {
-  main {
-    --gutter: 4.5rem;
-    /* How far a block reaches back out of the Gutter to take the whole card.
-       Nothing does by default: it is the card that says how much there is to
-       come back out of. */
-    --bleed: 0px;
-  }
-
   /* The sections that reserve it: the card's own inset, and the Gutter inside
      that. A card with nothing to hang there reserves it empty and holds the
-     axis anyway — the Preface and the Postscript both — which is the whole of
-     why the width is the page's rather than each section's. The Direction card
-     is here because it does have something to hang: its End label, in the place
-     a Question hangs its number. The Postscript's card says the same two lines
-     in its own module, where the card is. */
-  .prefaceBody,
+     axis anyway — the Postscript, and the Preface in `Card.module.css` — which
+     is the whole of why the width is the column's rather than each section's.
+     The Direction card is here because it does have something to hang: its
+     End label, in the place a Question hangs its number. The Postscript's card
+     says the same two lines in its own module, where the card is. */
   .directionCard,
   .question {
     --bleed: var(--gutter);

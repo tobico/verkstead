@@ -22,8 +22,8 @@ export type Filled = {
 
 /// A half-finished answer sheet, as it sits in `localStorage` between visits:
 /// every question's fields in the order the Set asked them, the set-level
-/// comment, and the direction picked where the Set carries a proposal to pick
-/// one on.
+/// comment, the direction picked where the Set carries a proposal to pick one
+/// on, and the Nothing-else mark where it was asked from a follow-up.
 ///
 /// The same per-question shape a submit snapshots, so a draft serializes as the
 /// sheet stands rather than through a parallel one.
@@ -34,6 +34,7 @@ export type Draft = {
   filled: Filled[];
   comment: string;
   direction: Direction | null;
+  nothing_else: boolean;
 };
 
 /// Whether the human has put anything into this question: an Option, words, or
@@ -50,7 +51,8 @@ export function answered(field: Filled): boolean {
 ///
 /// The pick is not one of the entries: the chooser answers no Question, so it
 /// travels as the Response's own `direction` — and on a Set with no chooser
-/// there is nothing to pick, so nothing goes out.
+/// there is nothing to pick, so nothing goes out. The Nothing-else mark travels
+/// the same way and for the same reason, and goes out only when it was ticked.
 ///
 /// A field with nothing in it is left out of its entry rather than sent empty,
 /// which is how the schema writes a Response everywhere else — what the CLI
@@ -59,6 +61,7 @@ export function drafted(
   filled: Filled[],
   comment: string,
   direction: Direction | null = null,
+  nothingElse = false,
 ): Response {
   const answers: Answer[] = filled.map((field) => {
     const words = field.free_text.trim();
@@ -87,6 +90,9 @@ export function drafted(
   }
   if (direction !== null) {
     response.direction = direction;
+  }
+  if (nothingElse) {
+    response.nothing_else = true;
   }
 
   return response;
@@ -132,11 +138,13 @@ export function draftKey(id: number): string {
 ///
 /// A picked direction counts, and is the one thing that may be the whole of a
 /// draft: a proposal accepted with nothing said beside it is a Response, so it
-/// is a draft too.
+/// is a draft too. A ticked Nothing else counts for the same reason — on a
+/// follow-up's last round it may well be the whole of what the human says.
 export function empty(draft: Draft): boolean {
   return (
     draft.comment.trim() === "" &&
     draft.direction === null &&
+    !draft.nothing_else &&
     !draft.filled.some(answered)
   );
 }
@@ -216,7 +224,7 @@ function parsed(body: string): Draft | null {
     return null;
   }
 
-  const { filled, comment, direction } = payload as Partial<Draft>;
+  const { filled, comment, direction, nothing_else } = payload as Partial<Draft>;
   if (!Array.isArray(filled) || typeof comment !== "string") {
     return null;
   }
@@ -228,6 +236,10 @@ function parsed(body: string): Draft | null {
     typeof direction === "string" && DIRECTIONS.includes(direction)
       ? direction
       : null;
+
+  // And the same for a draft written before the Nothing-else option: an absent
+  // mark is an unticked one, which is what every draft that predates it meant.
+  const ended = nothing_else === true;
 
   const fields: Filled[] = [];
   for (const field of filled as unknown[]) {
@@ -246,5 +258,5 @@ function parsed(body: string): Draft | null {
     fields.push({ label, selected, free_text });
   }
 
-  return { filled: fields, comment, direction: picked };
+  return { filled: fields, comment, direction: picked, nothing_else: ended };
 }

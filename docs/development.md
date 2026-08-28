@@ -245,6 +245,35 @@ $ nix flake check         # the viewer's suite, and the NixOS module in a VM
 $ tools/generate-icons.sh # the favicon and PWA icons, after replacing the artwork
 ```
 
+### The sessions suite, and the machine under it
+
+`crates/server/tests/sessions.rs` is the one suite that is really a hundred and
+forty small servers, each running a real session in a real sandbox and judged on
+wall clock. That makes it the one suite whose result depends on what else the
+machine is doing, so it has two knobs of its own.
+
+`VERKSTEAD_TEST_PACE` is a multiplier over everything time-shaped in it — the
+budgets a session is ended by, how long a wait gives up after, and every window a
+test holds open to prove nothing happened. Unset is `1.0`. CI sets `2`, because a
+two-core runner building the workspace alongside the run cannot meet a
+developer's machine's budgets, and a session descheduled past one is ended by the
+wrong rule and fails a test that is not about the code. Raise it locally if the
+suite fails on a busy machine and passes on a quiet one; the file's own `PACE`
+explains the rest.
+
+Nothing needs setting for the concurrency: the suite caps how many fixtures stand
+at once by itself, at twice the cores it can see.
+
+```console
+$ scripts/soak-sessions.sh        # ten runs, pinned to two cores, under a build loop
+```
+
+The soak is how a change to that suite is shown to hold. Running it again was
+never how its flakes reproduced — each loaded run failed a different test and
+every one of them passed alone — so the bar is ten in a row under load rather
+than one green run. It takes about fifty minutes, which is why nothing runs it
+for you.
+
 And in `web/`, which is the Solid viewer
 ([ADR 0003](adr/0003-solid-spa-viewer.md)):
 

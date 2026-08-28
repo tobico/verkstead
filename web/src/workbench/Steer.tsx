@@ -13,16 +13,20 @@
 //! either — the wrap-up's watchers work out for themselves what is left to do —
 //! but it does need a pairing, because sessions run there. **Grilling** carries
 //! a payload: a new brief, and a choice about how much of the last interview the
-//! session is primed with. **Implementing** carries the other one: an
-//! instruction, which is what the session it starts is sent off to do.
+//! session is primed with. **Implementing** carries another: an instruction,
+//! which is what the session it starts is sent off to do. **Follow-up** carries
+//! the third: the brief the session that follows the pull request up is opened
+//! on.
 //!
-//! **Both of those payloads are required exactly where nothing else answers for
-//! them.** Writing nothing under grilling means grill the brief that is already
-//! written, so it is required where none is — a grilling starts from a brief,
-//! and the one a steered round lands with is frozen where it lands. Writing
-//! nothing under implementing means carry on what the branch already holds, so
-//! it is required where it holds nothing. Either way the submit is held shut
-//! rather than offered and then refused.
+//! **The first two are required exactly where nothing else answers for them.**
+//! Writing nothing under grilling means grill the brief that is already written,
+//! so it is required where none is — a grilling starts from a brief, and the one
+//! a steered round lands with is frozen where it lands. Writing nothing under
+//! implementing means carry on what the branch already holds, so it is required
+//! where it holds nothing. **The third is required always**: nothing on the
+//! branch stands in for a follow-up, a follow-up being a thing the human wanted
+//! rather than a step of the run. Either way the submit is held shut rather than
+//! offered and then refused.
 //!
 //! **The pairing is the conversation's, not the session's.** It is prefilled
 //! from what the conversation already runs the work under and what is picked is
@@ -84,6 +88,8 @@ export const STEER_REFUSAL: Record<
     "This work is on no pull request, so there is no wrap-up to steer it into.",
   NoInstruction:
     "There is nothing on this branch to carry on — no backlog with work left in it, and no roadmap it has written — so write what to do.",
+  NoFollowUpBrief:
+    "A follow-up is whatever you want taken up about this pull request, so write what that is.",
   EmptyBrief:
     "There is no brief to grill: this conversation has none written yet, so write the one this round is about.",
   NoPairing: "Pick the account and model the work runs under from here.",
@@ -137,9 +143,12 @@ export function steerRefusal(outcome: ConversationSteered): string {
 /// Where a steer can send a conversation, and what each target means.
 ///
 /// Draft and Closed are not here and never will be: each has a way in of its
-/// own. Wrapping up is the one of the four that is not always offered, which is
-/// what `offered` below draws it out by: a conversation whose work is on no
-/// pull request has no wrap-up to be steered into.
+/// own; follow-up is here because a steer is the only way into it at all.
+/// Wrapping up and follow-up are the two that are not always offered, which is
+/// what `offered` below draws them out by: a conversation whose work is on no
+/// pull request has no wrap-up to be steered into and nothing to follow up, and
+/// following up is for work the pipeline has seen through rather than work still
+/// being built.
 ///
 /// `runs` is whether work goes on in that state, which is the one question the
 /// rest of the form follows from: a target something runs in needs a pairing
@@ -174,6 +183,13 @@ const TARGETS: {
     target: "Wrapping",
     label: "Wrapping up",
     note: "The branch looked at again: the checks watched, the review run, the comments answered. The fix attempts start over.",
+    runs: true,
+    role: "implementation",
+  },
+  {
+    target: "FollowUp",
+    label: "Follow-up",
+    note: "The pull request followed up on: a session that answers what you ask, does what you want done about it, and keeps asking what else there is until you are finished.",
     runs: true,
     role: "implementation",
   },
@@ -578,6 +594,16 @@ export function Steer(props: {
       switch (offered.target) {
         case "Wrapping":
           return onAPullRequest(props.conversation);
+        // And the same pull request, plus the work having been seen through:
+        // following up is for a conversation the pipeline has finished with or
+        // is finishing with, and one still building has the ordinary ways of
+        // saying what to do next.
+        case "FollowUp":
+          return (
+            onAPullRequest(props.conversation) &&
+            (props.conversation.state === "Done" ||
+              props.conversation.state === "Wrapping")
+          );
         default:
           return true;
       }
@@ -667,6 +693,14 @@ export function Steer(props: {
   /// could see.
   const [instruction, setInstruction] = createSignal("");
 
+  /// And the brief, for a steer into follow-up.
+  ///
+  /// Always required, unlike the two above it: an empty instruction carries the
+  /// branch on and an empty brief grills the one already written, and there is
+  /// nothing a follow-up could fall back on — it is a thing the human wants
+  /// rather than a step of the run.
+  const [followUp, setFollowUp] = createSignal("");
+
   /// Whether the submit would be refused for want of one, which is what holds
   /// the button shut rather than a message after the press.
   const needsInstruction = createMemo(
@@ -737,6 +771,12 @@ export function Steer(props: {
     })),
   );
 
+  /// And the same again on the one payload that is required whatever the record
+  /// holds.
+  const needsFollowUp = createMemo(
+    () => target() === "FollowUp" && !followUp().trim(),
+  );
+
   const [interrupt, setInterrupt] = createSignal(false);
   const [refused, setRefused] = createSignal<ConversationSteered | null>(null);
 
@@ -763,6 +803,8 @@ export function Steer(props: {
           target() === "Implementing" && instruction().trim()
             ? instruction()
             : null,
+        follow_up:
+          target() === "FollowUp" && followUp().trim() ? followUp() : null,
       }),
     onSuccess: (outcome: ConversationSteered) => {
       // The page it was submitted from is out of date either way: the work has
@@ -892,6 +934,29 @@ export function Steer(props: {
           </div>
         </Show>
 
+        {/* And under follow-up, the one payload with nothing it could mean
+            empty: there is no follow-up to start without something to follow
+            up on, so the field is the target and the submit is held shut until
+            it says something. */}
+        <Show when={target() === "FollowUp"}>
+          <div>
+            <label for="steer-follow-up">What to follow up on</label>
+            <textarea
+              id="steer-follow-up"
+              rows="6"
+              value={followUp()}
+              onInput={(event) => setFollowUp(event.currentTarget.value)}
+              disabled={submit.isPending}
+              placeholder="Ask about this pull request, or say what you want done to it."
+            />
+            <Note>
+              A session answers what you ask and does what you want done, then
+              asks you what else there is. It goes on until you are finished
+              with it.
+            </Note>
+          </div>
+        </Show>
+
         {/* Only where something runs in the state picked. What is settled here
             is the conversation's own pairing rather than one session's, which is
             what the line under it says: steering re-settles what runs the work.
@@ -982,7 +1047,8 @@ export function Steer(props: {
               submit.isPending ||
               (runs() && !picked()) ||
               needsInstruction() ||
-              needsBrief()
+              needsBrief() ||
+              needsFollowUp()
             }
           >
             {submit.isPending ? "Steering…" : "Steer"}

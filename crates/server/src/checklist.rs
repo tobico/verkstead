@@ -3,10 +3,10 @@
 //!
 //! `.tasks/TODO.md` and `docs/roadmaps/<name>/ROADMAP.md` write the same line —
 //! `- [ ] 01: <title> — [link](NN-<slug>.md)` — because the skills that produce
-//! them are forks of each other. What the mark *means* differs and stays each
-//! reader's own business: a task is done when its file has gone from `.tasks/`,
-//! and a stage is done when the box is ticked. What does not differ is the
-//! line, so it is read once here rather than twice over there.
+//! them are forks of each other. A ticked box is what says the thing is done in
+//! both, the document it names staying where it is either way. What the mark
+//! means beyond that stays each reader's own business; what does not differ is
+//! the line, so it is read once here rather than twice over there.
 
 /// How an entry can be written: to do, done, and done by whoever holds the
 /// shift key.
