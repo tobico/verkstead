@@ -17,6 +17,12 @@
 //! server's rule and not this page's — and where close has already been
 //! pressed, archive stands in its place.
 //!
+//! Stop goes the same way once it has been pressed. A stop waits for the step
+//! the run is on to finish, so from the press until it lands there is a
+//! decision recorded and nothing more to ask: a row still offering it would
+//! answer a second press by doing exactly what the first did. Force stop stays,
+//! being the escalation from there rather than the same press again.
+//!
 //! Nothing here draws a failure. These presses are not expected to fail in
 //! ordinary use — every refusal any of them has is a page drawn against a
 //! Conversation that has since moved — and the re-read each press ends with is
@@ -296,15 +302,25 @@ function actions(): {
     rows: (conversation) => (
       <>
         <Show when={conversation().ready_to_stop}>
-          <Action
-            class={styles.stop}
-            label="Stop"
-            pressing="Stopping…"
-            says="Stop after the current task until you resume."
-            working={stop.isPending}
-            press={() => stop.mutate(conversation().id)}
-          />
+          {/* Until the press has been made. A stop waits for the step the run
+              is on to finish, and from then on the decision is recorded and the
+              run halts the moment it lands — so a row still offering it would
+              be asking for a decision Verkstead already has, and a second press
+              would do nothing and say nothing. */}
+          <Show when={!conversation().stop_asked}>
+            <Action
+              class={styles.stop}
+              label="Stop"
+              pressing="Stopping…"
+              says="Stop after the current task until you resume."
+              working={stop.isPending}
+              press={() => stop.mutate(conversation().id)}
+            />
+          </Show>
 
+          {/* And force stop stays where it is, being the escalation from there
+              rather than the same press again: it is what the human presses
+              when they turn out not to want to wait for the step after all. */}
           <Show when={conversation().working}>
             <Action
               class={styles.forceStop}

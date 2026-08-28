@@ -721,6 +721,24 @@ ready_to_resume: boolean,
  */
 ready_to_stop: boolean, 
 /**
+ * And whether a stop has already been asked for and is waiting for the step
+ * the run is on to finish.
+ *
+ * What takes **Stop** off the menu, the press having been made: it is
+ * recorded, the run halts the moment the step lands, and a row still
+ * offering it would be Verkstead asking for a decision it already has.
+ * Force stop is left where it is — it is the escalation from here, and the
+ * one thing a human who has changed their mind about waiting can still
+ * press.
+ *
+ * Beside [`ready_to_stop`] rather than folded into it, because the two say
+ * different things: that one is *there is a run to stop*, which is what
+ * draws Force stop, and this is *and you have already said so*.
+ *
+ * [`ready_to_stop`]: ConversationView::ready_to_stop
+ */
+stop_asked: boolean, 
+/**
  * And whether a steer into Implementing has anything to carry on: the
  * branch holds a backlog with work left in it, or a roadmap it has
  * written.

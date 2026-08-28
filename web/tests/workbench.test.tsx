@@ -5436,6 +5436,30 @@ describe("stopping a conversation", () => {
     ).toBeNull();
   });
 
+  /// And the ordinary stop goes once it has been pressed: from there it is a
+  /// decision the server has, waiting for the step the run is on to finish, and
+  /// a row still offering it would answer a second press by doing what the
+  /// first did. Force stop stays, being the escalation from there rather than
+  /// the same press again.
+  it("takes the stop off the menu once one has been asked for", async () => {
+    theGrillingStanding({
+      ready_to_stop: true,
+      working: true,
+      stop_asked: true,
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+
+    await drawn(
+      container,
+      `.${actions.conversationActions} .${actions.forceStop}`,
+    );
+    expect(
+      container.querySelector(`.${actions.conversationActions} .${actions.stop}`),
+    ).toBeNull();
+  });
+
   /// And neither is offered on a conversation that has already stopped. Getting
   /// one going again is what resume is for; there is nothing here left to stop.
   it("offers neither stop on a conversation that has already stopped", async () => {

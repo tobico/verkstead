@@ -77,6 +77,7 @@
   },
   "resets": null,
   "state": "Implementing",
+  "stop_asked": false,
   "stopped_by_hand": false,
   "timeline": [
     {

@@ -900,6 +900,23 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // [`crate::stops::ready`].
     let ready_to_stop = crate::stops::ready(conversation.state, stopped.is_some());
 
+    // And whether the press has already been made and is waiting for the step
+    // the run is on to finish, which is what takes Stop off the menu: the
+    // decision is recorded, and asking for it again is Verkstead asking for one
+    // it has. Force stop is drawn on `ready_to_stop` alone, being the escalation
+    // from here rather than the same press repeated.
+    //
+    // A read that fails reads as *not asked*, which is the way round that leaves
+    // the press offered: a menu short of a row the human wanted is worse than
+    // one carrying a row that answers `Stopping` again.
+    let stop_asked = match store::asked_to_stop(&state.pool, id).await {
+        Ok(asked) => asked,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a stop was asked for failed");
+            false
+        }
+    };
+
     // And whether a steer into Implementing would have anything to carry on: a
     // backlog with work left in it, or a roadmap the branch has written. What
     // the modal draws the *carrying on* by, the target itself being offered
@@ -991,6 +1008,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         ready_to_grill,
         ready_to_resume,
         ready_to_stop,
+        stop_asked,
         ready_to_continue,
         adopting,
         grilling_pairing,

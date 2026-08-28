@@ -49,6 +49,7 @@
   },
   "resets": null,
   "state": "Draft",
+  "stop_asked": false,
   "stopped_by_hand": false,
   "timeline": [
     {

@@ -49,6 +49,7 @@
   },
   "resets": "3pm",
   "state": "Implementing",
+  "stop_asked": false,
   "stopped_by_hand": false,
   "timeline": [
     {

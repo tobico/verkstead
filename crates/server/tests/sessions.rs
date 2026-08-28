@@ -8832,6 +8832,17 @@ async fn stop_lets_the_task_finish_and_halts_before_the_next_one() {
         "and nothing has stopped yet, because the step has not finished: {:?}",
         notices(&view),
     );
+    assert!(
+        view.stop_asked,
+        "the press is recorded, which is what takes Stop off the menu: there is \
+         nothing left to ask, and pressing it again would do what the first one did",
+    );
+    assert!(
+        view.ready_to_stop,
+        "and there is still a run to stop, which is what keeps Force stop there \
+         — the escalation from here, for a human who turns out not to want to \
+         wait for the step",
+    );
 
     // What the session was waiting for. From here it commits its task and idles,
     // which is where the run would have launched the next one.
