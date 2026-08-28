@@ -509,13 +509,19 @@ export function Conversations(props: {
 /// A link rather than a button, and the only row of any menu that is one: the
 /// settings are a page of their own, so this is going somewhere in the way that
 /// opening a Conversation is not. Nothing here has to shut the menu — the
-/// navigation takes the whole sidebar with it.
+/// navigation takes the whole sidebar with it. First in the menu, because it is
+/// what the menu is for: the way out of the workbench is what the ⋯ was put
+/// there to hold, and the switch under it is a setting that came to sit beside
+/// it.
 ///
-/// Beside it, the one thing that is about this list rather than about the rest
+/// Under it, the one thing that is about this list rather than about the rest
 /// of Verkstead: whether the conversations the human has archived are drawn in
 /// it. A switch rather than a row that presses, because it is a state the list
 /// is in rather than something to do to it — and it stays where it is put, so
-/// the menu does not shut under a hand that may want it back.
+/// the menu does not shut under a hand that may want it back. *Show archived*
+/// rather than the whole sentence it used to be: the menu is over the list of
+/// conversations, so what else it could be showing does not have to be said,
+/// and two words fit on the one line a row of a menu is.
 function WorkbenchActions(): JSX.Element {
   const queries = useQueryClient();
 
@@ -556,9 +562,13 @@ function WorkbenchActions(): JSX.Element {
     >
       {() => (
         <>
+          <A role="menuitem" href="/settings">
+            Settings
+          </A>
+
           <div class={styles.showArchived}>
             <Toggle
-              label="Show archived conversations"
+              label="Show archived"
               on={on()}
               disabled={showing.isPending || flip.isPending}
               flip={(wanted) => flip.mutate(wanted)}
@@ -569,10 +579,6 @@ function WorkbenchActions(): JSX.Element {
               </ErrorLine>
             </Show>
           </div>
-
-          <A role="menuitem" href="/settings">
-            Settings
-          </A>
         </>
       )}
     </Menu>

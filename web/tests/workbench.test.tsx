@@ -65,7 +65,12 @@ import illegible from "../src/set/Unreadable.module.css";
 import base from "../src/styles/base.css?raw";
 // What can be done to a Conversation as a whole, both ways: the hashed names
 // the menu's rows are queried by, and the words its refusals are said in.
-import { STOP_REFUSAL } from "../src/workbench/Actions";
+import {
+  ARCHIVE_REFUSAL,
+  CLOSE_REFUSAL,
+  STOP_REFUSAL,
+  UNARCHIVE_REFUSAL,
+} from "../src/workbench/Actions";
 import actions from "../src/workbench/Actions.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import adoption from "../src/workbench/Adoption.module.css";
@@ -435,6 +440,33 @@ describe("the workbench", () => {
     await waitFor(() => expect(history.get()).toBe("/settings"));
   });
 
+  /// And it is the first thing in the menu, because it is what the ⋯ was put at
+  /// the head of the pane to hold: the switch under it is a setting that came to
+  /// sit beside the way out rather than the reason there is a menu.
+  it("puts settings above the switch", async () => {
+    theWorkbench();
+    const { container } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    const drop = await openWorkbenchActions(container);
+
+    expect(drop.firstElementChild!.tagName).toBe("A");
+    expect(drop.firstElementChild!.textContent).toBe("Settings");
+    expect(drop.lastElementChild!.className).toBe(sidebar.showArchived);
+  });
+
+  /// Two words rather than the sentence it used to be, and never on two lines:
+  /// the menu is over the list of conversations, so what else it could be
+  /// showing does not have to be said — and a label that wrapped would leave the
+  /// switch on a line of its own with nothing beside it to say what it was for.
+  it("keeps the archived switch on one line", () => {
+    const at = sidebarCss.indexOf("\n.showArchived label > span {");
+    expect(at, "expected the sheet to hold the switch's own label rule").toBeGreaterThan(-1);
+    expect(sidebarCss.slice(at, sidebarCss.indexOf("\n}", at))).toContain(
+      "white-space: nowrap;",
+    );
+  });
+
   /// And the one row of that menu that is about this list rather than about the
   /// rest of Verkstead: whether the conversations put away are drawn in it.
   ///
@@ -453,7 +485,7 @@ describe("the workbench", () => {
     await openWorkbenchActions(container);
 
     const toggle = await waitFor(() =>
-      screen.getByLabelText<HTMLInputElement>("Show archived conversations"),
+      screen.getByLabelText<HTMLInputElement>("Show archived"),
     );
     expect(toggle.checked).toBe(true);
   });
@@ -473,7 +505,7 @@ describe("the workbench", () => {
 
     await openWorkbenchActions(container);
     const toggle = await waitFor(() =>
-      screen.getByLabelText<HTMLInputElement>("Show archived conversations"),
+      screen.getByLabelText<HTMLInputElement>("Show archived"),
     );
     fireEvent.click(toggle);
 
@@ -500,7 +532,7 @@ describe("the workbench", () => {
     await openWorkbenchActions(container);
     const read = askedFor(fetching, "/api/ui/conversations");
     fireEvent.click(
-      await waitFor(() => screen.getByLabelText("Show archived conversations")),
+      await waitFor(() => screen.getByLabelText("Show archived")),
     );
 
     await waitFor(() =>
@@ -5004,17 +5036,24 @@ describe("closing a conversation", () => {
     expect(screen.getByText(/The branch stays where it is/)).toBeTruthy();
   });
 
+  /// Closing is over, so the row is gone and archive stands in its place.
+  /// Nothing says so in words: a menu whose rows have changed has already said
+  /// it, and a line of prose about a press that is no longer offered would be
+  /// the only thing in the card that was not a press.
   it("offers nothing to close on one that is closed already", async () => {
     theWorkbenchWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
 
-    await waitFor(() => screen.getByText("This conversation has been closed."));
+    await drawn(container, `.${actions.conversationActions} .${actions.archive}`);
     expect(container.querySelector(`.${actions.conversationActions} .${actions.close}`)).toBeNull();
+    expect(screen.queryByText("This conversation has been closed.")).toBeNull();
   });
 
-  it("says when the worktree could not be removed", async () => {
+  it("logs a worktree that could not be removed rather than drawing it", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
     theGrilling(
       whenever(
         `/api/ui/conversations/${GRILLING.id}/close`,
@@ -5027,7 +5066,12 @@ describe("closing a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.close}`));
 
-    await waitFor(() => screen.getByText(/could not be removed/));
+    await waitFor(() =>
+      expect(logged).toHaveBeenCalledWith(CLOSE_REFUSAL.WorktreeStuck),
+    );
+    expect(screen.queryByText(/could not be removed/)).toBeNull();
+
+    logged.mockRestore();
   });
 });
 
@@ -5085,8 +5129,10 @@ describe("archiving a conversation", () => {
   });
 
   /// A page drawn against a conversation that has since been steered back into
-  /// the work: the press is refused, and the refusal is what says so.
-  it("says when it is not a conversation to put away", async () => {
+  /// the work: the press is refused, and the console is where the refusal goes.
+  it("logs one that is not a conversation to put away", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
     theWorkbenchWith(
       { state: "Closed", ready_to_grill: false },
       whenever(
@@ -5100,7 +5146,12 @@ describe("archiving a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.archive}`));
 
-    await waitFor(() => screen.getByText(/nothing to put away/));
+    await waitFor(() =>
+      expect(logged).toHaveBeenCalledWith(ARCHIVE_REFUSAL.NotClosed),
+    );
+    expect(screen.queryByText(/nothing to put away/)).toBeNull();
+
+    logged.mockRestore();
   });
 });
 
@@ -5162,8 +5213,10 @@ describe("unarchiving a conversation", () => {
   });
 
   /// The one thing left to refuse: a page drawn against a conversation that has
-  /// since gone.
-  it("says when the conversation is gone", async () => {
+  /// since gone. To the console, as every other refusal here goes.
+  it("logs a conversation that is gone", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
     theWorkbenchWith(
       { state: "Closed", ready_to_grill: false, archived: true },
       whenever(
@@ -5177,7 +5230,12 @@ describe("unarchiving a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.unarchive}`));
 
-    await waitFor(() => screen.getByText("This conversation is gone."));
+    await waitFor(() =>
+      expect(logged).toHaveBeenCalledWith(UNARCHIVE_REFUSAL.NoSuchConversation),
+    );
+    expect(screen.queryByText("This conversation is gone.")).toBeNull();
+
+    logged.mockRestore();
   });
 });
 
@@ -5301,7 +5359,9 @@ describe("stopping a conversation", () => {
   /// The two stops sit in the same menu as the steer and the close, in the order
   /// of what each one costs: pause after this task, stop now, move the work
   /// somewhere else, end the conversation. Each says what it does, because
-  /// *stop* and *force stop* are two words apart and hours of work apart.
+  /// *stop* and *force stop* are two words apart and hours of work apart — and
+  /// each says it *inside* the row, so what the press is called and what it
+  /// means are one thing to read and one thing to aim at.
   it("offers the four ways of stopping, each saying what it does", async () => {
     theGrillingStanding({ ready_to_stop: true, working: true });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -5320,7 +5380,6 @@ describe("stopping a conversation", () => {
 
     expect(
       screen.getByText("Stop after the current task until you resume."),
-
     ).toBeTruthy();
     expect(
       screen.getByText("End any running task and stop immediately."),
@@ -5331,6 +5390,34 @@ describe("stopping a conversation", () => {
     expect(
       screen.getByText(/Permanently end the conversation and delete the/),
     ).toBeTruthy();
+  });
+
+  /// And the sentence is the row's own, rather than a line after it: everything
+  /// the menu draws is inside one press or another, so there is nothing in it
+  /// that reads as a row and is not one.
+  it("carries every sentence inside the row it belongs to", async () => {
+    theGrillingStanding({ ready_to_stop: true, working: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+
+    for (const words of [
+      "Stop after the current task until you resume.",
+      "End any running task and stop immediately.",
+      "Stop the run and move this conversation somewhere else.",
+    ]) {
+      const said = screen.getByText(words);
+      expect(said.className, `"${words}" is drawn as the row's own note`).toBe(
+        actions.says,
+      );
+      expect(said.closest("button"), `"${words}" is inside its row`).toBeTruthy();
+    }
+
+    // Nothing loose in the card: every element the menu holds is a row or
+    // something inside one.
+    expect(
+      [...menu.children].every((row) => row.tagName === "BUTTON"),
+    ).toBe(true);
   });
 
   /// Force stop ends a session, so it is offered where there is one. With
@@ -5398,11 +5485,11 @@ describe("stopping a conversation", () => {
     await waitFor(() => expect(sent(fetching, AT_ONCE)).toEqual({}));
   });
 
-  /// A stop that is waiting for a task to finish says so where it was pressed.
-  /// Nothing on the timeline has changed yet — the session is still running, and
-  /// the notice comes when it stops — so this is the only thing that can tell
-  /// the human the press landed.
-  it("says a stop is waiting for the task to finish", async () => {
+  /// A stop that is still waiting for a task to finish is a press that landed,
+  /// so the menu goes the way it does for one that stopped at once. Nothing on
+  /// the timeline has changed yet — the session is still running, and the notice
+  /// comes when it stops.
+  it("shuts on a stop that is waiting for the task to finish", async () => {
     theGrillingStanding(
       { ready_to_stop: true, working: true },
       whenever(
@@ -5416,14 +5503,21 @@ describe("stopping a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.stop}`));
 
-    const waiting = await drawn(container, `.${actions.conversationActions} .${actions.waiting}`);
-
-    expect(waiting.textContent).toContain("finishes its task first");
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${actions.conversationActions} > .${dropdown.drop}`),
+      ).toBeNull(),
+    );
   });
 
-  /// And a press that found the run already stopped says that instead, rather
-  /// than looking as though it did something.
-  it("says in words that it had already stopped", async () => {
+  /// And a press that was refused draws nothing at all. These are not presses
+  /// that fail in ordinary use — every refusal is a page drawn against a
+  /// conversation that has since moved, and the re-read that follows is what
+  /// answers it, by taking the row away. What is left is a line in the console,
+  /// for whoever is debugging.
+  it("logs a refused stop rather than drawing one", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
     theGrillingStanding(
       { ready_to_stop: true, working: true },
       whenever(
@@ -5437,10 +5531,14 @@ describe("stopping a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.stop}`));
 
-    const refused = await drawn(container, `.${actions.conversationActions} .${notices.error}`);
+    await waitFor(() =>
+      expect(logged).toHaveBeenCalledWith(STOP_REFUSAL.AlreadyStopped),
+    );
+    expect(
+      container.querySelector(`.${actions.conversationActions} .${notices.error}`),
+    ).toBeNull();
 
-    expect(refused.textContent).toBe(STOP_REFUSAL.AlreadyStopped);
-    expect(refused.textContent).toContain("Resume");
+    logged.mockRestore();
   });
 });
 

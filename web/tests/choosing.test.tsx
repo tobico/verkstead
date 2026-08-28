@@ -109,12 +109,12 @@ describe("the chooser on a Set that carries a proposal", () => {
   /// The one ask on the page that is not one of the Questions, and it is asked
   /// the way they are: the label floated in the accent beside the words, with
   /// the human's own word for the move in place of a question number.
-  it("asks it the way a question is asked, labelled End", async () => {
+  it("asks it the way a question is asked, labelled Final", async () => {
     const { page } = await answering(PROPOSING);
 
     const label = page.querySelector(`.${sheet.directionCard} .${sheet.ask} .${sheet.text} .${sheet.label}`);
     expect(label, "expected the ask's label on the chooser").toBeTruthy();
-    expect(label!.textContent).toBe("End");
+    expect(label!.textContent).toBe("Final");
   });
 
   /// The house pattern every other section on the page keeps: the name of the
@@ -269,7 +269,7 @@ describe("the record a picked-on Set becomes", () => {
 
     const label = page.querySelector(`.${sheet.directionCard} .${sheet.ask} .${sheet.text} .${sheet.label}`);
     expect(label, "expected the ask's label on the record").toBeTruthy();
-    expect(label!.textContent).toBe("End");
+    expect(label!.textContent).toBe("Final");
   });
 
   /// Headed and carded on the record exactly as on the chooser: the two are one

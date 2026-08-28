@@ -8,11 +8,21 @@
 //!
 //! In order of what each costs: stop, which waits for the task the run is on;
 //! force stop, which does not; steer, which moves the work somewhere else; and
-//! close, which is not a stop at all but the end of the Conversation. Each says
-//! what it does under it, because *stop* and *force stop* are two words apart
-//! and hours of work apart. Each is drawn only where it applies — the two stops
-//! need something to stop, which is the server's rule and not this page's — and
-//! where close has already been pressed, archive stands in its place.
+//! close, which is not a stop at all but the end of the Conversation. Each
+//! carries what it does *inside* it, under its own name — because *stop* and
+//! *force stop* are two words apart and hours of work apart, and because a row
+//! that is one press from its name to its last word is one thing to aim at
+//! rather than a button with a sentence loose beside it. Each is drawn only
+//! where it applies — the two stops need something to stop, which is the
+//! server's rule and not this page's — and where close has already been
+//! pressed, archive stands in its place.
+//!
+//! Nothing here draws a failure. These presses are not expected to fail in
+//! ordinary use — every refusal any of them has is a page drawn against a
+//! Conversation that has since moved — and the re-read each press ends with is
+//! both the correction and the answer: a row that stopped applying stops being
+//! drawn. What is left for whoever is debugging is a `console.error`, which is
+//! where a thing nobody is meant to see belongs.
 //!
 //! Two menus and one set of rows. The pane's ⋯ is about the Conversation that is
 //! open, and the sidebar's right-click is about the card under the pointer,
@@ -49,16 +59,16 @@ import type {
   SteerOpened,
 } from "../api/types";
 import { useReading } from "../freshness";
-import { Empty, ErrorLine, Note } from "../notices";
+import { Empty, ErrorLine } from "../notices";
 import styles from "./Actions.module.css";
 import { Steer } from "./Steer";
 
-/// Each way of being refused a stop, whichever of the two was pressed.
+/// Each way of being refused a stop, whichever of the two was pressed, in the
+/// words the console is told them in.
 ///
 /// The two that are not refusals map to nothing: a conversation that has
-/// stopped says so by the badge and the notice the read after the press brings
-/// back, and one that is still finishing its task says so in its own words
-/// beside the button rather than as an error.
+/// stopped, and one that is still finishing its task, are both the press having
+/// landed — and what says so is the read that follows it.
 export const STOP_REFUSAL: Record<ConversationStopped, string> = {
   Stopped: "",
   Stopping: "",
@@ -99,6 +109,38 @@ export const UNARCHIVE_REFUSAL: Record<ConversationUnarchived, string> = {
   NoSuchConversation: "This conversation is gone.",
 };
 
+/// One row of this menu: what the press is called, and under it the sentence
+/// saying what pressing it means.
+///
+/// Both inside the button, which is the whole of what makes it one row: the
+/// name and the sentence are one thing to read and one thing to hit, on a phone
+/// as much as under a pointer.
+function Action(props: {
+  /// Which row this is, for the paint and for the tests that look for it.
+  class?: string;
+  /// What it reads as, and what it reads as while its press is in flight.
+  label: string;
+  pressing: string;
+  /// The sentence under the name.
+  says: string;
+  /// Whether that press is in flight, which is also what takes the row.
+  working: boolean;
+  press: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      class={props.class}
+      disabled={props.working}
+      onClick={() => props.press()}
+    >
+      <span>{props.working ? props.pressing : props.label}</span>
+      <span class={styles.says}>{props.says}</span>
+    </button>
+  );
+}
+
 /// Every press this menu can make, and the rows that make them.
 ///
 /// A factory rather than a component, because the rows are drawn in two menus of
@@ -122,13 +164,6 @@ function actions(): {
 } {
   const queries = useQueryClient();
 
-  const [refused, setRefused] = createSignal<ConversationClosed | null>(null);
-  const [unarchivable, setUnarchivable] =
-    createSignal<ConversationArchived | null>(null);
-  const [unreturnable, setUnreturnable] =
-    createSignal<ConversationUnarchived | null>(null);
-  const [stopped, setStopped] = createSignal<ConversationStopped | null>(null);
-
   /// What the click found, once it has answered, and `null` while the modal is
   /// shut. Held out here rather than in the menu's rows, because the menu's rows
   /// are built when it opens and thrown away when it closes — and the modal
@@ -142,37 +177,34 @@ function actions(): {
     working: boolean;
   } | null>(null);
 
-  /// And what the click said when there was nothing to open a modal about.
-  const [unsteerable, setUnsteerable] = createSignal(false);
-
   // The menu's own way to shut, held here because what closes it is the press
   // coming back rather than the press going out.
   let shut = (): void => {};
 
   /// What every press here leaves behind: a page drawn against a conversation
   /// that has moved. Reading it again is both the correction and, where the
-  /// press was refused, the explanation.
+  /// press was refused, the answer — the row goes.
   const reread = () => {
     void queries.invalidateQueries({ queryKey: ["conversation"] });
     void queries.invalidateQueries({ queryKey: ["conversations"] });
   };
 
-  /// Both stops answer the same way, so both are pressed the same way: the
-  /// outcome is kept whatever it is — it is either what happened or why nothing
-  /// did — and the menu closes only on a conversation that has actually
-  /// stopped. A stop that is still waiting for a step to finish has something
-  /// left to say, and says it where it was pressed.
+  /// Both stops answer the same way, so both are pressed the same way: a
+  /// refusal goes to the console and the menu stays where it is for the re-read
+  /// to correct, and anything else is the press having landed.
   const pressing = (stopping: (id: number) => Promise<ConversationStopped>) => ({
     mutationFn: stopping,
     onSuccess: (outcome: ConversationStopped) => {
-      setStopped(outcome);
-
-      if (outcome === "Stopped") {
+      if (STOP_REFUSAL[outcome]) {
+        console.error(STOP_REFUSAL[outcome]);
+      } else {
         shut();
       }
 
       reread();
     },
+    onError: (error: Error) =>
+      console.error("The conversation could not be stopped:", error),
   });
 
   const stop = useMutation(() => pressing(stopConversation));
@@ -190,12 +222,11 @@ function actions(): {
       steerConversation(conversation.id),
     onSuccess: (outcome: SteerOpened, conversation: ConversationView) => {
       if (outcome === "NoSuchConversation") {
-        setUnsteerable(true);
+        console.error("This conversation is gone.");
         reread();
         return;
       }
 
-      setUnsteerable(false);
       setSteering({ conversation, working: outcome.Opened.working });
       shut();
 
@@ -203,21 +234,24 @@ function actions(): {
       // the page behind the modal is already out of date.
       reread();
     },
+    onError: (error: Error) =>
+      console.error("The conversation could not be stopped to steer it:", error),
   }));
 
   const close = useMutation(() => ({
     mutationFn: (id: number) => closeConversation(id),
     onSuccess: (outcome: ConversationClosed) => {
-      if (outcome === "NoSuchConversation" || outcome === "WorktreeStuck") {
-        setRefused(outcome);
+      if (CLOSE_REFUSAL[outcome]) {
+        console.error(CLOSE_REFUSAL[outcome]);
         return;
       }
 
       // Closed or already closed: what was asked for holds either way.
-      setRefused(null);
       shut();
       reread();
     },
+    onError: (error: Error) =>
+      console.error("The conversation could not be closed:", error),
   }));
 
   /// And putting the closed conversation away, which reads the same way: both
@@ -226,15 +260,16 @@ function actions(): {
   const archive = useMutation(() => ({
     mutationFn: (id: number) => archiveConversation(id),
     onSuccess: (outcome: ConversationArchived) => {
-      if (outcome === "NoSuchConversation" || outcome === "NotClosed") {
-        setUnarchivable(outcome);
+      if (ARCHIVE_REFUSAL[outcome]) {
+        console.error(ARCHIVE_REFUSAL[outcome]);
         return;
       }
 
-      setUnarchivable(null);
       shut();
       reread();
     },
+    onError: (error: Error) =>
+      console.error("The conversation could not be archived:", error),
   }));
 
   /// And the way back out, which is the same press mirrored: its one refusal is
@@ -243,15 +278,16 @@ function actions(): {
   const unarchive = useMutation(() => ({
     mutationFn: (id: number) => unarchiveConversation(id),
     onSuccess: (outcome: ConversationUnarchived) => {
-      if (outcome === "NoSuchConversation") {
-        setUnreturnable(outcome);
+      if (UNARCHIVE_REFUSAL[outcome]) {
+        console.error(UNARCHIVE_REFUSAL[outcome]);
         return;
       }
 
-      setUnreturnable(null);
       shut();
       reread();
     },
+    onError: (error: Error) =>
+      console.error("The conversation could not be unarchived:", error),
   }));
 
   return {
@@ -260,38 +296,24 @@ function actions(): {
     rows: (conversation) => (
       <>
         <Show when={conversation().ready_to_stop}>
-          <div class={styles.action}>
-            <button
-              type="button"
-              role="menuitem"
-              class={styles.stop}
-              disabled={stop.isPending}
-              onClick={() => stop.mutate(conversation().id)}
-            >
-              {stop.isPending ? "Stopping…" : "Stop"}
-            </button>
-            <Note>Stop after the current task until you resume.</Note>
-            <Show when={stopped() === "Stopping"}>
-              <Note class={styles.waiting}>
-                The session running now finishes its task first. Nothing will be
-                started after it.
-              </Note>
-            </Show>
-          </div>
+          <Action
+            class={styles.stop}
+            label="Stop"
+            pressing="Stopping…"
+            says="Stop after the current task until you resume."
+            working={stop.isPending}
+            press={() => stop.mutate(conversation().id)}
+          />
 
           <Show when={conversation().working}>
-            <div class={styles.action}>
-              <button
-                type="button"
-                role="menuitem"
-                class={styles.forceStop}
-                disabled={force.isPending}
-                onClick={() => force.mutate(conversation().id)}
-              >
-                {force.isPending ? "Stopping…" : "Force stop"}
-              </button>
-              <Note>End any running task and stop immediately.</Note>
-            </div>
+            <Action
+              class={styles.forceStop}
+              label="Force stop"
+              pressing="Stopping…"
+              says="End any running task and stop immediately."
+              working={force.isPending}
+              press={() => force.mutate(conversation().id)}
+            />
           </Show>
         </Show>
 
@@ -300,29 +322,14 @@ function actions(): {
             nothing has run in, a run in flight, work Verkstead has finished
             with — and which states it can be steered *to* is the modal's to
             offer. */}
-        <div class={styles.action}>
-          <button
-            type="button"
-            role="menuitem"
-            class={styles.steer}
-            disabled={click.isPending}
-            onClick={() => click.mutate(conversation())}
-          >
-            {click.isPending ? "Stopping…" : "Steer"}
-          </button>
-          <Note>Stop the run and move this conversation somewhere else.</Note>
-          <Show when={unsteerable()}>
-            <ErrorLine class={styles.failure}>
-              This conversation is gone.
-            </ErrorLine>
-          </Show>
-          <Show when={click.isError}>
-            <ErrorLine class={styles.failure}>
-              The conversation could not be stopped to steer it:{" "}
-              {click.error?.message}
-            </ErrorLine>
-          </Show>
-        </div>
+        <Action
+          class={styles.steer}
+          label="Steer"
+          pressing="Stopping…"
+          says="Stop the run and move this conversation somewhere else."
+          working={click.isPending}
+          press={() => click.mutate(conversation())}
+        />
 
         {/* And where Close was, on a conversation that has already had it: the
             way to put the record out of sight once there is nothing left to
@@ -332,112 +339,38 @@ function actions(): {
         <Show
           when={conversation().state !== "Closed"}
           fallback={
-            <>
-              <Note>This conversation has been closed.</Note>
-              <Show
-                when={conversation().archived}
-                fallback={
-                  <div class={styles.action}>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      class={styles.archive}
-                      disabled={archive.isPending}
-                      onClick={() => archive.mutate(conversation().id)}
-                    >
-                      {archive.isPending ? "Archiving…" : "Archive"}
-                    </button>
-                    <Note>
-                      Take it off the conversations list. Its record stays where
-                      it is.
-                    </Note>
-                    <Show when={unarchivable()}>
-                      {(outcome) => (
-                        <ErrorLine class={styles.failure}>
-                          {ARCHIVE_REFUSAL[outcome()]}
-                        </ErrorLine>
-                      )}
-                    </Show>
-                    <Show when={archive.isError}>
-                      <ErrorLine class={styles.failure}>
-                        The conversation could not be archived:{" "}
-                        {archive.error?.message}
-                      </ErrorLine>
-                    </Show>
-                  </div>
-                }
-              >
-                <div class={styles.action}>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    class={styles.unarchive}
-                    disabled={unarchive.isPending}
-                    onClick={() => unarchive.mutate(conversation().id)}
-                  >
-                    {unarchive.isPending ? "Unarchiving…" : "Unarchive"}
-                  </button>
-                  <Note>
-                    Put it back on the conversations list, where it stays.
-                  </Note>
-                  <Show when={unreturnable()}>
-                    {(outcome) => (
-                      <ErrorLine class={styles.failure}>
-                        {UNARCHIVE_REFUSAL[outcome()]}
-                      </ErrorLine>
-                    )}
-                  </Show>
-                  <Show when={unarchive.isError}>
-                    <ErrorLine class={styles.failure}>
-                      The conversation could not be unarchived:{" "}
-                      {unarchive.error?.message}
-                    </ErrorLine>
-                  </Show>
-                </div>
-              </Show>
-            </>
+            <Show
+              when={conversation().archived}
+              fallback={
+                <Action
+                  class={styles.archive}
+                  label="Archive"
+                  pressing="Archiving…"
+                  says="Take it off the conversations list. Its record stays where it is."
+                  working={archive.isPending}
+                  press={() => archive.mutate(conversation().id)}
+                />
+              }
+            >
+              <Action
+                class={styles.unarchive}
+                label="Unarchive"
+                pressing="Unarchiving…"
+                says="Put it back on the conversations list, where it stays."
+                working={unarchive.isPending}
+                press={() => unarchive.mutate(conversation().id)}
+              />
+            </Show>
           }
         >
-          <div class={styles.action}>
-            <button
-              type="button"
-              role="menuitem"
-              class={styles.close}
-              disabled={close.isPending}
-              onClick={() => close.mutate(conversation().id)}
-            >
-              {close.isPending ? "Closing…" : "Close conversation"}
-            </button>
-            <Note>
-              Permanently end the conversation and delete the worktree. The
-              branch stays where it is.
-            </Note>
-          </div>
-        </Show>
-
-        <Show when={stopped() && STOP_REFUSAL[stopped()!]}>
-          <ErrorLine class={styles.failure}>
-            {STOP_REFUSAL[stopped()!]}
-          </ErrorLine>
-        </Show>
-        <Show when={stop.isError || force.isError}>
-          <ErrorLine class={styles.failure}>
-            The conversation could not be stopped:{" "}
-            {stop.error?.message ?? force.error?.message}
-          </ErrorLine>
-        </Show>
-
-        <Show when={refused()}>
-          {(outcome) => (
-            <ErrorLine class={styles.failure}>
-              {CLOSE_REFUSAL[outcome()]}
-            </ErrorLine>
-          )}
-        </Show>
-        <Show when={close.isError}>
-          <ErrorLine class={styles.failure}>
-            The conversation could not be closed: {close.error?.message}
-          </ErrorLine>
+          <Action
+            class={styles.close}
+            label="Close conversation"
+            pressing="Closing…"
+            says="Permanently end the conversation and delete the worktree. The branch stays where it is."
+            working={close.isPending}
+            press={() => close.mutate(conversation().id)}
+          />
         </Show>
       </>
     ),
