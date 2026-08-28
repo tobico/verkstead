@@ -3469,7 +3469,7 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
 /// loop counts to four and nothing about the part that is hard.
 ///
 /// The stub decides what it is by looking at `.tasks/`, exactly as the bundled
-/// fork does — no task file left means the finish step — so what this asserts is
+/// fork does — every box ticked means the finish step — so what this asserts is
 /// that Verkstead and the fork read the same backlog the same way.
 #[tokio::test]
 async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
@@ -3496,19 +3496,18 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
                 exit 0
                 ;;
             esac
-            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+            next=$(ls .tasks | grep -E "^$number-" | head -n 1)
             if [ -n "$next" ]; then
                 printf 'working %s\n' "$next"
                 printf 'skill=%s\n' "$(grep '^name:' "$HOME/.claude/skills/next-task/SKILL.md")"
-                number=${next%%-*}
                 printf 'a limiter\n' >> limiter.md
-                rm ".tasks/$next"
                 sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
                 git add -A
                 git commit --quiet -m "feat: $next"
             else
                 printf 'finishing\n'
-                git rm --quiet .tasks/TODO.md
+                git rm --quiet -r .tasks
                 git commit --quiet -m 'chore: finish rate-limiting'
             fi
             sleep 300
@@ -3632,10 +3631,9 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
             sleep 300
             ;;
         *)
-            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+            next=$(ls .tasks | grep -E "^$number-" | head -n 1)
             if [ -n "$next" ]; then
-                number=${next%%-*}
-                rm ".tasks/$next"
                 sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
                 git add -A
                 git commit --quiet -m "feat: $next"
@@ -3752,16 +3750,15 @@ claude-grilling-5)
         exit 0
         ;;
     esac
-    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
     if [ -n "$next" ]; then
         printf 'a limiter\n' >> limiter.md
-        number=${next%%-*}
-        rm ".tasks/$next"
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: count the requests"
     else
-        git rm --quiet .tasks/TODO.md
+        git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
         printf 'pushed, and the pull request is open\n'
     fi
@@ -6284,16 +6281,15 @@ case "$2" in
     printf 'pushed, and the pull request is open\n'
     ;;
 *next-task/SKILL.md*)
-    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
     if [ -n "$next" ]; then
         printf 'one clock\n' >> clocks.md
-        number=${{next%%-*}}
-        rm ".tasks/$next"
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m 'feat: collapse the clocks'
     else
-        git rm --quiet .tasks/TODO.md
+        git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish the clocks'
         printf 'pushed, and the pull request is open\n'
     fi
@@ -8244,12 +8240,11 @@ fn out_of_window(sentence: &str) -> String {
             sleep 300
             ;;
         *)
-            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+            next=$(ls .tasks | grep -E "^$number-" | head -n 1)
             if [ -n "$next" ]; then
                 printf 'working %s\n' "$next"
-                number=${{next%%-*}}
                 printf 'a limiter\n' >> limiter.md
-                rm ".tasks/$next"
                 sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
                 git add -A
                 git commit --quiet -m "feat: $next"
@@ -8281,7 +8276,7 @@ fn out_of_window(sentence: &str) -> String {
                 fi
             else
                 printf 'finishing\n'
-                git rm --quiet .tasks/TODO.md
+                git rm --quiet -r .tasks
                 git commit --quiet -m 'chore: finish rate-limiting'
             fi
             sleep 300
@@ -8688,12 +8683,11 @@ claude-grilling-5)
     sleep 300
     ;;
 *)
-    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
     printf 'working %s\r\n' "$next"
     while [ ! -f {gate} ]; do sleep 0.05; done
-    number=$(printf '%s' "$next" | cut -d- -f1)
     printf 'a limiter\n' >> limiter.md
-    rm ".tasks/$next"
     sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
     git add -A
     git commit --quiet -m "feat: $next"
@@ -10334,18 +10328,17 @@ case "$2" in
     sleep 300
     ;;
 *next-task/SKILL.md*)
-    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
     if [ -n "$next" ]; then
         printf 'working %s\n' "$next"
         printf 'a counter\n' >> counter.md
-        number=${{next%%-*}}
-        rm ".tasks/$next"
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m 'feat: count the requests'
     else
         printf 'finishing\n'
-        git rm --quiet .tasks/TODO.md
+        git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish the stage'
         printf 'pushed, and the pull request is open\n'
     fi
@@ -10792,7 +10785,6 @@ claude-grilling-5)
 *)
     printf 'working the task\r\n'
     printf 'a limiter\n' >> limiter.md
-    rm -f .tasks/01-count.md
     sed -i "s/- \[ \] 01:/- [x] 01:/" .tasks/TODO.md
     git add -A
     git commit --quiet -m 'feat: count the requests'
@@ -13973,7 +13965,7 @@ esac
 "#;
 
 /// A backlog of one whose step session comes up, says a word and then goes idle
-/// with the task file exactly where it found it.
+/// with its entry exactly as unticked as it found it.
 ///
 /// The grilling half is [`A_BACKLOG_OF_ONE`]'s: what is being asked about here is
 /// the step, so the list it works has to land the ordinary way first.
@@ -14143,8 +14135,8 @@ async fn a_grilling_that_goes_idle_without_its_artifact_is_told_and_then_stopped
 /// told and stopped the same way.
 ///
 /// The same loop with the same bound, over the done-indicator a step is judged
-/// by: the task file gone from the Worktree and git holding nothing pending for
-/// it. A hung step used to hold the whole run open with the human never told.
+/// by: the entry ticked off in the Worktree's `TODO.md` and git holding nothing
+/// pending for it. A hung step used to hold the whole run open with the human never told.
 #[tokio::test]
 async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_stopped() {
     let fixture = grilling(A_BACKLOG_THEN_AN_IDLE_STEP).await;
@@ -15884,17 +15876,16 @@ claude-grilling-5)
         exit 0
         ;;
     esac
-    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
     printf '===== %s\n%s\n' "${{next:-finish}}" "$2" >> {prompts}
     if [ -n "$next" ]; then
         printf 'a limiter\n' >> limiter.md
-        number=${{next%%-*}}
-        rm ".tasks/$next"
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: $next"
     else
-        git rm --quiet .tasks/TODO.md
+        git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
         printf 'pushed, and the pull request is open\n'
     fi

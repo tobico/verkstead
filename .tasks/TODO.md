@@ -19,7 +19,7 @@ order is the dependency.
 - [x] 03: The Done dot — [details](03-done-dot.md)
 - [x] 04: Header state labels — [details](04-header-state-labels.md)
 - [x] 05: Task done by checkbox — [details](05-task-done-by-checkbox.md)
-- [ ] 06: Skills keep task files — [details](06-skills-keep-task-files.md)
+- [x] 06: Skills keep task files — [details](06-skills-keep-task-files.md)
 - [ ] 07: List windowing — [details](07-list-windowing.md)
 - [ ] 08: Pull request card — [details](08-pull-request-card.md)
 - [ ] 09: Check rollup and icon — [details](09-check-rollup-icon.md)

@@ -1244,8 +1244,8 @@ mod tests {
 
     /// One task per session is the whole reason there is a session per task, and
     /// the fork has to say so: nothing else will. The done-signal the runner
-    /// watches is the file gone and committed, so the deletion and the commit
-    /// are the two things it cannot leave out.
+    /// watches is the entry ticked and committed, so the box and the commit are
+    /// the two things it cannot leave out.
     #[test]
     fn the_next_task_fork_works_one_task_and_commits_it() {
         let next_task = skill("next-task/SKILL.md");
@@ -1262,8 +1262,14 @@ mod tests {
             "which task is decided by the same rule the runner decides it by: {next_task}"
         );
         assert!(
-            next_task.contains("rm .tasks/NN-<slug>.md") && next_task.contains("git commit"),
-            "the file being gone and committed is what says the task is done: {next_task}"
+            next_task.contains(r#""- [ ] NN: ..." becomes "- [x] NN: ...""#)
+                && next_task.contains("git commit"),
+            "the box ticked and committed is what says the task is done: {next_task}"
+        );
+        assert!(
+            !next_task.contains("rm .tasks/NN-<slug>.md"),
+            "and the task file stays where it is, going with the rest of the backlog at the \
+             finish rather than one at a time: {next_task}"
         );
         assert!(
             next_task.contains("Nothing waits on approval"),
@@ -1273,14 +1279,17 @@ mod tests {
     }
 
     /// The finish step is the other half of what the fork decides, and the
-    /// runner watches it the same way: `TODO.md` gone and committed.
+    /// runner watches it the same way: `TODO.md` gone and committed. The whole
+    /// of `.tasks/` goes with it — the task files are kept as they are worked,
+    /// so the finish is the one place any of them is taken away.
     #[test]
-    fn the_next_task_fork_finishes_the_feature_by_taking_the_list_away() {
+    fn the_next_task_fork_finishes_the_feature_by_taking_the_backlog_away() {
         let next_task = skill("next-task/SKILL.md");
 
         assert!(
-            next_task.contains("git rm .tasks/TODO.md"),
-            "taking the list away is what says the feature is finished: {next_task}"
+            next_task.contains("git rm -r .tasks/"),
+            "taking the backlog away, list and task files together, is what says the feature \
+             is finished: {next_task}"
         );
     }
 
@@ -2219,8 +2228,8 @@ mod tests {
             );
         }
         assert!(
-            block.contains("file's deletion rides along with the code"),
-            "a task's commit is still a delivering one, deletion and all: {block}"
+            block.contains("tick rides along with the code"),
+            "a task's commit is still a delivering one, the list's tick and all: {block}"
         );
         assert!(
             block.contains("more than three changed lines"),
