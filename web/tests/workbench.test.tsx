@@ -976,6 +976,31 @@ describe("the order the human puts the sidebar in", () => {
     fireEvent.pointerUp(open, { pointerId: 1 });
   }
 
+  /// Which rows are still under the hand, by branch. Empty every moment nobody
+  /// is dragging, which is what every way a drag can end has to leave behind.
+  async function holding(container: ParentNode): Promise<(string | null)[]> {
+    return (await cards(container))
+      .filter((row) => row.classList.contains(sidebar.held!))
+      .map((row) => row.querySelector(`.${sidebar.title}`)!.textContent);
+  }
+
+  /// A press on a card, and the hand moved far enough down the pane to lift it
+  /// and carry it to the top. What ends the drag is the caller's to say.
+  function pickUp(row: HTMLElement): HTMLElement {
+    const open = card(row);
+
+    fireEvent.pointerDown(open, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "mouse",
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(open, { pointerId: 1, clientX: 0, clientY: 10 });
+
+    return open;
+  }
+
   /// A finger put on a card, and the card given long enough to lift under it.
   async function holdOn(row: HTMLElement): Promise<HTMLElement> {
     const open = card(row);
@@ -1026,6 +1051,73 @@ describe("the order the human puts the sidebar in", () => {
     dragTo(rows[0]!, 500);
 
     expect(await order(container)).toEqual(["second", "third", "first"]);
+  });
+
+  /// The hand can outrun the card it is dragging — out of the row, out of the
+  /// sidebar, out of the window — and let go somewhere the card will never hear
+  /// about. So the release is listened for at the window rather than at the
+  /// card, and this is the drag that says so: nothing is left held, the order
+  /// the hand made is what goes, and the next press is a drag of its own.
+  it("lets go of a card released away from it", async () => {
+    const fetching = three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    pickUp(rows[2]!);
+    fireEvent.pointerUp(window, { pointerId: 1 });
+
+    expect(await order(container)).toEqual(["third", "first", "second"]);
+    expect(await holding(container), "nothing is under the hand now").toEqual([]);
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
+        order: [3, 1, 2],
+      }),
+    );
+
+    // And the list is there to be dragged again, rather than held by a hand
+    // that left the window a moment ago.
+    dragTo(rows[0]!, 500);
+    expect(await order(container)).toEqual(["third", "second", "first"]);
+  });
+
+  /// A card can also go out from under the hand without either a release or a
+  /// cancel — the list re-rendering under it, or the browser taking the gesture
+  /// over. What says so is the capture going.
+  it("puts a card down when the capture is lost", async () => {
+    three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    const open = pickUp(rows[2]!);
+    expect(await holding(container), "the drag is under way").toEqual(["third"]);
+
+    fireEvent.lostPointerCapture(open, { pointerId: 1 });
+
+    expect(await holding(container), "and over, however it ended").toEqual([]);
+  });
+
+  /// And a cancel is a release as far as the drag is concerned, wherever it
+  /// lands — including the refusal of the scroll that a lifted card hung on the
+  /// document.
+  it("puts a card down on a cancel that lands away from it", async () => {
+    three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    const open = await holdOn(rows[2]!);
+    fireEvent.pointerMove(open, { pointerId: 1, clientX: 0, clientY: 10 });
+    expect(scrolled(), "the held card, not the list").toBe(true);
+
+    fireEvent.pointerCancel(window, { pointerId: 1 });
+
+    expect(await holding(container), "nothing is under the hand now").toEqual([]);
+    expect(scrolled(), "the list again, as on any other day").toBe(false);
   });
 
   /// A card that could only be dragged would be a control half the people using

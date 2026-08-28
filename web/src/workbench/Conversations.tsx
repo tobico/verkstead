@@ -174,12 +174,18 @@ export function Conversations(props: {
   // pointer event and the next.
   let press: {
     id: number;
+    pointer: number;
     x: number;
     y: number;
     touch: boolean;
     lifted: boolean;
     waiting?: ReturnType<typeof setTimeout>;
   } | null = null;
+
+  // What takes the drag's listeners back off the window, or null while nothing
+  // is pressed. They are made per press — each of them closes over the press it
+  // belongs to — so what removes them is made alongside them.
+  let stop: (() => void) | null = null;
 
   // Whether the press that has just ended moved a card. The click arrives after
   // the pointer is up, and a card dragged into place should not open as well.
@@ -229,13 +235,21 @@ export function Conversations(props: {
     // The primary button, a finger or a pen. A right-click is not a drag.
     if (event.button !== 0) return;
 
-    // Every move from here reaches this card, whatever the pointer ends up
-    // over — including the gap between two rows and the world outside the
-    // sidebar.
+    // A press whose ending never reached us is over the moment another begins.
+    // Nothing should get this far with one still in flight — every way a drag
+    // can end is listened for below — and one left standing would be a list
+    // held by a hand that is no longer on it.
+    drop();
+
+    // The card keeps the pointer for the length of the drag, so nothing it is
+    // carried over lights up under a hand that is already holding something —
+    // and so the browser has something to say, below, on the day it takes the
+    // pointer back. Where the drag is actually watched is the window.
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 
     const began: NonNullable<typeof press> = {
       id,
+      pointer: event.pointerId,
       x: event.clientX,
       y: event.clientY,
       touch: event.pointerType !== "mouse",
@@ -243,6 +257,33 @@ export function Conversations(props: {
     };
     press = began;
     reordered = false;
+
+    // The rest of the gesture is watched at the window rather than at the card,
+    // which is what the pane dividers next door do: a pointer that has outrun
+    // the card is still dragging it, and a release out beyond the sidebar — or
+    // beyond the window — is still the release. Lost capture is listened for
+    // as well, for the endings that are neither: a card taken out from under
+    // the hand by a re-render, or a gesture the browser has taken over. Every
+    // one of them puts the card down, so there is no way for a drag to end that
+    // leaves the list held.
+    const moved = (at: PointerEvent) => {
+      if (at.pointerId === began.pointer) drag(at);
+    };
+    const ended = (at: PointerEvent) => {
+      if (at.pointerId === began.pointer) drop();
+    };
+
+    stop = () => {
+      window.removeEventListener("pointermove", moved);
+      window.removeEventListener("pointerup", ended);
+      window.removeEventListener("pointercancel", ended);
+      window.removeEventListener("lostpointercapture", ended);
+    };
+
+    window.addEventListener("pointermove", moved);
+    window.addEventListener("pointerup", ended);
+    window.addEventListener("pointercancel", ended);
+    window.addEventListener("lostpointercapture", ended);
 
     // A finger lifts a card by holding still. No distance tells a drag from a
     // scroll on a phone — both of them are the finger moving — so what tells
@@ -269,10 +310,10 @@ export function Conversations(props: {
       }
 
       // A finger that travels before its card has lifted is scrolling the list,
-      // so the press is over and the browser has it.
+      // so the press is over and the browser has it. Nothing has lifted, so
+      // ending it here moves nothing and sends nothing.
       if (at.touch) {
-        clearTimeout(at.waiting);
-        press = null;
+        drop();
         return;
       }
 
@@ -288,14 +329,22 @@ export function Conversations(props: {
     setDragged(moved(order, at.id, to));
   };
 
-  /// The hand let go: what is on the screen is what the human meant, so that is
-  /// what is sent.
+  /// The drag is over: what is on the screen is what the human meant, so that
+  /// is what is sent.
+  ///
+  /// Every ending comes through here — the release, a cancel, a capture lost,
+  /// a press that turned out to be a scroll, and the next press finding this
+  /// one still standing — so there is one place the listeners come off and one
+  /// place the held card is put down.
   const drop = () => {
     const at = press;
+
+    stop?.();
+    stop = null;
+    press = null;
     if (!at) return;
 
     clearTimeout(at.waiting);
-    press = null;
     if (!at.lifted) return;
 
     document.removeEventListener("touchmove", refuse);
@@ -306,10 +355,14 @@ export function Conversations(props: {
     if (order) place.mutate(order);
   };
 
-  // A sidebar that goes away mid-drag takes its refusal of the scroll with it.
-  // Nothing else would ever take it off the document again: the drop that would
-  // have is on an element that is no longer there.
-  onCleanup(() => document.removeEventListener("touchmove", refuse));
+  // A sidebar that goes away mid-drag takes the whole drag with it: the
+  // listeners it hung on the window, and its refusal of the scroll. Nothing
+  // else would ever take those off again — what would have is a drop that is
+  // never coming.
+  onCleanup(() => {
+    stop?.();
+    document.removeEventListener("touchmove", refuse);
+  });
 
   /// A press that let go about where it landed is a click, and a click opens the
   /// Conversation. One that moved a card is not: the card is where they put it,
@@ -409,8 +462,6 @@ export function Conversations(props: {
                   held={held() === entry.id}
                   open={opened}
                   grab={grab}
-                  drag={drag}
-                  drop={drop}
                   step={step}
                   ask={ask}
                 />
@@ -864,6 +915,10 @@ function spoken(entry: ConversationEntry): string {
 /// and `drop` above — and the arrow keys do from the keyboard what the grip's
 /// did.
 ///
+/// The press is the whole of what the card hears about. Where the hand goes
+/// after it and where it lets go are the window's to say — a pointer that has
+/// outrun the card is still dragging it — so `grab` is the only handler here.
+///
 /// And it answers a right-click with what there is to do about the Conversation
 /// — see `ask` above. A mouse's gesture and only a mouse's: a finger has no
 /// right-click, and the long press it might have been is already how a card is
@@ -874,8 +929,6 @@ function ConversationRow(props: {
   held: boolean;
   open: (id: number) => void;
   grab: (event: PointerEvent, id: number) => void;
-  drag: (event: PointerEvent) => void;
-  drop: () => void;
   step: (id: number, by: number) => void;
   ask: (event: MouseEvent, id: number) => void;
 }): JSX.Element {
@@ -906,9 +959,6 @@ function ConversationRow(props: {
         aria-keyshortcuts="ArrowUp ArrowDown"
         onClick={() => props.open(props.entry.id)}
         onPointerDown={(event) => props.grab(event, props.entry.id)}
-        onPointerMove={props.drag}
-        onPointerUp={props.drop}
-        onPointerCancel={props.drop}
         onContextMenu={(event) => props.ask(event, props.entry.id)}
         onKeyDown={(event) => {
           if (event.key === "ArrowUp") {
