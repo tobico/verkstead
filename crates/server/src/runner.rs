@@ -1240,15 +1240,26 @@ pub(crate) enum Reviewed {
 
 /// Run the one review session a wrap-up gets, and wait until it is over.
 ///
-/// `said` is what was written on the pull request before this started, which the
-/// caller reads inside the Turn it is holding and records as addressed — so this
-/// session is the one that proposes about it, and nothing else is sent to.
+/// One session however many pull requests the work ended up on: `on` is every one
+/// of them, so that the session reading the work whole knows where the whole of
+/// it is — see [`crate::review::across`].
+///
+/// `said` is what was written on those pull requests before this started, which
+/// the caller reads inside the Turn it is holding and records as addressed — so
+/// this session is the one that proposes about it, and nothing else is sent to.
 pub(crate) async fn review(
     state: &AppState,
     conversation_id: i64,
+    on: Option<String>,
     said: Option<String>,
 ) -> Reviewed {
-    proposing(state, conversation_id, Prompt::Reviewing(said), "review").await
+    proposing(
+        state,
+        conversation_id,
+        Prompt::Reviewing { on, said },
+        "review",
+    )
+    .await
 }
 
 /// Run one batch session, and wait until it is over.
@@ -1855,9 +1866,18 @@ enum Prompt {
     Addressing(String),
 
     /// The reviewing skill, which the one session a wrap-up starts with runs
-    /// inside — carrying whatever was said on the pull request before it started,
-    /// which is the other half of what it has to propose about.
-    Reviewing(Option<String>),
+    /// inside — carrying every pull request the work ended up on, and whatever
+    /// was said on them before it started, which is the other half of what it has
+    /// to propose about.
+    Reviewing {
+        /// Every pull request the work is on, where it is on more than one: one
+        /// review reads the whole of the work, and this is where the whole of it
+        /// is.
+        on: Option<String>,
+
+        /// What was standing on those pull requests when the review started.
+        said: Option<String>,
+    },
 
     /// The responding skill, which a session answering a batch of comments runs
     /// inside — carrying the batch, which is the whole of what it is about.
@@ -1954,7 +1974,9 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                     skills::instruction(&brief, handoff, instruction)
                 }
                 Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
-                Prompt::Reviewing(said) => skills::reviewing(&brief, handoff, said.as_deref()),
+                Prompt::Reviewing { on, said } => {
+                    skills::reviewing(&brief, handoff, on.as_deref(), said.as_deref())
+                }
                 Prompt::Responding(said) => skills::responding(&brief, handoff, said),
             }
         }

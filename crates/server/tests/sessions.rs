@@ -4902,6 +4902,27 @@ const REVIEW_THEN_FIX: &str = "    SAYING='reading the branch'\n    \
      git commit --quiet -m 'fix: reset the counter as the window rolls'\n    \
      printf 'fixed what was accepted and left the rest\\n'";
 
+/// One that fixes what was accepted in both of the repositories the work
+/// reached: a commit in the worktree it started in and one in the companion's
+/// beside it.
+///
+/// What a review of work on two pull requests lands. The findings were one Set
+/// across the lot of them, and where they landed is wherever the finding was
+/// about — so the session commits in each worktree it fixed something in and
+/// pushes each of them.
+const REVIEW_THEN_FIX_BOTH: &str = "    SAYING='reading the branch'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'a fix\\n' >> fixes.md\n    \
+     git add -A\n    \
+     git commit --quiet -m 'fix: reset the counter as the window rolls'\n    \
+     cd ../askance-*\n    \
+     printf 'a fix\\n' >> halves.md\n    \
+     git add -A\n    \
+     git commit --quiet -m 'fix: take the other half with it'\n    \
+     printf 'fixed what was accepted in both, and pushed both\\n'";
+
 /// One that waits for the answers and then goes without landing any of them,
 /// which is the failure a session dying between the deciding and the doing
 /// leaves behind.
@@ -5205,6 +5226,11 @@ async fn the_review_proposes_its_findings_and_then_fixes_what_was_accepted() {
     assert!(
         started[0].contains("The API has none."),
         "and told what the work was meant to be: {told}",
+    );
+    assert!(
+        !started[0].contains("The pull requests this work is on"),
+        "a Conversation whose work touched nothing else is told what it has always \
+         been told, the branch this worktree is on being the whole of it: {told}",
     );
 
     assert!(
@@ -14964,6 +14990,21 @@ fn nothing_said_once_asked(logged_in: &Path) -> String {
 /// finish commits in the companion beside the work's own repository, which is
 /// what makes the wrap-up cover two pull requests rather than one.
 fn a_backlog_alongside_then_answers(reviews: &Path, batches: &Path, responding: &str) -> String {
+    a_backlog_alongside_then_reviews(reviews, batches, REVIEW_AND_FIND_NOTHING, responding)
+}
+
+/// The same again, with a review of the caller's choosing.
+///
+/// What the tests about one review across two pull requests need: reading the
+/// prompt it was given is one half of what a review of work in two repositories
+/// does, and what it lands in each of their worktrees is the other.
+fn a_backlog_alongside_then_reviews(
+    reviews: &Path,
+    batches: &Path,
+    review: &str,
+    responding: &str,
+) -> String {
+    let review = review.replace("WHILE_NOBODY_HAS_ASKED", WHILE_NOBODY_HAS_ASKED);
     let responding = responding.replace("WHILE_NOBODY_HAS_ASKED", WHILE_NOBODY_HAS_ASKED);
 
     format!(
@@ -14983,7 +15024,7 @@ claude-grilling-5)
     case "$2" in
     *reviewing/SKILL.md*)
         printf '%s\n=====\n' "$2" >> {reviews}
-        printf 'I read the whole branch and found nothing worth raising\n'
+{review}
         exit 0
         ;;
     *responding/SKILL.md*)
@@ -15082,6 +15123,257 @@ async fn a_comment_on_a_companions_pull_request_is_answered_in_that_companions_w
     assert!(
         addressed(&fixture).await.is_empty(),
         "rather than against the Conversation's own, which nobody said anything on",
+    );
+}
+
+/// One review reads the whole of the work, so it is told where the whole of it
+/// is: every pull request the Conversation holds, each with its number, the
+/// repository it was opened in, its URL and the worktree to read it in.
+///
+/// Which is what a session that starts in the Conversation's own worktree cannot
+/// work out for itself. Both `git` and `gh` read their repository from wherever
+/// they are run, so a review left where it landed would read `verkstead`'s diff
+/// twice and `askance`'s never — and the seam between the two halves of the work
+/// is exactly what one session reading both is for.
+#[tokio::test]
+async fn the_review_is_told_every_pull_request_and_where_to_read_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_answers(&reviews, &batches, RESPOND_AND_FIND_NOTHING),
+        "askance",
+        &gh_alongside_saying(NOTHING_SAID, NOTHING_SAID),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let told = std::fs::read_to_string(&reviews).expect("the review session wrote its prompt");
+    let view = fixture.view().await;
+    let own = view.worktree.clone().expect("the work has a worktree").path;
+    let companion = view.companions[0]
+        .worktree
+        .clone()
+        .expect("the companion is checked out")
+        .path;
+
+    assert!(
+        told.contains("#41") && told.contains("#7") && told.contains("askance"),
+        "each pull request by its number and the repository it was opened in: {told}",
+    );
+    assert!(
+        told.contains("https://github.com/tobico/verkstead/pull/41")
+            && told.contains("https://github.com/tobico/askance/pull/7"),
+        "with the URL of each, rather than a number built onto one repository's: \
+         {told}",
+    );
+    assert!(
+        told.contains(&own) && told.contains(&companion),
+        "and the worktree to read each of them in, {companion} being where the \
+         companion's branch is: {told}",
+    );
+
+    assert_eq!(
+        prompts(&told).len(),
+        1,
+        "one review across the lot of them, and one only: {told}",
+    );
+}
+
+/// A review that splits a finding out still sends the work back to be built, and
+/// the second wrap's review is told every pull request again.
+///
+/// The one move down the ladder, with a companion beside it: the list is worked
+/// like any other, the finish that follows the last task wraps the work up again
+/// on the pull requests it already had, and the review that reads it afresh knows
+/// nothing of the first — including where the other half of the work is, which is
+/// why it is told again rather than remembered.
+#[tokio::test]
+async fn the_second_wrap_of_a_split_out_backlog_reviews_every_pull_request_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let once = spill.path().join("split-written");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_reviews(
+            &reviews,
+            &batches,
+            &review_then_split(&once, ""),
+            RESPOND_AND_FIND_NOTHING,
+        ),
+        "askance",
+        &gh_alongside_saying(NOTHING_SAID, NOTHING_SAID),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Implementing) == 2).then_some(()))
+        .await;
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Wrapping) == 2).then_some(()))
+        .await;
+
+    let deadline = Instant::now() + PATIENCE;
+    let read_again = loop {
+        let written = std::fs::read_to_string(&reviews).unwrap_or_default();
+
+        if prompts(&written).len() > 1 {
+            break written;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the second wrap never read the work: {written}",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+
+    let read_again = prompts(&read_again);
+    let companion = fixture.view().await.companions[0]
+        .worktree
+        .clone()
+        .expect("the companion is checked out")
+        .path;
+
+    assert_eq!(read_again.len(), 2, "one review per wrap: {read_again:?}");
+    assert!(
+        read_again[1].contains("#41")
+            && read_again[1].contains("#7")
+            && read_again[1].contains(&companion),
+        "and the second is told every pull request the work is on and where to \
+         read each, exactly as the first was: {:?}",
+        read_again[1],
+    );
+}
+
+/// A review that accepts findings in two repositories lands them in both, and
+/// the wrap-up settles over the lot of it.
+///
+/// One review, one Set, and what it was answered carried out wherever each
+/// finding was about: the session commits in the worktree it started in and in
+/// the companion's beside it, and both commits reach the Timeline saying which
+/// repository they came from. Nothing is dispatched to fix anything and nothing
+/// reviews anything a second time — the session that raised the findings is the
+/// one that lands them, however many repositories they were spread across.
+#[tokio::test]
+async fn a_review_that_accepts_findings_in_two_repositories_lands_them_in_both() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_reviews(
+            &reviews,
+            &batches,
+            REVIEW_THEN_FIX_BOTH,
+            RESPOND_AND_FIND_NOTHING,
+        ),
+        "askance",
+        &gh_alongside_saying(NOTHING_SAID, NOTHING_SAID),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    // The review is up and waiting on the human, which is the Set the test puts
+    // on its behalf and the answer it writes the marker for. Put once the session
+    // is reading, because a proposal standing before there is a session behind it
+    // is exactly what a wrap-up stops over.
+    let set = fixture.ask(REVIEW).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1 },
+                    { "label": "Q2", "selected": 1 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (fixes(view) == 2).then(|| view.clone()))
+        .await;
+
+    let landed = commits(&view);
+    let named = |subject: &str| {
+        landed
+            .iter()
+            .find(|commit| commit.subject == subject)
+            .unwrap_or_else(|| panic!("no commit called {subject:?} among {landed:#?}"))
+    };
+
+    assert_eq!(
+        named("fix: reset the counter as the window rolls").repo,
+        None,
+        "the fix made in the work's own repository draws unlabelled",
+    );
+    assert_eq!(
+        named("fix: take the other half with it").repo,
+        Some("askance".to_owned()),
+        "and the one made in the companion says which repository it landed in",
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the session landed both fixes and the review never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
+        1,
+        "one review across both of them, and nothing reads either a second time",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: {:?}",
+        notices(&view),
     );
 }
 

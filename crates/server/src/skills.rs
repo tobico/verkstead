@@ -312,14 +312,35 @@ pub(crate) fn next_task(brief: &str, handoff: Option<&str>) -> String {
 /// work was cut into would be handing it the very frame the sessions that wrote
 /// it were each stuck inside.
 ///
-/// `said` is what was written on the pull request before this session started —
-/// the comments whole, in the order they were said in, with where each was said.
-/// It goes *last*, under the documents, where the newest and least general thing
-/// goes in every other prompt here: the documents say what the work is, and this
-/// says what somebody has already said about it. A pull request nobody has
-/// written on carries none of it, rather than a heading saying nothing was said.
-pub(crate) fn reviewing(brief: &str, handoff: Option<&str>, said: Option<&str>) -> String {
-    let prompt = on_the_documents(
+/// `on` is every pull request the work ended up on, where it ended up on more
+/// than one: each of them named with its number, the repository it was opened
+/// in, its URL and the worktree to read it in. One review reads the whole of the
+/// work and the whole of it may be several branches, so the session is told where
+/// each of them is — it starts in the Conversation's own worktree and both `git`
+/// and `gh` read their repository from wherever they are run, so a `gh pr diff`
+/// left where the session landed would read one repository's half of the work
+/// twice and the other's never.
+///
+/// A Conversation whose work touched nothing else carries none of it and is told
+/// what it is told today. There is nothing there to say: the branch this worktree
+/// is on is the whole of the work, which is what the opening line says already
+/// and what the skill falls back on.
+///
+/// `said` is what was written on those pull requests before this session started
+/// — the comments whole, in the order they were said in, with where each was
+/// said. It goes *last*, under the documents and under the pull requests they
+/// were left on, where the newest and least general thing goes in every other
+/// prompt here: the documents say what the work is, the list says where it is,
+/// and this says what somebody has already said about it. A pull request nobody
+/// has written on carries none of it, rather than a heading saying nothing was
+/// said.
+pub(crate) fn reviewing(
+    brief: &str,
+    handoff: Option<&str>,
+    on: Option<&str>,
+    said: Option<&str>,
+) -> String {
+    let mut prompt = on_the_documents(
         &format!(
             "Read {REVIEWING} and review the branch this worktree is on, the way it says. The \
              work described below is what it was meant to be."
@@ -327,6 +348,16 @@ pub(crate) fn reviewing(brief: &str, handoff: Option<&str>, said: Option<&str>) 
         brief,
         handoff,
     );
+
+    if let Some(on) = on {
+        prompt = format!(
+            "{prompt}\n# The pull requests this work is on\n\nThe work reached more than one \
+             repository, so it is on a pull request in each of them, and reviewing it is \
+             reading every one of them. Read each of them where it lives — `git` and `gh` \
+             both read the repository from wherever they are run.\n\n{}\n",
+            on.trim()
+        );
+    }
 
     match said {
         Some(said) => format!(
@@ -1722,6 +1753,11 @@ mod tests {
             "the woken session reads the pull request's own check state: {reviewing}"
         );
         assert!(
+            reviewing.contains("ask each pull request how its checks are getting on"),
+            "each of them, asked where that one lives — a suite asked about from \
+             the wrong worktree is somebody else's: {reviewing}"
+        );
+        assert!(
             reviewing.find("gh pr checks") < reviewing.find("git push"),
             "and fixes what is failing before it pushes, so the push is what puts \
              the fix back in front of the checks — {reviewing}"
@@ -1738,6 +1774,74 @@ mod tests {
         );
     }
 
+    /// One review reads the whole of the work, and the whole of it may be a pull
+    /// request per repository the Conversation was worked in — so the skill is
+    /// written for several: a diff read in each worktree, each suite asked about
+    /// where that pull request lives, and a push from every worktree it committed
+    /// in.
+    ///
+    /// Both `git` and `gh` read their repository from wherever they are run, so a
+    /// session that stayed in the worktree it started in would read one
+    /// repository's half of the work twice and the companion's never.
+    #[test]
+    fn the_reviewing_skill_reads_every_pull_request_where_it_lives() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("The pull requests this work is on"),
+            "the prompt's own listing is what names them, and the skill says so: \
+             {reviewing}"
+        );
+        assert!(
+            reviewing.contains("cd <the worktree that pull request is in>"),
+            "each of them read where it lives, which is a directory to change into \
+             first: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("Where your prompt lists none"),
+            "and a Conversation that touched nothing else reviews the branch it is \
+             standing in, exactly as it always did: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("push each worktree you committed in"),
+            "a repository it fixed something in and did not push is a decision \
+             nobody can see: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("do not touch any branch")
+                && reviewing.contains("beyond the ones you were sent to"),
+            "and what it must leave alone is every branch but those, rather than \
+             every branch but the one it started on: {reviewing}"
+        );
+    }
+
+    /// One Set across the whole of the work, whatever repositories it reached —
+    /// and a finding about a companion says which repository it is about, so the
+    /// Option the human picks says what would change and where.
+    ///
+    /// The backlog is the one thing that does not move: Verkstead reads it off the
+    /// Conversation's own branch, so a list written in a companion's worktree is
+    /// work nothing would ever start.
+    #[test]
+    fn the_reviewing_skill_puts_one_set_across_the_repositories() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("One Set for the whole of the work"),
+            "one review, one Set, however many repositories it read: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("names the repository it is about"),
+            "with a finding about a companion saying so, so the pick says what \
+             would change and where: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("In the worktree you started in"),
+            "and the backlog written where Verkstead reads one from, whichever \
+             repository the split-out finding is about: {reviewing}"
+        );
+    }
+
     /// The review session is put inside the skill the same way every other is,
     /// and primed with the two documents that say what the work was *for*.
     #[test]
@@ -1745,6 +1849,7 @@ mod tests {
         let prompt = reviewing(
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
+            None,
             None,
         );
 
@@ -1766,6 +1871,12 @@ mod tests {
             "a pull request nobody has written on carries no heading saying so: \
              {prompt:?}"
         );
+        assert!(
+            !prompt.contains("The pull requests this work is on"),
+            "and a Conversation whose work touched nothing else is told what it has \
+             always been told, the branch this worktree is on being the whole of it: \
+             {prompt:?}"
+        );
     }
 
     /// And what was said on the pull request goes in last, where the newest and
@@ -1775,6 +1886,7 @@ mod tests {
         let prompt = reviewing(
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
+            None,
             Some("**tobico** said on `src/window.rs` line 12:\n\nThis is the wrong way round."),
         );
 
@@ -1787,6 +1899,50 @@ mod tests {
             prompt.find("In-process counter.") < prompt.find("This is the wrong way round."),
             "under the documents: they say what the work is and this says what \
              somebody has already said about it — {prompt:?}"
+        );
+    }
+
+    /// A review of work that reached more than one repository is told where every
+    /// one of its pull requests is, between the documents and what was said on
+    /// them.
+    ///
+    /// One review reads the whole of the work, and a session that started in the
+    /// Conversation's own worktree could not find the other half of it: `git` and
+    /// `gh` both read their repository from wherever they are run.
+    #[test]
+    fn a_review_session_is_told_every_pull_request_the_work_is_on() {
+        let prompt = reviewing(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+            Some(
+                "- pull request #41 of `verkstead`, at https://github.com/tobico/verkstead/pull/41 \
+                 — its worktree is at `/srv/work/verkstead-rate-limiting`.\n\
+                 - pull request #7 of `askance`, at https://github.com/tobico/askance/pull/7 — \
+                 its worktree is at `/srv/work/askance-rate-limiting`.",
+            ),
+            Some(
+                "**tobico** said on pull request #7 of `askance`:\n\nThis is the wrong way round.",
+            ),
+        );
+
+        assert!(
+            prompt.contains("#41") && prompt.contains("#7") && prompt.contains("askance"),
+            "each pull request by its number and the repository it was opened in: \
+             {prompt:?}"
+        );
+        assert!(
+            prompt.contains("https://github.com/tobico/askance/pull/7")
+                && prompt.contains("`/srv/work/askance-rate-limiting`"),
+            "with the URL and the worktree to read it in: {prompt:?}"
+        );
+        assert!(
+            prompt.find("In-process counter.") < prompt.find("#41"),
+            "under the documents, which say what the work is: {prompt:?}"
+        );
+        assert!(
+            prompt.find("#41") < prompt.find("This is the wrong way round."),
+            "and over what was said on them, which is the newest and least general \
+             thing here — {prompt:?}"
         );
     }
 
