@@ -2097,8 +2097,11 @@ pub enum Resumed {
     /// because a direction was picked.
     NoDirection,
 
-    /// The backlog it was working has nothing left in it — never written, or
-    /// finished with. Either way there is no step to read off `.tasks/`.
+    /// The backlog it was working has nothing left in it and this branch never
+    /// wrote one: there is no step to read off `.tasks/` and nothing built on
+    /// the branch to carry to a pull request either. A backlog that *was*
+    /// written and worked to empty is not this — that one has work on the
+    /// branch, so the press has somewhere to go.
     NothingToWork,
 
     /// The grilling Pairing has gone, and a grilling runs under that one

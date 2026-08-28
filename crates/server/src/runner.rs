@@ -48,6 +48,25 @@
 //! told, twice, and then stopped where it stands — see [`crate::rescues`], which
 //! is one loop over every driver here and takes what *done* is read off as its
 //! parameter.
+//!
+//! **The pull request is the one thing that gets a second go.** Every run here
+//! ends on one — a backlog's finish step, an inline implementation, a roadmap's
+//! own session — and each of them commits its work and then pushes and opens the
+//! pull request after the commit. So each of them can land everything it was
+//! sent for and still stop short of the one act that makes the work readable,
+//! leaving it built, committed and unreviewable. That is not a step to run
+//! again: it is one push and one `gh pr create`, so it is asked for on its own,
+//! by a session sent for nothing else, and what follows is GitHub asked again
+//! and the ordinary stop where the answer has not changed. See
+//! [`to_a_pull_request`].
+//!
+//! **And Resume takes the same go**, which is what makes pressing it worth
+//! anything here: a run that stopped at its push is a Conversation whose work is
+//! built and whose branch is on nothing, and the press finds exactly that and
+//! sends for the pull request again. What Resume must never do is guess — an
+//! empty `.tasks/` is a finished backlog or one that never landed, and those are
+//! opposite situations — so the branch is read for which it is. See
+//! [`nothing_left`].
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -449,7 +468,7 @@ async fn backlog_again(
             return plan_stage(state, conversation_id, stacked_on, driving).await;
         }
 
-        return nothing_left(state, conversation_id, driving).await;
+        return nothing_left(state, conversation_id, working_in, base, driving).await;
     }
 
     tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
@@ -462,7 +481,7 @@ async fn backlog_again(
 }
 
 /// What to make of a backlog with nothing left in it, which is decided by asking
-/// GitHub what the branch is on.
+/// GitHub what the branch is on and the branch what it has written.
 ///
 /// [`inline_again`]'s question, asked at the other end of the run. An inline
 /// implementation asks it before spending a session, because a branch that is
@@ -471,8 +490,8 @@ async fn backlog_again(
 /// place: the finish step that emptied it is the step that opens the pull
 /// request, so a branch on one is a run whose ending got most of the way through.
 ///
-/// Which is the case this is written for. Recording the pull request and moving
-/// the Conversation into Wrapping is one transaction — see
+/// Which is one of the cases this is written for. Recording the pull request and
+/// moving the Conversation into Wrapping is one transaction — see
 /// [`store::record_pull_request`] — and a Conversation whose ending failed
 /// somewhere after the push is left implementing a backlog that is empty, with
 /// the work on a pull request nothing has written down. Every way back in used
@@ -484,17 +503,38 @@ async fn backlog_again(
 ///
 /// - a pull request, and [`crate::wrapping::opened`] records it and starts the
 ///   wrap-up, finishing the ending that did not finish;
-/// - [`github::Trouble::NoPullRequest`], which is the ordinary case — a
-///   breakdown that never landed — and there is nothing to launch and nothing to
-///   wrap up, so this stops;
-/// - anything else, which is `gh` unable to answer at all, and that stops too,
+/// - [`github::Trouble::NoPullRequest`], which is the ending that got nowhere
+///   near as far, and what happens about it is below;
+/// - anything else, which is `gh` unable to answer at all, and that stops,
 ///   saying which trouble it was.
 ///
-/// Both stops are stops rather than a line in the log, because what is on the
-/// other side of doing nothing here is the stall sweep finding the Conversation
-/// undriven a minute later and stopping it with a worse sentence than either of
-/// these.
-async fn nothing_left(state: AppState, conversation_id: i64, driving: Driving) {
+/// **An empty backlog and no pull request is two situations, and the branch tells
+/// them apart.** A branch that has written a backlog since it came off its base
+/// has been worked through and finished with — the finish commit is what took
+/// `.tasks/` away — so the work is built and the one thing missing is the push
+/// that never happened, and a session is sent for it exactly as an ending that
+/// stopped short gets one. A branch that has written none never had a breakdown
+/// land on it at all: there is nothing built to open a pull request for, and
+/// pressing on would be pushing an empty branch. That one stops, and it is the
+/// only way out of here that still does.
+///
+/// Which is what makes Resume worth pressing on a run that stopped at its push.
+/// The press comes back through here, the branch still says the work is written,
+/// and the go is taken again — a human who has just logged `gh` in gets the
+/// pipeline finished rather than the Notice they were already looking at. See
+/// [`asked_for_a_pull_request`], which is the same move the automatic ending
+/// makes, and [`backlog_written`], which is the reading that separates the two.
+///
+/// The stop is a stop rather than a line in the log, because what is on the other
+/// side of doing nothing here is the stall sweep finding the Conversation undriven
+/// a minute later and stopping it with a worse sentence than this one.
+async fn nothing_left(
+    state: AppState,
+    conversation_id: i64,
+    working_in: &Path,
+    base: Option<&str>,
+    driving: Driving,
+) {
     let Some((branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
         return;
     };
@@ -518,10 +558,20 @@ async fn nothing_left(state: AppState, conversation_id: i64, driving: Driving) {
             // above whatever stopped the run.
             crate::wrapping::opened(&state, conversation_id, None).await
         }
+        Err(github::Trouble::NoPullRequest) if wrote_a_backlog(working_in, base).await => {
+            tracing::info!(
+                conversation_id,
+                "the backlog was written, worked out and left on no pull request, so a \
+                 session is being sent to open one",
+            );
+
+            asked_for_a_pull_request(&state, conversation_id).await
+        }
         Err(github::Trouble::NoPullRequest) => {
             tracing::info!(
                 conversation_id,
-                "there is no backlog left to work and the branch is on no pull request",
+                "there is no backlog left to work, none was ever written here, and the \
+                 branch is on no pull request",
             );
 
             stop(
@@ -529,9 +579,9 @@ async fn nothing_left(state: AppState, conversation_id: i64, driving: Driving) {
                 conversation_id,
                 crate::stopping::Decided::Verkstead,
                 "working out what is left of the backlog",
-                "there is nothing left in `.tasks/` to work and the branch is on no pull \
-                 request to wrap up — the breakdown never landed, or the work is finished \
-                 with and its ending never happened",
+                "there is nothing in `.tasks/` to work, nothing on this branch ever wrote \
+                 a backlog, and there is no pull request to wrap up — the breakdown never \
+                 landed, so there is nothing built here to carry anywhere",
                 None,
             )
             .await;
@@ -626,7 +676,10 @@ async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
 ///
 /// Two cases, one phase earlier than the finish's: a roadmap Conversation's own
 /// work is one session, and a run that stopped after it had written the roadmap
-/// stopped on the question of what became of it rather than on the writing.
+/// stopped on the question of what became of it rather than on the writing. So
+/// the press is worth something either way — a roadmap that is not written is
+/// written by a fresh session, and one that is written but on no pull request is
+/// sent for the pull request. See [`to_a_pull_request`].
 async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path, driving: Driving) {
     let Some(base) = base(&state, conversation_id).await else {
         return;
@@ -653,7 +706,7 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
         // [`store::record_roadmap`].
         crate::conversations::roadmap_landed(&state, conversation_id).await;
 
-        return crate::wrapping::opened(&state, conversation_id, None).await;
+        return to_a_pull_request(&state, conversation_id, None).await;
     }
 
     let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Staging).await else {
@@ -747,7 +800,7 @@ async fn work(
     // afterwards, because this is the one place that knows *which* step just
     // landed.
     if first == Step::Finish {
-        crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+        to_a_pull_request(&state, conversation_id, Some(writing)).await;
         return;
     }
 
@@ -837,10 +890,157 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
         };
 
         if step == Step::Finish {
-            crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+            to_a_pull_request(&state, conversation_id, Some(writing)).await;
             return;
         }
     }
+}
+
+/// Carry work that is built and committed on to the pull request it ends on —
+/// and where the session that should have opened one did not, ask for one before
+/// anything stops.
+///
+/// **Every run here ends on a pull request**, and each of them ends on it the
+/// same way: the session commits the last of the work and then follows the
+/// repository's own finish sequence to push and open one. A backlog's finish
+/// step, an inline implementation, a roadmap's own session — three endings, one
+/// shape. So they have one failure too: a session that landed its commit and
+/// stopped short of the push leaves the work built, committed and unreviewable,
+/// and the stop that used to follow said exactly that and left the human to open
+/// the pull request themselves.
+///
+/// **So the missing thing is asked for by a session of its own.** It is the
+/// cheapest ask there is — the work is committed, and what is left is a push and
+/// a `gh pr create` — and it is the one thing the run cannot go on without. A
+/// fresh session rather than the one that stopped short: that one is over by the
+/// time this is asked, and a context that already stopped short of the last step
+/// is not the one to send back to it. See [`skills::submitting`], which says the
+/// work is already built and that opening the pull request is the whole of the
+/// job.
+///
+/// **Only where GitHub says there is no pull request.** A `gh` that is missing,
+/// logged out, or looking at a repository with no remote is a wall a session
+/// would walk into at exactly the same place, so those stop where they always
+/// did — the reasoning [`inline_again`] follows a phase earlier. The answer is
+/// handed on to [`crate::wrapping::record`] whole, which makes of it what it
+/// always has.
+///
+/// `writing` is the Timeline Event the session that stopped short printed into,
+/// so that a stop written before anything else runs carries the tail of what *it*
+/// last said, and `None` where there is no session left to read one off.
+async fn to_a_pull_request(state: &AppState, conversation_id: i64, writing: Option<i64>) {
+    let Some((branch, found)) = crate::wrapping::asked(state, conversation_id).await else {
+        return;
+    };
+
+    if !matches!(found, Err(github::Trouble::NoPullRequest)) {
+        return crate::wrapping::record(state, conversation_id, &branch, found, writing).await;
+    }
+
+    tracing::warn!(
+        conversation_id,
+        branch,
+        "the work is committed and on no pull request, so a session is being sent to open one",
+    );
+
+    asked_for_a_pull_request(state, conversation_id).await
+}
+
+/// Send one session for the pull request the work should already be on, and make
+/// of what it leaves what everything else here makes of it.
+///
+/// The move the automatic endings and a pressed Resume share, which is why it is
+/// a function: a run that stopped short of its push and a human pressing Resume
+/// on one are the same Conversation wanting the same thing, and answering them
+/// differently would mean the press was worth less than the run. See
+/// [`to_a_pull_request`] for the first and [`nothing_left`] for the second.
+///
+/// **Once per go.** What follows the session is GitHub asked again, and what it
+/// says then is the whole of it: a pull request wraps the Conversation up, and no
+/// pull request stops it in the words it has always stopped in — over the session
+/// that was sent to open one, whose last words are where the reason there is
+/// still none is written down. Verkstead does not go round a second time by
+/// itself, because two agents that both stopped short of the same push is
+/// something for the human to look at. What they have then is Resume, and a press
+/// is another go through here: the work is still built, so there is still exactly
+/// one thing to ask for.
+async fn asked_for_a_pull_request(state: &AppState, conversation_id: i64) {
+    let Some(writing) = submitted(state, conversation_id).await else {
+        return;
+    };
+
+    crate::wrapping::opened(state, conversation_id, Some(writing)).await
+}
+
+/// Run the one session sent to open a pull request the finish step did not, and
+/// wait until it is over.
+///
+/// **Ended on quiet with nothing of its own open**, which is the review's rule
+/// rather than a step's, and here for a reason of its own: what this session is
+/// sent to do happens on GitHub rather than in the repository, so there is no
+/// path to watch and no commit it has to make — a branch that only wanted pushing
+/// is one it finishes without writing a line. What is left is silence, and every
+/// session here is an interactive agent that idles when its work is done rather
+/// than exiting. Anything it prints puts the whole grace back on the clock, and a
+/// Set of its own left open holds it for as long as the human takes.
+///
+/// **No rescue on this one**, alone among the sessions here. The rescue is for a
+/// session nothing else can move on from — but this is already the second go at
+/// the same missing thing, and what follows it either way is GitHub asked and the
+/// Conversation wrapped up or stopped. Prodding it a third time would put the
+/// Notice off rather than save the human from it.
+///
+/// The Timeline Event it printed into, or `None` where nothing ran: no session
+/// could be started, or the run was stopped from outside while this one did. Both
+/// of those have already said whatever there was to say.
+async fn submitted(state: &AppState, conversation_id: i64) -> Option<i64> {
+    let mut session = launch_in_turn(state, conversation_id, Prompt::Submitting).await?;
+
+    let event_id = session.event_id;
+    let quiet = session.quiet.clone();
+    let pace = state.sessions.pace();
+
+    let ended = tokio::select! {
+        ended = session.ended() => Some(ended),
+        () = quiet_and_nothing_asked(state, conversation_id, event_id, &quiet, pace) => None,
+    };
+
+    match ended {
+        // Quiet with nothing of its own open, which is as much as a session whose
+        // work happened on GitHub can report from in here. Ended rather than left
+        // holding the Worktree, and what it did is GitHub's to say.
+        None => {
+            tracing::info!(
+                conversation_id,
+                event_id,
+                "the session sent to open the pull request has gone quiet, so it is \
+                 being ended",
+            );
+
+            state.sessions.end(conversation_id).await;
+        }
+        // Verkstead ended it — the human closed the Conversation or force-stopped
+        // it, or the account it was spending ran out of window. The stop is on the
+        // record already, so there is nothing to ask GitHub about. See
+        // [`crate::sessions::Ended::on_purpose`].
+        Some(ended) if ended.on_purpose() => {
+            tracing::info!(
+                conversation_id,
+                event_id,
+                "the session sent to open the pull request was stopped from outside, so \
+                 nothing is asked about it",
+            );
+
+            return None;
+        }
+        // And one that ended by itself is read by what it left on GitHub rather
+        // than by how it exited: an agent that opened the pull request and then
+        // fell over has done the job, and one that exited cleanly having done
+        // nothing has not. The ask that follows this is what tells them apart.
+        Some(_) => {}
+    }
+
+    Some(event_id)
 }
 
 /// Follow the grilling session as it writes the handoff, and start the session
@@ -924,9 +1124,11 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// What follows a session that landed something is the same ending a backlog's
 /// finish step has: the session followed the repository's own review process on
 /// its way out, so the branch is pushed and on a pull request by the time it
-/// goes quiet, and [`crate::wrapping::opened`] is what finds that pull request
-/// and moves the Conversation on. An inline implementation is work like any
-/// other work and goes for review like any other work.
+/// goes quiet, and [`to_a_pull_request`] is what finds that pull request and
+/// moves the Conversation on — or, where the session stopped short of the push,
+/// sends for the one thing missing before anything stops. An inline
+/// implementation is work like any other work and goes for review like any other
+/// work.
 ///
 /// Which is why landing nothing is not the end of it either. A second session on
 /// the branch — the one [`inline_again`] launches where GitHub has no pull
@@ -1005,9 +1207,8 @@ async fn follow_inline(
     // Committed and gone quiet, which is an inline implementation done. The
     // session is ended rather than waited out, and what follows is the ending a
     // landed run has always had: the skill carried the branch to a pull request
-    // on its way out, and [`crate::wrapping::opened`] is what finds it — or
-    // stops naming what it could not find, which is the same answer this has
-    // always given a branch with nothing on it.
+    // on its way out, and [`to_a_pull_request`] is what finds it — or sends for
+    // it, and then stops naming what it still could not find.
     let Some(ended) = ended else {
         tracing::info!(
             conversation_id,
@@ -1017,7 +1218,7 @@ async fn follow_inline(
 
         state.sessions.end(conversation_id).await;
 
-        return crate::wrapping::opened(&state, conversation_id, Some(event_id)).await;
+        return to_a_pull_request(&state, conversation_id, Some(event_id)).await;
     };
 
     // Verkstead ended it — the human closed the Conversation or force-stopped
@@ -1059,7 +1260,7 @@ async fn follow_inline(
                 "an inline session has landed its work"
             );
 
-            crate::wrapping::opened(&state, conversation_id, Some(event_id)).await;
+            to_a_pull_request(&state, conversation_id, Some(event_id)).await;
             return;
         }
         // Exited cleanly having committed nothing at all. An interactive agent
@@ -1824,7 +2025,10 @@ async fn follow_staging(state: AppState, conversation_id: i64, writing: Session,
 /// in between. Implementing is where an agent is building the work, and on a
 /// roadmap the building belongs to the Stages: this Conversation's own work is
 /// the planning, which is the grilling carrying on. The move is
-/// [`crate::wrapping::opened`]'s, made as the pull request is recorded.
+/// [`crate::wrapping::opened`]'s, made as the pull request is recorded — and a
+/// roadmap that was committed and never pushed gets the go every other ending
+/// gets, the roadmap being this Conversation's whole work and a pull request
+/// being what it is finished by. See [`to_a_pull_request`].
 ///
 /// No handoff anywhere in it, and none in a task list either. A handoff is for
 /// a context boundary the work actually crosses, and a roadmap crosses none:
@@ -1854,7 +2058,7 @@ async fn follow_roadmap(
     // order the two happened in.
     crate::conversations::roadmap_landed(&state, conversation_id).await;
 
-    crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+    to_a_pull_request(&state, conversation_id, Some(writing)).await;
 }
 
 /// Run one fix session about `feedback`, and wait until it is over.
@@ -2605,17 +2809,29 @@ pub(crate) async fn stage_to_plan(
         }
     };
 
-    // Off the runtime's threads: two git reads.
-    let written = {
-        let worktree = worktree.to_owned();
-        let base = base.to_owned();
+    (!wrote_a_backlog(worktree, Some(base)).await).then_some(stacked_on)
+}
 
-        tokio::task::spawn_blocking(move || backlog_written(&worktree, &base))
-            .await
-            .unwrap_or(true)
+/// [`backlog_written`] as the two things that turn on it ask it: off the
+/// runtime's threads, and *written* wherever it cannot be read at all.
+///
+/// A git that will not answer and a Conversation with no base commit are the same
+/// unreadable branch, and every caller wants the same thing said about one. A
+/// stage read as unplanned would be planned again over somebody else's backlog;
+/// an emptied backlog read as never written would stop a run that has work on the
+/// branch and one push to go, and refuse the press that would have finished it.
+/// *Written* is the careful answer to all three.
+pub(crate) async fn wrote_a_backlog(worktree: &Path, base: Option<&str>) -> bool {
+    let Some(base) = base else {
+        return true;
     };
 
-    (!written).then_some(stacked_on)
+    let worktree = worktree.to_owned();
+    let base = base.to_owned();
+
+    tokio::task::spawn_blocking(move || backlog_written(&worktree, &base))
+        .await
+        .unwrap_or(true)
 }
 
 /// Whether this branch has written a backlog since `base`.
@@ -2736,6 +2952,17 @@ enum Prompt {
 
     /// The implementation skill, which is the whole of an inline run.
     Implementing,
+
+    /// The submitting skill, which the session sent after a finish that left no
+    /// pull request runs inside.
+    ///
+    /// Carries nothing, like every other prompt that carries nothing: what it is
+    /// about is the branch, which the session reads for itself. A prompt of its
+    /// own rather than the finish step's again, because the work is built — a
+    /// session told to work the next task would find no backlog and nothing to
+    /// do, and the one thing left is the one thing that skill says last. See
+    /// [`to_a_pull_request`].
+    Submitting,
 
     /// The instruction skill, carrying the hand-written work a steer into
     /// Implementing sent the session off with.
@@ -2859,6 +3086,7 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                 Prompt::Staging => skills::staging(&brief),
                 Prompt::NextTask => skills::next_task(&brief, handoff),
                 Prompt::Implementing => skills::implementing(&brief, handoff),
+                Prompt::Submitting => skills::submitting(&brief, handoff),
                 Prompt::Instruction(instruction) => {
                     skills::instruction(&brief, handoff, instruction)
                 }
@@ -3216,6 +3444,58 @@ mod tests {
         assert!(
             backlog_written(path, &base),
             "this stage planned, and a finished backlog is not an unplanned one",
+        );
+    }
+
+    /// And the other thing the same reading decides: which of two situations an
+    /// empty backlog is, when Resume is pressed on a branch that is on no pull
+    /// request. A branch that worked its backlog to empty has written one and
+    /// finished with it, so the work is built and the push is the only thing
+    /// left; one that never had a breakdown land on it has written none and has
+    /// nothing built to carry anywhere. The Worktree looks the same either way —
+    /// no `.tasks/` at all — and the history is the whole of the difference. See
+    /// [`nothing_left`].
+    #[test]
+    fn an_emptied_backlog_and_one_that_never_landed_are_told_apart_by_the_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        run(path, &["init", "--initial-branch", "main"]);
+        run(path, &["config", "user.email", "test@verkstead.invalid"]);
+        run(path, &["config", "user.name", "Verkstead Test"]);
+
+        std::fs::write(path.join("README.md"), "# A repository\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: the repository as it stood"]);
+
+        let base = run(path, &["rev-parse", "HEAD"]).trim().to_owned();
+
+        assert_eq!(next_step(path), Step::Nothing, "there is nothing to work");
+        assert!(
+            !backlog_written(path, &base),
+            "and nothing on this branch ever wrote a backlog, so there is nothing built \
+             to send for a pull request",
+        );
+
+        let backlog = path.join(BACKLOG);
+        std::fs::create_dir_all(&backlog).unwrap();
+        std::fs::write(backlog.join(TODO), "# Rate limiting\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: plan rate-limiting tasks"]);
+
+        std::fs::remove_dir_all(&backlog).unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: finish rate limiting"]);
+
+        assert_eq!(
+            next_step(path),
+            Step::Nothing,
+            "the finish took the list away, so there is nothing to work here either",
+        );
+        assert!(
+            backlog_written(path, &base),
+            "but this branch wrote a backlog and finished with it, which is a run that \
+             got as far as its push",
         );
     }
 

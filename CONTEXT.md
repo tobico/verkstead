@@ -330,6 +330,25 @@ a grace period, never on done alone: work does not always stop at the commit, an
 output arriving puts the whole grace back on the clock. A session that keeps
 talking is never ended. One Step per session and one session per Step — a fresh
 context each time, which is what the backlog was broken into slices for.
+
+**A Step can be done and still be short**, because what a run's last Step is for
+happens after its commit: the finish takes the list away and commits it, and the
+push and the pull request come next — as they do for an inline implementation and
+for a roadmap's own session, every kind of work here ending on a pull request.
+One that stopped in between leaves the work built, committed and unreviewable, so
+the missing thing is asked for — a session of its own, sent to push and open the
+pull request and told the work is already built. Not a Step itself: nothing in
+the Repo says it is due and nothing there says it is done, GitHub being the one
+that knows. Once per go, and then the ordinary stop where the answer has not
+changed, because two agents that both stopped short of the same push is something
+for the human to look at.
+
+**Resume takes that same go**, so a run stopped at its push is one a press can
+finish. What it must not do is guess: an empty `.tasks/` is a backlog worked
+through or one that never landed, which are opposite situations, so the branch is
+read for which it is — a branch that has written a backlog since it came off its
+base has been worked and finished with, and one that has written none has nothing
+built to carry anywhere and stops.
 _Avoid_: job, iteration, unit of work, stage (that is a roadmap's)
 
 **Stage**:
@@ -394,14 +413,14 @@ all.
 
 **Deliberate** or by **circumstance**, which is the one thing a restart has to
 know. Verkstead pulling the brake — a session that fell over, checks that would
-not go green, a finish Step that left no pull request, an Agent Profile out of
-usage window — and the human pressing **Stop** are both deliberate, and a
-restarting server leaves them alone. A driver a restart or a crash took away is
-circumstance: nobody decided anything, so the next server up carries the work on
-unasked. A deliberate stop Verkstead decided on is also pushed to the human's
-devices; one nobody chose is not, a restart being free to pick it up, and
-neither is the human's own Stop, they being the one person a notification would
-be telling their own news.
+not go green, work whose pull request never arrived even after a session was
+sent for it, an Agent Profile out of usage window — and the human pressing
+**Stop** are both deliberate, and a restarting server leaves them alone. A
+driver a restart or a crash took away is circumstance: nobody decided anything,
+so the next server up carries the work on unasked. A deliberate stop
+Verkstead decided on is also pushed to the human's devices; one nobody chose is
+not, a restart being free to pick it up, and neither is the human's own Stop,
+they being the one person a notification would be telling their own news.
 
 **No stop resumes itself**, the usage-window one included. A run whose Agent
 Profile has exhausted its window stops the way everything else does, and all
@@ -439,6 +458,14 @@ than refused: the plan session is launched as the Stage is made and by nothing
 else, so a Stage with no `.tasks/` is a run that never began rather than one
 that is worked out — read off what its branch has written since it was made,
 which the backlog of the Stage it stacks on is no part of.
+
+**A press always has somewhere to go**, which is the whole point of recomputing
+rather than repeating: every state the pipeline can stop in has a next move, and
+work that stopped at its push has the plainest of them — the pull request is
+sent for again. What the branch has written since it came off its base is what
+says which situation an empty `.tasks/` is, the same reading a Stage's planning
+turns on, and the one press that is still refused by name is the branch with
+nothing built on it at all.
 
 Offered on a Conversation that is merely undriven as much as on one that is
 **Stopped**, a run with nothing behind it being the same condition however it

@@ -3744,6 +3744,87 @@ claude-grilling-5)
 esac
 "#;
 
+/// The same backlog, with the session Verkstead sends after a finish that opened
+/// nothing doing the one thing it is sent for.
+///
+/// `opened` is this fixture's stand-in for a pull request appearing on GitHub:
+/// the `gh` beside it answers *no pull request* until the file is there and
+/// answers #41 once it is, which is the change the session's own push and
+/// `gh pr create` would make. See [`gh_opened_by_hand`].
+///
+/// The finish itself is unchanged — it commits the list away and gets no
+/// further, which is what a session that stopped short of its push leaves
+/// behind.
+fn a_backlog_whose_pull_request_is_opened_when_asked(opened: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    printf 'the branch is pushed and the pull request is open\n'
+    printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+    exit 0
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+    )
+}
+
+/// And the same again where the session sent for the pull request cannot open one
+/// either: it says why and exits, which is what a `gh` nobody logged in looks
+/// like from inside a session.
+fn a_backlog_that_cannot_open_a_pull_request() -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    printf 'gh is not logged in here, so there is no pull request to open\n'
+    exit 1
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#
+    )
+}
+
+/// And the same again where the first session sent for the pull request cannot
+/// open one either, and the second — the one a press of Resume sends — can.
+///
+/// Which is the shape the button is for: the run has its go, stops on the same
+/// missing thing, and the human presses when whatever was in the way is out of
+/// it. `tried` is how the stub remembers which of the two it is in.
+fn a_backlog_whose_pull_request_takes_two_asks(tried: &Path, opened: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    if [ ! -f {tried} ]; then
+        printf 'no remote to push to, so there is no pull request to open\n'
+        printf 'once\n' > {tried}
+        exit 1
+    fi
+    printf 'the branch is pushed and the pull request is open\n'
+    printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+    exit 0
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+        tried = quoted(tried),
+        opened = quoted(opened),
+    )
+}
+
 /// Take a Conversation from the pick on its closing Set to a worked-through
 /// backlog, with nothing pressed on the way: the whole point of the run is that
 /// nobody is asked anything between the direction and the pull request.
@@ -4337,12 +4418,77 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
     );
 }
 
-/// And what happens when `gh` cannot answer — no `gh`, no login, or a branch
-/// nothing was opened on. The Conversation stays where it is with the reason on
-/// its Timeline, rather than becoming a Wrapping with no pull request under it.
+/// A finish that commits its work and opens no pull request is not the end of the
+/// run: one session is sent for the one thing missing, and a branch that comes
+/// back on a pull request wraps up as though the finish had done it itself.
+///
+/// The failure this is about is the finish stopping between its commit and its
+/// push. The step lands — `.tasks/` is gone and the commit removing it is on the
+/// branch — so everything Verkstead watches for says done, and the work is
+/// nonetheless built, committed and unreadable by anybody. It is one push and one
+/// `gh pr create` from being finished, which is the cheapest thing there is to
+/// ask for and the one thing the run cannot go on without.
+///
+/// Sent inside the submitting skill rather than the fork that works a backlog:
+/// the work is built, and a session told to work the next task would find no
+/// backlog and nothing to do.
 #[tokio::test]
-async fn a_finish_that_opened_no_pull_request_leaves_the_conversation_where_it_is() {
-    let fixture = grilling_asking(A_BACKLOG_OF_ONE, NO_PULL_REQUEST).await;
+async fn a_finish_that_opened_no_pull_request_is_sent_back_for_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_whose_pull_request_is_opened_when_asked(&opened),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    // Read at the moment it moves rather than afterwards: a wrap-up with nothing
+    // outstanding settles itself, so a second look is as likely to be of a
+    // Conversation that has already finished.
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
+                .then(|| view.clone())
+        })
+        .await;
+
+    let found = pull_request(&view).expect("the wrap-up has its pull request pinned");
+
+    assert_eq!(
+        found.number, 41,
+        "the pull request the session opened is the one it wraps up",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "one session, sent for the pull request and nothing else",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "and nothing is waiting on the human: the run finished the way it was \
+         always supposed to",
+    );
+}
+
+/// And what happens when the session sent for it opens none either — no `gh`, no
+/// login, or a branch nothing was opened on. The Conversation stays where it is
+/// with the reason on its Timeline, rather than becoming a Wrapping with no pull
+/// request under it.
+///
+/// One go and then the stop: two agents that both stopped short of the same push
+/// is something for the human to look at, and a third would be Verkstead spending
+/// an account on the same missing thing with nobody watching.
+#[tokio::test]
+async fn a_finish_whose_pull_request_never_arrives_leaves_the_conversation_where_it_is() {
+    let fixture = grilling_asking(
+        &a_backlog_that_cannot_open_a_pull_request(),
+        NO_PULL_REQUEST,
+    )
+    .await;
 
     worked_to_empty(&fixture).await;
 
@@ -4363,6 +4509,11 @@ async fn a_finish_that_opened_no_pull_request_leaves_the_conversation_where_it_i
         Decision::Deliberate,
         "what is missing is out here rather than in a driver that went away, so a \
          restart looking again would find the same missing thing",
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "and the stop is on the far side of the one go rather than instead of it",
     );
 
     let view = fixture.view().await;
@@ -11318,24 +11469,37 @@ async fn a_conversation_nothing_is_supposed_to_be_driving_is_never_halted() {
     );
 }
 
-/// An inline run that lands its work and leaves no pull request halts, with the
-/// reason `gh` gave and the Worktree it stopped in on the Timeline.
+/// An inline run that lands its work and leaves no pull request is sent back for
+/// one, and halts where that leaves none either — with the reason `gh` gave and
+/// the Worktree it stopped in on the Timeline.
 ///
 /// The inline half of what a finish step's missing pull request does — see
-/// [`a_finish_that_opened_no_pull_request_leaves_the_conversation_where_it_is`].
-/// The session committed and exited without ever pushing, which is precisely the
-/// ending nothing used to notice: the run went quiet in Implementing and stayed
-/// there. Now it is asked about, and a Conversation that cannot be moved on is
-/// one the human is told about.
+/// [`a_finish_that_opened_no_pull_request_is_sent_back_for_one`]. The session
+/// committed and exited without ever pushing, which is precisely the ending
+/// nothing used to notice: the run went quiet in Implementing and stayed there.
+/// Every run here ends on a pull request the same way, so every one of them gets
+/// the same go at the one thing missing, and a Conversation that still cannot be
+/// moved on is one the human is told about.
 ///
 /// The evidence is both halves of it: what git makes of the Worktree, and the
-/// tail of what the session last said — which is where the reason it opened
-/// nothing is usually written down, and is why the session's own Timeline Event
-/// goes to the wrap-up with it.
+/// tail of what the last session said — which is where the reason there is still
+/// no pull request is written down, and is why each session's own Timeline Event
+/// goes to the wrap-up with it. The last session is the one sent for the pull
+/// request, so what the Notice carries is its account rather than the builder's:
+/// the run's question by then is why the push did not happen, and that session is
+/// the one that tried it.
 #[tokio::test]
 async fn an_inline_run_that_opened_no_pull_request_leaves_the_conversation_where_it_is() {
     let fixture = grilling_asking(
         r#"
+        case "$2" in
+        *submitting/SKILL.md*)
+            printf 'prompt was: %s\n' "$2"
+            printf 'gh is not logged in here, so there is no pull request to open\n'
+            exit 1
+            ;;
+        esac
+
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
@@ -11379,12 +11543,17 @@ async fn an_inline_run_that_opened_no_pull_request_leaves_the_conversation_where
         "with what git makes of the Worktree it stopped in: {:?}",
         stopped.html,
     );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "and the stop is on the far side of the one go rather than instead of it",
+    );
     assert!(
         stopped
             .html
-            .contains("the limiter is in, the middleware is not"),
-        "and the tail of what the session last said, which is the Event the \
-         wrap-up was handed: {:?}",
+            .contains("gh is not logged in here, so there is no pull request to open"),
+        "and the tail of what the last session said, which is the one sent for the \
+         pull request and the one that knows why there is none: {:?}",
         stopped.html,
     );
     assert_eq!(
@@ -15042,48 +15211,77 @@ async fn a_worktree_that_cannot_be_made_again_refuses_by_name() {
     );
 }
 
-/// A Resume with nothing to start refuses by name, and leaves the Conversation
-/// exactly as it found it.
+/// A Resume pressed on a run that stopped at its push sends for the pull request
+/// again, rather than refusing because `.tasks/` has nothing left in it.
 ///
-/// The whole of what this replaces: a press that quietly decided there was
-/// nothing to do left the human as stuck as they were, with no more to go on
-/// than a line in a log they cannot see. So the reason comes back to the page
-/// that asked, and the stop it was pressed on stands.
+/// The press that has to be worth pressing. A backlog worked to empty whose
+/// branch is on no pull request is the state a finish that stopped between its
+/// commit and its push leaves behind — the work is built, the list is gone, and
+/// the one thing missing is out on GitHub. Refusing that by name would be the
+/// button turning down the one Conversation it could finish, and turning it down
+/// every time it was pressed: nothing about the situation changes on its own, so
+/// the human would be as stuck as the run was.
 ///
-/// A finish step whose pull request `gh` could not find is the plainest way to
-/// have one: the backlog is worked through and taken away, the Conversation is
-/// still implementing, and there is nothing left in `.tasks/` to read a step
-/// off. What is missing is out on GitHub, which is not something a session can
-/// be launched at.
+/// So the branch is read rather than the tree: it has written a backlog since it
+/// came off its base, which is a run that got as far as its push, and what is
+/// left of it is one session's worth of asking. The stub here cannot open one the
+/// first time and can the second, which is the shape of whatever was in the way
+/// being taken out of it.
 #[tokio::test]
-async fn resuming_with_nothing_to_start_refuses_by_name_and_changes_nothing() {
-    let fixture = grilling_asking(A_BACKLOG_OF_ONE, NO_PULL_REQUEST).await;
+async fn resuming_an_emptied_backlog_with_no_pull_request_sends_for_one_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let tried = spill.path().join("tried-once");
+    let opened = spill.path().join("opened-when-asked");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_whose_pull_request_takes_two_asks(&tried, &opened),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
 
     worked_to_empty(&fixture).await;
 
+    // The run has its own go first, and it comes to nothing: the session says it
+    // cannot push and GitHub still has nothing on the branch.
     let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("no pull request"),
+        "the run stopped on the pull request nothing could find: {:?}",
+        stopped.html,
+    );
 
     assert_eq!(
         fixture.resume().await,
-        Resumed::NothingToWork,
-        "there is no backlog to read a step off, and saying so is the whole job",
+        Resumed::Resumed,
+        "an empty backlog is not the whole answer: the work is built and the push \
+         is what is left",
     );
 
-    let view = fixture.view().await;
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
+                .then(|| view.clone())
+        })
+        .await;
 
     assert_eq!(
-        view.blocked_on,
-        Some(stopped.id),
-        "the stop stands: a refusal changes nothing",
-    );
-    assert!(
-        view.ready_to_resume,
-        "and the button is still there, because nothing is driving it yet",
+        pull_request(&view)
+            .expect("the wrap-up has its pull request pinned")
+            .number,
+        41,
+        "the pull request the press paid for is the one it wraps up",
     );
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
-        "and the Conversation is where it was",
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        2,
+        "one session for the run's own go and one for the press, and neither of \
+         them sent to build anything",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "and nothing is waiting on the human any more",
     );
 }
 
@@ -15532,21 +15730,24 @@ async fn a_halt_nobody_chose_is_driven_again_by_the_next_server() {
 /// look at, and *nothing is driving it* from the sweep a minute later is the same
 /// Conversation described by something that knows less.
 ///
-/// A finish step whose pull request `gh` could not find is the plainest way to
-/// have one: the backlog is worked through and taken away, the Conversation is
-/// still implementing, and there is nothing left in `.tasks/` to read a step off.
-/// The stop it left is taken away first, which is the human having pressed Resume
-/// on it before the restart — what is being asked about here is the restart's own
-/// refusal rather than a stop it would have left alone.
+/// A Worktree that is not one any more and cannot be made again is the plainest
+/// way to have one: a run that is implementing has everywhere to start and
+/// nowhere to do it, and it is the one refusal with nothing the workbench can
+/// correct. The stop the run left is taken away first, which is the human having
+/// pressed Resume on it before the restart — what is being asked about here is
+/// the restart's own refusal rather than a stop it would have left alone.
 ///
-/// The restarted server's `gh` finds none either, and that is load-bearing rather
-/// than incidental: an empty backlog refuses only where GitHub confirms the
-/// branch is on no pull request — see
-/// [`resuming_an_emptied_backlog_whose_branch_has_a_pull_request_wraps_it_up_unspent`],
-/// which is the same Conversation with the other answer behind it.
+/// An emptied backlog is deliberately not the example any more: a branch that
+/// wrote a backlog and worked it to empty has work on it and one push to go, so a
+/// restart sends for the pull request rather than refusing — see
+/// [`resuming_an_emptied_backlog_with_no_pull_request_sends_for_one_again`].
 #[tokio::test]
 async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline() {
-    let fixture = grilling_asking(A_BACKLOG_OF_ONE, NO_PULL_REQUEST).await;
+    let fixture = grilling_asking(
+        &a_backlog_that_cannot_open_a_pull_request(),
+        NO_PULL_REQUEST,
+    )
+    .await;
 
     worked_to_empty(&fixture).await;
 
@@ -15555,6 +15756,14 @@ async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline
     let before = notices(&fixture.view().await).len();
 
     fixture.drive_again().await;
+
+    // Something that is not a directory at all sitting where the Worktree goes:
+    // it cannot be removed as a worktree, it is not a directory to take away, and
+    // git will not check the branch out over it.
+    let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
+
+    std::fs::remove_dir_all(&worktree).unwrap();
+    std::fs::write(&worktree, "not a worktree\n").unwrap();
 
     let _restarted = fixture.restarted("true", NO_PULL_REQUEST).await;
 
@@ -15574,7 +15783,7 @@ async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline
         "and the restart is what could not start it: {refused:?}",
     );
     assert!(
-        refused.contains("there is nothing left in <code>.tasks/</code> to work"),
+        refused.contains("git would not make it again from the branch"),
         "in the words the press refuses in, rather than the sweep's: {refused:?}",
     );
     assert_eq!(

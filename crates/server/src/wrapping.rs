@@ -34,6 +34,18 @@
 //! cannot resolve it, and what to do about it is the human's — install `gh`, log
 //! in, or open the PR by hand, and resume.
 //!
+//! With one thing tried first, and only for the one answer a session could do
+//! anything about. Every run that ends here commits its work and pushes it
+//! afterwards, so any of them can land the whole of what it was sent for and
+//! still stop short of the push — which leaves the work built, committed and
+//! unreviewable. So *no PR on the branch* is asked for once more, by a session of
+//! its own sent to push and open one, and the stop is what is left if that comes
+//! back to the same missing thing. A pressed Resume takes the same go rather than
+//! the Notice again. See [`crate::runner`], which is where the deciding is done,
+//! and [`record`], which is this module's half of it. The other troubles are
+//! walls a session would walk into in the same place, so they stop as they always
+//! have.
+//!
 //! Which is advice Resume then has to be able to take: a pull request opened in
 //! a browser is one nothing on the branch knows about, so Resume asks GitHub
 //! about it before it spends anything — see [`asked`], and [`crate::runner`] for
@@ -62,6 +74,27 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
         return;
     };
 
+    record(state, conversation_id, &branch, found, writing).await
+}
+
+/// Make of an answer `gh` has already given what [`opened`] makes of its own.
+///
+/// The same move with the asking taken out of it, for the one caller that has to
+/// look at the answer before this does: a finish step that left no pull request
+/// is sent back to open one, and only a branch GitHub says has none is worth
+/// spending a session on — see [`crate::runner`]. Everything else it may say is
+/// this function's to record or to stop over, exactly as it always was, so the
+/// deciding stays in one place and the caller hands back what it was given.
+///
+/// `branch` is the branch that was asked about, which is what the stop is logged
+/// against.
+pub(crate) async fn record(
+    state: &AppState,
+    conversation_id: i64,
+    branch: &str,
+    found: Result<store::PullRequest, github::Trouble>,
+    writing: Option<i64>,
+) {
     let opened = match found {
         Ok(opened) => opened,
         Err(trouble) => {

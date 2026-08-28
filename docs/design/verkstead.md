@@ -169,7 +169,14 @@ flowchart LR
   Auto-advance runs the whole pipeline unattended: fresh session per task,
   tasks auto-advance, stages auto-continue, and the finish sequence (push +
   draft PR per the repo's review process) runs without approval. Merging stays
-  a human act.
+  a human act. Every run ends on a PR and pushes after its last commit, so any
+  of them — a backlog's finish, an inline implementation, a roadmap's own
+  session — can land the whole of its work and still stop short of the PR.
+  One that did gets a session sent for the PR alone, told the work is already
+  built, and the stop is what is left if that leaves none either. Resume takes
+  the same go rather than repeating the Notice: an empty `.tasks/` is read
+  against the branch, which tells a backlog worked through from one that never
+  landed.
 - **Wrap-up phase, per PR.** After a PR opens: the agent re-reviews the PR in
   a fresh context and raises a question set for any issues it finds;
   meanwhile Verkstead monitors the CI run and dispatches fix sessions on

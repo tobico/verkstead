@@ -63,6 +63,11 @@ const NEXT_STAGE: &str = "~/.claude/skills/next-stage/SKILL.md";
 /// is, is read off `.tasks/` rather than told.
 const NEXT_TASK: &str = "~/.claude/skills/next-task/SKILL.md";
 
+/// And the submitting skill's, which the one session launched over a finish
+/// that left no pull request runs inside: the work is built and committed, and
+/// the pull request it should have gone for review on is the one thing missing.
+const SUBMITTING: &str = "~/.claude/skills/submitting/SKILL.md";
+
 /// And the addressing skill's, which every fix session of a wrap-up runs
 /// inside — whichever of the three kinds of feedback dispatched it.
 const ADDRESSING: &str = "~/.claude/skills/addressing/SKILL.md";
@@ -302,6 +307,26 @@ pub(crate) fn next_task(brief: &str, handoff: Option<&str>) -> String {
         &format!(
             "Read {NEXT_TASK} and work the next task of the backlog for the work described \
              below, the way it says."
+        ),
+        brief,
+        handoff,
+    )
+}
+
+/// What the session sent after a finish that opened nothing is started on: the
+/// same two documents again, under the line that sends the agent into the
+/// submitting skill.
+///
+/// The documents rather than a bare instruction to push, for the reason every
+/// other session here is given them: a pull request is titled and described for
+/// the work it carries, and what that work was for is written in the Brief and
+/// the handoff rather than anywhere the branch could say it. The commits say
+/// what was built; these two say what it was meant to be.
+pub(crate) fn submitting(brief: &str, handoff: Option<&str>) -> String {
+    on_the_documents(
+        &format!(
+            "Read {SUBMITTING} and get the work already committed on this branch onto a \
+             pull request, the way it says."
         ),
         brief,
         handoff,
@@ -1314,6 +1339,85 @@ mod tests {
             next_task.contains("Nothing waits on approval here either"),
             "and there is no gate in front of that either, as there is in front of none: \
              {next_task}"
+        );
+    }
+
+    /// And where the finish stopped between its commit and its pull request, the
+    /// session sent after it is sent for the pull request and nothing else: the
+    /// work is built and committed, so a skill that read as *build the feature*
+    /// would put a second run on a branch the human is about to read as finished.
+    #[test]
+    fn the_submitting_skill_says_the_work_is_already_built() {
+        let submitting = skill("submitting/SKILL.md");
+
+        assert!(
+            submitting.contains("already built and committed"),
+            "what is missing is the pull request rather than the work: {submitting}"
+        );
+        assert!(
+            submitting.contains("Do not start anything else"),
+            "so there is nothing else for this session to pick up: {submitting}"
+        );
+        assert!(
+            !submitting.contains("lowest-numbered"),
+            "and no backlog left to work through: {submitting}"
+        );
+        assert!(
+            submitting.contains("verkstead guide") && submitting.contains("verkstead ask"),
+            "the one way to the human, for what the branch cannot settle: {submitting}"
+        );
+    }
+
+    /// And it opens the pull request the same way the finish step would have —
+    /// the repository's own process, both shapes named, no gate in front of it.
+    /// One wording across the three, because the branch does not care which
+    /// session got there.
+    #[test]
+    fn the_submitting_skill_opens_the_pull_request_the_repositorys_own_way() {
+        let submitting = skill("submitting/SKILL.md");
+
+        assert!(
+            submitting.contains("docs/agents/git-workflow.md")
+                && submitting.contains("Finish sequence"),
+            "the process is the repository's, read out of the file that records it: \
+             {submitting}"
+        );
+        assert!(
+            submitting.contains("gh stack submit --auto"),
+            "a stacked branch is submitted as a stack: {submitting}"
+        );
+        assert!(
+            submitting.contains("gh pr create --draft"),
+            "and an unstacked one opens a draft PR of its own: {submitting}"
+        );
+        assert!(
+            submitting.contains("Nothing waits on approval"),
+            "and there is no gate in front of it, as there is in front of none: {submitting}"
+        );
+    }
+
+    /// The session is put inside the skill the same way every other one is, and
+    /// primed with the same two documents: the pull request is titled and
+    /// described for work whose point is written in them rather than in the diff.
+    #[test]
+    fn a_submitting_session_is_started_on_the_documents_inside_the_skill() {
+        let prompt = submitting(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# Handoff\n\nA fixed window.\n"),
+        );
+
+        assert!(
+            prompt.contains(SUBMITTING),
+            "the skill is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none.") && prompt.contains("A fixed window."),
+            "and both documents are what it is primed with: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains(NEXT_TASK) && !prompt.contains(IMPLEMENTING),
+            "and nothing sends this session to work a task or build the feature again: \
+             {prompt:?}"
         );
     }
 
