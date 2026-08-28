@@ -263,6 +263,7 @@ fn confirmed_with_three_left_open() -> Response {
         answers: vec![answered("Q1", Some(2)), left_open("Q2a"), left_open("Q2b")],
         comment: None,
         direction: None,
+        nothing_else: false,
     }
 }
 
@@ -273,6 +274,7 @@ fn decided() -> Response {
         answers: QUESTIONS.iter().map(|label| left_open(label)).collect(),
         comment: Some("Neither — why is this not just a cache in front?".to_owned()),
         direction: None,
+        nothing_else: false,
     }
 }
 
@@ -405,6 +407,51 @@ async fn a_disconnected_set_is_still_answerable_from_the_viewer() {
     assert!(
         matches!(asked[0].standing, Standing::Answered(_)),
         "the answered Set should read as the decision it now is: {asked:?}"
+    );
+}
+
+/// The Nothing-else mark end to end, which is the one thing about it that no
+/// single half can be asked: the browser sends it with the Response, the store
+/// keeps it beside the row, and the wait the agent is holding ends with a
+/// Response that has no trace of it.
+#[tokio::test]
+async fn the_nothing_else_mark_is_kept_here_and_never_goes_out_to_the_agent() {
+    let (_dir, pool, app) = fresh_app().await;
+    let id = post_set(&app, SET).await;
+
+    let ordinary = decided();
+    let ending = Response {
+        nothing_else: true,
+        ..ordinary.clone()
+    };
+
+    let outcome: Submitted = post(
+        &app,
+        &format!("/api/ui/sets/{id}/response"),
+        serde_json::to_value(&ending).unwrap(),
+    )
+    .await;
+    assert_eq!(outcome, Submitted::Accepted);
+
+    assert!(
+        store::ended_on(&pool, id).await.unwrap(),
+        "the mark is recorded beside the stored Response, which is where a rule \
+         about the follow-up will read it"
+    );
+
+    let handed = wait_for_response(&app, id, 0).await;
+    assert_eq!(handed.status(), StatusCode::OK);
+
+    let yaml = body_text(handed).await;
+    assert!(
+        !yaml.contains("nothing_else"),
+        "there is nothing in the Response for a session to find: {yaml}"
+    );
+    assert_eq!(
+        serde_saphyr::from_str::<Response>(&yaml).unwrap(),
+        ordinary,
+        "what the agent is handed is the Response it would have been handed \
+         without a mark on it"
     );
 }
 
@@ -606,6 +653,7 @@ async fn a_response_that_misses_a_question_comes_back_naming_it() {
         answers: vec![answered("Q1", Some(1)), left_open("Q2a")],
         comment: None,
         direction: None,
+        nothing_else: false,
     };
 
     let outcome: Submitted = post(

@@ -85,6 +85,17 @@ jobs:
       # what the viewer's own suite covers is the viewer job's business.
       - name: Test
         run: cargo test --workspace
+        env:
+          # Twice the suite's own clock for `crates/server/tests/sessions.rs`,
+          # which stands real servers up and runs real sessions in real
+          # sandboxes and judges them on wall clock. This runner has two cores
+          # and is building the workspace alongside the run, so a session gets
+          # descheduled past a budget it would have met on a developer's
+          # machine — and what comes out is a different test failing every time,
+          # none of them about the code. See `VERKSTEAD_TEST_PACE` there for why
+          # one factor over the whole file rather than a longer budget here and
+          # there.
+          VERKSTEAD_TEST_PACE: "2"
 
       # `cargo test` writes `web/src/api/types.ts` through ts-rs — see
       # `.cargo/config.toml`. So a working tree that is no longer clean after

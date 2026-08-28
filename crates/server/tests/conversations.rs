@@ -20,14 +20,14 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded,
+    Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CheckRollup, CompanionAdded,
     CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChosen,
     CompanionRefusal, CompanionRemoved, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationUnarchived, ConversationView,
     GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered, RoadmapPane,
-    ShowingArchived, Started, SteerOpened, TimelineEvent,
+    ShowingArchived, Standing, Started, SteerOpened, TimelineEvent,
 };
-use verkstead_server::{WatchedPaths, open_database, router_watching};
+use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
 /// A router watching `watched`, plus the directory holding its database and its
 /// data directory alive.
@@ -1143,6 +1143,16 @@ async fn close(app: &Router, id: i64) -> ConversationClosed {
     .await
 }
 
+/// And the row that does both at once, which says as little as either of them.
+async fn close_and_archive(app: &Router, id: i64) -> ConversationClosed {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/close-and-archive"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
 /// And put a closed one away, which is Close's neighbour in the same menu and
 /// says as little for itself.
 async fn archive(app: &Router, id: i64) -> ConversationArchived {
@@ -1224,6 +1234,21 @@ async fn steer_instructed(app: &Router, id: i64, instruction: &str) -> Conversat
             "target": "Implementing",
             "interrupt": false,
             "instruction": instruction,
+        }),
+    )
+    .await
+}
+
+/// And the submit into Follow-up, which carries the one payload that is always
+/// required: the brief the session it starts opens the follow-up on.
+async fn steer_following_up(app: &Router, id: i64, brief: Option<&str>) -> ConversationSteered {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "FollowUp",
+            "interrupt": false,
+            "follow_up": brief,
         }),
     )
     .await
@@ -2028,6 +2053,11 @@ async fn steering_into_done_moves_it_and_starts_nothing() {
         !view.ready_to_resume && !view.ready_to_stop,
         "and there is nothing to drive in Done, so neither press is offered",
     );
+    assert!(
+        !unseen(&app, id).await,
+        "and no news mark: this Done is the human's own act, so there is nothing \
+         to tell them about",
+    );
 }
 
 /// Every state is a source, which is the one thing that makes a steer different
@@ -2560,6 +2590,177 @@ async fn a_finished_conversation_steered_into_grilling_opens_a_second_round() {
     );
 }
 
+/// A steer into Follow-up moves a Conversation Verkstead has finished with, and
+/// keeps the brief the human wrote as the Steer Event's own body.
+///
+/// The one state with no other way in. What it is *for* is the work being on a
+/// pull request and there being something more to say about it — so the record
+/// it turns on is that pull request, and what it starts is whatever the human
+/// wrote.
+///
+/// **The brief is the Event**, rendered like every other document they write,
+/// which is what makes reading the Timeline back reading what the follow-up was
+/// opened about. Not a Brief of the Conversation's: a Brief is what a round is
+/// grilled about, and this is one session's whole job.
+#[tokio::test]
+async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::record_pull_request(
+            &pool,
+            id,
+            repo_id,
+            &store::PullRequest {
+                number: 41,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                repo: None,
+            },
+        )
+        .await
+        .unwrap(),
+        store::Wrapping::Started,
+    );
+
+    pool.close().await;
+
+    // Finished with, which is where a follow-up is steered from in the ordinary
+    // case: the wrap-up settled, the human read the pull request, and there is
+    // one more thing to ask about it.
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_following_up(&app, id, Some("Does it count the `429`s it sends?\n")).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert_eq!(
+        steered(&view),
+        [
+            ("moved", Lifecycle::Grilling),
+            ("moved", Lifecycle::Wrapping),
+            ("steer", Lifecycle::Done),
+            ("moved", Lifecycle::Done),
+            ("steer", Lifecycle::FollowUp),
+            ("moved", Lifecycle::FollowUp),
+        ],
+        "the human's own line, and the plain move under it",
+    );
+
+    let brief = view
+        .timeline
+        .iter()
+        .rev()
+        .find_map(|event| match event {
+            TimelineEvent::Steer(steer) => steer.html.clone(),
+            _ => None,
+        })
+        .expect("the steer carries what was written on it");
+
+    assert!(
+        brief.contains("Does it count the <code>429</code>s it sends?"),
+        "rendered like every other document the human writes: {brief:?}",
+    );
+    assert!(
+        !view.timeline.iter().any(
+            |event| matches!(event, TimelineEvent::Brief(brief) if brief.markdown.contains("429"))
+        ),
+        "and it is the steer's own body rather than a Brief of the \
+         Conversation's: what a round is grilled about has not changed",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "and the stop the click wrote is gone",
+    );
+}
+
+/// A follow-up is whatever the human wrote it about, so a submit with nothing
+/// written is refused by name — and so is one on work nobody can see.
+///
+/// The one written payload with no quiet meaning. An empty instruction carries
+/// the branch on and an empty brief grills the one already written; a follow-up
+/// has nothing of its own to fall back on, being a thing the human wanted rather
+/// than a step of the run. And the pull request is the same rule Wrapping is
+/// refused by, asked of the target that turns on the same fact.
+#[tokio::test]
+async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_following_up(&app, id, Some("Does it count the 429s?\n")).await,
+        ConversationSteered::NoPullRequest,
+        "there is nothing pushed to follow up on",
+    );
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    pool.close().await;
+
+    assert_eq!(
+        steer_following_up(&app, id, None).await,
+        ConversationSteered::NoFollowUpBrief,
+        "and a pull request with nothing said about it is a session with \
+         nothing to do",
+    );
+    assert_eq!(
+        steer_following_up(&app, id, Some("   \n")).await,
+        ConversationSteered::NoFollowUpBrief,
+        "a textarea somebody tabbed through included",
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping, "so nothing moved");
+    assert_eq!(
+        steered(&view),
+        [
+            ("moved", Lifecycle::Grilling),
+            ("moved", Lifecycle::Wrapping),
+        ],
+        "and nothing on the record says it was steered",
+    );
+}
+
 /// Wrapping up is a move onto a pull request that is already there, so a submit
 /// naming it on work that is on none is refused by name.
 ///
@@ -2849,6 +3050,87 @@ async fn closing_a_conversation_whose_worktree_has_already_gone_works() {
     assert_eq!(worktrees(&repo).len(), 1, "git should have let it go too");
 }
 
+/// And a worktree git will not let go of is a close that works too. A directory
+/// hollowed out — its `.git` file gone — is one git refuses to remove and one
+/// the human has every reason to want the end of: the close goes through, and
+/// what is left on disk is left for them.
+#[tokio::test]
+async fn closing_a_conversation_whose_worktree_git_will_not_remove_still_closes() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    std::fs::remove_file(path.join(".git")).unwrap();
+
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.worktree, None);
+    assert!(
+        path.exists(),
+        "the directory git would not remove should still be there to be found"
+    );
+}
+
+/// Close and archive is the two rows in one press: the Conversation ends and
+/// comes off the sidebar, and the record is the record either press leaves.
+#[tokio::test]
+async fn closing_and_archiving_in_one_press_does_both() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+
+    assert_eq!(
+        close_and_archive(&app, id).await,
+        ConversationClosed::Closed
+    );
+
+    assert!(!path.exists(), "the worktree directory should be gone");
+    assert_eq!(
+        worktrees(&repo).len(),
+        1,
+        "git should hold only the repository"
+    );
+    assert!(sidebar(&app).await.is_empty());
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert!(view.archived);
+    assert_eq!(view.worktree, None);
+    assert_eq!(moves(&view), [Lifecycle::Grilling, Lifecycle::Closed]);
+}
+
+/// On one that is closed already it is the archive alone, which is the whole
+/// point of saying so rather than refusing: what the human asked for holds.
+#[tokio::test]
+async fn closing_and_archiving_one_already_closed_puts_it_away() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    close(&app, id).await;
+
+    assert_eq!(
+        close_and_archive(&app, id).await,
+        ConversationClosed::AlreadyClosed
+    );
+
+    assert!(sidebar(&app).await.is_empty());
+    assert!(opened(&app, id).await.archived);
+}
+
+#[tokio::test]
+async fn closing_and_archiving_a_conversation_that_is_not_there_says_so() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(
+        close_and_archive(&app, 404).await,
+        ConversationClosed::NoSuchConversation
+    );
+}
+
 #[tokio::test]
 async fn closing_a_conversation_that_is_not_there_says_so() {
     let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
@@ -3131,12 +3413,22 @@ questions:
 
 /// Put a Set to the human the way a session does, and hand back its id.
 async fn ask(app: &Router, conversation: i64, yaml: &str) -> i64 {
+    asking(app, conversation, yaml, "").await
+}
+
+/// The same Set asked as a **Deferred Ask**: on the Timeline to be answered like
+/// any other, with nobody waiting on the Answer.
+async fn defer(app: &Router, conversation: i64, yaml: &str) -> i64 {
+    asking(app, conversation, yaml, "?deferred=true").await
+}
+
+async fn asking(app: &Router, conversation: i64, yaml: &str, kind: &str) -> i64 {
     let response = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/conversations/{conversation}/api/v1/sets"))
+                .uri(format!("/conversations/{conversation}/api/v1/sets{kind}"))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -3392,6 +3684,169 @@ async fn a_draft_is_never_marked_as_waiting() {
     assert_eq!(
         answer_ordinary(&app, set).await,
         verkstead_render::Submitted::Accepted
+    );
+}
+
+/// How each Question Set on a Conversation's Timeline stands, in the order it
+/// was asked.
+fn standings(view: &ConversationView) -> Vec<&Standing> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::QuestionSet(asked) => Some(&asked.standing),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Closing shuts whatever the Conversation was still asking. The sessions that
+/// asked are gone for good and no other is coming, so a Set left open would be
+/// one the human could write an Answer into that nothing would ever read.
+///
+/// Every kind of ask, which is where this differs from a grilling being
+/// relaunched: that leaves a Deferred Ask standing for the session after it, and
+/// closing has no session after it to leave one for.
+#[tokio::test]
+async fn closing_locks_every_set_it_finds_open() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    let answered = ask(&app, id, ORDINARY).await;
+    answer_ordinary(&app, answered).await;
+    ask(&app, id, ORDINARY).await;
+    defer(&app, id, ORDINARY).await;
+
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    let view = opened(&app, id).await;
+    let standings = standings(&view);
+
+    assert!(
+        matches!(standings[0], Standing::Answered(_)),
+        "what the human decided is left exactly as they decided it: {:?}",
+        standings[0],
+    );
+    assert!(
+        matches!(standings[1], Standing::LockedUnanswered(_)),
+        "the blocking Ask nobody answered is closed unanswered: {:?}",
+        standings[1],
+    );
+    assert!(
+        matches!(standings[2], Standing::LockedUnanswered(_)),
+        "and so is the Deferred one, there being no session left to fold an \
+         Answer into: {:?}",
+        standings[2],
+    );
+    assert!(
+        !only_row(&app).await.waiting,
+        "so nothing on the Conversation is left drawing the human",
+    );
+}
+
+/// And a closed Conversation carries neither waiting mark, whatever stopped it
+/// on the way.
+///
+/// Closing is the human saying the work is over wherever it had got to, so the
+/// stop stops being something to come back to: the marks mean *there is
+/// something here for you*, and there is not. The stop itself is untouched —
+/// it is what happened, and the Notice explaining it is still on the Timeline.
+#[tokio::test]
+async fn a_closed_conversation_carries_neither_waiting_mark() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    // The click is the shortest way to a stop written down: it stops the drive
+    // and opens the modal, and nothing here submits one.
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert!(
+        opened(&app, id).await.blocked_on.is_some(),
+        "the drive has stopped, and the header says so until it is closed",
+    );
+
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(view.blocked_on, None, "so there is no header mark to press");
+    assert!(!view.stopped_by_hand, "of either kind");
+    assert!(!only_row(&app).await.waiting, "and no disc beside the row");
+    assert!(
+        view.timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::Notice(_))),
+        "with the Notice the stop wrote still on the record: closing reads the \
+         stop and writes nothing over it",
+    );
+}
+
+/// And the news mark goes with them, which is the third thing a row can draw the
+/// human with.
+///
+/// The case it is really for: a wrap-up carries the work to Done and stamps the
+/// Conversation unseen, and the human closes it from the sidebar without ever
+/// opening it — so the press that takes the mark off is one they never made. A
+/// disc on the Conversation they have just put away is exactly the disc that
+/// teaches them to stop reading the discs.
+#[tokio::test]
+async fn closing_takes_the_news_off_the_row_the_human_never_opened() {
+    let (_watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::stamp_unseen(&pool, id).await.unwrap();
+
+    assert!(
+        only_row(&app).await.unseen,
+        "Verkstead told them the work was done, and they have not looked",
+    );
+
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    let row = only_row(&app).await;
+
+    assert_eq!(row.state, Lifecycle::Closed);
+    assert!(
+        !row.unseen,
+        "and closing it is them being done with it, so there is no news to go back for",
+    );
+    assert!(!row.waiting, "with neither waiting mark either");
+
+    pool.close().await;
+}
+
+/// **Done is not Closed here**, and the difference is what the marks are for: a
+/// Done Conversation is one Verkstead has finished with rather than one the
+/// human has put away, and its Sets are still there to be answered. An
+/// answerable ask is still an ask.
+#[tokio::test]
+async fn a_done_conversation_with_an_open_set_is_still_waiting() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    ask(&app, id, ORDINARY).await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let row = only_row(&app).await;
+
+    assert_eq!(row.state, Lifecycle::Done);
+    assert!(row.waiting, "the Set is open, and nothing has closed it");
+    assert!(
+        matches!(standings(&opened(&app, id).await)[0], Standing::Waiting(_)),
+        "because it is still there to answer",
     );
 }
 
@@ -3837,7 +4292,7 @@ async fn the_task_list_opens_as_every_task_document_it_names() {
 
     assert_eq!(
         pane.tasks[0].html, None,
-        "the finished task's file has gone, so there is nothing to render",
+        "the list names a file nobody wrote, so there is nothing to render",
     );
 
     let html = pane.tasks[1].html.as_deref().expect("that file is there");
@@ -4824,4 +5279,362 @@ async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
         Lifecycle::Draft,
         "and nothing about the roadmap was read to find that out",
     );
+}
+
+/// How a pull request's checks are is carried to both copies of its card: the
+/// one pinned above the record and the one at the moment it opened.
+///
+/// Walked through the store rather than watched for, as the narrowing below is:
+/// what is under test is the reading, and asking GitHub is `src/checks.rs`'s.
+/// The aggregate and nothing else — what every check is called belongs to the
+/// details pane.
+#[tokio::test]
+async fn how_a_pull_requests_checks_are_reaches_both_copies_of_its_card() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        checks(&opened(&app, id).await),
+        [None, None],
+        "nothing has asked GitHub yet, and a card with nothing to say draws no icon",
+    );
+
+    for (asked, drawn) in [
+        (store::Rollup::Running, CheckRollup::Running),
+        (store::Rollup::Failed, CheckRollup::Failed),
+        (store::Rollup::Passed, CheckRollup::Passed),
+    ] {
+        store::record_check_rollup(&pool, id, asked).await.unwrap();
+
+        assert_eq!(
+            checks(&opened(&app, id).await),
+            [Some(drawn), Some(drawn)],
+            "the card follows the poll, in both places it is drawn",
+        );
+    }
+}
+
+/// How the checks are on each copy of the pull request card a view carries: the
+/// pinned one first, then the one on the record.
+fn checks(view: &ConversationView) -> [Option<CheckRollup>; 2] {
+    let pinned = view.pinned.iter().find_map(|event| match event {
+        PinnedEvent::PullRequest(opened) => Some(opened.checks),
+        _ => None,
+    });
+
+    let reached = view.timeline.iter().find_map(|event| match event {
+        TimelineEvent::PullRequest(opened) => Some(opened.checks),
+        _ => None,
+    });
+
+    [pinned.flatten(), reached.flatten()]
+}
+
+/// A wrap-up that has narrowed to its checks says so where the human reads a
+/// Conversation: on its card, and on the row in the sidebar they find it by.
+///
+/// Walked through the store rather than run, because what is under test is the
+/// reading rather than the watchers: nothing runs sessions here, so the
+/// Conversation sits in Wrapping with exactly the settle facts it is given. What
+/// the watchers make of the same facts is `sessions.rs`'s.
+///
+/// The condition is Wrapping's own and never a state: the Lifecycle does not
+/// move at either end of it.
+#[tokio::test]
+async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::record_pull_request(
+            &pool,
+            id,
+            repo_id,
+            &store::PullRequest {
+                number: 41,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                repo: None,
+            },
+        )
+        .await
+        .unwrap(),
+        store::Wrapping::Started,
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert!(
+        !view.waiting_on_checks,
+        "a wrap-up nobody has read yet is waiting on all three of them",
+    );
+
+    for waiting_on in [
+        store::WaitingOn::Review,
+        store::WaitingOn::Comments(repo_id),
+    ] {
+        store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+
+    let view = opened(&app, id).await;
+    assert!(
+        view.waiting_on_checks,
+        "the checks are the whole of what is left, so that is what it is waiting on",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "which is a condition of Wrapping and not a rung of its own",
+    );
+    assert!(
+        sidebar(&app)
+            .await
+            .into_iter()
+            .find(|row| row.id == id)
+            .expect("the Conversation is on the sidebar")
+            .waiting_on_checks,
+        "and the row says the same thing the card does",
+    );
+
+    store::settle_wrap_up(&pool, id, store::WaitingOn::Checks(repo_id))
+        .await
+        .unwrap();
+
+    assert!(
+        !opened(&app, id).await.waiting_on_checks,
+        "nothing is waiting on checks that have come in",
+    );
+
+    pool.close().await;
+}
+
+/// The line saying a wrap-up is down to its checks is written once per
+/// narrowing: not once per poll, and not once ever.
+///
+/// The rule is the store's — the settling loop asks it on a cadence and writes
+/// the Notice when it is told to — so it is asked here as that loop asks it,
+/// including with a session running, which is the half of the condition no row
+/// can answer. A fix session working a red check is a wrap-up getting on with
+/// it, and the label is for one with nobody in it.
+#[tokio::test]
+async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::NotNarrowed,
+        "a Conversation that is not wrapping up is waiting on nothing",
+    );
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    for waiting_on in [
+        store::WaitingOn::Review,
+        store::WaitingOn::Comments(repo_id),
+    ] {
+        store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::Narrowed,
+        "the first look is the one that owes the Timeline a line",
+    );
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::NoticedAlready,
+        "and every look after it finds the line written",
+    );
+
+    assert_eq!(
+        store::narrowing(&pool, id, true).await.unwrap(),
+        store::Narrowing::NotNarrowed,
+        "a fix session in the Worktree is a wrap-up getting on with it",
+    );
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::Narrowed,
+        "and the wrap-up going quiet again is worth saying afresh",
+    );
+
+    store::unsettle_wrap_up(&pool, id, store::WaitingOn::Comments(repo_id))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::NotNarrowed,
+        "a comment landing is something else to deal with, so it is not the checks alone",
+    );
+
+    store::settle_wrap_up(&pool, id, store::WaitingOn::Comments(repo_id))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::Narrowed,
+        "and dealing with it narrows the wrap-up a second time, which is a second line",
+    );
+
+    pool.close().await;
+}
+
+/// The browser saying the human has looked at a Conversation takes the news
+/// mark off its row, and it does not come back.
+///
+/// Walked through the store at the writing end, because what is under test is
+/// the press: what puts the mark on is the wrap-up reaching Done, which
+/// `sessions.rs` runs for real.
+///
+/// Refused for nothing, and that matters more than it looks: the press rides
+/// every opening of every Conversation, and one that answered an error for a
+/// row with nothing to clear would be an error the human saw for reading their
+/// own list.
+#[tokio::test]
+async fn looking_at_a_conversation_takes_the_news_off_its_row() {
+    let (_watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert!(
+        !unseen(&app, id).await,
+        "nothing has been said about it yet"
+    );
+
+    // The press before anything is marked, which is every opening of every
+    // Conversation on an ordinary day.
+    see(&app, &id.to_string()).await;
+    assert!(!unseen(&app, id).await);
+
+    store::stamp_unseen(&pool, id).await.unwrap();
+    assert!(
+        unseen(&app, id).await,
+        "and the row says there is news on it",
+    );
+
+    see(&app, &id.to_string()).await;
+    assert!(!unseen(&app, id).await, "which looking at it takes off");
+
+    see(&app, &id.to_string()).await;
+    assert!(
+        !unseen(&app, id).await,
+        "and nothing brings it back: the mark is the one Done, not a counter",
+    );
+
+    // An id out of a URL the human may have typed, and one naming nothing:
+    // neither is something to refuse for, because looking at something is not a
+    // claim that it is there.
+    see(&app, "404").await;
+    see(&app, "nonsense").await;
+
+    pool.close().await;
+}
+
+/// The news mark and *waiting on you* are two facts, and the row carries both:
+/// one is something to answer and the other is something to read, and folding
+/// either into the other would lose the one the human can act on.
+#[tokio::test]
+async fn news_on_a_row_leaves_what_is_waiting_on_it_alone() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::stop(
+        &pool,
+        id,
+        store::Decision::Verkstead,
+        "The checks would not go green.\n",
+        None,
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation was running");
+    store::stamp_unseen(&pool, id).await.unwrap();
+
+    let both = row(&app, id).await;
+    assert!(both.waiting, "Verkstead's brake is waiting on the human");
+    assert!(both.unseen, "and there is news on the same Conversation");
+
+    see(&app, &id.to_string()).await;
+
+    let read = row(&app, id).await;
+    assert!(
+        read.waiting,
+        "looking at it read the news; it did not answer the stop",
+    );
+    assert!(!read.unseen);
+
+    pool.close().await;
+}
+
+/// Say the human has looked at one. Answers nothing, and is refused for
+/// nothing — see the two tests above.
+async fn see(app: &Router, id: &str) {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/ui/conversations/{id}/seen"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "the press failed: {body}");
+}
+
+/// One Conversation's row on the sidebar.
+async fn row(app: &Router, id: i64) -> ConversationEntry {
+    sidebar(app)
+        .await
+        .into_iter()
+        .find(|row| row.id == id)
+        .expect("the Conversation is on the sidebar")
+}
+
+/// And whether that row says there is news on it.
+async fn unseen(app: &Router, id: i64) -> bool {
+    row(app, id).await.unseen
 }

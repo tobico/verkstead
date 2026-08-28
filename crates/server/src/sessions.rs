@@ -23,6 +23,7 @@
 //! reading back a live one out of a database.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -469,6 +470,11 @@ struct Running {
     /// can be given one — see [`Sessions::following`].
     quiet: Quiet,
     ended: watch::Receiver<Option<Ended>>,
+
+    /// Whether the process has gone, set the moment the relay reads
+    /// end-of-file — see [`Sessions::alive`], which is the whole of what it is
+    /// for.
+    gone: Arc<AtomicBool>,
 }
 
 impl Sessions {
@@ -578,6 +584,25 @@ impl Sessions {
             .get(&conversation_id)
             .filter(|running| running.event_id == event_id)
             .map(|running| running.screen.clone())
+    }
+
+    /// Whether the session named is a process that is still there.
+    ///
+    /// Narrower than [`Sessions::screen`], which answers about the register, and
+    /// the difference between them is the whole reason this exists: a session
+    /// stays on the register until its last sweep of the branch has finished,
+    /// which happens well after the process it belongs to has gone. A watcher
+    /// reading the final frame of a session that has just exited wants the
+    /// register's answer. Anything about to *speak* to a session wants this one
+    /// — see [`crate::rescues`], which would otherwise type into a terminal
+    /// nothing is reading and count the silence against it.
+    pub(crate) fn alive(&self, conversation_id: i64, event_id: i64) -> bool {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .get(&conversation_id)
+            .filter(|running| running.event_id == event_id)
+            .is_some_and(|running| !running.gone.load(Ordering::Acquire))
     }
 
     /// A driver's hold on the session a Conversation already has running, or
@@ -835,6 +860,14 @@ impl Sessions {
         let quiet = Quiet::started();
         let (over, ended) = watch::channel(None);
 
+        // And the third: whether the process itself has gone. Set the moment the
+        // relay reads end-of-file and long before `over` is sent — what is
+        // between them is one last sweep of the branch, which may take a while
+        // and which nothing typed into a terminal could reach. So this is what
+        // says whether there is a session there to type into at all; see
+        // [`Sessions::alive`] and [`crate::rescues`], which is what asks.
+        let gone = Arc::new(AtomicBool::new(false));
+
         // What the session is about to commit, which is the other half of what
         // it leaves behind. Watched for as long as it runs and once more as it
         // ends — see [`crate::commits`].
@@ -859,6 +892,7 @@ impl Sessions {
                 let pool = pool.clone();
                 let nudges = nudges.clone();
                 let quiet = quiet.clone();
+                let gone = gone.clone();
 
                 async move {
                     // One watcher per branch, each with the word that stops it.
@@ -897,6 +931,14 @@ impl Sessions {
                         stopping,
                     )
                     .await;
+
+                    // The process has gone, whatever is left to tidy up after
+                    // it. Said here rather than with the rest of the tidying
+                    // below, because what reads it is asking whether there is
+                    // anything there to speak to — and from the moment the
+                    // relay returns there is not, however long the sweep and
+                    // the bookkeeping under it take.
+                    gone.store(true, Ordering::Release);
 
                     // The session is over, so the branches are finished moving.
                     // Waited on rather than only asked to stop, because what
@@ -952,6 +994,7 @@ impl Sessions {
                     screen,
                     quiet: quiet.clone(),
                     ended: ended.clone(),
+                    gone,
                 },
             );
         }

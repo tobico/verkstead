@@ -6,9 +6,15 @@
 //! API call every time the page heard the world moved.
 //!
 //! What it shows is a reading of GitHub as it stands — the commits the PR
-//! carries and everything said on it — rather than anything Verkstead wrote
-//! down. The three facts that *are* written down are on the pinned event above:
-//! the number, the title and the way out to GitHub itself.
+//! carries, what GitHub is running against it and everything said on it — rather
+//! than anything Verkstead wrote down. The three facts that *are* written down
+//! are on the pinned event above: the number, the title and the way out to
+//! GitHub itself.
+//!
+//! The checks are the part the card above has only one icon for. Here each of
+//! them is named, marked with the same three shapes, and linked to its own run —
+//! which is what a red suite is read by, the failure itself being on GitHub's
+//! side of the wire.
 //!
 //! The comments arrive as HTML the server rendered and sanitized. They are
 //! markdown from whoever can reach the repository, which is the strongest reason
@@ -21,6 +27,7 @@ import type { ConversationView, PullRequestEvent } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
+import { CheckMark, SAID } from "./Checks";
 import { PaneHead } from "./PaneHead";
 import styles from "./PullRequest.module.css";
 import { ABBREVIATED } from "./Timeline";
@@ -39,11 +46,11 @@ export function PullRequest(props: {
 
     // Merged rather than frozen: a pull request is the one payload here that
     // somebody else is still writing, so an open pane has to follow commits
-    // landing and comments arriving. Keyed by the commit's `sha`, the only
-    // identifier either list carries — a comment has none, so comments are
-    // matched by position, which holds for a list only ever appended to. What
-    // the merge saves is the `innerHTML` below: a comment whose markup did not
-    // change keeps the node it was rendered into.
+    // landing, checks turning green and comments arriving. Keyed by the commit's
+    // `sha`, the only identifier any of the three lists carries — a comment and
+    // a check have none, so both are matched by position. What the merge saves
+    // is the `innerHTML` below: a comment whose markup did not change keeps the
+    // node it was rendered into.
     freshness: { reconcile: "sha" },
   }));
 
@@ -94,6 +101,42 @@ export function PullRequest(props: {
                       )}
                     </For>
                   </ol>
+                </Show>
+              </section>
+
+              <section class={styles.checks} aria-label="Checks">
+                <h2>Checks</h2>
+                <Show
+                  when={read().checks.length > 0}
+                  fallback={<Empty>Nothing is running against it.</Empty>}
+                >
+                  <ul class={styles.ran}>
+                    <For each={read().checks}>
+                      {(check) => (
+                        <li>
+                          <CheckMark how={check.how} spoken={SAID[check.how]} />
+                          {/* The name links to the run where GitHub gave one,
+                              and is plain text where it gave none: a check with
+                              nothing to follow is still a check to name. */}
+                          <Show
+                            when={check.link !== ""}
+                            fallback={
+                              <span class={styles.check}>{check.name}</span>
+                            }
+                          >
+                            <a
+                              class={styles.check}
+                              href={check.link}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {check.name}
+                            </a>
+                          </Show>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
                 </Show>
               </section>
 

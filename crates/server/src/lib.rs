@@ -24,6 +24,8 @@ mod deferrals;
 mod diffs;
 mod drivers;
 mod exchanges;
+/// What a follow-up session is started on, and read back from where it stands.
+mod follow_ups;
 mod followers;
 /// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
 ///
@@ -46,6 +48,8 @@ mod profiles;
 mod push;
 mod reply;
 mod repos;
+/// Speaking to a session that has gone idle without asking anything.
+mod rescues;
 mod responding;
 mod responses;
 /// Starting to drive a Conversation again, from wherever it now stands.

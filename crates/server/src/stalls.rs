@@ -1,9 +1,10 @@
 //! The check that finds a Conversation nothing is driving, and writes down that
 //! it has stopped.
 //!
-//! **Stalled** is three things at once: the state is Grilling, Implementing or
-//! Wrapping; nothing is registered as driving it — see [`crate::drivers`]; and
-//! nothing has stopped it on purpose. Each of the three is doing work. The state is
+//! **Stalled** is three things at once: the state is one work goes on in —
+//! Grilling, Implementing, Wrapping or Follow-up; nothing is registered as
+//! driving it — see [`crate::drivers`]; and nothing has stopped it on purpose.
+//! Each of the four is doing work. The state is
 //! what says something ought to be happening, so Draft and Direction waiting on
 //! the human, Done finished and Closed stopped are none of them a Conversation
 //! standing still. The register is what says nothing is, rather than a stopwatch
@@ -161,8 +162,8 @@ async fn sweep(state: &AppState) {
 ///
 /// [`store::Decision::Circumstance`], because that is what a stall is: nobody
 /// decided to stop, a driver went away. What that buys is a restart free to
-/// start the work again without asking — a deliberate stop is the one that
-/// waits for a press.
+/// start the work again without asking — a stop somebody decided is the one
+/// that waits for a press.
 async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
     tracing::warn!(
         conversation_id,
@@ -210,6 +211,7 @@ pub(crate) fn driving(lifecycle: Lifecycle) -> &'static str {
         Lifecycle::Grilling => "grilling the work",
         Lifecycle::Implementing => "implementing the work",
         Lifecycle::Wrapping => "wrapping the work up",
+        Lifecycle::FollowUp => "following the work up",
         Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => "driving the Conversation",
     }
 }
@@ -255,6 +257,7 @@ mod tests {
             Lifecycle::Grilling,
             Lifecycle::Implementing,
             Lifecycle::Wrapping,
+            Lifecycle::FollowUp,
         ]
         .into_iter()
         .map(driving)
@@ -266,6 +269,7 @@ mod tests {
                 "grilling the work",
                 "implementing the work",
                 "wrapping the work up",
+                "following the work up",
             ],
         );
     }

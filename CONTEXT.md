@@ -34,10 +34,20 @@ can be closed from any of them, a **Steer** being the one way back into a
 Conversation that is closed or Done. There is one move back down the ladder: a
 wrap-up whose review split its findings out into a backlog returns to
 Implementing to build it, and its finish step wraps up again on the pull request
-it already had, reviewed afresh. *Blocked on you* is a badge on an active
-state, never a state of its own — where **Closed** is a state of its own, off
-the ladder rather than on it: every other state is somewhere the work has got
-to, and closing is the work stopping wherever it was.
+it already had, reviewed afresh. **Follow-up** sits beside the ladder rather
+than on it, the way Closed does, and is the one state with no way in but a
+Steer: the human taking something up about work that is already on a pull
+request, and landing back in the wrap-up when they are finished with it.
+*Blocked on you* is a badge on an active state, never a state of its own, and
+*Waiting on checks* is a condition of Wrapping read the same way — where
+**Closed** is a state of its own, off the ladder rather than on it: every other
+state is somewhere the work has got to, and closing is the work stopping
+wherever it was. Nothing about a Closed Conversation waits on the human:
+closing shuts every Question Set it left open — those read *closed unanswered*
+on the Timeline — and neither waiting mark is drawn over the stop it carries,
+which stays on the record as history. Done is not Closed in this. A Done
+Conversation's Sets are still there to be answered, so one left open goes on
+drawing the marks: an answerable ask is still an ask.
 _Avoid_: task, session, job, thread, ticket
 
 **Worktree**:
@@ -50,6 +60,10 @@ Conversation keeps the one it has; where the directory has gone, one is checked
 out again on the branch that was worked, which is one of the two times a
 Worktree is made without a branch being made with it — a read-only companion's,
 checked out detached, is the other.
+A removal git refuses — a directory it no longer reads as a Worktree — does not
+hold the close up: it is logged with its path and left on disk, closing being
+what the human asked for and a directory nobody can be rid of being what they
+were trying to escape.
 Named for the Repo and what the checkout holds — the branch, or the base a
 detached one stands at — and it lives in the Data Directory rather than inside
 a Watched Path: Verkstead made it, so it goes among Verkstead's own things.
@@ -145,13 +159,12 @@ _Avoid_: submodule, dependency, linked repo, sibling checkout, secondary repo
 
 **Skill**:
 One of the workflows Verkstead runs its sessions by — grilling, implementing,
-breaking down and working a Step now, the rest as the stages that need them
-arrive. Verkstead's
-own: shipped inside the binary, installed under the Data Directory at startup
-and mounted read-only over `~/.claude/skills`, so a session's behaviour is the
-product's rather than whatever the machine or the account happens to keep. A
-session is put inside one by the prompt it is started on, which names the Skill
-above the Brief.
+breaking down, working a Step and following up now, the rest as the stages that
+need them arrive. Verkstead's own: shipped inside the binary, installed under
+the Data Directory at startup and mounted read-only over `~/.claude/skills`, so
+a session's behaviour is the product's rather than whatever the machine or the
+account happens to keep. A session is put inside one by the prompt it is started
+on, which names the Skill above the Brief.
 _Avoid_: prompt, instructions, plugin, workflow file
 
 **Brief**:
@@ -210,10 +223,11 @@ gate summary (the gate is gone), changelog entry
 **Notice**:
 The one kind of Event Verkstead writes on its own account: which Stage it
 started and where that Stage's branch went, that a roadmap has no Stage left to
-run, or — as a **stop Notice** — what stopped driving, why, and what the
-evidence was. No agent wrote it and nobody pressed anything for it. It is what
-running unattended owes the human: a decision made while nobody was watching is
-one they have to be able to read afterwards.
+run, that a wrap-up is down to its checks, or — as a **stop Notice** — what
+stopped driving, why, and what the evidence was. No agent wrote it and nobody
+pressed anything for it. It is what running unattended owes the human: a
+decision made while nobody was watching is one they have to be able to read
+afterwards.
 
 Nothing to do about one, however much it says. A Notice is written after the
 fact and stays on the record for ever; what a stopped run is waiting on is that
@@ -367,20 +381,42 @@ of a Conversation's backlog, the finish that follows the last task, an inline
 implementation, which is the whole of the work in one Step, or the staging a
 **Resume** launches — the breakdown, and the staging that ran the ordinary way,
 are the grilling session's own tail rather than a Step. What is next is read
-from the Repo and nowhere else — the lowest-numbered task file left in
-`.tasks/`, or `TODO.md` on its own — so the Steps are the backlog's, and
-Verkstead keeps no list of its own to disagree with it.
+from the Repo and nowhere else — the lowest-numbered entry of `.tasks/TODO.md`
+whose box is not ticked, or the finish once every box is — so the Steps are the
+backlog's, and Verkstead keeps no list of its own to disagree with it. An
+unticked entry naming a task file nobody wrote is neither: the run stops there
+rather than putting a session at nothing to work from.
 
-A Step is **done** when the file it turns on has gone from the Worktree *and* the
-commit removing it has landed. A session reports through the repository, being an
+A Step is **done** when what it turns on has changed in the Worktree *and* the
+commit saying so has landed — a task's entry ticked off in `TODO.md`, the finish
+step's `.tasks/` taken away. A session reports through the repository, being an
 ordinary interactive one, and a commit is the one report it cannot half make — a
-file deleted but not committed is a session still mid-Step.
+box ticked but not committed is a session still mid-Step.
 
 Its session is ended once the Step is done **and** the session has gone quiet for
 a grace period, never on done alone: work does not always stop at the commit, and
 output arriving puts the whole grace back on the clock. A session that keeps
 talking is never ended. One Step per session and one session per Step — a fresh
 context each time, which is what the backlog was broken into slices for.
+
+**A Step can be done and still be short**, because what a run's last Step is for
+happens after its commit: the finish takes the list away and commits it, and the
+push and the pull request come next — as they do for an inline implementation and
+for a roadmap's own session, every kind of work here ending on a pull request.
+One that stopped in between leaves the work built, committed and unreviewable, so
+the missing thing is asked for — a session of its own, sent to push and open the
+pull request and told the work is already built. Not a Step itself: nothing in
+the Repo says it is due and nothing there says it is done, GitHub being the one
+that knows. Once per go, and then the ordinary stop where the answer has not
+changed, because two agents that both stopped short of the same push is something
+for the human to look at.
+
+**Resume takes that same go**, so a run stopped at its push is one a press can
+finish. What it must not do is guess: an empty `.tasks/` is a backlog worked
+through or one that never landed, which are opposite situations, so the branch is
+read for which it is — a branch that has written a backlog since it came off its
+base has been worked and finished with, and one that has written none has nothing
+built to carry anywhere and stops.
 _Avoid_: job, iteration, unit of work, stage (that is a roadmap's)
 
 **Stage**:
@@ -437,22 +473,32 @@ once, and a second stop raised against one already stopped is the same stop
 noticed twice.
 
 Nothing advances past one. Every launch asks first, so a Conversation waiting
-on **Resume** never quietly gets another agent spent on it, and its card carries
-*blocked on you* for as long as it is stopped. Nothing about being stopped
-reverts, resets or stashes anything: the repository is left exactly as the
-session left it, which is what makes taking the Worktree on by hand possible at
-all.
+on **Resume** never quietly gets another agent spent on it. Nothing about being
+stopped reverts, resets or stashes anything: the repository is left exactly as
+the session left it, which is what makes taking the Worktree on by hand possible
+at all.
 
-**Deliberate** or by **circumstance**, which is the one thing a restart has to
-know. Verkstead pulling the brake — a session that fell over, checks that would
-not go green, a finish Step that left no pull request, an Agent Profile out of
-usage window — and the human pressing **Stop** are both deliberate, and a
-restarting server leaves them alone. A driver a restart or a crash took away is
-circumstance: nobody decided anything, so the next server up carries the work on
-unasked. A deliberate stop Verkstead decided on is also pushed to the human's
-devices; one nobody chose is not, a restart being free to pick it up, and
-neither is the human's own Stop, they being the one person a notification would
-be telling their own news.
+Who stopped it is recorded, and two things follow from it. **Verkstead** is the
+brake it pulled — a session that fell over, checks that would not go green, work
+whose pull request never arrived even after a session was sent for it, an Agent
+Profile out of usage window. **Human** is their press on **Stop** or **Force
+stop**. **Circumstance** is a driver a restart or a crash took away, nobody
+having decided anything. **Deliberate** is the fourth word and the only one
+nothing writes any more: a stop recorded before the first two were told apart,
+read as the human's, because their own presses are what nearly all of those rows
+are.
+
+*Is it waiting for a press?* Everything but circumstance is: the next server up
+carries a circumstance stop on unasked, and leaves every other one exactly where
+it stands. *Is the human being told?* Verkstead's brake and a stop nobody chose
+carry the full marks — the sidebar's disc and the *blocked on you* badge — and a
+stop the human made themselves carries neither, showing a quiet **Stopped**
+label in the Conversation's header instead, which goes to the same stop Notice.
+They were there when they pressed it, and a mark that appears where nothing
+happened without them is the mark that teaches them to stop reading the marks.
+Push follows the same rule for the same reason: Verkstead's brake reaches a
+phone, a stop nobody chose does not — a restart being free to pick it up — and
+neither does the human's own Stop.
 
 **No stop resumes itself**, the usage-window one included. A run whose Agent
 Profile has exhausted its window stops the way everything else does, and all
@@ -484,7 +530,20 @@ note to write and one button rather than one per way of stopping. It is never
 silent either: either something starts, which the Timeline says by itself, or
 the press is refused by name and the page says which — the backlog that has
 gone, the Pairing that has, the Worktree that is nowhere. A Worktree the record
-names and git does not is made again from the branch rather than refused on.
+names and git does not is made again from the branch rather than refused on. And
+a **Stage** whose planning session died before it committed is started rather
+than refused: the plan session is launched as the Stage is made and by nothing
+else, so a Stage with no `.tasks/` is a run that never began rather than one
+that is worked out — read off what its branch has written since it was made,
+which the backlog of the Stage it stacks on is no part of.
+
+**A press always has somewhere to go**, which is the whole point of recomputing
+rather than repeating: every state the pipeline can stop in has a next move, and
+work that stopped at its push has the plainest of them — the pull request is
+sent for again. What the branch has written since it came off its base is what
+says which situation an empty `.tasks/` is, the same reading a Stage's planning
+turns on, and the one press that is still refused by name is the branch with
+nothing built on it at all.
 
 Offered on a Conversation that is merely undriven as much as on one that is
 **Stopped**, a run with nothing behind it being the same condition however it
@@ -500,14 +559,19 @@ _Avoid_: retry, remedy, restart (that is the server's), continue, unblock
 **Steer**:
 The human saying where the work goes, from wherever it has got to: a row in the
 Conversation's own menu beside **Stop**, and a modal over one question — where
-does this go? Targets are **Grilling**, **Implementing**, **Wrapping** and
-**Done**, the four states the work is done in; Draft and Closed are not among
-them, each having a way in of its own. Sources are every state there is — a
-Draft nothing has run in, a run in flight, work Verkstead has finished with —
-because a steer is the human stepping outside the pipeline's path rather than
-another move along it. So every refusal is about the target instead of the
-source: wrapping up is offered only where the work is on a pull request, there
-being no wrap-up to steer into otherwise.
+does this go? Targets are **Grilling**, **Implementing**, **Wrapping**,
+**Follow-up** and **Done** — the four states the work is done in, and Follow-up
+beside them because a steer is the only way into it at all; Draft and Closed are
+not among them, each having a way in of its own. Sources are every state there
+is — a Draft nothing has run in, a run in flight, work Verkstead has finished
+with — because a steer is the human stepping outside the pipeline's path rather
+than another move along it. So every refusal is about the target instead of the
+source: wrapping up and following up are offered only where the work is on a
+pull request, there being no wrap-up to steer into and nothing to follow up
+otherwise. Follow-up is the one target the source narrows as well, and by what
+the modal offers rather than by a refusal on arrival — from Done and from
+Wrapping alone, because work still being built has the ordinary ways of saying
+what to do next.
 
 **The click stops the drive**, before the modal opens. The ordinary Stop, so
 nothing new launches while the human composes and whatever is running is left
@@ -536,35 +600,172 @@ about priming the session with the digest of everything already answered, off
 unless asked for, because a steer is usually a change of direction rather than a
 return to the argument just left. Implementing takes a hand-written
 instruction — required where the branch holds nothing to carry on, and optional
-where it does, empty there meaning carry it on. Wrapping takes nothing: its
-watchers recompute over whatever the branch now holds, the fix attempts
-forgotten. Done takes nothing at all, there being nothing to run in it.
+where it does, empty there meaning carry it on. Follow-up takes the brief its
+session is opened on, and takes it *always*: an empty instruction carries the
+branch on and an empty brief grills the one already written, and there is
+nothing on the branch a follow-up could fall back on — it is something the human
+wanted rather than a step of the run. Wrapping takes nothing: its watchers
+recompute over whatever the branch now holds, the fix attempts forgotten. Done
+takes nothing at all, there being nothing to run in it.
 
 **The record is the move with the human's own line above it.** The Steer is an
-Event of its own — somebody decided this — carrying the brief or the instruction
-as its body, and the machine's plain Moved line stands under it. A steer into
-Grilling lands that round's Brief under the move as well, frozen where it lands
-and beside the earlier round's rather than over it. The Pairing the modal
-settled is recorded as the **Conversation's** rather than one session's, because
-steering re-settles what runs the work — which is also why the pick is part of
-the form: a steered Draft has none fixed yet.
+Event of its own — somebody decided this — carrying the instruction, or the
+brief a follow-up is opened on, as its body, and the machine's plain Moved line
+stands under it. A steer into Grilling lands that round's Brief under the move
+as well, frozen where it lands and beside the earlier round's rather than over
+it. The Pairing the modal settled is recorded as the **Conversation's** rather
+than one session's, because steering re-settles what runs the work — which is
+also why the pick is part of the form: a steered Draft has none fixed yet.
 
 **And the submit resumes in the same press.** The stop the click left is
 cleared, and what that state ought to be running starts — a fresh grilling, the
-instruction session or the next step off the branch, the wrap-up's watchers.
-Into Done it is the move alone.
+instruction session or the next step off the branch, the wrap-up's watchers, the
+follow-up's own session. Into Done it is the move alone.
 _Avoid_: redirect, retarget, override, transition, take over, reopen and manual
 task (both retired: a steer into Grilling is what reopening a Done Conversation
 was, and a steer into Implementing with a hand-written instruction is what a
 manual task was)
 
+**Follow-up**:
+Where a Conversation goes when the human wants something taken up about work
+that is already on a pull request: a session of their own, answering what they
+ask and doing what they want done about it, for as many rounds as they want.
+Not a rung of the ladder — it hangs off the wrap-up rather than following it —
+and the one state with no way in but a **Steer**, offered from Done and from
+Wrapping and only where the record holds a pull request.
+
+**The brief is what it is about**, written into the steer and required there:
+nothing on the branch could stand in for it, a follow-up being something the
+human wanted rather than a step of the run. It lands as the Steer Event's own
+body, which is where a session started again reads it back from — along with
+the rounds already answered under it, this follow-up's own rather than the
+Conversation's, both read from the newest steer into Follow-up down.
+
+**The rounds are ordinary Question Sets.** The session answers what was asked,
+does what was asked for, commits and pushes it — the branch is on a pull
+request already, so the checks run while the human reads — and puts the round
+to them as one Set. Nothing about the state makes its Sets special: the agent
+writes an ordinary Preface, ordinary Questions and an ordinary Postscript, and
+it never asks whether there is anything else.
+
+**What ends it is the human's mark and the session's silence together**: the
+newest round they answered carries **Nothing else**, nothing is left open on
+the Conversation, and the session has printed nothing for the grace. The mark
+alone would end a follow-up in the middle of the work the last round asked for;
+quiet alone would reap a session idling on a Blocking Ask, which is one doing
+exactly what it should. Then the session is ended and the Conversation is
+Wrapping again over the pull request it was opened about, with the checks put
+back to waiting where the follow-up pushed anything — *back to Done* being that
+wrap-up's own settling rule rather than anything a follow-up decides.
+_Avoid_: follow-up task, comment round, reopen, chat, Q&A
+
+**Nothing else**:
+The control that ends a follow-up: a checkbox in the closing section of a
+follow-up's Question Set, under the set-level comment box it shares that
+section with, saying there is nothing more the human wants from this follow-up.
+Drawn on a Follow-up's Sets and on no others.
+
+Not a Question and not an Option. It answers nothing anybody asked, so it rides
+the Response as a field of its own the way a picked Direction does; and it is a
+checkbox rather than an Option because there is nothing here to choose between,
+a second click taking it off again.
+
+**The agent never sees it.** The mark comes off the Response on the way into
+the store and is kept beside it, so what a waiting session is handed is byte
+for byte what it would have been handed without one. The agent writes an
+ordinary Postscript and reads an ordinary Response; how a follow-up ends is
+Verkstead's business rather than the session's.
+
+**Never sticky, and the newest answer is the one that decides.** Everything
+written beside it still goes back and the agent finishes the round, so a round
+that ticks it and asks for one more thing in the comment goes round again — and
+an answer without the mark puts the follow-up back to running.
+_Avoid_: anything-else question (the agent asks none), done, close, opt-out,
+finish flag
+
+**Waiting on checks**:
+What a wrap-up has narrowed to when the review is answered, nothing said on the
+pull request is left unaddressed, the checks alone are outstanding and nothing
+is running in the Worktree. A **Notice** says so on the Timeline, once per
+narrowing; the card carries the words as a label beside the branch, and the
+sidebar row reads them in place of the state word, Wrapping being what has
+narrowed.
+
+A condition of Wrapping rather than a state, exactly as *blocked on you* is a
+badge on an active state: the Lifecycle is untouched, and the only thing stored
+is the mark saying the line has been written. What the label is drawn from is
+the wrap-up's own settle facts and the sessions register, read together every
+time they are asked.
+
+Nothing to do about one, which is why it is drawn quietly and pushed to no
+device: the checks are GitHub's to finish. Leaving the condition takes the mark
+with it, so a fix session dispatched or a comment landing and the wrap-up
+quietening again is a fresh Notice rather than a duplicate of the first or a
+silence.
+_Avoid_: blocked on you (that is about the human, this is about GitHub), CI
+(the word here is checks), pending, green, state
+
+**Check rollup**:
+How a pull request's checks are getting on, taken all together and said in one
+word: anything red reads as *failed*, else anything unfinished reads as
+*running*, else *passed*. The **pull request** card draws it as the icon GitHub
+draws beside a pull request — a tick, a cross, a dot — on the right of its head.
+
+Written down on every poll of the checks watcher, so it outlives both the poll
+and the server: a Conversation carried to Done keeps the icon the last poll
+earned it. Which also means it can be stale, the watching stopping when the
+wrap-up is over — and what freshens a stale one is opening the pull request's
+details pane, which asks GitHub the same question on its way to listing every
+check by name, with its own mark and a link to its run.
+
+Never guessed at. A pull request nothing has asked GitHub about has no rollup,
+and neither has one in a repository with no CI — *not known* is a third thing
+beside green and red, exactly as it is for the watcher meeting a `gh` that will
+not answer, and what a card with no rollup draws is no icon.
+_Avoid_: status, CI (the word here is checks), green as a state name, one check
+(the rollup is the whole suite)
+
+**Rescue**:
+The canned line Verkstead types into a session that has gone quiet without
+asking anything or finishing what it was sent for. A session reaches the human
+in exactly one way — the Question Set it sends — so one sitting there with its
+turn over, nothing open on the Conversation and nothing to show for itself
+leaves a Conversation nobody can move. So it is spoken to, through the terminal
+a watcher's keystrokes go through, and told the one thing it cannot see from
+inside: that nothing it prints reaches anybody, and that a Set is the whole of
+how the human is spoken to.
+
+**Three things at once**, and none of them is enough alone: idle for the grace,
+nothing open on the Conversation, and nothing landed. A session still printing
+is at work, one sitting on a Blocking Ask is waiting on the human — for as long
+as they take — and one that has landed what it was sent for is already being
+ended by the driver beside this. An answer arriving, or a line typed in, starts
+the grace again.
+
+**Every session Verkstead launches**, one loop with the state's own
+done-indicator as its parameter: a grilling's artifact, a backlog Step's task
+file, an inline implementation's, an instruction's or a fix's commit, a
+follow-up's Nothing-else mark. What differs from one state to the next is only
+what *finished* looks like.
+
+**Twice at most**, the second silence being evidence rather than bad luck. A
+session still saying nothing after the second is ended where it stands and the
+Conversation **Stopped**, with a Notice saying it would not ask and **Resume**
+for the human to press — except a fix session, which is ended and its check
+looked at again, the wrap-up's two goes at a check being the stop it already
+has. Nothing goes on the Timeline for the rescue itself: it is Verkstead
+prodding an agent rather than anything the work has got to, and the line is in
+the session's own Capture.
+_Avoid_: Nudge (that is the viewer's signal), retry, reminder, ping, poke
+
 **Stalled**:
-A Conversation in a driven state — Grilling, Implementing or Wrapping — with
-nothing registered as driving it and nothing on it saying it is **Stopped**.
-Nothing is moving the work and nothing is saying so, which is the one condition
-Verkstead has to notice on its own account. A condition an active state can be in
-rather than a state of its own — the Conversation is still Grilling or
-Implementing or Wrapping, and that is the half of it that is wrong.
+A Conversation in a driven state — Grilling, Implementing, Wrapping or
+Follow-up — with nothing registered as driving it and nothing on it saying it
+is **Stopped**. Nothing is moving the work and nothing is saying so, which is
+the one condition Verkstead has to notice on its own account. A condition an
+active state can be in rather than a state of its own — the Conversation is
+still Grilling or Implementing or Wrapping or Follow-up, and that is the half
+of it that is wrong.
 
 The condition rather than the record of it. A sweep looks every minute and
 **stops** what it finds, by circumstance rather than by anybody's decision, so
@@ -572,10 +773,11 @@ what the human sees is a Conversation stopped with a Notice on it and a Resume
 to press — and what a restart sees is one it may take up unasked.
 
 Judged by whether a driver — a grilling session, the watcher a Pick armed on
-one, a runner loop, a wrap-up's watchers — is registered, rather than by how
-long nothing has happened. Wrapping idles for days under live watchers and is
-perfectly healthy; so are the gaps between an unattended run's Steps. Draft,
-Done and Closed are never stalled, nothing being supposed to drive them.
+one, a runner loop, a wrap-up's watchers, the task seeing a follow-up's session
+out — is registered, rather than by how long nothing has happened. Wrapping
+idles for days under live watchers and is perfectly healthy; so are the gaps
+between an unattended run's Steps. Draft, Done and Closed are never stalled,
+nothing being supposed to drive them.
 _Avoid_: blocked on you (the badge a stall is precisely without), stopped (what
 a stall becomes, not what it is), state, stuck, hung, idle
 
@@ -585,7 +787,9 @@ left to read on it. A fact about the list and nothing else: the Timeline, the
 branch and the Conversation's own page are exactly where they were, and opening
 it by its URL shows all of it. Offered on a Closed Conversation alone — a
 Conversation still being worked on belongs on the list it is being worked from,
-so it is closed first and archived after.
+so it is closed first and archived after. **Close and archive** is that order
+in one press, for a Conversation the human is finished with and finished
+looking at; it refuses what closing refuses and nothing more.
 
 Reversible, which is what tells it from **Locked**: nothing is confirmed,
 because nothing is lost. The two words are not each other's — one is a Question
@@ -600,6 +804,30 @@ beside the archivings and read back on every load.
 _Avoid_: locked (the Question Set word), deleted, hidden, closed (the state
 being archived, not the archiving), done, restore or unhide (the word is
 unarchive)
+
+**Unseen**:
+A Conversation Verkstead has told the human about and they have not looked at
+yet. The only thing in the record about the person rather than about the work,
+and kept on the server for that reason: a mark held in a browser would be one
+their phone had never heard of, and news read on the phone would leave the
+laptop's sidebar still calling for attention.
+
+One thing writes it: the wrap-up that carries the work to **Done**, in the same
+breath as the push it sends about it. A milestone nobody was watching happen is
+what a mark saying *look here* is for — and a **Steer** to Done is the human's
+own act, so it pushes nothing and marks nothing. Opening the Conversation is
+what takes the mark away, said by the browser in a call of its own rather than
+happening on the way past a read — and **Closed** takes it away too, that being
+the human saying the work is over wherever it had got to: nothing about a Closed
+Conversation asks for them, the news it was carrying included.
+
+Drawn as the same accent disc a Conversation waiting on the human carries: one
+mark meaning *look here*, because two would be a list to decode instead of one
+to glance down. Which of the two it is is in the row's read-aloud label, and
+where both are true the waiting is what is said — a Conversation with something
+to answer is asking for a reply, one with news is only asking to be read.
+_Avoid_: unread (nothing here is a message), badge, alert, notification (that is
+the push, this is what is left behind it), new
 
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles
@@ -762,12 +990,14 @@ and it went when the last gate did.
 _Avoid_: section, chapter
 
 **Locked**:
-What a Question Set becomes once it is settled — its Response delivered, or an
-orphaned Set put away unanswered by hand. Permanent decision history, and no
-place of its own to browse: a locked Set stays on the Timeline it was asked
-from, saying what became of it, and takes no Response ever again. Locking one
-by hand is the single irreversible act in the workbench, which is why it is the
-single one confirmed in as many words. Nothing leaves a Timeline.
+What a Question Set becomes once it is settled — its Response delivered, or a
+Set nobody will ever answer put away unanswered: by the human, from the page it
+is on, or by Verkstead where the asking is over — a grilling relaunched over the
+session that asked, or the Conversation itself closing. Permanent decision
+history, and no place of its own to browse: a locked Set stays on the Timeline
+it was asked from, saying what became of it, and takes no Response ever again.
+Locking one by hand is the single irreversible act in the workbench, which is
+why it is the single one confirmed in as many words. Nothing leaves a Timeline.
 _Avoid_: archived (**Archived** is a Conversation coming off the sidebar, which
 is reversible and about a list rather than about a Set), filed, history, log
 

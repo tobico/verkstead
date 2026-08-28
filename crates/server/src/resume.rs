@@ -29,6 +29,15 @@
 //! loose is the one thing that must not be guessed at, and a spawn is a moment
 //! later.
 //!
+//! One of them goes to the network, and it is the press that waits for it: a
+//! backlog with nothing left in it refuses only where GitHub confirms the branch
+//! is on no pull request. That is a `gh` the browser is held open across, which
+//! is worth it for what the alternative was — the button turning down the one
+//! Conversation that most needed pressing, because its ending failed *after* the
+//! pull request was opened and the empty backlog is all that failure leaves
+//! behind. Nothing else is asked over a network, and this one is asked only
+//! where the local answer would otherwise be a refusal.
+//!
 //! **And a restart presses it for itself.** No driver survives the process, so a
 //! server coming up holds a page full of Conversations nothing is driving, and
 //! every one of them wants exactly what the button does. So it does it unasked,
@@ -40,7 +49,8 @@ use verkstead_render::Resumed;
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
-use crate::store::{self, Decision, Lifecycle};
+use crate::github;
+use crate::store::{self, Lifecycle};
 
 /// Who asked for the run to start again.
 ///
@@ -91,10 +101,7 @@ pub(crate) async fn resume(
     // is nothing to start driving again. The button is not drawn on one — this
     // is the same rule asked again on arrival, the way every named refusal here
     // is.
-    if !matches!(
-        conversation.state,
-        Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping
-    ) {
+    if !driven(conversation.state) {
         return Ok(Resumed::NotDriven);
     }
 
@@ -226,11 +233,73 @@ pub(crate) async fn resume(
 
             // And the backlog's own answer to what is next, asked of `.tasks/`
             // exactly as every other turn of the run asks it. Nothing left in it
-            // is a breakdown that never landed or a feature that is finished
-            // with, and neither is a thing to launch a session for.
+            // is a stage that was never planned, a breakdown that never landed,
+            // or a feature that is finished with — three situations rather than
+            // one, which is what the questions after it are for.
+            //
+            // A feature that is finished with has had its finish step, and a
+            // finish step commits the list away, pushes, and opens a pull
+            // request. So an empty backlog is the very case in which the branch
+            // is most likely to be on one that nothing recorded — the finish ran
+            // and what failed was afterwards — and the very case in which the
+            // finish stopped between its commit and its push, which is a branch
+            // with the whole of the work on it and one `gh pr create` to go.
+            // Refusing on the backlog alone would be Resume turning down the one
+            // Conversation that most needs it — see
+            // [`crate::runner::backlog_again`], which is what the spawn below
+            // does about both.
+            //
+            // So the branch is the tiebreak, and `gh` is the tiebreak after it.
+            // A branch that has written a backlog since it came off its base has
+            // been worked and finished with, so there is work built on it and a
+            // press has somewhere to go whatever GitHub says. A branch that has
+            // written none never had a breakdown land: there is nothing built to
+            // push, and only then does the plain *no pull request* refuse. A
+            // `gh` that cannot answer at all does not refuse either: the run is
+            // stopped either way, and a stop that names the trouble on the
+            // Timeline is worth more than a button saying the backlog is empty —
+            // which would be true and beside the point.
             if direction == Direction::TaskList && !crate::runner::anything_to_work(&worktree).await
             {
-                return Ok(Resumed::NothingToWork);
+                // Except where it is a roadmap stage whose backlog was never
+                // planned, which is the third thing an empty one can be and the
+                // one this refusal would be most wrong about: its first step has
+                // not run, and the session that runs it is launched once and by
+                // nobody the human can press. Asked before GitHub is — a stage
+                // that has planned nothing has pushed nothing to have a pull
+                // request on — and asked here for the reason every other refusal
+                // is asked here, so that the press either starts something or
+                // says why not. See [`crate::runner::stage_to_plan`], which is
+                // the same reading [`crate::runner::backlog_again`] makes a
+                // moment later to decide what to launch.
+                let planned = crate::runner::stage_to_plan(
+                    state,
+                    conversation_id,
+                    &worktree,
+                    conversation.base_commit.as_deref(),
+                )
+                .await
+                .is_none();
+
+                // And what the branch has written since it was made, which is
+                // the same reading again asked for the other thing it decides:
+                // a backlog written and worked to empty is a run that got as
+                // far as its push, and what is left of it is one session's
+                // worth of asking. See [`crate::runner::nothing_left`].
+                let built =
+                    crate::runner::wrote_a_backlog(&worktree, conversation.base_commit.as_deref())
+                        .await;
+
+                if planned && !built {
+                    let asked = crate::wrapping::asked(state, conversation_id).await;
+
+                    if matches!(
+                        asked,
+                        None | Some((_, _, Err(github::Trouble::NoPullRequest)))
+                    ) {
+                        return Ok(Resumed::NothingToWork);
+                    }
+                }
             }
 
             clear(state, conversation_id).await?;
@@ -285,6 +354,36 @@ pub(crate) async fn resume(
             }
         }
 
+        // A fresh session on the follow-up skill, on the brief the steer opened
+        // it with and the rounds it has already been through — which is the
+        // grilling's shape, and for the grilling's reason: a follow-up is a
+        // conversation, so nothing of it is written on the branch and what
+        // outlives the session having it is the Timeline. See
+        // [`crate::follow_ups`].
+        //
+        // No pull request is read for here. The steer that opened this refused
+        // without one, and a follow-up is about the branch rather than about the
+        // record of it: what the session is sent to do is the brief.
+        Lifecycle::FollowUp => {
+            if conversation.implementation_pairing.is_none() {
+                return Ok(Resumed::NoImplementationPairing);
+            }
+
+            let Some(follow_up) = crate::follow_ups::opened(&state.pool, conversation_id).await?
+            else {
+                return Ok(Resumed::NoFollowUpBrief);
+            };
+
+            clear(state, conversation_id).await?;
+
+            tokio::spawn(crate::runner::following_up(
+                state.clone(),
+                conversation_id,
+                follow_up,
+                driving,
+            ));
+        }
+
         // Refused above, where the refusal belongs: before the stop is read and
         // before a registration is taken. Answered again here because the match
         // has to be whole, and answered the same way.
@@ -309,19 +408,20 @@ pub(crate) async fn resume(
 /// The whole of what a restart is: no driver survives the process, so every
 /// Conversation the last server was driving is one nothing is driving now — a
 /// grilling whose session was killed, a backlog between tasks, a wrap-up whose
-/// watchers went with the process. Each of them gets the recompute the button
+/// watchers went with the process, a follow-up the human was mid-round of. Each
+/// of them gets the recompute the button
 /// gives, and starts driving again with nobody asked. There is nothing for a
 /// human to press here: a restart is not a decision anybody took, and a
 /// Conversation left standing still because Verkstead was upgraded is one that
 /// would wait for however long it took somebody to notice.
 ///
-/// **Except where somebody decided to stop.** A [`Decision::Deliberate`] is
-/// Verkstead or the human pulling the brake — the checks that would not go green,
-/// a finish step with no pull request, a Stop pressed from the menu, an account
-/// out of window — and a server coming back up is no reason to think differently
-/// about any of them. Those keep their badge and wait for the press. A
-/// [`Decision::Circumstance`] is the other half of the same record: nobody chose
-/// it, so it is taken up here.
+/// **Except where somebody decided to stop.** A stop [`store::Decision::decided`]
+/// answers for is Verkstead or the human pulling the brake — the checks that
+/// would not go green, a finish step with no pull request, a Stop pressed from
+/// the menu, an account out of window — and a server coming back up is no reason
+/// to think differently about any of them. Those wait for the press, whether or
+/// not they are marked as waiting on anybody. A [`store::Decision::Circumstance`] is
+/// the other half of the same record: nobody chose it, so it is taken up here.
 ///
 /// A refusal is written down rather than logged, because a Conversation that
 /// cannot be started is exactly the one somebody has to look at: it stops, with
@@ -371,10 +471,7 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
         };
 
         for conversation in conversations {
-            if !matches!(
-                conversation.state,
-                Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping
-            ) {
+            if !driven(conversation.state) {
                 continue;
             }
 
@@ -407,13 +504,16 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
 /// Whether this Conversation is stopped in a way only the human can undo, which
 /// is the one thing a restart leaves alone.
 ///
-/// A [`Decision::Deliberate`] is what says it: somebody decided, so nothing here
-/// decides otherwise. See [`crate::stopping::stopped`], which asks the same
-/// question in front of a launch.
+/// [`store::Decision::decided`] is what says it: somebody decided, so nothing here
+/// decides otherwise. Which of them decided is not this question — the human's
+/// own press is left alone exactly as Verkstead's brake is, and what the two
+/// differ about is the marks rather than the press they wait for. See
+/// [`crate::stopping::stopped`], which asks the same question in front of a
+/// launch.
 async fn waiting_for_a_press(state: &AppState, conversation_id: i64) -> anyhow::Result<bool> {
     Ok(store::stopped(&state.pool, conversation_id)
         .await?
-        .is_some_and(|stopped| stopped.decision == Decision::Deliberate))
+        .is_some_and(|stopped| stopped.decision.decided()))
 }
 
 /// Stop a Conversation a restart could not start anything for, with the refusal
@@ -426,7 +526,7 @@ async fn waiting_for_a_press(state: &AppState, conversation_id: i64) -> anyhow::
 /// under *nothing is driving it*, which is the same Conversation described by
 /// something that knows less.
 ///
-/// [`Decision::Deliberate`], which is what it is: Verkstead looked at this
+/// [`store::Decision::Verkstead`], which is what it is: Verkstead looked at this
 /// Conversation and decided nothing could be started for it. Nothing but the
 /// human can change that, so the next restart leaves it alone rather than
 /// refusing all over again — and it reaches a phone, a Conversation nothing will
@@ -486,12 +586,15 @@ fn why(refusal: Resumed) -> Option<&'static str> {
         }
         Resumed::NoDirection => "nothing on the record says how the work is being built",
         Resumed::NothingToWork => {
-            "there is nothing left in `.tasks/` to work — the backlog was never written, \
-             or it is finished with"
+            "there is nothing left in `.tasks/` to work and nothing on this branch ever \
+             wrote a backlog, so there is nothing built here to carry anywhere"
         }
         Resumed::NoGrillingPairing => "the grilling Profile and model it runs under have gone",
         Resumed::NoImplementationPairing => {
             "the implementation Profile and model the work runs under have gone"
+        }
+        Resumed::NoFollowUpBrief => {
+            "nothing on the record says what the follow-up was opened about"
         }
     })
 }
@@ -535,13 +638,29 @@ pub(crate) fn ready(
     lifecycle: Lifecycle,
     stopped: bool,
 ) -> bool {
+    driven(lifecycle)
+        && (stopped
+            || !state
+                .drivers
+                .driven(&state.sessions.working(), conversation_id, lifecycle))
+}
+
+/// Whether this is a state something ought to be driving, which is the whole of
+/// what Resume is offered on.
+///
+/// The four: a grilling has its session, an implementation its run, a wrap-up
+/// its watchers, and a follow-up the session the human is talking to. The three
+/// that are left — drafting, done and closed — were never being driven by
+/// anything, so a press on one is not a Conversation that stood still.
+///
+/// Said once here because three places ask it and none of them may answer it
+/// differently: the button the page draws, the press that arrives, and the
+/// restart that presses it for every Conversation the last server was driving.
+fn driven(lifecycle: Lifecycle) -> bool {
     matches!(
         lifecycle,
-        Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping
-    ) && (stopped
-        || !state
-            .drivers
-            .driven(&state.sessions.working(), conversation_id, lifecycle))
+        Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping | Lifecycle::FollowUp
+    )
 }
 
 #[cfg(test)]

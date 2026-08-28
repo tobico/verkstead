@@ -63,6 +63,7 @@ import {
 import { loadCapture, loadTranscript } from "../api/client";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { followBottom } from "../scrolling";
 import { Mark } from "./Mark";
 import styles from "./Output.module.css";
 import { PaneHead } from "./PaneHead";
@@ -302,7 +303,7 @@ export function Output(props: {
             </ErrorLine>
           </Match>
           <Match when={spoke() && transcript.data}>
-            {(said) => <Record said={said()} />}
+            {(said) => <Record said={said()} live={!over} />}
           </Match>
           {/* No Transcript, so the bytes — which is the whole Transcript-side
               story for a session whose backend kept no log of itself. */}
@@ -346,7 +347,29 @@ export function Output(props: {
 /// opened would snap shut with the element it was DOM state on. So the rows
 /// stay the turns themselves — a call looks its answer up, and an answer a call
 /// is already drawing draws nothing of its own.
-function Record(props: { said: TranscriptView }): JSX.Element {
+///
+/// And while the session is still talking, the pane follows what it says: a
+/// record being written is opened at its end and held there, because what
+/// somebody opens a running session for is the line it is on now. Scrolling up
+/// out of it is reading something further back, so the following stops until
+/// they come down to the end again — see [`../scrolling`].
+///
+/// The Capture beside it does not follow. It stands in for the sessions that
+/// kept no log, and every one of those is a stub agent whose output is a
+/// handful of lines rather than an hour of them.
+function Record(props: { said: TranscriptView; live: boolean }): JSX.Element {
+  /// The list the turns are drawn in, which is what says which box the pane's
+  /// scroll happens in.
+  let list!: HTMLOListElement;
+
+  followBottom(
+    () => list,
+    () => props.live,
+    // What growing means for a record that is only ever appended to: another
+    // turn, or another line folded away at the end of it.
+    () => props.said.turns.length + props.said.bookkeeping.length,
+  );
+
   /// The answers, by the call each of them names.
   const answers = createMemo(() => {
     const by = new Map<string, ToolResult>();
@@ -377,7 +400,7 @@ function Record(props: { said: TranscriptView }): JSX.Element {
 
   return (
     <>
-      <ol class={styles.transcript}>
+      <ol class={styles.transcript} ref={list}>
         <For each={props.said.turns}>
           {(turn) => (
             <Said
@@ -498,14 +521,17 @@ function Said(props: {
         )}
       </Match>
 
-      {/* A line of a kind this version has never met, shown as the JSON it is
-          rather than dropped: a format that has moved on should say so here
-          instead of quietly emptying the pane. */}
+      {/* Something of a kind this version has never met, shown as the JSON it
+          is rather than dropped: a format that has moved on should say so here
+          instead of quietly emptying the pane. A block inside a turn, or a
+          line that never said what it was — a whole line of an unknown kind
+          folds away with the bookkeeping instead, which is why this says
+          "something" rather than "a line". */}
       <Match when={props.turn.kind === "Unread" && props.turn}>
         {(unread) => (
           <li class={`${styles.turn} ${styles.unread}`}>
             <details>
-              <summary>A line this version does not know</summary>
+              <summary>Something this version does not know</summary>
               <pre class={styles.raw}>{unread().line}</pre>
             </details>
           </li>

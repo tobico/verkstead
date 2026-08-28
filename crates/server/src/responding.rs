@@ -268,7 +268,7 @@ async fn proposed(state: &AppState, conversation_id: i64) -> Option<i64> {
 /// `ended_badly` is how the session went where this is being raised as one ends
 /// and it did not end well, with the Timeline Event it was printing into.
 ///
-/// [`store::Decision::Deliberate`]: what to do about it is Resume, which answers
+/// [`store::Decision::Verkstead`]: what to do about it is Resume, which answers
 /// what was said again, or reading the comments yourself, or ending the run.
 async fn abandoned(
     state: &AppState,
@@ -376,7 +376,7 @@ async fn unsettle(state: &AppState, conversation_id: i64, repo_id: Option<i64>) 
 /// The evidence is the tail of what the session said, which is where one that
 /// fell over says why.
 ///
-/// [`store::Decision::Deliberate`]: what to do about it is Resume, which answers what
+/// [`store::Decision::Verkstead`]: what to do about it is Resume, which answers what
 /// was said again, or reading the comments yourself, or ending the run.
 async fn stopped(
     state: &AppState,

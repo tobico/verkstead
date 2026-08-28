@@ -608,7 +608,7 @@ pub(crate) async fn unanswered(state: &AppState, set_id: i64) -> bool {
 /// was already gone before anybody looked, which is what a restarted server
 /// finds.
 ///
-/// [`store::Decision::Deliberate`]: what to do about it is Resume, which reads the
+/// [`store::Decision::Verkstead`]: what to do about it is Resume, which reads the
 /// branch again in a session as fresh as the first, or taking the branch over,
 /// or closing the Conversation with the branch exactly as it stands.
 async fn abandoned(
@@ -694,7 +694,7 @@ async fn settle(state: &AppState, conversation_id: i64) {
 /// that fell over says why — and what to do about it is Resume, read the branch
 /// themselves, or close the Conversation.
 ///
-/// [`store::Decision::Deliberate`], because a wrap-up that goes on without its
+/// [`store::Decision::Verkstead`], because a wrap-up that goes on without its
 /// review is a branch nobody read: Verkstead stops rather than pass a session
 /// that crashed off as a clean bill of health, and going again is the human's
 /// press.
@@ -726,7 +726,7 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
 /// is not there — so the run stops rather than settle a review nothing saw the
 /// end of, and the human says what happens next.
 ///
-/// [`store::Decision::Deliberate`]: what to do about it is Resume, which reads
+/// [`store::Decision::Verkstead`]: what to do about it is Resume, which reads
 /// the branch again in a session as fresh as the first and raises whatever is
 /// still worth raising, or reading it themselves, or closing the Conversation
 /// with the branch exactly as it stands.

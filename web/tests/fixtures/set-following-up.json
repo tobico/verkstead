@@ -1,0 +1,55 @@
+{
+  "Set": {
+    "branch": "rate-limiting",
+    "conversation": 1,
+    "diagrams": false,
+    "diff": [],
+    "follow_up": true,
+    "id": 1,
+    "postscript_html": "<p>Both are pushed as separate commits, so the second can go on its own.</p>\n",
+    "preface_html": "<p>The header is in and pushed. Two things I could not settle from the code.</p>\n",
+    "project": "verkstead",
+    "proposal": null,
+    "questions": [
+      {
+        "ask": {
+          "columns": [],
+          "name": "Q1",
+          "options": [
+            {
+              "cells": [],
+              "n": 1,
+              "recommended": true,
+              "text_html": "Seconds, which is what the spec's examples use"
+            },
+            {
+              "cells": [],
+              "n": 2,
+              "recommended": false,
+              "text_html": "An HTTP-date, which is easier to read in a log"
+            }
+          ],
+          "text_html": "<p>Should <code>Retry-After</code> be seconds or a timestamp?</p>\n"
+        },
+        "heading": false,
+        "nav_text": "Should Retry-After be seconds or a timestamp?",
+        "subquestions": []
+      },
+      {
+        "ask": {
+          "columns": [],
+          "name": "Q2",
+          "options": [],
+          "text_html": "<p>The window is a minute. Was that deliberate?</p>\n"
+        },
+        "heading": false,
+        "nav_text": "The window is a minute. Was that deliberate?",
+        "subquestions": []
+      }
+    ],
+    "standing": {
+      "Waiting": "waiting"
+    },
+    "title": "The reset header, and what the window should be"
+  }
+}

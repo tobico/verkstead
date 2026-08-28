@@ -26,8 +26,9 @@
 //! Conversation Verkstead has finished with are all somewhere to be steered
 //! from. What the targets are is [`SteerTarget`]'s to say, and it is the short
 //! list — the states work is *done in*, with Draft and Closed left out because
-//! each has a way in of its own. So every refusal here is about the *target*:
-//! work that cannot be set going from what the record holds.
+//! each has a way in of its own, and Follow-up in because a steer is the only
+//! way into it at all. So every refusal here is about the *target*: work that
+//! cannot be set going from what the record holds.
 //!
 //! **What is missing is made again**, and the further from a running state the
 //! source is the more of it there is to make. A Worktree whose directory has
@@ -44,9 +45,10 @@
 //! it, which is the order the moment happened in, and beside them go the Pairing
 //! the modal settled and the Worktree and base commit the steer had to make:
 //! steering re-settles what runs the work rather than picking for one session.
-//! The Steer carries what was written with it, too: an instruction is the Event's
-//! own body, so reading it back is reading the job that was set. See
-//! [`store::steer_conversation`], which writes all of it in one transaction.
+//! The Steer carries what was written with it, too: an instruction, or the brief
+//! a follow-up is opened on, is the Event's own body, so reading it back is
+//! reading the job that was set. See [`store::steer_conversation`], which writes
+//! all of it in one transaction.
 //!
 //! **What each target starts is the ordinary recompute.** Into Grilling it is a
 //! fresh grilling on the round's own Brief, primed with the digest of what has
@@ -61,8 +63,10 @@
 //! an instruction is required exactly where nothing stands to be carried on,
 //! which is what [`standing`] answers. Into Wrapping it is the wrap-up's own
 //! watchers over whatever the branch now holds, with the fix attempts
-//! forgotten, which is what that press does there. Into Done there is nothing
-//! to start at all.
+//! forgotten, which is what that press does there. Into Follow-up it is a
+//! session on the follow-up skill, started on the brief the human wrote and
+//! required to have one — see [`crate::runner::following_up`]. Into Done there
+//! is nothing to start at all.
 //!
 //! Nothing is reverted, reset or stashed, here or anywhere a stop is written:
 //! the Worktree is left exactly as whatever was running left it.
@@ -190,12 +194,15 @@ pub(crate) async fn submit(
     clear(state, conversation_id).await?;
 
     let instruction = instruction(submission);
+    let follow_up = follow_up(submission);
 
     let steer = store::Steer {
         target,
         pairing: settling(&conversation, submission),
         brief: brief(submission),
-        instruction,
+        // Whichever of the two the target takes, both landing in the one place:
+        // the Steer Event's own body is what the human wrote to steer it with.
+        instruction: instruction.or(follow_up),
         direction: directing(&conversation, instruction),
         worktree: made.worktree.as_deref(),
         base_commit: made.base_commit.as_deref(),
@@ -282,6 +289,39 @@ pub(crate) async fn submit(
             });
         }
 
+        // A session on the follow-up skill, started on the brief the human
+        // steered with — which is required, so [`refusal`] has already made sure
+        // there is one and this cannot come to nothing. See
+        // [`crate::runner::following_up`], which is what drives the Conversation
+        // while it runs.
+        SteerTarget::FollowUp => match follow_up {
+            Some(follow_up) => {
+                tokio::spawn(crate::runner::following_up(
+                    state.clone(),
+                    conversation_id,
+                    crate::follow_ups::FollowUp::opening(follow_up.to_owned()),
+                    driving,
+                ));
+            }
+
+            // Refused above, so nothing reaches here. Said rather than
+            // unwrapped — a panic in a handler is a request the browser is left
+            // holding — and nothing is refused at this end: the move is written
+            // by now, and an answer saying it was refused would be an answer
+            // about a Conversation that had already moved. What is left is a
+            // Conversation nothing is driving, which the stall sweep says out
+            // loud a minute later.
+            None => {
+                tracing::error!(
+                    conversation_id,
+                    "a steer into Follow-up got past the refusals with no brief, so nothing \
+                     was started",
+                );
+
+                drop(driving);
+            }
+        },
+
         // And nothing at all: a steer into Done is the move alone.
         SteerTarget::Done => drop(driving),
     }
@@ -314,16 +354,28 @@ async fn refusal(
     submission: &SteerSubmission,
 ) -> anyhow::Result<Option<ConversationSteered>> {
     // A wrapping Conversation is defined by the pull request under it, so a steer
-    // into Wrapping is a move onto one that is already there. The Conversation's
-    // own repository's: a companion's is something a wrap-up covers rather than
-    // something that makes one. The modal does not offer the target where there
+    // into Wrapping is a move onto one that is already there — and a follow-up is
+    // the human taking something up about work that is already pushed, so it
+    // turns on the same fact and is refused by the same name. The Conversation's
+    // own repository's either way: a companion's is something a wrap-up covers
+    // rather than something that makes one. The modal offers neither where there
     // is none; this is the same rule asked again on arrival.
-    if submission.target == SteerTarget::Wrapping
-        && store::pull_request(&state.pool, conversation.id, conversation.repo.id)
-            .await?
-            .is_none()
+    if matches!(
+        submission.target,
+        SteerTarget::Wrapping | SteerTarget::FollowUp
+    ) && store::pull_request(&state.pool, conversation.id, conversation.repo.id)
+        .await?
+        .is_none()
     {
         return Ok(Some(ConversationSteered::NoPullRequest));
+    }
+
+    // And a follow-up is whatever the human wrote it about. Nothing on the branch
+    // could stand in for it — a follow-up is not a step of the run to be picked
+    // up — so it is the one written payload with no quiet meaning, and the modal
+    // holds the submit shut without one rather than offering it.
+    if submission.target == SteerTarget::FollowUp && follow_up(submission).is_none() {
+        return Ok(Some(ConversationSteered::NoFollowUpBrief));
     }
 
     // And a steer into Implementing either carries on what the branch already
@@ -437,6 +489,28 @@ fn instruction(submission: &SteerSubmission) -> Option<&str> {
         .as_deref()
         .map(str::trim)
         .filter(|instruction| !instruction.is_empty())
+}
+
+/// What the human wants followed up on, or `None` where they wrote nothing.
+///
+/// Read exactly as the instruction above it is, and it lands in the same place —
+/// the Steer Event's own body. What differs is that `None` is a refusal rather
+/// than an ordinary case: an instruction left empty carries on what the branch
+/// holds, and there is nothing a follow-up could carry on instead. See
+/// [`refusal`].
+///
+/// Only where a follow-up could be started on it. A brief that arrived beside
+/// another target is a page sending a field it should not have drawn.
+fn follow_up(submission: &SteerSubmission) -> Option<&str> {
+    if submission.target != SteerTarget::FollowUp {
+        return None;
+    }
+
+    submission
+        .follow_up
+        .as_deref()
+        .map(str::trim)
+        .filter(|follow_up| !follow_up.is_empty())
 }
 
 /// How the work is built from here, or `None` where the Conversation has already
@@ -650,16 +724,19 @@ pub(crate) async fn standing(
 /// Which role's Pairing a target's sessions run under, or `None` where nothing
 /// runs there.
 ///
-/// Implementing and Wrapping are one answer between them, because they are one
-/// run seen at two moments: the task sessions build the work, and the wrap-up's
-/// watchers dispatch the fix, review and comment sessions that see it through.
-/// Every one of those is the work itself, so all of them run under the
-/// implementation Pairing. A grilling is the other one, which is what an
+/// Implementing, Wrapping and Follow-up are one answer between them, because
+/// they are one run seen at three moments: the task sessions build the work, the
+/// wrap-up's watchers dispatch the fix, review and comment sessions that see it
+/// through, and a follow-up session does whatever the human wants doing about it
+/// afterwards. Every one of those is the work itself, so all of them run under
+/// the implementation Pairing. A grilling is the other one, which is what an
 /// interview runs under whatever else has happened since.
 fn role(target: SteerTarget) -> Option<Role> {
     match target {
         SteerTarget::Grilling => Some(Role::Grilling),
-        SteerTarget::Implementing | SteerTarget::Wrapping => Some(Role::Implementation),
+        SteerTarget::Implementing | SteerTarget::Wrapping | SteerTarget::FollowUp => {
+            Some(Role::Implementation)
+        }
         SteerTarget::Done => None,
     }
 }
@@ -811,6 +888,7 @@ fn target(target: SteerTarget) -> Lifecycle {
         SteerTarget::Grilling => Lifecycle::Grilling,
         SteerTarget::Implementing => Lifecycle::Implementing,
         SteerTarget::Wrapping => Lifecycle::Wrapping,
+        SteerTarget::FollowUp => Lifecycle::FollowUp,
         SteerTarget::Done => Lifecycle::Done,
     }
 }

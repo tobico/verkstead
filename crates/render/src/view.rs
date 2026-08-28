@@ -124,6 +124,19 @@ pub struct SetView {
     /// about arrive together, so the page never draws the Questions above a
     /// chooser that has not turned up yet.
     pub proposal: Option<ProposalView>,
+
+    /// Whether this Set was asked while its Conversation is in Follow-up, which
+    /// is what puts the Nothing-else option in its closing section.
+    ///
+    /// The other control the viewer injects, and it arrives the same way the
+    /// proposal does: with the Set, so the page never draws a closing section
+    /// the option turns up in a moment later.
+    ///
+    /// A fact about the Conversation rather than about the Set, which is why it
+    /// is decided here rather than read off the stored body. Nothing about what
+    /// was asked changes — an ordinary Set is what a follow-up's rounds are made
+    /// of — and a Set stored before any of this stays exactly as it was.
+    pub follow_up: bool,
 }
 
 /// The Diff as the browser receives it: the HTML the server rendered, and the
@@ -282,12 +295,15 @@ pub struct Answered {
 ///
 /// `standing` is the caller's to decide — it comes from the store's settlement
 /// and the registry of held waits, neither of which is any of this crate's
-/// business. Everything else on the way out is rendering, which is all of it.
+/// business. `follow_up` is the caller's for the same reason: it is where the
+/// Conversation stands, which this crate never asks about. Everything else on
+/// the way out is rendering, which is all of it.
 pub fn set_view(
     id: i64,
     conversation: i64,
     set: verkstead_schema::QuestionSet,
     standing: Standing,
+    follow_up: bool,
 ) -> SetView {
     // An empty Preface is the same as none at all: no point drawing the section
     // for it. The Postscript is nothing but the same thing said at the other end
@@ -325,6 +341,7 @@ pub fn set_view(
         questions,
         standing,
         proposal,
+        follow_up,
     }
 }
 

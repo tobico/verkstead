@@ -252,9 +252,9 @@
   scroll-margin-top: var(--jump-clear);
 }
 
-/* The Gutter the Set page reserves down its left once the window is wide — see
-   `set/Sheet.module.css`, where it is named and the rest of what reserves it is
-   set. */
+/* The Gutter a card reserves down its left once the column is wide — see
+   `styles/base.css`, where it is named, and the modules of the cards that
+   reserve it. */
 @media (min-width: 60rem) {
   /* And the Diff's own gutter cut to the page's: the marker keeps the width it
      measures for itself and the number column takes what is left, so the two

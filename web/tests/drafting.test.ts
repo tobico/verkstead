@@ -36,6 +36,7 @@ function partWay(): Draft {
     ],
     comment: "back in an hour",
     direction: null,
+    nothing_else: false,
   };
 }
 
@@ -188,6 +189,7 @@ describe("a draft between visits", () => {
       filled: [filled("Q1", null, ""), filled("Q2", 1, "")],
       comment: "",
       direction: null,
+      nothing_else: false,
     };
 
     const restored = restorable(JSON.stringify(draft), ["Q1", "Q2"])!;
@@ -233,6 +235,7 @@ describe("a draft between visits", () => {
       filled: [filled("Q1", null, ""), filled("Q2", null, "  \n")],
       comment: "   ",
       direction: null,
+      nothing_else: false,
     };
     expect(empty(nothing), "whitespace is not an answer here either").toBe(
       true,
@@ -244,9 +247,32 @@ describe("a draft between visits", () => {
         filled: [filled("Q1", null, "")],
         comment: "why not cache it upstream?",
         direction: null,
+        nothing_else: false,
       }),
       "a comment on its own is a draft: it is a whole counter-question",
     ).toBe(false);
+
+    expect(
+      empty({
+        filled: [filled("Q1", null, "")],
+        comment: "",
+        direction: null,
+        nothing_else: true,
+      }),
+      "and so is a ticked Nothing else: on a follow-up's last round it may be all there is",
+    ).toBe(false);
+  });
+
+  /// Written by a build that predates the option, which every draft on a device
+  /// that was answering Sets before this one is.
+  it("restores an older draft with the option untouched", () => {
+    const { nothing_else, ...before } = partWay();
+    void nothing_else;
+
+    expect(
+      restorable(JSON.stringify(before), ["Q1", "Q2", "Q2a"]),
+      "an absent mark is an unticked one, which is what such a draft meant",
+    ).toEqual(partWay());
   });
 
   it("is kept per Set, so two answered in turn do not share one", () => {
