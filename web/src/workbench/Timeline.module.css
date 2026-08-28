@@ -456,10 +456,6 @@
   border-radius: 0.6rem;
 }
 
-.pullRequest.selected {
-  border-color: var(--accent);
-}
-
 .pullRequest .eventHead {
   margin-bottom: 0.4rem;
   justify-content: flex-start;
@@ -474,26 +470,12 @@
   color: var(--ink-soft);
 }
 
-/* The way out to GitHub, on the other end of the line: merging happens over
-   there, and getting there must not depend on any pane of this page. */
-.pullRequest .out {
-  margin-left: auto;
-  font-size: 0.85rem;
-}
-
-/* And what opens the pane: the title, pressed. A button drawn as the line of
-   text it is, because what is being pressed is the pull request itself. */
-.openPullRequest {
-  display: block;
-  width: 100%;
-  padding: 0;
-  font: inherit;
+/* And the name of the work, under the name of the pull request. A line of text
+   rather than a button: the whole card is what opens the pane, so there is
+   nothing here to press on its own. */
+.pullRequestTitle {
+  margin: 0;
   font-weight: 600;
-  text-align: left;
-  color: inherit;
-  background: none;
-  border: 0;
-  cursor: pointer;
 }
 
 /* The timeline: everything that has happened, in order, each event a card of its
@@ -592,11 +574,9 @@
    said here instead.
 
    Wherever the card is drawn rather than only on the record, which is what the
-   two lists made matter: a task list and a roadmap are drawn twice, pinned and
-   listed, and a rule that reached one copy would have the human press the card
-   held above the pane and watch a different one light up. Said the way
-   `.pullRequest.selected` above says it, and true of both copies for the same
-   reason. */
+   two lists and the pull request made matter: each of the three is drawn twice,
+   pinned and listed, and a rule that reached one copy would have the human
+   press the card held above the pane and watch a different one light up. */
 .openable {
   cursor: pointer;
 }
@@ -1153,12 +1133,9 @@
     background: var(--ink-soft);
   }
 
-  .openPullRequest:hover {
-    color: var(--accent);
-  }
-
   /* The pressable card, wherever it is drawn — the pinned copies of the two
-     lists included, for the reason `.openable` itself is unscoped. */
+     lists and the pull request included, for the reason `.openable` itself is
+     unscoped. */
   .openable:hover,
   .timelineEvent > .agentOutput:hover,
   .timelineEvent > .questionSet:hover,

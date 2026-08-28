@@ -21,7 +21,7 @@ order is the dependency.
 - [x] 05: Task done by checkbox — [details](05-task-done-by-checkbox.md)
 - [x] 06: Skills keep task files — [details](06-skills-keep-task-files.md)
 - [x] 07: List windowing — [details](07-list-windowing.md)
-- [ ] 08: Pull request card — [details](08-pull-request-card.md)
+- [x] 08: Pull request card — [details](08-pull-request-card.md)
 - [ ] 09: Check rollup and icon — [details](09-check-rollup-icon.md)
 - [ ] 10: Checks in the details pane — [details](10-checks-details-pane.md)
 - [ ] 11: Unknown lines to bookkeeping — [details](11-unknown-lines-bookkeeping.md)

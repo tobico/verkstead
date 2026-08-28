@@ -8603,23 +8603,54 @@ describe("the pinned pull request", () => {
     expect(opened.querySelector(`.${timeline.number}`)!.textContent).toBe(
       `#${OPENED.number}`,
     );
-    expect(opened.querySelector(`.${timeline.openPullRequest}`)!.textContent).toBe(
+    expect(opened.querySelector(`.${timeline.pullRequestTitle}`)!.textContent).toBe(
       OPENED.title,
     );
   });
 
-  /// Merging is the human's act and it happens over there, so getting there is
-  /// a link rather than anything this page's panes have to answer for.
-  it("links out to GitHub itself", async () => {
+  /// One card, one target: nothing on it to press but itself, so there is no
+  /// link out here. Merging is still the human's act and it still happens over
+  /// there, and the details pane the card opens is what carries the way to it.
+  it("carries no link of its own, and the pane it opens carries the way out", async () => {
     theWrapping();
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    const out = await drawn<HTMLAnchorElement>(
+    const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
+
+    expect(opened.querySelector("a")).toBeNull();
+    expect(opened.textContent).not.toContain("On GitHub");
+
+    fireEvent.click(opened);
+
+    const where = await drawn<HTMLAnchorElement>(
       container,
-      `.${timeline.pinned} .${timeline.pullRequest} .${timeline.out}`,
+      `.${shell.detailsPane} .${prPane.where} a`,
     );
 
-    expect(out.href).toBe(OPENED.url);
+    expect(where.href).toBe(OPENED.url);
+  });
+
+  /// The restructure took the card's button away, so the card itself is what
+  /// answers for the keyboard and for anything reading the page aloud.
+  it("stays a button for the keyboard and the screen reader", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
+
+    expect(opened.getAttribute("role")).toBe("button");
+    expect(opened.getAttribute("tabindex")).toBe("0");
+    expect(opened.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.keyDown(opened, { key: "Enter" });
+
+    await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
+
+    expect(
+      container
+        .querySelector(`.${timeline.pinned} .${timeline.pullRequest}`)!
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   /// Pinned and on the record both: the sticky block holds it in view for as
@@ -8635,7 +8666,7 @@ describe("the pinned pull request", () => {
     const listed = container.querySelector<HTMLElement>(
       `.${timeline.timeline} .${timeline.pullRequest}`,
     )!;
-    expect(listed.querySelector(`.${timeline.openPullRequest}`)!.textContent).toBe(
+    expect(listed.querySelector(`.${timeline.pullRequestTitle}`)!.textContent).toBe(
       OPENED.title,
     );
 
@@ -8663,7 +8694,7 @@ describe("the pinned pull request", () => {
       container,
       `.${timeline.timeline} .${timeline.pullRequest}`,
     );
-    fireEvent.click(listed.querySelector(`.${timeline.openPullRequest}`)!);
+    fireEvent.click(listed);
 
     await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
 
@@ -8679,7 +8710,7 @@ describe("the pinned pull request", () => {
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
-    fireEvent.click(opened.querySelector(`.${timeline.openPullRequest}`)!);
+    fireEvent.click(opened);
 
     const commits = await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
 
@@ -8724,7 +8755,7 @@ describe("the pinned pull request", () => {
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
-    fireEvent.click(opened.querySelector(`.${timeline.openPullRequest}`)!);
+    fireEvent.click(opened);
 
     const error = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
 
@@ -9016,7 +9047,7 @@ describe("the pinned carousel", () => {
     fireEvent.click(dots.querySelectorAll("button")[2]!);
 
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
-    fireEvent.click(opened.querySelector(`.${timeline.openPullRequest}`)!);
+    fireEvent.click(opened);
 
     await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBeGreaterThan(0);

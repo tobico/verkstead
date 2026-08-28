@@ -656,7 +656,7 @@ describe("what a Nudge is about", () => {
     const fetching = theWrapping();
     const { container } = render(() => <App />);
     const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
-    fireEvent.click(pinned.querySelector(`.${timeline.openPullRequest}`)!);
+    fireEvent.click(pinned);
     await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
     stream().opens();
     const before = askedFor(fetching, WHAT_IS_ON_IT);
@@ -677,7 +677,7 @@ describe("what a Nudge is about", () => {
     const fetching = theWrapping();
     const { container } = render(() => <App />);
     const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
-    fireEvent.click(pinned.querySelector(`.${timeline.openPullRequest}`)!);
+    fireEvent.click(pinned);
     await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
     stream().opens();
     const before = askedFor(fetching, WHAT_IS_ON_IT);

@@ -304,11 +304,12 @@ function Clamped(props: {
 
 /// A card whose whole surface opens the details pane.
 ///
-/// Every other openable Event is a `button`, and these three cannot be: what
-/// they hold is rendered markdown, and a link inside a button is not something a
-/// browser will have. So the affordance goes on the article instead — the press,
-/// the keyboard and the role that says what it is — and it reads as the same
-/// card either way.
+/// Every other openable Event is a `button`, and the cards drawn through here
+/// cannot be: the documents hold rendered markdown, and a link inside a button
+/// is not something a browser will have; the lists and the pull request hold a
+/// heading and rows, which a button would flatten to one run of text. So the
+/// affordance goes on the article instead — the press, the keyboard and the
+/// role that says what it is — and it reads as the same card either way.
 ///
 /// `open` is nothing where the card is not openable, which is the Brief for as
 /// long as it is a draft: a field is not a thing to press, and neither is the
@@ -1154,10 +1155,12 @@ function Card(props: {
 
 /// The pull request the finish step opened: what it is called, and its number.
 ///
-/// A button, because what is *on* it — the commits and the comments — is in the
-/// details pane, fetched from GitHub when this is opened. The link out is a link
-/// rather than part of the button: merging is the human's act and it happens
-/// over there, so getting there must not depend on this page's own panes.
+/// The whole card is the press, as the two lists beside it are: what is *on* it
+/// — the commits and the comments — is in the details pane, fetched from GitHub
+/// when this is opened, and there is nothing else on the card to press. The way
+/// out to GitHub went with the button it used to sit beside: a card with a link
+/// on it has two targets and only one of them is the card, so the link lives in
+/// the pane instead, which is where it was already written out in full.
 ///
 /// Drawn twice, from the pinned block and from the record, because it belongs in
 /// both. The two are the same Event and so the same selection: opening either
@@ -1168,27 +1171,18 @@ function PullRequest(props: {
   open: () => void;
 }): JSX.Element {
   return (
-    <article
-      class={styles.pullRequest}
-      classList={{ [styles.selected!]: props.selected }}
+    <Openable
+      kind={styles.pullRequest!}
+      selected={props.selected}
+      open={props.open}
     >
       <div class={styles.eventHead}>
         <h2>Pull request</h2>
         <span class={styles.number}>#{props.opened.number}</span>
-        <a
-          class={styles.out}
-          href={props.opened.url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          On GitHub
-        </a>
       </div>
 
-      <button type="button" class={styles.openPullRequest} onClick={props.open}>
-        {props.opened.title}
-      </button>
-    </article>
+      <p class={styles.pullRequestTitle}>{props.opened.title}</p>
+    </Openable>
   );
 }
 
