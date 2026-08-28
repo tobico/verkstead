@@ -16,9 +16,10 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Lifecycle, PullRequest, Rebuilding, Wrapping, close_conversation, implement_again,
-    load_conversation, open_database, pick_direction, pull_request, record_pull_request,
-    register_repo, save_brief, start_conversation, start_grilling, timeline,
+    Event, Lifecycle, PullRequest, Rebuilding, Rollup, Wrapping, check_rollup, close_conversation,
+    implement_again, load_conversation, open_database, pick_direction, pull_request,
+    record_check_rollup, record_pull_request, register_repo, save_brief, start_conversation,
+    start_grilling, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -303,4 +304,79 @@ async fn only_a_wrapping_conversation_can_be_sent_back_to_be_built() {
         implement_again(&pool, 404).await.unwrap(),
         Rebuilding::NoSuchConversation,
     );
+}
+
+/// How the checks on it are, which is the one thing about a pull request that is
+/// written down and moves.
+///
+/// Written on every poll of the watcher and read by the Conversation view, so
+/// what these ask is the two things the card depends on: that the last word
+/// written is the word read back, and that saying the same thing twice is not
+/// news.
+#[tokio::test]
+async fn how_the_checks_are_is_written_down_and_read_back() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = implementing(&pool).await;
+    record_pull_request(&pool, id, &opened()).await.unwrap();
+
+    assert_eq!(
+        check_rollup(&pool, id).await.unwrap(),
+        None,
+        "nothing has asked GitHub yet, which is not the same as green",
+    );
+
+    assert!(
+        record_check_rollup(&pool, id, Rollup::Running)
+            .await
+            .unwrap(),
+        "the first poll is news",
+    );
+    assert_eq!(
+        check_rollup(&pool, id).await.unwrap(),
+        Some(Rollup::Running)
+    );
+
+    assert!(
+        !record_check_rollup(&pool, id, Rollup::Running)
+            .await
+            .unwrap(),
+        "and a suite still running half an hour later is the same thing said again",
+    );
+
+    assert!(
+        record_check_rollup(&pool, id, Rollup::Failed)
+            .await
+            .unwrap(),
+        "a check going red is news",
+    );
+    assert_eq!(check_rollup(&pool, id).await.unwrap(), Some(Rollup::Failed));
+
+    assert!(
+        record_check_rollup(&pool, id, Rollup::Passed)
+            .await
+            .unwrap(),
+        "and so is the fix session's push going green",
+    );
+    assert_eq!(check_rollup(&pool, id).await.unwrap(), Some(Rollup::Passed));
+}
+
+/// And it survives a restart, which is the whole reason it is written down
+/// rather than held in the watcher: the watching stops when the wrap-up is over,
+/// and the card on a Done Conversation goes on drawing what the last poll found.
+#[tokio::test]
+async fn how_the_checks_are_outlives_the_server_that_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("verkstead.db");
+
+    let pool = open_database(&database).await.unwrap();
+    let id = implementing(&pool).await;
+    record_pull_request(&pool, id, &opened()).await.unwrap();
+    record_check_rollup(&pool, id, Rollup::Passed)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let pool = open_database(&database).await.unwrap();
+
+    assert_eq!(check_rollup(&pool, id).await.unwrap(), Some(Rollup::Passed));
 }

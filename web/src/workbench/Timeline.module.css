@@ -470,6 +470,15 @@
   color: var(--ink-soft);
 }
 
+/* And how its checks are, on the other end of the head's line. The mark itself
+   is `Checks.module.css`'s; what is here is where it stands, which belongs to
+   the line that drew it. `margin-left: auto` rather than a `space-between`,
+   because the head is `flex-start` here — the number sits against the heading
+   and the checks against the card's edge. */
+.pullRequest .checkRollup {
+  margin-left: auto;
+}
+
 /* And the name of the work, under the name of the pull request. A line of text
    rather than a button: the whole card is what opens the pane, so there is
    nothing here to press on its own. */

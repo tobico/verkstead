@@ -40,6 +40,7 @@
     {
       "PullRequest": {
         "at": "2026-08-03T09:07:11.000Z",
+        "checks": "Running",
         "id": 32,
         "number": 41,
         "title": "Rate limiting",
@@ -99,6 +100,7 @@
     {
       "PullRequest": {
         "at": "2026-08-03T09:07:11.000Z",
+        "checks": "Running",
         "id": 32,
         "number": 41,
         "title": "Rate limiting",

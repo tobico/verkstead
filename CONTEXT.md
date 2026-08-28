@@ -613,6 +613,24 @@ silence.
 _Avoid_: blocked on you (that is about the human, this is about GitHub), CI
 (the word here is checks), pending, green, state
 
+**Check rollup**:
+How a pull request's checks are getting on, taken all together and said in one
+word: anything red reads as *failed*, else anything unfinished reads as
+*running*, else *passed*. The **pull request** card draws it as the icon GitHub
+draws beside a pull request — a tick, a cross, a dot — on the right of its head.
+
+Written down on every poll of the checks watcher, so it outlives both the poll
+and the server: a Conversation carried to Done keeps the icon the last poll
+earned it. Which also means it can be stale, the watching stopping when the
+wrap-up is over.
+
+Never guessed at. A pull request nothing has asked GitHub about has no rollup,
+and neither has one in a repository with no CI — *not known* is a third thing
+beside green and red, exactly as it is for the watcher meeting a `gh` that will
+not answer, and what a card with no rollup draws is no icon.
+_Avoid_: status, CI (the word here is checks), green as a state name, one check
+(the rollup is the whole suite)
+
 **Rescue**:
 The canned line Verkstead types into a session that has gone quiet without
 asking anything or finishing what it was sent for. A session reaches the human

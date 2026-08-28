@@ -28,7 +28,7 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationArchived,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Cursor, GrillingStarted, Lifecycle, Locked,
     NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
@@ -770,6 +770,23 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
             .map(verkstead_render::stage_list_event),
     );
 
+    // And how the pull request's checks were the last time anything asked, which
+    // is the one thing about a pull request that is written down and moves. Read
+    // once for the two cards drawn from it below, both being the one card in the
+    // two places a pull request is drawn.
+    //
+    // Stale on a Conversation nothing is watching any more, the watcher stopping
+    // when the wrap-up is over — which is a card an hour behind rather than a
+    // card that is wrong: the last thing anybody asked GitHub is the honest
+    // thing to draw.
+    let checks = match store::check_rollup(&state.pool, id).await {
+        Ok(checks) => checks.map(rollup),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading how a pull request's checks are failed");
+            None
+        }
+    };
+
     // And the pull request the work ended up on, which is pinned beside it. This
     // one *is* on the record — it is what moved the Conversation into Wrapping —
     // so it is read off the Timeline for the reason the Brief is: it is already
@@ -783,6 +800,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                 number: opened.number,
                 title: opened.title.clone(),
                 url: opened.url.clone(),
+                checks,
             },
         )),
         _ => None,
@@ -1149,6 +1167,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             number: opened.number,
                             title: opened.title,
                             url: opened.url,
+                            checks,
                         },
                     ),
                     // And the two rows that carry nothing of their own: what is
@@ -1999,6 +2018,16 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
             tracing::error!(error = ?error, profile_id = id, "removing an Agent Profile failed");
             unavailable("the agent profile could not be removed")
         }
+    }
+}
+
+/// And how a pull request's checks are, the same way: the store's word for a
+/// whole suite, as the card that draws an icon of it receives it.
+fn rollup(checks: store::Rollup) -> CheckRollup {
+    match checks {
+        store::Rollup::Passed => CheckRollup::Passed,
+        store::Rollup::Running => CheckRollup::Running,
+        store::Rollup::Failed => CheckRollup::Failed,
     }
 }
 

@@ -33,7 +33,7 @@ pub use answering::{Locked, Submitted};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
-    BriefEvent, BriefSaved, Capture, Comment, CommitEvent, CommitPane, CommitRecord,
+    BriefEvent, BriefSaved, Capture, CheckRollup, Comment, CommitEvent, CommitPane, CommitRecord,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, GrillingStarted, HandoffEvent,
     Lifecycle, ManualTaskEvent, MovedEvent, NewAdoption, NewConversation, NewOrder, NoticeEvent,

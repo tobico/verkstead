@@ -43,6 +43,8 @@
 
 use std::time::Duration;
 
+use verkstead_schema::Nudge;
+
 use crate::AppState;
 use crate::github::{Check, Checked};
 use crate::store;
@@ -200,6 +202,12 @@ async fn once(state: &AppState, conversation_id: i64, writing: Option<i64>) -> W
         }
     };
 
+    // Written down before anything is decided about it, because the card draws
+    // it and the card outlives the watching: this is the one place anything asks
+    // GitHub how the checks are while a wrap-up is running, and what it learned
+    // would otherwise go no further than the settle below.
+    remember(state, conversation_id, &checks).await;
+
     let failed: Vec<Check> = checks
         .iter()
         .filter(|check| check.how == Checked::Failed)
@@ -231,6 +239,56 @@ async fn once(state: &AppState, conversation_id: i64, writing: Option<i64>) -> W
     }
 
     fix(state, conversation_id, &failed, writing).await
+}
+
+/// Write down how the suite is, and tell the open pages where that is news.
+///
+/// The aggregate rather than the checks themselves: what the card has room for
+/// is one icon, and which of the three afternoons this is is what a human wants
+/// out of one. What every check is called and where its run is is not thrown
+/// away by that — it is on GitHub, which is where a red one is read anyway.
+///
+/// Nudged only where the word changed. A suite that is still running says the
+/// same thing every thirty seconds for as long as it takes, and a page told each
+/// time would be a page re-reading a Timeline nothing had happened on.
+async fn remember(state: &AppState, conversation_id: i64, checks: &[Check]) {
+    // A pull request with no checks on it at all is not passing and is not
+    // failing: there is nothing to say about a repository with no CI, and a
+    // green tick would be one this suite never earned. So nothing is written
+    // down, and the card draws no icon.
+    let Some(rollup) = rollup(checks) else {
+        return;
+    };
+
+    match store::record_check_rollup(&state.pool, conversation_id, rollup).await {
+        Ok(true) => state.nudges.announce(Nudge::Conversation {
+            conversation: conversation_id,
+        }),
+        Ok(false) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "recording how the checks are failed");
+        }
+    }
+}
+
+/// The one word a whole suite comes to, or nothing where there is no suite.
+///
+/// Red first, then unfinished, then green — see [`store::Rollup`], which is
+/// where that order is argued. The same reading [`once`] above makes of the same
+/// checks, so the icon on the card and the wrap-up's own patience cannot come to
+/// disagree about a suite they are both looking at.
+fn rollup(checks: &[Check]) -> Option<store::Rollup> {
+    if checks.iter().any(|check| check.how == Checked::Failed) {
+        return Some(store::Rollup::Failed);
+    }
+
+    if checks.iter().any(|check| check.how == Checked::Running) {
+        return Some(store::Rollup::Running);
+    }
+
+    // Green, and only where there was something to be green: an empty suite
+    // falls through to nothing at all.
+    (!checks.is_empty()).then_some(store::Rollup::Passed)
 }
 
 /// Dispatch a fix session for the failed checks that have attempts left, or ask
@@ -422,6 +480,15 @@ mod tests {
         }
     }
 
+    /// The same, for the tests that are about how a check is getting on rather
+    /// than about where its run is.
+    fn how(name: &str, how: Checked) -> Check {
+        Check {
+            how,
+            ..check(name, "")
+        }
+    }
+
     /// What a fix session is told: which checks are red and where their runs
     /// are, so it can go and read the real failure rather than a summary.
     #[test]
@@ -447,5 +514,47 @@ mod tests {
     #[test]
     fn a_check_with_no_run_to_link_to_is_listed_by_name_alone() {
         assert_eq!(listed(&[check("Rust", "")]), "- Rust");
+    }
+
+    /// One red check is a red suite, whatever the rest of it is doing. It is
+    /// the thing to go and look at, and a card saying anything else about a
+    /// suite with a failure in it would be a card sending nobody.
+    #[test]
+    fn a_suite_with_anything_red_in_it_is_red() {
+        assert_eq!(
+            rollup(&[
+                how("Rust", Checked::Passed),
+                how("Web", Checked::Failed),
+                how("Nix", Checked::Running),
+            ]),
+            Some(store::Rollup::Failed),
+        );
+    }
+
+    /// And nothing red with something unfinished is a suite still running:
+    /// green is a thing the whole of it has to have earned.
+    #[test]
+    fn a_suite_with_nothing_red_and_something_unfinished_is_running() {
+        assert_eq!(
+            rollup(&[how("Rust", Checked::Passed), how("Web", Checked::Running)]),
+            Some(store::Rollup::Running),
+        );
+    }
+
+    /// Every check finished and none of them red.
+    #[test]
+    fn a_suite_that_has_finished_with_nothing_red_has_passed() {
+        assert_eq!(
+            rollup(&[how("Rust", Checked::Passed), how("Web", Checked::Passed)]),
+            Some(store::Rollup::Passed),
+        );
+    }
+
+    /// And a pull request with no checks on it at all says nothing rather than
+    /// green: a repository with no CI has passed nothing, and the card draws no
+    /// icon for it.
+    #[test]
+    fn a_pull_request_with_no_checks_on_it_is_not_a_green_one() {
+        assert_eq!(rollup(&[]), None);
     }
 }

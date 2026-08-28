@@ -415,6 +415,15 @@ export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
 export type Capture = { text: string, };
 
 /**
+ * How a pull request's checks are getting on, taken all together.
+ *
+ * The store's own word, carried across the wire — see the reading behind it
+ * there. Three states and no fourth: *nobody has asked* is the absence of one
+ * rather than a variant, which is a card with no icon on it.
+ */
+export type CheckRollup = "Passed" | "Running" | "Failed";
+
+/**
  * A commit as the Timeline shows it: what it was called, and how much of the
  * repository it moved.
  *
@@ -1295,7 +1304,21 @@ title: string,
  * The whole URL, because merging is the human's act and this is the way to
  * where they do it.
  */
-url: string, };
+url: string, 
+/**
+ * How the checks on it were getting on the last time anything asked, or
+ * nothing where nothing has — a pull request in a repository with no CI,
+ * and one opened before Verkstead started writing this down.
+ *
+ * The aggregate rather than the checks, because what the card has room for
+ * is one icon: which of the three a suite is, and not what each of them is
+ * called.
+ *
+ * It can be stale, and on a Conversation nothing is watching any more it
+ * will be: what keeps it fresh is the checks watcher, and that stops when
+ * the wrap-up is over.
+ */
+checks: CheckRollup | null, };
 
 /**
  * The public half of the server's VAPID keypair, base64url-encoded from the

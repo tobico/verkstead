@@ -110,6 +110,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import unreadable from "../set/Unreadable.module.css";
 import { Actions } from "./Actions";
 import { Adoption } from "./Adoption";
+import { Checks } from "./Checks";
 import { Mark } from "./Mark";
 import { PaneHead } from "./PaneHead";
 import { Setup } from "./Setup";
@@ -1153,7 +1154,8 @@ function Card(props: {
   );
 }
 
-/// The pull request the finish step opened: what it is called, and its number.
+/// The pull request the finish step opened: what it is called, its number, and
+/// how its checks are getting on.
 ///
 /// The whole card is the press, as the two lists beside it are: what is *on* it
 /// — the commits and the comments — is in the details pane, fetched from GitHub
@@ -1179,6 +1181,10 @@ function PullRequest(props: {
       <div class={styles.eventHead}>
         <h2>Pull request</h2>
         <span class={styles.number}>#{props.opened.number}</span>
+        {/* On the other end of the line, where every card's second thing sits:
+            the checks are what is true of the pull request now, beside what it
+            was called when it opened. */}
+        <Checks checks={props.opened.checks} class={styles.checkRollup!} />
       </div>
 
       <p class={styles.pullRequestTitle}>{props.opened.title}</p>

@@ -920,6 +920,32 @@ pub struct PullRequestEvent {
     /// The whole URL, because merging is the human's act and this is the way to
     /// where they do it.
     pub url: String,
+
+    /// How the checks on it were getting on the last time anything asked, or
+    /// nothing where nothing has — a pull request in a repository with no CI,
+    /// and one opened before Verkstead started writing this down.
+    ///
+    /// The aggregate rather than the checks, because what the card has room for
+    /// is one icon: which of the three a suite is, and not what each of them is
+    /// called.
+    ///
+    /// It can be stale, and on a Conversation nothing is watching any more it
+    /// will be: what keeps it fresh is the checks watcher, and that stops when
+    /// the wrap-up is over.
+    pub checks: Option<CheckRollup>,
+}
+
+/// How a pull request's checks are getting on, taken all together.
+///
+/// The store's own word, carried across the wire — see the reading behind it
+/// there. Three states and no fourth: *nobody has asked* is the absence of one
+/// rather than a variant, which is a card with no icon on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CheckRollup {
+    Passed,
+    Running,
+    Failed,
 }
 
 /// What is on a pull request now: the commits it carries, and what has been said
@@ -1837,6 +1863,7 @@ fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestE
         number: opened.number,
         title: opened.title,
         url: opened.url,
+        checks: opened.checks,
     }
 }
 
@@ -1850,6 +1877,9 @@ pub struct PullRequestSummary {
     pub number: i64,
     pub title: String,
     pub url: String,
+
+    /// How its checks were, as the store last wrote it down.
+    pub checks: Option<CheckRollup>,
 }
 
 /// What a pull request holds, as the details pane receives it: the commit list

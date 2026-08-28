@@ -20,10 +20,11 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
-    ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered,
-    RoadmapPane, ShowingArchived, Standing, Started, SteerOpened, TimelineEvent,
+    Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CheckRollup,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
+    ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, PinnedEvent,
+    ProfileSaved, Registered, RoadmapPane, ShowingArchived, Standing, Started, SteerOpened,
+    TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
@@ -4404,6 +4405,70 @@ async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
         Lifecycle::Draft,
         "and nothing about the roadmap was read to find that out",
     );
+}
+
+/// How a pull request's checks are is carried to both copies of its card: the
+/// one pinned above the record and the one at the moment it opened.
+///
+/// Walked through the store rather than watched for, as the narrowing below is:
+/// what is under test is the reading, and asking GitHub is `src/checks.rs`'s.
+/// The aggregate and nothing else — what every check is called belongs to the
+/// details pane.
+#[tokio::test]
+async fn how_a_pull_requests_checks_are_reaches_both_copies_of_its_card() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::record_pull_request(
+        &pool,
+        id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        checks(&opened(&app, id).await),
+        [None, None],
+        "nothing has asked GitHub yet, and a card with nothing to say draws no icon",
+    );
+
+    for (asked, drawn) in [
+        (store::Rollup::Running, CheckRollup::Running),
+        (store::Rollup::Failed, CheckRollup::Failed),
+        (store::Rollup::Passed, CheckRollup::Passed),
+    ] {
+        store::record_check_rollup(&pool, id, asked).await.unwrap();
+
+        assert_eq!(
+            checks(&opened(&app, id).await),
+            [Some(drawn), Some(drawn)],
+            "the card follows the poll, in both places it is drawn",
+        );
+    }
+}
+
+/// How the checks are on each copy of the pull request card a view carries: the
+/// pinned one first, then the one on the record.
+fn checks(view: &ConversationView) -> [Option<CheckRollup>; 2] {
+    let pinned = view.pinned.iter().find_map(|event| match event {
+        PinnedEvent::PullRequest(opened) => Some(opened.checks),
+        _ => None,
+    });
+
+    let reached = view.timeline.iter().find_map(|event| match event {
+        TimelineEvent::PullRequest(opened) => Some(opened.checks),
+        _ => None,
+    });
+
+    [pinned.flatten(), reached.flatten()]
 }
 
 /// A wrap-up that has narrowed to its checks says so where the human reads a

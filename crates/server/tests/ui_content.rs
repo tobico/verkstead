@@ -2312,6 +2312,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap();
 
+    // And how its checks are getting on, which the checks watcher writes down on
+    // every poll — recorded here rather than watched for, as the pull request
+    // above is. Still running, which is the ordinary state of a wrap-up: the
+    // suite is what it is waiting on.
+    store::record_check_rollup(&pool, wrapping, store::Rollup::Running)
+        .await
+        .unwrap();
+
     write(
         "conversation-wrapping.json",
         &pin_health(&pin_timeline(
@@ -2331,6 +2339,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap();
     }
     store::finish_wrap_up(&pool, wrapping).await.unwrap();
+
+    // The suite went green on the way, which is what settling the checks above
+    // means: the last thing the watcher wrote down before it stopped watching,
+    // and what the card on a finished Conversation goes on showing.
+    store::record_check_rollup(&pool, wrapping, store::Rollup::Passed)
+        .await
+        .unwrap();
 
     store::steer_conversation(
         &pool,

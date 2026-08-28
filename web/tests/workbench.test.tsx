@@ -22,6 +22,7 @@ import type {
   BacklogPane,
   BriefEvent,
   Capture,
+  CheckRollup,
   CommitPane,
   ConversationArchived,
   ConversationClosed,
@@ -89,6 +90,10 @@ import paneHead from "../src/workbench/PaneHead.module.css";
 import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The pause card, which is one of the record's and draws itself.
 import prPane from "../src/workbench/PullRequest.module.css";
+// The mark a pull request's checks are said in, both ways: the hashed names to
+// query the card by, and the words the icon is read aloud in.
+import { SPOKEN as CHECKS_SPOKEN } from "../src/workbench/Checks";
+import checkMarks from "../src/workbench/Checks.module.css";
 // The Screen, both ways: it is the one pane with a height of its own, and the
 // rules that give it one are what jsdom cannot lay out.
 import screenPane from "../src/workbench/Screen.module.css";
@@ -8592,6 +8597,29 @@ function theWrapping(
   );
 }
 
+/// The same Conversation with its pull request's checks in a given state — or in
+/// none, which is one nothing has asked GitHub about.
+///
+/// Both copies of the card are drawn from the pinned Event here: what the record
+/// row holds is the same reading handed over twice, and the two are the one
+/// component.
+function whoseChecks(checks: CheckRollup | null): Partial<ConversationView> {
+  return {
+    pinned: WRAPPING.pinned.map((event) =>
+      "PullRequest" in event
+        ? { PullRequest: { ...event.PullRequest, checks } }
+        : event,
+    ),
+  };
+}
+
+/// The rule each rollup is drawn by, whose names are the words in lower case.
+const LOWERCASED = {
+  Passed: "passed",
+  Running: "running",
+  Failed: "failed",
+} as const;
+
 describe("the pinned pull request", () => {
   it("says what it is called and what number it answers to", async () => {
     theWrapping();
@@ -8651,6 +8679,36 @@ describe("the pinned pull request", () => {
         .querySelector(`.${timeline.pinned} .${timeline.pullRequest}`)!
         .getAttribute("aria-pressed"),
     ).toBe("true");
+  });
+
+  /// GitHub's own three, echoed here: a green tick, a red cross, and a dot for
+  /// a suite that has not finished. Drawn rather than worded, so the icon is
+  /// what carries the words for anything reading the page aloud.
+  it("marks how the checks are, in the icon GitHub uses for it", async () => {
+    for (const rollup of ["Passed", "Running", "Failed"] as const) {
+      theWrapping(whoseChecks(rollup));
+      const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+      const mark = await drawn(
+        container,
+        `.${timeline.pinned} .${timeline.pullRequest} .${checkMarks.checks}`,
+      );
+
+      expect(mark.classList.contains(checkMarks[LOWERCASED[rollup]]!)).toBe(true);
+      expect(mark.getAttribute("role")).toBe("img");
+      expect(mark.getAttribute("aria-label")).toBe(CHECKS_SPOKEN[rollup]);
+    }
+  });
+
+  /// And nothing where nothing is known: a repository with no CI has passed
+  /// nothing, and an icon guessing at it would be worse than no icon.
+  it("draws no icon for a pull request nothing has asked about", async () => {
+    theWrapping(whoseChecks(null));
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
+
+    expect(opened.querySelector(`.${checkMarks.checks}`)).toBeNull();
   });
 
   /// Pinned and on the record both: the sticky block holds it in view for as
