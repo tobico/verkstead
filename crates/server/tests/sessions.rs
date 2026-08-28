@@ -3695,7 +3695,7 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
             .map(|task| task.done)
             .collect::<Vec<_>>(),
         [true, false],
-        "the task whose file has gone is done, and the one still to do is not",
+        "the task whose entry is ticked is done, and the one still to do is not",
     );
 
     // And the same list is on the record, at the row the backlog landing

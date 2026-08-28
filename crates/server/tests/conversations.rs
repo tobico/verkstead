@@ -3455,7 +3455,7 @@ async fn the_task_list_opens_as_every_task_document_it_names() {
 
     assert_eq!(
         pane.tasks[0].html, None,
-        "the finished task's file has gone, so there is nothing to render",
+        "the list names a file nobody wrote, so there is nothing to render",
     );
 
     let html = pane.tasks[1].html.as_deref().expect("that file is there");

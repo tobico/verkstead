@@ -70,10 +70,12 @@
   border-radius: 0.6rem;
 }
 
-/* A section with no document to draw: a task whose file has gone, which is what
-   says it is done, or a roadmap naming a brief nobody wrote. In the box where
-   the document would have been, so the section reads as what it is rather than
-   as a document that would not load. */
+/* A section with no document to draw: a list naming a file nobody wrote, which
+   is a backlog or a roadmap part way through being written. Never the ordinary
+   end of anything — a task document and a stage brief both stay where they are,
+   and what says either is done is the box on its entry. In the box where the
+   document would have been, so the section reads as what it is rather than as a
+   document that would not load. */
 .missing {
   margin: 0;
   color: var(--ink-soft);
