@@ -17,8 +17,9 @@ export const DIRECTIONS: Direction[] = ["inline", "task-list", "roadmap"];
 ///
 /// A word rather than a number, because this is not one of the Questions: a
 /// `Q4` after `Q3` would read as a fourth question whose answer the Response
-/// had lost.
-export const DIRECTION_LABEL = "End";
+/// had lost. *Final* rather than *End*, because it is the last ask of the Set
+/// rather than a way of ending one.
+export const DIRECTION_LABEL = "Final";
 
 /// What each direction is called, wherever one is named: on the chooser, and on
 /// the record it becomes once the Set is answered.

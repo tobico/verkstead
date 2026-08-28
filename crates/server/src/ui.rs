@@ -28,7 +28,7 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, CompanionAdded,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, CompanionAdded,
     CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
     CompanionModeChosen, CompanionRemoved, CompanionView, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
@@ -171,6 +171,13 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/close", post(close))
+        // And the two of those joined, which is one row of the menu rather than
+        // two pressed in turn: the close and the archive are one intention often
+        // enough to be worth a press of their own.
+        .route(
+            "/api/ui/conversations/{id}/close-and-archive",
+            post(close_and_archive),
+        )
         // And the one that puts a closed Conversation away, which is the row
         // beside Close in the same menu. Named in the path like everything
         // around it, and with no body for the same reason: which Conversation
@@ -179,6 +186,13 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // And the way back out of it, which is the same row saying the other
         // word: archiving is reversible, and this is what reverses it.
         .route("/api/ui/conversations/{id}/unarchive", post(unarchive))
+        // And the browser saying the human has now looked at one, which takes
+        // the mark off the sidebar row. A press of its own rather than
+        // something the read of the Conversation does on the way past: a GET
+        // that wrote would be a GET a retry or a prefetch could spend, and what
+        // is being recorded is a person having looked rather than a page having
+        // fetched.
+        .route("/api/ui/conversations/{id}/seen", post(seen))
         // No route for how the work gets built: the direction rides the closing
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
@@ -321,6 +335,23 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         OffsetDateTime::now_utc(),
     );
 
+    // Whether the closing section carries the Nothing-else option, which is a
+    // fact about the Conversation rather than about the Set: a follow-up's
+    // rounds are ordinary Sets, and what makes one a follow-up's is where the
+    // work stands while it is being answered. A Conversation that cannot be read
+    // draws no option, which is what every state but Follow-up gets anyway.
+    let follow_up = match store::state(&state.pool, conversation).await {
+        Ok(state) => state == Some(store::Lifecycle::FollowUp),
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation,
+                "reading where a Set's Conversation stands failed"
+            );
+            false
+        }
+    };
+
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
     //
@@ -329,7 +360,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
     // work to do on an async worker thread while other requests wait behind it.
     let set_id = stored.id;
     let view = tokio::task::spawn_blocking(move || {
-        verkstead_render::set_view(set_id, conversation, set, standing)
+        verkstead_render::set_view(set_id, conversation, set, standing, follow_up)
     })
     .await;
 
@@ -578,6 +609,17 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // rather than left to the page that draws it.
                 idle: working && quiet.contains(&conversation.id),
                 waiting: conversation.waiting,
+                // And the same pairing again for the wrap-up that has got down
+                // to its checks: the settle facts came out of the query above,
+                // and whether anything is running on it is this register's to
+                // say. A fix session working a red check draws as plain
+                // Wrapping — waiting is what a wrap-up with nobody in it does.
+                waiting_on_checks: conversation.narrowed_to_checks && !working,
+                // And whether Verkstead has told the human something about it
+                // they have not looked at yet, which is the store's alone: it is
+                // written down rather than read off anything here, being a fact
+                // about the person rather than about the work.
+                unseen: conversation.unseen,
             }
         })
         .collect();
@@ -763,6 +805,23 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
             .map(verkstead_render::stage_list_event),
     );
 
+    // And how the pull request's checks were the last time anything asked, which
+    // is the one thing about a pull request that is written down and moves. Read
+    // once for the two cards drawn from it below, both being the one card in the
+    // two places a pull request is drawn.
+    //
+    // Stale on a Conversation nothing is watching any more, the watcher stopping
+    // when the wrap-up is over — which is a card an hour behind rather than a
+    // card that is wrong: the last thing anybody asked GitHub is the honest
+    // thing to draw.
+    let checks = match store::check_rollup(&state.pool, id).await {
+        Ok(checks) => checks.map(rollup),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading how a pull request's checks are failed");
+            None
+        }
+    };
+
     // And the pull request the work ended up on, which is pinned beside it. This
     // one *is* on the record — it is what moved the Conversation into Wrapping —
     // so it is read off the Timeline for the reason the Brief is: it is already
@@ -776,6 +835,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                 number: opened.number,
                 title: opened.title.clone(),
                 url: opened.url.clone(),
+                checks,
             },
         )),
         _ => None,
@@ -890,6 +950,23 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // [`crate::stops::ready`].
     let ready_to_stop = crate::stops::ready(conversation.state, stopped.is_some());
 
+    // And whether the press has already been made and is waiting for the step
+    // the run is on to finish, which is what takes Stop off the menu: the
+    // decision is recorded, and asking for it again is Verkstead asking for one
+    // it has. Force stop is drawn on `ready_to_stop` alone, being the escalation
+    // from here rather than the same press repeated.
+    //
+    // A read that fails reads as *not asked*, which is the way round that leaves
+    // the press offered: a menu short of a row the human wanted is worse than
+    // one carrying a row that answers `Stopping` again.
+    let stop_asked = match store::asked_to_stop(&state.pool, id).await {
+        Ok(asked) => asked,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a stop was asked for failed");
+            false
+        }
+    };
+
     // And whether a steer into Implementing would have anything to carry on: a
     // backlog with work left in it, or a roadmap the branch has written. What
     // the modal draws the *carrying on* by, the target itself being offered
@@ -908,16 +985,45 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     .await
     .offerable();
 
-    // And the badge points at the stop's own Notice, whatever wrote it: a run
-    // that has stopped is stopped, and a badge with nowhere to go would be one
+    // The stop the header draws a mark for, which is every stop but the one on a
+    // Conversation the human has closed. Closing is them saying the work is over
+    // wherever it had got to, so whatever it stopped on stopped being something
+    // to come back to — a Conversation they closed themselves is the last place
+    // a mark saying *look here* belongs. The stop record itself is untouched: it
+    // is history, and the Notice it points at is still on the Timeline.
+    let marked = stopped
+        .as_ref()
+        .filter(|_| conversation.state != store::Lifecycle::Closed);
+
+    // And the mark points at the stop's own Notice, whatever wrote it: a run
+    // that has stopped is stopped, and a mark with nowhere to go would be one
     // the human could not act on.
-    let blocked_on = stopped.as_ref().map(|stopped| stopped.notice);
+    let blocked_on = marked.map(|stopped| stopped.notice);
+
+    // Which mark it is, decided here so the browser never weighs a stored word:
+    // Verkstead's brake and a driver a crash took away are things that happened
+    // without the human, so those get the accent badge; their own press gets the
+    // quiet label. See [`store::Decision::waits_on_the_human`], which is the
+    // same rule the sidebar's own `waiting` is folded by.
+    let stopped_by_hand = marked.is_some_and(|stopped| !stopped.decision.waits_on_the_human());
 
     // With the words about the account coming back beside it, where the stop
     // carries any: the one thing that tells a run stopped by an exhausted window
     // from a run stopped by anything else. Drawn beside Resume rather than acted
     // on — no stop resumes itself, so every one of them waits for the same press.
     let resets = stopped.and_then(|stopped| stopped.resets);
+
+    // And whether the wrap-up has narrowed to its checks, which is a label
+    // beside the state rather than a state of its own: the review and the
+    // comments settled, the checks not. Half of the condition — the other half
+    // is that nothing is running in the Worktree, which is `writing` below.
+    let narrowed_to_checks = match store::narrowed_to_checks(&state.pool, id).await {
+        Ok(narrowed) => narrowed,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a wrap-up was down to its checks failed");
+            false
+        }
+    };
 
     // And whether the human has put this Conversation away, which is what the
     // actions menu offers Unarchive by. Read here rather than carried by the
@@ -953,6 +1059,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         ready_to_grill,
         ready_to_resume,
         ready_to_stop,
+        stop_asked,
         ready_to_continue,
         adopting,
         grilling_pairing,
@@ -961,6 +1068,11 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         direction: conversation.direction,
         pinned,
         blocked_on,
+        stopped_by_hand,
+        // A fix session actively working a red check is a wrap-up getting on
+        // with it, so the label is drawn only where nothing is running — the
+        // same reading `working` below is.
+        waiting_on_checks: narrowed_to_checks && writing.is_none(),
         resets,
         archived,
         // The same reading the Events above are drawn against, said as a fact
@@ -969,6 +1081,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         // — a Conversation whose session has ended is not working, whichever
         // Event it was writing into.
         working: writing.is_some(),
+        // And the register beside it, read raw: what is holding this
+        // Conversation as of now, whatever state it is in. The rule about which
+        // states ought to have one is `ready_to_resume`'s a few lines up — this
+        // is the register itself, which is the half a reader outside the process
+        // cannot see any other way.
+        driven: state.drivers.registered(id),
         timeline: timeline
             .into_iter()
             // Every kind in, none held back: the record is the whole of what
@@ -1118,6 +1236,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             number: opened.number,
                             title: opened.title,
                             url: opened.url,
+                            checks,
                         },
                     ),
                     // And the two rows that carry nothing of their own: what is
@@ -1450,6 +1569,12 @@ async fn roadmap(
 /// A `gh` that will not answer is refused with the reason it gave, which is the
 /// one thing the human can act on: what the pane then shows is "there is no `gh`
 /// on this machine's PATH" rather than a spinner.
+///
+/// The same question carries back how the checks are, so opening this is also
+/// what freshens the rollup the card draws — see [`crate::checks::remember`].
+/// The checks watcher keeps that fresh while a wrap-up is running and stops when
+/// the wrap-up is over, so on a Conversation carried to Done the pane is the one
+/// thing left that asks.
 async fn pull_request(
     State(state): State<AppState>,
     Path((id, event)): Path<(String, String)>,
@@ -1497,7 +1622,14 @@ async fn pull_request(
             .await;
 
     match asked {
-        Ok(Ok(details)) => Json(details).into_response(),
+        Ok(Ok(read)) => {
+            // Written down before the answer goes out, so a page that redraws
+            // the card on the Nudge this sends draws what the pane is about to
+            // show it.
+            crate::checks::remember(&state, id, &read.checks).await;
+
+            Json(read.pane).into_response()
+        }
         // GitHub could not be asked, or would not say. Refused with `gh`'s own
         // reason rather than a bare failure: every one of those reasons is
         // something different for the human to go and do.
@@ -1844,6 +1976,53 @@ async fn close(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
     }
 }
 
+/// `POST /api/ui/conversations/{id}/close-and-archive` — end it and put it away
+/// in one press.
+///
+/// The menu's two rows joined, because they are one intention often enough: a
+/// Conversation the human is finished with is usually one they are finished
+/// looking at. Joined on this side rather than in the browser so that a
+/// connection dropped between the two cannot leave the pair half made.
+///
+/// Answered with what became of the close, that being the half that has
+/// anything to refuse: archiving a Conversation just closed is either the
+/// archiving asked for or one already made, and the browser reads the
+/// Conversation back either way. What comes back as a failure names which half
+/// it was, because *closed but still on the list* is a different thing to be
+/// told than *not closed*.
+async fn close_and_archive(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationClosed::NoSuchConversation).into_response();
+    };
+
+    let closed = match crate::conversations::close(&state, id).await {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "closing a Conversation failed");
+            return unavailable("the conversation could not be closed");
+        }
+    };
+
+    // Nothing to put away where there was nothing to close. The other outcomes
+    // are both a Conversation that is closed now, which is what archiving wants.
+    if closed == ConversationClosed::NoSuchConversation {
+        return Json(closed).into_response();
+    }
+
+    match store::archive_conversation(&state.pool, id).await {
+        // Whichever it says, the Conversation is off the list — and the close is
+        // what the browser is told about, as it is for the row that only closes.
+        Ok(_) => {
+            state.nudges.announce(Nudge::Conversations);
+            Json(closed).into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "putting a just-closed Conversation away failed");
+            unavailable("the conversation was closed, but could not be put away")
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/archive` — take a closed one off the list.
 ///
 /// Straight to the store rather than through [`crate::conversations`], as the
@@ -1905,6 +2084,36 @@ fn unarchived(outcome: store::Unarchiving) -> ConversationUnarchived {
         store::Unarchiving::Unarchived => ConversationUnarchived::Unarchived,
         store::Unarchiving::NotArchived => ConversationUnarchived::NotArchived,
         store::Unarchiving::NoSuchConversation => ConversationUnarchived::NoSuchConversation,
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/seen` — the human has looked at this one.
+///
+/// Takes the unseen mark off, which is the whole of it: the mark is one row or
+/// none, and there is nothing to be refused for. An id naming no Conversation
+/// clears nothing and says so the same way one that was never marked does —
+/// looking at something is not a claim that it is still there.
+///
+/// The Nudge goes out only where there was a mark to take away. The ordinary
+/// case is a Conversation opened for the second time in a session of reading,
+/// and every other device re-reading its sidebar because a page was scrolled
+/// past would be a cost paid for nothing.
+async fn seen(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NO_CONTENT.into_response();
+    };
+
+    match store::see_conversation(&state.pool, id).await {
+        Ok(cleared) => {
+            if cleared {
+                state.nudges.announce(Nudge::Conversations);
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "clearing the unseen mark on a Conversation failed");
+            unavailable("the conversation could not be marked as seen")
+        }
     }
 }
 
@@ -2079,6 +2288,16 @@ async fn companion(companion: store::Companion) -> Result<CompanionView, anyhow:
     })
 }
 
+/// And how a pull request's checks are, the same way: the store's word for a
+/// whole suite, as the card that draws an icon of it receives it.
+fn rollup(checks: store::Rollup) -> CheckRollup {
+    match checks {
+        store::Rollup::Passed => CheckRollup::Passed,
+        store::Rollup::Running => CheckRollup::Running,
+        store::Rollup::Failed => CheckRollup::Failed,
+    }
+}
+
 /// The store's lifecycle state as the viewer receives it. One word either side,
 /// and this is where the two vocabularies are held to each other.
 fn lifecycle(state: store::Lifecycle) -> Lifecycle {
@@ -2087,6 +2306,7 @@ fn lifecycle(state: store::Lifecycle) -> Lifecycle {
         store::Lifecycle::Grilling => Lifecycle::Grilling,
         store::Lifecycle::Implementing => Lifecycle::Implementing,
         store::Lifecycle::Wrapping => Lifecycle::Wrapping,
+        store::Lifecycle::FollowUp => Lifecycle::FollowUp,
         store::Lifecycle::Done => Lifecycle::Done,
         store::Lifecycle::Closed => Lifecycle::Closed,
     }

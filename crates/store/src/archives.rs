@@ -99,7 +99,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// steered back into the work from another device between the two cannot end up
 /// hidden from the list it is being worked in.
 pub async fn archive_conversation(pool: &SqlitePool, id: i64) -> Result<Archiving> {
-    let mut tx = pool.begin().await.context("archiving a Conversation")?;
+    let mut tx = super::writing(pool, "archiving a Conversation").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
@@ -141,7 +141,7 @@ pub async fn archive_conversation(pool: &SqlitePool, id: i64) -> Result<Archivin
 /// nothing — the two are told apart by whether there is a Conversation, which
 /// is the only place the difference is written down.
 pub async fn unarchive_conversation(pool: &SqlitePool, id: i64) -> Result<Unarchiving> {
-    let mut tx = pool.begin().await.context("unarchiving a Conversation")?;
+    let mut tx = super::writing(pool, "unarchiving a Conversation").await?;
 
     let known: Option<(i64,)> = sqlx::query_as("SELECT id FROM conversations WHERE id = ?")
         .bind(id)

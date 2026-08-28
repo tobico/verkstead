@@ -25,14 +25,17 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-/* The commit list and the comments, each a section of the pane. Both are a
-   reading of GitHub as it stands rather than anything Verkstead wrote down. */
+/* The commit list, the checks and the comments, each a section of the pane. All
+   three are a reading of GitHub as it stands rather than anything Verkstead
+   wrote down. */
 .commits,
+.checks,
 .comments {
   margin-bottom: 1.5rem;
 }
 
 .commits h2,
+.checks h2,
 .comments h2 {
   font-size: 1rem;
   margin: 0 0 0.5rem;
@@ -61,6 +64,33 @@
 }
 
 .commits .subject {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* One check to a line: its mark, and its name as the way to the run behind it.
+   The mark is `Checks.module.css`'s, drawn at the size the card draws it, so a
+   suite and the checks in it are read in one alphabet. */
+.checks .ran {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.checks .ran li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+}
+
+/* A name long enough to run off a phone is cut rather than wrapped under its
+   own mark, the way a commit's subject beside its hash is. */
+.checks .check {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;

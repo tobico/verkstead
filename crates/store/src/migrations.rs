@@ -87,10 +87,11 @@ async fn conversations_that_were_aborted(pool: &SqlitePool) -> Result<()> {
 /// Conversation is stopped *now*. So the columns become the markdown they would
 /// have been written as, and each Event becomes the Notice it would have been.
 ///
-/// The ones still open become stops as well, and deliberate ones: an open stop
-/// was a run waiting on the human, which is exactly the stop a restart leaves
-/// alone. A Conversation that is stopped already keeps the stop it has — there
-/// is one per Conversation, and the first Notice is the one that explains it.
+/// The ones still open become stops as well, and Verkstead's own: an open stop
+/// of before was a step that failed and a run left waiting on the human, which
+/// is exactly the stop a restart leaves alone and exactly the stop the marks are
+/// for. A Conversation that is stopped already keeps the stop it has — there is
+/// one per Conversation, and the first Notice is the one that explains it.
 ///
 /// One transaction, and the table is dropped inside it: a Timeline holding rows
 /// that have been rewritten beside a table that still says otherwise would be
@@ -173,7 +174,7 @@ async fn stops_recorded_the_old_way(pool: &SqlitePool) -> Result<()> {
                   WHERE id = ? AND stopped_at IS NULL",
             )
             .bind(at)
-            .bind(Decision::Deliberate.stored())
+            .bind(Decision::Verkstead.stored())
             .bind(event_id)
             .bind(conversation_id)
             .execute(&mut *tx)

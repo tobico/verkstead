@@ -570,6 +570,53 @@ async fn a_steer_with_an_instruction_keeps_it_as_the_steers_own_body() {
     );
 }
 
+/// And a steer into Follow-up leaves its brief the same way, in a state that
+/// reads back as the one it was written as.
+///
+/// The brief is what one session was set going on rather than what a round is
+/// grilled about, so it rides on the human's own line exactly as an instruction
+/// does and opens no round. And the state is the newest word the column holds,
+/// which is worth a round trip of its own: a state written one way and read
+/// another is a Conversation nothing could load.
+#[tokio::test]
+async fn a_steer_into_follow_up_keeps_its_brief_and_reads_back_as_follow_up() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    let brief = "Does it count the `429`s it sends?\n";
+
+    assert_eq!(
+        steer_conversation(
+            &pool,
+            id,
+            Steer {
+                instruction: Some(brief),
+                ..into(Lifecycle::FollowUp)
+            },
+        )
+        .await
+        .unwrap(),
+        Steering::Steered,
+    );
+
+    assert_eq!(state(&pool, id).await, Lifecycle::FollowUp);
+    assert_eq!(instructions(&pool, id).await, [Some(brief.to_owned())]);
+    assert_eq!(
+        ladder(&pool, id).await,
+        [
+            ("moved", Lifecycle::Grilling),
+            ("steer", Lifecycle::FollowUp),
+            ("moved", Lifecycle::FollowUp),
+        ],
+    );
+    assert_eq!(
+        briefs(&pool, id).await.len(),
+        1,
+        "and nothing opened a round: a follow-up is asked about the work rather \
+         than grilled about a Brief",
+    );
+}
+
 /// A steer that carries no instruction leaves the Steer Event saying the state
 /// alone.
 ///

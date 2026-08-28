@@ -451,6 +451,22 @@ export function closeConversation(id: number): Promise<ConversationClosed> {
   return post<ConversationClosed>(`/api/ui/conversations/${id}/close`, {});
 }
 
+/// And the same press with the archive already made: the Conversation ends and
+/// comes off the sidebar at once.
+///
+/// One request rather than the two it stands for, so that a connection dropped
+/// between them cannot leave a Conversation closed and still on the list. What
+/// comes back is what became of the close, the archive of a Conversation just
+/// closed having nothing left to refuse.
+export function closeAndArchiveConversation(
+  id: number,
+): Promise<ConversationClosed> {
+  return post<ConversationClosed>(
+    `/api/ui/conversations/${id}/close-and-archive`,
+    {},
+  );
+}
+
 /// Put a closed Conversation away: it comes off the sidebar, and nothing else
 /// about it moves.
 ///
@@ -472,6 +488,23 @@ export function unarchiveConversation(
   return post<ConversationUnarchived>(
     `/api/ui/conversations/${id}/unarchive`,
     {},
+  );
+}
+
+/// Say the human has looked at a Conversation, which takes the news mark off
+/// its sidebar row.
+///
+/// A press of its own rather than something reading the Conversation does on
+/// the way past: what is being recorded is a person having looked, and a read
+/// that wrote it would spend the mark on a prefetch or a retry.
+///
+/// Answered with nothing at all, as the order and the archived switch are.
+/// There is nothing to be refused for — an id naming nothing clears nothing —
+/// and what the row does next arrives as a Nudge like every other change to the
+/// list.
+export async function seeConversation(id: string): Promise<void> {
+  await refused(
+    await sent(`/api/ui/conversations/${encodeURIComponent(id)}/seen`, {}),
   );
 }
 

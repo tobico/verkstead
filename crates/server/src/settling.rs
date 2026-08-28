@@ -1,4 +1,4 @@
-//! The rule that ends a wrap-up.
+//! The rule that ends a wrap-up, and the condition it passes through on the way.
 //!
 //! A Conversation leaves Wrapping for **Done** when three things are true
 //! together: the pull request's checks are green, the self-review's Question Set
@@ -21,6 +21,12 @@
 //! poll of GitHub, and the endpoint that takes a Response — and a wrap-up left
 //! for ever because one of them forgot to ask would be the failure nobody
 //! notices. Asking costs one read of a table.
+//!
+//! Which is also why the condition on the way is noticed here — see
+//! [`narrowing`]. A wrap-up whose review and comments have settled and whose
+//! checks have not, with nothing running in its Worktree, is **Waiting on
+//! checks**: a label on the card and a line on the Timeline, drawn off the same
+//! facts this loop already reads on a cadence, and nothing on the Lifecycle.
 
 use verkstead_schema::Nudge;
 
@@ -34,6 +40,12 @@ use crate::store;
 /// what it has to say it says on the Timeline or in the log.
 pub(crate) async fn watch(state: AppState, conversation_id: i64) {
     loop {
+        // Before the rule itself, because the two are readings of the same
+        // facts a moment apart and this is the one that has something to say
+        // about a wrap-up that is *not* over: the narrowing is what is left
+        // when everything but the checks has settled.
+        narrowing(&state, conversation_id).await;
+
         match store::finish_wrap_up(&state.pool, conversation_id).await {
             Ok(store::Finished::StillWaiting) => {}
             Ok(store::Finished::Done) => {
@@ -42,6 +54,24 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
                     "the checks are green, the review is answered and nothing is left \
                      unaddressed, so the work is done",
                 );
+
+                // The sidebar keeps the news until the human has looked at it,
+                // which is what a push nobody was there for needs behind it: a
+                // notification read on a phone and swiped away is a milestone
+                // the laptop would otherwise never mention. Stamped here rather
+                // than wherever Done is reached, because it is this push it
+                // marks the trail of — a steer to Done is the human's own act,
+                // pushes nothing and stamps nothing.
+                //
+                // Before the Nudge, so that the sidebar the Nudge sends every
+                // open page back to read is one this has already written to.
+                if let Err(error) = store::stamp_unseen(&state.pool, conversation_id).await {
+                    tracing::error!(
+                        error = ?error,
+                        conversation_id,
+                        "stamping a finished Conversation unseen failed",
+                    );
+                }
 
                 // The Timeline has a move on it, and an open page should say so
                 // without being reloaded.
@@ -89,5 +119,82 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
         }
 
         tokio::time::sleep(state.sessions.pace().checks).await;
+    }
+}
+
+/// Notice a wrap-up that has narrowed to its checks, and say so once.
+///
+/// **Waiting on checks** is a condition of Wrapping rather than a state: the
+/// review answered, the comments dealt with, the checks alone outstanding and
+/// nothing running in the Worktree. Nothing is stored about it beyond the mark
+/// that says the Notice has been written — see [`store::narrowing`] — and the
+/// Lifecycle is untouched. It is read off the settle facts and the sessions
+/// register the same way *blocked on you* is read off a stop.
+///
+/// Here rather than anywhere else because this loop already reads those facts
+/// on a cadence, and the narrowing is exactly what it finds when the answer to
+/// *is this over* is nearly yes.
+///
+/// One Notice per narrowing, which is the whole of what the mark is for: leaving
+/// the condition takes the mark with it, so a fix session dispatched or a
+/// comment landing and the wrap-up quietening again writes a fresh line rather
+/// than a duplicate of the first or nothing at all.
+///
+/// **No device push.** There is nothing for the human to do about it — the
+/// checks are GitHub's to finish — so it is a line on the Timeline and a label
+/// on the card, and neither is worth a phone lighting up.
+async fn narrowing(state: &AppState, conversation_id: i64) {
+    // The register rather than the record: what says a wrap-up is waiting is
+    // that nobody is in it, and a fix session working a red check is a wrap-up
+    // getting on with it.
+    let working = state.sessions.working().contains(&conversation_id);
+
+    match store::narrowing(&state.pool, conversation_id, working).await {
+        Ok(store::Narrowing::Narrowed) => {
+            tracing::info!(
+                conversation_id,
+                "the review is answered and nothing is left unaddressed, so the wrap-up is \
+                 waiting on its checks",
+            );
+
+            if let Err(error) = store::note(
+                &state.pool,
+                conversation_id,
+                "**Waiting on checks.** The review is answered and nothing said on the pull \
+                 request is left unaddressed, so the checks going green is the whole of what \
+                 this wrap-up is still waiting on.",
+            )
+            .await
+            {
+                tracing::error!(error = ?error, conversation_id, "saying that a wrap-up was down to its checks failed");
+
+                // And the mark comes off, so the next poll is told to write it
+                // again: one standing over a line that never landed would be a
+                // narrowing said nowhere at all.
+                if let Err(error) = store::forget_narrowing(&state.pool, conversation_id).await {
+                    tracing::error!(error = ?error, conversation_id, "taking back the mark on a line that was never written failed");
+                }
+
+                return;
+            }
+
+            // The Timeline has a line on it and the card a label, and an open
+            // page should say so without being reloaded. The one kind carries
+            // both — a Conversation that moved is a sidebar row that reads
+            // differently, which is exactly what this is.
+            state.nudges.announce(Nudge::Conversation {
+                conversation: conversation_id,
+            });
+        }
+        // Said already, and still true: the label goes on standing and there is
+        // nothing to write.
+        Ok(store::Narrowing::NoticedAlready) => {}
+        // And not narrowed — which includes every state that is not Wrapping,
+        // so a Conversation steered away leaves no mark behind for the round
+        // after it to be quiet on.
+        Ok(store::Narrowing::NotNarrowed) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "asking whether a wrap-up was down to its checks failed");
+        }
     }
 }
