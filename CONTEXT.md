@@ -109,17 +109,40 @@ one, what its branch is to be called. Empty is not a branch called nothing but
 *mirroring*: the Conversation's own branch name, followed as it is renamed,
 until a name is typed and stands on its own.
 
-**Always a Worktree of Verkstead's own, never the human's checkout.** At grill
-start each companion is fetched and then resolved, the Conversation's
-repository's order for the Conversation's repository's reasons. A read-only one
-is checked out **detached** at the commit its base resolved to, having nothing
-to commit and no business taking a name in somebody else's repository; a
-read-write one is cut a branch from its base, exactly as the Conversation's
-repository is. Every question is asked before anything is made, so an answer
-git will not give — the fetch that failed, the base that resolves to nothing,
-the branch already taken — refuses the grill start naming the repository and
-leaves neither a directory nor a branch behind. Closed the way the
-Conversation's own is: the directory goes and the branch stays.
+**Frozen only means it stops narrowing.** A **Steer** may put another
+registered Repo in and open a read-only one up to read-write, on every target
+the work goes on in, because what that settles is the sandbox the sessions to
+come run in rather than a property of one state. Never the other way: nothing
+removes a companion and nothing puts one back to read-only, so what a session
+was once given is never taken back mid-Conversation. What is added at a steer
+answers the setup card's questions again, and what is opened up is cut its
+branch off the base its row already names, re-resolved at that moment — the
+repository is joining the work now, so it starts from now rather than from the
+commit its detached checkout was left at.
+
+**A Stage inherits its predecessor's whole set**, through the one act that
+gives it the Pairings and the stage brief: a stage has no draft moment of its
+own, so there is nowhere else the set could come from, and a roadmap grilled
+against a repository would otherwise build without it. Read-only ones come
+across as they are; read-write ones cut a branch of their own per stage, named
+after the stage's own branch rather than carrying a name somebody typed while
+drafting the roadmap, because two stages sharing one companion branch would be
+two review units on one branch. Where the stage's own branch stacks on its
+predecessor's, its companion branches stack too.
+
+**Always a Worktree of Verkstead's own, never the human's checkout.** Whenever
+one is made — a grill start, an adopted stage, a steer, a stage a settling
+predecessor starts — each companion is fetched and then resolved, the
+Conversation's repository's order for the Conversation's repository's reasons.
+A read-only one is checked out **detached** at the commit its base resolved to,
+having nothing to commit and no business taking a name in somebody else's
+repository; a read-write one is cut a branch from its base, exactly as the
+Conversation's repository is. Every question is asked before anything is made,
+so an answer git will not give — the fetch that failed, the base that resolves
+to nothing, the branch already taken — refuses the whole press naming the
+repository and leaves neither a directory nor a branch behind; where nobody is
+at a button, it halts the stage and says so on the Timeline instead. Closed the
+way the Conversation's own is: the directory goes and the branch stays.
 
 **A session gets the checkout, and is told it is there.** The worktree and the
 git directory behind it are both bound at the companion's mode — read-only
@@ -528,7 +551,11 @@ second.
 source is the more of it there is to make. A Worktree whose directory has gone
 is checked out afresh from the branch, exactly as a pressed Resume makes one; a
 Draft has no branch either, so it is cut where a grill start would have cut it —
-off the base the human fixed, resolved at that moment.
+off the base the human fixed, resolved at that moment. Every **Companion Repo**
+the record holds with nothing on disk is checked out again beside it, which is
+what a steered Draft and a Conversation steered back out of Closed both need:
+without it either would reach a running state with companions the sandbox skips
+in silence.
 
 **What a target takes is what it has to be about.** Grilling takes a new Brief,
 optional, empty being the round starting on the one already there; and a choice
@@ -539,6 +566,19 @@ instruction — required where the branch holds nothing to carry on, and optiona
 where it does, empty there meaning carry it on. Wrapping takes nothing: its
 watchers recompute over whatever the branch now holds, the fix attempts
 forgotten. Done takes nothing at all, there being nothing to run in it.
+
+**And every target work goes on in takes the sandbox.** A companion section
+under all three of them — Grilling, Implementing and Wrapping — because what it
+settles is the world the sessions to come run in rather than a payload of one
+state: the **Companion Repos** already there to read, a tick that opens a
+read-only one up to read-write, and a row per registered Repo not on the
+Conversation yet, asking what a setup row asks. Not under Done, where nothing
+runs and there is nothing a companion could be for. One direction only: no row
+offers removal and no switch offers read-only, so a downgrade cannot be spelled
+at all. Everything it takes in is checked out as the steer lands, and a
+companion it cannot deliver refuses the whole press by name — a press that did
+not happen, with no directory, no branch, no row, nothing ended and no stop
+cleared.
 
 **The record is the move with the human's own line above it.** The Steer is an
 Event of its own — somebody decided this — carrying the brief or the instruction
