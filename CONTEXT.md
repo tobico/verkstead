@@ -723,7 +723,9 @@ breath as the push it sends about it. A milestone nobody was watching happen is
 what a mark saying *look here* is for — and a **Steer** to Done is the human's
 own act, so it pushes nothing and marks nothing. Opening the Conversation is
 what takes the mark away, said by the browser in a call of its own rather than
-happening on the way past a read.
+happening on the way past a read — and **Closed** takes it away too, that being
+the human saying the work is over wherever it had got to: nothing about a Closed
+Conversation asks for them, the news it was carrying included.
 
 Drawn as the same accent disc a Conversation waiting on the human carries: one
 mark meaning *look here*, because two would be a list to decode instead of one

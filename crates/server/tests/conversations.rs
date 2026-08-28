@@ -2946,6 +2946,43 @@ async fn a_closed_conversation_carries_neither_waiting_mark() {
     );
 }
 
+/// And the news mark goes with them, which is the third thing a row can draw the
+/// human with.
+///
+/// The case it is really for: a wrap-up carries the work to Done and stamps the
+/// Conversation unseen, and the human closes it from the sidebar without ever
+/// opening it — so the press that takes the mark off is one they never made. A
+/// disc on the Conversation they have just put away is exactly the disc that
+/// teaches them to stop reading the discs.
+#[tokio::test]
+async fn closing_takes_the_news_off_the_row_the_human_never_opened() {
+    let (_watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::stamp_unseen(&pool, id).await.unwrap();
+
+    assert!(
+        only_row(&app).await.unseen,
+        "Verkstead told them the work was done, and they have not looked",
+    );
+
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    let row = only_row(&app).await;
+
+    assert_eq!(row.state, Lifecycle::Closed);
+    assert!(
+        !row.unseen,
+        "and closing it is them being done with it, so there is no news to go back for",
+    );
+    assert!(!row.waiting, "with neither waiting mark either");
+
+    pool.close().await;
+}
+
 /// **Done is not Closed here**, and the difference is what the marks are for: a
 /// Done Conversation is one Verkstead has finished with rather than one the
 /// human has put away, and its Sets are still there to be answered. An

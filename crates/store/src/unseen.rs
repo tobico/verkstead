@@ -11,8 +11,10 @@
 //! One row or none per Conversation, beside them rather than a column on them:
 //! there is no migration machinery here and `conversations` is STRICT, which is
 //! the placements' reason and the archivings' said a third time. The row being
-//! there is the whole of the mark, and taking it away is what looking at the
-//! Conversation does.
+//! there is the whole of the mark, and two things take it away: the human
+//! looking at the Conversation, and the Conversation closing, which is them
+//! saying the work is over wherever it had got to. Both are them being done with
+//! it, and neither leaves news to go back for.
 //!
 //! What writes one is narrow on purpose: the wrap-up that carries a Conversation
 //! to Done and pushes the news to the devices, in the same breath as the push —
@@ -57,12 +59,14 @@ pub async fn stamp_unseen(pool: &SqlitePool, conversation_id: i64) -> Result<()>
     Ok(())
 }
 
-/// And that they have now looked, which takes the mark away.
+/// And that they are done with it, which takes the mark away — they have looked
+/// at the Conversation, or they have closed it.
 ///
 /// Answers whether there was one to take, which is what tells a first opening
 /// from the many that follow it: the caller announces the list has moved on the
 /// strength of it, and a Conversation opened twice should not have every other
-/// device read its sidebar again for nothing.
+/// device read its sidebar again for nothing. Closing has its own reason to
+/// announce and ignores the answer.
 ///
 /// Refused for nothing, and silent about a Conversation that has gone: opening
 /// something is not a claim that it is still there, and there is no mark left on
