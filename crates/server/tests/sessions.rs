@@ -8254,6 +8254,39 @@ async fn a_backlog_entry_with_no_task_file_stops_the_run() {
         sessions,
         "and no session was launched at the entry there is nothing to work from",
     );
+
+    // And the press that follows the Notice they have just read: a Resume
+    // before `TODO.md` is fixed asks the same question of the same backlog, so
+    // it gets the same answer. A press is the human's leave to try the run
+    // again rather than their leave to work a list nothing can be read out of.
+    let notices = said(&fixture.view().await).len();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| said(view).get(notices).map(|notice| (*notice).clone()))
+        .await;
+
+    assert!(
+        again.html.contains("entry 02 of"),
+        "the resumed run stops at the same entry, and says so again: {:?}",
+        again.html,
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Verkstead,
+        "and on the same reading, which is not one a restart may guess past either",
+    );
+
+    // Long enough again for a launch to have happened behind the stop.
+    pause(Duration::from_secs(3)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        sessions,
+        "and the press spent no session on it: what Resume found is what the \
+         loop found",
+    );
 }
 
 /// The backlog every usage-limit test below is worked against: two tasks, and a

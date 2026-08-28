@@ -175,8 +175,9 @@ enum Step {
     ///
     /// Nothing to run. A session launched at it would have no task document to
     /// read and nothing to tell it where to stop, so the run stops instead and a
-    /// Notice names the entry — see [`carry_on`], which is the one place this is
-    /// answered.
+    /// Notice names the entry — see [`nothing_to_work_from`], which is the one
+    /// answer, and both places that ask what is next reach for it: [`carry_on`]
+    /// working a backlog, and [`backlog_again`] resuming one.
     Broken { label: String },
 
     /// Finish the feature: every entry is ticked, and what is left is taking
@@ -283,6 +284,38 @@ fn broken(label: &str) -> String {
          nothing for a session to work from",
         BACKLOG,
     )
+}
+
+/// Stop the run at a [`Step::Broken`], with the Notice naming the entry there is
+/// nothing to work from.
+///
+/// Both places that decide what to run next reach for this, because both can be
+/// handed one: [`carry_on`] meets it as a backlog is worked, and
+/// [`backlog_again`] meets it when a Resume asks the same question of the same
+/// `.tasks/`. A press that launched a session where the loop would have refused
+/// to would be Resume undoing the rule rather than the human's leave to try
+/// again.
+///
+/// [`crate::stopping::Decided::Verkstead`]: nothing can be read out of the
+/// backlog, so a restart looking again would find the same unreadable list. What
+/// changes it is the human's, in the repository — writing the document the entry
+/// names, or ticking the entry off — and Resume is what picks it up afterwards.
+async fn nothing_to_work_from(state: &AppState, conversation_id: i64, step: &Step, label: &str) {
+    tracing::warn!(
+        conversation_id,
+        label,
+        "a backlog entry is not done and names no task file, so the run stops here",
+    );
+
+    stop(
+        state,
+        conversation_id,
+        crate::stopping::Decided::Verkstead,
+        &step.what(),
+        &broken(label),
+        None,
+    )
+    .await;
 }
 
 /// Follow the grilling session as it writes what the pick asked for.
@@ -492,6 +525,23 @@ async fn backlog_again(
         }
 
         return nothing_left(state, conversation_id, driving).await;
+    }
+
+    // And an entry that is not ticked and names no file is refused here exactly
+    // as the loop refuses it — see [`nothing_to_work_from`]. A Resume is the
+    // human's leave to try the run again rather than their leave to work a
+    // backlog nothing can be read out of, and the press arriving before they
+    // have fixed `TODO.md` is the ordinary way this is met: the Notice that
+    // stopped the run is what they have just read.
+    //
+    // Held until the stop is written, for [`nothing_left`]'s reason: dropping
+    // the registration first would leave a moment where a sweep could find the
+    // Conversation undriven and stop it with a worse sentence.
+    if let Step::Broken { label } = &step {
+        let _driving = driving;
+
+        nothing_to_work_from(&state, conversation_id, &step, label).await;
+        return;
     }
 
     tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
@@ -870,26 +920,10 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
 
         // An entry that is not ticked and names no file: there is nothing for a
         // session to read and nothing to tell it where to stop, so the run stops
-        // here and the Notice names the entry. The human's to fix in the
-        // repository — write the document or tick the entry — and Resume's to
-        // pick up afterwards.
+        // here and the Notice names the entry — see [`nothing_to_work_from`],
+        // which a Resume asking the same question reaches for too.
         if let Step::Broken { label } = &step {
-            tracing::warn!(
-                conversation_id,
-                label,
-                "a backlog entry is not done and names no task file, so the run stops here",
-            );
-
-            stop(
-                &state,
-                conversation_id,
-                crate::stopping::Decided::Verkstead,
-                &step.what(),
-                &broken(label),
-                None,
-            )
-            .await;
-
+            nothing_to_work_from(&state, conversation_id, &step, label).await;
             return;
         }
 
