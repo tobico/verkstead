@@ -286,9 +286,10 @@
   margin-bottom: 0;
 }
 
-/* The Gutter the Set page reserves down its left once the window is wide — it
-   is named in `set/Sheet.module.css`, along with everything else that reserves
-   it. What belongs here is the one thing it means for the agent's own blocks. */
+/* The Gutter a card reserves down its left once the column is wide — it is named
+   in `styles/base.css`, on the column every page sits in, and what reserves it
+   is in the modules of the cards that do. What belongs here is the one thing it
+   means for the agent's own blocks. */
 @media (min-width: 60rem) {
   /* And the agent's own blocks that were never prose — see the measure in
      `base.css`, which names every block that is prose and leaves exactly these

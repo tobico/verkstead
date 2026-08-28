@@ -56,10 +56,12 @@
   color: var(--ink-soft);
 }
 
-/* The box the rendered markdown sits in. The same box a Set's Preface draws
-   around its body — see `.prefaceBody` in `set/Sheet.module.css`, which is the
-   same five lines and has to stay the same five, because these documents and a
-   Set's Preface are the same kind of thing read the same way. */
+/* The box the rendered markdown sits in. The same box a Set's Preface is drawn
+   in — see `.cardBody` in `Card.module.css`, which is the same five lines and
+   has to stay the same five, because these documents and a Set's Preface are the
+   same kind of thing read the same way. Not the shared component itself: a
+   section here carries a heading of its own make — a number, a title and a mark
+   — where the card's is one word. */
 .document,
 .missing {
   padding: 1rem;

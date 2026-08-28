@@ -49,6 +49,11 @@ import type {
 } from "../src/api/types";
 // The one menu, which all three of this page's ⋯ and dropdowns are drawn as.
 import app from "../src/App.module.css";
+// The card a Set's Preface and a commit's Message are both drawn as, both ways:
+// the hashed names to query the two panes by, and the source to read the box's
+// own rules off, jsdom laying nothing out to read them from.
+import card from "../src/Card.module.css";
+import cardCss from "../src/Card.module.css?raw";
 import dropdown from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
 // The set page as it is drawn inside a details pane: its nav, its sections, and
@@ -67,6 +72,7 @@ import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: a commit, a document read whole,
 // one session's record and the terminal it was printed on, and a pull request.
 import commitPane from "../src/workbench/Commit.module.css";
+import commitPaneCss from "../src/workbench/Commit.module.css?raw";
 // The Diff section the commit pane draws, which is the Set page's own component
 // and so the Set page's own module.
 import diffSection from "../src/set/Diff.module.css";
@@ -6351,7 +6357,7 @@ describe("a question set on the timeline", () => {
 
     const pane = screen.getByLabelText("Details");
     await waitFor(() => {
-      if (!pane.querySelector(`.${sheet.preface}`)) {
+      if (!pane.querySelector("#preface")) {
         throw new Error("the document has not been drawn");
       }
     });
@@ -6414,7 +6420,7 @@ describe("a question set on the timeline", () => {
 
     const pane = screen.getByLabelText("Details");
     await waitFor(() => {
-      if (!pane.querySelector(`.${sheet.preface}`)) {
+      if (!pane.querySelector("#preface")) {
         throw new Error("the document has not been drawn");
       }
     });
@@ -6835,13 +6841,13 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const body = await drawn(container, `.${shell.detailsPane} .${commitPane.messageBody}`);
+    const body = await drawn(container, `.${shell.detailsPane} #commit-message .${card.cardBody}`);
 
     expect(body.innerHTML).toBe("<p>A bucket per account.</p>");
 
     // In the box, under a heading of its own — the heading outside the box, as
     // a Preface's is.
-    const message = body.closest(`.${commitPane.message}`)!;
+    const message = body.closest(`.${card.card}`)!;
 
     expect(message.querySelector("h2")!.textContent).toBe("Message");
     expect(message.querySelector("h2")!.nextElementSibling).toBe(body);
@@ -6856,6 +6862,50 @@ describe("a commit on the timeline", () => {
     ).toBeTruthy();
   });
 
+  /// And it is the *same* card, not a copy of one: the Message used to be its
+  /// own five lines in `Commit.module.css` with a cap at the prose measure on
+  /// top of them, so it sat narrow in a column a Preface spanned and a wide
+  /// Diagram in it had nowhere to bleed to. One component now, and the pane has
+  /// no box of its own left to disagree with.
+  it("draws the message as the card a Preface is drawn as", async () => {
+    theBuilding({}, whenever(DIFF_OF_IT, json(SUMMARISED)));
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
+
+    const message = await drawn(
+      container,
+      `.${shell.detailsPane} section#commit-message.${card.card}`,
+    );
+
+    expect(message.querySelector(`.${card.cardBody}`)).toBeTruthy();
+    expect(commitPaneCss, "the pane keeps no box of its own").not.toContain(
+      ".messageBody",
+    );
+  });
+
+  /// What the card is, asserted off the stylesheet: jsdom computes no layout, and
+  /// a media query it never evaluates is a rule no rendered page can be asked
+  /// about.
+  ///
+  /// Two facts make the two look alike. The card spans the column — no measure on
+  /// it, so the prose inside keeps the measure block by block and a table, a fence
+  /// or a Diagram keeps the card. And it reserves the Gutter, which is what gives
+  /// a wide block somewhere to bleed back into: `--bleed` is how far, and a
+  /// Diagram takes all of it.
+  it("spans the column and reserves the Gutter, in one place for both", () => {
+    expect(cardCss, "a measure on the card would take the wide blocks down with the prose").not.toContain(
+      "max-width",
+    );
+    expect(cardCss).toContain("--bleed: var(--gutter);");
+    expect(cardCss).toContain("padding-left: calc(1rem + var(--gutter));");
+
+    // And the Gutter it reserves is the one every page's column names, which is
+    // the whole of the wiring: a details pane inherits it from there as a page
+    // does, so the one rule above serves the Set page and this pane alike.
+    expect(base).toContain("  main {\n    --gutter: 4.5rem;");
+  });
+
   /// A Diagram in the message is the one thing the pane draws for itself, and it
   /// draws it the Set page's way: over the source block the server left, once the
   /// message is in the page. What it drew is `diagrams.test.ts`'s subject; what
@@ -6867,7 +6917,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const body = await drawn(container, `.${shell.detailsPane} .${commitPane.messageBody}`);
+    const body = await drawn(container, `.${shell.detailsPane} #commit-message .${card.cardBody}`);
 
     // The source block the renderer draws over — and what the reader is left
     // with if it never draws.
@@ -6898,9 +6948,10 @@ describe("a commit on the timeline", () => {
 
     await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`);
 
-    /// The card for one of the two, which is the only way to tell them apart on
-    /// the timeline.
-    const card = (subject: string) =>
+    /// The timeline row for one of the two, which is the only way to tell them
+    /// apart on the record. Named for the row rather than for the card it is
+    /// drawn as, because `card` here is the module a Message is boxed in.
+    const commitCard = (subject: string) =>
       [...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.commit}`)].find(
         (row) => row.querySelector(`.${timeline.subject}`)!.textContent === subject,
       )!;
@@ -6910,25 +6961,25 @@ describe("a commit on the timeline", () => {
     /// this test is about, so waiting for the block alone would prove nothing.
     const showing = (words: string) =>
       waitFor(() => {
-        const block = container.querySelector(`.${shell.detailsPane} .${commitPane.messageBody}`);
+        const block = container.querySelector(`.${shell.detailsPane} #commit-message .${card.cardBody}`);
         if (!block?.textContent?.includes(words)) {
           throw new Error(`the pane is not showing ${words} yet`);
         }
         return block;
       });
 
-    fireEvent.click(card(COMMITS[0]!.subject));
+    fireEvent.click(commitCard(COMMITS[0]!.subject));
     const first = await showing("A bucket per account.");
     await waitFor(() => expect(drawing).toHaveBeenCalledOnce());
     expect(drawing.mock.calls[0]![0]).toEqual({ root: first });
 
-    fireEvent.click(card(COMMITS[1]!.subject));
+    fireEvent.click(commitCard(COMMITS[1]!.subject));
     const second = await showing("A queue per repository.");
     await waitFor(() => expect(drawing).toHaveBeenCalledTimes(2));
     expect(drawing.mock.calls[1]![0]).toEqual({ root: second });
 
     // Back to the first, which the cache still holds and hands back whole.
-    fireEvent.click(card(COMMITS[0]!.subject));
+    fireEvent.click(commitCard(COMMITS[0]!.subject));
     const again = await showing("A bucket per account.");
     await waitFor(() => expect(drawing).toHaveBeenCalledTimes(3));
     expect(drawing.mock.calls[2]![0]).toEqual({ root: again });
@@ -6957,7 +7008,7 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, `.${shell.detailsPane} .${commitPane.messageBody}`);
+    await drawn(container, `.${shell.detailsPane} #commit-message .${card.cardBody}`);
 
     expect(drawing).not.toHaveBeenCalled();
   });
@@ -6971,7 +7022,7 @@ describe("a commit on the timeline", () => {
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
     await drawn(container, `.${shell.detailsPane} .${diffSection.diffFiles}`);
 
-    expect(container.querySelector(`.${shell.detailsPane} .${commitPane.messageBody}`)).toBeNull();
+    expect(container.querySelector(`.${shell.detailsPane} #commit-message .${card.cardBody}`)).toBeNull();
   });
 
   it("says so plainly when the commit changed no files", async () => {
@@ -7180,6 +7231,33 @@ describe("the contents of a details pane", () => {
 
       expect(landed).toHaveBeenCalled();
     }
+  });
+
+  /// And it stands above both of them in the pane, which is where the sidebar
+  /// starts: the stylesheet pins the nav from where it sits in the flow, so one
+  /// written under the Message would begin level with the diff and leave the
+  /// margin beside the Message empty. The Set page puts its own in the same
+  /// place — under the title, above everything it lists.
+  it("starts the nav above the message it lists, not level with the diff", async () => {
+    theBuilding({}, whenever(DIFF_OF_IT, json(SUMMARISED)));
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
+
+    const nav = await drawn(container, `.${shell.detailsPane} nav.${contents.contents}`);
+    const message = container.querySelector(`.${shell.detailsPane} #commit-message`)!;
+
+    expect(
+      nav.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING,
+      "the nav should come before the message it lists",
+    ).toBeTruthy();
+
+    // And under the pane's own header, which is what says the commit is.
+    const header = container.querySelector(`.${shell.detailsPane} .${commitPane.header}`)!;
+
+    expect(
+      header.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("jumps into a fold of the commit, unfolding it first", async () => {

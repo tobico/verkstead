@@ -27,5 +27,5 @@ order is the dependency.
 - [x] 11: Unknown lines to bookkeeping — [details](11-unknown-lines-bookkeeping.md)
 - [x] 12: Transcript autoscroll — [details](12-transcript-autoscroll.md)
 - [x] 13: Drag-drop capture — [details](13-drag-drop-capture.md)
-- [ ] 14: Commit message card — [details](14-commit-message-card.md)
+- [x] 14: Commit message card — [details](14-commit-message-card.md)
 - [ ] 15: Menu and label chrome — [details](15-menu-label-chrome.md)

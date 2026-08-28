@@ -22,6 +22,7 @@ import type { JSX } from "solid-js";
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 
 import app from "../App.module.css";
+import { Card } from "../Card";
 import type {
   Answer,
   AskView,
@@ -236,20 +237,12 @@ export function Sheet(props: {
           {(liveness) => <Standing id={props.set.id} liveness={liveness()} />}
         </Show>
       </div>
-      {/* Named and anchored like the Questions below it: the heading is what a
-          jump from the table of contents lands on, and the id is what it jumps
-          to.
-
-          The body is marked as rendered markdown, so the agent's headings,
-          tables and code get the same rules there as they get inside a Question
-          — the section around it is all that is the Preface's own. */}
+      {/* The Preface, as the shared card: the heading a jump from the table of
+          contents lands on, and the agent's own markdown boxed under it. A
+          commit's Message is the same component, because it is the same kind of
+          thing read the same way — see `Card.tsx`. */}
       <Show when={props.set.preface_html}>
-        {(html) => (
-          <section class={styles.preface} id="preface">
-            <h2 class={app.sectionHeading}>Preface</h2>
-            <div class={`${styles.prefaceBody} markdown`} innerHTML={html()} />
-          </section>
-        )}
+        {(html) => <Card anchor="preface" heading="Preface" html={html()} />}
       </Show>
       {/* Between the Preface and the Questions: the Preface says what the agent
           is asking about, and the Diff is the evidence for it. */}

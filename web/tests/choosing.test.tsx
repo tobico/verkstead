@@ -319,7 +319,7 @@ describe("the card in the wide-window Gutter", () => {
   it("reserves the Gutter like the page's other cards", () => {
     expect(
       declares(
-        ".prefaceBody,\n  .directionCard,\n  .question",
+        ".directionCard,\n  .question",
       ),
     ).toContain("--bleed: var(--gutter);");
   });
