@@ -7,13 +7,11 @@
 //! names a brief beside `ROADMAP.md` that says what the stage is for. This is
 //! those briefs, in the roadmap's own order.
 //!
-//! Two things are the roadmap's own. It is named by the roadmap rather than by
-//! the conversation, a worktree being allowed any number of roadmaps where it
-//! has one `.tasks/`. And every stage has a document, done or not: a brief stays
-//! where it is for ever, being the record of what the stage was for, so the done
-//! state is something the section's heading says rather than the reason it is
-//! empty. The other way round from a task, whose file going is what says it is
-//! done.
+//! One thing is the roadmap's own: it is named by the roadmap rather than by the
+//! conversation, a worktree being allowed any number of roadmaps where it has
+//! one `.tasks/`. Everything else it does, the backlog pane does too — every
+//! stage has a document, done or not, and the done state is something the
+//! section's heading says rather than the reason it is empty.
 
 import { Match, Show, Switch, createMemo, type JSX } from "solid-js";
 
@@ -62,16 +60,14 @@ export function Roadmap(props: {
       number: stage.number,
       title: stage.title,
       html: stage.html,
-      // Not the ordinary end of a stage's life, unlike a task's missing
-      // document: a brief stays where it is, so nothing here is a file that has
-      // gone. What it is instead is the roadmap pointing at a file nobody
-      // wrote, which is the human's to fix — the same thing `/next-stage`
-      // refuses to guess past.
+      // A brief stays where it is, so nothing here is a file that has gone.
+      // What it is instead is the roadmap pointing at a file nobody wrote,
+      // which is the human's to fix — the same thing `/next-stage` refuses to
+      // guess past.
       missing: "The roadmap names a brief that is not there to read.",
       // The done state on the heading rather than in the box, because a done
-      // stage still has its brief. The word travels with the section rather
-      // than being drawn by the stylesheet, for the reason the card's rows do:
-      // a page read aloud or copied out still says which stages are finished.
+      // stage still has its brief — see `Backlog.tsx`, which says it the same
+      // way for the same reason.
       mark: stage.done ? "done" : "to do",
     })),
   );

@@ -3634,7 +3634,9 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
         *)
             next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
             if [ -n "$next" ]; then
+                number=${next%%-*}
                 rm ".tasks/$next"
+                sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
                 git add -A
                 git commit --quiet -m "feat: $next"
                 # Only the first task, so the list is caught half worked
@@ -3753,7 +3755,9 @@ claude-grilling-5)
     next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
     if [ -n "$next" ]; then
         printf 'a limiter\n' >> limiter.md
+        number=${next%%-*}
         rm ".tasks/$next"
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: count the requests"
     else
@@ -6283,7 +6287,9 @@ case "$2" in
     next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
     if [ -n "$next" ]; then
         printf 'one clock\n' >> clocks.md
+        number=${{next%%-*}}
         rm ".tasks/$next"
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m 'feat: collapse the clocks'
     else
@@ -8121,6 +8127,82 @@ async fn a_backlog_halts_at_the_task_whose_session_died() {
     assert!(
         worktree.join(".tasks/01-count.md").exists(),
         "the task is still there to be worked, because nothing reverted anything",
+    );
+}
+
+/// A backlog whose next entry names a document nobody wrote: the run stops there
+/// rather than putting a session at nothing to work from.
+///
+/// What a breakdown looks like part way through writing itself, and what a
+/// hand-edited `TODO.md` looks like too. The box is what says a task is done, so
+/// an entry that is not ticked is work still outstanding — and one with no file
+/// beside it is work nothing can be told how to do.
+#[tokio::test]
+async fn a_backlog_entry_with_no_task_file_stops_the_run() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+            printf -- '- [x] 01: count the requests\n' >> .tasks/TODO.md
+            printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan the rate limiter'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'working a task nobody wrote down\n'
+            sleep 300
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("Working the backlog"),
+        "the Notice says what stopped: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("entry 02 of"),
+        "and names the entry there is nothing to work from: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("<code>.tasks/TODO.md</code>"),
+        "in the file the human has to go and fix: {:?}",
+        stopped.html,
+    );
+
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Verkstead,
+        "a backlog nothing can be read out of is not one a restart may guess past",
+    );
+
+    let sessions = outputs(&fixture.view().await).len();
+
+    // Long enough for several more turns of a runner that was still turning.
+    pause(Duration::from_secs(3)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        sessions,
+        "and no session was launched at the entry there is nothing to work from",
     );
 }
 
@@ -10256,7 +10338,9 @@ case "$2" in
     if [ -n "$next" ]; then
         printf 'working %s\n' "$next"
         printf 'a counter\n' >> counter.md
+        number=${{next%%-*}}
         rm ".tasks/$next"
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m 'feat: count the requests'
     else
@@ -10709,6 +10793,7 @@ claude-grilling-5)
     printf 'working the task\r\n'
     printf 'a limiter\n' >> limiter.md
     rm -f .tasks/01-count.md
+    sed -i "s/- \[ \] 01:/- [x] 01:/" .tasks/TODO.md
     git add -A
     git commit --quiet -m 'feat: count the requests'
     sleep 300
@@ -15803,7 +15888,9 @@ claude-grilling-5)
     printf '===== %s\n%s\n' "${{next:-finish}}" "$2" >> {prompts}
     if [ -n "$next" ]; then
         printf 'a limiter\n' >> limiter.md
+        number=${{next%%-*}}
         rm ".tasks/$next"
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: $next"
     else

@@ -7410,7 +7410,9 @@ describe("the pinned task list", () => {
 });
 
 /// The backlog opened, as the details pane fetches it: one document per entry,
-/// with the finished tasks' files gone.
+/// done or not — a task file stays in `.tasks/` until the feature is finished
+/// with. The last entry names a document nobody wrote, which is the one way a
+/// section comes back empty.
 ///
 /// Written by hand rather than taken from a fixture: the fixtures are of the
 /// conversation endpoint, and this is a pane's own payload — the same way a
@@ -7421,11 +7423,13 @@ const BACKLOG_PANE: BacklogPane = {
   tasks: BACKLOG.tasks.map((task) => ({
     number: task.number,
     title: task.title,
-    html: task.done
-      ? null
-      : `<h1>${task.number}. ${task.title}</h1>\n<h2>What to build</h2>\n` +
-        `<p>The ${task.title.toLowerCase()} part of it.</p>\n` +
-        '<div class="wide"><pre class="mermaid">flowchart LR\n  in --&gt; out\n</pre></div>',
+    done: task.done,
+    html:
+      task.number === "04"
+        ? null
+        : `<h1>${task.number}. ${task.title}</h1>\n<h2>What to build</h2>\n` +
+          `<p>The ${task.title.toLowerCase()} part of it.</p>\n` +
+          '<div class="wide"><pre class="mermaid">flowchart LR\n  in --&gt; out\n</pre></div>',
   })),
 };
 
@@ -7475,9 +7479,11 @@ describe("the task list opened", () => {
     expect(askedFor(fetching, THE_BACKLOG)).toBeGreaterThan(0);
   });
 
-  /// A done task's file is gone from `.tasks/` — which is what says it is done —
-  /// so its entry is drawn with the note rather than with a document.
-  it("says so where the document is finished and removed", async () => {
+  /// A task document stays in `.tasks/` until the feature is finished with, so a
+  /// done task has one like any other and the heading is where the done state
+  /// goes — the roadmap pane's own arrangement, and the checkbox in `TODO.md` is
+  /// what both are drawn from.
+  it("marks the done tasks on their own headings, documents and all", async () => {
     theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
     const { container } = mount(`/conversations/${TASKED.id}`);
 
@@ -7492,18 +7498,39 @@ describe("the task list opened", () => {
     ];
 
     expect(
-      sections.map((section) => section.querySelector(`.${documents.missing}`) !== null),
-    ).toEqual(BACKLOG.tasks.map((task) => task.done));
+      sections.map((section) => section.querySelector(`.${documents.mark}`)!.textContent),
+    ).toEqual(BACKLOG.tasks.map((task) => (task.done ? "done" : "to do")));
 
-    const done = sections[BACKLOG.tasks.findIndex((task) => task.done)]!;
-
-    expect(done.querySelector(`.${documents.missing}`)!.textContent).toBe(
-      "Finished, and the document removed.",
-    );
-    expect(done.querySelector(`.${documents.document}`)).toBeNull();
+    // And the done ones are drawn with their documents all the same.
+    expect(
+      sections
+        .filter((_, at) => BACKLOG.tasks[at]!.done)
+        .every((section) => section.querySelector(`.${documents.document}`) !== null),
+    ).toBe(true);
   });
 
-  /// The set page's own table of contents, one line per task: a finished one is
+  /// The one thing a task has no document for is the list naming a file nobody
+  /// wrote, which is the human's to fix and so is said in words.
+  it("says so where the list names a document that is not there", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    const missing = await drawn(
+      container,
+      `.${shell.detailsPane} .${documents.missing}`,
+    );
+
+    expect(missing.textContent).toBe(
+      "The list names a task document that is not there to read.",
+    );
+    expect(missing.closest(`.${documents.section}`)!.id).toBe("task-04");
+  });
+
+  /// The set page's own table of contents, one line per task: a done one is
   /// listed too, because it is part of what the backlog is.
   it("offers a jump to each task", async () => {
     theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
@@ -7870,8 +7897,8 @@ describe("the stage list opened", () => {
   });
 
   /// A stage's brief stays where it is for ever, so a done stage has a document
-  /// like any other and the heading is where the done state goes — the other way
-  /// round from a task, whose file going is what says it is done.
+  /// like any other and the heading is where the done state goes — the backlog
+  /// pane's own arrangement, one level up.
   it("marks the done stages on their own headings, briefs and all", async () => {
     theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
     const { container } = mount(`/conversations/${STAGED.id}`);

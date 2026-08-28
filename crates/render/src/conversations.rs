@@ -697,9 +697,10 @@ pub struct TaskEntry {
 
     pub title: String,
 
-    /// Whether the task is finished, which is the task file having gone from
-    /// `.tasks/`. That is the done-signal the task runner turns on, and a
-    /// checkbox is how an entry is written rather than what says it is done.
+    /// Whether the task is finished, which is the entry's own checkbox. That is
+    /// the done-signal the task runner turns on, and it is the list saying so
+    /// rather than anything the directory beside it happens to hold — a task
+    /// whose document has not been written yet is a task nobody has done.
     pub done: bool,
 }
 
@@ -743,9 +744,18 @@ pub struct TaskDocument {
 
     pub title: String,
 
-    /// The document rendered and sanitized, or `null` where there is no file to
-    /// render — which is a task that is done, the file going being what says so.
-    /// The pane says as much in words rather than drawing a gap.
+    /// Whether the task is finished, which is the entry's checkbox — see
+    /// [`TaskEntry::done`]. Carried on the document because a finished task
+    /// still has one: its file stays in `.tasks/` until the feature is over, so
+    /// the done state is something the section says about itself rather than the
+    /// reason it is empty. The same way round as a stage's — see
+    /// [`StageDocument::done`].
+    pub done: bool,
+
+    /// The document rendered and sanitized, or `null` where there is nothing to
+    /// render. Not the ordinary end of a task's life but the list pointing at a
+    /// file nobody wrote, which the pane says in words rather than drawing a
+    /// gap.
     pub html: Option<String>,
 }
 
@@ -758,8 +768,10 @@ pub struct TaskDocument {
 pub struct TaskSource {
     pub number: String,
     pub title: String,
+    pub done: bool,
 
-    /// The markdown, or `None` where the task's file has gone from `.tasks/`.
+    /// The markdown, or `None` where the file the entry names is not there to
+    /// read.
     pub markdown: Option<String>,
 }
 
@@ -1682,9 +1694,13 @@ pub fn task_list(feature: String, tasks: Vec<TaskEntry>) -> TaskListEvent {
 ///
 /// Here rather than in the server for the reason the commit pane's rendering is:
 /// this is the crate with the markdown parser and the sanitizer in it. A task
-/// whose file has gone comes back with nothing to draw rather than with an empty
-/// document — the file going is what says the task is done, and the pane says so
-/// in words.
+/// whose document is not there to read comes back with nothing to draw, and the
+/// pane says so in words — the list pointing at a file nobody wrote is a thing
+/// to say rather than a gap to leave, exactly as a roadmap's is.
+///
+/// Whether the task is done is the entry's own checkbox and travels beside the
+/// document, because a done task still has one: nothing deletes a task file
+/// until the feature is finished with.
 ///
 /// A document of nothing but whitespace is the same as no document at all, which
 /// is what an empty file left behind would otherwise draw: a box with a gap in
@@ -1695,6 +1711,7 @@ pub fn backlog_pane(feature: String, read: Vec<TaskSource>) -> BacklogPane {
         .map(|task| TaskDocument {
             number: task.number,
             title: task.title,
+            done: task.done,
             html: task
                 .markdown
                 .as_deref()

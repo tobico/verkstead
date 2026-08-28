@@ -317,14 +317,17 @@ of a Conversation's backlog, the finish that follows the last task, an inline
 implementation, which is the whole of the work in one Step, or the staging a
 **Resume** launches — the breakdown, and the staging that ran the ordinary way,
 are the grilling session's own tail rather than a Step. What is next is read
-from the Repo and nowhere else — the lowest-numbered task file left in
-`.tasks/`, or `TODO.md` on its own — so the Steps are the backlog's, and
-Verkstead keeps no list of its own to disagree with it.
+from the Repo and nowhere else — the lowest-numbered entry of `.tasks/TODO.md`
+whose box is not ticked, or the finish once every box is — so the Steps are the
+backlog's, and Verkstead keeps no list of its own to disagree with it. An
+unticked entry naming a task file nobody wrote is neither: the run stops there
+rather than putting a session at nothing to work from.
 
-A Step is **done** when the file it turns on has gone from the Worktree *and* the
-commit removing it has landed. A session reports through the repository, being an
+A Step is **done** when what it turns on has changed in the Worktree *and* the
+commit saying so has landed — a task's entry ticked off in `TODO.md`, the finish
+step's `.tasks/` taken away. A session reports through the repository, being an
 ordinary interactive one, and a commit is the one report it cannot half make — a
-file deleted but not committed is a session still mid-Step.
+box ticked but not committed is a session still mid-Step.
 
 Its session is ended once the Step is done **and** the session has gone quiet for
 a grace period, never on done alone: work does not always stop at the commit, and

@@ -6,15 +6,18 @@
 //! the repository alone, because the sessions are ordinary interactive ones and
 //! the repository is the only thing they report through.
 //!
-//! **What is next** is [`next_step`]: the lowest-numbered task file left, or the
-//! finish step once only `TODO.md` is. Read off the Worktree by the same rule
-//! the pinned Event is drawn by — see [`crate::tasks`] — so the list the human
-//! is watching and the list the runner is working are one list.
+//! **What is next** is [`next_step`]: the lowest-numbered entry of `TODO.md`
+//! whose box is not ticked, or the finish step once every box is. Read off the
+//! Worktree by the same rule the pinned Event is drawn by — see [`crate::tasks`]
+//! — so the list the human is watching and the list the runner is working are
+//! one list. An unticked entry naming a file nobody wrote is neither, and stops
+//! the run rather than putting a session at nothing to work from.
 //!
-//! **When a step is over** is [`Landing`]: a path gone from the Worktree, or
-//! arrived in it, *and* committed as it stands. A task file deleted but not
-//! committed is a session still mid-task, and a commit is the one report an
-//! agent cannot half make. The poll never takes `index.lock` — everything here
+//! **When a step is over** is [`Landing`]: an entry ticked in `TODO.md`, or a
+//! path gone from the Worktree or arrived in it — and, either way, committed as
+//! it stands. A box ticked but not committed is a session still mid-task, and a
+//! commit is the one report an agent cannot half make. The poll never takes
+//! `index.lock` — everything here
 //! goes through [`crate::repos::git`], which passes `--no-optional-locks`,
 //! because what it is reading is a repository a session is committing in and a
 //! watcher that tripped the session's own `git add` would break the step it is
@@ -62,7 +65,7 @@ use crate::repos::git;
 use crate::sessions::{Quiet, Session};
 use crate::skills;
 use crate::store;
-use crate::tasks::{BACKLOG, TODO, numbered};
+use crate::tasks::{BACKLOG, TODO};
 
 /// How fast the runner works a backlog.
 ///
@@ -159,10 +162,25 @@ enum Step {
     /// is: it is the step the runner is handed rather than one it decides.
     Handoff(PathBuf),
 
-    /// Work this task file, the lowest-numbered one left.
-    Task(PathBuf),
+    /// Work this task: the lowest-numbered entry whose box is not ticked, and
+    /// the file in `.tasks/` that says what it is.
+    ///
+    /// Both, because the two answer different halves of the step. The number is
+    /// what says it is over — the entry's own box, ticked — and the file is what
+    /// the Notice names when it is not.
+    Task { number: u32, file: PathBuf },
 
-    /// Finish the feature: every task is done and only `TODO.md` is left.
+    /// An entry that is not ticked and names no file: a hand-edited backlog, or
+    /// a breakdown that stopped part way through writing one.
+    ///
+    /// Nothing to run. A session launched at it would have no task document to
+    /// read and nothing to tell it where to stop, so the run stops instead and a
+    /// Notice names the entry — see [`carry_on`], which is the one place this is
+    /// answered.
+    Broken { label: String },
+
+    /// Finish the feature: every entry is ticked, and what is left is taking
+    /// `.tasks/` away.
     Finish,
 
     /// Write the roadmap, which is where a roadmap Conversation starts and
@@ -184,6 +202,12 @@ enum Step {
 pub(crate) enum Landing {
     Gone(PathBuf),
     Arrived(PathBuf),
+
+    /// The entry with this number, ticked off in `.tasks/TODO.md` and committed
+    /// as it stands. What says a task is done — the same box the pinned card
+    /// draws, so the list the human is watching and the step the runner is
+    /// waiting on cannot disagree.
+    Ticked(u32),
 
     /// A roadmap this branch has written, committed as it stands. The commit
     /// the branch came off, because `docs/roadmaps/` is a directory a
@@ -210,13 +234,15 @@ impl Step {
             // reaches: nothing puts it under version control, so its being there
             // is the whole of the signal.
             Step::Handoff(path) => Some(Landing::Handoff(path.clone())),
-            // Finishing a task is what deletes its file.
-            Step::Task(file) => Some(Landing::Gone(file.clone())),
+            // Finishing a task is what ticks its entry off in the list.
+            Step::Task { number, .. } => Some(Landing::Ticked(*number)),
             // And the finish commit removes `TODO.md` with the rest of `.tasks/`.
             Step::Finish => Some(Landing::Gone(todo())),
             // The roadmap commit is what puts the stages under version control.
             Step::Staging(base) => Some(Landing::Roadmap(base.clone())),
-            Step::Nothing => None,
+            // Neither of these is a step to run, so neither has anything to
+            // watch for.
+            Step::Broken { .. } | Step::Nothing => None,
         }
     }
 
@@ -230,7 +256,8 @@ impl Step {
             Step::Planning => "breaking the work down into a backlog".to_owned(),
             Step::PlanningStage => "planning the roadmap stage into a backlog".to_owned(),
             Step::Handoff(_) => "writing the handoff for the session that builds".to_owned(),
-            Step::Task(file) => format!("the task in {}", file.display()),
+            Step::Task { file, .. } => format!("the task in {}", file.display()),
+            Step::Broken { .. } => "working the backlog".to_owned(),
             Step::Finish => "finishing the feature".to_owned(),
             Step::Staging(_) => "staging the work into a roadmap".to_owned(),
             Step::Nothing => "nothing".to_owned(),
@@ -241,6 +268,21 @@ impl Step {
 /// The backlog's list, as a path inside a Worktree.
 fn todo() -> PathBuf {
     Path::new(BACKLOG).join(TODO)
+}
+
+/// Why a run stopped at an entry with no task file, in the words the Notice
+/// carries.
+///
+/// The entry rather than the file, because the file is the thing that is not
+/// there: what the human has to go and look at is the line in `TODO.md`, and
+/// either writing the document it names or ticking it off gets the run going
+/// again.
+fn broken(label: &str) -> String {
+    format!(
+        "entry {label} of `{}/{TODO}` is not ticked off and names no task file, so there is \
+         nothing for a session to work from",
+        BACKLOG,
+    )
 }
 
 /// Follow the grilling session as it writes what the pick asked for.
@@ -823,6 +865,31 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
                 conversation_id,
                 "the backlog is worked through, so the runner has nothing left to launch"
             );
+            return;
+        }
+
+        // An entry that is not ticked and names no file: there is nothing for a
+        // session to read and nothing to tell it where to stop, so the run stops
+        // here and the Notice names the entry. The human's to fix in the
+        // repository — write the document or tick the entry — and Resume's to
+        // pick up afterwards.
+        if let Step::Broken { label } = &step {
+            tracing::warn!(
+                conversation_id,
+                label,
+                "a backlog entry is not done and names no task file, so the run stops here",
+            );
+
+            stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                &step.what(),
+                &broken(label),
+                None,
+            )
+            .await;
+
             return;
         }
 
@@ -2514,6 +2581,17 @@ fn landed(worktree: &Path, landing: &Landing) -> bool {
     let (path, wanted) = match landing {
         Landing::Gone(path) => (path, false),
         Landing::Arrived(path) => (path, true),
+        // Not a path at all but a line inside one, so what is asked is the
+        // list: the entry's box ticked, and the commit that ticked it landed.
+        Landing::Ticked(number) => {
+            let ticked = crate::tasks::entries(&worktree.join(BACKLOG)).is_some_and(|entries| {
+                entries
+                    .iter()
+                    .any(|entry| entry.number == *number && entry.checked)
+            });
+
+            return ticked && pending(worktree, &todo()) == Some(false);
+        }
         // Not a path this branch was told about but one it went and wrote, so
         // what is asked is which roadmaps it has touched — the same reading the
         // pinned stage list is drawn by, so the list the human is watching and
@@ -2677,39 +2755,38 @@ async fn decide(worktree: &Path) -> Step {
 
 /// What to run next, decided from `.tasks/` alone.
 ///
-/// The lowest-numbered task file left, because the order the backlog was written
-/// in is the order its slices depend on each other. Then the finish step, once
-/// the only thing left is the list itself. Then nothing — which is a `.tasks/`
+/// The lowest-numbered entry whose box is not ticked, because the order the
+/// backlog was written in is the order its slices depend on each other. Then the
+/// finish step, once every box is ticked. Then nothing — which is a `.tasks/`
 /// that was never written and one that has been finished with, and there is
 /// nothing for the runner to do about either.
+///
+/// The list decides all of it, and the directory beside it only says which file
+/// the session will be working from. A backlog part way through being written
+/// has entries with no files yet, and reading those as done would be the runner
+/// finishing a feature nobody had started: an entry that is not ticked and names
+/// nothing is [`Step::Broken`], which stops the run and says so.
 fn next_step(worktree: &Path) -> Step {
     let backlog = worktree.join(BACKLOG);
 
-    let mut left: Vec<(u32, String)> = match std::fs::read_dir(&backlog) {
-        Ok(listed) => listed
-            .flatten()
-            .filter_map(|file| {
-                let name = file.file_name().to_string_lossy().into_owned();
-                numbered(&name).map(|number| (number, name))
-            })
-            .collect(),
-        Err(_) => Vec::new(),
+    let Some(entries) = crate::tasks::entries(&backlog) else {
+        return Step::Nothing;
     };
 
-    // By the number rather than by the name, so `9-` comes before `10-` where a
-    // backlog was written without zero-padding. The name breaks the tie, which
-    // is only ever two files claiming one number.
-    left.sort();
-
-    if let Some((_, name)) = left.into_iter().next() {
-        return Step::Task(Path::new(BACKLOG).join(name));
-    }
-
-    if backlog.join(TODO).is_file() {
+    // In the list's own order rather than sorted: `TODO.md` is written in the
+    // order the tasks are meant to be worked, and renumbering somebody's backlog
+    // is not the runner's to do.
+    let Some(next) = entries.into_iter().find(|entry| !entry.checked) else {
         return Step::Finish;
-    }
+    };
 
-    Step::Nothing
+    match crate::tasks::files(&backlog).get(&next.number) {
+        Some(name) => Step::Task {
+            number: next.number,
+            file: Path::new(BACKLOG).join(name),
+        },
+        None => Step::Broken { label: next.label },
+    }
 }
 
 /// Which skill a session is being started inside.
@@ -2973,10 +3050,10 @@ mod tests {
 
     use super::*;
 
-    /// A worktree with a backlog in it: `TODO.md` and whichever task files are
-    /// still to do, committed as a session that finished the ones before them
-    /// would have left it.
-    fn worktree(files: &[&str]) -> tempfile::TempDir {
+    /// A worktree with a backlog in it: `TODO.md` as `list` writes it and a task
+    /// document per file, committed as the breaking-down session would have left
+    /// it.
+    fn worktree(list: &str, files: &[&str]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path();
 
@@ -2986,7 +3063,7 @@ mod tests {
 
         let backlog = path.join(BACKLOG);
         std::fs::create_dir_all(&backlog).unwrap();
-        std::fs::write(backlog.join(TODO), "# Rate limiting\n").unwrap();
+        std::fs::write(backlog.join(TODO), list).unwrap();
 
         for file in files {
             std::fs::write(backlog.join(file), "# a task\n").unwrap();
@@ -2996,6 +3073,35 @@ mod tests {
         run(path, &["commit", "-m", "chore: plan rate-limiting tasks"]);
 
         dir
+    }
+
+    /// The list of a three-task backlog, with the first `done` of them ticked
+    /// off — which is what a run part way through looks like.
+    fn list(done: usize) -> String {
+        ["01: First", "02: Second", "03: Third"]
+            .iter()
+            .enumerate()
+            .map(|(at, entry)| match at < done {
+                true => format!("- [x] {entry}\n"),
+                false => format!("- [ ] {entry}\n"),
+            })
+            .collect::<String>()
+    }
+
+    /// The three task documents that backlog names.
+    const DOCUMENTS: [&str; 3] = ["01-first.md", "02-second.md", "03-third.md"];
+
+    /// Tick entry `number` off in the worktree's list and commit it, which is
+    /// what a session finishing a task does.
+    fn finish(path: &Path, number: &str) {
+        let list = path.join(BACKLOG).join(TODO);
+        let ticked = std::fs::read_to_string(&list)
+            .unwrap()
+            .replace(&format!("- [ ] {number}:"), &format!("- [x] {number}:"));
+
+        std::fs::write(&list, ticked).unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "feat: a task"]);
     }
 
     fn run(dir: &Path, args: &[&str]) -> String {
@@ -3013,21 +3119,61 @@ mod tests {
     }
 
     /// The order the backlog was written in is the order its slices depend on
-    /// each other, so the lowest number left is the only thing to run next.
+    /// each other, so the lowest entry still unticked is the only thing to run
+    /// next.
     #[test]
-    fn the_next_step_is_the_lowest_numbered_task_file_left() {
-        let dir = worktree(&["03-third.md", "01-first.md", "02-second.md"]);
+    fn the_next_step_is_the_lowest_unticked_entry() {
+        let dir = worktree(&list(0), &DOCUMENTS);
 
         assert_eq!(
             next_step(dir.path()),
-            Step::Task(Path::new(BACKLOG).join("01-first.md")),
+            Step::Task {
+                number: 1,
+                file: Path::new(BACKLOG).join("01-first.md"),
+            },
         );
 
-        std::fs::remove_file(dir.path().join(BACKLOG).join("01-first.md")).unwrap();
+        finish(dir.path(), "01");
 
         assert_eq!(
             next_step(dir.path()),
-            Step::Task(Path::new(BACKLOG).join("02-second.md")),
+            Step::Task {
+                number: 2,
+                file: Path::new(BACKLOG).join("02-second.md"),
+            },
+        );
+    }
+
+    /// And the file staying where it is says nothing: what a session leaves
+    /// behind is a ticked entry beside a document nobody deleted.
+    #[test]
+    fn a_task_file_left_behind_is_not_a_task_still_to_do() {
+        let dir = worktree(&list(2), &DOCUMENTS);
+
+        assert_eq!(
+            next_step(dir.path()),
+            Step::Task {
+                number: 3,
+                file: Path::new(BACKLOG).join("03-third.md"),
+            },
+            "the two ticked entries are done, documents and all",
+        );
+    }
+
+    /// The other way round, and the case the whole rule is for: a backlog part
+    /// way through being written has entries with no documents yet, and the
+    /// runner stops rather than putting a session at nothing to work from.
+    #[test]
+    fn an_unticked_entry_with_no_file_stops_the_run() {
+        let dir = worktree(&list(0), &["01-first.md"]);
+
+        finish(dir.path(), "01");
+
+        assert_eq!(
+            next_step(dir.path()),
+            Step::Broken {
+                label: "02".to_owned()
+            },
         );
     }
 
@@ -3035,19 +3181,25 @@ mod tests {
     /// zero-padded backlog and a different one for a backlog that got past nine.
     #[test]
     fn a_backlog_that_got_past_nine_is_still_worked_in_order() {
-        let dir = worktree(&["9-ninth.md", "10-tenth.md"]);
+        let dir = worktree(
+            "- [ ] 9: Ninth\n- [ ] 10: Tenth\n",
+            &["9-ninth.md", "10-tenth.md"],
+        );
 
         assert_eq!(
             next_step(dir.path()),
-            Step::Task(Path::new(BACKLOG).join("9-ninth.md")),
+            Step::Task {
+                number: 9,
+                file: Path::new(BACKLOG).join("9-ninth.md"),
+            },
         );
     }
 
-    /// `TODO.md` is the list rather than a task, and the runner has to be able
-    /// to tell them apart — it is what is left when every task is done.
+    /// Every box ticked is the feature built, whatever is still sitting in
+    /// `.tasks/` — the finish step is what takes the directory away.
     #[test]
-    fn the_finish_step_is_what_is_left_once_the_task_files_have_gone() {
-        let dir = worktree(&[]);
+    fn the_finish_step_is_what_is_left_once_every_entry_is_ticked() {
+        let dir = worktree(&list(3), &DOCUMENTS);
 
         assert_eq!(next_step(dir.path()), Step::Finish);
     }
@@ -3056,40 +3208,39 @@ mod tests {
     /// was never broken down, and one whose finish commit took `.tasks/` away.
     #[test]
     fn a_worktree_with_no_backlog_has_nothing_to_run() {
-        let dir = worktree(&[]);
+        let dir = worktree(&list(3), &DOCUMENTS);
         std::fs::remove_dir_all(dir.path().join(BACKLOG)).unwrap();
 
         assert_eq!(next_step(dir.path()), Step::Nothing);
         assert_eq!(next_step(Path::new("/nonexistent")), Step::Nothing);
     }
 
-    /// The done-signal, and the half of it that matters most: the file is gone,
-    /// but the commit removing it has not landed, so the session is still
-    /// mid-task.
+    /// The done-signal, and the half of it that matters most: the box is
+    /// ticked, but the commit that ticked it has not landed, so the session is
+    /// still mid-task.
     #[test]
-    fn a_task_file_deleted_but_not_committed_is_a_session_still_working() {
-        let dir = worktree(&["01-first.md"]);
-        let landing = Landing::Gone(Path::new(BACKLOG).join("01-first.md"));
+    fn an_entry_ticked_but_not_committed_is_a_session_still_working() {
+        let dir = worktree(&list(0), &DOCUMENTS);
+        let path = dir.path();
+        let landing = Landing::Ticked(1);
+        let todo = path.join(BACKLOG).join(TODO);
 
-        assert!(!landed(dir.path(), &landing), "the file is still there");
+        assert!(!landed(path, &landing), "the box is not ticked yet");
 
-        std::fs::remove_file(dir.path().join(BACKLOG).join("01-first.md")).unwrap();
-
-        assert!(
-            !landed(dir.path(), &landing),
-            "deleted, and the deletion is not committed",
-        );
-
-        run(dir.path(), &["add", "-A"]);
+        std::fs::write(&todo, list(1)).unwrap();
 
         assert!(
-            !landed(dir.path(), &landing),
-            "staged is not committed either",
+            !landed(path, &landing),
+            "ticked, and the tick is not committed",
         );
 
-        run(dir.path(), &["commit", "-m", "feat: count the requests"]);
+        run(path, &["add", "-A"]);
 
-        assert!(landed(dir.path(), &landing), "gone and committed");
+        assert!(!landed(path, &landing), "staged is not committed either");
+
+        run(path, &["commit", "-m", "feat: count the requests"]);
+
+        assert!(landed(path, &landing), "ticked and committed");
     }
 
     /// The other way round, which is the breakdown's signal: the plan is written
@@ -3289,19 +3440,17 @@ mod tests {
     /// own `git commit` fail, on a machine with nobody watching.
     #[test]
     fn the_poll_reads_through_a_lock_a_session_is_holding() {
-        let dir = worktree(&["01-first.md"]);
+        let dir = worktree(&list(0), &DOCUMENTS);
         let path = dir.path();
 
-        std::fs::remove_file(path.join(BACKLOG).join("01-first.md")).unwrap();
-        run(path, &["add", "-A"]);
-        run(path, &["commit", "-m", "feat: count the requests"]);
+        finish(path, "01");
 
         // What a session mid-commit has left in the repository.
         let lock = path.join(".git/index.lock");
         std::fs::write(&lock, "").unwrap();
 
         assert!(
-            landed(path, &Landing::Gone(Path::new(BACKLOG).join("01-first.md"))),
+            landed(path, &Landing::Ticked(1)),
             "a locked repository is still a repository to read",
         );
         assert!(
@@ -3310,7 +3459,8 @@ mod tests {
         );
     }
 
-    /// Which path each step turns on. The plan arrives, everything else goes.
+    /// What each step turns on. The plan arrives, the finish takes the list
+    /// away, and a task is its own entry ticked off in it.
     #[test]
     fn every_step_but_nothing_has_something_to_watch_for() {
         assert_eq!(
@@ -3322,8 +3472,12 @@ mod tests {
             Some(Landing::Gone(Path::new(".tasks/TODO.md").to_owned())),
         );
         assert_eq!(
-            Step::Task(Path::new(".tasks/01-first.md").to_owned()).landing(),
-            Some(Landing::Gone(Path::new(".tasks/01-first.md").to_owned())),
+            Step::Task {
+                number: 1,
+                file: Path::new(".tasks/01-first.md").to_owned(),
+            }
+            .landing(),
+            Some(Landing::Ticked(1)),
         );
         assert_eq!(
             Step::Staging("d41f8a3b".to_owned()).landing(),
@@ -3336,6 +3490,14 @@ mod tests {
             ))),
         );
         assert_eq!(Step::Nothing.landing(), None);
+        assert_eq!(
+            Step::Broken {
+                label: "02".to_owned()
+            }
+            .landing(),
+            None,
+            "an entry with no file is nothing to run, so there is nothing to wait for",
+        );
     }
 
     /// The handoff is the one landing with no repository in it. Nothing puts the
@@ -3345,7 +3507,7 @@ mod tests {
     /// about it either way.
     #[test]
     fn the_handoff_lands_outside_the_worktree_entirely() {
-        let dir = worktree(&[]);
+        let dir = worktree(&list(3), &DOCUMENTS);
         let elsewhere = tempfile::tempdir().unwrap();
         let document = elsewhere.path().join("handoff.md");
         let landing = Landing::Handoff(document.clone());

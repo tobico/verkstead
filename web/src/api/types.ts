@@ -2014,9 +2014,19 @@ export type TaskDocument = {
  */
 number: string, title: string, 
 /**
- * The document rendered and sanitized, or `null` where there is no file to
- * render — which is a task that is done, the file going being what says so.
- * The pane says as much in words rather than drawing a gap.
+ * Whether the task is finished, which is the entry's checkbox — see
+ * [`TaskEntry::done`]. Carried on the document because a finished task
+ * still has one: its file stays in `.tasks/` until the feature is over, so
+ * the done state is something the section says about itself rather than the
+ * reason it is empty. The same way round as a stage's — see
+ * [`StageDocument::done`].
+ */
+done: boolean, 
+/**
+ * The document rendered and sanitized, or `null` where there is nothing to
+ * render. Not the ordinary end of a task's life but the list pointing at a
+ * file nobody wrote, which the pane says in words rather than drawing a
+ * gap.
  */
 html: string | null, };
 
@@ -2032,9 +2042,10 @@ export type TaskEntry = {
  */
 number: string, title: string, 
 /**
- * Whether the task is finished, which is the task file having gone from
- * `.tasks/`. That is the done-signal the task runner turns on, and a
- * checkbox is how an entry is written rather than what says it is done.
+ * Whether the task is finished, which is the entry's own checkbox. That is
+ * the done-signal the task runner turns on, and it is the list saying so
+ * rather than anything the directory beside it happens to hold — a task
+ * whose document has not been written yet is a task nobody has done.
  */
 done: boolean, };
 
