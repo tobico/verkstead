@@ -2,16 +2,17 @@
 //!
 //! A Conversation leaves Wrapping for **Done** when three kinds of thing are
 //! true together: every pull request's checks are green, the self-review's
-//! Question Set has been answered, and nothing said on the pull request is left
-//! unaddressed. Any one of them missing keeps it where it is.
+//! Question Set has been answered, and nothing said on any of the pull requests
+//! is left unaddressed. Any one of them missing keeps it where it is.
 //!
 //! Three kinds rather than three things, because a Conversation ends on a pull
-//! request per repository it was worked in and each of them has a suite of its
-//! own: the review is one review across the whole of it, and the checks are one
-//! settlement each. Which pull requests those are is read off the record every
-//! time the rule is asked — a companion's found a poll after the Conversation's
-//! own is one more thing to wait on, and a wrap-up that had already counted its
-//! three would have finished in between. See [`store::finish_wrap_up`].
+//! request per repository it was worked in and each of them has a suite and a
+//! conversation of its own: the review is one review across the whole of it, and
+//! the checks and the comments are one settlement each per pull request. Which
+//! pull requests those are is read off the record every time the rule is asked —
+//! a companion's found a poll after the Conversation's own is two more things to
+//! wait on, and a wrap-up that had already counted its three would have finished
+//! in between. See [`store::finish_wrap_up`].
 //!
 //! Verkstead decides that itself. There is nobody at the workbench to press
 //! anything, which is the whole of what running unattended means — and each of
@@ -69,8 +70,9 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
             Ok(store::Finished::Done) => {
                 tracing::info!(
                     conversation_id,
-                    "every pull request's checks are green, the review is answered and \
-                     nothing is left unaddressed, so the work is done",
+                    "every pull request's checks are green and nothing said on any of \
+                     them is left unaddressed, and the review is answered, so the work \
+                     is done",
                 );
 
                 // The Timeline has a move on it, and an open page should say so

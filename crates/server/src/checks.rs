@@ -65,12 +65,12 @@
 //! of it: Verkstead does not know how the checks are, and neither *green* nor
 //! *red* is a thing to conclude from not knowing.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::AppState;
 use crate::github::{Check, Checked};
 use crate::store;
+use crate::wrapping::{Watched, named};
 
 /// How many fix sessions one check gets before the human is asked instead.
 ///
@@ -191,22 +191,6 @@ enum Watching {
     Done(&'static str),
 }
 
-/// The pull request one watcher follows: where to ask GitHub about it, what to
-/// call it, and where its work is done.
-struct Watched {
-    /// The registered Repo it was opened in, which is where `gh` is run and what
-    /// the feedback and the Notice name it by.
-    repo: store::Repo,
-
-    /// The number GitHub gave it, which is what everybody calls it by — in that
-    /// repository and nowhere else.
-    number: i64,
-
-    /// The checkout its branch is on: the Conversation's own worktree, or the
-    /// companion's beside it. Where a fix session is sent to work.
-    worktree: PathBuf,
-}
-
 /// Take one look: ask GitHub how the checks are, and do whatever that means.
 async fn once(
     state: &AppState,
@@ -255,7 +239,7 @@ async fn once(
     // Which repository to ask in and which checkout its work is done in, read off
     // the Conversation every poll rather than held: a companion taken away is one
     // there is nowhere left to ask about.
-    let Some(watched) = watched(&conversation, repo_id, opened.number) else {
+    let Some(watched) = crate::wrapping::watched(&conversation, repo_id, opened.number) else {
         return Watching::Done("there is no repository left to ask about that pull request in");
     };
 
@@ -326,32 +310,6 @@ async fn once(
     }
 
     fix(state, conversation_id, &watched, &failed, writing).await
-}
-
-/// Where the pull request opened in `repo_id` is, and where its work is done.
-///
-/// The Conversation's own repository and Worktree, or the companion's beside it.
-/// `None` where the Conversation has neither — a companion taken off it, or a
-/// checkout that is gone — which is a pull request nothing here can do anything
-/// about.
-fn watched(conversation: &store::Conversation, repo_id: i64, number: i64) -> Option<Watched> {
-    let (repo, worktree) = match conversation.repo.id == repo_id {
-        true => (&conversation.repo, conversation.worktree.as_ref()?),
-        false => {
-            let companion = conversation
-                .companions
-                .iter()
-                .find(|companion| companion.repo.id == repo_id)?;
-
-            (&companion.repo, companion.worktree.as_ref()?)
-        }
-    };
-
-    Some(Watched {
-        repo: repo.clone(),
-        number,
-        worktree: worktree.clone(),
-    })
 }
 
 /// Dispatch a fix session for the failed checks that have attempts left, or ask
@@ -519,18 +477,6 @@ fn feedback(watched: &Watched, failed: &[&Check]) -> String {
     )
 }
 
-/// The pull request in words, which is its number and the repository it is in.
-///
-/// Both halves every time: `#7` is a number in one repository and a different
-/// pull request or nothing at all in another, and a Conversation now ends on one
-/// per repository it was worked in.
-fn named(watched: &Watched) -> String {
-    format!(
-        "pull request #{} of `{}`",
-        watched.number, watched.repo.name
-    )
-}
-
 /// One check per line: what it is called, and where its run is.
 fn listed(checks: &[Check]) -> String {
     checks
@@ -610,12 +556,12 @@ mod tests {
         Watched {
             repo: store::Repo {
                 id: 2,
-                path: PathBuf::from("/watched/askance"),
+                path: std::path::PathBuf::from("/watched/askance"),
                 name: "askance".to_owned(),
                 default_branch: "main".to_owned(),
             },
             number: 7,
-            worktree: PathBuf::from("/state/worktrees/rate-limiting-askance"),
+            worktree: std::path::PathBuf::from("/state/worktrees/rate-limiting-askance"),
         }
     }
 

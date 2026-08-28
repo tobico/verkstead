@@ -93,8 +93,9 @@ pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
     Finished, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
-    forget_addressed_comments, forget_fix_attempts, record_addressed_comments, record_fix_attempt,
-    settle_wrap_up, unsettle_wrap_up, wrap_up_settled,
+    forget_addressed_comments, forget_every_addressed_comment, forget_fix_attempts,
+    record_addressed_comments, record_fix_attempt, settle_wrap_up, unsettle_wrap_up,
+    wrap_up_settled,
 };
 
 /// A Set as the store holds it: what was asked plus the identity the server

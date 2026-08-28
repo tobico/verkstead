@@ -2419,9 +2419,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // wrap-up settling everything it waits on. Walked there rather than written,
     // because what a round boundary looks like is exactly what this fixture is
     // for — the first round's Brief above it, the round steered into below.
-    let waiting_on = verkstead_store::WAITED_ON
-        .into_iter()
-        .chain([verkstead_store::WaitingOn::Checks(repos[0].id)]);
+    let waiting_on = verkstead_store::WAITED_ON.into_iter().chain([
+        verkstead_store::WaitingOn::Checks(repos[0].id),
+        verkstead_store::WaitingOn::Comments(repos[0].id),
+    ]);
 
     for waiting_on in waiting_on {
         store::settle_wrap_up(&pool, wrapping, waiting_on)

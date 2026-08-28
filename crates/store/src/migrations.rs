@@ -7,9 +7,10 @@
 //! there, run once because the thing they described has been replaced by
 //! something else.
 //!
-//! And two of them are about a Conversation ending on more than one pull
-//! request: what a fix session was counted against, and what a settled suite was
-//! about, are both a pull request's rather than a Conversation's now.
+//! And three of them are about a Conversation ending on more than one pull
+//! request: what a fix session was counted against, what a settled suite was
+//! about, and which pull request a comment somebody was sent to deal with was
+//! left on, are all a pull request's rather than a Conversation's now.
 //!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
@@ -29,7 +30,8 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     commits_that_named_no_repo(pool).await?;
     pull_requests_that_named_no_repo(pool).await?;
     fix_attempts_that_named_no_repo(pool).await?;
-    settlements_that_named_no_pull_request(pool).await
+    settlements_that_named_no_pull_request(pool).await?;
+    addressed_comments_that_named_no_pull_request(pool).await
 }
 
 /// Attribute every commit recorded before Verkstead swept more than one
@@ -288,12 +290,13 @@ async fn fix_attempts_that_named_no_repo(pool: &SqlitePool) -> Result<()> {
 /// rebuild the key that keeps one settlement per thing waited on.
 ///
 /// A wrap-up used to wait on three things, all of them the Conversation's. The
-/// checks are now one per pull request — a Conversation ends on one per
-/// repository it was worked in, each with its own suite — so a settlement is the
-/// Conversation's, the pull request's and the thing's. Every settled `checks` row
+/// checks and what has been said are now one per pull request each — a
+/// Conversation ends on one per repository it was worked in, each with its own
+/// suite and its own conversation — so a settlement is the Conversation's, the
+/// pull request's and the thing's. Every settled `checks` and `comments` row
 /// already there is the Conversation's own repository's, which is the only pull
-/// request it was possible for it to be about; the review and what has been said
-/// stay what they are, and are written against no pull request at all.
+/// request it was possible for it to be about; the review stays what it is, one
+/// review across the whole of it, and is written against no pull request at all.
 ///
 /// The table is rebuilt for the reason the three above it are, and the column it
 /// gains references nothing: the rows about no pull request carry a Repo of zero,
@@ -331,15 +334,15 @@ async fn settlements_that_named_no_pull_request(pool: &SqlitePool) -> Result<()>
     .await
     .context("making the wrap-up settlements table over with a pull request on it")?;
 
-    // The checks against the Conversation's own repository and everything else
-    // against none, which is the whole of what this rewrite decides. Joined to the
-    // Conversations for the reason the rewrites above are joined: a settlement
-    // whose Conversation has gone has no repository to be attributed to.
+    // Everything but the review against the Conversation's own repository, which
+    // is the whole of what this rewrite decides. Joined to the Conversations for
+    // the reason the rewrites above are joined: a settlement whose Conversation
+    // has gone has no repository to be attributed to.
     sqlx::query(
         "INSERT INTO wrap_up_settled_by_repo
              (conversation_id, repo_id, waiting_on, at)
          SELECT s.conversation_id,
-                CASE s.waiting_on WHEN 'checks' THEN v.repo_id ELSE 0 END,
+                CASE s.waiting_on WHEN 'review' THEN 0 ELSE v.repo_id END,
                 s.waiting_on, s.at
          FROM wrap_up_settled s
          JOIN conversations v ON v.id = s.conversation_id",
@@ -361,6 +364,82 @@ async fn settlements_that_named_no_pull_request(pool: &SqlitePool) -> Result<()>
     tx.commit()
         .await
         .context("attributing the settled checks of before to a pull request")
+}
+
+/// Attribute every addressed comment to the pull request it was left on, and
+/// rebuild the key that keeps one row per comment.
+///
+/// Which comments have been dispatched about used to be the Conversation's, one
+/// pull request per Conversation making the pull request nothing worth naming.
+/// A Conversation now ends on one per repository it was worked in, each read on
+/// its own interval and each settling on its own, so a row is the
+/// Conversation's, the pull request's and the comment's. Every row already there
+/// is the Conversation's own repository's, which is the only pull request it was
+/// possible for the comment to have been left on.
+///
+/// The table is rebuilt for the reason the ones above it are: the rule is
+/// declared inline as the primary key, so it is the table itself that has to be
+/// written out again.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn addressed_comments_that_named_no_pull_request(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('addressed_comments') WHERE name = ?")
+            .bind("repo_id")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the pull request an addressed comment was left on")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("attributing the comments dispatched for before this to a pull request")?;
+
+    sqlx::query(
+        "CREATE TABLE addressed_comments_by_repo (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             comment_id      TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id, comment_id)
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the addressed comments table over with a pull request on it")?;
+
+    // Joined to the Conversations rather than sub-selected per row, which is
+    // also what leaves behind a comment whose Conversation has gone: there is no
+    // pull request such a row could be attributed to, and no wrap-up left to
+    // read it.
+    sqlx::query(
+        "INSERT INTO addressed_comments_by_repo
+             (conversation_id, repo_id, comment_id, at)
+         SELECT c.conversation_id, v.repo_id, c.comment_id, c.at
+         FROM addressed_comments c
+         JOIN conversations v ON v.id = c.conversation_id",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("attributing the comments dispatched for before this to a pull request")?;
+
+    sqlx::query("DROP TABLE addressed_comments")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the addressed comments table as it was")?;
+
+    sqlx::query("ALTER TABLE addressed_comments_by_repo RENAME TO addressed_comments")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt addressed comments table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("attributing the comments dispatched for before this to a pull request")
 }
 
 /// The table the stops of before are kept in, named once: it is gone by the end

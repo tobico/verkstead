@@ -343,9 +343,14 @@ pub(crate) fn reviewing(brief: &str, handoff: Option<&str>, said: Option<&str>) 
 /// The same three pieces the review gets, in the same order and for the same
 /// reasons — the documents say what the work is, and what was said goes last
 /// because it is the newest and least general thing. What differs is which
-/// comments and how many: the review is given everything standing on the pull
-/// request when it starts, and this is given one batch of what was said after
-/// it.
+/// comments and how many: the review is given everything standing on every one
+/// of the pull requests when it starts, and this is given one batch of what was
+/// said on one of them after it.
+///
+/// Which pull request that is, and which worktree to answer it in, are in `said`
+/// rather than said here: a Conversation ends on one per repository it was worked
+/// in, and a session sent at a companion's would otherwise read the diff of the
+/// repository it started in — see [`crate::comments::feedback`].
 ///
 /// `said` is never empty here, unlike the review's. A batch session exists
 /// because something was said, so there is no version of this prompt with
@@ -353,8 +358,9 @@ pub(crate) fn reviewing(brief: &str, handoff: Option<&str>, said: Option<&str>) 
 pub(crate) fn responding(brief: &str, handoff: Option<&str>, said: &str) -> String {
     let prompt = on_the_documents(
         &format!(
-            "Read {RESPONDING} and answer what has just been said on this branch's pull \
-             request, the way it says. The work described below is what it was meant to be."
+            "Read {RESPONDING} and answer what has just been said on the pull request named \
+             at the end of this prompt, the way it says. The work described below is what it \
+             was meant to be."
         ),
         brief,
         handoff,

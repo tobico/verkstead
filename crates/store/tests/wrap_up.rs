@@ -13,9 +13,9 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     Ask, Event, Finished, Lifecycle, Locking, Settlements, Steer, Steering, Submission, WAITED_ON,
     WaitingOn, addressed_comments, ask, finish_wrap_up, fix_attempts, forget_addressed_comments,
-    forget_fix_attempts, implement_again, last_batch_proposal, last_proposal, load_conversation,
-    load_response, lock_set, open_database, pick_direction, pull_requests,
-    record_addressed_comments, record_another_pull_request, record_fix_attempt,
+    forget_every_addressed_comment, forget_fix_attempts, implement_again, last_batch_proposal,
+    last_proposal, load_conversation, load_response, lock_set, open_database, pick_direction,
+    pull_requests, record_addressed_comments, record_another_pull_request, record_fix_attempt,
     record_pull_request, register_repo, save_brief, settle_wrap_up, start_conversation,
     start_grilling, steer_conversation, submit_response, timeline, unsettle_wrap_up,
     wrap_up_settled,
@@ -79,12 +79,12 @@ async fn own(pool: &SqlitePool, id: i64) -> i64 {
         .id
 }
 
-/// Everything one Conversation's wrap-up waits on: the two there is one of per
-/// Conversation, and the checks of every pull request it is on.
+/// Everything one Conversation's wrap-up waits on: the review, and the checks
+/// and the comments of every pull request it is on.
 ///
 /// Read off the record rather than written out, exactly as the rule that ends a
 /// wrap-up reads them — a Conversation ends on one pull request per repository it
-/// was worked in, and each of them has a suite of its own.
+/// was worked in, and each of them has a suite and a conversation of its own.
 async fn waiting_on(pool: &SqlitePool, id: i64) -> Vec<WaitingOn> {
     let opened = pull_requests(pool, id).await.unwrap();
 
@@ -93,7 +93,7 @@ async fn waiting_on(pool: &SqlitePool, id: i64) -> Vec<WaitingOn> {
         .chain(
             opened
                 .into_iter()
-                .map(|(repo, _)| WaitingOn::Checks(repo.id)),
+                .flat_map(|(repo, _)| [WaitingOn::Checks(repo.id), WaitingOn::Comments(repo.id)]),
         )
         .collect()
 }
@@ -333,23 +333,31 @@ async fn which_comments_have_been_dispatched_for_survives_a_restart() {
         let id = wrapping(&pool).await;
 
         assert_eq!(
-            addressed_comments(&pool, id).await.unwrap(),
+            addressed_comments(&pool, id, own(&pool, id).await)
+                .await
+                .unwrap(),
             Vec::<String>::new(),
             "nothing has been dispatched for on a pull request nobody has said anything on",
         );
 
         // One batch, one write: three replies in a minute are one point being
         // made, and one session is dispatched about all of them.
-        record_addressed_comments(&pool, id, &["IC_1".to_owned(), "IC_2".to_owned()])
-            .await
-            .unwrap();
+        record_addressed_comments(
+            &pool,
+            id,
+            own(&pool, id).await,
+            &["IC_1".to_owned(), "IC_2".to_owned()],
+        )
+        .await
+        .unwrap();
 
         pool.close().await;
         id
     };
 
     let restarted = open_database(&database).await.unwrap();
-    let mut already = addressed_comments(&restarted, id).await.unwrap();
+    let own = own(&restarted, id).await;
+    let mut already = addressed_comments(&restarted, id, own).await.unwrap();
     already.sort();
 
     assert_eq!(already, vec!["IC_1".to_owned(), "IC_2".to_owned()]);
@@ -357,16 +365,74 @@ async fn which_comments_have_been_dispatched_for_survives_a_restart() {
     // And a batch that overlaps one already written down is the same comments
     // rather than a refusal: the poll that dispatched for `IC_2` may have been a
     // server that then restarted, and what matters is that it is written once.
-    record_addressed_comments(&restarted, id, &["IC_2".to_owned(), "IC_3".to_owned()])
+    record_addressed_comments(&restarted, id, own, &["IC_2".to_owned(), "IC_3".to_owned()])
         .await
         .unwrap();
 
-    let mut already = addressed_comments(&restarted, id).await.unwrap();
+    let mut already = addressed_comments(&restarted, id, own).await.unwrap();
     already.sort();
 
     assert_eq!(
         already,
         vec!["IC_1".to_owned(), "IC_2".to_owned(), "IC_3".to_owned()],
+    );
+}
+
+/// And which pull request each of them was left on is part of what is written
+/// down, so that one going quiet says nothing about the other.
+///
+/// The same comment id on two pull requests could not happen — GitHub hands them
+/// out across the whole of it — so what this is about is the reading rather than
+/// the writing: a watcher asks *which of the comments I have just read have
+/// already been dispatched for*, and it has just read one pull request's.
+#[tokio::test]
+async fn which_comments_have_been_dispatched_for_is_asked_of_one_pull_request() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let own = own(&pool, id).await;
+    let beside = beside(&pool, id).await;
+
+    record_addressed_comments(&pool, id, own, &["IC_1".to_owned()])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        addressed_comments(&pool, id, own).await.unwrap(),
+        vec!["IC_1".to_owned()],
+    );
+    assert_eq!(
+        addressed_comments(&pool, id, beside).await.unwrap(),
+        Vec::<String>::new(),
+        "the companion's pull request has had nothing dispatched about it",
+    );
+
+    // And forgetting one pull request's batch leaves the other's alone.
+    record_addressed_comments(&pool, id, beside, &["IC_2".to_owned()])
+        .await
+        .unwrap();
+
+    forget_addressed_comments(&pool, id, own, &["IC_1".to_owned()])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        addressed_comments(&pool, id, own).await.unwrap(),
+        Vec::<String>::new(),
+    );
+    assert_eq!(
+        addressed_comments(&pool, id, beside).await.unwrap(),
+        vec!["IC_2".to_owned()],
+        "a batch nobody answered on one pull request is not the other's to read again",
+    );
+
+    // Where nobody can say which pull request the gone session was answering,
+    // every one of them is read again.
+    forget_every_addressed_comment(&pool, id).await.unwrap();
+
+    assert_eq!(
+        addressed_comments(&pool, id, beside).await.unwrap(),
+        Vec::<String>::new(),
     );
 }
 
@@ -432,7 +498,7 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
     record_fix_attempt(&pool, id, own(&pool, id).await, "build")
         .await
         .unwrap();
-    record_addressed_comments(&pool, id, &["IC_1".to_owned()])
+    record_addressed_comments(&pool, id, own(&pool, id).await, &["IC_1".to_owned()])
         .await
         .unwrap();
 
@@ -470,7 +536,9 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
         "and its checks start from no attempts spent"
     );
     assert_eq!(
-        addressed_comments(&pool, id).await.unwrap(),
+        addressed_comments(&pool, id, own(&pool, id).await)
+            .await
+            .unwrap(),
         vec!["IC_1".to_owned()],
         "but a comment already answered stays answered"
     );
@@ -481,7 +549,7 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
 #[tokio::test]
 async fn missing_any_one_of_the_three_keeps_the_conversation_wrapping() {
     // Every one of them in turn, which on a Conversation with a companion is
-    // four: the review, what was said, and a suite per pull request.
+    // five: the review, and a suite and a conversation per pull request.
     let (_dir, counting) = fresh_pool().await;
     let counted = wrapping(&counting).await;
     beside(&counting, counted).await;
@@ -519,7 +587,7 @@ async fn missing_any_one_of_the_three_keeps_the_conversation_wrapping() {
 }
 
 /// A companion's pull request found after the Conversation's own went green is
-/// one more suite to wait on, and the wrap-up waits.
+/// one more suite and one more conversation to wait on, and the wrap-up waits.
 ///
 /// The order this actually happens in: the finish opens both, Verkstead records
 /// its own and moves the Conversation, and the companion's is discovered a poll
@@ -544,6 +612,16 @@ async fn a_companions_pull_request_is_one_more_thing_to_wait_on() {
     );
 
     settle_wrap_up(&pool, id, WaitingOn::Checks(beside))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        finish_wrap_up(&pool, id).await.unwrap(),
+        Finished::StillWaiting,
+        "and nobody has read what was said on it either",
+    );
+
+    settle_wrap_up(&pool, id, WaitingOn::Comments(beside))
         .await
         .unwrap();
 
@@ -902,11 +980,13 @@ async fn comments_forgotten_are_dispatched_for_again() {
     let (dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
-    record_addressed_comments(&pool, id, &["IC_1".to_owned(), "IC_2".to_owned()])
+    let own = own(&pool, id).await;
+
+    record_addressed_comments(&pool, id, own, &["IC_1".to_owned(), "IC_2".to_owned()])
         .await
         .unwrap();
 
-    forget_addressed_comments(&pool, id, &["IC_1".to_owned(), "IC_2".to_owned()])
+    forget_addressed_comments(&pool, id, own, &["IC_1".to_owned(), "IC_2".to_owned()])
         .await
         .unwrap();
 
@@ -919,7 +999,7 @@ async fn comments_forgotten_are_dispatched_for_again() {
         .unwrap();
 
     assert_eq!(
-        addressed_comments(&pool, id).await.unwrap(),
+        addressed_comments(&pool, id, own).await.unwrap(),
         Vec::<String>::new(),
         "nothing has been dispatched about, so the next poll dispatches again",
     );

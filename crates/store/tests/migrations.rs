@@ -1192,7 +1192,11 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
     .await
     .unwrap();
 
-    for table in ["check_fix_attempts", "wrap_up_settled"] {
+    for table in [
+        "check_fix_attempts",
+        "wrap_up_settled",
+        "addressed_comments",
+    ] {
         sqlx::query(&format!("DROP TABLE {table}"))
             .execute(&pool)
             .await
@@ -1224,6 +1228,18 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
     .unwrap();
 
     sqlx::query(
+        "CREATE TABLE addressed_comments (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             comment_id      TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, comment_id)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
         "INSERT INTO check_fix_attempts (conversation_id, check_name, attempts)
          VALUES (?, 'Rust', 1)",
     )
@@ -1232,7 +1248,16 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
     .await
     .unwrap();
 
-    for waiting_on in ["checks", "review"] {
+    sqlx::query(
+        "INSERT INTO addressed_comments (conversation_id, comment_id, at)
+         VALUES (?, 'IC_1', '2026-08-01T09:14:22.000Z')",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for waiting_on in ["checks", "review", "comments"] {
         sqlx::query(
             "INSERT INTO wrap_up_settled (conversation_id, waiting_on, at)
              VALUES (?, ?, '2026-08-01T09:14:22.000Z')",
@@ -1247,6 +1272,56 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
     pool.close().await;
 
     (id, repo)
+}
+
+/// A comment a session was dispatched about before this was dispatched about on
+/// the Conversation's own pull request, which is the only one it could have been
+/// left on — so the comment stays answered there, and the same pull request's
+/// watcher does not dispatch a second session about yesterday's feedback.
+#[tokio::test]
+async fn every_comment_dispatched_for_before_this_was_the_conversations_own_pull_requests() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo) = wrap_up_of_before(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        verkstead_store::addressed_comments(&pool, id, repo)
+            .await
+            .unwrap(),
+        vec!["IC_1".to_owned()],
+        "the comment somebody was sent to deal with is still dealt with",
+    );
+
+    let beside = register_repo(&pool, Path::new("/watched/askance"), "askance", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    assert_eq!(
+        verkstead_store::addressed_comments(&pool, id, beside)
+            .await
+            .unwrap(),
+        Vec::<String>::new(),
+        "and a companion's pull request has had nothing dispatched about it",
+    );
+
+    pool.close().await;
+
+    // And a database opened twice is rewritten once.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        verkstead_store::addressed_comments(&pool, id, repo)
+            .await
+            .unwrap(),
+        vec!["IC_1".to_owned()],
+    );
 }
 
 /// A fix session counted before this was counted against the Conversation's own
@@ -1286,12 +1361,14 @@ async fn every_fix_session_counted_before_this_was_the_conversations_own_reposit
     );
 }
 
-/// And a settled suite was about that same pull request, while the review stays
-/// what it always was: one review, about no pull request in particular.
+/// And a settled suite, and a pull request nothing was left unaddressed on, were
+/// both about that same pull request — while the review stays what it always
+/// was: one review, about no pull request in particular.
 ///
 /// Which together are what keeps a wrap-up that was nearly over from starting
-/// again: the checks it had settled are still settled, so a server that came back
-/// up to this database is waiting on what it was waiting on before.
+/// again: what it had settled is still settled, so a server that came back up to
+/// this database is waiting on what it was waiting on before — which here is
+/// nothing at all.
 #[tokio::test]
 async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() {
     let dir = tempfile::tempdir().unwrap();
@@ -1306,21 +1383,17 @@ async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() 
 
     assert_eq!(
         settled,
-        vec![WaitingOn::Checks(repo), WaitingOn::Review],
-        "the suite that was green is the one pull request's it could have been",
+        vec![
+            WaitingOn::Checks(repo),
+            WaitingOn::Comments(repo),
+            WaitingOn::Review,
+        ],
+        "the suite that was green and the pull request that was quiet are the one \
+         pull request's they could have been",
     );
 
-    // And the rule that ends a wrap-up reads them as it always did: what is left
-    // outstanding here is what was said on the pull request, and nothing else.
-    assert_eq!(
-        finish_wrap_up(&pool, id).await.unwrap(),
-        Finished::StillWaiting,
-    );
-
-    verkstead_store::settle_wrap_up(&pool, id, WaitingOn::Comments)
-        .await
-        .unwrap();
-
+    // And the rule that ends a wrap-up reads them as it always did: everything
+    // this wrap-up was waiting on it had already settled, so it is over.
     assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
 
     pool.close().await;
