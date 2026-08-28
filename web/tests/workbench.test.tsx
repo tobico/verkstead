@@ -4321,6 +4321,60 @@ describe("a session's output on the timeline", () => {
     await waitFor(() => expect(output.classList).toContain(timeline.selected));
     expect(output.getAttribute("aria-pressed")).toBe("true");
   });
+
+  /// A running session is opened for what it is saying now, which is the end of
+  /// the record rather than the beginning of it — and the pane goes on following
+  /// as the session talks.
+  ///
+  /// What the ask lands on here is the window: which box scrolls is the
+  /// stylesheet's answer to how wide the window is, and jsdom lays nothing out,
+  /// so the walk up from the record finds no box that scrolls and the page
+  /// itself is what moves. Where the pause and the resume are asked about is
+  /// `following.test.ts`, which builds a box that scrolls.
+  it("opens a running session's record at its end, and follows it down", async () => {
+    const scrolled = vi.fn();
+    vi.stubGlobal("scrollTo", scrolled);
+
+    theGrillingOutput(
+      { running: true },
+      whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
+      whenever(REST_OF_IT, json(MORE)),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+    await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.prose}`);
+
+    expect(scrolled).toHaveBeenCalled();
+    const landed = scrolled.mock.calls.length;
+
+    await client.invalidateQueries();
+
+    // What the session has said since is drawn, and the view goes after it.
+    await waitFor(() =>
+      expect(container.querySelectorAll(`.${shell.detailsPane} .${outputPane.turn}`)).toHaveLength(
+        rows(TRANSCRIPT.turns, MORE.turns),
+      ),
+    );
+    expect(scrolled.mock.calls.length).toBeGreaterThan(landed);
+  });
+
+  /// And a session that has stopped talking is opened where every other document
+  /// in this pane is: at the top. There is no end being written for the view to
+  /// keep up with, and moving a reader off the first thing the session said
+  /// would be the pane deciding where they meant to start.
+  it("leaves a finished session's record where the reader arrives", async () => {
+    const scrolled = vi.fn();
+    vi.stubGlobal("scrollTo", scrolled);
+
+    theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+    await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.prose}`);
+
+    expect(scrolled).not.toHaveBeenCalled();
+  });
 });
 
 /// And that same session again, held against the foot of the pane for as long
