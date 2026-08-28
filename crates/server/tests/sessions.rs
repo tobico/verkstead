@@ -13636,9 +13636,9 @@ async fn a_follow_up_that_goes_idle_without_asking_is_told_to_put_it_to_the_huma
          else: {said:?}",
     );
     assert!(
-        said[0].contains("nothing you print here reaches me"),
-        "and told it plainly, in the words somebody watching would have typed: \
-         {said:?}",
+        said[0].contains("summarize your current status"),
+        "and asked for where it had got to, in the words somebody watching \
+         would have typed: {said:?}",
     );
 
     // Which is what the rescue is for: the session takes another turn and puts
@@ -13990,7 +13990,7 @@ async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_stopped() {
     let said = told(&fixture, 1).await;
 
     assert!(
-        said[0].contains("nothing you print here reaches me"),
+        said[0].contains("summarize your current status"),
         "the same line, in the words somebody watching would have typed: \
          {said:?}",
     );
@@ -14028,7 +14028,7 @@ async fn an_inline_session_that_goes_quiet_without_committing_is_told_and_then_s
     let said = told(&fixture, 1).await;
 
     assert!(
-        said[0].contains("nothing you print here reaches me"),
+        said[0].contains("summarize your current status"),
         "the same line, in the words somebody watching would have typed: \
          {said:?}",
     );

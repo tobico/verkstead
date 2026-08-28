@@ -9,9 +9,9 @@
 //!
 //! **So it is spoken to.** Verkstead types a canned line into the running
 //! session — through the terminal a watcher's keystrokes go through, which is the
-//! only way in there is — telling it plainly what it cannot see from inside: that
-//! nothing it prints reaches anybody, and that a Set is the whole of how the
-//! human is spoken to. An agent that had finished its turn takes another one.
+//! only way in there is — asking it for the one move that reaches the human:
+//! where it has got to, put to them as a Set. An agent that had finished its
+//! turn takes another one.
 //!
 //! **Twice at most**, because the second time it fails to work is evidence rather
 //! than bad luck. What follows is a stop like any other: the Conversation lands
@@ -39,7 +39,7 @@
 //! own Capture holds the line and whatever the agent made of it.
 
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::AppState;
 use crate::runner::{Landing, Pace};
@@ -56,16 +56,31 @@ pub(crate) const AT_MOST: usize = 2;
 ///
 /// Written to the agent as the human would write it, because that is what it is:
 /// a line arriving at the session's own terminal, indistinguishable from one
-/// somebody watching had typed. What it says is the one thing an agent cannot
-/// find out from inside its own session — that the screen it is printing to has
-/// nobody in front of it.
+/// somebody watching had typed. What it asks for is the one move that reaches
+/// the human at all — a Set — and it asks for nothing else, because everything
+/// else a line like this could say about the session is a guess made from
+/// outside it.
 ///
 /// One line and no newline of its own. The Enter is [`rescue`]'s, and a line
 /// broken over two would be submitted half-written.
-pub(crate) const LINE: &str = "I am not at this terminal and nothing you print here reaches me — the only thing I ever \
-     see is a Question Set you send with `verkstead ask`. You have gone quiet with none of them \
-     open, so there is nothing here for me to answer and no way for me to say we are done. Put \
-     what you are waiting on to me as a Set now, with an ordinary postscript under it.";
+pub(crate) const LINE: &str =
+    "Please summarize your current status and ask me what to do next via `verkstead ask`.";
+
+/// How long the line is left sitting in the session's composer before the Enter
+/// is typed after it.
+///
+/// **Because an agent's terminal interface reads a burst as a paste.** The
+/// interfaces Verkstead launches take a line and its carriage return arriving in
+/// one read for pasted text, and a return inside pasted text is a line break in
+/// what is being written rather than a send — which leaves the rescue sitting in
+/// the composer unsent, the session as quiet as it was, and Verkstead reading
+/// that as a session that would not ask. Typed a moment apart they are two
+/// keystrokes, which is what they are meant to be.
+///
+/// Long enough for the interface to have drawn the line and short enough that
+/// nothing else could have happened in between: this is one turnaround of a
+/// terminal, not a wait on anything.
+const BEFORE_THE_ENTER: Duration = Duration::from_millis(250);
 
 /// Type [`LINE`] into the session, and say whether it reached one.
 ///
@@ -98,10 +113,13 @@ pub(crate) async fn rescue(state: &AppState, conversation_id: i64, event_id: i64
         return false;
     };
 
-    // The carriage return an Enter arrives as, which is what a terminal
-    // application reads a line on — see the viewer's Screen, whose keystrokes
-    // take this same path.
-    screen.put_in(&format!("{LINE}\r")).await;
+    // The line first, and the carriage return an Enter arrives as a moment
+    // behind it — see [`BEFORE_THE_ENTER`], which is why the two are not one
+    // write. Both take the path a watcher's keystrokes take, which is the whole
+    // of the way into a running session.
+    screen.put_in(LINE).await;
+    tokio::time::sleep(BEFORE_THE_ENTER).await;
+    screen.put_in("\r").await;
 
     tracing::info!(
         conversation_id,
@@ -273,7 +291,7 @@ pub(crate) async fn until_it_will_not_ask(
 /// What a stop over a session that would not ask says beyond what it was doing.
 ///
 /// The rescue spent: it was idle with nothing open and nothing landed, it was
-/// told twice that a Question Set is the whole of how the human is spoken to,
+/// twice asked to say where it had got to and put the next move to the human,
 /// and it went on saying nothing. Which leaves a Conversation nobody can move —
 /// nothing to answer and nothing to read — so it stops rather than sitting
 /// there, and Resume is what the human has.
@@ -281,4 +299,4 @@ pub(crate) async fn until_it_will_not_ask(
 /// [`crate::stopping::Decided::Verkstead`] wherever it is written: Verkstead
 /// looked at this session and decided it was not going to ask.
 pub(crate) const WOULD_NOT_ASK: &str = "the session went quiet without asking you anything or finishing what it was doing, and \
-     asked nothing after being told twice that a Question Set is the only thing that reaches you";
+     asked nothing after being told twice to say where it had got to and ask you what to do next";

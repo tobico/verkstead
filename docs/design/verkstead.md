@@ -86,9 +86,12 @@ flowchart LR
   show for itself leaves a conversation nobody can move: the human sees only
   what arrives as a question set, and none has. So Verkstead types a canned
   line into the running session — the channel a watcher's keystrokes take —
-  telling it that nothing it prints reaches anybody and to put what it is
-  waiting on as a set. Twice at most; a session still saying nothing after the
-  second stops the conversation with a notice saying it would not ask.
+  asking it to summarize where it has got to and ask what to do next, as a set.
+  The line and the enter after it are typed a moment apart, because an agent's
+  terminal interface reads the two arriving together as a paste and a return
+  inside a paste is a line break rather than a send. Twice at most; a session
+  still saying nothing after the second stops the conversation with a notice
+  saying it would not ask.
   Follow-up is where it started, the state where an idle session is exactly the
   failure (*added 2026-08-27, building follow-ups*). It now watches **every
   session Verkstead launches**, one loop with the state's own done-indicator as
