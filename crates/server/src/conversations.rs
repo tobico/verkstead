@@ -856,10 +856,13 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             }];
 
             for companion in companions {
-                planned.push(plan(&data_dir, id, &branch, companion, &planned)?);
+                let beside =
+                    plan(&data_dir, id, &branch, companion, &planned).map_err(Unmade::grilling)?;
+
+                planned.push(beside);
             }
 
-            make(&planned)?;
+            make(&planned).map_err(Unmade::grilling)?;
 
             Ok((commit, recorded(&planned)))
         }
@@ -961,13 +964,53 @@ impl Checkout {
     /// How git refusing to make this checkout is refused back: the
     /// Conversation's own repository says only that git would not, and a
     /// companion says which repository it was.
-    fn refused(&self) -> GrillingStarted {
+    fn refused(&self) -> Unmade {
         match &self.companion {
-            Some((_, repo)) => GrillingStarted::Companion {
+            Some((_, repo)) => Unmade::Companion {
                 repo: repo.clone(),
                 why: CompanionRefusal::WorktreeRefused,
             },
-            None => GrillingStarted::WorktreeRefused,
+            None => Unmade::Own,
+        }
+    }
+}
+
+/// Why a start's checkouts could not be made, before it is put in the words of
+/// whichever press asked.
+///
+/// [`Unready`]'s shape and for its reason: two presses take a Draft past
+/// drafting — starting a grilling and adopting a stage — and each of them makes
+/// the Conversation's own checkout and one per companion by the same rules. What
+/// differs is only what the answer is called, so the reading is made once here
+/// and spelled twice below.
+enum Unmade {
+    /// The Conversation's own checkout: git would not make the worktree.
+    ///
+    /// One case rather than four, because it is the only one of the four that
+    /// reaches here. What the branch comes off and whether the name is free are
+    /// asked of the Conversation's own repository before the list is built, and
+    /// each press has its own words for those already.
+    Own,
+
+    /// One of its companions, named — because *which one* is the whole of what
+    /// the human needs.
+    Companion { repo: String, why: CompanionRefusal },
+}
+
+impl Unmade {
+    /// Said to the press that starts a grilling.
+    fn grilling(self) -> GrillingStarted {
+        match self {
+            Unmade::Own => GrillingStarted::WorktreeRefused,
+            Unmade::Companion { repo, why } => GrillingStarted::Companion { repo, why },
+        }
+    }
+
+    /// And to the press that adopts a stage.
+    fn adopting(self) -> Adopted {
+        match self {
+            Unmade::Own => Adopted::WorktreeRefused,
+            Unmade::Companion { repo, why } => Adopted::Companion { repo, why },
         }
     }
 }
@@ -992,9 +1035,9 @@ fn plan(
     branch: &str,
     companion: store::Companion,
     planned: &[Checkout],
-) -> Result<Checkout, GrillingStarted> {
+) -> Result<Checkout, Unmade> {
     let repo = companion.repo.path.clone();
-    let refused = |why| GrillingStarted::Companion {
+    let refused = |why| Unmade::Companion {
         repo: companion.repo.name.clone(),
         why,
     };
@@ -1003,7 +1046,7 @@ fn plan(
         tracing::error!(
             said,
             repo = %repo.display(),
-            "fetching a companion Repo's remotes failed, so the grilling is not being started",
+            "fetching a companion Repo's remotes failed, so the start is not being made",
         );
 
         return Err(refused(CompanionRefusal::FetchFailed));
@@ -1054,12 +1097,12 @@ fn plan(
 /// Make every checkout of a start, or unmake the ones already made and say which
 /// one would not be.
 ///
-/// The one place a grill start creates anything, which is what makes *leaves
+/// The one place either press creates anything, which is what makes *leaves
 /// nothing behind* something to hold rather than something to hope for. What is
 /// unwound is directory and branch together — see [`worktrees::unmake`] —
 /// because a branch cut moments ago by a start that then refused holds nothing
 /// worth keeping.
-fn make(planned: &[Checkout]) -> Result<(), GrillingStarted> {
+fn make(planned: &[Checkout]) -> Result<(), Unmade> {
     for (nth, checkout) in planned.iter().enumerate() {
         let made = match &checkout.branch {
             Some(branch) => {
@@ -1147,6 +1190,14 @@ fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
 /// with nothing checked out is a Conversation nothing can run and nothing will
 /// clean up, where a directory the store does not know about is a directory to
 /// tidy.
+///
+/// **And the companions are checked out with it**, by the same [`plan`],
+/// [`make`] and [`recorded`] a grill start uses. An adopting Conversation
+/// drafts like any other and its setup card configures companions like any
+/// other's, and this is the other press that takes a Draft past drafting — so a
+/// stage adopted without them would be a session quietly missing a repository
+/// the human put there. Refused by name where one cannot be delivered, and
+/// nothing left behind: the branch and every directory are unmade together.
 ///
 /// The Timeline gets both records — the stage brief as the Brief, and what was
 /// adopted from where — and the planning session comes last, exactly as it does
@@ -1268,18 +1319,51 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     let branch = stage.branch();
     let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch);
 
+    // Every checkout the stage needs, planned before any of it is made: the
+    // branch off the commit above, and one per companion the human configured
+    // while this was drafting. An adopting Conversation is a Draft like any
+    // other, so its setup card put those rows there like any other's — and
+    // adoption is the other press that takes a Draft past drafting, so it is the
+    // other press that owes them a directory. Without this the stage would run
+    // with companions the sandbox skips in silence.
+    //
+    // The same [`plan`], [`make`] and [`recorded`] a grill start uses, at the
+    // stage's own branch: a read-write companion mirrors that where its row
+    // names nothing, so the branch cut beside the stage is the stage's own.
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
         let branch = branch.clone();
         let commit = commit.clone();
+        let data_dir = state.data_dir.clone();
+        let companions = conversation.companions.clone();
 
-        move || worktrees::add(&repo, &path, &branch, &commit)
+        move || {
+            let mut planned = vec![Checkout {
+                companion: None,
+                repo,
+                path,
+                branch: Some(branch.clone()),
+                commit,
+            }];
+
+            for companion in companions {
+                let beside =
+                    plan(&data_dir, id, &branch, companion, &planned).map_err(Unmade::adopting)?;
+
+                planned.push(beside);
+            }
+
+            make(&planned).map_err(Unmade::adopting)?;
+
+            Ok(recorded(&planned))
+        }
     })
     .await?;
 
-    if !made {
-        return Ok(Adopted::WorktreeRefused);
-    }
+    let checkouts = match made {
+        Ok(checkouts) => checkouts,
+        Err(refusal) => return Ok(refusal),
+    };
 
     // And now the store, in the order the record is read in: the branch it is on,
     // the Brief it works from, and then the move that freezes both. Adoption
@@ -1288,9 +1372,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     store::rename_branch(pool, id, &branch).await?;
     store::save_brief(pool, id, &stage.brief).await?;
 
-    // And no companion checkouts: adoption makes the Conversation's own worktree
-    // and nothing beside it, so there is nowhere for one to have been put.
-    match store::start_stage(pool, id, &commit, &path, None, &[]).await? {
+    // The companion checkouts with it, in the transaction that makes it a stage
+    // — the reason [`crate::continuing`] writes its own there: a Conversation
+    // that said it was implementing without saying where its companions went
+    // would be one nothing could bind into a sandbox and nothing would come back
+    // and remove.
+    match store::start_stage(pool, id, &commit, &path, None, &checkouts).await? {
         store::Staged::Started => {}
         store::Staged::NoSuchConversation => return Ok(Adopted::NoSuchConversation),
         store::Staged::NotDrafting => return Ok(Adopted::NotDrafting),

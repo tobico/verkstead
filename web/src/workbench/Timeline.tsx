@@ -191,7 +191,12 @@ const GRILL_REFUSAL: Record<
 
 /// And the same four failings over a companion repo, which say the same things
 /// about a different repository.
-const COMPANION_REFUSAL: Record<CompanionRefusal, string> = {
+///
+/// Exported because both presses that take a draft past drafting meet them:
+/// starting a grilling and adopting a stage each check the companions out, so
+/// each is refused by these four names — see `adoptRefusal` in
+/// [`Adoption`](./Adoption.tsx).
+export const COMPANION_REFUSAL: Record<CompanionRefusal, string> = {
   FetchFailed:
     "Git could not fetch from its remote, so nothing was started. The server log says why.",
   NoBaseCommit: "It has nothing to check out any more.",

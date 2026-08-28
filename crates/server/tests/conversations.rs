@@ -5173,6 +5173,139 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
     );
 }
 
+/// And the companions the human configured while it drafted are checked out
+/// with it, exactly as a grill start's are.
+///
+/// An adopting Conversation is a Draft like any other, so its setup card put
+/// those rows there like any other's — and adoption is the other press that
+/// takes a Draft past drafting. Without this the stage would reach Implementing
+/// with rows the sandbox skips in silence, which is a session quietly missing a
+/// repository the human put there.
+#[tokio::test]
+async fn adopting_checks_out_the_companions_it_was_configured_with() {
+    let (watched, dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let reading = second_repo(&app, watched.path(), "askance").await;
+    let writing = second_repo(&app, watched.path(), "granit").await;
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+
+    add_companion(&app, id, reading).await;
+    add_companion(&app, id, writing).await;
+    companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
+
+    assert!(
+        opened(&app, id)
+            .await
+            .companions
+            .iter()
+            .all(|companion| companion.worktree.is_none()),
+        "nothing has been checked out while it drafts",
+    );
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.branch, "implementation");
+    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(companions(&app, id).await, ["askance", "granit"]);
+
+    // The read-only one is detached at whatever its base came to, and holds no
+    // branch in somebody else's repository.
+    let askance = watched.path().join("askance");
+    let detached = checked_out(&view, "askance");
+
+    assert_eq!(
+        git(&detached, &["rev-parse", "HEAD"]).trim(),
+        git(&askance, &["rev-parse", "HEAD"]).trim(),
+    );
+    assert_eq!(
+        companion(&view, "askance").base_commit.as_deref(),
+        Some(git(&askance, &["rev-parse", "HEAD"]).trim()),
+        "and the record says which commit that was, nothing else being able to",
+    );
+    assert!(!has_branch(&askance, &view.branch));
+
+    // And the read-write one is on a branch of its own, mirroring the stage's
+    // own rather than the name the row was invented under.
+    let granit = watched.path().join("granit");
+    let worked = checked_out(&view, "granit");
+
+    assert_eq!(
+        git(&worked, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        "implementation",
+    );
+    assert!(has_branch(&granit, "implementation"));
+
+    // Both under the data directory, and both registered with git — which is
+    // what makes them worktrees rather than copies.
+    for path in [&detached, &worked] {
+        assert_eq!(
+            path.parent(),
+            Some(dir.path().join("worktrees").as_path()),
+            "{path:?}",
+        );
+    }
+
+    assert!(worktrees(&askance).contains(&detached.canonicalize().unwrap()));
+    assert!(worktrees(&granit).contains(&worked.canonicalize().unwrap()));
+}
+
+/// And a companion adoption cannot deliver refuses the press by name, leaving
+/// the Conversation drafting with nothing checked out anywhere.
+///
+/// The grill start's four refusals at the other door, said in the words of the
+/// press that was made: the human is standing at Adopt, and *which repository*
+/// is the whole of what they need.
+#[tokio::test]
+async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let writing = second_repo(&app, watched.path(), "askance").await;
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+
+    add_companion(&app, id, writing).await;
+    companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
+
+    // Somebody else's branch, by the name the companion's would take: the
+    // stage's own slug, which is what mirroring comes to here.
+    let askance = watched.path().join("askance");
+    git(&askance, &["branch", "implementation"]);
+
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::Companion {
+            repo: "askance".to_owned(),
+            why: CompanionRefusal::BranchExists,
+        },
+    );
+
+    // The press did not happen: still drafting, nothing checked out anywhere,
+    // and the stage's own branch never cut either — every question is asked
+    // before any of them is answered.
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert!(view.worktree.is_none());
+    assert!(companion(&view, "askance").worktree.is_none());
+    assert!(!has_branch(&repo, "implementation"));
+    assert_eq!(
+        worktrees(&askance).len(),
+        1,
+        "only the companion repository itself",
+    );
+}
+
 /// A stage Conversation steered into a second round is not a stage to adopt
 /// again. Adopting is how that work *started*, so a second press is not another
 /// adoption: what the steered round has is a Brief of its own, grilled the

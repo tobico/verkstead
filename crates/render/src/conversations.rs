@@ -2741,7 +2741,7 @@ pub enum SteerCompanionRefusal {
 /// something different for them to go and do. What is decided while nobody is
 /// watching says itself on a Timeline instead — see the server's `continuing`
 /// module, which starts the same stage by the other route.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Adopted {
     /// The branch and the worktree are made, the stage brief is the Brief, and
@@ -2807,6 +2807,22 @@ pub enum Adopted {
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.
     WorktreeRefused,
+
+    /// A companion repo could not be checked out beside the stage's own, and
+    /// this is which one and why.
+    ///
+    /// A Conversation adopting a roadmap is drafting like any other, so its
+    /// setup card configures companions like any other — and adoption is the
+    /// other press that takes a Draft past drafting, so it checks them out
+    /// exactly as a grill start does. Which is why this is
+    /// [`GrillingStarted::Companion`] word for word: the same four questions
+    /// asked of the same repositories at the other door.
+    Companion {
+        /// The Repo's registered name.
+        repo: String,
+
+        why: CompanionRefusal,
+    },
 }
 
 /// What became of pressing Stop or Force stop.

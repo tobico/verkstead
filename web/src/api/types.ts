@@ -64,7 +64,11 @@ stage_title: string, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused";
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+/**
+ * The Repo's registered name.
+ */
+repo: string, why: CompanionRefusal, } };
 
 /**
  * The stage an adoption would start, named.
