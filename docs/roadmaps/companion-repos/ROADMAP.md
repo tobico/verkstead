@@ -21,5 +21,5 @@ builds on all three — it steers and inherits what they made.
 
 - [x] 01: Foundations — [brief](01-foundations.md)
 - [x] 02: Visibility — [brief](02-visibility.md)
-- [ ] 03: Pipeline — [brief](03-pipeline.md) *(in progress: `pipeline`)*
-- [ ] 04: Steer and stages — [brief](04-steer-and-stages.md)
+- [x] 03: Pipeline — [brief](03-pipeline.md)
+- [ ] 04: Steer and stages — [brief](04-steer-and-stages.md) *(in progress: `steer-and-stages`)*
