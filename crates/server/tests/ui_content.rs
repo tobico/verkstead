@@ -1766,7 +1766,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             lines: 3,
             // The turns of the Transcript written just below, which is what the
             // relay would have counted as it followed the log: everything there
-            // but the one line of the backend's own bookkeeping.
+            // but the two lines of the backend's own bookkeeping.
             turns: Some(6),
             latest: "What should happen to a delivery that has failed forty times?".to_owned(),
         },
@@ -1778,7 +1778,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // which is what the pane draws instead of the bytes wherever there is one.
     // The lines are the shape a backend writes them in, because that is what the
     // renderer reads — and one of everything, because what the pane has to draw
-    // is one of everything.
+    // is one of everything: the two lines it folds away, the known kind and the
+    // one nobody here has heard of, and the block inside a turn that it does
+    // not know and shows where it was said.
     store::append_transcript(
         &pool,
         capture,
@@ -1789,7 +1791,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"rg -n 'retry' crates/server/src","description":"Find where a delivery is retried"}}]}}"#.to_owned(),
             r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","is_error":false,"content":"crates/server/src/queue.rs:118:    retry(delivery).await;"}]}}"#.to_owned(),
             r#"{"type":"attachment","attachment":{"type":"todos","content":"three things still to do"}}"#.to_owned(),
-            r#"{"type":"divination","omen":"a kind from a version nobody here has met"}"#.to_owned(),
+            r#"{"type":"atis-latch","latched":"a kind from a version nobody here has met"}"#.to_owned(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"divination","omen":"a block from a version nobody here has met"}]}}"#.to_owned(),
         ],
     )
     .await
@@ -2106,7 +2109,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::stop(
         &pool,
         tasked,
-        store::Decision::Deliberate,
+        // Verkstead's own brake: a session exited 1 and nobody pressed anything,
+        // which is the stop the accent badge is for.
+        store::Decision::Verkstead,
         "**The task in .tasks/03-commit-events.md** stopped.\n\n\
          the session exited with status 1\n\n\
          ### The worktree\n\n\
@@ -2200,7 +2205,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::stop(
         &pool,
         waiting,
-        store::Decision::Deliberate,
+        store::Decision::Verkstead,
         &format!(
             "**Implementing the work** stopped.\n\n\
              the account **{}** was being spent is out of window: {printed}\n\n\
@@ -2310,6 +2315,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap();
 
+    // And how its checks are getting on, which the checks watcher writes down on
+    // every poll — recorded here rather than watched for, as the pull request
+    // above is. Still running, which is the ordinary state of a wrap-up: the
+    // suite is what it is waiting on.
+    store::record_check_rollup(&pool, wrapping, store::Rollup::Running)
+        .await
+        .unwrap();
+
     write(
         "conversation-wrapping.json",
         &pin_health(&pin_timeline(
@@ -2329,6 +2342,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap();
     }
     store::finish_wrap_up(&pool, wrapping).await.unwrap();
+
+    // The suite went green on the way, which is what settling the checks above
+    // means: the last thing the watcher wrote down before it stopped watching,
+    // and what the card on a finished Conversation goes on showing.
+    store::record_check_rollup(&pool, wrapping, store::Rollup::Passed)
+        .await
+        .unwrap();
 
     store::steer_conversation(
         &pool,

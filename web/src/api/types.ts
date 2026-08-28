@@ -415,6 +415,26 @@ export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
 export type Capture = { text: string, };
 
 /**
+ * How a pull request's checks are getting on, taken all together.
+ *
+ * The store's own word, carried across the wire — see the reading behind it
+ * there. Three states and no fourth: *nobody has asked* is the absence of one
+ * rather than a variant, which is a card with no icon on it.
+ */
+export type CheckRollup = "Passed" | "Running" | "Failed";
+
+/**
+ * How one check is getting on.
+ *
+ * The same three words as [`CheckRollup`] and not the same thing: this is one
+ * check and that is a whole suite taken together. Three rather than GitHub's
+ * dozen, because three is what anybody does anything about — a red one is the
+ * thing to go and look at, one still running is nothing to do yet, and the
+ * rest are green.
+ */
+export type Checked = "Passed" | "Running" | "Failed";
+
+/**
  * A commit as the Timeline shows it: what it was called, and how much of the
  * repository it moved.
  *
@@ -526,11 +546,11 @@ export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversatio
  *
  * Where it has got to is drawn rather than worded — a turning ring for a
  * session getting on with it, the same ring empty for one that has gone quiet,
- * a dot for a Conversation that wants answering, a dotted border for a draft
- * and a dimmed card for work that has stopped. Which is why the facts below are
- * facts and not one collapsed verdict: the row says what is true of the
- * Conversation, and which mark that comes out as is the one rule the viewer
- * keeps.
+ * a dot for a Conversation that wants answering or has news on it, a dotted
+ * border for a draft and a dimmed card for work that has stopped. Which is why
+ * the facts below are facts and not one collapsed verdict: the row says what is
+ * true of the Conversation, and which mark that comes out as is the one rule
+ * the viewer keeps.
  */
 export type ConversationEntry = { id: number, branch: string, 
 /**
@@ -576,7 +596,22 @@ waiting: boolean,
  * The row draws no state in words, so what this comes out as is the label
  * read aloud — *Waiting on checks* where the plain state word would be.
  */
-waiting_on_checks: boolean, };
+waiting_on_checks: boolean, 
+/**
+ * Whether Verkstead has told the human something about this Conversation
+ * that they have not looked at yet.
+ *
+ * One thing writes it: the wrap-up that carries a Conversation to Done and
+ * pushes the news to the devices, in the same breath as the push. A
+ * milestone nobody was watching happen is what a mark saying *look here*
+ * is for, and a Done the human steered to themselves is what it is not.
+ *
+ * Beside `waiting` rather than folded into it, because the row draws one
+ * disc for the two and says which of them it is in the label read aloud:
+ * *something wants you* against *there is news here*. Cleared by opening
+ * the Conversation, which the browser says in a call of its own.
+ */
+unseen: boolean, };
 
 /**
  * What became of submitting one.
@@ -686,6 +721,24 @@ ready_to_resume: boolean,
  */
 ready_to_stop: boolean, 
 /**
+ * And whether a stop has already been asked for and is waiting for the step
+ * the run is on to finish.
+ *
+ * What takes **Stop** off the menu, the press having been made: it is
+ * recorded, the run halts the moment the step lands, and a row still
+ * offering it would be Verkstead asking for a decision it already has.
+ * Force stop is left where it is — it is the escalation from here, and the
+ * one thing a human who has changed their mind about waiting can still
+ * press.
+ *
+ * Beside [`ready_to_stop`] rather than folded into it, because the two say
+ * different things: that one is *there is a run to stop*, which is what
+ * draws Force stop, and this is *and you have already said so*.
+ *
+ * [`ready_to_stop`]: ConversationView::ready_to_stop
+ */
+stop_asked: boolean, 
+/**
  * And whether a steer into Implementing has anything to carry on: the
  * branch holds a backlog with work left in it, or a roadmap it has
  * written.
@@ -749,8 +802,28 @@ direction: Direction | null,
  *
  * *Blocked on you* is a badge on an active state and never a state of its
  * own, which is why this sits beside `state` rather than in it.
+ *
+ * Set for every stop, however it stopped. Which of the two marks the
+ * header draws is `stopped_by_hand` below — both of them point here, a
+ * stop the human has to find being the same Notice as a stop they made
+ * themselves.
  */
 blocked_on: number | null, 
+/**
+ * Whether that stop is the human's own press, or a row from before the
+ * two were told apart and read as one.
+ *
+ * Which of the two marks the header draws, decided here rather than in the
+ * browser: `false` is the accent *Blocked on you* badge — Verkstead pulled
+ * the brake, or a crash took the driver away — and `true` is the quiet
+ * **Stopped** label, which goes to the same Notice and says nothing about
+ * anybody waiting. The sidebar's disc follows the same rule from its own
+ * end of the wire, where the row's `waiting` has already folded it in.
+ *
+ * `false` where nothing has stopped, which is the ordinary Conversation:
+ * there is no mark to choose between.
+ */
+stopped_by_hand: boolean, 
 /**
  * Whether the wrap-up has narrowed to its checks: the review answered, the
  * comments dealt with, the checks alone outstanding, and nothing running in
@@ -1175,6 +1248,26 @@ export type Prose = {
 id: number, html: string, };
 
 /**
+ * One check GitHub is running against a pull request, as the details pane
+ * receives it: what it is called, how it is getting on, and where its run is.
+ *
+ * A line of a list GitHub keeps, in the spirit [`PullRequestCommit`] is one:
+ * read at the moment the pane is opened rather than written down, because a
+ * suite is still running while the human is looking at it.
+ */
+export type PullRequestCheck = { 
+/**
+ * What GitHub calls it, which is what the human calls it by.
+ */
+name: string, how: Checked, 
+/**
+ * Where its run is, as GitHub gave it — the one thing a red check cannot
+ * be read without. Empty where GitHub gave none, which is a check drawn as
+ * its name and nothing to follow.
+ */
+link: string, };
+
+/**
  * One comment on a pull request: who said it, when, and what they said.
  *
  * The body arrives rendered, like everything else an outsider wrote — a comment
@@ -1213,8 +1306,8 @@ sha: string,
 subject: string, };
 
 /**
- * What is on a pull request now: the commits it carries, and what has been said
- * about it.
+ * What is on a pull request now: the commits it carries, what GitHub is running
+ * against it, and what has been said about it.
  *
  * Its own request rather than a field on the Conversation, for the reason a
  * commit's diff is one — and for a further reason of its own: reading this is
@@ -1229,7 +1322,17 @@ export type PullRequestDetails = {
 /**
  * Oldest first, as GitHub lists them, which is the order they landed.
  */
-commits: Array<PullRequestCommit>, comments: Array<PullRequestComment>, };
+commits: Array<PullRequestCommit>, comments: Array<PullRequestComment>, 
+/**
+ * Every check GitHub is running against it, in the order GitHub lists
+ * them. Empty where there are none, which is a repository with no CI.
+ *
+ * Each of them rather than the one word the card draws — see
+ * [`CheckRollup`]. What the card has room for is which of the three a
+ * suite is; this is the pane somebody opens to find out *which* check is
+ * red and where its run is.
+ */
+checks: Array<PullRequestCheck>, };
 
 /**
  * The pull request as the Timeline shows it: what it is called and what number
@@ -1260,7 +1363,21 @@ title: string,
  * The whole URL, because merging is the human's act and this is the way to
  * where they do it.
  */
-url: string, };
+url: string, 
+/**
+ * How the checks on it were getting on the last time anything asked, or
+ * nothing where nothing has — a pull request in a repository with no CI,
+ * and one opened before Verkstead started writing this down.
+ *
+ * The aggregate rather than the checks, because what the card has room for
+ * is one icon: which of the three a suite is, and not what each of them is
+ * called.
+ *
+ * It can be stale, and on a Conversation nothing is watching any more it
+ * will be: what keeps it fresh is the checks watcher, and that stops when
+ * the wrap-up is over.
+ */
+checks: CheckRollup | null, };
 
 /**
  * The public half of the server's VAPID keypair, base64url-encoded from the
@@ -1979,9 +2096,19 @@ export type TaskDocument = {
  */
 number: string, title: string, 
 /**
- * The document rendered and sanitized, or `null` where there is no file to
- * render — which is a task that is done, the file going being what says so.
- * The pane says as much in words rather than drawing a gap.
+ * Whether the task is finished, which is the entry's checkbox — see
+ * [`TaskEntry::done`]. Carried on the document because a finished task
+ * still has one: its file stays in `.tasks/` until the feature is over, so
+ * the done state is something the section says about itself rather than the
+ * reason it is empty. The same way round as a stage's — see
+ * [`StageDocument::done`].
+ */
+done: boolean, 
+/**
+ * The document rendered and sanitized, or `null` where there is nothing to
+ * render. Not the ordinary end of a task's life but the list pointing at a
+ * file nobody wrote, which the pane says in words rather than drawing a
+ * gap.
  */
 html: string | null, };
 
@@ -1997,9 +2124,10 @@ export type TaskEntry = {
  */
 number: string, title: string, 
 /**
- * Whether the task is finished, which is the task file having gone from
- * `.tasks/`. That is the done-signal the task runner turns on, and a
- * checkbox is how an entry is written rather than what says it is done.
+ * Whether the task is finished, which is the entry's own checkbox. That is
+ * the done-signal the task runner turns on, and it is the list saying so
+ * rather than anything the directory beside it happens to hold — a task
+ * whose document has not been written yet is a task nobody has done.
  */
 done: boolean, };
 
@@ -2175,7 +2303,10 @@ cursor: string, };
 export type Turn = { "kind": "Prose" } & Prose | { "kind": "Reasoning" } & Reasoning | { "kind": "ToolUse" } & ToolUse | { "kind": "ToolResult" } & ToolResult | { "kind": "Put" } & Put | { "kind": "Unread" } & Unread;
 
 /**
- * A line nothing here knows how to draw.
+ * Something nothing here knows how to draw, in the conversation where it was
+ * found: a block of an unknown type inside a turn, a line that is not JSON at
+ * all, or one that does not say what type it is. A whole line whose type is
+ * merely unknown is not one of these — it folds away as [`Bookkeeping`].
  */
 export type Unread = { 
 /**

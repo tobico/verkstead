@@ -162,8 +162,8 @@ async fn sweep(state: &AppState) {
 ///
 /// [`store::Decision::Circumstance`], because that is what a stall is: nobody
 /// decided to stop, a driver went away. What that buys is a restart free to
-/// start the work again without asking — a deliberate stop is the one that
-/// waits for a press.
+/// start the work again without asking — a stop somebody decided is the one
+/// that waits for a press.
 async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
     tracing::warn!(
         conversation_id,

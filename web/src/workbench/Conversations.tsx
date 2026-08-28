@@ -174,12 +174,18 @@ export function Conversations(props: {
   // pointer event and the next.
   let press: {
     id: number;
+    pointer: number;
     x: number;
     y: number;
     touch: boolean;
     lifted: boolean;
     waiting?: ReturnType<typeof setTimeout>;
   } | null = null;
+
+  // What takes the drag's listeners back off the window, or null while nothing
+  // is pressed. They are made per press — each of them closes over the press it
+  // belongs to — so what removes them is made alongside them.
+  let stop: (() => void) | null = null;
 
   // Whether the press that has just ended moved a card. The click arrives after
   // the pointer is up, and a card dragged into place should not open as well.
@@ -229,13 +235,21 @@ export function Conversations(props: {
     // The primary button, a finger or a pen. A right-click is not a drag.
     if (event.button !== 0) return;
 
-    // Every move from here reaches this card, whatever the pointer ends up
-    // over — including the gap between two rows and the world outside the
-    // sidebar.
+    // A press whose ending never reached us is over the moment another begins.
+    // Nothing should get this far with one still in flight — every way a drag
+    // can end is listened for below — and one left standing would be a list
+    // held by a hand that is no longer on it.
+    drop();
+
+    // The card keeps the pointer for the length of the drag, so nothing it is
+    // carried over lights up under a hand that is already holding something —
+    // and so the browser has something to say, below, on the day it takes the
+    // pointer back. Where the drag is actually watched is the window.
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 
     const began: NonNullable<typeof press> = {
       id,
+      pointer: event.pointerId,
       x: event.clientX,
       y: event.clientY,
       touch: event.pointerType !== "mouse",
@@ -243,6 +257,33 @@ export function Conversations(props: {
     };
     press = began;
     reordered = false;
+
+    // The rest of the gesture is watched at the window rather than at the card,
+    // which is what the pane dividers next door do: a pointer that has outrun
+    // the card is still dragging it, and a release out beyond the sidebar — or
+    // beyond the window — is still the release. Lost capture is listened for
+    // as well, for the endings that are neither: a card taken out from under
+    // the hand by a re-render, or a gesture the browser has taken over. Every
+    // one of them puts the card down, so there is no way for a drag to end that
+    // leaves the list held.
+    const moved = (at: PointerEvent) => {
+      if (at.pointerId === began.pointer) drag(at);
+    };
+    const ended = (at: PointerEvent) => {
+      if (at.pointerId === began.pointer) drop();
+    };
+
+    stop = () => {
+      window.removeEventListener("pointermove", moved);
+      window.removeEventListener("pointerup", ended);
+      window.removeEventListener("pointercancel", ended);
+      window.removeEventListener("lostpointercapture", ended);
+    };
+
+    window.addEventListener("pointermove", moved);
+    window.addEventListener("pointerup", ended);
+    window.addEventListener("pointercancel", ended);
+    window.addEventListener("lostpointercapture", ended);
 
     // A finger lifts a card by holding still. No distance tells a drag from a
     // scroll on a phone — both of them are the finger moving — so what tells
@@ -269,10 +310,10 @@ export function Conversations(props: {
       }
 
       // A finger that travels before its card has lifted is scrolling the list,
-      // so the press is over and the browser has it.
+      // so the press is over and the browser has it. Nothing has lifted, so
+      // ending it here moves nothing and sends nothing.
       if (at.touch) {
-        clearTimeout(at.waiting);
-        press = null;
+        drop();
         return;
       }
 
@@ -288,14 +329,22 @@ export function Conversations(props: {
     setDragged(moved(order, at.id, to));
   };
 
-  /// The hand let go: what is on the screen is what the human meant, so that is
-  /// what is sent.
+  /// The drag is over: what is on the screen is what the human meant, so that
+  /// is what is sent.
+  ///
+  /// Every ending comes through here — the release, a cancel, a capture lost,
+  /// a press that turned out to be a scroll, and the next press finding this
+  /// one still standing — so there is one place the listeners come off and one
+  /// place the held card is put down.
   const drop = () => {
     const at = press;
+
+    stop?.();
+    stop = null;
+    press = null;
     if (!at) return;
 
     clearTimeout(at.waiting);
-    press = null;
     if (!at.lifted) return;
 
     document.removeEventListener("touchmove", refuse);
@@ -306,10 +355,14 @@ export function Conversations(props: {
     if (order) place.mutate(order);
   };
 
-  // A sidebar that goes away mid-drag takes its refusal of the scroll with it.
-  // Nothing else would ever take it off the document again: the drop that would
-  // have is on an element that is no longer there.
-  onCleanup(() => document.removeEventListener("touchmove", refuse));
+  // A sidebar that goes away mid-drag takes the whole drag with it: the
+  // listeners it hung on the window, and its refusal of the scroll. Nothing
+  // else would ever take those off again — what would have is a drop that is
+  // never coming.
+  onCleanup(() => {
+    stop?.();
+    document.removeEventListener("touchmove", refuse);
+  });
 
   /// A press that let go about where it landed is a click, and a click opens the
   /// Conversation. One that moved a card is not: the card is where they put it,
@@ -409,8 +462,6 @@ export function Conversations(props: {
                   held={held() === entry.id}
                   open={opened}
                   grab={grab}
-                  drag={drag}
-                  drop={drop}
                   step={step}
                   ask={ask}
                 />
@@ -458,13 +509,19 @@ export function Conversations(props: {
 /// A link rather than a button, and the only row of any menu that is one: the
 /// settings are a page of their own, so this is going somewhere in the way that
 /// opening a Conversation is not. Nothing here has to shut the menu — the
-/// navigation takes the whole sidebar with it.
+/// navigation takes the whole sidebar with it. First in the menu, because it is
+/// what the menu is for: the way out of the workbench is what the ⋯ was put
+/// there to hold, and the switch under it is a setting that came to sit beside
+/// it.
 ///
-/// Beside it, the one thing that is about this list rather than about the rest
+/// Under it, the one thing that is about this list rather than about the rest
 /// of Verkstead: whether the conversations the human has archived are drawn in
 /// it. A switch rather than a row that presses, because it is a state the list
 /// is in rather than something to do to it — and it stays where it is put, so
-/// the menu does not shut under a hand that may want it back.
+/// the menu does not shut under a hand that may want it back. *Show archived*
+/// rather than the whole sentence it used to be: the menu is over the list of
+/// conversations, so what else it could be showing does not have to be said,
+/// and two words fit on the one line a row of a menu is.
 function WorkbenchActions(): JSX.Element {
   const queries = useQueryClient();
 
@@ -505,9 +562,13 @@ function WorkbenchActions(): JSX.Element {
     >
       {() => (
         <>
+          <A role="menuitem" href="/settings">
+            Settings
+          </A>
+
           <div class={styles.showArchived}>
             <Toggle
-              label="Show archived conversations"
+              label="Show archived"
               on={on()}
               disabled={showing.isPending || flip.isPending}
               flip={(wanted) => flip.mutate(wanted)}
@@ -518,10 +579,6 @@ function WorkbenchActions(): JSX.Element {
               </ErrorLine>
             </Show>
           </div>
-
-          <A role="menuitem" href="/settings">
-            Settings
-          </A>
         </>
       )}
     </Menu>
@@ -772,10 +829,18 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
 /// Which mark a card carries at its right edge, or nothing where it carries
 /// none.
 ///
-/// Waiting wins, and never both: a Conversation whose session is sitting on a
+/// The disc wins, and never both: a Conversation whose session is sitting on a
 /// Blocking Ask is working *and* waiting, and of the two the one the human can
 /// do something about is the ask. So the dot is what a card shows the moment
 /// there is anything to answer, and a ring is what is left.
+///
+/// Two things draw that one disc, because they say the same thing to the person
+/// glancing down the list: *look here*. One is something waiting on them; the
+/// other is news they have not looked at yet — a wrap-up that carried the work
+/// to Done while nobody was watching, which is stamped on the Conversation at
+/// the moment the push goes out and comes off when they open it. Two marks for
+/// one instruction would be a list to decode rather than one to glance at, so
+/// which of the two it is is said in the label instead — see [`spoken`].
 ///
 /// Which of the two rings it is says whether that session is doing anything: the
 /// turning one while it prints, and the empty one once it has gone quiet — the
@@ -784,10 +849,20 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
 /// an ask for an hour turning a spinner is the case this is for, and the reason
 /// the empty ring is the quieter mark of the two.
 function mark(entry: ConversationEntry): "waiting" | "working" | "idle" | null {
-  if (entry.waiting) return "waiting";
+  if (entry.waiting || entry.unseen) return "waiting";
   if (entry.working) return entry.idle ? "idle" : "working";
   return null;
 }
+
+/// What the disc says, for the two things that draw it.
+///
+/// Waiting first where both are true: a Conversation with something to answer
+/// on it is asking for a reply, and one with news on it is only asking to be
+/// read. The one the human can do something about is the one worth saying.
+const DISC = {
+  waiting: "waiting on you",
+  unseen: "not looked at yet",
+} as const;
 
 /// What a row says when it is read aloud.
 ///
@@ -801,6 +876,10 @@ function mark(entry: ConversationEntry): "waiting" | "working" | "idle" | null {
 /// wherever it labels itself: the same ring should not mean one thing on a card
 /// and another on the row it opens.
 ///
+/// And the disc is where the two reasons for it are told apart, because the
+/// mark itself does not tell them apart: the words are [`DISC`], and waiting
+/// wins where both are true for the reason [`mark`] gives.
+///
 /// And a wrap-up down to its checks is said in place of the state word rather
 /// than beside it — *Waiting on checks* is what Wrapping has narrowed to, so
 /// saying both would be saying it twice. The words are [`WAITING_ON_CHECKS`],
@@ -810,7 +889,7 @@ function spoken(entry: ConversationEntry): string {
   const where = entry.waiting_on_checks ? WAITING_ON_CHECKS : STATE[entry.state];
   const said =
     which === "waiting"
-      ? `${where}, waiting on you`
+      ? `${where}, ${entry.waiting ? DISC.waiting : DISC.unseen}`
       : which
         ? `${where}, ${SPOKEN[which]}`
         : where;
@@ -842,6 +921,10 @@ function spoken(entry: ConversationEntry): string {
 /// and `drop` above — and the arrow keys do from the keyboard what the grip's
 /// did.
 ///
+/// The press is the whole of what the card hears about. Where the hand goes
+/// after it and where it lets go are the window's to say — a pointer that has
+/// outrun the card is still dragging it — so `grab` is the only handler here.
+///
 /// And it answers a right-click with what there is to do about the Conversation
 /// — see `ask` above. A mouse's gesture and only a mouse's: a finger has no
 /// right-click, and the long press it might have been is already how a card is
@@ -852,8 +935,6 @@ function ConversationRow(props: {
   held: boolean;
   open: (id: number) => void;
   grab: (event: PointerEvent, id: number) => void;
-  drag: (event: PointerEvent) => void;
-  drop: () => void;
   step: (id: number, by: number) => void;
   ask: (event: MouseEvent, id: number) => void;
 }): JSX.Element {
@@ -884,9 +965,6 @@ function ConversationRow(props: {
         aria-keyshortcuts="ArrowUp ArrowDown"
         onClick={() => props.open(props.entry.id)}
         onPointerDown={(event) => props.grab(event, props.entry.id)}
-        onPointerMove={props.drag}
-        onPointerUp={props.drop}
-        onPointerCancel={props.drop}
         onContextMenu={(event) => props.ask(event, props.entry.id)}
         onKeyDown={(event) => {
           if (event.key === "ArrowUp") {

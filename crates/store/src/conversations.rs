@@ -227,6 +227,14 @@ pub struct ConversationRow {
     /// nothing is running on it, which the caller already reads once for the
     /// whole sidebar rather than per row.
     pub narrowed_to_checks: bool,
+
+    /// Whether Verkstead has told the human something about this Conversation
+    /// they have not looked at yet — see [`super::stamp_unseen`], which is the
+    /// one thing that writes it.
+    ///
+    /// Read here rather than asked for per row, the way the two above are: the
+    /// mark is one `EXISTS` over a table with a row per Conversation at most.
+    pub unseen: bool,
 }
 
 /// The word the `kind` column holds for a Question Set.
@@ -1100,10 +1108,15 @@ async fn started(
 /// - A **Question Set with no Response and no lock** — an ask left open.
 ///   Blocking and Deferred alike: what draws the human is that there is
 ///   something answerable, not whether the asking session is idling on it.
-/// - A **stop**, which is a Conversation nothing is driving any more and which
-///   goes again only when the human says so — however it stopped, an account
-///   out of window included. A column on the row rather than a subselect, so
-///   the whole list costs one query.
+/// - A **stop that came from outside the human**, which is a Conversation
+///   nothing is driving any more and which goes again only when they say so —
+///   Verkstead's own brake, an account out of window, a driver a crash took
+///   away. Their own press is not one of them: it stops the run just the same
+///   and waits for the same press, but a mark saying *look here* about
+///   something they did themselves is what makes the marks worth ignoring. See
+///   [`super::Decision::waits_on_the_human`], which is that rule, and
+///   `stops::waited_on`, which is it said as the condition below. A column on
+///   the row rather than a subselect, so the whole list costs one query.
 ///
 /// A grilling waiting on its closing proposal is the first of them and not a
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
@@ -1114,9 +1127,22 @@ async fn started(
 /// which asks it of one Conversation — and a caller folding it itself would be
 /// issuing a query per row for something a subselect already has.
 ///
+/// And `unseen` rides along for the same reason a third time: whether Verkstead
+/// has told the human something about this Conversation that they have not
+/// looked at yet — see [`super::stamp_unseen`]. Not one of the waiting sources
+/// above, because the two say different things and the row says which in words:
+/// *something wants you* against *there is news here*.
+///
 /// A **Draft** is none of them, whatever else is true of it: it is waiting on
 /// the human in the ordinary sense, and the sidebar says so by drawing it as a
 /// draft rather than by marking it as an ask.
+///
+/// **Closed** is none of them either, and for the opposite reason: nothing is
+/// waiting because nothing is left. Closing shuts the Sets it found open — see
+/// the server's `conversations::close` — so what this excludes is mostly the
+/// stop the Conversation carried, which stays on the record as history. A
+/// **Done** Conversation is not excluded: its Sets are still answerable, and an
+/// answerable ask is still an ask.
 ///
 /// What the human has archived is not here at all, unless they have asked to be
 /// shown it — see [`super::archive_conversation`] and
@@ -1129,9 +1155,9 @@ async fn started(
 /// the choice would be a second place to get it wrong, and there is no other way
 /// the sidebar should ever be read.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
-    let rows: Vec<(i64, String, String, String, bool, bool)> = sqlx::query_as(
+    let rows: Vec<(i64, String, String, String, bool, bool, bool)> = sqlx::query_as(&format!(
         "SELECT c.id, c.branch, r.name, c.state,
-                c.state <> 'draft' AND (
+                c.state NOT IN ('draft', 'closed') AND (
                     EXISTS (
                         SELECT 1 FROM set_events s
                         JOIN timeline_events e ON e.id = s.event_id
@@ -1143,7 +1169,7 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                               SELECT 1 FROM archivings a WHERE a.set_id = s.set_id
                           )
                     )
-                    OR c.stopped_at IS NOT NULL
+                    OR ({stopped})
                 ) AS waiting,
                 c.state = 'wrapping'
                   AND EXISTS (
@@ -1157,7 +1183,11 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                   AND NOT EXISTS (
                       SELECT 1 FROM wrap_up_settled w
                       WHERE w.conversation_id = c.id AND w.waiting_on = 'checks'
-                  ) AS narrowed_to_checks
+                  ) AS narrowed_to_checks,
+                EXISTS (
+                    SELECT 1 FROM unseen_conversations u
+                    WHERE u.conversation_id = c.id
+                ) AS unseen
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
          LEFT JOIN placements m ON m.conversation_id = c.id
@@ -1166,22 +1196,26 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                    SELECT 1 FROM archived_conversations a WHERE a.conversation_id = c.id
                )
          ORDER BY m.place IS NULL DESC, m.place, c.id DESC",
-    )
+        stopped = super::stops::waited_on(),
+    ))
     .fetch_all(pool)
     .await
     .context("listing the Conversations")?;
 
     rows.into_iter()
-        .map(|(id, branch, repo, state, waiting, narrowed_to_checks)| {
-            Ok(ConversationRow {
-                id,
-                branch,
-                repo,
-                state: Lifecycle::read(&state)?,
-                waiting,
-                narrowed_to_checks,
-            })
-        })
+        .map(
+            |(id, branch, repo, state, waiting, narrowed_to_checks, unseen)| {
+                Ok(ConversationRow {
+                    id,
+                    branch,
+                    repo,
+                    state: Lifecycle::read(&state)?,
+                    waiting,
+                    narrowed_to_checks,
+                    unseen,
+                })
+            },
+        )
         .collect()
 }
 

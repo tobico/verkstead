@@ -404,6 +404,16 @@ Timeline events:
   `docs/roadmaps/` read live at the moment somebody looks, exactly as the pinned
   copy is. Conversations from before the rows existed are not backfilled: they
   keep their pinned cards alone.
+- **A checklist card shows five entries, not all of them** (*settled
+  2026-08-28, building design-fixes*): the task list and the stage list window
+  to five real entries centred on the first one that is not done, held inside
+  the list's ends — none of ten done shows 1–5, five of ten shows 4–8, nine of
+  ten shows 6–10, and a list with every box ticked shows its last five. A plain
+  ellipsis row marks whichever end has entries out of sight, and does not count
+  against the five. A card that grew with the backlog would push the record it
+  is pinned above off the screen; the progress line on it still counts the whole
+  list, and the details pane it opens still holds every entry, which is where
+  the whole list is read.
 - **A session's liveness is a mark rather than a word**, and the same mark
   everywhere it is said — the sidebar card, the agent-output row and the
   details pane above the record. A slowly turning ring while the session is

@@ -39,16 +39,33 @@ use sqlx::SqlitePool;
 
 use super::conversations::Event;
 
-/// Whether anybody chose to stop.
+/// Who stopped it.
 ///
-/// The one thing a restart has to know about a stop. What Verkstead pulled the
-/// brake on, or the human asked to stop, stays stopped until somebody says
-/// otherwise; what a crash took away is a Conversation nobody decided anything
-/// about, and starting it again is putting things back rather than overriding a
-/// decision.
+/// Two things follow from the word, and they are not the same question. A
+/// restart asks *did anybody decide this?* — what Verkstead pulled the brake on
+/// and what the human pressed both stay stopped until somebody says otherwise,
+/// and what a crash took away is a Conversation nobody decided anything about,
+/// so starting it again is putting things back rather than overriding a
+/// decision. The waiting marks ask something narrower: *is this stop the
+/// human's to look into?* A stop they made themselves is not — they were there
+/// — so the sidebar disc and the *blocked on you* badge are drawn only for the
+/// stops that came from outside them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
-    /// Verkstead pulled the brake, or the human asked it to stop.
+    /// Verkstead pulled the brake: a session that fell over, checks that would
+    /// not go green, a finish step with no pull request, an account out of
+    /// window.
+    Verkstead,
+
+    /// The human pressed Stop or Force stop.
+    Human,
+
+    /// A stop written before the two above were told apart, when both were
+    /// stored as one word.
+    ///
+    /// Nothing can say which of them it was, so it is read as the human's: the
+    /// marks are worth something only while they are rare, and a badge nobody
+    /// can explain is worse than a stop somebody has to go and find.
     Deliberate,
 
     /// Nothing chose anything: a restart or a crash took the driver away.
@@ -60,6 +77,8 @@ impl Decision {
     /// opened by hand says something.
     pub(crate) fn stored(self) -> &'static str {
         match self {
+            Self::Verkstead => "verkstead",
+            Self::Human => "human",
             Self::Deliberate => "deliberate",
             Self::Circumstance => "circumstance",
         }
@@ -70,11 +89,49 @@ impl Decision {
     /// state is.
     fn read(word: &str) -> Result<Self> {
         Ok(match word {
+            "verkstead" => Self::Verkstead,
+            "human" => Self::Human,
             "deliberate" => Self::Deliberate,
             "circumstance" => Self::Circumstance,
             other => bail!("a Conversation is stopped for the unknown reason {other:?}"),
         })
     }
+
+    /// Whether anybody decided it, which is the one thing a restart asks: what
+    /// somebody chose waits for a press, and what nobody chose is taken up
+    /// unasked.
+    #[must_use]
+    pub fn decided(self) -> bool {
+        !matches!(self, Self::Circumstance)
+    }
+
+    /// Whether the stop is one to draw the waiting marks for — the sidebar disc
+    /// and the *blocked on you* badge.
+    ///
+    /// A stop the human made themselves is not. It still waits for their press
+    /// like every other, but they pressed it: a mark saying *look here* would
+    /// be Verkstead telling them their own news, and what makes the marks worth
+    /// looking at is that they appear only where something happened without
+    /// them.
+    #[must_use]
+    pub fn waits_on_the_human(self) -> bool {
+        matches!(self, Self::Verkstead | Self::Circumstance)
+    }
+}
+
+/// The same rule as [`Decision::waits_on_the_human`], said as SQL about a
+/// Conversation row aliased `c`.
+///
+/// Here rather than in the sidebar's own query — see [`super::conversations`],
+/// its one reader — because the words are this module's. Built from
+/// [`Decision::stored`], so a query cannot go on asking for a word the writing
+/// half has stopped using.
+pub(crate) fn waited_on() -> String {
+    format!(
+        "c.stopped_at IS NOT NULL AND c.stopped_by IN ('{}', '{}')",
+        Decision::Verkstead.stored(),
+        Decision::Circumstance.stored(),
+    )
 }
 
 /// A stop, whole: what kind of stop it is, when it happened, which Event
@@ -175,6 +232,12 @@ const ASKED: &str = "stops_asked";
 /// could launch for either reason, and the first of them is the one that named
 /// its own Notice.
 ///
+/// A halt carries its own word across untouched — it was the same column then,
+/// and a word nothing here can improve on is one to leave alone. A Pause is
+/// written as [`Decision::Verkstead`], because there is nothing to guess about
+/// it: an open Pause is an account out of window, which is Verkstead pulling the
+/// brake, and it is exactly the kind of stop the human has to be told about.
+///
 /// Any of the tables may be missing altogether — a database made after this
 /// stage has none of them — which is nothing to do rather than a failure.
 async fn carried_over(pool: &SqlitePool) -> Result<()> {
@@ -204,7 +267,7 @@ async fn carried_over(pool: &SqlitePool) -> Result<()> {
                 SET stopped_at     = (SELECT e.at FROM pauses p
                                         JOIN timeline_events e ON e.id = p.event_id
                                        WHERE p.conversation_id = conversations.id AND p.resumed_at IS NULL),
-                    stopped_by     = '{deliberate}',
+                    stopped_by     = '{verkstead}',
                     stopped_notice = (SELECT p.event_id FROM pauses p
                                        WHERE p.conversation_id = conversations.id AND p.resumed_at IS NULL),
                     stopped_resets = (SELECT p.resets_at FROM pauses p
@@ -212,7 +275,7 @@ async fn carried_over(pool: &SqlitePool) -> Result<()> {
               WHERE stopped_at IS NULL
                 AND EXISTS (SELECT 1 FROM pauses p
                              WHERE p.conversation_id = conversations.id AND p.resumed_at IS NULL)",
-            deliberate = Decision::Deliberate.stored(),
+            verkstead = Decision::Verkstead.stored(),
         ))
         .execute(pool)
         .await

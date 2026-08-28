@@ -88,12 +88,19 @@ pub(crate) enum Decided<'a> {
 }
 
 impl<'a> Decided<'a> {
-    /// What the record keeps, which is only whether anybody chose — see
-    /// [`store::Decision`]. Verkstead and the human are one thing to a restart:
-    /// both are decisions, and neither is a server's to overturn.
+    /// What the record keeps — see [`store::Decision`], which is the same four
+    /// words with the account that ran out folded back into Verkstead's brake:
+    /// what a stop *shows* about a window coming back is `resets` below, and
+    /// who pulled the brake is Verkstead either way.
+    ///
+    /// Verkstead and the human are one thing to a restart, both being decisions
+    /// and neither a server's to overturn. They are two to the waiting marks,
+    /// which is why the record keeps them apart rather than folding them the
+    /// way it once did.
     fn decision(self) -> store::Decision {
         match self {
-            Self::Verkstead | Self::OutOfWindow { .. } | Self::Human => store::Decision::Deliberate,
+            Self::Verkstead | Self::OutOfWindow { .. } => store::Decision::Verkstead,
+            Self::Human => store::Decision::Human,
             Self::Nobody => store::Decision::Circumstance,
         }
     }

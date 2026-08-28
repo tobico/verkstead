@@ -516,8 +516,9 @@ impl Grilling {
             .await
     }
 
-    /// Whether anybody chose to stop, which is the half of a stop the Timeline
-    /// does not draw: a restart reads it rather than a human, so the record is
+    /// Who stopped it, which is the half of a stop the Timeline does not draw.
+    /// A restart reads it to decide whether to take the Conversation up, and
+    /// the marks read it to decide whether to say anything — so the record is
     /// the only place to ask.
     async fn chosen(&self) -> Decision {
         self.stop_on_the_record().await.decision
@@ -568,6 +569,27 @@ impl Grilling {
             &serde_json::json!({}),
         )
         .await
+    }
+
+    /// Open the Conversation, as far as the server is concerned: the press the
+    /// browser makes when the human walks into one, which takes the news mark
+    /// off its sidebar row.
+    ///
+    /// Answers nothing, and is refused for nothing — it rides every opening of
+    /// every Conversation, so there is nothing for it to be wrong about.
+    async fn see(&self) {
+        let (status, body) = fetch(
+            &self.app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/ui/conversations/{}/seen", self.id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NO_CONTENT, "the press failed: {body}");
     }
 
     /// And click Steer, which is the row beside those in the same menu: it
@@ -894,11 +916,16 @@ static SWEEPING: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// It tells the questions apart by the fields being asked for, because that is
 /// what tells them apart on the command line — except the comments left on the
 /// lines of the diff, which are `gh api`'s and so are told by `$1`.
+///
+/// The checks are on the details pane's question and on nothing else here: the
+/// watcher asks about them on their own and this answers that with the pull
+/// request itself, which reads as a suite of nothing. Which is what makes the
+/// pane's own freshening visible — nothing else writes a rollup down.
 const PULL_REQUEST: &str = r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
 case "$5" in
 *commits*)
-    printf '{"commits":[{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}],"comments":[{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}]}'
+    printf '{"commits":[{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}],"comments":[{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}],"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'
     ;;
 *comments*)
     printf '{"comments":[],"reviews":[]}'
@@ -1868,10 +1895,12 @@ async fn a_sessions_own_log_is_followed_line_by_line_while_it_runs() {
 /// what keeps the reading of somebody else's file format to the one crate that
 /// has the parsers in it (ADR 0006).
 ///
-/// The stub writes a line of each of the three classes — the conversation
-/// itself, the backend's own bookkeeping, and a kind nobody has ever heard of —
-/// because what the pane does with the three is the whole of what makes a log
-/// readable.
+/// The stub writes a line of each class — the conversation itself, the
+/// backend's own bookkeeping, a whole line of a type nobody has ever heard of,
+/// and a turn with a block of one inside it — because what the pane does with
+/// them is the whole of what makes a log readable. The last two are where the
+/// boundary runs: the line folds away with the bookkeeping and the block stays
+/// in the turn it was said in.
 #[tokio::test]
 async fn a_running_sessions_log_is_read_back_as_a_conversation() {
     let fixture = grilling(
@@ -1887,7 +1916,8 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
 
         printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the **brief**."}]}}\n' > "$log"
         printf '{"type":"attachment","attachment":{"type":"todos"}}\n' >> "$log"
-        printf '{"type":"divination","omen":"a raven"}\n' >> "$log"
+        printf '{"type":"atis-latch","latched":"a kind from a later version"}\n' >> "$log"
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"divination","omen":"a raven"}]}}\n' >> "$log"
         printf 'Reading the brief.\n'
 
         sleep 300
@@ -1909,13 +1939,17 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
     );
     assert!(
         matches!(view.turns.get(1), Some(Turn::Unread(_))),
-        "a kind nobody knows should arrive as itself rather than as nothing: {:?}",
+        "a block nobody knows should arrive as itself rather than as nothing: {:?}",
         view.turns
     );
     assert_eq!(
-        view.bookkeeping.len(),
-        1,
-        "and the backend's own bookkeeping should be out of the conversation: {:?}",
+        view.bookkeeping
+            .iter()
+            .map(|kept| kept.kind.as_str())
+            .collect::<Vec<&str>>(),
+        ["attachment", "atis-latch"],
+        "and the backend's own bookkeeping should be out of the conversation, \
+         a type this version has never met among it: {:?}",
         view.bookkeeping
     );
 
@@ -2779,7 +2813,7 @@ async fn an_inline_grilling_that_writes_no_handoff_halts_the_run() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "a session that ended short is a brake Verkstead pulled, so a restart \
          leaves it alone",
     );
@@ -3447,7 +3481,7 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
 /// loop counts to four and nothing about the part that is hard.
 ///
 /// The stub decides what it is by looking at `.tasks/`, exactly as the bundled
-/// fork does — no task file left means the finish step — so what this asserts is
+/// fork does — every box ticked means the finish step — so what this asserts is
 /// that Verkstead and the fork read the same backlog the same way.
 #[tokio::test]
 async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
@@ -3474,19 +3508,18 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
                 exit 0
                 ;;
             esac
-            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+            next=$(ls .tasks | grep -E "^$number-" | head -n 1)
             if [ -n "$next" ]; then
                 printf 'working %s\n' "$next"
                 printf 'skill=%s\n' "$(grep '^name:' "$HOME/.claude/skills/next-task/SKILL.md")"
-                number=${next%%-*}
                 printf 'a limiter\n' >> limiter.md
-                rm ".tasks/$next"
                 sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
                 git add -A
                 git commit --quiet -m "feat: $next"
             else
                 printf 'finishing\n'
-                git rm --quiet .tasks/TODO.md
+                git rm --quiet -r .tasks
                 git commit --quiet -m 'chore: finish rate-limiting'
             fi
             sleep 300
@@ -3610,9 +3643,10 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
             sleep 300
             ;;
         *)
-            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+            next=$(ls .tasks | grep -E "^$number-" | head -n 1)
             if [ -n "$next" ]; then
-                rm ".tasks/$next"
+                sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
                 git add -A
                 git commit --quiet -m "feat: $next"
                 # Only the first task, so the list is caught half worked
@@ -3661,7 +3695,7 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
             .map(|task| task.done)
             .collect::<Vec<_>>(),
         [true, false],
-        "the task whose file has gone is done, and the one still to do is not",
+        "the task whose entry is ticked is done, and the one still to do is not",
     );
 
     // And the same list is on the record, at the row the backlog landing
@@ -3728,14 +3762,15 @@ claude-grilling-5)
         exit 0
         ;;
     esac
-    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
     if [ -n "$next" ]; then
         printf 'a limiter\n' >> limiter.md
-        rm ".tasks/$next"
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: count the requests"
     else
-        git rm --quiet .tasks/TODO.md
+        git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
         printf 'pushed, and the pull request is open\n'
     fi
@@ -3926,6 +3961,10 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
         notices(&view),
     );
 
+    // Nothing has written down how the checks are: this `gh` answers the
+    // watcher's question with a pull request that has no suite on it.
+    assert_eq!(check_rollup(&fixture).await, None);
+
     // And what is on the PR is fetched when the pane opens it, through the same
     // host `gh` — never written down.
     let carried: verkstead_render::PullRequestDetails = get(
@@ -3941,6 +3980,28 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
     assert_eq!(carried.commits[0].subject, "feat: count the requests");
     assert_eq!(carried.comments.len(), 1);
     assert!(carried.comments[0].html.contains("<strong>good</strong>"));
+
+    // The checks come back on the same answer, each with the run to follow.
+    assert_eq!(
+        carried
+            .checks
+            .iter()
+            .map(|check| (check.name.as_str(), check.how, check.link.as_str()))
+            .collect::<Vec<_>>(),
+        [(
+            "Rust",
+            verkstead_render::Checked::Passed,
+            "https://github.com/tobico/verkstead/actions/runs/1/job/2",
+        )],
+    );
+
+    // And opening it is what freshens the rollup the card draws: the watcher
+    // stops when the wrap-up is over, so on a Conversation nothing is watching
+    // the pane is the one thing left that asks GitHub.
+    assert_eq!(
+        check_rollup(&fixture).await,
+        Some(verkstead_server::store::Rollup::Passed),
+    );
 }
 
 /// The same backlog, plus a session that plays a fix: it writes down the prompt
@@ -3994,6 +4055,22 @@ async fn checks_settled(fixture: &Grilling) -> bool {
     pool.close().await;
 
     settled.contains(&verkstead_server::store::WaitingOn::Checks)
+}
+
+/// How Verkstead has written down that this Conversation's checks are, or
+/// nothing where nothing has asked.
+///
+/// The rollup the pull request card draws its icon from, read out of the store
+/// because that is where it is: what a poll or an opened details pane learned
+/// from GitHub outlives both.
+async fn check_rollup(fixture: &Grilling) -> Option<verkstead_server::store::Rollup> {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let rollup = verkstead_server::store::check_rollup(&pool, fixture.id)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    rollup
 }
 
 /// How many fix sessions Verkstead has counted against one of this
@@ -4102,7 +4179,7 @@ async fn a_check_two_fix_sessions_could_not_fix_halts_and_tells_the_human() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "every fix session the branch was allowed has been spent, so a restart \
          that started the fixing over would spend them all again",
     );
@@ -4506,7 +4583,7 @@ async fn a_finish_whose_pull_request_never_arrives_leaves_the_conversation_where
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "what is missing is out here rather than in a driver that went away, so a \
          restart looking again would find the same missing thing",
     );
@@ -5491,7 +5568,7 @@ async fn a_review_session_that_dies_halts_the_run_rather_than_passing_the_branch
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "a branch nobody has read is not one a restart may carry on past",
     );
     assert_eq!(
@@ -6409,14 +6486,15 @@ case "$2" in
     printf 'pushed, and the pull request is open\n'
     ;;
 *next-task/SKILL.md*)
-    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
     if [ -n "$next" ]; then
         printf 'one clock\n' >> clocks.md
-        rm ".tasks/$next"
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m 'feat: collapse the clocks'
     else
-        git rm --quiet .tasks/TODO.md
+        git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish the clocks'
         printf 'pushed, and the pull request is open\n'
     fi
@@ -7473,6 +7551,10 @@ async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_
 /// The device subscribes after the direction is picked, so what is read back is
 /// the milestones alone: a Question Set's push is `push_delivery.rs`'s subject
 /// and there is none left to send after this point anyway.
+///
+/// And the news mark the Done push leaves behind it is here too, because the
+/// two are one act: the push is the moment, the mark is what is left of it on
+/// every device until somebody opens the Conversation.
 #[tokio::test]
 async fn a_pull_request_opening_and_a_conversation_finishing_reach_the_devices() {
     let spill = tempfile::tempdir().unwrap();
@@ -7537,6 +7619,37 @@ async fn a_pull_request_opening_and_a_conversation_finishing_reach_the_devices()
         taken.lock().unwrap().len(),
         2,
         "one push per milestone, and no reminders about a Conversation that is over",
+    );
+
+    // And the sidebar keeps the second of them until the human has looked. The
+    // push is a moment and the mark is what is left of it: a notification read
+    // on the phone and swiped away would otherwise be the only trace this ever
+    // finished.
+    assert!(
+        fixture.row().await.unseen,
+        "the Conversation Verkstead carried to Done has news on its row",
+    );
+
+    fixture.see().await;
+
+    assert!(
+        !fixture.row().await.unseen,
+        "and opening it is what takes the news off — everywhere, the mark being \
+         the server's rather than a browser's",
+    );
+
+    // Long enough again for the loops that were still running to have said
+    // anything they had left to say.
+    tokio::time::sleep(BRISKLY.checks * 3).await;
+
+    assert!(
+        !fixture.row().await.unseen,
+        "and it does not come back: this Done has been read",
+    );
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        2,
+        "and nothing was pushed a second time either",
     );
 }
 
@@ -8035,7 +8148,7 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "Verkstead pulled the brake on a session that fell over, so going again \
          is the human's press rather than a restart's to assume",
     );
@@ -8047,8 +8160,14 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
         "the Conversation is blocked on the human, and says which Event it is blocked on",
     );
     assert!(
+        !view.stopped_by_hand,
+        "loudly, nobody having pressed anything: the badge rather than the quiet \
+         label",
+    );
+    assert!(
         fixture.row().await.waiting,
-        "and the sidebar says so too, a stop being the whole of what is waiting",
+        "and the sidebar says so too, a stop from outside the human being the \
+         whole of what is waiting",
     );
     assert_eq!(
         view.state,
@@ -8180,7 +8299,7 @@ async fn a_backlog_halts_at_the_task_whose_session_died() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "a task nothing has moved is not one a restart may have another go at",
     );
 
@@ -8209,6 +8328,115 @@ async fn a_backlog_halts_at_the_task_whose_session_died() {
     assert!(
         worktree.join(".tasks/01-count.md").exists(),
         "the task is still there to be worked, because nothing reverted anything",
+    );
+}
+
+/// A backlog whose next entry names a document nobody wrote: the run stops there
+/// rather than putting a session at nothing to work from.
+///
+/// What a breakdown looks like part way through writing itself, and what a
+/// hand-edited `TODO.md` looks like too. The box is what says a task is done, so
+/// an entry that is not ticked is work still outstanding — and one with no file
+/// beside it is work nothing can be told how to do.
+#[tokio::test]
+async fn a_backlog_entry_with_no_task_file_stops_the_run() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+            printf -- '- [x] 01: count the requests\n' >> .tasks/TODO.md
+            printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan the rate limiter'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'working a task nobody wrote down\n'
+            sleep 300
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("Working the backlog"),
+        "the Notice says what stopped: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("entry 02 of"),
+        "and names the entry there is nothing to work from: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("<code>.tasks/TODO.md</code>"),
+        "in the file the human has to go and fix: {:?}",
+        stopped.html,
+    );
+
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Verkstead,
+        "a backlog nothing can be read out of is not one a restart may guess past",
+    );
+
+    let sessions = outputs(&fixture.view().await).len();
+
+    // Long enough for several more turns of a runner that was still turning.
+    pause(Duration::from_secs(3)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        sessions,
+        "and no session was launched at the entry there is nothing to work from",
+    );
+
+    // And the press that follows the Notice they have just read: a Resume
+    // before `TODO.md` is fixed asks the same question of the same backlog, so
+    // it gets the same answer. A press is the human's leave to try the run
+    // again rather than their leave to work a list nothing can be read out of.
+    let notices = said(&fixture.view().await).len();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| said(view).get(notices).map(|notice| (*notice).clone()))
+        .await;
+
+    assert!(
+        again.html.contains("entry 02 of"),
+        "the resumed run stops at the same entry, and says so again: {:?}",
+        again.html,
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Verkstead,
+        "and on the same reading, which is not one a restart may guess past either",
+    );
+
+    // Long enough again for a launch to have happened behind the stop.
+    pause(Duration::from_secs(3)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        sessions,
+        "and the press spent no session on it: what Resume found is what the \
+         loop found",
     );
 }
 
@@ -8250,12 +8478,11 @@ fn out_of_window(sentence: &str) -> String {
             sleep 300
             ;;
         *)
-            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+            next=$(ls .tasks | grep -E "^$number-" | head -n 1)
             if [ -n "$next" ]; then
                 printf 'working %s\n' "$next"
-                number=${{next%%-*}}
                 printf 'a limiter\n' >> limiter.md
-                rm ".tasks/$next"
                 sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
                 git add -A
                 git commit --quiet -m "feat: $next"
@@ -8287,7 +8514,7 @@ fn out_of_window(sentence: &str) -> String {
                 fi
             else
                 printf 'finishing\n'
-                git rm --quiet .tasks/TODO.md
+                git rm --quiet -r .tasks
                 git commit --quiet -m 'chore: finish rate-limiting'
             fi
             sleep 300
@@ -8361,7 +8588,7 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
 
     assert_eq!(
         stop.decision,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "Verkstead pulled the brake, so a restart leaves it waiting",
     );
     assert_eq!(
@@ -8694,12 +8921,11 @@ claude-grilling-5)
     sleep 300
     ;;
 *)
-    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
     printf 'working %s\r\n' "$next"
     while [ ! -f {gate} ]; do sleep 0.05; done
-    number=$(printf '%s' "$next" | cut -d- -f1)
     printf 'a limiter\n' >> limiter.md
-    rm ".tasks/$next"
     sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
     git add -A
     git commit --quiet -m "feat: $next"
@@ -8757,6 +8983,17 @@ async fn stop_lets_the_task_finish_and_halts_before_the_next_one() {
         "and nothing has stopped yet, because the step has not finished: {:?}",
         notices(&view),
     );
+    assert!(
+        view.stop_asked,
+        "the press is recorded, which is what takes Stop off the menu: there is \
+         nothing left to ask, and pressing it again would do what the first one did",
+    );
+    assert!(
+        view.ready_to_stop,
+        "and there is still a run to stop, which is what keeps Force stop there \
+         — the escalation from here, for a human who turns out not to want to \
+         wait for the step",
+    );
 
     // What the session was waiting for. From here it commits its task and idles,
     // which is where the run would have launched the next one.
@@ -8771,7 +9008,7 @@ async fn stop_lets_the_task_finish_and_halts_before_the_next_one() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Human,
         "a stop the human asked for is not one a restart may drive past",
     );
 
@@ -8870,7 +9107,7 @@ async fn force_stop_ends_the_session_where_it_stands_and_halts_at_once() {
         "the Notice says whose stop it was, and which of the two: {:?}",
         stopped.html,
     );
-    assert_eq!(fixture.chosen().await, Decision::Deliberate);
+    assert_eq!(fixture.chosen().await, Decision::Human);
 
     fixture
         .until(|view| {
@@ -9006,7 +9243,7 @@ async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
         "the run stopped because of the press: {:?}",
         stopped.html,
     );
-    assert_eq!(fixture.chosen().await, Decision::Deliberate);
+    assert_eq!(fixture.chosen().await, Decision::Human);
 
     // Long enough for the driver to have read the ending, taken the handoff and
     // reached the launch on the other side of it.
@@ -9258,12 +9495,25 @@ async fn stop_pressed_with_nothing_running_halts_where_it_stands() {
         "and what it was that stopped: {:?}",
         stopped.html,
     );
-    assert_eq!(fixture.chosen().await, Decision::Deliberate);
+    assert_eq!(fixture.chosen().await, Decision::Human);
+
+    let view = fixture.view().await;
 
     assert_eq!(
-        fixture.view().await.blocked_on,
+        view.blocked_on,
         Some(stopped.id),
-        "and the Conversation is waiting on the human from here",
+        "and nothing is driving the Conversation from here, with the Notice \
+         saying so where the record kept it",
+    );
+    assert!(
+        view.stopped_by_hand,
+        "said quietly, because they are the one who pressed it: the label \
+         rather than the badge",
+    );
+    assert!(
+        !fixture.row().await.waiting,
+        "and the sidebar's dot stays off, a dot on the work they stopped last \
+         being the one that teaches them to ignore the dots",
     );
 }
 
@@ -10327,16 +10577,17 @@ case "$2" in
     sleep 300
     ;;
 *next-task/SKILL.md*)
-    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
     if [ -n "$next" ]; then
         printf 'working %s\n' "$next"
         printf 'a counter\n' >> counter.md
-        rm ".tasks/$next"
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m 'feat: count the requests'
     else
         printf 'finishing\n'
-        git rm --quiet .tasks/TODO.md
+        git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish the stage'
         printf 'pushed, and the pull request is open\n'
     fi
@@ -10783,7 +11034,7 @@ claude-grilling-5)
 *)
     printf 'working the task\r\n'
     printf 'a limiter\n' >> limiter.md
-    rm -f .tasks/01-count.md
+    sed -i "s/- \[ \] 01:/- [x] 01:/" .tasks/TODO.md
     git add -A
     git commit --quiet -m 'feat: count the requests'
     sleep 300
@@ -11091,7 +11342,7 @@ async fn a_halt_verkstead_decided_on_tells_the_devices_once() {
 
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "Verkstead pulled the brake, which is the kind of stop worth a phone",
     );
 
@@ -11558,7 +11809,7 @@ async fn an_inline_run_that_opened_no_pull_request_leaves_the_conversation_where
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "what is missing is out here rather than in a driver that went away, so a \
          restart looking again would find the same missing thing",
     );
@@ -11627,21 +11878,24 @@ async fn a_wrap_up_nothing_is_watching_halts_as_one() {
     assert_eq!(view.blocked_on, Some(stalled.id));
 }
 
-/// Stop a Conversation the way a stall does — nobody's decision, and the
-/// ordinary Notice on its Timeline saying what nothing was doing — without
-/// waiting for a sweep to find it.
+/// Stop a Conversation the way a stall does, with the ordinary Notice on its
+/// Timeline saying what nothing was doing — and stopped by whichever of the
+/// four words is being asked about, rather than by waiting for a sweep to find
+/// it.
 ///
 /// The record is written rather than provoked, for [`wrapping_unwatched`]'s
-/// reason: what the test is about is what the *next* server makes of a stop
-/// nobody chose, and a sweep left running would write a second one over the top
-/// of what it was watching.
-async fn halted_by_circumstance(fixture: &Grilling) {
+/// reason: what these tests are about is what the *next* server makes of a
+/// stored word, and a sweep left running would write a second stop over the top
+/// of what it was watching. It is also the only way to have a `deliberate` one
+/// at all — nothing writes that word any more, and what these tests are asking
+/// is what a database written before it stopped being written still does.
+async fn halted_by(fixture: &Grilling, decision: Decision) {
     let pool = open_database(&fixture.database).await.unwrap();
 
     let written = verkstead_store::stop(
         &pool,
         fixture.id,
-        Decision::Circumstance,
+        decision,
         "**Grilling the work** stopped.\n\nnothing is driving it: no session is \
          running, and nothing is left to start one\n\n### The worktree\n\nGit had \
          nothing pending, or the repository would not answer.\n\n### What the last \
@@ -12185,7 +12439,7 @@ async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "what is missing is out here, so a restart looking again would find it",
     );
 
@@ -13913,7 +14167,7 @@ async fn a_follow_up_session_that_will_not_ask_is_stopped_after_two_rescues() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "and Verkstead decided it, so a restart leaves it exactly here",
     );
 }
@@ -13978,7 +14232,7 @@ esac
 "#;
 
 /// A backlog of one whose step session comes up, says a word and then goes idle
-/// with the task file exactly where it found it.
+/// with its entry exactly as unticked as it found it.
 ///
 /// The grilling half is [`A_BACKLOG_OF_ONE`]'s: what is being asked about here is
 /// the step, so the list it works has to land the ordinary way first.
@@ -14139,7 +14393,7 @@ async fn a_grilling_that_goes_idle_without_its_artifact_is_told_and_then_stopped
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "and Verkstead decided it, so a restart leaves it exactly here",
     );
 }
@@ -14148,8 +14402,8 @@ async fn a_grilling_that_goes_idle_without_its_artifact_is_told_and_then_stopped
 /// told and stopped the same way.
 ///
 /// The same loop with the same bound, over the done-indicator a step is judged
-/// by: the task file gone from the Worktree and git holding nothing pending for
-/// it. A hung step used to hold the whole run open with the human never told.
+/// by: the entry ticked off in the Worktree's `TODO.md` and git holding nothing
+/// pending for it. A hung step used to hold the whole run open with the human never told.
 #[tokio::test]
 async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_stopped() {
     let fixture = grilling(A_BACKLOG_THEN_AN_IDLE_STEP).await;
@@ -15601,7 +15855,7 @@ async fn a_deliberate_halt_survives_a_restart_with_its_badge_intact() {
 
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "a step whose session ended without landing it is Verkstead pulling the \
          brake, which is the kind of stop a restart may not overrule",
     );
@@ -15629,7 +15883,7 @@ async fn a_deliberate_halt_survives_a_restart_with_its_badge_intact() {
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "and the stop is the same stop, not one written over the top of it",
     );
     assert_eq!(
@@ -15647,7 +15901,7 @@ async fn a_deliberate_halt_survives_a_restart_with_its_badge_intact() {
 /// stop goes with it, because nothing is stopped any more. The Notice stays where
 /// it is: it is a stop that really happened.
 ///
-/// The stop is written rather than waited for — see [`halted_by_circumstance`] —
+/// The stop is written rather than waited for — see [`halted_by`] —
 /// so that this server writes exactly one: a sweep that went on looking would
 /// stop the Conversation again while the next server was driving it.
 #[tokio::test]
@@ -15656,7 +15910,7 @@ async fn a_halt_nobody_chose_is_driven_again_by_the_next_server() {
 
     fixture.quiet().await;
 
-    halted_by_circumstance(&fixture).await;
+    halted_by(&fixture, Decision::Circumstance).await;
 
     let stalled = fixture.stopped().await;
 
@@ -15718,6 +15972,76 @@ async fn a_halt_nobody_chose_is_driven_again_by_the_next_server() {
         "and the Notice stays where it is: {:?}",
         notices(&view),
     );
+}
+
+/// And the two words in between are left alone as well: a stop the human
+/// pressed, and one stored before their press and Verkstead's brake were told
+/// apart.
+///
+/// The marks tell those two from the brake above — neither draws a dot or a
+/// badge, because there is nobody to tell that they did not already know — but a
+/// restart does not, and that is the point of asking here. Whoever decided, it
+/// was decided, and the press that undoes it is the human's whichever mark the
+/// page happens to be drawing.
+///
+/// The stored word is put on the record directly, which is the only way to have
+/// a `deliberate` one at all: nothing writes that word any more, and what this
+/// is asking is what a database written before it stopped being written still
+/// does.
+#[tokio::test]
+async fn a_stop_the_human_pressed_survives_a_restart_quietly() {
+    for decision in [Decision::Human, Decision::Deliberate] {
+        let fixture = grilling(r#"printf 'the grilling has nothing to say\n'"#).await;
+
+        fixture.quiet().await;
+
+        halted_by(&fixture, decision).await;
+
+        let stopped = fixture.stopped().await;
+        let before = outputs(&fixture.view().await).len();
+
+        let _restarted = fixture
+            .restarted(
+                r#"
+                printf 'prompt was: %s\n' "$2"
+                sleep 300
+                "#,
+                PULL_REQUEST,
+            )
+            .await;
+
+        // Long enough for the second server to have taken up everything it was
+        // going to, and for the sweep that follows it to have looked as well.
+        tokio::time::sleep(BRISKLY.grace * 4).await;
+
+        let view = fixture.view().await;
+
+        assert_eq!(
+            outputs(&view).len(),
+            before,
+            "no session was launched over a {decision:?} stop: somebody decided \
+             it, and a restart is not the press that undoes one",
+        );
+        assert_eq!(
+            view.blocked_on,
+            Some(stopped.id),
+            "the mark is intact, and still points at the Notice that explained it",
+        );
+        assert!(
+            view.stopped_by_hand,
+            "drawn quietly, this one being the human's own: {decision:?}",
+        );
+        assert!(
+            !fixture.row().await.waiting,
+            "and the sidebar stays quiet about it too",
+        );
+        assert_eq!(
+            fixture.chosen().await,
+            decision,
+            "with the stored word exactly as it was, not rewritten by the server \
+             that read it",
+        );
+    }
 }
 
 /// A restart that can start nothing for a Conversation says so on the Timeline
@@ -15788,7 +16112,7 @@ async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline
     );
     assert_eq!(
         fixture.chosen().await,
-        Decision::Deliberate,
+        Decision::Verkstead,
         "Verkstead looked and decided nothing could be started, and nothing but \
          the human can change that — so the next restart leaves it alone",
     );
@@ -15859,15 +16183,16 @@ claude-grilling-5)
         exit 0
         ;;
     esac
-    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
     printf '===== %s\n%s\n' "${{next:-finish}}" "$2" >> {prompts}
     if [ -n "$next" ]; then
         printf 'a limiter\n' >> limiter.md
-        rm ".tasks/$next"
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: $next"
     else
-        git rm --quiet .tasks/TODO.md
+        git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
         printf 'pushed, and the pull request is open\n'
     fi

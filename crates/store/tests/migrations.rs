@@ -220,7 +220,12 @@ async fn a_stop_that_was_open_becomes_the_one_stop_it_now_is() {
 
     let it = stopped(&pool, id).await.unwrap().expect("it was open");
 
-    assert_eq!(it.decision, Decision::Deliberate);
+    assert_eq!(
+        it.decision,
+        Decision::Verkstead,
+        "a step of before that failed was Verkstead pulling the brake, so it \
+         keeps the marks a stop the human pressed would not",
+    );
     assert_eq!(
         it.notice, open,
         "the badge points at the Notice the open stop became",
@@ -480,8 +485,8 @@ async fn an_open_halt_reads_back_as_a_stop() {
     );
 }
 
-/// An open Pause reads back as the one stop too, deliberate — Verkstead pulled
-/// the brake on the window — and carrying the words about when the account comes
+/// An open Pause reads back as the one stop too, Verkstead's — it pulled the
+/// brake on the window — and carrying the words about when the account comes
 /// back. The Event stays the Pause it always was.
 #[tokio::test]
 async fn an_open_pause_reads_back_as_a_stop_with_reset_words() {
@@ -508,7 +513,11 @@ async fn an_open_pause_reads_back_as_a_stop_with_reset_words() {
 
     let it = stopped(&pool, id).await.unwrap().expect("it was waiting");
 
-    assert_eq!(it.decision, Decision::Deliberate, "it waits for a press");
+    assert_eq!(
+        it.decision,
+        Decision::Verkstead,
+        "it waits for a press, and for a reason the human has to be shown",
+    );
     assert_eq!(it.notice, waiting, "the badge points at the Pause Event");
     assert_eq!(it.resets.as_deref(), Some("2026-08-24T05:00:00Z"));
     assert_eq!(

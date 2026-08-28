@@ -12,8 +12,8 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{
     ConversationRow, Decision, Event, Stopped, ask_to_stop, asked_to_stop, clear_stop,
-    conversations, forget_stop, open_database, register_repo, start_conversation, start_grilling,
-    stop, stopped, timeline,
+    close_conversation, conversations, forget_stop, open_database, register_repo,
+    start_conversation, start_grilling, stop, stopped, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -104,7 +104,7 @@ async fn a_stop_for_a_window_is_the_same_stop_with_reset_words_on_it() {
     let notice = stop(
         &pool,
         id,
-        Decision::Deliberate,
+        Decision::Verkstead,
         SAID,
         Some("2026-08-24T05:00:00Z"),
     )
@@ -116,7 +116,7 @@ async fn a_stop_for_a_window_is_the_same_stop_with_reset_words_on_it() {
 
     assert_eq!(
         (it.decision, it.notice, it.resets.as_deref()),
-        (Decision::Deliberate, notice, Some("2026-08-24T05:00:00Z"),),
+        (Decision::Verkstead, notice, Some("2026-08-24T05:00:00Z"),),
         "one Notice and one badge behind it, with the reset words beside them",
     );
 }
@@ -135,7 +135,7 @@ async fn a_conversation_is_stopped_once_however_often_it_is_noticed() {
         .expect("a Conversation that is there stops");
 
     assert_eq!(
-        stop(&pool, id, Decision::Deliberate, "and again", None)
+        stop(&pool, id, Decision::Human, "and again", None)
             .await
             .unwrap(),
         None,
@@ -168,7 +168,7 @@ async fn driving_again_clears_the_stop_and_leaves_the_notice() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
 
-    stop(&pool, id, Decision::Deliberate, SAID, Some("3pm"))
+    stop(&pool, id, Decision::Verkstead, SAID, Some("3pm"))
         .await
         .unwrap();
     clear_stop(&pool, id).await.unwrap();
@@ -185,7 +185,7 @@ async fn driving_again_clears_the_stop_and_leaves_the_notice() {
     );
 
     assert!(
-        stop(&pool, id, Decision::Deliberate, "stopped again", None)
+        stop(&pool, id, Decision::Human, "stopped again", None)
             .await
             .unwrap()
             .is_some(),
@@ -193,9 +193,16 @@ async fn driving_again_clears_the_stop_and_leaves_the_notice() {
     );
 }
 
-/// Both kinds read back as themselves. Which one a stop is decides whether a
-/// restarting server starts the work again or leaves it alone, so a word the
-/// store could not read back would be a decision nothing could act on.
+/// Every kind reads back as itself. Which one a stop is decides two things a
+/// promise could not keep — whether a restarting server starts the work again
+/// or leaves it alone, and whether the human is marked as being waited on — so
+/// a word the store could not read back would be two decisions nothing could
+/// act on.
+///
+/// The stored word is asserted beside the kind, because it is written into a
+/// database that outlives this build: a word quietly renamed would leave every
+/// stop written before it unreadable, and the migration reading yesterday's
+/// Pauses writes one of these by hand.
 #[tokio::test]
 async fn every_kind_of_stop_reads_back_as_itself() {
     let (_dir, pool) = fresh_pool().await;
@@ -205,9 +212,11 @@ async fn every_kind_of_stop_reads_back_as_itself() {
         .expect("nothing was registered at that path yet")
         .id;
 
-    for (kind, branch) in [
-        (Decision::Deliberate, "asked-to-stop"),
-        (Decision::Circumstance, "left-mid-run"),
+    for (kind, word, branch) in [
+        (Decision::Verkstead, "verkstead", "brake-pulled"),
+        (Decision::Human, "human", "asked-to-stop"),
+        (Decision::Deliberate, "deliberate", "stopped-long-ago"),
+        (Decision::Circumstance, "circumstance", "left-mid-run"),
     ] {
         let id = start_conversation(&pool, repo, branch)
             .await
@@ -219,6 +228,39 @@ async fn every_kind_of_stop_reads_back_as_itself() {
         assert_eq!(
             stopped(&pool, id).await.unwrap().map(|it| it.decision),
             Some(kind),
+        );
+
+        let (stored,): (String,) =
+            sqlx::query_as("SELECT stopped_by FROM conversations WHERE id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        assert_eq!(stored, word, "the word the column holds for {kind:?}");
+    }
+}
+
+/// And each kind answers the two questions the same way every time.
+///
+/// A restart asks the first: everything somebody decided waits for a press, and
+/// only what nobody decided is taken up unasked. The marks ask the second, and
+/// it is the narrower one — the human's own press waits for their press like
+/// the rest and is not something they have to be told about, so the two rows
+/// here that are theirs answer *yes* and *no*.
+#[test]
+fn each_kind_says_who_waits_for_it_and_who_is_waited_on() {
+    for (kind, decided, waits_on_the_human) in [
+        (Decision::Verkstead, true, true),
+        (Decision::Human, true, false),
+        (Decision::Deliberate, true, false),
+        (Decision::Circumstance, false, true),
+    ] {
+        assert_eq!(kind.decided(), decided, "who a {kind:?} stop waits for");
+        assert_eq!(
+            kind.waits_on_the_human(),
+            waits_on_the_human,
+            "and whether a {kind:?} stop is marked as waiting on them",
         );
     }
 }
@@ -277,14 +319,15 @@ async fn a_conversation_asks_to_stop_once() {
     );
 }
 
-/// A stopped Conversation is one the sidebar draws as waiting on the human.
+/// A Conversation stopped by something outside the human is one the sidebar
+/// draws as waiting on them.
 ///
 /// The badge on its own page points at the Notice; the list has no Notice to
 /// point at and only the dot, so what it needs is the fact — and a stop the
 /// sidebar said nothing about would be one the human found by opening every
 /// Conversation they have.
 #[tokio::test]
-async fn a_stopped_conversation_is_waiting_on_the_human_in_the_sidebar() {
+async fn a_stop_from_outside_the_human_is_waiting_on_them_in_the_sidebar() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
 
@@ -309,13 +352,13 @@ async fn a_stopped_conversation_is_waiting_on_the_human_in_the_sidebar() {
         "a Conversation being grilled is not waiting on anybody",
     );
 
-    stop(&pool, id, Decision::Deliberate, SAID, None)
+    stop(&pool, id, Decision::Verkstead, SAID, None)
         .await
         .unwrap();
 
     assert!(
         waiting(conversations(&pool).await.unwrap()),
-        "and one that has stopped is",
+        "and one Verkstead pulled the brake on is",
     );
 
     clear_stop(&pool, id).await.unwrap();
@@ -324,5 +367,111 @@ async fn a_stopped_conversation_is_waiting_on_the_human_in_the_sidebar() {
         !waiting(conversations(&pool).await.unwrap()),
         "and starting to drive again takes the dot with it, leaving the Notice \
          where it is",
+    );
+}
+
+/// And a stop the human made themselves is not, however plainly it is a stop.
+///
+/// It still stands there waiting for their press — nothing about that changes —
+/// but the dot means *something happened without you*, and a dot on the work
+/// they pressed Stop on last is the one that teaches them to stop reading the
+/// dots. A row stored before the two were told apart reads the same way: it
+/// cannot be told apart now either, and their own presses are what nearly all
+/// of those rows are.
+#[tokio::test]
+async fn the_humans_own_stop_is_not_waiting_on_them_in_the_sidebar() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing was registered at that path yet")
+        .id;
+
+    for (kind, branch) in [
+        (Decision::Human, "asked-to-stop"),
+        (Decision::Deliberate, "stopped-long-ago"),
+        (Decision::Circumstance, "left-mid-run"),
+        (Decision::Verkstead, "brake-pulled"),
+    ] {
+        let id = start_conversation(&pool, repo, branch)
+            .await
+            .unwrap()
+            .expect("the Repo was just registered");
+
+        start_grilling(
+            &pool,
+            id,
+            "abc1234",
+            Path::new("/data/worktrees/rate-limiting"),
+        )
+        .await
+        .unwrap();
+
+        stop(&pool, id, kind, SAID, None).await.unwrap();
+
+        let waiting = conversations(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == id)
+            .expect("the Conversation is on the list")
+            .waiting;
+
+        assert_eq!(
+            waiting,
+            kind.waits_on_the_human(),
+            "the sidebar's dot follows the word the stop was written with, and \
+             this one is {kind:?}",
+        );
+    }
+}
+
+/// And a stop on a Conversation the human has closed is not either, however it
+/// stopped.
+///
+/// Closing is them saying the work is over wherever it had got to, so the stop
+/// stops being something to come back to: the dot means *there is something here
+/// for you*, and there is not. The record is left exactly as it was — it is what
+/// happened, and the Notice explaining it is still on the Timeline — so what
+/// changes is only what the sidebar makes of it.
+#[tokio::test]
+async fn a_closed_conversation_is_not_waiting_on_them_whatever_stopped_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    start_grilling(
+        &pool,
+        id,
+        "abc1234",
+        Path::new("/data/worktrees/rate-limiting"),
+    )
+    .await
+    .unwrap();
+
+    stop(&pool, id, Decision::Verkstead, SAID, None)
+        .await
+        .unwrap();
+
+    let waiting = |rows: Vec<ConversationRow>| {
+        rows.into_iter()
+            .find(|row| row.id == id)
+            .expect("the Conversation is on the list")
+            .waiting
+    };
+
+    assert!(
+        waiting(conversations(&pool).await.unwrap()),
+        "Verkstead pulled the brake, so until it is closed this is waiting on them",
+    );
+
+    close_conversation(&pool, id).await.unwrap();
+
+    assert!(
+        !waiting(conversations(&pool).await.unwrap()),
+        "and closing takes the dot away, whatever the stop was",
+    );
+    assert!(
+        stopped(&pool, id).await.unwrap().is_some(),
+        "leaving the stop itself where it is: closing reads it, and writes nothing",
     );
 }

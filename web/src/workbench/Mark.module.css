@@ -21,16 +21,22 @@
   border-radius: 50%;
 }
 
-/* Something is waiting on the human: an ask left open, driving that has halted,
-   a run waiting an account's window out, or a direction to choose. A filled disc
-   and nothing else — the whole of the mark, where it used to be one of three
-   things a waiting card said at once. It is a size up on the session marks
-   beside it because this is a list that is glanced down rather than read, and
-   the accent rather than the `--stopped` red because not one of the four is
-   anything going wrong.
+/* Look here. Something is waiting on the human — an ask left open, driving that
+   has halted, a run waiting an account's window out, a direction to choose — or
+   there is news on the Conversation they have not looked at yet, which is a
+   wrap-up that carried the work to Done while nobody was watching. One disc for
+   the two, because the two say the same thing to somebody glancing down a list;
+   which of them it is is said in the row's label rather than drawn, and the
+   class keeps the name of the first of them.
+
+   A filled disc and nothing else — the whole of the mark, where it used to be
+   one of three things a waiting card said at once. It is a size up on the
+   session marks beside it because this is a list that is glanced down rather
+   than read, and the accent rather than the `--stopped` red because not one of
+   the reasons is anything going wrong.
 
    The sidebar's alone, and it needs no card named in front of it to say so:
-   `waiting` is a state no running session has, so the only mark that ever
+   neither reason is anything a running session has, so the only mark that ever
    carries it is the one `Conversations.tsx` draws. */
 .mark.waiting {
   width: 1rem;

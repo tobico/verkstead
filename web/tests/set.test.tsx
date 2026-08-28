@@ -18,6 +18,8 @@ import type { Response as Decided } from "../src/api/types";
 // The page's own vocabulary, and the four components that keep names of their
 // own beside it.
 import app from "../src/App.module.css";
+// The card a Preface and a commit's Message are both drawn as.
+import card from "../src/Card.module.css";
 import contents from "../src/set/Contents.module.css";
 import closing from "../src/set/Postscript.module.css";
 import setPage from "../src/set/SetPage.module.css";
@@ -128,7 +130,7 @@ describe("reading a Set", () => {
   it("puts the Preface in as the server rendered it", async () => {
     const page = await reading(WAITING);
 
-    const preface = page.querySelector(`section.${sheet.preface} .${sheet.prefaceBody}`)!;
+    const preface = page.querySelector(`section#preface .${card.cardBody}`)!;
     expect(preface.className).toContain("markdown");
     expect(preface.innerHTML).toContain("<code>POST /v1/messages</code>");
     expect(preface.innerHTML).toContain(
@@ -136,10 +138,26 @@ describe("reading a Set", () => {
     );
   });
 
+  /// Drawn as the shared card, which is the same component a commit's Message
+  /// is drawn as: the heading outside the box and the markdown inside it. Two
+  /// copies of one box in two stylesheets is how the two came to look unalike,
+  /// so what is asked here is that the Preface is that component and not a copy
+  /// of it.
+  it("draws the Preface as the shared card, headed outside the box", async () => {
+    const page = await reading(WAITING);
+
+    const section = page.querySelector(`section#preface.${card.card}`)!;
+
+    expect(section.querySelector("h2")!.textContent).toBe("Preface");
+    expect(section.querySelector("h2")!.nextElementSibling).toBe(
+      section.querySelector(`.${card.cardBody}`),
+    );
+  });
+
   it("shows no Preface section for a Set with no Preface", async () => {
     const page = await reading({ ...WAITING, preface_html: null });
 
-    expect(page.querySelector(`.${sheet.preface}`)).toBeNull();
+    expect(page.querySelector("#preface")).toBeNull();
   });
 
   it("draws every Question and Sub-question in the order they were asked", async () => {
@@ -443,7 +461,7 @@ describe("the record of a settled Set", () => {
       expect(page.innerHTML).toContain("<li>in-process, per instance</li>");
       expect(page.innerHTML).toContain("<code>redis</code>");
       expect(page.innerHTML).toContain("<td>Retry-After</td>");
-      expect(page.querySelector(`.${sheet.prefaceBody}`)).toBeTruthy();
+      expect(page.querySelector(`.${card.cardBody}`)).toBeTruthy();
     }
   });
 

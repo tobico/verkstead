@@ -54,11 +54,11 @@ pub enum Lifecycle {
 ///
 /// Where it has got to is drawn rather than worded — a turning ring for a
 /// session getting on with it, the same ring empty for one that has gone quiet,
-/// a dot for a Conversation that wants answering, a dotted border for a draft
-/// and a dimmed card for work that has stopped. Which is why the facts below are
-/// facts and not one collapsed verdict: the row says what is true of the
-/// Conversation, and which mark that comes out as is the one rule the viewer
-/// keeps.
+/// a dot for a Conversation that wants answering or has news on it, a dotted
+/// border for a draft and a dimmed card for work that has stopped. Which is why
+/// the facts below are facts and not one collapsed verdict: the row says what is
+/// true of the Conversation, and which mark that comes out as is the one rule
+/// the viewer keeps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ConversationEntry {
@@ -105,6 +105,20 @@ pub struct ConversationEntry {
     /// The row draws no state in words, so what this comes out as is the label
     /// read aloud — *Waiting on checks* where the plain state word would be.
     pub waiting_on_checks: bool,
+
+    /// Whether Verkstead has told the human something about this Conversation
+    /// that they have not looked at yet.
+    ///
+    /// One thing writes it: the wrap-up that carries a Conversation to Done and
+    /// pushes the news to the devices, in the same breath as the push. A
+    /// milestone nobody was watching happen is what a mark saying *look here*
+    /// is for, and a Done the human steered to themselves is what it is not.
+    ///
+    /// Beside `waiting` rather than folded into it, because the row draws one
+    /// disc for the two and says which of them it is in the label read aloud:
+    /// *something wants you* against *there is news here*. Cleared by opening
+    /// the Conversation, which the browser says in a call of its own.
+    pub unseen: bool,
 }
 
 /// One Repo's notice under the new-conversation box: the roadmaps in it that
@@ -274,6 +288,23 @@ pub struct ConversationView {
     /// [`working`]: ConversationView::working
     pub ready_to_stop: bool,
 
+    /// And whether a stop has already been asked for and is waiting for the step
+    /// the run is on to finish.
+    ///
+    /// What takes **Stop** off the menu, the press having been made: it is
+    /// recorded, the run halts the moment the step lands, and a row still
+    /// offering it would be Verkstead asking for a decision it already has.
+    /// Force stop is left where it is — it is the escalation from here, and the
+    /// one thing a human who has changed their mind about waiting can still
+    /// press.
+    ///
+    /// Beside [`ready_to_stop`] rather than folded into it, because the two say
+    /// different things: that one is *there is a run to stop*, which is what
+    /// draws Force stop, and this is *and you have already said so*.
+    ///
+    /// [`ready_to_stop`]: ConversationView::ready_to_stop
+    pub stop_asked: bool,
+
     /// And whether a steer into Implementing has anything to carry on: the
     /// branch holds a backlog with work left in it, or a roadmap it has
     /// written.
@@ -333,7 +364,26 @@ pub struct ConversationView {
     ///
     /// *Blocked on you* is a badge on an active state and never a state of its
     /// own, which is why this sits beside `state` rather than in it.
+    ///
+    /// Set for every stop, however it stopped. Which of the two marks the
+    /// header draws is `stopped_by_hand` below — both of them point here, a
+    /// stop the human has to find being the same Notice as a stop they made
+    /// themselves.
     pub blocked_on: Option<i64>,
+
+    /// Whether that stop is the human's own press, or a row from before the
+    /// two were told apart and read as one.
+    ///
+    /// Which of the two marks the header draws, decided here rather than in the
+    /// browser: `false` is the accent *Blocked on you* badge — Verkstead pulled
+    /// the brake, or a crash took the driver away — and `true` is the quiet
+    /// **Stopped** label, which goes to the same Notice and says nothing about
+    /// anybody waiting. The sidebar's disc follows the same rule from its own
+    /// end of the wire, where the row's `waiting` has already folded it in.
+    ///
+    /// `false` where nothing has stopped, which is the ordinary Conversation:
+    /// there is no mark to choose between.
+    pub stopped_by_hand: bool,
 
     /// Whether the wrap-up has narrowed to its checks: the review answered, the
     /// comments dealt with, the checks alone outstanding, and nothing running in
@@ -664,9 +714,10 @@ pub struct TaskEntry {
 
     pub title: String,
 
-    /// Whether the task is finished, which is the task file having gone from
-    /// `.tasks/`. That is the done-signal the task runner turns on, and a
-    /// checkbox is how an entry is written rather than what says it is done.
+    /// Whether the task is finished, which is the entry's own checkbox. That is
+    /// the done-signal the task runner turns on, and it is the list saying so
+    /// rather than anything the directory beside it happens to hold — a task
+    /// whose document has not been written yet is a task nobody has done.
     pub done: bool,
 }
 
@@ -710,9 +761,18 @@ pub struct TaskDocument {
 
     pub title: String,
 
-    /// The document rendered and sanitized, or `null` where there is no file to
-    /// render — which is a task that is done, the file going being what says so.
-    /// The pane says as much in words rather than drawing a gap.
+    /// Whether the task is finished, which is the entry's checkbox — see
+    /// [`TaskEntry::done`]. Carried on the document because a finished task
+    /// still has one: its file stays in `.tasks/` until the feature is over, so
+    /// the done state is something the section says about itself rather than the
+    /// reason it is empty. The same way round as a stage's — see
+    /// [`StageDocument::done`].
+    pub done: bool,
+
+    /// The document rendered and sanitized, or `null` where there is nothing to
+    /// render. Not the ordinary end of a task's life but the list pointing at a
+    /// file nobody wrote, which the pane says in words rather than drawing a
+    /// gap.
     pub html: Option<String>,
 }
 
@@ -725,8 +785,10 @@ pub struct TaskDocument {
 pub struct TaskSource {
     pub number: String,
     pub title: String,
+    pub done: bool,
 
-    /// The markdown, or `None` where the task's file has gone from `.tasks/`.
+    /// The markdown, or `None` where the file the entry names is not there to
+    /// read.
     pub markdown: Option<String>,
 }
 
@@ -875,10 +937,36 @@ pub struct PullRequestEvent {
     /// The whole URL, because merging is the human's act and this is the way to
     /// where they do it.
     pub url: String,
+
+    /// How the checks on it were getting on the last time anything asked, or
+    /// nothing where nothing has — a pull request in a repository with no CI,
+    /// and one opened before Verkstead started writing this down.
+    ///
+    /// The aggregate rather than the checks, because what the card has room for
+    /// is one icon: which of the three a suite is, and not what each of them is
+    /// called.
+    ///
+    /// It can be stale, and on a Conversation nothing is watching any more it
+    /// will be: what keeps it fresh is the checks watcher, and that stops when
+    /// the wrap-up is over.
+    pub checks: Option<CheckRollup>,
 }
 
-/// What is on a pull request now: the commits it carries, and what has been said
-/// about it.
+/// How a pull request's checks are getting on, taken all together.
+///
+/// The store's own word, carried across the wire — see the reading behind it
+/// there. Three states and no fourth: *nobody has asked* is the absence of one
+/// rather than a variant, which is a card with no icon on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CheckRollup {
+    Passed,
+    Running,
+    Failed,
+}
+
+/// What is on a pull request now: the commits it carries, what GitHub is running
+/// against it, and what has been said about it.
 ///
 /// Its own request rather than a field on the Conversation, for the reason a
 /// commit's diff is one — and for a further reason of its own: reading this is
@@ -895,6 +983,15 @@ pub struct PullRequestDetails {
     pub commits: Vec<PullRequestCommit>,
 
     pub comments: Vec<PullRequestComment>,
+
+    /// Every check GitHub is running against it, in the order GitHub lists
+    /// them. Empty where there are none, which is a repository with no CI.
+    ///
+    /// Each of them rather than the one word the card draws — see
+    /// [`CheckRollup`]. What the card has room for is which of the three a
+    /// suite is; this is the pane somebody opens to find out *which* check is
+    /// red and where its run is.
+    pub checks: Vec<PullRequestCheck>,
 }
 
 /// One commit of a pull request: what it is, and what it was called.
@@ -931,6 +1028,41 @@ pub struct PullRequestComment {
     pub at: String,
 
     pub html: String,
+}
+
+/// One check GitHub is running against a pull request, as the details pane
+/// receives it: what it is called, how it is getting on, and where its run is.
+///
+/// A line of a list GitHub keeps, in the spirit [`PullRequestCommit`] is one:
+/// read at the moment the pane is opened rather than written down, because a
+/// suite is still running while the human is looking at it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PullRequestCheck {
+    /// What GitHub calls it, which is what the human calls it by.
+    pub name: String,
+
+    pub how: Checked,
+
+    /// Where its run is, as GitHub gave it — the one thing a red check cannot
+    /// be read without. Empty where GitHub gave none, which is a check drawn as
+    /// its name and nothing to follow.
+    pub link: String,
+}
+
+/// How one check is getting on.
+///
+/// The same three words as [`CheckRollup`] and not the same thing: this is one
+/// check and that is a whole suite taken together. Three rather than GitHub's
+/// dozen, because three is what anybody does anything about — a red one is the
+/// thing to go and look at, one still running is nothing to do yet, and the
+/// rest are green.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Checked {
+    Passed,
+    Running,
+    Failed,
 }
 
 /// A commit as the Timeline shows it: what it was called, and how much of the
@@ -1649,9 +1781,13 @@ pub fn task_list(feature: String, tasks: Vec<TaskEntry>) -> TaskListEvent {
 ///
 /// Here rather than in the server for the reason the commit pane's rendering is:
 /// this is the crate with the markdown parser and the sanitizer in it. A task
-/// whose file has gone comes back with nothing to draw rather than with an empty
-/// document — the file going is what says the task is done, and the pane says so
-/// in words.
+/// whose document is not there to read comes back with nothing to draw, and the
+/// pane says so in words — the list pointing at a file nobody wrote is a thing
+/// to say rather than a gap to leave, exactly as a roadmap's is.
+///
+/// Whether the task is done is the entry's own checkbox and travels beside the
+/// document, because a done task still has one: nothing deletes a task file
+/// until the feature is finished with.
 ///
 /// A document of nothing but whitespace is the same as no document at all, which
 /// is what an empty file left behind would otherwise draw: a box with a gap in
@@ -1662,6 +1798,7 @@ pub fn backlog_pane(feature: String, read: Vec<TaskSource>) -> BacklogPane {
         .map(|task| TaskDocument {
             number: task.number,
             title: task.title,
+            done: task.done,
             html: task
                 .markdown
                 .as_deref()
@@ -1787,6 +1924,7 @@ fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestE
         number: opened.number,
         title: opened.title,
         url: opened.url,
+        checks: opened.checks,
     }
 }
 
@@ -1800,20 +1938,27 @@ pub struct PullRequestSummary {
     pub number: i64,
     pub title: String,
     pub url: String,
+
+    /// How its checks were, as the store last wrote it down.
+    pub checks: Option<CheckRollup>,
 }
 
 /// What a pull request holds, as the details pane receives it: the commit list
-/// as it stands, and every comment rendered from the markdown it was written in.
+/// and the check list as they stand, and every comment rendered from the
+/// markdown it was written in.
 ///
 /// The comments are the only part with anything to render, and they are the part
 /// that most needs it: a PR comment is markdown written by whoever can reach the
-/// repository, so it is sanitized here rather than in a browser.
+/// repository, so it is sanitized here rather than in a browser. A commit's
+/// subject and a check's name are text and are put in the page as text.
 pub fn pull_request_details(
     commits: Vec<PullRequestCommit>,
     comments: Vec<Comment>,
+    checks: Vec<PullRequestCheck>,
 ) -> PullRequestDetails {
     PullRequestDetails {
         commits,
+        checks,
         comments: comments
             .into_iter()
             .map(|comment| PullRequestComment {

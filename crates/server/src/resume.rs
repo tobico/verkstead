@@ -50,7 +50,7 @@ use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
 use crate::github;
-use crate::store::{self, Decision, Lifecycle};
+use crate::store::{self, Lifecycle};
 
 /// Who asked for the run to start again.
 ///
@@ -412,13 +412,13 @@ pub(crate) async fn resume(
 /// Conversation left standing still because Verkstead was upgraded is one that
 /// would wait for however long it took somebody to notice.
 ///
-/// **Except where somebody decided to stop.** A [`Decision::Deliberate`] is
-/// Verkstead or the human pulling the brake — the checks that would not go green,
-/// a finish step with no pull request, a Stop pressed from the menu, an account
-/// out of window — and a server coming back up is no reason to think differently
-/// about any of them. Those keep their badge and wait for the press. A
-/// [`Decision::Circumstance`] is the other half of the same record: nobody chose
-/// it, so it is taken up here.
+/// **Except where somebody decided to stop.** A stop [`store::Decision::decided`]
+/// answers for is Verkstead or the human pulling the brake — the checks that
+/// would not go green, a finish step with no pull request, a Stop pressed from
+/// the menu, an account out of window — and a server coming back up is no reason
+/// to think differently about any of them. Those wait for the press, whether or
+/// not they are marked as waiting on anybody. A [`store::Decision::Circumstance`] is
+/// the other half of the same record: nobody chose it, so it is taken up here.
 ///
 /// A refusal is written down rather than logged, because a Conversation that
 /// cannot be started is exactly the one somebody has to look at: it stops, with
@@ -476,13 +476,16 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
 /// Whether this Conversation is stopped in a way only the human can undo, which
 /// is the one thing a restart leaves alone.
 ///
-/// A [`Decision::Deliberate`] is what says it: somebody decided, so nothing here
-/// decides otherwise. See [`crate::stopping::stopped`], which asks the same
-/// question in front of a launch.
+/// [`store::Decision::decided`] is what says it: somebody decided, so nothing here
+/// decides otherwise. Which of them decided is not this question — the human's
+/// own press is left alone exactly as Verkstead's brake is, and what the two
+/// differ about is the marks rather than the press they wait for. See
+/// [`crate::stopping::stopped`], which asks the same question in front of a
+/// launch.
 async fn waiting_for_a_press(state: &AppState, conversation_id: i64) -> anyhow::Result<bool> {
     Ok(store::stopped(&state.pool, conversation_id)
         .await?
-        .is_some_and(|stopped| stopped.decision == Decision::Deliberate))
+        .is_some_and(|stopped| stopped.decision.decided()))
 }
 
 /// Stop a Conversation a restart could not start anything for, with the refusal
@@ -495,7 +498,7 @@ async fn waiting_for_a_press(state: &AppState, conversation_id: i64) -> anyhow::
 /// under *nothing is driving it*, which is the same Conversation described by
 /// something that knows less.
 ///
-/// [`Decision::Deliberate`], which is what it is: Verkstead looked at this
+/// [`store::Decision::Verkstead`], which is what it is: Verkstead looked at this
 /// Conversation and decided nothing could be started for it. Nothing but the
 /// human can change that, so the next restart leaves it alone rather than
 /// refusing all over again — and it reaches a phone, a Conversation nothing will

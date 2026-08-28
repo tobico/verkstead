@@ -150,6 +150,79 @@ main {
   padding: 1.25rem 1rem 3rem;
 }
 
+/* The Gutter: the width every card reserves down its left once the column is
+   wide, so that the marks which are *about* the content rather than part of it
+   have somewhere of their own to sit — a Question's label, the radio and the
+   number a row of an Answer Table is picked by, the Diff's line numbers — and
+   everything there is to read starts one axis past them. Prose, a question's
+   words, an Option's words and a line of code all begin in the same place,
+   however unalike the blocks holding them are, and the marks become a column to
+   run the eye down instead of a jog in the left edge of every third block.
+
+   Three edges, and the pages use all three. The *column edge* is where a
+   section's heading sits and where its card is drawn. The *card edge* is the
+   card's own inset from that, 1rem, which nothing about the Gutter changes: it is
+   how far out a block that was never prose — a table, a fence, a Diagram, the
+   Answer Table's frame — may come to take the whole card, exactly as the widened
+   column above was widened to let it. The *content edge* is the Gutter's right
+   edge, a card edge plus one Gutter, and that is the axis.
+
+   The Gutter is given up rather than spent, though: a table or a fence comes out
+   of it only as far as it will not otherwise fit, so one narrow enough to sit in
+   the content area stays on the axis with the prose and only one that would
+   overrun it reaches back, by exactly what it overruns by. See
+   `.markdown > .wide` in `styles/markdown.css`, which is the row that works
+   that out, and the frame in the markup that exists for no other reason.
+
+   Two blocks take the whole card whether they need it or not, and for the same
+   reason inverted: neither has a width of its own to be measured against the room.
+   A Diagram fits whatever it is given, so it would never ask, and giving it less
+   only draws it smaller. The Answer Table's picking column has to be in the Gutter
+   or the Option's words come off the axis, which is what all of this is for.
+
+   4.5rem is what its widest residents ask for, and there are two of them within
+   half a rem of one another. The Diff wants four columns of line number and one
+   of marker, set in the 0.8rem monospace its lines are, plus the padding those
+   two cells carry between them: a little over 3.5rem in the faces monospace is
+   usually set in. The Answer Table's picking column wants a radio, a gap and an
+   Option's number, and that comes out about the same — a shade more once the
+   Option is numbered in three digits and the browser draws a fat radio, neither
+   of which the width may be caught out by, because a column that outgrows the
+   Gutter pushes the Option's words off the axis. 4.5rem is the round number
+   above both with room to spare.
+
+   Everything is cut to this rather than the page measuring itself against any of
+   them. The Diff's own width is written in `ch`, and a `ch` is only a length
+   inside the font it was measured for, which nothing outside the code is; the
+   Answer Table's is whatever a radio button happens to be today. One name and
+   everything else derived, for the reason the Diff's gutter is already one name:
+   two copies of a width drift, and a drift here is a page that does not line up
+   with itself.
+
+   Only where the window holds the column at its widest — the same 60rem the
+   column itself asks for, so the Gutter travels with the full-width card
+   however the window ranks against the breakpoints elsewhere. On a narrower
+   window the card would be paying for the Gutter out of the measure, so there is
+   none, and the marks sit inline as they always did.
+
+   Named here, on the column every page sits in, because it is read from five
+   modules that share nothing else: the Set page's own sections in
+   `set/Sheet.module.css` and `set/Postscript.module.css`, the card a Preface and
+   a commit's Message are both drawn as in `Card.module.css`, the Diff's own
+   gutter in `styles/diff.css`, and the blocks that bleed back out of it in
+   `styles/markdown.css`. A details pane inherits it from here as a page does,
+   which is what lets one card rule serve the page and the pane alike. Nothing on
+   a list page reads it, a list row having no marks to hang. */
+@media (min-width: 60rem) {
+  main {
+    --gutter: 4.5rem;
+    /* How far a block reaches back out of the Gutter to take the whole card.
+       Nothing does by default: it is the card that says how much there is to
+       come back out of. */
+    --bleed: 0px;
+  }
+}
+
 /* Prose at the measure, flush left rather than centred in the card: the eye
    starts the next line where the last one began, and a column that sat
    somewhere different under every block would make that a hunt.

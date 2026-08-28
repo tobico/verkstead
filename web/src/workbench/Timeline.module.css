@@ -59,19 +59,34 @@
   cursor: pointer;
 }
 
-/* And what a wrap-up that has narrowed to its checks says, in the same place.
-   Not a button and nothing to press: the checks are GitHub's to finish and
-   there is nowhere to go about them, so this is a label where the one above is
-   a way in. Which is why it is drawn quietly — the outline in the edge grey
-   rather than a filled red — a condition being worth reading rather than worth
-   shouting. */
-.waitingOnChecks {
+/* And the quiet mark, in the same place and drawn the same way: an outline in
+   the edge grey rather than a filled red, which is what a condition worth
+   reading looks like beside one worth shouting.
+
+   Three of them wear it. What a wrap-up that has narrowed to its checks says is
+   a label and nothing to press — the checks are GitHub's to finish and there is
+   nowhere to go about them. A stop the human pressed themselves is a button
+   like the badge above, going to the same notice: they know why it stopped, so
+   the word is worth reading rather than worth shouting, but the way to what
+   stopped it is worth keeping. And the word an ended conversation says about
+   itself is a label too: Done and Closed are where the work got to rather than
+   something to go and look at. */
+.waitingOnChecks,
+.stopped,
+.ended {
   padding: 0.15rem 0.5rem;
+  font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--ink-soft);
+  background: none;
   border: 1px solid var(--edge);
   border-radius: 0.3rem;
+}
+
+/* And the one of the three that is a button carries the pointer that says so. */
+.stopped {
+  cursor: pointer;
 }
 
 /* The pinned events, above the timeline and inside the chrome that holds the top
@@ -415,6 +430,15 @@
   border: 0;
 }
 
+/* The ends of a list that is longer than the card shows: an ellipsis where the
+   entries carry on, in the column the boxes are in so it reads as part of the
+   list rather than as something under it. */
+.taskList .more,
+.stageList .more {
+  color: var(--ink-soft);
+  line-height: 1;
+}
+
 /* One that is done is struck through and taken down, the way a checked item
    reads on any list. */
 .taskList .tasks li.done .what,
@@ -432,10 +456,6 @@
   border-radius: 0.6rem;
 }
 
-.pullRequest.selected {
-  border-color: var(--accent);
-}
-
 .pullRequest .eventHead {
   margin-bottom: 0.4rem;
   justify-content: flex-start;
@@ -450,26 +470,21 @@
   color: var(--ink-soft);
 }
 
-/* The way out to GitHub, on the other end of the line: merging happens over
-   there, and getting there must not depend on any pane of this page. */
-.pullRequest .out {
+/* And how its checks are, on the other end of the head's line. The mark itself
+   is `Checks.module.css`'s; what is here is where it stands, which belongs to
+   the line that drew it. `margin-left: auto` rather than a `space-between`,
+   because the head is `flex-start` here — the number sits against the heading
+   and the checks against the card's edge. */
+.pullRequest .checkRollup {
   margin-left: auto;
-  font-size: 0.85rem;
 }
 
-/* And what opens the pane: the title, pressed. A button drawn as the line of
-   text it is, because what is being pressed is the pull request itself. */
-.openPullRequest {
-  display: block;
-  width: 100%;
-  padding: 0;
-  font: inherit;
+/* And the name of the work, under the name of the pull request. A line of text
+   rather than a button: the whole card is what opens the pane, so there is
+   nothing here to press on its own. */
+.pullRequestTitle {
+  margin: 0;
   font-weight: 600;
-  text-align: left;
-  color: inherit;
-  background: none;
-  border: 0;
-  cursor: pointer;
 }
 
 /* The timeline: everything that has happened, in order, each event a card of its
@@ -568,11 +583,9 @@
    said here instead.
 
    Wherever the card is drawn rather than only on the record, which is what the
-   two lists made matter: a task list and a roadmap are drawn twice, pinned and
-   listed, and a rule that reached one copy would have the human press the card
-   held above the pane and watch a different one light up. Said the way
-   `.pullRequest.selected` above says it, and true of both copies for the same
-   reason. */
+   two lists and the pull request made matter: each of the three is drawn twice,
+   pinned and listed, and a rule that reached one copy would have the human
+   press the card held above the pane and watch a different one light up. */
 .openable {
   cursor: pointer;
 }
@@ -1120,16 +1133,18 @@
     background: color-mix(in srgb, var(--stopped) 88%, var(--ink));
   }
 
+  /* And the quiet one deepens its ink instead, having no fill to deepen. */
+  .stopped:hover {
+    color: var(--ink);
+  }
+
   .dots button:not([aria-current]):hover::before {
     background: var(--ink-soft);
   }
 
-  .openPullRequest:hover {
-    color: var(--accent);
-  }
-
   /* The pressable card, wherever it is drawn — the pinned copies of the two
-     lists included, for the reason `.openable` itself is unscoped. */
+     lists and the pull request included, for the reason `.openable` itself is
+     unscoped. */
   .openable:hover,
   .timelineEvent > .agentOutput:hover,
   .timelineEvent > .questionSet:hover,

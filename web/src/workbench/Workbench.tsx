@@ -57,7 +57,7 @@ import {
   type JSX,
 } from "solid-js";
 
-import { loadConversation } from "../api/client";
+import { loadConversation, seeConversation } from "../api/client";
 import type {
   AgentOutputEvent,
   BriefEvent,
@@ -343,6 +343,21 @@ export function Workbench(): JSX.Element {
     on(selected, (id) => {
       setPane(id === "" ? "conversations" : "timeline");
       setEvent(null);
+
+      // And opening one is the human having looked at it, which takes the news
+      // mark off its sidebar row — on every device, the mark being the
+      // server's. Said here rather than in the card's own click handler
+      // because Back, a typed URL and a reload all open a Conversation without
+      // going anywhere near one, and a mark that only a click cleared would
+      // outlive the reading it was about.
+      //
+      // Nothing waits on it and nothing is done about a failure: the mark is a
+      // nudge to look rather than a record to keep, and the worst a lost call
+      // costs is a dot that comes off the next time the Conversation is
+      // opened.
+      if (id !== "") {
+        void seeConversation(id).catch(() => {});
+      }
     }),
   );
 

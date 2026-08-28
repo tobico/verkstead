@@ -5,6 +5,7 @@
     "idle": false,
     "repo": "verkstead",
     "state": "Implementing",
+    "unseen": false,
     "waiting": false,
     "waiting_on_checks": false,
     "working": false
@@ -15,6 +16,7 @@
     "idle": false,
     "repo": "verkstead",
     "state": "Implementing",
+    "unseen": false,
     "waiting": false,
     "waiting_on_checks": false,
     "working": false
@@ -25,6 +27,7 @@
     "idle": false,
     "repo": "verkstead",
     "state": "Grilling",
+    "unseen": false,
     "waiting": true,
     "waiting_on_checks": false,
     "working": false
@@ -35,6 +38,7 @@
     "idle": false,
     "repo": "askance",
     "state": "Draft",
+    "unseen": false,
     "waiting": false,
     "waiting_on_checks": false,
     "working": false
@@ -45,6 +49,7 @@
     "idle": false,
     "repo": "verkstead",
     "state": "Draft",
+    "unseen": false,
     "waiting": false,
     "waiting_on_checks": false,
     "working": false
