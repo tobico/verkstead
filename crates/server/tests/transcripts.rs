@@ -23,9 +23,10 @@ use tower::ServiceExt;
 use verkstead_render::TranscriptView;
 use verkstead_server::{open_database, router, store};
 
-/// A session's log, in the shape a backend writes one: the conversation itself,
-/// the backend's own bookkeeping, and a kind nobody here has heard of — because
-/// what an incremental read has to keep in step is all three numberings.
+/// A session's log, in the shape a backend writes one: the conversation itself
+/// and the backend's own bookkeeping among it — because what an incremental
+/// read has to keep in step is both numberings and the lines they were counted
+/// over.
 const LOG: &[&str] = &[
     r#"{"type":"user","message":{"role":"user","content":"Where should the counter live?"}}"#,
     r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the **brief**."}]}}"#,

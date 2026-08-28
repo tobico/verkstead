@@ -1766,7 +1766,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             lines: 3,
             // The turns of the Transcript written just below, which is what the
             // relay would have counted as it followed the log: everything there
-            // but the one line of the backend's own bookkeeping.
+            // but the two lines of the backend's own bookkeeping.
             turns: Some(6),
             latest: "What should happen to a delivery that has failed forty times?".to_owned(),
         },
@@ -1778,7 +1778,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // which is what the pane draws instead of the bytes wherever there is one.
     // The lines are the shape a backend writes them in, because that is what the
     // renderer reads — and one of everything, because what the pane has to draw
-    // is one of everything.
+    // is one of everything: the two lines it folds away, the known kind and the
+    // one nobody here has heard of, and the block inside a turn that it does
+    // not know and shows where it was said.
     store::append_transcript(
         &pool,
         capture,
@@ -1789,7 +1791,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"rg -n 'retry' crates/server/src","description":"Find where a delivery is retried"}}]}}"#.to_owned(),
             r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","is_error":false,"content":"crates/server/src/queue.rs:118:    retry(delivery).await;"}]}}"#.to_owned(),
             r#"{"type":"attachment","attachment":{"type":"todos","content":"three things still to do"}}"#.to_owned(),
-            r#"{"type":"divination","omen":"a kind from a version nobody here has met"}"#.to_owned(),
+            r#"{"type":"atis-latch","latched":"a kind from a version nobody here has met"}"#.to_owned(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"divination","omen":"a block from a version nobody here has met"}]}}"#.to_owned(),
         ],
     )
     .await

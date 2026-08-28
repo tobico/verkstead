@@ -1895,10 +1895,12 @@ async fn a_sessions_own_log_is_followed_line_by_line_while_it_runs() {
 /// what keeps the reading of somebody else's file format to the one crate that
 /// has the parsers in it (ADR 0006).
 ///
-/// The stub writes a line of each of the three classes — the conversation
-/// itself, the backend's own bookkeeping, and a kind nobody has ever heard of —
-/// because what the pane does with the three is the whole of what makes a log
-/// readable.
+/// The stub writes a line of each class — the conversation itself, the
+/// backend's own bookkeeping, a whole line of a type nobody has ever heard of,
+/// and a turn with a block of one inside it — because what the pane does with
+/// them is the whole of what makes a log readable. The last two are where the
+/// boundary runs: the line folds away with the bookkeeping and the block stays
+/// in the turn it was said in.
 #[tokio::test]
 async fn a_running_sessions_log_is_read_back_as_a_conversation() {
     let fixture = grilling(
@@ -1914,7 +1916,8 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
 
         printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the **brief**."}]}}\n' > "$log"
         printf '{"type":"attachment","attachment":{"type":"todos"}}\n' >> "$log"
-        printf '{"type":"divination","omen":"a raven"}\n' >> "$log"
+        printf '{"type":"atis-latch","latched":"a kind from a later version"}\n' >> "$log"
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"divination","omen":"a raven"}]}}\n' >> "$log"
         printf 'Reading the brief.\n'
 
         sleep 300
@@ -1936,13 +1939,17 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
     );
     assert!(
         matches!(view.turns.get(1), Some(Turn::Unread(_))),
-        "a kind nobody knows should arrive as itself rather than as nothing: {:?}",
+        "a block nobody knows should arrive as itself rather than as nothing: {:?}",
         view.turns
     );
     assert_eq!(
-        view.bookkeeping.len(),
-        1,
-        "and the backend's own bookkeeping should be out of the conversation: {:?}",
+        view.bookkeeping
+            .iter()
+            .map(|kept| kept.kind.as_str())
+            .collect::<Vec<&str>>(),
+        ["attachment", "atis-latch"],
+        "and the backend's own bookkeeping should be out of the conversation, \
+         a type this version has never met among it: {:?}",
         view.bookkeeping
     );
 

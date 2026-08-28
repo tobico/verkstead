@@ -498,14 +498,17 @@ function Said(props: {
         )}
       </Match>
 
-      {/* A line of a kind this version has never met, shown as the JSON it is
-          rather than dropped: a format that has moved on should say so here
-          instead of quietly emptying the pane. */}
+      {/* Something of a kind this version has never met, shown as the JSON it
+          is rather than dropped: a format that has moved on should say so here
+          instead of quietly emptying the pane. A block inside a turn, or a
+          line that never said what it was — a whole line of an unknown kind
+          folds away with the bookkeeping instead, which is why this says
+          "something" rather than "a line". */}
       <Match when={props.turn.kind === "Unread" && props.turn}>
         {(unread) => (
           <li class={`${styles.turn} ${styles.unread}`}>
             <details>
-              <summary>A line this version does not know</summary>
+              <summary>Something this version does not know</summary>
               <pre class={styles.raw}>{unread().line}</pre>
             </details>
           </li>

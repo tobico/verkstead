@@ -4055,6 +4055,9 @@ describe("a session's output on the timeline", () => {
       TRANSCRIPT.bookkeeping.length,
     );
     expect(kept.textContent).toContain("attachment");
+    // A whole line of a kind this version has never met folds in here too,
+    // under the name the log gave it — see ADR 0006.
+    expect(kept.textContent).toContain("atis-latch");
 
     // And not among the turns, which is what folding it away is for.
     expect(container.querySelectorAll(`.${shell.detailsPane} .${outputPane.turn}`)).toHaveLength(
@@ -4064,8 +4067,10 @@ describe("a session's output on the timeline", () => {
 
   /// ADR 0006's containment, at the end of the wire: the log's format belongs to
   /// somebody else, and one that has moved on should say so here rather than
-  /// quietly emptying the pane.
-  it("shows a line of a kind it does not know as the JSON it is", async () => {
+  /// quietly emptying the pane. A block is where that is still drawn inline —
+  /// it is part of what somebody said, so it stays in the turn it was said in,
+  /// where a whole line of an unknown kind folds away with the bookkeeping.
+  it("shows a block of a kind it does not know as the JSON it is", async () => {
     theSpeaking();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 

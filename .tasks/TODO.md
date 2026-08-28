@@ -24,7 +24,7 @@ order is the dependency.
 - [x] 08: Pull request card — [details](08-pull-request-card.md)
 - [x] 09: Check rollup and icon — [details](09-check-rollup-icon.md)
 - [x] 10: Checks in the details pane — [details](10-checks-details-pane.md)
-- [ ] 11: Unknown lines to bookkeeping — [details](11-unknown-lines-bookkeeping.md)
+- [x] 11: Unknown lines to bookkeeping — [details](11-unknown-lines-bookkeeping.md)
 - [ ] 12: Transcript autoscroll — [details](12-transcript-autoscroll.md)
 - [ ] 13: Drag-drop capture — [details](13-drag-drop-capture.md)
 - [ ] 14: Commit message card — [details](14-commit-message-card.md)

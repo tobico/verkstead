@@ -24,9 +24,18 @@
 //! backend's own bookkeeping — modes, reminders, attachments, snapshots — which
 //! is roughly a third of every log and none of it anything a reader came for. It
 //! is kept out of the turns and put in one group of its own, expandable, so that
-//! nothing is hidden and nothing is in the way. Only a line that is neither the
-//! conversation nor known bookkeeping is unrecognised, and those get ADR 0006's
-//! treatment.
+//! nothing is hidden and nothing is in the way. A whole line of a kind nothing
+//! here knows goes to the same group, under the name the log gave it: it used
+//! to stand in the conversation as the JSON it is, which put `atis-latch` — a
+//! type the backend added and never announced — between two turns of a talk.
+//!
+//! **A line folds, a block does not.** The other half of that boundary is
+//! inside a turn, and it goes the other way: a block of a type nothing here
+//! knows is part of what somebody said, so it stays where it was said, as the
+//! JSON it is. One folded away silently would be a turn with a hole in it,
+//! which is what ADR 0006's treatment is there to prevent. A line that is not
+//! JSON at all, and a line that does not say what type it is, stay inline for
+//! the same reason — neither has a name to be filed under.
 //!
 //! **A reading can be carried on.** A running session's Transcript is re-read
 //! every time it says anything, which late in a session is megabytes twice a
@@ -147,7 +156,8 @@ pub enum Turn {
     /// A turn put to it.
     Put(Put),
 
-    /// A line of a kind nothing here knows.
+    /// Something inside a turn that nothing here knows, or a line that never
+    /// said what it was.
     Unread(Unread),
 }
 
@@ -223,7 +233,10 @@ pub struct Put {
     pub html: String,
 }
 
-/// A line nothing here knows how to draw.
+/// Something nothing here knows how to draw, in the conversation where it was
+/// found: a block of an unknown type inside a turn, a line that is not JSON at
+/// all, or one that does not say what type it is. A whole line whose type is
+/// merely unknown is not one of these — it folds away as [`Bookkeeping`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Unread {
@@ -253,11 +266,13 @@ pub struct Bookkeeping {
 /// it invented, snapshots it took of the files. Roughly a third of every log,
 /// and none of it what a reader came for.
 ///
-/// A closed list rather than "everything that is not the conversation", because
-/// the two answers are different: bookkeeping is known and folded away, and a
-/// kind nobody here has heard of is unrecognised and shown (ADR 0006). A list
-/// makes a new kind announce itself; a catch-all would file it silently under
-/// the noise.
+/// A closed list, and a fall-back past it: a whole line of a kind nobody here
+/// has heard of is folded away too, under whatever the log called it. The list
+/// is what says a kind was expected, and the fall-back is what keeps a type the
+/// backend added without announcing it — `atis-latch` was the one — out of the
+/// conversation while still showing it (ADR 0006). Nothing is hidden by that,
+/// since the group opens, and the name it is filed under is what makes a new
+/// kind findable to whoever comes looking.
 const BOOKKEEPING: &[&str] = &[
     "agent-name",
     "ai-title",
@@ -504,7 +519,13 @@ fn read(line: &str, into: &mut Reading) {
         Some("assistant") => said(&entry, into),
         Some("user") => put(&entry, into),
         Some(kind) if BOOKKEEPING.contains(&kind) => into.keep(kind.to_owned(), raw(&entry, reads)),
-        _ => into.take(unread(&entry, reads)),
+        // And a whole line of a kind nobody here has heard of, the same way:
+        // folded under the name the log gave it rather than stood in the
+        // conversation — see [`BOOKKEEPING`].
+        Some(kind) => into.keep(kind.to_owned(), raw(&entry, reads)),
+        // A line that does not say what it is has no name to file it under, so
+        // it is shown, the way a line that is not JSON at all is.
+        None => into.take(unread(&entry, reads)),
     }
 }
 
@@ -705,7 +726,8 @@ mod tests {
 
     /// A log with one of everything in it: the agent's prose, its thinking, a
     /// tool called and the tool's answer, a turn put to it, a line of the
-    /// backend's bookkeeping, and a line of a kind nobody here has heard of.
+    /// backend's bookkeeping, and a line of a kind nobody here has heard of —
+    /// which is bookkeeping too, and the second of the two.
     const FIXTURE: &[&str] = &[
         r#"{"type":"user","message":{"role":"user","content":"Rename the **capture**."}}"#,
         r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"The tables are the awkward part.","signature":"xx"}]}}"#,
@@ -713,7 +735,7 @@ mod tests {
         r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls .tasks","description":"List the task files"}}]}}"#,
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":"04-render.md\n05-summaries.md"}]}}"#,
         r#"{"type":"attachment","attachment":{"type":"todos","content":"nothing a reader came for"}}"#,
-        r#"{"type":"telepathy","thought":"a kind from a later version"}"#,
+        r#"{"type":"atis-latch","latched":"a kind from a later version"}"#,
     ];
 
     fn fixture() -> TranscriptView {
@@ -724,6 +746,11 @@ mod tests {
         said.iter().map(|line| (*line).to_owned()).collect()
     }
 
+    /// The same JSON as the reading lays it out, which is what a fold shows.
+    fn pretty(line: &str) -> String {
+        serde_json::to_string_pretty(&serde_json::from_str::<Value>(line).unwrap()).unwrap()
+    }
+
     /// The count the Timeline row shows is the turns the pane draws, and the one
     /// fixture with one of everything in it is where the two are held to that.
     #[test]
@@ -731,8 +758,8 @@ mod tests {
         assert_eq!(turns(&lines(FIXTURE)), fixture().turns.len());
         assert_eq!(
             turns(&lines(FIXTURE)),
-            6,
-            "one of everything, and the backend's own bookkeeping counted as none of it"
+            5,
+            "one of everything, and neither line of bookkeeping counted as any of it"
         );
     }
 
@@ -803,14 +830,8 @@ mod tests {
                     failed: false,
                     text: "04-render.md\n05-summaries.md".to_owned()
                 }),
-                Turn::Unread(Unread {
-                    id: 6,
-                    line: serde_json::to_string_pretty(
-                        &serde_json::from_str::<Value>(FIXTURE[6]).unwrap()
-                    )
-                    .unwrap()
-                }),
-            ]
+            ],
+            "and the two lines that were nobody talking are not among them"
         );
     }
 
@@ -859,14 +880,18 @@ mod tests {
 
         assert_eq!(
             view.bookkeeping,
-            vec![Bookkeeping {
-                id: 1,
-                kind: "attachment".to_owned(),
-                line: serde_json::to_string_pretty(
-                    &serde_json::from_str::<Value>(FIXTURE[5]).unwrap()
-                )
-                .unwrap(),
-            }]
+            vec![
+                Bookkeeping {
+                    id: 1,
+                    kind: "attachment".to_owned(),
+                    line: pretty(FIXTURE[5]),
+                },
+                Bookkeeping {
+                    id: 2,
+                    kind: "atis-latch".to_owned(),
+                    line: pretty(FIXTURE[6]),
+                },
+            ]
         );
         assert!(
             !view
@@ -875,6 +900,42 @@ mod tests {
                 .any(|turn| matches!(turn, Turn::Unread(unread) if unread.line.contains("todos"))),
             "bookkeeping is known, not unrecognised"
         );
+    }
+
+    /// The line that prompted the boundary: `atis-latch` is a type the backend
+    /// added without announcing it, and it used to stand between two turns of
+    /// a talk saying only that this version had never met it. It folds away
+    /// under the name the log gave it — nothing lost, nothing in the way.
+    #[test]
+    fn a_line_of_a_kind_nobody_knows_folds_under_its_own_name() {
+        let view = transcript_view(&[
+            r#"{"type":"telepathy","thought":"a kind from a later version"}"#.to_owned(),
+        ]);
+
+        assert!(view.turns.is_empty(), "nobody said this: {:?}", view.turns);
+        assert_eq!(
+            view.bookkeeping,
+            vec![Bookkeeping {
+                id: 1,
+                kind: "telepathy".to_owned(),
+                line: pretty(r#"{"type":"telepathy","thought":"a kind from a later version"}"#),
+            }]
+        );
+    }
+
+    /// And a line that never said what it was has no name to be filed under,
+    /// so it is shown where it fell — the same answer as a line that is not
+    /// JSON at all.
+    #[test]
+    fn a_line_that_says_nothing_about_its_kind_is_shown() {
+        let view = transcript_view(&[r#"{"thought":"and no type to go with it"}"#.to_owned()]);
+
+        assert!(
+            matches!(&view.turns[..], [Turn::Unread(unread)] if unread.line.contains("no type")),
+            "{:?}",
+            view.turns
+        );
+        assert!(view.bookkeeping.is_empty());
     }
 
     /// A line the agent's backend wrote for its own purposes rather than
@@ -906,10 +967,12 @@ mod tests {
         );
     }
 
-    /// The same rule one level down: the line is one this knows and the block
-    /// inside it is not.
+    /// The other half of the boundary: a whole line of an unknown kind folds
+    /// away, and a block of one inside a turn does not. A block is part of
+    /// what somebody said, and one folded away silently would leave a hole in
+    /// the turn it was said in.
     #[test]
-    fn a_block_of_a_kind_nobody_knows_is_shown_too() {
+    fn a_block_of_a_kind_nobody_knows_is_shown_where_it_was_said() {
         let view = transcript_view(&[
             r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"divination","omen":"a raven"}]}}"#
                 .to_owned(),

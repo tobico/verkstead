@@ -2285,7 +2285,10 @@ cursor: string, };
 export type Turn = { "kind": "Prose" } & Prose | { "kind": "Reasoning" } & Reasoning | { "kind": "ToolUse" } & ToolUse | { "kind": "ToolResult" } & ToolResult | { "kind": "Put" } & Put | { "kind": "Unread" } & Unread;
 
 /**
- * A line nothing here knows how to draw.
+ * Something nothing here knows how to draw, in the conversation where it was
+ * found: a block of an unknown type inside a turn, a line that is not JSON at
+ * all, or one that does not say what type it is. A whole line whose type is
+ * merely unknown is not one of these — it folds away as [`Bookkeeping`].
  */
 export type Unread = { 
 /**
