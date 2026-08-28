@@ -1200,6 +1200,26 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
     grilling_at_pace(spill, stub, gh, BRISKLY, &[]).await
 }
 
+/// The same with a read-write companion beside it, for the tests about a
+/// Conversation that ends on a pull request in each: the sessions spill what they
+/// were told somewhere that outlives their worktrees, and `gh` answers for both
+/// repositories.
+async fn grilling_spilling_alongside(
+    spill: tempfile::TempDir,
+    stub: &str,
+    companion: &str,
+    gh: &str,
+) -> Grilling {
+    grilling_at_pace(
+        spill,
+        stub,
+        gh,
+        BRISKLY,
+        &[(companion, CompanionMode::ReadWrite)],
+    )
+    .await
+}
+
 /// And the same again at a pace of the caller’s choosing, alongside whatever
 /// `companions` names — no repository at all being the ordinary Conversation.
 async fn grilling_at_pace(
@@ -4011,32 +4031,86 @@ fn fixes(view: &ConversationView) -> usize {
         .count()
 }
 
-/// Whether Verkstead has recorded this Conversation's checks as green.
+/// Whether Verkstead has recorded this Conversation's own pull request's checks
+/// as green.
 ///
 /// Read out of the store rather than off the Timeline, because that is where it
 /// is: settling is bookkeeping about what wrap-up is still waiting on rather
 /// than something that happened, and nothing that is not an Event goes on a
 /// Timeline.
+///
+/// The Conversation's own, there being one suite per pull request: a companion's
+/// is [`companion_checks_settled`]'s.
 async fn checks_settled(fixture: &Grilling) -> bool {
+    settled(
+        fixture,
+        verkstead_server::store::WaitingOn::Checks(own_repo(fixture).await),
+    )
+    .await
+}
+
+/// And whether the pull request opened in the companion beside it is green.
+async fn companion_checks_settled(fixture: &Grilling) -> bool {
+    settled(
+        fixture,
+        verkstead_server::store::WaitingOn::Checks(companion_repo(fixture).await),
+    )
+    .await
+}
+
+/// Whether one of the things this wrap-up waits on is settled.
+async fn settled(fixture: &Grilling, waiting_on: verkstead_server::store::WaitingOn) -> bool {
     let pool = open_database(&fixture.database).await.unwrap();
     let settled = verkstead_server::store::wrap_up_settled(&pool, fixture.id)
         .await
         .unwrap();
     pool.close().await;
 
-    settled.contains(&verkstead_server::store::WaitingOn::Checks)
+    settled.contains(&waiting_on)
+}
+
+/// The Repo the Conversation's own work is in, which is what its own pull
+/// request's checks and fix sessions are keyed by.
+async fn own_repo(fixture: &Grilling) -> i64 {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let conversation = verkstead_server::store::load_conversation(&pool, fixture.id)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+    pool.close().await;
+
+    conversation.repo.id
+}
+
+/// And the one beside it, for the fixtures that are configured with a companion.
+async fn companion_repo(fixture: &Grilling) -> i64 {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let conversation = verkstead_server::store::load_conversation(&pool, fixture.id)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+    pool.close().await;
+
+    conversation
+        .companions
+        .first()
+        .expect("this Conversation was configured with a companion")
+        .repo
+        .id
 }
 
 /// How many fix sessions Verkstead has counted against one of this
-/// Conversation's checks.
+/// Conversation's checks, on its own pull request.
 ///
 /// The count that *two attempts, then ask* is kept by, read the way the watcher
-/// reads it. What a check the review folded into its own session has spent is
-/// nothing: an attempt is counted where a fix session is dispatched, and none is
-/// dispatched into a Worktree the review is holding.
+/// reads it — per check and per pull request, the same check name red on two of
+/// them being two different failures. What a check the review folded into its
+/// own session has spent is nothing: an attempt is counted where a fix session
+/// is dispatched, and none is dispatched into a Worktree the review is holding.
 async fn attempts_spent(fixture: &Grilling, check: &str) -> i64 {
+    let repo = own_repo(fixture).await;
     let pool = open_database(&fixture.database).await.unwrap();
-    let spent = verkstead_server::store::fix_attempts(&pool, fixture.id, check)
+    let spent = verkstead_server::store::fix_attempts(&pool, fixture.id, repo, check)
         .await
         .unwrap();
     pool.close().await;
@@ -4641,7 +4715,19 @@ async fn a_committed_in_companion_without_a_pull_request_stops_the_run_naming_it
 async fn settle_everything(fixture: &Grilling) {
     let pool = open_database(&fixture.database).await.unwrap();
 
-    for waiting_on in verkstead_server::store::WAITED_ON {
+    let opened = verkstead_server::store::pull_requests(&pool, fixture.id)
+        .await
+        .unwrap();
+
+    // The two there is one of per Conversation, and a green suite for every pull
+    // request the wrap-up found — which is what the rule that ends one asks for.
+    let waiting_on = verkstead_server::store::WAITED_ON.into_iter().chain(
+        opened
+            .into_iter()
+            .map(|(repo, _)| verkstead_server::store::WaitingOn::Checks(repo.id)),
+    );
+
+    for waiting_on in waiting_on {
         verkstead_server::store::settle_wrap_up(&pool, fixture.id, waiting_on)
             .await
             .unwrap();
@@ -14330,4 +14416,420 @@ async fn an_answered_deferred_set_is_folded_into_the_next_session_and_no_later_o
             "each Answer is folded once: {step} was told again: {prompt:?}",
         );
     }
+}
+
+/// A `gh` that answers for two repositories at once with a suite of its own in
+/// each: `own` is what it says about the checks where the work's own repository
+/// is, and `companion` what it says in `askance`.
+///
+/// [`gh_alongside`] one step further out. That one is about finding the pull
+/// requests; this is about what is happening to them afterwards, which is a
+/// different answer per repository — a suite runs against a branch in a
+/// repository, and the two have nothing to do with each other.
+fn gh_alongside_checking(own: &str, companion: &str) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+case "$(pwd -P)" in
+*/askance*)
+    case "$5" in
+    *statusCheckRollup*)
+{companion}
+        ;;
+    *commits*)
+        printf '{{"commits":[],"comments":[]}}'
+        ;;
+    *comments*)
+        printf '{{"comments":[],"reviews":[]}}'
+        ;;
+    *)
+        printf '{{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}}'
+        ;;
+    esac
+    exit 0
+    ;;
+esac
+case "$5" in
+*statusCheckRollup*)
+{own}
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#
+    )
+}
+
+/// A red suite, as an answer about the checks — whichever repository it is asked
+/// in.
+///
+/// The same check name in both, which is the whole point of asking twice: `Rust`
+/// red on two pull requests is two different failures, and neither of them
+/// spends the other's attempts.
+const RED: &str = r#"    printf '{"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
+
+/// One that is red until `fixed` is there and green once it is, which is what a
+/// fix session that reached the right pull request does to it.
+fn red_until(fixed: &Path) -> String {
+    format!(
+        r#"    if [ -s {fixed} ]; then how=SUCCESS; else how=FAILURE; fi
+    printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$how""#,
+        fixed = quoted(fixed),
+    )
+}
+
+/// The backlog worked alongside a companion and carried to two pull requests,
+/// plus the sessions a wrap-up runs: a review that finds nothing worth raising,
+/// and a fix session that writes down the prompt it was given.
+///
+/// The fix session says which pull request it was sent at by leaving a marker
+/// named for it — `#7` is the companion's and anything else is the work's own —
+/// so a `gh` beside it can turn *that* repository's suite green, and a fix that
+/// reached the wrong one is visible from outside.
+///
+/// And it says whether it was ever in there beside another: `busy` exists for as
+/// long as one is working, so a second session started over the top of one
+/// writes down that they collided.
+fn a_backlog_alongside_then_fixes(
+    dispatched: &Path,
+    busy: &Path,
+    own: &Path,
+    companion: &Path,
+) -> String {
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    *addressing/SKILL.md*)
+        if [ -e {busy} ]; then printf 'COLLIDED\n' >> {dispatched}; fi
+        printf 'x' > {busy}
+        printf '%s\n=====\n' "$2" >> {dispatched}
+        case "$2" in
+        *"pull request #7"*) printf 'x' > {companion} ;;
+        *) printf 'x' > {own} ;;
+        esac
+        printf 'having a go at the check\n'
+        printf 'a fix\n' >> fixes.md
+        git add -A
+        git commit --quiet -m 'fix: have a go at the failing check'
+        rm -f {busy}
+        sleep 300
+        ;;
+    esac
+    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        rm ".tasks/$next"
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+    else
+        git rm --quiet .tasks/TODO.md
+        git commit --quiet -m 'chore: finish rate-limiting'
+        cd ../askance-*
+        printf 'the other half\n' > halves.md
+        git add halves.md
+        git commit --quiet -m 'feat: the other half'
+        printf 'pushed both, and the pull requests are open\n'
+    fi
+    sleep 300
+    ;;
+esac
+"#,
+        busy = quoted(busy),
+        dispatched = quoted(dispatched),
+        own = quoted(own),
+        companion = quoted(companion),
+    )
+}
+
+/// A red check on a companion's pull request is fixed in that companion's
+/// worktree, and the run stops naming the pull request that would not go green.
+///
+/// Which is the whole of what a fix session has to be told once a Conversation
+/// holds more than one pull request. It starts in the Conversation's own
+/// worktree and `gh` reads its repository from wherever it runs, so a session
+/// sent at `#7` and left to work where it landed would ask `verkstead` how
+/// `askance`'s checks were getting on — and be told about a suite that is green.
+///
+/// Two goes and then the human, per pull request: the work's own is green
+/// throughout and has nothing dispatched about it, and the two the companion
+/// spends are its own.
+#[tokio::test]
+async fn a_red_check_on_a_companions_pull_request_is_fixed_in_that_companions_worktree() {
+    let spill = tempfile::tempdir().unwrap();
+    let dispatched = spill.path().join("fix-prompts");
+    let busy = spill.path().join("busy");
+    let own = spill.path().join("fixed-own");
+    let companion = spill.path().join("fixed-companion");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
+        "askance",
+        &gh_alongside_checking(GREEN, RED),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+    let worktree = fixture.view().await.companions[0]
+        .worktree
+        .clone()
+        .expect("the companion is checked out")
+        .path;
+
+    let told = std::fs::read_to_string(&dispatched).expect("both fix sessions wrote their prompt");
+    let prompts: Vec<&str> = told
+        .split("=====")
+        .filter(|it| !it.trim().is_empty())
+        .collect();
+
+    assert_eq!(
+        prompts.len(),
+        2,
+        "two goes at the companion's check and no more: {told}",
+    );
+
+    for prompt in &prompts {
+        assert!(
+            prompt.contains("#7") && prompt.contains("askance"),
+            "the session is told which pull request in which repository: {prompt}",
+        );
+        assert!(
+            prompt.contains(&worktree),
+            "and the worktree to work in, {worktree} being where that repository's \
+             branch is: {prompt}",
+        );
+    }
+
+    assert!(
+        stopped.html.contains("#7") && stopped.html.contains("askance"),
+        "the Notice says which pull request would not go green: {:?}",
+        stopped.html,
+    );
+
+    assert!(
+        !own.exists(),
+        "nothing was ever dispatched about the work's own pull request, it having \
+         been green from the first poll",
+    );
+    assert_eq!(
+        attempts_spent(&fixture, "Rust").await,
+        0,
+        "and the work's own `Rust` spent nothing: it was green the whole time, and \
+         the companion's two are the companion's",
+    );
+}
+
+/// Two red pull requests queue rather than collide: one fix session at a time,
+/// and the second dispatched once the Worktree is free.
+///
+/// Both of them are red from the moment the wrap-up starts and each goes green on
+/// its own fix, so each gets exactly one session — and the two sessions are the
+/// two watchers taking the Conversation's Turn in turn. A watcher that dispatched
+/// without it would put two agents in one sandbox, which is what the marker file
+/// here would catch.
+///
+/// And then the wrap-up ends, which it could only do with both suites green.
+#[tokio::test]
+async fn two_red_pull_requests_are_fixed_one_session_at_a_time() {
+    let spill = tempfile::tempdir().unwrap();
+    let dispatched = spill.path().join("fix-prompts");
+    let busy = spill.path().join("busy");
+    let own = spill.path().join("fixed-own");
+    let companion = spill.path().join("fixed-companion");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
+        "askance",
+        &gh_alongside_checking(&red_until(&own), &red_until(&companion)),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let told = std::fs::read_to_string(&dispatched).expect("both pull requests were fixed");
+
+    assert!(
+        !told.contains("COLLIDED"),
+        "two fix sessions were in the Worktree at once: {told}",
+    );
+
+    let prompts: Vec<&str> = told
+        .split("=====")
+        .filter(|it| !it.trim().is_empty())
+        .collect();
+
+    assert!(
+        prompts
+            .iter()
+            .any(|prompt| prompt.contains("#41") && prompt.contains("verkstead")),
+        "the work's own pull request had a session of its own: {told}",
+    );
+    assert!(
+        prompts
+            .iter()
+            .any(|prompt| prompt.contains("#7") && prompt.contains("askance")),
+        "and so did the companion's: {told}",
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: both suites went green on their fix — {:?}",
+        notices(&view),
+    );
+}
+
+/// A wrap-up is over when *every* pull request's checks are green, and not
+/// before.
+///
+/// The work's own is green from the first poll and the companion's suite is still
+/// running, which is neither red nor green: nothing is dispatched about it and
+/// nothing is settled either. A rule that waited on the Conversation's own alone
+/// would have finished here — with a pull request nobody had heard back about.
+#[tokio::test]
+async fn a_wrap_up_waits_for_every_pull_requests_checks() {
+    let spill = tempfile::tempdir().unwrap();
+    let dispatched = spill.path().join("fix-prompts");
+    let busy = spill.path().join("busy");
+    let own = spill.path().join("fixed-own");
+    let running = spill.path().join("companion-finished");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &running),
+        "askance",
+        &gh_alongside_checking(GREEN, &green_after(&running)),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the work's own checks never settled: {}",
+            standing(&fixture.view().await),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Long enough for many polls of a wrap-up with one suite green and one still
+    // running.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(
+        !companion_checks_settled(&fixture).await,
+        "a suite that has not finished settles nothing",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "so the Conversation waits, whatever its own pull request is doing",
+    );
+    assert!(
+        !dispatched.exists(),
+        "and nothing was dispatched about either of them: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+
+    // And now the companion's finishes, green.
+    std::fs::write(&running, "x").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+}
+
+/// The same check name red on two pull requests gets two fix sessions each: two
+/// different failures, and neither of them spending the other's attempts.
+///
+/// `Rust` is red on both from the first poll and stays red, so this is *two
+/// attempts, then ask the human* running twice over — which a count kept per
+/// check alone would have cut to two sessions altogether, with one of the two
+/// pull requests never looked at.
+///
+/// The four alternate, because the Worktree is what they queue for: a watcher
+/// that could not take the Turn tries again a poll later, and a poll later is
+/// always sooner than the watcher whose session has just ended and has a whole
+/// interval to sleep off.
+#[tokio::test]
+async fn the_same_check_red_on_two_pull_requests_gets_two_goes_each() {
+    let spill = tempfile::tempdir().unwrap();
+    let dispatched = spill.path().join("fix-prompts");
+    let busy = spill.path().join("busy");
+    let own = spill.path().join("fixed-own");
+    let companion = spill.path().join("fixed-companion");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
+        "askance",
+        &gh_alongside_checking(RED, RED),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+    let told = std::fs::read_to_string(&dispatched).expect("the fix sessions wrote their prompts");
+    let prompts: Vec<&str> = told
+        .split("=====")
+        .filter(|it| !it.trim().is_empty())
+        .collect();
+
+    let about = |number: &str| {
+        prompts
+            .iter()
+            .filter(|prompt| prompt.contains(number))
+            .count()
+    };
+
+    assert_eq!(
+        (about("#41"), about("#7")),
+        (2, 2),
+        "two goes at each pull request, and no more: {told}",
+    );
+
+    assert!(
+        stopped.html.contains("pull request #"),
+        "and the Notice says which one would not go green: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        attempts_spent(&fixture, "Rust").await,
+        2,
+        "the work's own `Rust` spent its own two, whatever the companion's spent",
+    );
 }

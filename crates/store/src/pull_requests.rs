@@ -351,6 +351,71 @@ pub async fn pull_request(
     }))
 }
 
+/// Every pull request a Conversation's work is on, each with the Repo it was
+/// opened in.
+///
+/// What a wrap-up's watchers are started from: there is a suite per pull request
+/// and a Conversation ends on one per repository it was worked in, so *which
+/// pull requests* is a question with a list for an answer. The Repo comes with
+/// each of them because that is where `gh` has to be run to ask about it — a
+/// number means something else in another repository, or nothing.
+///
+/// In the order they were recorded, which is the Conversation's own first and
+/// the companions as they were found.
+///
+/// A pull request whose Repo is no longer registered is left out rather than
+/// carried without one: there is nowhere left to ask about it.
+pub async fn pull_requests(
+    pool: &SqlitePool,
+    conversation_id: i64,
+) -> Result<Vec<(Repo, PullRequest)>> {
+    /// The columns in the order the query below selects them: the Repo, whether
+    /// it is one beside the Conversation's own, and the pull request.
+    type Row = (i64, String, String, String, i64, i64, String, String);
+
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT r.id, r.path, r.name, r.default_branch, r.id <> v.repo_id,
+                p.number, p.title, p.url
+         FROM pull_requests p
+         JOIN conversations v ON v.id = p.conversation_id
+         JOIN repos r ON r.id = p.repo_id
+         WHERE p.conversation_id = ?
+         ORDER BY p.event_id",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading the pull requests of Conversation {conversation_id}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, path, name, default_branch, beside, number, title, url)| {
+                let repo = Repo {
+                    id,
+                    path: std::path::PathBuf::from(path),
+                    name,
+                    default_branch,
+                };
+
+                // The label the pinned card draws, which is the Repo's name only
+                // where it is not the Conversation's own — see [`PullRequest::repo`].
+                let named = (beside != 0).then(|| repo.name.clone());
+
+                (
+                    repo,
+                    PullRequest {
+                        number,
+                        title,
+                        url,
+                        repo: named,
+                    },
+                )
+            },
+        )
+        .collect())
+}
+
 /// Which registered Repo one of a Conversation's pull requests was opened in.
 ///
 /// What the details pane asks GitHub in. The Conversation's own repository is

@@ -18,17 +18,29 @@ Each of them is somebody — or something — telling you that work already push
 is not right yet. None of them is a fresh piece of work, and none of them is an
 invitation to look around for others.
 
-You start in a worktree of the repository, on the branch the work is on. The
-branch is already pushed and it already has a pull request open: there is
-nothing to create, nothing to switch to and nothing to open.
+You start in a worktree of the Conversation's own repository, on the branch the
+work is on. That branch is already pushed and it already has a pull request
+open: there is nothing to create, nothing to switch to and nothing to open.
+
+**Work where the feedback says.** This Conversation may hold a pull request in
+more than one repository — its own, and one per companion repository the work
+committed in — so feedback about one of them names the repository, the pull
+request and the worktree to work in. `cd` into that worktree first and do the
+whole job there: `git` and `gh` both read their repository from wherever they
+are run, so a `gh pr checks` from the wrong directory asks about somebody else's
+pull request. Feedback that names no worktree is about the branch you started
+on, and that is where to work.
+
+Whichever it is, it is one branch and one pull request: the one in the worktree
+you are working in, already pushed and already open.
 
 ## 1. Find out what it is actually saying
 
 Read the feedback whole before changing anything, then go and see for yourself.
 
-- **A failed check**: run the thing that failed, here, and read the real
-  failure. A CI log says which command failed; the repository says how to run
-  it. A fix written from the log alone is a guess.
+- **A failed check**: run the thing that failed, in the worktree the feedback
+  named, and read the real failure. A CI log says which command failed; the
+  repository says how to run it. A fix written from the log alone is a guess.
 - **A review finding or a comment**: read the code it is about, and the code
   around it. What is being asked for is usually smaller than it sounds and
   occasionally larger.
@@ -60,6 +72,10 @@ this terminal to ask for one.
     git add -A
     git commit -m "fix: <what the feedback was, and what you did about it>"
     git push
+
+In the worktree the feedback named, which is where the fix was made: those three
+are one repository's, and a commit made in the wrong directory is a change to
+work nobody asked about.
 
 Push, unlike every other session here: this branch is already on a pull request,
 and a fix that stays local is a fix nobody can see and nothing re-runs. The push
@@ -104,8 +120,12 @@ Trailers go at the end as usual; the workbench takes them off what it shows.
       class throttle removed
     ```
 
-Do not open a pull request, do not touch any other branch, and do not merge
-anything. The pull request exists, and merging is the human's act.
+Do not open a pull request, do not merge anything, and do not touch any branch
+beyond the one you were sent to: the branch checked out in the worktree the
+feedback named, or the one you started on where it named none. Every other
+branch — in this repository and in every companion beside it — belongs to
+somebody else's piece of feedback. The pull request exists, and merging is the
+human's act.
 
 Then stop.
 

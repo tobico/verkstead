@@ -1465,6 +1465,37 @@ mod tests {
         );
     }
 
+    /// A fix session may be sent at a pull request that is not the one in the
+    /// worktree it starts in, so the skill has to say where to work.
+    ///
+    /// A Conversation ends on a pull request per repository it committed in, and
+    /// every one of them is watched. Both `git` and `gh` read their repository
+    /// from wherever they are run, so a session sent at a companion's pull
+    /// request and left where it landed would ask the wrong repository how its
+    /// checks were getting on — and *do not touch any other branch* would forbid
+    /// exactly the branch it was sent to.
+    #[test]
+    fn the_addressing_skill_sends_the_session_to_the_worktree_the_feedback_names() {
+        let addressing = skill("addressing/SKILL.md");
+
+        assert!(
+            addressing.contains("worktree the feedback named")
+                || addressing.contains("worktree to work in"),
+            "the feedback names where to work, and the skill says to go there: \
+             {addressing}"
+        );
+        assert!(
+            addressing.contains("cd"),
+            "which is a directory to change into before anything else: {addressing}"
+        );
+        assert!(
+            addressing.contains("do not touch any branch")
+                && addressing.contains("beyond the one you were sent to"),
+            "and what it must leave alone is every branch but that one, rather than \
+             every branch but the one it started on: {addressing}"
+        );
+    }
+
     /// The scope is the feedback and nothing beside it, which is what makes a
     /// fix reviewable against the thing that was asked for.
     #[test]

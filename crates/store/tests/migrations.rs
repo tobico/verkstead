@@ -23,6 +23,12 @@
 //! request used to be the Conversation's alone, and is now the Conversation's and
 //! the Repo's — a Conversation ends on one per repository it was worked in.
 //!
+//! And two more that follow from that one: a fix session was counted against the
+//! Conversation and a check, and a settled suite was the Conversation's, both of
+//! which are a pull request's now. What was already written down is the
+//! Conversation's own repository's, that being the only pull request it could
+//! have been about.
+//!
 //! Both old shapes are written here by hand rather than by the code that used to
 //! write them: that code has gone, and what has to keep working is a database
 //! rather than a function.
@@ -31,10 +37,11 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Commit, Decision, Event, Lifecycle, PullRequest, asked_to_stop, clear_stop, commit_repo,
-    conversations, load_conversation, open_database, pull_request, pull_request_repo,
-    record_another_pull_request, record_commit, recorded_commits, register_repo,
-    start_conversation, start_grilling, stop, stopped, timeline,
+    Commit, Decision, Event, Finished, Lifecycle, PullRequest, WaitingOn, asked_to_stop,
+    clear_stop, commit_repo, conversations, finish_wrap_up, fix_attempts, load_conversation,
+    open_database, pull_request, pull_request_repo, record_another_pull_request, record_commit,
+    record_fix_attempt, recorded_commits, register_repo, start_conversation, start_grilling, stop,
+    stopped, timeline, wrap_up_settled,
 };
 
 /// A database with the old table in it, and a Conversation to hang stops off.
@@ -1133,4 +1140,201 @@ async fn the_rebuilt_pull_requests_table_keeps_one_per_conversation_per_repo() {
         2,
         "and a database opened twice is rewritten once",
     );
+}
+
+/// A database whose wrap-up bookkeeping is the shape it was before a
+/// Conversation could end on more than one pull request: a fix session counted
+/// against the Conversation and a check, and a suite settled for the Conversation
+/// itself.
+///
+/// The Conversation is walked to Wrapping first, so what the rewrite attributes
+/// is a wrap-up that was really under way — and the pull request it is on is the
+/// one its settled checks turn out to have been about.
+async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/state/worktrees/rate-limiting"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    verkstead_store::pick_direction(&pool, id, verkstead_schema::Direction::Inline)
+        .await
+        .unwrap();
+
+    verkstead_store::record_pull_request(
+        &pool,
+        id,
+        repo,
+        &PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    for table in ["check_fix_attempts", "wrap_up_settled"] {
+        sqlx::query(&format!("DROP TABLE {table}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    sqlx::query(
+        "CREATE TABLE check_fix_attempts (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             check_name      TEXT NOT NULL,
+             attempts        INTEGER NOT NULL,
+             PRIMARY KEY (conversation_id, check_name)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE wrap_up_settled (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             waiting_on      TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, waiting_on)
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO check_fix_attempts (conversation_id, check_name, attempts)
+         VALUES (?, 'Rust', 1)",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for waiting_on in ["checks", "review"] {
+        sqlx::query(
+            "INSERT INTO wrap_up_settled (conversation_id, waiting_on, at)
+             VALUES (?, ?, '2026-08-01T09:14:22.000Z')",
+        )
+        .bind(id)
+        .bind(waiting_on)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    pool.close().await;
+
+    (id, repo)
+}
+
+/// A fix session counted before this was counted against the Conversation's own
+/// repository, which is the only pull request it was possible for it to have been
+/// about — so the check that had a go left has one, and the same check name on
+/// another pull request has its own two.
+#[tokio::test]
+async fn every_fix_session_counted_before_this_was_the_conversations_own_repositorys() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo) = wrap_up_of_before(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        fix_attempts(&pool, id, repo, "Rust").await.unwrap(),
+        1,
+        "the go it has already had is still spent",
+    );
+
+    let beside = register_repo(&pool, Path::new("/watched/askance"), "askance", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    assert_eq!(
+        fix_attempts(&pool, id, beside, "Rust").await.unwrap(),
+        0,
+        "and the same check name on another pull request starts from its own two",
+    );
+    assert_eq!(
+        record_fix_attempt(&pool, id, beside, "Rust").await.unwrap(),
+        1,
+        "which the rebuilt key is what makes room for",
+    );
+}
+
+/// And a settled suite was about that same pull request, while the review stays
+/// what it always was: one review, about no pull request in particular.
+///
+/// Which together are what keeps a wrap-up that was nearly over from starting
+/// again: the checks it had settled are still settled, so a server that came back
+/// up to this database is waiting on what it was waiting on before.
+#[tokio::test]
+async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() {
+    let dir = tempfile::tempdir().unwrap();
+    let (id, repo) = wrap_up_of_before(dir.path()).await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let mut settled = wrap_up_settled(&pool, id).await.unwrap();
+    settled.sort_by_key(|one| format!("{one:?}"));
+
+    assert_eq!(
+        settled,
+        vec![WaitingOn::Checks(repo), WaitingOn::Review],
+        "the suite that was green is the one pull request's it could have been",
+    );
+
+    // And the rule that ends a wrap-up reads them as it always did: what is left
+    // outstanding here is what was said on the pull request, and nothing else.
+    assert_eq!(
+        finish_wrap_up(&pool, id).await.unwrap(),
+        Finished::StillWaiting,
+    );
+
+    verkstead_store::settle_wrap_up(&pool, id, WaitingOn::Comments)
+        .await
+        .unwrap();
+
+    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+
+    pool.close().await;
+
+    // And a database opened twice is rewritten once: a second run over the
+    // rebuilt tables would find nothing to attribute and drop what is there.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        fix_attempts(&pool, id, repo, "Rust").await.unwrap(),
+        1,
+        "what a check had been given is where the first run left it",
+    );
+    assert_eq!(wrap_up_settled(&pool, id).await.unwrap().len(), 3);
 }

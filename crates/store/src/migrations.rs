@@ -7,6 +7,10 @@
 //! there, run once because the thing they described has been replaced by
 //! something else.
 //!
+//! And two of them are about a Conversation ending on more than one pull
+//! request: what a fix session was counted against, and what a settled suite was
+//! about, are both a pull request's rather than a Conversation's now.
+//!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
 //! rewrites rather than a version number kept somewhere. So a database opened
@@ -23,7 +27,9 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     stops_recorded_the_old_way(pool).await?;
     conversations_that_were_aborted(pool).await?;
     commits_that_named_no_repo(pool).await?;
-    pull_requests_that_named_no_repo(pool).await
+    pull_requests_that_named_no_repo(pool).await?;
+    fix_attempts_that_named_no_repo(pool).await?;
+    settlements_that_named_no_pull_request(pool).await
 }
 
 /// Attribute every commit recorded before Verkstead swept more than one
@@ -200,6 +206,161 @@ async fn pull_requests_that_named_no_repo(pool: &SqlitePool) -> Result<()> {
     tx.commit()
         .await
         .context("attributing the pull requests recorded before this to a repository")
+}
+
+/// Attribute every fix session counted before a Conversation could end on more
+/// than one pull request, and rebuild the key that keeps the count per check.
+///
+/// The count used to be the Conversation's and the check's — one pull request per
+/// Conversation, so naming the repository would have been naming the only thing
+/// it could be. A Conversation now has a suite per pull request, and the same
+/// check name red on two of them is two different failures: one spending the
+/// other's attempts would stop a run that still had somewhere to go. Every row
+/// already there was counted against the Conversation's own repository, which is
+/// what it was possible for it to be.
+///
+/// The table is rebuilt rather than altered for the reason the two above it are:
+/// the rule is the primary key, declared inline, and a `CREATE TABLE IF NOT
+/// EXISTS` does nothing at all to a table that is already there.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn fix_attempts_that_named_no_repo(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('check_fix_attempts') WHERE name = ?")
+            .bind("repo_id")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the Repo of a counted fix session")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("attributing the fix sessions counted before this to a repository")?;
+
+    sqlx::query(
+        "CREATE TABLE check_fix_attempts_by_repo (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             check_name      TEXT NOT NULL,
+             attempts        INTEGER NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id, check_name)
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the check fix attempts table over with a repository on it")?;
+
+    // Joined to the Conversations rather than sub-selected per row, which is
+    // also what leaves behind a count whose Conversation has gone: there is no
+    // repository such a row could be attributed to, and no wrap-up left to read
+    // it.
+    sqlx::query(
+        "INSERT INTO check_fix_attempts_by_repo
+             (conversation_id, repo_id, check_name, attempts)
+         SELECT a.conversation_id, v.repo_id, a.check_name, a.attempts
+         FROM check_fix_attempts a
+         JOIN conversations v ON v.id = a.conversation_id",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("attributing the fix sessions counted before this to a repository")?;
+
+    sqlx::query("DROP TABLE check_fix_attempts")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the check fix attempts table as it was")?;
+
+    sqlx::query("ALTER TABLE check_fix_attempts_by_repo RENAME TO check_fix_attempts")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt check fix attempts table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("attributing the fix sessions counted before this to a repository")
+}
+
+/// Attribute every settled checks row to the pull request it was about, and
+/// rebuild the key that keeps one settlement per thing waited on.
+///
+/// A wrap-up used to wait on three things, all of them the Conversation's. The
+/// checks are now one per pull request — a Conversation ends on one per
+/// repository it was worked in, each with its own suite — so a settlement is the
+/// Conversation's, the pull request's and the thing's. Every settled `checks` row
+/// already there is the Conversation's own repository's, which is the only pull
+/// request it was possible for it to be about; the review and what has been said
+/// stay what they are, and are written against no pull request at all.
+///
+/// The table is rebuilt for the reason the three above it are, and the column it
+/// gains references nothing: the rows about no pull request carry a Repo of zero,
+/// which is no repository — SQLite hands rowids out from one — and a reference
+/// would refuse them. See [`super::wrap_up`].
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn settlements_that_named_no_pull_request(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('wrap_up_settled') WHERE name = ?")
+            .bind("repo_id")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the pull request a wrap-up's settlement is about")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    let mut tx = super::begin_writing(pool)
+        .await
+        .context("attributing the settled checks of before to a pull request")?;
+
+    sqlx::query(
+        "CREATE TABLE wrap_up_settled_by_repo (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL,
+             waiting_on      TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id, waiting_on)
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the wrap-up settlements table over with a pull request on it")?;
+
+    // The checks against the Conversation's own repository and everything else
+    // against none, which is the whole of what this rewrite decides. Joined to the
+    // Conversations for the reason the rewrites above are joined: a settlement
+    // whose Conversation has gone has no repository to be attributed to.
+    sqlx::query(
+        "INSERT INTO wrap_up_settled_by_repo
+             (conversation_id, repo_id, waiting_on, at)
+         SELECT s.conversation_id,
+                CASE s.waiting_on WHEN 'checks' THEN v.repo_id ELSE 0 END,
+                s.waiting_on, s.at
+         FROM wrap_up_settled s
+         JOIN conversations v ON v.id = s.conversation_id",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("attributing the settled checks of before to a pull request")?;
+
+    sqlx::query("DROP TABLE wrap_up_settled")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the wrap-up settlements table as it was")?;
+
+    sqlx::query("ALTER TABLE wrap_up_settled_by_repo RENAME TO wrap_up_settled")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt wrap-up settlements table where the old one was")?;
+
+    tx.commit()
+        .await
+        .context("attributing the settled checks of before to a pull request")
 }
 
 /// The table the stops of before are kept in, named once: it is gone by the end

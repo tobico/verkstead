@@ -1,9 +1,17 @@
 //! The rule that ends a wrap-up.
 //!
-//! A Conversation leaves Wrapping for **Done** when three things are true
-//! together: the pull request's checks are green, the self-review's Question Set
-//! has been answered, and nothing said on the pull request is left unaddressed.
-//! Any one of the three missing keeps it where it is.
+//! A Conversation leaves Wrapping for **Done** when three kinds of thing are
+//! true together: every pull request's checks are green, the self-review's
+//! Question Set has been answered, and nothing said on the pull request is left
+//! unaddressed. Any one of them missing keeps it where it is.
+//!
+//! Three kinds rather than three things, because a Conversation ends on a pull
+//! request per repository it was worked in and each of them has a suite of its
+//! own: the review is one review across the whole of it, and the checks are one
+//! settlement each. Which pull requests those are is read off the record every
+//! time the rule is asked — a companion's found a poll after the Conversation's
+//! own is one more thing to wait on, and a wrap-up that had already counted its
+//! three would have finished in between. See [`store::finish_wrap_up`].
 //!
 //! Verkstead decides that itself. There is nobody at the workbench to press
 //! anything, which is the whole of what running unattended means — and each of
@@ -25,11 +33,11 @@
 //! its own Notice. So this asks too, the way every watcher already asks before
 //! it dispatches anything — see [`crate::stopping::stopped`].
 //!
-//! A loop rather than a call from each of the three, and deliberately so: the
+//! A loop rather than a call from each of the watchers, and deliberately so: the
 //! things that settle are in three different places — a poll of GitHub, another
 //! poll of GitHub, and the endpoint that takes a Response — and a wrap-up left
 //! for ever because one of them forgot to ask would be the failure nobody
-//! notices. Asking costs one read of a table.
+//! notices. Asking costs two reads of a table.
 
 use verkstead_schema::Nudge;
 
@@ -61,8 +69,8 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
             Ok(store::Finished::Done) => {
                 tracing::info!(
                     conversation_id,
-                    "the checks are green, the review is answered and nothing is left \
-                     unaddressed, so the work is done",
+                    "every pull request's checks are green, the review is answered and \
+                     nothing is left unaddressed, so the work is done",
                 );
 
                 // The Timeline has a move on it, and an open page should say so
