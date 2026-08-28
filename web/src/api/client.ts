@@ -16,6 +16,12 @@ import type {
   BriefSaved,
   Capture,
   CommitPane,
+  CompanionAdded,
+  CompanionBaseRecorded,
+  CompanionBranchRenamed,
+  CompanionMode,
+  CompanionModeChosen,
+  CompanionRemoved,
   ConversationArchived,
   ConversationClosed,
   ConversationEntry,
@@ -349,6 +355,74 @@ export function setBaseBranch(
   branch: string | null,
 ): Promise<BaseRecorded> {
   return post<BaseRecorded>(`/api/ui/conversations/${id}/base`, { branch });
+}
+
+/// Work alongside another registered Repo, read-only and off its own default
+/// branch until the row says otherwise.
+///
+/// Which Repo is the whole of what goes out: everything else a companion holds
+/// has a default worth having, and picking one out of a menu is one decision.
+export function addCompanion(
+  id: number,
+  repoId: number,
+): Promise<CompanionAdded> {
+  return post<CompanionAdded>(`/api/ui/conversations/${id}/companions`, {
+    repo_id: repoId,
+  });
+}
+
+/// And stop working alongside one. Which Repo is in the path, and there is
+/// nothing else to say about taking it away.
+export function removeCompanion(
+  id: number,
+  repoId: number,
+): Promise<CompanionRemoved> {
+  return post<CompanionRemoved>(
+    `/api/ui/conversations/${id}/companions/${repoId}/remove`,
+    {},
+  );
+}
+
+
+/// Say how far into one of them the work may reach.
+export function setCompanionMode(
+  id: number,
+  repoId: number,
+  mode: CompanionMode,
+): Promise<CompanionModeChosen> {
+  return post<CompanionModeChosen>(
+    `/api/ui/conversations/${id}/companions/${repoId}/mode`,
+    { mode },
+  );
+}
+
+/// Choose the branch its checkout comes off, or pass `null` for that
+/// repository's default-branch rule.
+///
+/// The branch is the companion repository's own: a conversation and a companion
+/// of it are two repositories, each with a list of its own.
+export function setCompanionBase(
+  id: number,
+  repoId: number,
+  branch: string | null,
+): Promise<CompanionBaseRecorded> {
+  return post<CompanionBaseRecorded>(
+    `/api/ui/conversations/${id}/companions/${repoId}/base`,
+    { branch },
+  );
+}
+
+/// Name the branch a read-write companion's work is done on, or send nothing at
+/// all to go back to mirroring the conversation's own.
+export function renameCompanionBranch(
+  id: number,
+  repoId: number,
+  branch: string,
+): Promise<CompanionBranchRenamed> {
+  return post<CompanionBranchRenamed>(
+    `/api/ui/conversations/${id}/companions/${repoId}/branch`,
+    { branch },
+  );
 }
 
 /// Give a Conversation somewhere to work and set it grilling: a branch off its

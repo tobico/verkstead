@@ -193,6 +193,16 @@ pub struct Conversation {
     /// abandoned-roadmaps notice, and the directory name inside is the whole of
     /// what is stored about the roadmap — see [`start_adoption`].
     pub adopting: Option<String>,
+
+    /// The other registered Repos this Conversation works alongside, by the
+    /// Repo's name — see [`super::companions`].
+    ///
+    /// Empty is the ordinary Conversation: one repository is what most work
+    /// needs. Carried on the Conversation rather than fetched beside it,
+    /// because everything that acts on a Conversation acts on its companions
+    /// too — the sandbox it is worked in, the prompt its sessions are given,
+    /// and the summary of what it was set up with.
+    pub companions: Vec<super::Companion>,
 }
 
 /// One row of the conversations sidebar, drawn without reading a Timeline.
@@ -1289,6 +1299,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
         adopting: adopting(pool, id).await?,
+        companions: super::companions(pool, id).await?,
     }))
 }
 
@@ -1440,10 +1451,7 @@ async fn choose(
         });
     }
 
-    let mut tx = pool
-        .begin()
-        .await
-        .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
+    let mut tx = super::writing(pool, "choosing a Profile for a Conversation").await?;
 
     if !settle(&mut tx, id, role, profile_id, model).await? {
         return Ok(Chosen::NoSuchProfile);
@@ -1557,18 +1565,21 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
         Option<i64>,
         Option<i64>,
         Option<i64>,
+        Option<String>,
     );
 
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT e.id, e.at, e.kind, e.body,
                 q.id, q.body, r.submitted_at, r.body, a.archived_at AS locked_at,
-                c.sha, c.subject, c.files, c.insertions, c.deletions
+                c.sha, c.subject, c.files, c.insertions, c.deletions, cr.name
          FROM timeline_events e
+         JOIN conversations v ON v.id = e.conversation_id
          LEFT JOIN set_events s ON s.event_id = e.id
          LEFT JOIN question_sets q ON q.id = s.set_id
          LEFT JOIN responses r ON r.set_id = s.set_id
          LEFT JOIN archivings a ON a.set_id = s.set_id
          LEFT JOIN commits c ON c.event_id = e.id
+         LEFT JOIN repos cr ON cr.id = c.repo_id AND cr.id <> v.repo_id
          WHERE e.conversation_id = ?
          ORDER BY e.id",
     )
@@ -1627,6 +1638,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 files,
                 insertions,
                 deletions,
+                repo,
             ) = row;
 
             let commit = match (sha, subject, files, insertions, deletions) {
@@ -1640,6 +1652,10 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                         // Absent for most commits, which is what a commit that
                         // said nothing about itself looks like.
                         summary: summaries_of_commits.remove(&id),
+                        // And absent for every commit in the Conversation's own
+                        // repository, which is what the join above says: a label
+                        // is drawn where repos mix and nowhere else.
+                        repo,
                     })
                 }
                 // Every column of that row is `NOT NULL`, so the only way to be
@@ -2144,7 +2160,7 @@ pub async fn set_base_commit(pool: &SqlitePool, id: i64, commit: Option<&str>) -
 /// there is one human at the workbench, and what would be raced for here is
 /// their own two tabs editing one Brief. What matters is that a Conversation
 /// past drafting refuses, and that a Conversation that is not there says so.
-async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
+pub(crate) async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
         .fetch_optional(pool)
@@ -2171,7 +2187,7 @@ async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
 /// is whether there is a branch behind it. What is refused off this is the
 /// branch name and the base commit — a record that has both settled is not one
 /// a field should rewrite, whatever its state column says.
-async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
+pub(crate) async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
     let row: Option<(i64,)> =
         sqlx::query_as("SELECT conversation_id FROM worktrees WHERE conversation_id = ?")
             .bind(id)
@@ -2199,11 +2215,19 @@ async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// It is also where the Repo remembers what it was grilled with — see
 /// [`super::pairings::remember`] — because this is the moment the two Pairings
 /// stop being changeable and become what the work is actually running under.
+///
+/// `companions` is where each of the Conversation's companion repos was checked
+/// out, in the same transaction and for the same reason: they were made against
+/// git before this was called, and a Conversation saying it is grilling without
+/// saying where they went would be one nothing could bind into a sandbox and
+/// nothing would come back and remove. Empty is the ordinary Conversation, which
+/// has none.
 pub async fn start_grilling(
     pool: &SqlitePool,
     id: i64,
     base_commit: &str,
     worktree: &Path,
+    companions: &[super::CompanionWorktree],
 ) -> Result<Grilling> {
     let worktree = super::repos::text(worktree)?;
 
@@ -2247,6 +2271,8 @@ pub async fn start_grilling(
     .execute(&mut *tx)
     .await
     .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+
+    super::companions::record_worktrees(&mut tx, id, companions).await?;
 
     moved(&mut tx, id, Lifecycle::Grilling).await?;
 
@@ -2301,6 +2327,11 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
         .execute(&mut *tx)
         .await
         .with_context(|| format!("forgetting the worktree of Conversation {id}"))?;
+
+    // And every companion's beside it, for the same reason and by the same rule:
+    // the directories are gone by the time this runs, and the branches their
+    // read-write companions were worked on stay where they are.
+    super::companions::forget_worktrees(&mut tx, id).await?;
 
     moved(&mut tx, id, Lifecycle::Closed).await?;
 
@@ -2516,7 +2547,21 @@ pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<
     }
 
     if pushed {
-        super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Checks).await?;
+        // Every pull request the work ended up on, rather than the one. A
+        // Conversation ends on one per repository it was worked in and each has
+        // a suite of its own, so a follow-up that pushed is a wrap-up whose
+        // checks are all of them running again — and one left settled would be a
+        // wrap-up finishing on a green nobody re-earned.
+        let opened: Vec<(i64,)> =
+            sqlx::query_as("SELECT repo_id FROM pull_requests WHERE conversation_id = ?")
+                .bind(id)
+                .fetch_all(&mut *tx)
+                .await
+                .with_context(|| format!("reading which pull requests Conversation {id} is on"))?;
+
+        for (repo_id,) in opened {
+            super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Checks(repo_id)).await?;
+        }
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
@@ -2589,6 +2634,14 @@ pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<
 /// the filesystem are the server's to reach, and what this writes is the record
 /// of work that has already happened. See [`Steer`].
 ///
+/// **And the companions the steer widened the set with and the ones it opened
+/// up**, their rows and their checkouts, and a line under the Steer naming what
+/// came in and what was opened. Past drafting is exactly where this writes, so
+/// none of it goes through the setup card's own guarded writes — see
+/// [`super::companions::join`] and [`super::companions::open_up`]. One direction
+/// only: nothing here takes a companion away, puts one back to read-only, or
+/// writes an add over a row that is already there.
+///
 /// Nothing about the run is touched, and what has to stop running is stopped
 /// before this is called — see the server's `steering` module, which is the only
 /// caller.
@@ -2601,6 +2654,10 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         direction,
         worktree,
         base_commit,
+        companions,
+        opened,
+        checkouts,
+        said,
     } = steer;
 
     let mut tx = super::writing(pool, "steering a Conversation").await?;
@@ -2626,6 +2683,26 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
 
     if landed == 0 {
         return Ok(Steering::NoSuchConversation);
+    }
+
+    // And what came into the sandbox with it, directly under the human's own
+    // line. The Steer says a person moved this; this says which repositories
+    // moved with it, and it belongs to the Steer rather than to the move — what
+    // a Conversation is configured with is read on the Brief's details pane ever
+    // after, and this is what says when the set changed and who changed it.
+    if let Some(said) = said {
+        let notice = Event::Notice(said.to_owned());
+
+        sqlx::query(
+            "INSERT INTO timeline_events (conversation_id, at, kind, body)
+             VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
+        )
+        .bind(id)
+        .bind(notice.kind())
+        .bind(notice.body().into_owned())
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("saying what a steer of Conversation {id} took in"))?;
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
@@ -2665,6 +2742,18 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         .await
         .with_context(|| format!("recording the worktree of Conversation {id}"))?;
     }
+
+    // And the companions the steer widened the set with, the ones it opened up,
+    // and where every checkout it made went — the ones just added, the ones
+    // whose detached directory was replaced, and every one the record held with
+    // no directory behind it. All in the move's own transaction, for the reason
+    // the Worktree above is: a Conversation that said it had moved without
+    // saying which repositories moved with it, and how far into each the work
+    // now reaches, would be one nothing could bind into a sandbox correctly and
+    // nothing would come back and remove.
+    super::companions::join(&mut tx, id, companions).await?;
+    super::companions::open_up(&mut tx, id, opened).await?;
+    super::companions::record_worktrees(&mut tx, id, checkouts).await?;
 
     // And how the work is built from here, for a Conversation that has never
     // said. `DO NOTHING` rather than an upsert, which is what makes the rule the
@@ -2789,6 +2878,41 @@ pub struct Steer<'a> {
 
     /// And what its branch was cut from, where the steer is what cut it.
     pub base_commit: Option<&'a str>,
+
+    /// The companions the steer is putting on, which are rows this writes and
+    /// nothing else could.
+    ///
+    /// Past drafting is where a steer writes, so this does not go through the
+    /// setup card's own guarded writes — see [`super::companions::join`]. Empty
+    /// is the ordinary case: most steers widen nothing.
+    pub companions: &'a [super::Joining<'a>],
+
+    /// And the companions it opened up, which are rows this moves and nothing
+    /// else could.
+    ///
+    /// The same absent guard for the same reason, and one direction only: each
+    /// of these goes to read-write with the branch it was given, and nothing
+    /// here puts one back — see [`super::companions::open_up`]. Empty is the
+    /// ordinary case: most steers open nothing up.
+    pub opened: &'a [super::Opening<'a>],
+
+    /// And where every companion checkout the steer made went, which is the ones
+    /// just added, the ones it opened up, and every one the record held with no
+    /// directory behind it.
+    ///
+    /// In the same transaction as the move, for the reason the Conversation's
+    /// own Worktree is: one that said it had moved without saying where its
+    /// companions went would be one nothing could bind into a sandbox and
+    /// nothing would come back and remove.
+    pub checkouts: &'a [super::CompanionWorktree],
+
+    /// What the steer has to say about the set it widened, for the Timeline.
+    ///
+    /// Under the Steer Event rather than beside it: the Steer is the human's
+    /// own line — *I moved this* — and this is what came into the sandbox with
+    /// it. `None` is a steer that widened nothing, which is a steer with nothing
+    /// to announce.
+    pub said: Option<&'a str>,
 }
 
 /// A Pairing a steer settles: which of the two roles, and both halves of the
@@ -2899,10 +3023,7 @@ pub enum Landed {
 async fn landed(pool: &SqlitePool, id: i64, event: Event) -> Result<Landed> {
     let kind = event.kind();
 
-    let mut tx = pool
-        .begin()
-        .await
-        .with_context(|| format!("recording that {kind} landed on Conversation {id}"))?;
+    let mut tx = super::writing(pool, "recording what landed on a Conversation").await?;
 
     let conversation: Option<(i64,)> = sqlx::query_as("SELECT id FROM conversations WHERE id = ?")
         .bind(id)
@@ -2984,12 +3105,19 @@ pub async fn record_roadmap(pool: &SqlitePool, id: i64) -> Result<Landed> {
 /// where it came off the default branch. Written here because this is the
 /// transaction that makes the Conversation a stage, and read back by whatever
 /// starts a session in it — the first one, and any the human asks for again.
+///
+/// `companions` is where the stage's inherited companion repos were checked
+/// out, written in this transaction for [`start_grilling`]'s reason: a stage
+/// that said it was implementing with companions nothing had checked out would
+/// be one nothing could bind into a sandbox and nothing would come back and
+/// remove.
 pub async fn start_stage(
     pool: &SqlitePool,
     id: i64,
     base_commit: &str,
     worktree: &Path,
     stacks_on: Option<&str>,
+    companions: &[super::CompanionWorktree],
 ) -> Result<Staged> {
     let worktree = super::repos::text(worktree)?;
 
@@ -3040,6 +3168,8 @@ pub async fn start_stage(
         .execute(&mut *tx)
         .await
         .with_context(|| format!("recording what the branch of Conversation {id} stands on"))?;
+
+    super::companions::record_worktrees(&mut tx, id, companions).await?;
 
     moved(&mut tx, id, Lifecycle::Implementing).await?;
 

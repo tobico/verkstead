@@ -42,6 +42,11 @@ export const PROFILES = profiles as ProfileEntry[];
 /// reads it out of a real git repository, which the fixtures have none of.
 export const BRANCHES = ["main", "release-1.4", "origin/main"];
 
+/// And the companion's own, which is a different repository with a list of its
+/// own: what the base dropdown on its row offers, and nothing the conversation
+/// could branch from.
+export const COMPANION_BRANCHES = ["trunk", "origin/trunk"];
+
 /// And the sidebar's one setting, off — which is where a workbench nobody has
 /// archived anything in stands. Written here rather than read out of a fixture
 /// for the reason the branches are: one boolean is not a shape a golden file
@@ -88,6 +93,14 @@ export function theWorkbench(...answers: Parameters<typeof serving>) {
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
+    // Every companion the fixture carries has a base dropdown of its own, over
+    // its own repository's branches.
+    ...OPEN.companions.map((companion) =>
+      whenever(
+        `/api/ui/repos/${companion.repo.id}/branches`,
+        json(COMPANION_BRANCHES),
+      ),
+    ),
     whenever("/api/ui/abandoned-roadmaps", json([])),
     whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
     ...answers,

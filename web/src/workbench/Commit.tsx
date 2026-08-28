@@ -40,6 +40,11 @@
 //! What the commit was called comes off the event rather than out of the diff.
 //! The diff arrives headerless on purpose: the renderer splits on `diff --git`,
 //! so a commit header above the first file would be dropped rather than shown.
+//!
+//! Which repository it landed in comes off the event too, and is drawn beside
+//! the hash for the reason the timeline card draws it: only where that is not
+//! the conversation's own repo. The diff behind it is read out of that
+//! repository by the server, so a companion's commit shows the companion's work.
 
 import {
   Match,
@@ -197,6 +202,9 @@ export function Commit(props: {
       <div class={styles.header}>
         <p class={styles.subject}>{props.commit.subject}</p>
         <p class={styles.changed}>
+          <Show when={props.commit.repo}>
+            {(repo) => <span class={styles.repo}>{repo()}</span>}
+          </Show>
           <span class={styles.sha}>{props.commit.sha.slice(0, ABBREVIATED)}</span>
           <span>
             {props.commit.files} {props.commit.files === 1 ? "file" : "files"}

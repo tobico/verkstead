@@ -565,7 +565,7 @@ describe("the record of a settled Set", () => {
 
       expect(texts(page, `h2.${app.sectionHeading}`)).toEqual([
         "Preface",
-        ...(set.diff === null ? [] : ["Diff"]),
+        ...(set.diff.length === 0 ? [] : ["Diff"]),
         "Questions",
         ...(closes ? ["Comment"] : []),
       ]);

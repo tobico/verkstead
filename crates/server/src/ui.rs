@@ -28,13 +28,15 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Cursor, GrillingStarted, Lifecycle, Locked,
-    NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved,
-    SettingsView, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
-    Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, CompanionAdded,
+    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
+    CompanionModeChosen, CompanionRemoved, CompanionView, ConversationArchived, ConversationClosed,
+    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
+    ConversationView, Cursor, GrillingStarted, Lifecycle, Locked, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -132,6 +134,32 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
         .route("/api/ui/conversations/{id}/base", post(set_base_branch))
+        // And the other registered Repos the work runs alongside, added and
+        // taken away on the same card and for as long as the same card is
+        // drawn. Named in the path rather than in the verb, as everything
+        // around it is: the viewer speaks one method, so taking one away is a
+        // route rather than a `DELETE`.
+        .route("/api/ui/conversations/{id}/companions", post(add_companion))
+        .route(
+            "/api/ui/conversations/{id}/companions/{repo}/remove",
+            post(remove_companion),
+        )
+        // And what each of those rows is configured with — the same three
+        // things the Conversation's own branch row settles, about a companion
+        // instead: how far in the work may reach, what its checkout comes off,
+        // and what its branch is called.
+        .route(
+            "/api/ui/conversations/{id}/companions/{repo}/mode",
+            post(set_companion_mode),
+        )
+        .route(
+            "/api/ui/conversations/{id}/companions/{repo}/base",
+            post(set_companion_base),
+        )
+        .route(
+            "/api/ui/conversations/{id}/companions/{repo}/branch",
+            post(rename_companion_branch),
+        )
         // The two that make and unmake what a Conversation works in. Named in
         // the path rather than in the verb, as closing a Set unanswered is: the
         // viewer speaks one method. Nothing here opens a second round on one
@@ -782,6 +810,11 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // once for the two cards drawn from it below, both being the one card in the
     // two places a pull request is drawn.
     //
+    // The Conversation's own repository's pull request only. How the checks are
+    // is written down per Conversation rather than per pull request, so it is the
+    // one that moved this Conversation into Wrapping that it belongs to — see
+    // [`own_checks`]. A companion's card draws no icon rather than this one's.
+    //
     // Stale on a Conversation nothing is watching any more, the watcher stopping
     // when the wrap-up is over — which is a card an hour behind rather than a
     // card that is wrong: the last thing anybody asked GitHub is the honest
@@ -794,12 +827,16 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
-    // And the pull request the work ended up on, which is pinned beside it. This
-    // one *is* on the record — it is what moved the Conversation into Wrapping —
-    // so it is read off the Timeline for the reason the Brief is: it is already
-    // here. What is not read here is what the PR holds, which is a request of its
-    // own; see [`pull_request`].
-    pinned.extend(timeline.iter().rev().find_map(|event| match &event.event {
+    // And every pull request the work ended up on, which are pinned beside them.
+    // These *are* on the record — the Conversation's own repository's is what
+    // moved the Conversation into Wrapping, and a companion's is that wrap-up
+    // covering the repository it also committed in — so they are read off the
+    // Timeline for the reason the Brief is: they are already here. All of them
+    // rather than the last one found: a Conversation ends on one pull request per
+    // repository it was worked in, and the human wraps up all of them at once.
+    // What is not read here is what a PR holds, which is a request of its own;
+    // see [`pull_request`].
+    pinned.extend(timeline.iter().filter_map(|event| match &event.event {
         store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
             event.id,
             event.at.clone(),
@@ -807,7 +844,8 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                 number: opened.number,
                 title: opened.title.clone(),
                 url: opened.url.clone(),
-                checks,
+                repo: opened.repo.clone(),
+                checks: own_checks(&opened.repo, checks),
             },
         )),
         _ => None,
@@ -822,6 +860,21 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
             return unavailable("the Conversation could not be read");
         }
     };
+
+    // And each companion's, which is the same look at the filesystem: a
+    // Conversation with three companions has four checkouts, and every one of
+    // them is a directory somebody could have deleted.
+    let mut companions = Vec::new();
+
+    for reading in conversation.companions {
+        match companion(reading).await {
+            Ok(companion) => companions.push(companion),
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = id, "reading a companion worktree failed");
+                return unavailable("the Conversation could not be read");
+            }
+        }
+    }
 
     // The Brief decides whether the Conversation is ready to grill, so it is
     // read off the Timeline before the Timeline is spent building the view. The
@@ -1011,6 +1064,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         },
         branch: conversation.branch,
         base_commit: conversation.base_commit,
+        companions,
         state: lifecycle(conversation.state),
         ready_to_grill,
         ready_to_resume,
@@ -1135,6 +1189,10 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             insertions: commit.insertions,
                             deletions: commit.deletions,
                             summary: commit.summary,
+                            // Which repository it came out of, where that is not
+                            // this Conversation's own. The store decides that,
+                            // because it is the store that knows both.
+                            repo: commit.repo,
                         },
                     ),
                     // A wait a Verkstead of before put on a Timeline, said in
@@ -1192,7 +1250,8 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             number: opened.number,
                             title: opened.title,
                             url: opened.url,
-                            checks,
+                            repo: opened.repo.clone(),
+                            checks: own_checks(&opened.repo, checks),
                         },
                     ),
                     // And the two rows that carry nothing of their own: what is
@@ -1397,14 +1456,19 @@ async fn commit_pane(
         }
     };
 
-    // Which repository to read it out of, which is the Conversation's own. A
-    // Conversation that has a commit on its Timeline and no row of its own is a
-    // record that has been got at.
-    let repo = match store::load_conversation(&state.pool, id).await {
-        Ok(Some(conversation)) => conversation.repo.path,
+    // Which repository to read it out of, which is the one the commit was
+    // recorded against rather than the Conversation's own: a companion's commit
+    // is in the companion's repository, and the Conversation's would know
+    // nothing about it.
+    //
+    // A commit whose repository can no longer say anything about it — taken off
+    // the registry, moved out from under Verkstead — is the *gone* a collected
+    // commit already is, and answers the same way.
+    let repo = match store::commit_repo(&state.pool, id, event).await {
+        Ok(Some(repo)) => repo.path,
         Ok(None) => return no_such_commit(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a commit failed");
             return unavailable("the commit could not be read");
         }
     };
@@ -1541,18 +1605,9 @@ async fn pull_request(
         return no_such_pull_request();
     };
 
-    // Which PR, and which repository to ask about it in. Both come off the
-    // Conversation's own record: the Event says which pull request, and an Event
-    // id belonging to another Conversation names nothing here.
-    let conversation = match store::load_conversation(&state.pool, id).await {
-        Ok(Some(conversation)) => conversation,
-        Ok(None) => return no_such_pull_request(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
-            return unavailable("the pull request could not be read");
-        }
-    };
-
+    // Which PR, off the Conversation's own record: the Event says which pull
+    // request, and an Event id belonging to another Conversation names nothing
+    // here.
     let timeline = match store::timeline(&state.pool, id).await {
         Ok(timeline) => timeline,
         Err(error) => {
@@ -1570,8 +1625,21 @@ async fn pull_request(
         return no_such_pull_request();
     };
 
+    // And which repository to ask about it in, which is the repository that pull
+    // request was opened in rather than the Conversation's own. A number means
+    // something else in another repository, or nothing at all — so a companion's
+    // pull request asked about in the work's own repo would come back as
+    // somebody else's work or as a 404. See [`store::pull_request_repo`].
+    let repo = match store::pull_request_repo(&state.pool, id, event).await {
+        Ok(Some(repo)) => repo.path,
+        Ok(None) => return no_such_pull_request(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a pull request failed");
+            return unavailable("the pull request could not be read");
+        }
+    };
+
     let gh = state.github.clone();
-    let repo = conversation.repo.path;
 
     let asked =
         tokio::task::spawn_blocking(move || crate::github::details(&gh, &repo, opened.number))
@@ -1665,6 +1733,112 @@ async fn set_base_branch(
     }
 }
 
+/// `POST /api/ui/conversations/{id}/companions` — work alongside another
+/// registered Repo.
+async fn add_companion(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(added): Json<NewCompanion>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(CompanionAdded::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::add_companion(&state.pool, id, added.repo_id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "adding a companion repo failed");
+            unavailable("the companion repo could not be added")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/companions/{repo}/remove` — and stop working
+/// alongside one.
+///
+/// Which Repo is in the path and there is no body at all: the id is the whole of
+/// what a removal says.
+async fn remove_companion(
+    State(state): State<AppState>,
+    Path((id, repo)): Path<(String, String)>,
+) -> HttpResponse {
+    let (Ok(id), Ok(repo)) = (id.parse::<i64>(), repo.parse::<i64>()) else {
+        return Json(CompanionRemoved::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::remove_companion(&state.pool, id, repo).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "removing a companion repo failed");
+            unavailable("the companion repo could not be removed")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/companions/{repo}/mode` — how far into one
+/// of them the work may reach.
+async fn set_companion_mode(
+    State(state): State<AppState>,
+    Path((id, repo)): Path<(String, String)>,
+    Json(choice): Json<CompanionModeChoice>,
+) -> HttpResponse {
+    let (Ok(id), Ok(repo)) = (id.parse::<i64>(), repo.parse::<i64>()) else {
+        return Json(CompanionModeChosen::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::set_companion_mode(&state.pool, id, repo, choice.mode).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "setting a companion's mode failed");
+            unavailable("the companion repo's mode could not be set")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/companions/{repo}/base` — the branch of the
+/// companion's own repository its checkout comes off, or the default-branch
+/// rule.
+async fn set_companion_base(
+    State(state): State<AppState>,
+    Path((id, repo)): Path<(String, String)>,
+    Json(choice): Json<BaseBranchChoice>,
+) -> HttpResponse {
+    let (Ok(id), Ok(repo)) = (id.parse::<i64>(), repo.parse::<i64>()) else {
+        return Json(CompanionBaseRecorded::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::set_companion_base(&state.pool, id, repo, choice.branch.as_deref())
+        .await
+    {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "recording a companion's base branch failed");
+            unavailable("the companion repo's base branch could not be recorded")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/companions/{repo}/branch` — what a
+/// read-write companion's branch is called, or nothing at all for mirroring.
+async fn rename_companion_branch(
+    State(state): State<AppState>,
+    Path((id, repo)): Path<(String, String)>,
+    Json(rename): Json<BranchRename>,
+) -> HttpResponse {
+    let (Ok(id), Ok(repo)) = (id.parse::<i64>(), repo.parse::<i64>()) else {
+        return Json(CompanionBranchRenamed::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::rename_companion_branch(&state.pool, id, repo, &rename.branch).await
+    {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "naming a companion's branch failed");
+            unavailable("the companion repo's branch could not be named")
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/grill` — give a Conversation somewhere to
 /// work and set it grilling.
 ///
@@ -1715,7 +1889,7 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
 ///
 /// Answered as soon as the decision is made rather than once the session is up.
 /// What Resume starts takes as long as it takes — a grilling relaunch waits for
-/// the Worktree, and a wrap-up is four watchers — and the browser is waiting for
+/// the Worktree, and a wrap-up is five watchers — and the browser is waiting for
 /// *whether* it started, which is what the named outcomes say.
 async fn resume(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
@@ -2106,6 +2280,38 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
     }
 }
 
+/// A stored companion as the viewer receives it: the Repo in the shape every
+/// other Repo crosses this wire in, the three facts about how the work will use
+/// it, and where it was checked out once it has been.
+///
+/// The checkout is read off the filesystem the Conversation's own is —
+/// [`crate::conversations::worktree`] — because whether a directory is still
+/// there is not something a database knows, and a companion deleted by hand
+/// should read as a Conversation with a problem rather than as an obscure
+/// failure from whatever next works in it.
+async fn companion(companion: store::Companion) -> Result<CompanionView, anyhow::Error> {
+    let worktree = crate::conversations::worktree(companion.worktree).await?;
+
+    Ok(CompanionView {
+        repo: RepoEntry {
+            id: companion.repo.id,
+            name: companion.repo.name,
+            // Stored as UTF-8 in the first place — a path that is not cannot be
+            // registered — so nothing is lost putting it back on the wire.
+            path: companion.repo.path.to_string_lossy().into_owned(),
+            default_branch: companion.repo.default_branch,
+        },
+        mode: match companion.mode {
+            store::CompanionMode::ReadOnly => CompanionMode::ReadOnly,
+            store::CompanionMode::ReadWrite => CompanionMode::ReadWrite,
+        },
+        base_ref: companion.base_ref,
+        branch: companion.branch,
+        worktree,
+        base_commit: companion.base_commit,
+    })
+}
+
 /// And how a pull request's checks are, the same way: the store's word for a
 /// whole suite, as the card that draws an icon of it receives it.
 fn rollup(checks: store::Rollup) -> CheckRollup {
@@ -2113,6 +2319,24 @@ fn rollup(checks: store::Rollup) -> CheckRollup {
         store::Rollup::Passed => CheckRollup::Passed,
         store::Rollup::Running => CheckRollup::Running,
         store::Rollup::Failed => CheckRollup::Failed,
+    }
+}
+
+/// How the checks are, but only on the pull request they were written down
+/// about.
+///
+/// A rollup is recorded per Conversation, and a Conversation now ends on one
+/// pull request per repository it was worked in — so the word belongs to the one
+/// that moved it into Wrapping, which is the Conversation's own repository's.
+/// That is the pull request whose `repo` reads back unlabeled: a companion's
+/// carries the name of the repository it was opened in.
+///
+/// A companion's card draws no icon rather than this one's. Drawing it there
+/// would be saying something about a suite nobody asked GitHub about.
+fn own_checks(repo: &Option<String>, checks: Option<CheckRollup>) -> Option<CheckRollup> {
+    match repo {
+        None => checks,
+        Some(_) => None,
     }
 }
 

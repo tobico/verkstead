@@ -218,10 +218,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 ///
 /// `None` means another Profile is called that.
 pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<Option<Profile>> {
-    let mut tx = pool
-        .begin()
-        .await
-        .with_context(|| format!("saving the Profile {:?}", facts.name))?;
+    let mut tx = super::writing(pool, "saving a Profile").await?;
 
     let row: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
@@ -261,10 +258,7 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
 /// Rewrite a Profile, whole: everything about one is the human's to change, and
 /// nothing about it is an artifact that could have been built from it yet.
 pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) -> Result<Saving> {
-    let mut tx = pool
-        .begin()
-        .await
-        .with_context(|| format!("rewriting Profile {id}"))?;
+    let mut tx = super::writing(pool, "rewriting a Profile").await?;
 
     // The name it is being given may be another Profile's. Asked as its own
     // statement rather than caught off the update, because an update that
@@ -336,10 +330,7 @@ pub async fn delete_profile(pool: &SqlitePool, id: i64) -> Result<Deleting> {
         return Ok(Deleting::InUse);
     }
 
-    let mut tx = pool
-        .begin()
-        .await
-        .with_context(|| format!("removing Profile {id}"))?;
+    let mut tx = super::writing(pool, "removing a Profile").await?;
 
     forget_models(&mut tx, id).await?;
 

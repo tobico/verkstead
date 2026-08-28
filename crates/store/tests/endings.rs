@@ -23,10 +23,10 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{Answer, Question, QuestionSet, Response};
 use verkstead_store::{
-    Ask, Ending, Lifecycle, Settlements, Steer, Steering, Submission, WAITED_ON, WaitingOn, ask,
-    ended_on, follow_up_over, load_conversation, load_response, lock_set, nothing_else,
-    open_database, register_repo, settle_wrap_up, start_conversation, steer_conversation,
-    submit_response, wrap_up_settled,
+    Ask, Ending, Lifecycle, PullRequest, Settlements, Steer, Steering, Submission, WAITED_ON,
+    WaitingOn, ask, ended_on, follow_up_over, load_conversation, load_response, lock_set,
+    nothing_else, open_database, record_another_pull_request, register_repo, settle_wrap_up,
+    start_conversation, steer_conversation, submit_response, wrap_up_settled,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -78,6 +78,7 @@ fn round(title: &str) -> QuestionSet {
         project: Some("verkstead".to_owned()),
         branch: Some("rate-limiting".to_owned()),
         diff: None,
+        diffs: Vec::new(),
     }
 }
 
@@ -253,6 +254,10 @@ async fn following_up(pool: &SqlitePool, conversation: i64) {
                 direction: None,
                 worktree: None,
                 base_commit: None,
+                companions: &[],
+                opened: &[],
+                checkouts: &[],
+                said: None,
             },
         )
         .await
@@ -401,11 +406,24 @@ async fn the_follow_up_lands_back_in_the_wrap_up_and_takes_the_checks_with_it() 
     let (_dir, pool) = fresh_pool().await;
     let conversation = conversation(&pool).await;
 
+    // A pull request for the checks to be about. A Conversation ends on one per
+    // repository it was worked in and each has a suite of its own, so what a
+    // follow-up puts back to waiting is read off the record rather than named:
+    // there is no *the* checks to settle without one.
+    let repo = own_repo(&pool, conversation).await;
+    record_another_pull_request(&pool, conversation, repo, &opened())
+        .await
+        .unwrap();
+
     for waiting_on in WAITED_ON {
         settle_wrap_up(&pool, conversation, waiting_on)
             .await
             .unwrap();
     }
+
+    settle_wrap_up(&pool, conversation, WaitingOn::Checks(repo))
+        .await
+        .unwrap();
 
     following_up(&pool, conversation).await;
 
@@ -428,7 +446,7 @@ async fn the_follow_up_lands_back_in_the_wrap_up_and_takes_the_checks_with_it() 
     let settled = wrap_up_settled(&pool, conversation).await.unwrap();
 
     assert!(
-        !settled.contains(&WaitingOn::Checks),
+        !settled.contains(&WaitingOn::Checks(repo)),
         "the follow-up pushed, so the green standing over the checks was the run \
          before it: {settled:?}",
     );
@@ -437,6 +455,28 @@ async fn the_follow_up_lands_back_in_the_wrap_up_and_takes_the_checks_with_it() 
         "and the review it was steered out of stays settled: this is the same \
          wrap, and the human has just been through it: {settled:?}",
     );
+}
+
+/// Which Repo a Conversation's own work is in, which is what its own pull
+/// request is recorded against.
+async fn own_repo(pool: &SqlitePool, conversation: i64) -> i64 {
+    load_conversation(pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is there")
+        .repo
+        .id
+}
+
+/// The pull request the work ended up on, unlabeled: the Conversation's own
+/// repository's, which is the one every one of these is about.
+fn opened() -> PullRequest {
+    PullRequest {
+        number: 41,
+        title: "Rate limiting".to_owned(),
+        url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        repo: None,
+    }
 }
 
 #[tokio::test]

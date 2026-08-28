@@ -438,6 +438,21 @@
   border-left: 1px solid var(--edge);
 }
 
+/* The repository a run of files came out of, said once above them — wherever
+   the Diff names one, and nowhere else. Not a link: what it names is the block,
+   and the files under it are what the nav takes the reader to. Set small and
+   quiet, so the paths stay the thing being read. */
+.group {
+  margin-top: 0.4rem;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+
+.group:first-child {
+  margin-top: 0;
+}
+
 /* One nested line of the nav, which the face on it draws rather than the entry
    itself. */
 .entry {

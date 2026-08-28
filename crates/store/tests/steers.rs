@@ -51,6 +51,10 @@ fn into(target: Lifecycle) -> Steer<'static> {
         direction: None,
         worktree: None,
         base_commit: None,
+        companions: &[],
+        opened: &[],
+        checkouts: &[],
+        said: None,
     }
 }
 
@@ -91,6 +95,7 @@ async fn grilling(pool: &SqlitePool) -> i64 {
         id,
         "c0ffee",
         Path::new("/state/worktrees/rate-limiting"),
+        &[],
     )
     .await
     .unwrap();
@@ -397,8 +402,10 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
+    let repo = load_conversation(&pool, id).await.unwrap().unwrap().repo.id;
+
     settle_wrap_up(&pool, id, WaitingOn::Review).await.unwrap();
-    record_fix_attempt(&pool, id, "Rust").await.unwrap();
+    record_fix_attempt(&pool, id, repo, "Rust").await.unwrap();
 
     steer_conversation(&pool, id, into(Lifecycle::Wrapping))
         .await
@@ -409,7 +416,7 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
         [WaitingOn::Review],
         "a wrap-up steered into wrapping up is the same round, looked at again",
     );
-    assert_eq!(fix_attempts(&pool, id, "Rust").await.unwrap(), 1);
+    assert_eq!(fix_attempts(&pool, id, repo, "Rust").await.unwrap(), 1);
 
     steer_conversation(&pool, id, into(Lifecycle::Grilling))
         .await
@@ -419,7 +426,7 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
         wrap_up_settled(&pool, id).await.unwrap().is_empty(),
         "and the round that starts here waits on all of it from nothing",
     );
-    assert_eq!(fix_attempts(&pool, id, "Rust").await.unwrap(), 0);
+    assert_eq!(fix_attempts(&pool, id, repo, "Rust").await.unwrap(), 0);
 }
 
 /// What the steer had to make before anything could run in it: the Worktree it

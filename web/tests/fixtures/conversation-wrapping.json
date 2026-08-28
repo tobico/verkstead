@@ -4,6 +4,7 @@
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
   "blocked_on": null,
   "branch": "rate-limiting",
+  "companions": [],
   "direction": "task-list",
   "driven": false,
   "grilling_pairing": {
@@ -41,8 +42,9 @@
       "PullRequest": {
         "at": "2026-08-03T09:07:11.000Z",
         "checks": "Running",
-        "id": 32,
+        "id": 33,
         "number": 41,
+        "repo": null,
         "title": "Rate limiting",
         "url": "https://github.com/tobico/verkstead/pull/41"
       }
@@ -68,21 +70,21 @@
         "at": "2026-08-03T09:07:11.000Z",
         "frozen": true,
         "html": "<h1>Rate limiting</h1>\n<p>The API has none, so one account can exhaust it for everybody.</p>\n",
-        "id": 28,
+        "id": 29,
         "markdown": "# Rate limiting\n\nThe API has none, so one account can exhaust it for everybody.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 29,
+        "id": 30,
         "state": "Grilling"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 30,
+        "id": 31,
         "state": "Implementing"
       }
     },
@@ -91,8 +93,9 @@
         "at": "2026-08-03T09:07:11.000Z",
         "deletions": 24,
         "files": 1,
-        "id": 31,
+        "id": 32,
         "insertions": 0,
+        "repo": null,
         "sha": "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8",
         "snippet": null,
         "subject": "chore: finish rate-limiting"
@@ -102,8 +105,9 @@
       "PullRequest": {
         "at": "2026-08-03T09:07:11.000Z",
         "checks": "Running",
-        "id": 32,
+        "id": 33,
         "number": 41,
+        "repo": null,
         "title": "Rate limiting",
         "url": "https://github.com/tobico/verkstead/pull/41"
       }
@@ -111,7 +115,7 @@
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 33,
+        "id": 34,
         "state": "Wrapping"
       }
     },
@@ -119,7 +123,7 @@
       "ManualTask": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p>Rebase this onto <code>main</code> and force-push — the conflict is in <code>src/limits.rs</code> alone.</p>\n",
-        "id": 34
+        "id": 35
       }
     }
   ],

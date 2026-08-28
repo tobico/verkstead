@@ -834,7 +834,7 @@ async fn nothing_saved_means_an_empty_list() {
 async fn grill(dir: &Path, id: i64) {
     let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
 
-    store::start_grilling(&pool, id, "deadbeef", &dir.join("worktree"))
+    store::start_grilling(&pool, id, "deadbeef", &dir.join("worktree"), &[])
         .await
         .unwrap();
 }

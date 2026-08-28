@@ -496,18 +496,16 @@ fn a_deferred_ask_returns_as_soon_as_the_set_is_stored() {
 }
 
 #[test]
-fn project_branch_and_diff_are_derived_from_the_working_directory() {
+fn the_project_and_the_branch_are_derived_from_the_working_directory() {
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::start(tmp.path().join("verkstead.db"));
 
     let root = repo_with_a_commit(tmp.path());
     let linked = linked_worktree(&root, "feature");
 
-    // A clean linked worktree: the root repo's name, the worktree's branch,
-    // and no Diff at all.
-    let clean = ask(&server, &linked, SET);
+    let asking = ask(&server, &linked, SET);
     let stored = server.await_asked_set(1);
-    kill(clean);
+    kill(asking);
 
     assert_eq!(
         stored.project.as_deref(),
@@ -515,28 +513,35 @@ fn project_branch_and_diff_are_derived_from_the_working_directory() {
         "from a linked worktree the project is the root repo's name"
     );
     assert_eq!(stored.branch.as_deref(), Some("feature"));
-    assert_eq!(
-        stored.diff, None,
-        "a clean tree carries no Diff, got {:?}",
-        stored.diff
-    );
+}
 
-    // The same worktree with an untracked file in it.
+#[test]
+fn the_diff_is_not_the_clis_to_send_however_dirty_the_working_directory_is() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::start(tmp.path().join("verkstead.db"));
+
+    let root = repo_with_a_commit(tmp.path());
+    let linked = linked_worktree(&root, "feature");
+
+    // Dirty enough that the CLI would once have carried it: an untracked file
+    // with contents in it.
     std::fs::write(
         linked.join("open-questions.md"),
         "a line only in the working tree\n",
     )
     .unwrap();
 
-    let dirty = ask(&server, &linked, SET);
-    let stored = server.await_asked_set(2);
-    kill(dirty);
+    let asking = ask(&server, &linked, SET);
+    let stored = server.await_asked_set(1);
+    kill(asking);
 
-    let diff = stored.diff.expect("a dirty tree carries a Diff");
-    assert!(
-        diff.contains("+++ b/open-questions.md")
-            && diff.contains("+a line only in the working tree"),
-        "the Diff should carry the untracked file's contents, got:\n{diff}"
+    // The Conversation these Sets are asked from has no Worktree of its own, so
+    // the server — which is what reads one now — has nothing to attach. That
+    // this directory is dirty no longer says anything about the Set.
+    assert_eq!(
+        stored.diff, None,
+        "the Diff comes from the Conversation's Worktree, not the CLI's, got {:?}",
+        stored.diff
     );
 }
 

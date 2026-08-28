@@ -4,6 +4,21 @@
   "base_commit": "release-1.4",
   "blocked_on": null,
   "branch": "rate-limiting",
+  "companions": [
+    {
+      "base_commit": null,
+      "base_ref": null,
+      "branch": "",
+      "mode": "ReadOnly",
+      "repo": {
+        "default_branch": "trunk",
+        "id": 2,
+        "name": "askance",
+        "path": "/srv/repos/askance"
+      },
+      "worktree": null
+    }
+  ],
   "direction": null,
   "driven": false,
   "grilling_pairing": {

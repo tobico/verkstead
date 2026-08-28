@@ -23,7 +23,7 @@ use std::process::{Command, Stdio};
 
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{
-    Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell,
+    Bind, Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell,
 };
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
@@ -94,13 +94,31 @@ struct Grilling {
 impl Grilling {
     /// The sandbox this Conversation's session would run in, with `extra` as
     /// whatever Sandbox Configuration asked for.
-    fn sandbox(&self, extra: Vec<PathBuf>) -> Sandbox {
+    fn sandbox(&self, extra: Vec<Bind>) -> Sandbox {
         self.sandbox_reaching(LISTENING, extra)
+    }
+
+    /// The companion of that name, as the Conversation now carries it — where
+    /// it was checked out, and what it holds.
+    fn companion(&self, name: &str) -> &store::Companion {
+        self.conversation
+            .companions
+            .iter()
+            .find(|companion| companion.repo.name == name)
+            .unwrap_or_else(|| panic!("the fixture added {name} as a companion"))
+    }
+
+    /// And where it was checked out, which is what a session is given.
+    fn companion_worktree(&self, name: &str) -> &Path {
+        self.companion(name)
+            .worktree
+            .as_deref()
+            .expect("a grilling Conversation's companions are checked out")
     }
 
     /// The same, for a server that is really listening somewhere — which is what
     /// a session inside has to be able to reach to ask anything.
-    fn sandbox_reaching(&self, listening: SocketAddr, extra: Vec<PathBuf>) -> Sandbox {
+    fn sandbox_reaching(&self, listening: SocketAddr, extra: Vec<Bind>) -> Sandbox {
         Sandbox::for_conversation(
             &self.conversation,
             &self.profile,
@@ -151,8 +169,20 @@ impl Grilling {
     }
 }
 
-/// Stand one up.
+/// Stand one up, with no companion repos — which is the ordinary Conversation
+/// and what most of these tests are about.
 async fn grilling() -> Grilling {
+    grilling_alongside(&[]).await
+}
+
+/// And one configured with companion repos, each registered under the name given
+/// and added in the mode given.
+///
+/// They are added while the Conversation is still drafting, which is the only
+/// time they can be, and then checked out beside its own the way a grill start
+/// checks them out: a read-write companion on a branch of its own, a read-only
+/// one detached at the commit its base resolved to.
+async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Grilling {
     let watched = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
@@ -266,7 +296,75 @@ async fn grilling() -> Grilling {
         ],
     );
 
-    store::start_grilling(&pool, id, &commit, &worktree)
+    // And one beside it per companion the test asked for, in the shape its mode
+    // gives it — see [`grilling_alongside`].
+    let mut checkouts = Vec::new();
+
+    for (name, mode) in companions {
+        let path = repository(watched.path().join(name));
+        let registered = store::register_repo(&pool, &path, name, "main")
+            .await
+            .unwrap()
+            .expect("the companion Repo registers");
+
+        assert_eq!(
+            store::add_companion(&pool, id, registered.id)
+                .await
+                .unwrap(),
+            store::Adding::Added,
+        );
+        assert_eq!(
+            store::configure_companion(&pool, id, registered.id, store::Change::Mode(*mode))
+                .await
+                .unwrap(),
+            store::Configured::Saved,
+        );
+
+        let at = git(&path, &["rev-parse", "HEAD"]).trim().to_owned();
+
+        // Named for the Repo and what the checkout holds, as the real one is:
+        // the branch where there is one, and the base it stands at where there
+        // is not.
+        let checkout = match mode {
+            store::CompanionMode::ReadOnly => {
+                let checkout = state.path().join(format!("worktrees/{name}-main"));
+                git(
+                    &path,
+                    &[
+                        "worktree",
+                        "add",
+                        "--detach",
+                        &checkout.to_string_lossy(),
+                        &at,
+                    ],
+                );
+                checkout
+            }
+            store::CompanionMode::ReadWrite => {
+                let checkout = state.path().join(format!("worktrees/{name}-rate-limiting"));
+                git(
+                    &path,
+                    &[
+                        "worktree",
+                        "add",
+                        "-b",
+                        "rate-limiting",
+                        &checkout.to_string_lossy(),
+                        &at,
+                    ],
+                );
+                checkout
+            }
+        };
+
+        checkouts.push(store::CompanionWorktree {
+            repo_id: registered.id,
+            path: checkout,
+            base_commit: Some(at),
+        });
+    }
+
+    store::start_grilling(&pool, id, &commit, &worktree, &checkouts)
         .await
         .unwrap();
 
@@ -1053,7 +1151,7 @@ async fn the_extra_binds_sandbox_configuration_asks_for_are_there_and_writable()
     ])
     .unwrap();
 
-    let sandbox = fixture.sandbox(config.binds_for(&fixture.conversation.repo.name));
+    let sandbox = fixture.sandbox(config.binds_for(&fixture.conversation));
 
     let reported = probe(
         &sandbox,
@@ -1083,15 +1181,185 @@ async fn the_extra_binds_sandbox_configuration_asks_for_are_there_and_writable()
     );
 }
 
-/// The composition itself, without a sandbox to run in: what a Repo gets is the
-/// global set and then its own.
-#[test]
-fn a_repos_own_binds_compose_over_the_global_ones() {
+/// A read-only companion is there to be read: the checkout and the history
+/// behind it, and nothing a session does inside it changes either.
+///
+/// Both halves are asked of git rather than of the flags. A worktree bound
+/// read-only with a writable git directory would still take a commit, and one
+/// whose git directory is read-only refuses more than committing — the index and
+/// its lock live in there too, so what has to be shown is that reading really
+/// does work rather than that writing really does not.
+#[tokio::test]
+async fn a_read_only_companion_is_there_to_read_and_a_commit_from_it_is_refused() {
+    let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
+    fixture.configure_git_author("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+
+    let companion = fixture.companion_worktree("askance").to_owned();
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        &format!(
+            r#"
+            dir {companion} worktree
+            dir {git_dir} git-dir
+            say readme "$({cat} {companion}/README.md)"
+            say history "$({git} -C {companion} log --oneline | wc -l)"
+
+            if {git} -C {companion} status --porcelain >/dev/null 2>&1; then
+                say status yes
+            else
+                say status no
+            fi
+
+            if {git} -C {companion} commit --quiet --allow-empty -m 'from inside' 2>/dev/null; then
+                say committed yes
+            else
+                say committed no
+            fi
+
+            if {git} -C {companion} branch verkstead-probe 2>/dev/null; then
+                say branched yes
+            else
+                say branched no
+            fi
+            "#,
+            companion = quoted(&companion),
+            git_dir = quoted(&fixture.companion("askance").repo.path.join(".git")),
+            cat = quoted(&on_the_host("cat")),
+            git = quoted(&on_the_host("git")),
+        ),
+    );
+
+    assert_eq!(
+        reported["worktree"], "read",
+        "a read-only companion is a checkout to read and leave alone"
+    );
+    assert_eq!(
+        reported["git-dir"], "read",
+        "and the object database behind it, which is what makes it a repository at all"
+    );
+    assert_eq!(
+        reported["readme"], "# a repository",
+        "reading a file in one really works"
+    );
+    assert_eq!(
+        reported["history"], "1",
+        "and so does asking git what the history is, which is the half worth \
+         proving rather than assuming"
+    );
+    assert_eq!(
+        reported["status"], "yes",
+        "and so does the question an agent asks a checkout first of all, which \
+         git answers without writing the index it would rather refresh"
+    );
+    assert_eq!(
+        reported["committed"], "no",
+        "there is nowhere for a commit to be written"
+    );
+    assert_eq!(
+        reported["branched"], "no",
+        "and no ref can be moved, which is what the last step of a push is"
+    );
+}
+
+/// A read-write companion is somewhere the work is done: a commit lands on the
+/// branch that was cut for it, and it is there when the session has gone.
+#[tokio::test]
+async fn a_read_write_companion_takes_a_commit_on_its_own_branch() {
+    let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadWrite)]).await;
+    fixture.configure_git_author("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+
+    let companion = fixture.companion_worktree("askance").to_owned();
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        &format!(
+            r#"
+            printf 'from inside\n' > {companion}/NOTES.md
+            {git} -C {companion} add NOTES.md
+
+            if {git} -C {companion} commit --quiet -m 'from inside' 2>/tmp/git-said; then
+                say committed yes
+            else
+                say committed "no: $(cat /tmp/git-said)"
+            fi
+            "#,
+            companion = quoted(&companion),
+            git = quoted(&on_the_host("git")),
+        ),
+    );
+
+    assert_eq!(reported["committed"], "yes");
+
+    // Read outside, where the branch the checkout was cut on is: what a session
+    // committed in a companion is in that companion's repository, on the branch
+    // the Conversation's own name was mirrored into.
+    assert_eq!(
+        git(&companion, &["log", "-1", "--format=%s"]).trim(),
+        "from inside"
+    );
+    assert_eq!(
+        git(&companion, &["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "rate-limiting",
+        "a read-write companion is cut a branch of its own, mirroring the \
+         Conversation's where nothing else was typed"
+    );
+}
+
+/// What a companion repo's own Sandbox Configuration asks for is inside and
+/// writable, whatever the companion's mode.
+///
+/// A build cache is the installer's own hole and it sits outside the repository:
+/// a read-only companion is a checkout not to be changed rather than a
+/// repository whose builds should fail on a cold cache.
+#[tokio::test]
+async fn a_read_only_companions_own_configured_binds_are_still_writable() {
+    let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
+
+    let cache = fixture.state.path().join("askance-node-modules");
+    std::fs::create_dir_all(&cache).unwrap();
+
+    let config = SandboxConfig::resolve(&[format!("askance={}", cache.display())]).unwrap();
+    let sandbox = fixture.sandbox(config.binds_for(&fixture.conversation));
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            dir {cache} cache
+            dir {companion} worktree
+            "#,
+            cache = quoted(&cache),
+            companion = quoted(fixture.companion_worktree("askance")),
+        ),
+    );
+
+    assert_eq!(
+        reported["cache"], "write",
+        "a companion's builds need its caches like any other repository's"
+    );
+    assert_eq!(
+        reported["worktree"], "read",
+        "and the checkout beside it is still only there to be read"
+    );
+}
+
+/// The composition itself, without a sandbox to run in: what a Conversation
+/// gets is the global set, then its own Repo's, then each of its companions'.
+///
+/// The companion is read-only, which is the case worth asking about: what is
+/// configured for a Repo is a build cache outside it, and a build writes to one
+/// whether or not the checkout beside it may be written to.
+#[tokio::test]
+async fn a_repos_own_binds_compose_over_the_global_ones() {
+    let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
+
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path().join("cache");
     let cargo = dir.path().join("cargo");
     let node = dir.path().join("node");
-    for made in [&cache, &cargo, &node] {
+    let nobodys = dir.path().join("nobodys");
+    for made in [&cache, &cargo, &node, &nobodys] {
         std::fs::create_dir(made).unwrap();
     }
 
@@ -1099,19 +1367,19 @@ fn a_repos_own_binds_compose_over_the_global_ones() {
         cache.display().to_string(),
         format!("verkstead={}", cargo.display()),
         format!("askance={}", node.display()),
+        format!("something-nobody-added={}", nobodys.display()),
     ])
     .unwrap();
 
     assert_eq!(
-        config.binds_for("verkstead"),
-        vec![cache.clone(), cargo],
-        "the global set is not given up by a Repo asking for one of its own"
-    );
-    assert_eq!(config.binds_for("askance"), vec![cache.clone(), node]);
-    assert_eq!(
-        config.binds_for("something-nobody-configured"),
-        vec![cache],
-        "a Repo with nothing of its own still gets what every one of them gets"
+        config.binds_for(&fixture.conversation),
+        vec![
+            Bind::writable(cache),
+            Bind::writable(cargo),
+            Bind::writable(node),
+        ],
+        "the global set, then the Conversation's own Repo's, then its companion's — \
+         and a Repo it has nothing to do with brings nothing"
     );
 }
 

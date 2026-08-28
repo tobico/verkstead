@@ -28,6 +28,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rust_embed::Embed;
 
+use crate::store;
+
 /// The skills as they are written in this repository, one directory per skill.
 ///
 /// Compiled in for a release build and read off disk for a debug one, exactly
@@ -344,14 +346,35 @@ pub(crate) fn submitting(brief: &str, handoff: Option<&str>) -> String {
 /// work was cut into would be handing it the very frame the sessions that wrote
 /// it were each stuck inside.
 ///
-/// `said` is what was written on the pull request before this session started —
-/// the comments whole, in the order they were said in, with where each was said.
-/// It goes *last*, under the documents, where the newest and least general thing
-/// goes in every other prompt here: the documents say what the work is, and this
-/// says what somebody has already said about it. A pull request nobody has
-/// written on carries none of it, rather than a heading saying nothing was said.
-pub(crate) fn reviewing(brief: &str, handoff: Option<&str>, said: Option<&str>) -> String {
-    let prompt = on_the_documents(
+/// `on` is every pull request the work ended up on, where it ended up on more
+/// than one: each of them named with its number, the repository it was opened
+/// in, its URL and the worktree to read it in. One review reads the whole of the
+/// work and the whole of it may be several branches, so the session is told where
+/// each of them is — it starts in the Conversation's own worktree and both `git`
+/// and `gh` read their repository from wherever they are run, so a `gh pr diff`
+/// left where the session landed would read one repository's half of the work
+/// twice and the other's never.
+///
+/// A Conversation whose work touched nothing else carries none of it and is told
+/// what it is told today. There is nothing there to say: the branch this worktree
+/// is on is the whole of the work, which is what the opening line says already
+/// and what the skill falls back on.
+///
+/// `said` is what was written on those pull requests before this session started
+/// — the comments whole, in the order they were said in, with where each was
+/// said. It goes *last*, under the documents and under the pull requests they
+/// were left on, where the newest and least general thing goes in every other
+/// prompt here: the documents say what the work is, the list says where it is,
+/// and this says what somebody has already said about it. A pull request nobody
+/// has written on carries none of it, rather than a heading saying nothing was
+/// said.
+pub(crate) fn reviewing(
+    brief: &str,
+    handoff: Option<&str>,
+    on: Option<&str>,
+    said: Option<&str>,
+) -> String {
+    let mut prompt = on_the_documents(
         &format!(
             "Read {REVIEWING} and review the branch this worktree is on, the way it says. The \
              work described below is what it was meant to be."
@@ -359,6 +382,16 @@ pub(crate) fn reviewing(brief: &str, handoff: Option<&str>, said: Option<&str>) 
         brief,
         handoff,
     );
+
+    if let Some(on) = on {
+        prompt = format!(
+            "{prompt}\n# The pull requests this work is on\n\nThe work reached more than one \
+             repository, so it is on a pull request in each of them, and reviewing it is \
+             reading every one of them. Read each of them where it lives — `git` and `gh` \
+             both read the repository from wherever they are run.\n\n{}\n",
+            on.trim()
+        );
+    }
 
     match said {
         Some(said) => format!(
@@ -375,9 +408,14 @@ pub(crate) fn reviewing(brief: &str, handoff: Option<&str>, said: Option<&str>) 
 /// The same three pieces the review gets, in the same order and for the same
 /// reasons — the documents say what the work is, and what was said goes last
 /// because it is the newest and least general thing. What differs is which
-/// comments and how many: the review is given everything standing on the pull
-/// request when it starts, and this is given one batch of what was said after
-/// it.
+/// comments and how many: the review is given everything standing on every one
+/// of the pull requests when it starts, and this is given one batch of what was
+/// said on one of them after it.
+///
+/// Which pull request that is, and which worktree to answer it in, are in `said`
+/// rather than said here: a Conversation ends on one per repository it was worked
+/// in, and a session sent at a companion's would otherwise read the diff of the
+/// repository it started in — see [`crate::comments::feedback`].
 ///
 /// `said` is never empty here, unlike the review's. A batch session exists
 /// because something was said, so there is no version of this prompt with
@@ -385,8 +423,9 @@ pub(crate) fn reviewing(brief: &str, handoff: Option<&str>, said: Option<&str>) 
 pub(crate) fn responding(brief: &str, handoff: Option<&str>, said: &str) -> String {
     let prompt = on_the_documents(
         &format!(
-            "Read {RESPONDING} and answer what has just been said on this branch's pull \
-             request, the way it says. The work described below is what it was meant to be."
+            "Read {RESPONDING} and answer what has just been said on the pull request named \
+             at the end of this prompt, the way it says. The work described below is what it \
+             was meant to be."
         ),
         brief,
         handoff,
@@ -528,6 +567,87 @@ pub(crate) fn folded(prompt: &str, answers: &str) -> String {
     format!("{prompt}\n# What I have since said about the deferred questions\n\n{answers}\n")
 }
 
+/// The same prompt again, with the companion repos the Conversation was
+/// configured with listed under it.
+///
+/// One listing, on **every** session prompt of the Conversation — the grilling
+/// one included — because a companion is checked out from grill start to close
+/// and a session that was not told about it would be one standing beside a
+/// directory it has no reason to look in. Appended where every session is
+/// launched from rather than written into each prompt builder, so that a
+/// builder added later cannot forget it.
+///
+/// Neutral, and deliberately: each companion is named with where it is, what it
+/// holds and whether it may be written to, and nothing here says what to do
+/// about any of that. The Brief is what says what the work is, and the agent
+/// reads it — a prompt that told a session to go and use a repository would be
+/// Verkstead deciding the work from a configuration screen.
+///
+/// Nothing about dev shells either, for the same reason. A companion with a
+/// flake of its own is entered by the agent, `nix` being on the sandbox's
+/// `PATH` — see [`crate::sandbox::under_dev_shell`].
+///
+/// A Conversation with no companions is the prompt unchanged, which is most of
+/// them: a heading over an empty list would tell a session that something had
+/// been configured.
+///
+/// `branch` is the Conversation's own, which is what a companion left to
+/// mirror is called.
+pub(crate) fn alongside(prompt: &str, branch: &str, companions: &[store::Companion]) -> String {
+    let listed: Vec<String> = companions
+        .iter()
+        .filter_map(|companion| {
+            // Only the ones that are actually checked out. Before grilling
+            // starts there are none, and there is no session then either — so
+            // this is the companion added to a Conversation whose checkout is
+            // somehow gone, which is a row to leave unsaid rather than a path to
+            // send a session to.
+            let worktree = companion.worktree.as_ref()?;
+
+            // A read-write companion holds a branch, mirroring resolved; a
+            // read-only one is detached at the commit its base came to when the
+            // checkout was made. The commit rather than the branch it was
+            // resolved through, because the two are only the same thing on the
+            // day: a session told it was on `main` would be told something that
+            // stops being true the next time anybody pushes. The name is what a
+            // checkout recorded before Verkstead kept the commit has to fall
+            // back on.
+            let holding = match companion.branch_for(branch) {
+                Some(branch) => format!("on branch `{branch}`"),
+                None => format!(
+                    "detached at `{}`",
+                    companion.base_commit.clone().unwrap_or_else(|| companion
+                        .base_ref
+                        .clone()
+                        .unwrap_or_else(|| companion.repo.default_branch.clone()))
+                ),
+            };
+
+            let mode = match companion.mode {
+                store::CompanionMode::ReadOnly => "read-only",
+                store::CompanionMode::ReadWrite => "read-write",
+            };
+
+            Some(format!(
+                "- `{}` at `{}`, {holding}, {mode}.",
+                companion.repo.name,
+                worktree.display(),
+            ))
+        })
+        .collect();
+
+    if listed.is_empty() {
+        return prompt.to_owned();
+    }
+
+    format!(
+        "{}\n\n# Companion repositories\n\nThis Conversation is configured with other \
+         repositories, checked out beside the worktree this session starts in.\n\n{}\n",
+        prompt.trim_end(),
+        listed.join("\n"),
+    )
+}
+
 /// The body they are all primed with, under whichever opening line names the
 /// skill.
 fn on_the_documents(opening: &str, brief: &str, handoff: Option<&str>) -> String {
@@ -588,6 +708,24 @@ mod tests {
             + SUMMARY_BLOCK_END.len();
 
         rest[..end].to_string()
+    }
+
+    /// The heading the shared companion block opens with. The three skills that
+    /// end a piece of work carry it word for word, and it runs to the next
+    /// heading — there being nothing else in the section.
+    const COMPANION_BLOCK: &str = "### And every companion repository you committed in";
+
+    /// That block as one skill carries it, cut out so that the three can be held
+    /// against each other.
+    fn companion_block(name: &str) -> String {
+        let text = skill(name);
+        let start = text.find(COMPANION_BLOCK).unwrap_or_else(|| {
+            panic!("{name} should carry every companion it committed in to a pull request:\n{text}")
+        });
+        let rest = &text[start + COMPANION_BLOCK.len()..];
+        let end = rest.find("\n#").map_or(rest.len(), |at| at + 1);
+
+        format!("{COMPANION_BLOCK}{}", &rest[..end])
     }
 
     /// The whole reason the fork exists: the twelve lines it came from say to
@@ -1351,6 +1489,48 @@ mod tests {
         );
     }
 
+    /// And the finish extends to the companions. A Conversation working alongside
+    /// read-write repositories ends on one pull request per repository it
+    /// committed in, opened the way *that* repository says — and the three skills
+    /// that end a piece of work are the only place a session is told so.
+    ///
+    /// Word for word across the three, the way the commit-summary block is: what a
+    /// finish does about a companion is one instruction, and three wordings of it
+    /// would be three things to keep true.
+    #[test]
+    fn the_finish_skills_carry_every_companion_they_committed_in_to_its_own_pull_request() {
+        let block = companion_block("next-task/SKILL.md");
+
+        for named in ["implementing/SKILL.md", "staging/SKILL.md"] {
+            assert_eq!(
+                companion_block(named),
+                block,
+                "{named} should say what a finish does about a companion in the same \
+             words the others do",
+            );
+        }
+
+        assert!(
+            block.contains("docs/agents/git-workflow.md"),
+            "the process followed is the companion's own, read out of its own file: \
+         {block}"
+        );
+        assert!(
+            block.contains("worktree"),
+            "and it is followed in that companion's checkout rather than this one: \
+         {block}"
+        );
+        assert!(
+            block.contains("Only the ones holding commits"),
+            "a companion nobody committed in is nothing to carry anywhere: {block}"
+        );
+        assert!(
+            block.contains("stops the run"),
+            "and one committed in and left without a pull request is a stop rather \
+         than something wrap-up carries on past: {block}"
+        );
+    }
+
     /// And where the finish stopped between its commit and its pull request, the
     /// session sent after it is sent for the pull request and nothing else: the
     /// work is built and committed, so a skill that read as *build the feature*
@@ -1491,6 +1671,37 @@ mod tests {
         assert!(
             addressing.contains("verkstead guide") && addressing.contains("verkstead ask"),
             "the one way to the human, for feedback the codebase cannot settle: {addressing}"
+        );
+    }
+
+    /// A fix session may be sent at a pull request that is not the one in the
+    /// worktree it starts in, so the skill has to say where to work.
+    ///
+    /// A Conversation ends on a pull request per repository it committed in, and
+    /// every one of them is watched. Both `git` and `gh` read their repository
+    /// from wherever they are run, so a session sent at a companion's pull
+    /// request and left where it landed would ask the wrong repository how its
+    /// checks were getting on — and *do not touch any other branch* would forbid
+    /// exactly the branch it was sent to.
+    #[test]
+    fn the_addressing_skill_sends_the_session_to_the_worktree_the_feedback_names() {
+        let addressing = skill("addressing/SKILL.md");
+
+        assert!(
+            addressing.contains("worktree the feedback named")
+                || addressing.contains("worktree to work in"),
+            "the feedback names where to work, and the skill says to go there: \
+             {addressing}"
+        );
+        assert!(
+            addressing.contains("cd"),
+            "which is a directory to change into before anything else: {addressing}"
+        );
+        assert!(
+            addressing.contains("do not touch any branch")
+                && addressing.contains("beyond the one you were sent to"),
+            "and what it must leave alone is every branch but that one, rather than \
+             every branch but the one it started on: {addressing}"
         );
     }
 
@@ -1714,6 +1925,11 @@ mod tests {
             "the woken session reads the pull request's own check state: {reviewing}"
         );
         assert!(
+            reviewing.contains("ask each pull request how its checks are getting on"),
+            "each of them, asked where that one lives — a suite asked about from \
+             the wrong worktree is somebody else's: {reviewing}"
+        );
+        assert!(
             reviewing.find("gh pr checks") < reviewing.find("git push"),
             "and fixes what is failing before it pushes, so the push is what puts \
              the fix back in front of the checks — {reviewing}"
@@ -1730,6 +1946,74 @@ mod tests {
         );
     }
 
+    /// One review reads the whole of the work, and the whole of it may be a pull
+    /// request per repository the Conversation was worked in — so the skill is
+    /// written for several: a diff read in each worktree, each suite asked about
+    /// where that pull request lives, and a push from every worktree it committed
+    /// in.
+    ///
+    /// Both `git` and `gh` read their repository from wherever they are run, so a
+    /// session that stayed in the worktree it started in would read one
+    /// repository's half of the work twice and the companion's never.
+    #[test]
+    fn the_reviewing_skill_reads_every_pull_request_where_it_lives() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("The pull requests this work is on"),
+            "the prompt's own listing is what names them, and the skill says so: \
+             {reviewing}"
+        );
+        assert!(
+            reviewing.contains("cd <the worktree that pull request is in>"),
+            "each of them read where it lives, which is a directory to change into \
+             first: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("Where your prompt lists none"),
+            "and a Conversation that touched nothing else reviews the branch it is \
+             standing in, exactly as it always did: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("push each worktree you committed in"),
+            "a repository it fixed something in and did not push is a decision \
+             nobody can see: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("do not touch any branch")
+                && reviewing.contains("beyond the ones you were sent to"),
+            "and what it must leave alone is every branch but those, rather than \
+             every branch but the one it started on: {reviewing}"
+        );
+    }
+
+    /// One Set across the whole of the work, whatever repositories it reached —
+    /// and a finding about a companion says which repository it is about, so the
+    /// Option the human picks says what would change and where.
+    ///
+    /// The backlog is the one thing that does not move: Verkstead reads it off the
+    /// Conversation's own branch, so a list written in a companion's worktree is
+    /// work nothing would ever start.
+    #[test]
+    fn the_reviewing_skill_puts_one_set_across_the_repositories() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("One Set for the whole of the work"),
+            "one review, one Set, however many repositories it read: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("names the repository it is about"),
+            "with a finding about a companion saying so, so the pick says what \
+             would change and where: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("In the worktree you started in"),
+            "and the backlog written where Verkstead reads one from, whichever \
+             repository the split-out finding is about: {reviewing}"
+        );
+    }
+
     /// The review session is put inside the skill the same way every other is,
     /// and primed with the two documents that say what the work was *for*.
     #[test]
@@ -1737,6 +2021,7 @@ mod tests {
         let prompt = reviewing(
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
+            None,
             None,
         );
 
@@ -1758,6 +2043,12 @@ mod tests {
             "a pull request nobody has written on carries no heading saying so: \
              {prompt:?}"
         );
+        assert!(
+            !prompt.contains("The pull requests this work is on"),
+            "and a Conversation whose work touched nothing else is told what it has \
+             always been told, the branch this worktree is on being the whole of it: \
+             {prompt:?}"
+        );
     }
 
     /// And what was said on the pull request goes in last, where the newest and
@@ -1767,6 +2058,7 @@ mod tests {
         let prompt = reviewing(
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
+            None,
             Some("**tobico** said on `src/window.rs` line 12:\n\nThis is the wrong way round."),
         );
 
@@ -1779,6 +2071,50 @@ mod tests {
             prompt.find("In-process counter.") < prompt.find("This is the wrong way round."),
             "under the documents: they say what the work is and this says what \
              somebody has already said about it — {prompt:?}"
+        );
+    }
+
+    /// A review of work that reached more than one repository is told where every
+    /// one of its pull requests is, between the documents and what was said on
+    /// them.
+    ///
+    /// One review reads the whole of the work, and a session that started in the
+    /// Conversation's own worktree could not find the other half of it: `git` and
+    /// `gh` both read their repository from wherever they are run.
+    #[test]
+    fn a_review_session_is_told_every_pull_request_the_work_is_on() {
+        let prompt = reviewing(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+            Some(
+                "- pull request #41 of `verkstead`, at https://github.com/tobico/verkstead/pull/41 \
+                 — its worktree is at `/srv/work/verkstead-rate-limiting`.\n\
+                 - pull request #7 of `askance`, at https://github.com/tobico/askance/pull/7 — \
+                 its worktree is at `/srv/work/askance-rate-limiting`.",
+            ),
+            Some(
+                "**tobico** said on pull request #7 of `askance`:\n\nThis is the wrong way round.",
+            ),
+        );
+
+        assert!(
+            prompt.contains("#41") && prompt.contains("#7") && prompt.contains("askance"),
+            "each pull request by its number and the repository it was opened in: \
+             {prompt:?}"
+        );
+        assert!(
+            prompt.contains("https://github.com/tobico/askance/pull/7")
+                && prompt.contains("`/srv/work/askance-rate-limiting`"),
+            "with the URL and the worktree to read it in: {prompt:?}"
+        );
+        assert!(
+            prompt.find("In-process counter.") < prompt.find("#41"),
+            "under the documents, which say what the work is: {prompt:?}"
+        );
+        assert!(
+            prompt.find("#41") < prompt.find("This is the wrong way round."),
+            "and over what was said on them, which is the newest and least general \
+             thing here — {prompt:?}"
         );
     }
 
@@ -2282,6 +2618,149 @@ mod tests {
         let prompt = next_task("# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(folded(&prompt, "  \n"), prompt);
+    }
+
+    /// A companion of a Conversation, made by hand: the store is where one comes
+    /// from, and what the listing is written against is the shape rather than
+    /// the query.
+    fn companion(
+        name: &str,
+        mode: store::CompanionMode,
+        branch: &str,
+        worktree: &str,
+    ) -> store::Companion {
+        store::Companion {
+            repo: store::Repo {
+                id: 7,
+                path: PathBuf::from(format!("/home/tobi/src/{name}")),
+                name: name.to_owned(),
+                default_branch: "main".to_owned(),
+            },
+            mode,
+            base_ref: None,
+            branch: branch.to_owned(),
+            worktree: Some(PathBuf::from(worktree)),
+            base_commit: Some(COMMIT.to_owned()),
+        }
+    }
+
+    /// What a companion's base resolved to when it was checked out, which is
+    /// what a detached one is named by.
+    const COMMIT: &str = "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7";
+
+    /// What a session is told about the companions: where each one is, what it
+    /// holds and whether it may be written to, under one heading and under
+    /// whatever the prompt already said.
+    #[test]
+    fn every_companion_is_named_with_its_path_its_branch_and_its_write_status() {
+        let prompt = alongside(
+            &next_task("# Rate limiting\n\nThe API has none.\n", None),
+            "rate-limiting",
+            &[
+                companion(
+                    "askance",
+                    store::CompanionMode::ReadOnly,
+                    "",
+                    "/var/lib/verkstead/worktrees/askance-main",
+                ),
+                companion(
+                    "tobico-skills",
+                    store::CompanionMode::ReadWrite,
+                    "",
+                    "/var/lib/verkstead/worktrees/tobico-skills-rate-limiting",
+                ),
+            ],
+        );
+
+        assert!(
+            prompt.contains("# The Brief this started from"),
+            "the work is still what the session is being told about: {prompt:?}"
+        );
+        assert_eq!(
+            prompt.matches("# Companion repositories").count(),
+            1,
+            "one listing, whatever the prompt was built by: {prompt:?}"
+        );
+        assert!(
+            prompt.contains(&format!(
+                "- `askance` at `/var/lib/verkstead/worktrees/askance-main`, \
+                 detached at `{COMMIT}`, read-only."
+            )),
+            "a read-only companion is detached at the commit its base came to, \
+             rather than at a branch name that has moved on since: {prompt:?}"
+        );
+        assert!(
+            prompt.contains(
+                "- `tobico-skills` at \
+                 `/var/lib/verkstead/worktrees/tobico-skills-rate-limiting`, on branch \
+                 `rate-limiting`, read-write."
+            ),
+            "and a read-write one is on the branch cut for it, mirroring the \
+             Conversation's: {prompt:?}"
+        );
+    }
+
+    /// The listing says what is there and nothing about what to do with it. What
+    /// the work is, is the Brief's to say — a prompt that told a session to go
+    /// and use a repository would be Verkstead deciding the work off a
+    /// configuration screen.
+    #[test]
+    fn the_listing_tells_a_session_nothing_about_what_to_do_with_them() {
+        let prompt = alongside(
+            "",
+            "rate-limiting",
+            &[companion(
+                "askance",
+                store::CompanionMode::ReadOnly,
+                "",
+                "/var/lib/verkstead/worktrees/askance-main",
+            )],
+        );
+
+        for instructed in [
+            "you should",
+            "use it",
+            "make sure",
+            "read the",
+            "nix develop",
+        ] {
+            assert!(
+                !prompt.to_lowercase().contains(instructed),
+                "the listing is neutral, and {instructed:?} is not: {prompt:?}"
+            );
+        }
+    }
+
+    /// A companion named with a branch of its own is on that branch rather than
+    /// on the Conversation's — mirroring is what an empty name means, not what
+    /// every name means.
+    #[test]
+    fn a_companion_with_a_branch_of_its_own_is_listed_on_it() {
+        let prompt = alongside(
+            "",
+            "rate-limiting",
+            &[companion(
+                "askance",
+                store::CompanionMode::ReadWrite,
+                "the-typed-one",
+                "/var/lib/verkstead/worktrees/askance-the-typed-one",
+            )],
+        );
+
+        assert!(
+            prompt.contains("on branch `the-typed-one`"),
+            "a typed branch name stands on its own: {prompt:?}"
+        );
+    }
+
+    /// Which is most Conversations: one repository is what most work needs, and
+    /// a heading over an empty list would tell a session that something had been
+    /// configured.
+    #[test]
+    fn a_conversation_with_no_companions_is_started_on_the_prompt_as_it_stands() {
+        let prompt = next_task("# Rate limiting\n\nThe API has none.\n", None);
+
+        assert_eq!(alongside(&prompt, "rate-limiting", &[]), prompt);
     }
 
     /// The workbench shows a commit's message body beside its diff, and nothing

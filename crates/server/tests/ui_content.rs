@@ -24,7 +24,8 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{Answered, SetReading, SetView, Standing};
 use verkstead_schema::{
-    Answer, Liveness, Question, QuestionOption, QuestionSet, Response, SetCreated, Subquestion,
+    Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
+    Subquestion,
 };
 use verkstead_server::{Gh, open_database, router, router_asking_github, store};
 
@@ -189,6 +190,7 @@ fn full_grammar_set() -> QuestionSet {
         project: Some("verkstead".to_owned()),
         branch: Some("solid-viewer".to_owned()),
         diff: None,
+        diffs: Vec::new(),
     }
 }
 
@@ -330,6 +332,43 @@ fn modified_and_untracked_diff() -> String {
         "+a shared counter needs redis\n",
     )
     .to_owned()
+}
+
+/// A companion repository's uncommitted work: one file, so that a Diff of two
+/// blocks has a countable second one.
+fn companion_diff() -> String {
+    concat!(
+        "diff --git a/src/set.rs b/src/set.rs\n",
+        "index 4cb29ea..ddc897f 100644\n",
+        "--- a/src/set.rs\n",
+        "+++ b/src/set.rs\n",
+        "@@ -1,3 +1,3 @@\n",
+        " pub struct QuestionSet {\n",
+        "-    pub diff: Option<String>,\n",
+        "+    pub diffs: Vec<RepoDiff>,\n",
+        " }\n",
+    )
+    .to_owned()
+}
+
+/// The Conversation's own repository's block of a Diff — the one block that is
+/// drawn without a name where it is the whole of the Diff.
+fn own_block() -> RepoDiff {
+    RepoDiff {
+        repo: "verkstead".to_owned(),
+        own: true,
+        diff: modified_and_untracked_diff(),
+    }
+}
+
+/// And a read-write companion's, which is named wherever it is drawn: it is
+/// somebody else's repository however little else is uncommitted.
+fn companion_block() -> RepoDiff {
+    RepoDiff {
+        repo: "askance".to_owned(),
+        own: false,
+        diff: companion_diff(),
+    }
 }
 
 /// Ask for a stored Set the way the viewer does, and read back both the JSON as
@@ -984,28 +1023,103 @@ async fn a_postscript_of_nothing_but_whitespace_is_the_same_as_none() {
 async fn the_attached_diff_is_rendered_per_file_and_highlighted_by_the_server() {
     let (_dir, pool, app) = fresh_app().await;
     let mut set = full_grammar_set();
-    set.diff = Some(modified_and_untracked_diff());
+    set.diffs = vec![own_block()];
 
     let (view, _) = set_json(&app, &pool, &set).await;
-    let diff = view.diff.expect("this Set has a Diff attached");
+    let [block] = &view.diff[..] else {
+        panic!(
+            "one repository's changes are one block, got {:?}",
+            view.diff
+        );
+    };
 
     // The paths travel beside the HTML and in Diff order, because the viewer's
     // table of contents is built from both: `paths[0]` is what `#diff-1` shows.
-    assert_eq!(diff.paths, ["src/limits.rs", "notes.txt"]);
+    assert_eq!(block.diff.paths, ["src/limits.rs", "notes.txt"]);
     assert_eq!(
-        diff.html.matches(r#"class="diffFile""#).count(),
+        block.diff.html.matches(r#"class="diffFile""#).count(),
         2,
         "expected one section per file, whatever git knew of it:\n{}",
-        diff.html
+        block.diff.html
     );
 
     // The colouring comes from the server: the viewer gets no diff parser.
-    assert!(diff.html.contains("diffLine add"), "{}", diff.html);
-    assert!(diff.html.contains("diffLine del"), "{}", diff.html);
     assert!(
-        diff.html.contains(r#"<span class="tok-"#),
+        block.diff.html.contains("diffLine add"),
+        "{}",
+        block.diff.html
+    );
+    assert!(
+        block.diff.html.contains("diffLine del"),
+        "{}",
+        block.diff.html
+    );
+    assert!(
+        block.diff.html.contains(r#"<span class="tok-"#),
         "expected the Rust file highlighted server-side:\n{}",
-        diff.html
+        block.diff.html
+    );
+}
+
+#[tokio::test]
+async fn the_conversations_own_repository_drawn_alone_is_drawn_without_a_label() {
+    let (_dir, pool, app) = fresh_app().await;
+    let mut set = full_grammar_set();
+    set.diffs = vec![own_block()];
+
+    let (view, _) = set_json(&app, &pool, &set).await;
+
+    assert_eq!(
+        view.diff.first().and_then(|block| block.repo.clone()),
+        None,
+        "an unlabeled block means the work's own repo, so naming it would be naming it twice"
+    );
+}
+
+/// And the other way round, which is the whole reason the block says which
+/// repository is the Conversation's own: a companion's block is the whole of the
+/// Diff whenever the work's own Worktree is clean and the companion's is not.
+/// Unlabeled it would read as the work's own repository's, which is what an
+/// unlabeled block means.
+#[tokio::test]
+async fn a_companions_block_is_labeled_even_as_the_whole_of_the_diff() {
+    let (_dir, pool, app) = fresh_app().await;
+    let mut set = full_grammar_set();
+    set.diffs = vec![companion_block()];
+
+    let (view, _) = set_json(&app, &pool, &set).await;
+
+    assert_eq!(
+        view.diff.first().and_then(|block| block.repo.clone()),
+        Some("askance".to_owned()),
+        "it is somebody else's repository however little else is uncommitted"
+    );
+}
+
+#[tokio::test]
+async fn every_repositorys_block_is_labeled_once_more_than_one_is_drawn() {
+    let (_dir, pool, app) = fresh_app().await;
+    let mut set = full_grammar_set();
+    set.diffs = vec![own_block(), companion_block()];
+
+    let (view, _) = set_json(&app, &pool, &set).await;
+
+    assert_eq!(
+        view.diff
+            .iter()
+            .map(|block| block.repo.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("verkstead"), Some("askance")],
+        "the blocks are labeled and in the order they were composed"
+    );
+
+    // The anchors are ids on one page, so the second block's files carry on from
+    // where the first left off rather than restarting at `diff-1`.
+    assert_eq!(view.diff[1].diff.paths, ["src/set.rs"]);
+    assert!(
+        view.diff[1].diff.html.contains(r#"id="diff-3""#),
+        "the second block's file is the Diff's third:\n{}",
+        view.diff[1].diff.html
     );
 }
 
@@ -1013,11 +1127,38 @@ async fn the_attached_diff_is_rendered_per_file_and_highlighted_by_the_server() 
 async fn a_set_with_no_diff_carries_none() {
     let (_dir, pool, app) = fresh_app().await;
     let set = full_grammar_set();
-    assert!(set.diff.is_none(), "this Set is the one without a Diff");
+    assert!(
+        set.diff.is_none() && set.diffs.is_empty(),
+        "this Set is the one without a Diff"
+    );
 
     let (view, _) = set_json(&app, &pool, &set).await;
 
-    assert_eq!(view.diff, None, "there is no Diff section to draw");
+    assert!(view.diff.is_empty(), "there is no Diff section to draw");
+}
+
+#[tokio::test]
+async fn a_set_stored_before_the_diff_was_a_list_is_drawn_from_the_one_it_has() {
+    let (_dir, pool, app) = fresh_app().await;
+    let mut set = full_grammar_set();
+
+    // What every Set carried until the Diff became a block per repository: one
+    // patch, no repository named. Nothing writes one again, and the ones already
+    // stored go on being read.
+    set.diff = Some(modified_and_untracked_diff());
+
+    let (view, _) = set_json(&app, &pool, &set).await;
+    let [block] = &view.diff[..] else {
+        panic!("the one patch is the one block, got {:?}", view.diff);
+    };
+
+    assert_eq!(block.repo, None, "there is no repository to name it by");
+    assert_eq!(block.diff.paths, ["src/limits.rs", "notes.txt"]);
+    assert!(
+        block.diff.html.contains(r#"id="diff-1""#),
+        "anchored from one, exactly as it always was:\n{}",
+        block.diff.html
+    );
 }
 
 #[tokio::test]
@@ -1359,6 +1500,7 @@ fn wrap_up_proposal() -> QuestionSet {
         project: Some("verkstead".to_owned()),
         branch: Some("usage-limits".to_owned()),
         diff: None,
+        diffs: Vec::new(),
     }
 }
 
@@ -1417,6 +1559,7 @@ fn follow_up_round() -> QuestionSet {
         project: Some("verkstead".to_owned()),
         branch: Some("rate-limiting".to_owned()),
         diff: None,
+        diffs: Vec::new(),
     }
 }
 
@@ -1450,12 +1593,23 @@ const FIXTURES: &str = "../../web/tests/fixtures";
 #[tokio::test]
 async fn the_viewers_own_tests_are_fed_from_here() {
     // A Set to answer: every feature of the question grammar, the agent's markup
-    // throughout, and a Diff attached.
+    // throughout, and a Diff attached — one repository's, which is the Diff a
+    // Conversation with no companions has and the one every page drew until
+    // there could be more than one.
     let (_dir, pool, app) = fresh_app().await;
     let mut answering = marked_up_set();
-    answering.diff = Some(modified_and_untracked_diff());
+    answering.diffs = vec![own_block()];
     let (_, json) = set_json(&app, &pool, &answering).await;
     write("set-answering.json", &json);
+
+    // And the same Set asked with a read-write companion beside the work, which
+    // is the Diff of more than one repository: a labeled block each, in the
+    // order they were composed.
+    let (_dir, pool, app) = fresh_app().await;
+    let mut alongside = marked_up_set();
+    alongside.diffs = vec![own_block(), companion_block()];
+    let (_, json) = set_json(&app, &pool, &alongside).await;
+    write("set-alongside.json", &json);
 
     // The same Set answered, which is the same page read rather than filled in.
     let (_dir, pool, app) = fresh_app().await;
@@ -1709,6 +1863,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap();
 
+    // And the other Repo added to work alongside it, which is what a companion
+    // row on the setup card is drawn from — with the defaults an added one
+    // carries, because that is the shape every companion starts in.
+    assert_eq!(
+        store::add_companion(&pool, drafting, repos[1].id)
+            .await
+            .unwrap(),
+        store::Adding::Added,
+    );
+
     // A second one, so the sidebar is a list rather than a row — and against the
     // other Repo, because what a row names beside the branch is which repository
     // the work is in.
@@ -1742,6 +1906,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         grilling,
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-outbound-retries"),
+        &[],
     )
     .await
     .unwrap();
@@ -1886,11 +2051,31 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
+    // And the other Repo alongside it, in the mode a session may commit in: this
+    // is the Conversation whose Timeline carries commits, and a commit out of a
+    // companion is the one with a repository to name.
+    store::add_companion(&pool, directing, repos[1].id)
+        .await
+        .unwrap();
+    store::configure_companion(
+        &pool,
+        directing,
+        repos[1].id,
+        store::Change::Mode(store::CompanionMode::ReadWrite),
+    )
+    .await
+    .unwrap();
+
     store::start_grilling(
         &pool,
         directing,
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-usage-limits"),
+        &[store::CompanionWorktree {
+            repo_id: repos[1].id,
+            path: std::path::PathBuf::from("/var/lib/verkstead/worktrees/askance-usage-limits"),
+            base_commit: Some("1f0b6d2e94a7c3518d0f2b6a4e9c7d31b5a08f4e".to_owned()),
+        }],
     )
     .await
     .unwrap();
@@ -1950,31 +2135,54 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // grilling, because that is where a branch first has anything on it. One of
     // each kind, too: the bookkeeping commit that says only what it was, and the
     // one that delivered work and wrote a Commit Summary about it.
-    for commit in [
-        store::Commit {
-            sha: "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93".to_owned(),
-            subject: "chore: plan the usage-limit pause".to_owned(),
-            files: 2,
-            insertions: 74,
-            deletions: 3,
-            summary: None,
-        },
-        store::Commit {
-            sha: "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d".to_owned(),
-            subject: "feat: read the account's own limit error".to_owned(),
-            files: 5,
-            insertions: 213,
-            deletions: 41,
-            summary: Some(
-                "```mermaid\nflowchart LR\n  stderr --> reader --> pause\n```\n\n\
-                 The relay reads the account's own limit error off stderr and \
-                 hands the session's runner a time to wake at, instead of the \
-                 fixed backoff it used to guess."
-                    .to_owned(),
-            ),
-        },
+    // Three of them: two out of the Conversation's own repository and one out of
+    // the companion, because a labelled card is only worth drawing where a
+    // Timeline carries both — and the label is what tells them apart.
+    for (repo, commit) in [
+        (
+            repos[0].id,
+            store::Commit {
+                sha: "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93".to_owned(),
+                subject: "chore: plan the usage-limit pause".to_owned(),
+                files: 2,
+                insertions: 74,
+                deletions: 3,
+                summary: None,
+                repo: None,
+            },
+        ),
+        (
+            repos[0].id,
+            store::Commit {
+                sha: "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d".to_owned(),
+                subject: "feat: read the account's own limit error".to_owned(),
+                files: 5,
+                insertions: 213,
+                deletions: 41,
+                summary: Some(
+                    "```mermaid\nflowchart LR\n  stderr --> reader --> pause\n```\n\n\
+                     The relay reads the account's own limit error off stderr and \
+                     hands the session's runner a time to wake at, instead of the \
+                     fixed backoff it used to guess."
+                        .to_owned(),
+                ),
+                repo: None,
+            },
+        ),
+        (
+            repos[1].id,
+            store::Commit {
+                sha: "7d3a1c58e0b94f26a8d5c13f7b204e69a1c8d35f".to_owned(),
+                subject: "feat: say which account a limit error was about".to_owned(),
+                files: 3,
+                insertions: 46,
+                deletions: 12,
+                summary: None,
+                repo: None,
+            },
+        ),
     ] {
-        store::record_commit(&pool, directing, &commit)
+        store::record_commit(&pool, directing, repo, &commit)
             .await
             .unwrap()
             .unwrap();
@@ -2028,6 +2236,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         tasked,
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         &worktree,
+        &[],
     )
     .await
     .unwrap();
@@ -2044,6 +2253,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::record_commit(
         &pool,
         tasked,
+        repos[0].id,
         &store::Commit {
             sha: "5c2a9e14b7f36d80a1c4e9b2f7d53081a6e4c9b2".to_owned(),
             subject: "chore: plan the task-runner tasks".to_owned(),
@@ -2051,6 +2261,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             insertions: 132,
             deletions: 0,
             summary: None,
+            repo: None,
         },
     )
     .await
@@ -2173,6 +2384,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         waiting,
         "9e6cb584eeb157fd49f0c36e00bf87783fa2bfab",
         &worktree,
+        &[],
     )
     .await
     .unwrap();
@@ -2261,6 +2473,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         wrapping,
         "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
         std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+        &[],
     )
     .await
     .unwrap();
@@ -2272,6 +2485,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::record_commit(
         &pool,
         wrapping,
+        repos[0].id,
         &store::Commit {
             sha: "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8".to_owned(),
             subject: "chore: finish rate-limiting".to_owned(),
@@ -2279,6 +2493,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             insertions: 0,
             deletions: 24,
             summary: None,
+            repo: None,
         },
     )
     .await
@@ -2288,10 +2503,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::record_pull_request(
         &pool,
         wrapping,
+        repos[0].id,
         &store::PullRequest {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
         },
     )
     .await
@@ -2336,7 +2553,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // wrap-up settling everything it waits on. Walked there rather than written,
     // because what a round boundary looks like is exactly what this fixture is
     // for — the first round's Brief above it, the round steered into below.
-    for waiting_on in verkstead_store::WAITED_ON {
+    let waiting_on = verkstead_store::WAITED_ON.into_iter().chain([
+        verkstead_store::WaitingOn::Checks(repos[0].id),
+        verkstead_store::WaitingOn::Comments(repos[0].id),
+    ]);
+
+    for waiting_on in waiting_on {
         store::settle_wrap_up(&pool, wrapping, waiting_on)
             .await
             .unwrap();
@@ -2363,6 +2585,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 "/var/lib/verkstead/worktrees/verkstead-rate-limiting",
             )),
             base_commit: None,
+            companions: &[],
+            opened: &[],
+            checkouts: &[],
+            said: None,
         },
     )
     .await
@@ -2437,7 +2663,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // A roadmap pick records the direction and moves nothing: the grilling
     // session writes the roadmap itself, so the Conversation says it is grilling
     // until the pull request that follows the roadmap is recorded.
-    store::start_grilling(&pool, staged, &base, &worktree)
+    store::start_grilling(&pool, staged, &base, &worktree, &[])
         .await
         .unwrap();
     store::pick_direction(&pool, staged, verkstead_schema::Direction::Roadmap)

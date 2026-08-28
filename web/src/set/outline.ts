@@ -11,7 +11,7 @@
 //! Kept apart from the drawing of it for the same reason: this is the one
 //! description both shapes of the nav and the floating header are built from.
 
-import type { DiffView, SetView } from "../api/types";
+import type { DiffView, RepoDiffView, SetView } from "../api/types";
 import contents from "./Contents.module.css";
 
 /// The id a Question is reached by: its label, lowercased — `Q3` becomes `q3`,
@@ -94,6 +94,15 @@ export type Entry = {
   /// The whole of it, for the browser's own tooltip: the nav is narrow, and
   /// this is where the truncated line can be read out in full.
   whole: string;
+
+  /// The repository whose block this file belongs to, wherever the page labels
+  /// that block. `null` everywhere else — on a Question, and on the files of
+  /// the conversation's own repository drawn as the whole of the Diff.
+  ///
+  /// What the nav puts a heading in front of rather than a line of its own: the
+  /// runs of one name are what group the files under it, so the list says the
+  /// repository once above its files exactly as the page does.
+  group: string | null;
 };
 
 /// One section of the page in the table of contents: the heading it jumps to,
@@ -111,13 +120,36 @@ export type Section = {
 /// and as the whole of what a commit's details pane holds — and the two are the
 /// same folds in the same order. The renderer counts the folds from one, and so
 /// does this.
-export function files(diff: DiffView): Entry[] {
+///
+/// `from` is how many folds are already above these, which is what a Set's Diff
+/// of several repositories needs: the anchors are ids on one page and run on
+/// across the blocks rather than restarting. A commit's pane is one block and
+/// counts from the first.
+export function files(
+  diff: DiffView,
+  from = 0,
+  group: string | null = null,
+): Entry[] {
   return diff.paths.map((path, index) => ({
-    anchor: `diff-${index + 1}`,
+    anchor: `diff-${from + index + 1}`,
     label: null,
     text: shortened(path),
     whole: path,
+    group,
   }));
+}
+
+/// Every file of a Set's Diff, block by block: each repository's files under the
+/// name the page labels that repository with, and the anchors running on across
+/// them in the order the blocks are drawn.
+export function blocks(diff: RepoDiffView[]): Entry[] {
+  const entries: Entry[] = [];
+
+  for (const block of diff) {
+    entries.push(...files(block.diff, entries.length, block.repo));
+  }
+
+  return entries;
 }
 
 /// The page's sections top to bottom, each with its own parts under it.
@@ -128,8 +160,8 @@ export function outline(set: SetView): Section[] {
     sections.push({ anchor: "preface", name: "Preface", entries: [] });
   }
 
-  if (set.diff !== null) {
-    sections.push({ anchor: "diff", name: "Diff", entries: files(set.diff) });
+  if (set.diff.length > 0) {
+    sections.push({ anchor: "diff", name: "Diff", entries: blocks(set.diff) });
   }
 
   // Unconditional, like the heading it points at: every Set has Questions.
@@ -144,6 +176,7 @@ export function outline(set: SetView): Section[] {
       // `QuestionView.nav_text`.
       text: question.nav_text,
       whole: `${question.ask.name} ${question.nav_text}`,
+      group: null,
     })),
   });
 

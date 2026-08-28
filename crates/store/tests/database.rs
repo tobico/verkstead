@@ -44,6 +44,7 @@ async fn grilling(pool: &SqlitePool, repo: i64, branch: &str) -> i64 {
         id,
         "c0ffee",
         Path::new("/state/worktrees").join(branch).as_path(),
+        &[],
     )
     .await
     .unwrap();
@@ -58,6 +59,7 @@ fn opened(number: i64) -> PullRequest {
         number,
         title: "Rate limiting".to_owned(),
         url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+        repo: None,
     }
 }
 
@@ -134,7 +136,8 @@ async fn writes_that_arrive_at_once_all_land() {
             let pool = pool.clone();
 
             tokio::spawn(async move {
-                verkstead_store::record_pull_request(&pool, id, &opened(number as i64 + 1)).await
+                verkstead_store::record_pull_request(&pool, id, repo, &opened(number as i64 + 1))
+                    .await
             })
         })
         .collect();

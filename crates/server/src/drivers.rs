@@ -55,11 +55,13 @@ use crate::store::Lifecycle;
 /// by every clone: what is running is a fact about the process rather than
 /// about any one handler.
 ///
-/// A count rather than a flag, because a wrap-up is four tasks at once and any
-/// one of them still going is a wrap-up still being driven — and because a
-/// Resume starts a second set over the top of the first without
-/// stopping it. Counting is what keeps the first of them to finish from taking
-/// the whole Conversation off the register.
+/// A count rather than a flag, because a wrap-up is four tasks at once — six and
+/// up where the work ended on a pull request in a companion as well, each of
+/// those having its checks watched and its comments read by tasks of its own —
+/// and any one of them still going is a wrap-up still being driven. And because
+/// a Resume starts a second set over the top of the first without stopping it.
+/// Counting is what keeps the first of them to finish from taking the whole
+/// Conversation off the register.
 #[derive(Clone, Default)]
 pub(crate) struct Drivers {
     driving: Arc<Mutex<HashMap<i64, usize>>>,
@@ -255,7 +257,7 @@ mod tests {
         );
     }
 
-    /// A wrap-up is four tasks at once and each of them ends in its own time, so
+    /// A wrap-up is five tasks at once and each of them ends in its own time, so
     /// a Conversation is driven while any one of them is left. Which is also
     /// what Resume needs: it starts a second set over the top of
     /// the first without stopping it.

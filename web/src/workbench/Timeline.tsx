@@ -83,6 +83,7 @@ import type {
   BriefEvent,
   BriefSaved,
   CommitEvent,
+  CompanionRefusal,
   ConversationView,
   GrillingStarted,
   HandoffEvent,
@@ -168,11 +169,14 @@ export const BRIEF_REFUSAL: Record<BriefSaved, string> = {
     "The brief was frozen when grilling started, so it cannot be edited.",
 };
 
-/// And each way of being refused a start.
+/// And each way of being refused a start, for the conversation's own repo.
 ///
 /// Every one of them is something different to go and do, which is the whole
 /// reason the server names them separately rather than saying "cannot start".
-export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
+const GRILL_REFUSAL: Record<
+  Exclude<GrillingStarted, { Companion: unknown }>,
+  string
+> = {
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
@@ -188,6 +192,35 @@ export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
   BranchExists: "That branch already exists, and Verkstead did not make it.",
   WorktreeRefused: "Git would not make the worktree. The server log says why.",
 };
+
+/// And the same four failings over a companion repo, which say the same things
+/// about a different repository.
+///
+/// Exported because both presses that take a draft past drafting meet them:
+/// starting a grilling and adopting a stage each check the companions out, so
+/// each is refused by these four names — see `adoptRefusal` in
+/// [`Adoption`](./Adoption.tsx).
+export const COMPANION_REFUSAL: Record<CompanionRefusal, string> = {
+  FetchFailed:
+    "Git could not fetch from its remote, so nothing was started. The server log says why.",
+  NoBaseCommit: "It has nothing to check out any more.",
+  BranchExists:
+    "The branch already exists there, and Verkstead did not make it.",
+  WorktreeRefused: "Git would not make its worktree. The server log says why.",
+};
+
+/// What to say about a start that was refused.
+///
+/// A companion's refusal names the repository, because that is the whole of
+/// what makes it different from the same failing on the conversation's own: the
+/// thing to go and look at is one of several repos rather than the obvious one.
+export function grillRefusal(outcome: GrillingStarted): string {
+  if (typeof outcome === "object") {
+    return `${outcome.Companion.repo}: ${COMPANION_REFUSAL[outcome.Companion.why]}`;
+  }
+
+  return GRILL_REFUSAL[outcome];
+}
 
 /// And each way of being refused a resume.
 ///
@@ -1088,12 +1121,21 @@ function fronting(conversation: ConversationView): number {
 }
 
 /// What a pinned card is called, in the words its own heading uses.
+///
+/// A pull request in a companion repo is named with that repository, because a
+/// conversation ends on one per repository it was worked in: two dots both
+/// reading "Pull request" would be two cards a reader who cannot see them could
+/// not tell apart. The work's own stays unlabelled, by the rule the card itself
+/// follows.
 function named(event: PinnedEvent): string {
   if ("TaskList" in event) {
     return "Task list";
   }
   if ("StageList" in event) {
     return "Roadmap";
+  }
+  if ("PullRequest" in event && event.PullRequest.repo) {
+    return `Pull request in ${event.PullRequest.repo}`;
   }
   return "Pull request";
 }
@@ -1164,6 +1206,12 @@ function Card(props: {
 /// on it has two targets and only one of them is the card, so the link lives in
 /// the pane instead, which is where it was already written out in full.
 ///
+/// Which repository it was opened in is drawn beside the number, and only where
+/// that is not the conversation's own: an unlabelled card means the work's own
+/// repo, and the label earns its place when the pinned block holds a companion
+/// repo's pull request as well. The rule a commit's label follows — a
+/// conversation ends on one pull request per repository it was worked in.
+///
 /// Drawn twice, from the pinned block and from the record, because it belongs in
 /// both. The two are the same Event and so the same selection: opening either
 /// opens the one details pane, and both read as selected while it is open.
@@ -1181,6 +1229,9 @@ function PullRequest(props: {
       <div class={styles.eventHead}>
         <h2>Pull request</h2>
         <span class={styles.number}>#{props.opened.number}</span>
+        <Show when={props.opened.repo}>
+          {(repo) => <span class={styles.repo}>{repo()}</span>}
+        </Show>
         {/* On the other end of the line, where every card's second thing sits:
             the checks are what is true of the pull request now, beside what it
             was called when it opened. */}
@@ -1791,6 +1842,11 @@ function UnreadableSet(props: {
 /// nothing draws the card that has always been drawn, with nothing marking the
 /// absence.
 ///
+/// Which repository it landed in is drawn beside the word, and only where that
+/// is not the conversation's own: an unlabeled card means the work's own repo,
+/// and the label earns its place when a timeline carries the commits of a
+/// companion repo as well.
+///
 /// Nothing here asks the human for anything. Commits are viewable and have no
 /// state of their own: the design gives them no per-commit review, because
 /// feedback about the work consolidates in the wrap-up phase.
@@ -1812,6 +1868,9 @@ function Commit(props: {
     >
       <span class={styles.eventHead}>
         <span class={styles.what}>Commit</span>
+        <Show when={props.commit.repo}>
+          {(repo) => <span class={styles.repo}>{repo()}</span>}
+        </Show>
         <span class={styles.sha}>{props.commit.sha.slice(0, ABBREVIATED)}</span>
       </span>
 
@@ -1916,7 +1975,7 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
         <Show when={refused()}>
           {(outcome) => (
             <ErrorLine class={styles.failure}>
-              {GRILL_REFUSAL[outcome()]}
+              {grillRefusal(outcome())}
             </ErrorLine>
           )}
         </Show>

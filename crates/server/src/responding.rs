@@ -1,10 +1,18 @@
-//! The other proposal a wrap-up makes: what a batch of comments left on the
-//! pull request comes to.
+//! The other proposal a wrap-up makes: what a batch of comments left on one of
+//! its pull requests comes to.
 //!
-//! Everything standing on the pull request when the review starts belongs to
+//! Everything standing on every pull request when the review starts belongs to
 //! the review — see [`crate::comments::for_the_review`]. This is about what is
-//! said *after* it: a batch of comments the human wrote while the branch sat
-//! there, which nothing has been asked about yet.
+//! said *after* it: a batch of comments the human wrote on one of them while the
+//! branch sat there, which nothing has been asked about yet.
+//!
+//! **A batch is one pull request's.** A Conversation ends on one per repository
+//! it was worked in, and a human writes on the one they are reading — so the
+//! session is told which repository, which pull request and which worktree to
+//! work in, and the comments it is dispatched about are recorded as addressed
+//! against that pull request alone. What is settled is *this pull request has
+//! nothing outstanding*, which is what lets one of them go quiet while another is
+//! still being answered.
 //!
 //! **It proposes, and then it fixes what was agreed to**, exactly as the review
 //! does and for the same reason. A comment is the human talking, but the words
@@ -81,16 +89,27 @@ use crate::store;
 /// Run one batch session about `said`, and see out whatever it leaves.
 ///
 /// The caller is holding the Conversation's Turn and has recorded `which` — the
-/// comments this batch is made of — as addressed. Both are what make this the
-/// one session that will act on them.
+/// comments this batch is made of — as addressed against the pull request opened
+/// in `repo_id`. Both are what make this the one session that will act on them.
+///
+/// `repo_id` is which pull request the batch was left on, carried through so
+/// that whatever has to be put back where it was — the comments unread, the
+/// settlement back to waiting — is put back for that one rather than for all of
+/// them.
 ///
 /// Nothing is refused for. This runs unattended with nobody watching, and what
 /// it has to say it says on the Timeline or in the log.
-pub(crate) async fn run(state: &AppState, conversation_id: i64, said: &str, which: &[String]) {
+pub(crate) async fn run(
+    state: &AppState,
+    conversation_id: i64,
+    repo_id: i64,
+    said: &str,
+    which: &[String],
+) {
     match crate::runner::respond(state, conversation_id, said).await {
-        Reviewed::Done => over(state, conversation_id, which, None).await,
+        Reviewed::Done => over(state, conversation_id, repo_id, which, None).await,
         Reviewed::Stopped { how, writing } => {
-            over(state, conversation_id, which, Some((how, writing))).await
+            over(state, conversation_id, repo_id, which, Some((how, writing))).await
         }
         Reviewed::Nothing => {}
     }
@@ -108,6 +127,7 @@ pub(crate) async fn run(state: &AppState, conversation_id: i64, said: &str, whic
 async fn over(
     state: &AppState,
     conversation_id: i64,
+    repo_id: i64,
     which: &[String],
     ended_badly: Option<(String, i64)>,
 ) {
@@ -117,12 +137,19 @@ async fn over(
     // nothing would ever act on.
     if let Some(set_id) = proposed(state, conversation_id).await {
         if crate::review::unanswered(state, set_id).await {
-            return abandoned(state, conversation_id, set_id, Some(which), ended_badly).await;
+            return abandoned(
+                state,
+                conversation_id,
+                set_id,
+                Some((repo_id, which)),
+                ended_badly,
+            )
+            .await;
         }
     }
 
     if let Some((how, writing)) = ended_badly {
-        return stopped(state, conversation_id, which, &how, writing).await;
+        return stopped(state, conversation_id, repo_id, which, &how, writing).await;
     }
 
     // Everything it was sent to do is done: what was said read, whatever it would
@@ -223,11 +250,13 @@ async fn proposed(state: &AppState, conversation_id: i64) -> Option<i64> {
 /// it, so that the human's feedback outlives the session that lost it and a
 /// Resume is a fresh session about the same words.
 ///
-/// `which` is the batch, where the caller is the driver that dispatched it and
-/// therefore knows. `None` is a caller that cannot know — a server that came back
-/// up over somebody else's batch — and every comment on the pull request is read
-/// again there, because the record does not say which of them were this batch's
-/// and which the review folded in before it. A comment read twice costs a
+/// `which` is the pull request the batch was left on and the batch itself, where
+/// the caller is the driver that dispatched it and therefore knows. `None` is a
+/// caller that cannot know — a server that came back up over somebody else's
+/// batch — and every comment on every one of the Conversation's pull requests is
+/// read again there, because the record says neither which pull request the gone
+/// session was answering nor which of that one's comments were its batch rather
+/// than what the review folded in before it. A comment read twice costs a
 /// session's work and one dropped costs the human theirs, and a batch session
 /// reads the code as it now stands: a question the commits since have answered is
 /// one it says so about and asks nothing more of.
@@ -245,13 +274,13 @@ async fn abandoned(
     state: &AppState,
     conversation_id: i64,
     set_id: i64,
-    which: Option<&[String]>,
+    which: Option<(i64, &[String])>,
     ended_badly: Option<(String, i64)>,
 ) {
     crate::review::closed(state, conversation_id, set_id).await;
 
     forget(state, conversation_id, which).await;
-    unsettle(state, conversation_id).await;
+    unsettle(state, conversation_id, which.map(|(repo_id, _)| repo_id)).await;
 
     let left = "a session read what was said on the pull request and put what it would \
                 do to you, and it is gone, so its questions have been closed unanswered. \
@@ -282,42 +311,55 @@ async fn abandoned(
     }
 }
 
-/// Put comments back to being unread: the batch's own, or every one of them where
-/// the caller cannot say which those were.
-async fn forget(state: &AppState, conversation_id: i64, which: Option<&[String]>) {
-    let all;
+/// Put comments back to being unread: the batch's own, on the pull request it was
+/// left on, or every one of them on every pull request where the caller cannot
+/// say which those were.
+async fn forget(state: &AppState, conversation_id: i64, which: Option<(i64, &[String])>) {
+    let forgotten = match which {
+        Some((repo_id, which)) => {
+            store::forget_addressed_comments(&state.pool, conversation_id, repo_id, which).await
+        }
+        None => store::forget_every_addressed_comment(&state.pool, conversation_id).await,
+    };
 
-    let which = match which {
-        Some(which) => which,
-        None => match store::addressed_comments(&state.pool, conversation_id).await {
-            Ok(read) => {
-                all = read;
-                &all
-            }
+    if let Err(error) = forgotten {
+        tracing::error!(error = ?error, conversation_id, "forgetting what a gone session was reading failed");
+    }
+}
+
+/// And record that something said on a pull request is left unaddressed, which
+/// is what a proposal nobody is behind amounts to.
+///
+/// The pull request the batch was left on, or every one of the Conversation's
+/// where the caller cannot say which that was — the comments have all gone back
+/// to being unread there, so every one of them has something outstanding on it
+/// again.
+///
+/// Said before the run is stopped, because wrap-up's rule is decided by a loop
+/// of its own: a Conversation whose checks went green in the meantime would
+/// otherwise reach Done over the top of a proposal nobody is behind.
+async fn unsettle(state: &AppState, conversation_id: i64, repo_id: Option<i64>) {
+    let opened = match repo_id {
+        Some(repo_id) => vec![repo_id],
+        None => match store::pull_requests(&state.pool, conversation_id).await {
+            Ok(opened) => opened.into_iter().map(|(repo, _)| repo.id).collect(),
             Err(error) => {
-                tracing::error!(error = ?error, conversation_id, "reading which comments had been dispatched for failed");
+                tracing::error!(error = ?error, conversation_id, "reading which pull requests to put back to waiting failed");
                 return;
             }
         },
     };
 
-    if let Err(error) = store::forget_addressed_comments(&state.pool, conversation_id, which).await
-    {
-        tracing::error!(error = ?error, conversation_id, "forgetting what a gone session was reading failed");
-    }
-}
-
-/// And record that something said on the pull request is left unaddressed, which
-/// is what a proposal nobody is behind amounts to.
-///
-/// Said before the run is stopped, because wrap-up's rule is decided by a loop
-/// of its own: a Conversation whose checks went green in the meantime would
-/// otherwise reach Done over the top of a proposal nobody is behind.
-async fn unsettle(state: &AppState, conversation_id: i64) {
-    if let Err(error) =
-        store::unsettle_wrap_up(&state.pool, conversation_id, store::WaitingOn::Comments).await
-    {
-        tracing::error!(error = ?error, conversation_id, "putting the comments back to waiting failed");
+    for repo_id in opened {
+        if let Err(error) = store::unsettle_wrap_up(
+            &state.pool,
+            conversation_id,
+            store::WaitingOn::Comments(repo_id),
+        )
+        .await
+        {
+            tracing::error!(error = ?error, conversation_id, repo_id, "putting the comments back to waiting failed");
+        }
     }
 }
 
@@ -339,13 +381,15 @@ async fn unsettle(state: &AppState, conversation_id: i64) {
 async fn stopped(
     state: &AppState,
     conversation_id: i64,
+    repo_id: i64,
     which: &[String],
     how: &str,
     writing: i64,
 ) {
-    if let Err(error) = store::forget_addressed_comments(&state.pool, conversation_id, which).await
+    if let Err(error) =
+        store::forget_addressed_comments(&state.pool, conversation_id, repo_id, which).await
     {
-        tracing::error!(error = ?error, conversation_id, "forgetting a batch nobody answered failed");
+        tracing::error!(error = ?error, conversation_id, repo_id, "forgetting a batch nobody answered failed");
     }
 
     if let Err(error) = crate::stopping::stop(

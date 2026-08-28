@@ -237,6 +237,14 @@ pub struct ConversationView {
     /// grilling starts — which is why there is no value here to show instead.
     pub base_commit: Option<String>,
 
+    /// The other registered Repos this Conversation works alongside, by name.
+    ///
+    /// Empty is the ordinary Conversation. Beside the branch and the base
+    /// because it is the same kind of fact — what the work is configured with —
+    /// and settled in the same place and at the same moment: the setup card
+    /// while the Brief drafts, frozen when grilling starts.
+    pub companions: Vec<CompanionView>,
+
     pub state: Lifecycle,
 
     /// The Profile and model the grilling session will run under, whole rather
@@ -472,6 +480,63 @@ pub struct ConversationView {
     /// state of something the work is against. Empty is the ordinary case — a
     /// Conversation with no backlog has nothing to pin.
     pub pinned: Vec<PinnedEvent>,
+}
+
+/// One companion repo of a Conversation: which Repo, how far into it a session
+/// may reach, and what its checkout comes off.
+///
+/// The Repo in the shape the Repo list sends one, for [`ConversationView`]'s
+/// reason: the card names it and links nowhere else, and a second shape for a
+/// Repo would be a second opinion about what one is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CompanionView {
+    pub repo: RepoEntry,
+
+    pub mode: CompanionMode,
+
+    /// The branch this companion's checkout comes off, where the human named
+    /// one. `null` is the same rule the Conversation's own base follows: that
+    /// repository's default branch, as it stands when grilling starts.
+    pub base_ref: Option<String>,
+
+    /// What a read-write companion's branch will be called, or empty for
+    /// *mirroring* — the Conversation's own branch name, followed as it is
+    /// renamed. Empty on a read-only companion as well, there being no branch
+    /// to name: its checkout is detached at the commit the base resolved to.
+    pub branch: String,
+
+    /// Where this companion was checked out, once grilling has made its
+    /// worktree.
+    ///
+    /// `null` while the Conversation drafts and again once it is closed, which
+    /// is the Conversation's own worktree's rule: a companion has a directory
+    /// for exactly as long as the work does.
+    pub worktree: Option<Worktree>,
+
+    /// The commit its base resolved to when that checkout was made.
+    ///
+    /// What a read-only companion is detached at, and what a read-write one's
+    /// branch was cut from. Kept beside [`Self::base_ref`] rather than instead
+    /// of it, because the two say different things: the ref is the *name* the
+    /// human picked and what a rename or a steer would follow, and this is where
+    /// that name stood at the one moment it mattered.
+    ///
+    /// `null` wherever [`Self::worktree`] is, and on a checkout made before
+    /// Verkstead kept the commit.
+    pub base_commit: Option<String>,
+}
+
+/// How far into a companion a session may reach.
+///
+/// Two, and no third: a repository is there to be read, or it is there to be
+/// worked in. What the word decides is the sandbox's binds and whether a branch
+/// is cut for it, and neither of those has a halfway.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionMode {
+    ReadOnly,
+    ReadWrite,
 }
 
 /// The grilling's closing proposal as the Set it rides draws it: which direction
@@ -938,6 +1003,15 @@ pub struct PullRequestEvent {
     /// where they do it.
     pub url: String,
 
+    /// Which repository it was opened in, where that is not the Conversation's
+    /// own.
+    ///
+    /// `None` is the work's own repository and draws nothing, by the rule a
+    /// commit's label follows: an unlabeled card means the repo the Conversation
+    /// is in, and the label earns its place when the pinned block holds a
+    /// companion's pull request as well.
+    pub repo: Option<String>,
+
     /// How the checks on it were getting on the last time anything asked, or
     /// nothing where nothing has — a pull request in a repository with no CI,
     /// and one opened before Verkstead started writing this down.
@@ -1115,6 +1189,13 @@ pub struct CommitEvent {
     /// what it carried was a Diagram and nothing else. Both draw the card that
     /// has always been drawn.
     pub snippet: Option<String>,
+
+    /// Which repository it landed in, where that is not the Conversation's own.
+    ///
+    /// `None` is the work's own repository and draws nothing: an unlabeled card
+    /// means the repo the Conversation is in, and the label earns its place when
+    /// a Timeline carries more than one repository's commits.
+    pub repo: Option<String>,
 }
 
 /// One commit, as the details pane receives it: what it said about itself, and
@@ -1718,6 +1799,7 @@ pub fn commit_event(id: i64, at: String, commit: CommitRecord) -> TimelineEvent 
             .as_deref()
             .map(crate::markdown::to_prose)
             .filter(|prose| !prose.is_empty()),
+        repo: commit.repo,
     })
 }
 
@@ -1739,6 +1821,10 @@ pub struct CommitRecord {
     /// The Commit Summary as the agent wrote it, or `None` where the commit
     /// carried none. Markdown, as everything an agent writes is.
     pub summary: Option<String>,
+
+    /// What the repository it landed in is called, where that is not the
+    /// Conversation's own — see [`CommitEvent::repo`].
+    pub repo: Option<String>,
 }
 
 /// One commit as the details pane receives it, rendered on the way.
@@ -1924,6 +2010,8 @@ fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestE
         number: opened.number,
         title: opened.title,
         url: opened.url,
+        repo: opened.repo,
+
         checks: opened.checks,
     }
 }
@@ -1932,12 +2020,16 @@ fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestE
 /// store holds it.
 ///
 /// Its own type rather than the store's, because this crate does not depend on
-/// the store — and rather than three parameters, two of which are strings.
+/// the store — and rather than four parameters, three of which are strings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestSummary {
     pub number: i64,
     pub title: String,
     pub url: String,
+
+    /// What the Repo it was opened in is called, where that is not the
+    /// Conversation's own — see [`PullRequestEvent::repo`].
+    pub repo: Option<String>,
 
     /// How its checks were, as the store last wrote it down.
     pub checks: Option<CheckRollup>,
@@ -2103,6 +2195,133 @@ pub struct BaseBranchChoice {
     pub branch: Option<String>,
 }
 
+/// Which registered Repo to work alongside.
+///
+/// The id and nothing else: everything a companion holds beyond which Repo it
+/// is has a default worth having, and a press in a menu is one decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct NewCompanion {
+    pub repo_id: i64,
+}
+
+/// What became of adding one.
+///
+/// Every refusal is named rather than collapsed into one, because each is a
+/// different sentence to put in front of the human — and two of them are about
+/// what a companion *is* rather than about anything that has gone wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionAdded {
+    /// Added, read-only, on the default-branch rule.
+    Added,
+
+    NoSuchConversation,
+
+    /// The Conversation is past drafting: its configuration froze when grilling
+    /// started, and the setup card it was changed on is gone with it.
+    NotDrafting,
+
+    /// There is no Repo with that id — taken off the registry between the menu
+    /// reading it and the press that picked one.
+    NoSuchRepo,
+
+    /// It is the Conversation's own Repo. The work is already being done in it,
+    /// and a companion checkout of it would be that repository twice in one
+    /// sandbox.
+    OwnRepo,
+
+    /// It is a companion of this Conversation already.
+    AlreadyAdded,
+}
+
+/// And of taking one away.
+///
+/// No *no such companion*: a row that is not there is the state the press asked
+/// for, so it comes back as [`CompanionRemoved::Removed`] like any other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionRemoved {
+    Removed,
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, for [`CompanionAdded::NotDrafting`]'s
+    /// reason.
+    NotDrafting,
+}
+
+/// How far into a companion a session may reach, as the switch on its row sends
+/// it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CompanionModeChoice {
+    pub mode: CompanionMode,
+}
+
+/// What became of flipping that switch.
+///
+/// *No such companion* is among these and is not among a removal's refusals: a
+/// removal asked for a row to be gone, and a row that was never there is that.
+/// A configuration asked for a row to say something, and where there is no row
+/// there is nothing to say it — so the press did nothing, which is worth
+/// saying rather than reporting as done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionModeChosen {
+    Chosen,
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, for [`CompanionAdded::NotDrafting`]'s
+    /// reason.
+    NotDrafting,
+
+    /// That Repo is not a companion of this Conversation — taken off between
+    /// the card drawing the row and the press that configured it.
+    NoSuchCompanion,
+}
+
+/// And of choosing the branch a companion's checkout comes off.
+///
+/// The Conversation's own [`BaseRecorded`] with the companion refusal added,
+/// rather than that enum reused: the branch this is about is the companion
+/// repository's own, and a Conversation and a companion of it are two
+/// repositories with two lists of branches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionBaseRecorded {
+    Recorded,
+    NoSuchConversation,
+    NotDrafting,
+
+    /// That Repo is not a companion of this Conversation any more.
+    NoSuchCompanion,
+
+    /// The companion's own repository has no branch by that name — see
+    /// [`BaseRecorded::NoSuchBranch`], which is the same refusal about the
+    /// Conversation's own.
+    NoSuchBranch,
+}
+
+/// And of naming the branch a read-write companion's work is done on.
+///
+/// The empty name is not refused, because empty is not a name: it is
+/// *mirroring*, which is what a companion nobody has typed into is on and what
+/// clearing the field goes back to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionBranchRenamed {
+    Renamed,
+    NoSuchConversation,
+    NotDrafting,
+
+    /// That Repo is not a companion of this Conversation any more.
+    NoSuchCompanion,
+
+    /// Not a name git would take for a branch, asked of git itself — see
+    /// [`BranchRenamed::NotABranchName`].
+    NotABranchName,
+}
+
 /// What became of an edit to a Brief.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -2155,7 +2374,13 @@ pub enum BaseRecorded {
 /// is something different for the human to go and do: choose a Profile, write a
 /// Brief, pick another commit, deal with a branch that is already there. A
 /// single "cannot start" would leave them guessing which.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// A companion repo can fail in four of the same ways the Conversation's own
+/// does, and which repository it was is the thing the human needs — so those
+/// four are carried together under [`GrillingStarted::Companion`], named for
+/// the Repo they are about. Nothing gates the button on a companion: the
+/// configuration is always complete, so refusal at the start is the whole story.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum GrillingStarted {
     /// The branch and the worktree are made, and the Conversation is grilling.
@@ -2197,6 +2422,42 @@ pub enum GrillingStarted {
 
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.
+    WorktreeRefused,
+
+    /// One of the Conversation's companion repos could not be checked out, and
+    /// so none of it was: the whole start is refused, naming the repository and
+    /// what git could not do about it.
+    Companion {
+        /// What the companion Repo is called, which is what the human picked it
+        /// by and what they will go and look at.
+        repo: String,
+
+        why: CompanionRefusal,
+    },
+}
+
+/// Which of a companion repo's four ways of not being checked out this was.
+///
+/// The Conversation's own four, asked of a companion: everything git is asked
+/// for one is what it is asked for the other, in the same order and for the same
+/// reasons. Separate from [`GrillingStarted`] rather than four more variants of
+/// it, so that the repository is named once instead of four times.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CompanionRefusal {
+    /// Git would not fetch from that repository's remote, so what its checkout
+    /// would come off cannot be trusted to be what the remote is holding.
+    FetchFailed,
+
+    /// Nothing in it answers to the base its checkout would come off — a branch
+    /// picked while drafting that has since gone, or a default branch that has.
+    NoBaseCommit,
+
+    /// A read-write companion's branch is already there, in that repository.
+    /// Verkstead did not make it, so it will not take it over.
+    BranchExists,
+
+    /// Git would not make the worktree. The reason is in the server's log.
     WorktreeRefused,
 }
 
@@ -2479,6 +2740,86 @@ pub struct SteerSubmission {
     /// nothing to prime.
     #[serde(default)]
     pub digest: bool,
+
+    /// The registered Repos to put into the sandbox the sessions to come run
+    /// in, each with what a setup row would have said about it.
+    ///
+    /// Sandbox setup rather than a property of one state, which is why it rides
+    /// every target work goes on in rather than one of them. Empty is the
+    /// ordinary case and the whole of what most steers carry.
+    ///
+    /// **Adding only.** Nothing here may name a companion the Conversation
+    /// already has — one that does is refused rather than obeyed, because the
+    /// frozen set only widens and what a session was once given is never taken
+    /// back mid-Conversation. Which is also why there is no list beside this
+    /// one for taking a companion away.
+    ///
+    /// Nothing anywhere else reads it: a target nothing runs in has no sandbox
+    /// to set up.
+    #[serde(default)]
+    pub added: Vec<CompanionAddition>,
+
+    /// And the companions already there that the steer opens up: read-only
+    /// until now, read-write from here, each with what the branch cut in it is
+    /// called.
+    ///
+    /// **Upgrading only, which is why there is no mode on the rows.** Read-only
+    /// is not something this can ask for and neither is removal, so a
+    /// downgrade cannot be spelled here at all — what a session was once given
+    /// is never taken back mid-Conversation. Nothing here may name a companion
+    /// that is read-write already, or a Repo the Conversation has not got: both
+    /// are refused rather than obeyed, the first being a row with nothing left
+    /// to open and the second a page arguing with the record.
+    ///
+    /// Nothing anywhere else reads it, for [`Self::added`]'s reason: a target
+    /// nothing runs in has no sandbox to open up.
+    #[serde(default)]
+    pub upgraded: Vec<CompanionUpgrade>,
+}
+
+/// One registered Repo a steer puts on a Conversation, with everything a setup
+/// row would have settled about it.
+///
+/// The same four facts a drafting companion is configured with — which Repo,
+/// how far into it the work may reach, what its checkout comes off, and what a
+/// read-write one's branch is called — because this is the one other moment
+/// those questions can be asked: the setup rows have gone by the time anything
+/// is steered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CompanionAddition {
+    pub repo_id: i64,
+
+    pub mode: CompanionMode,
+
+    /// The branch of that repository's own the checkout comes off, or `null`
+    /// for the rule the Conversation's own base follows: that repository's
+    /// default branch, as origin holds it at the moment of the steer.
+    pub base_ref: Option<String>,
+
+    /// What a read-write one's branch is to be called, or empty for
+    /// *mirroring* — the Conversation's own branch name. Empty on a read-only
+    /// one as well, its checkout being detached and holding no branch.
+    pub branch: String,
+}
+
+/// One companion of a Conversation the steer opens up: read-only until now,
+/// read-write from here.
+///
+/// **Two fields rather than four, and the missing two are the point.** There is
+/// no mode, because there is one direction — a row that could carry read-only
+/// would be a row that could take back what a session was given. And there is
+/// no base: what the upgrade comes off is the base already on the row, picked
+/// while the Conversation drafted, re-resolved at this moment because the
+/// companion is joining the work now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CompanionUpgrade {
+    pub repo_id: i64,
+
+    /// What the branch cut in it is to be called, or empty for *mirroring* —
+    /// the Conversation's own branch name, exactly as at draft time.
+    pub branch: String,
 }
 
 /// What became of submitting one.
@@ -2488,7 +2829,7 @@ pub struct SteerSubmission {
 /// where it goes, so the source is not something to be refused for. What is left
 /// to be wrong about is the *target* — a state whose work cannot be set going
 /// from what the record holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum ConversationSteered {
     /// Moved: the Steer Event is on the Timeline beside the move, and any stop
@@ -2564,6 +2905,93 @@ pub enum ConversationSteered {
     /// What the record names is not a Worktree any more, and git would not make
     /// it again from the branch.
     WorktreeRefused,
+
+    /// One of the Repos the modal named is not on the registry — taken off it
+    /// between the list the modal read and the submit that named it.
+    ///
+    /// The one companion refusal with no repository in it, because there is no
+    /// repository to name: a Repo that is not registered is a row Verkstead
+    /// knows nothing about but the id the page sent.
+    NoSuchCompanionRepo,
+
+    /// A companion could not be put into the sandbox, and this is which one and
+    /// why.
+    ///
+    /// The repository said, because *which one* is the whole of what the human
+    /// needs — the same reason [`GrillingStarted::Companion`] says it. Nothing
+    /// is made and nothing is moved for any of these: every question a
+    /// companion turns on is asked in front of the session that gets ended, the
+    /// stop that gets cleared and the worktree that gets rebuilt, so a steer
+    /// refused here is a press that did not happen.
+    Companion {
+        /// The Repo's registered name.
+        repo: String,
+
+        why: SteerCompanionRefusal,
+    },
+}
+
+/// Which of a companion's ways of not being delivered by a steer this was.
+///
+/// [`CompanionRefusal`]'s four asked again at the other moment a companion is
+/// checked out, and four more that only a steer can meet: the setup card
+/// catches those the moment a row is pressed, and a steer is where the same
+/// questions are asked past drafting, with nothing in front of them but the
+/// submit.
+///
+/// Two of the four are about the *set* rather than about git, and they come in
+/// a pair because a steer does two things to it: an add is refused where the
+/// Repo is a companion already, and an upgrade is refused where it is not one
+/// yet — or where it is already as open as a companion gets.
+///
+/// A vocabulary of its own rather than more variants of the grill start's, for
+/// the reason [`SteerTarget`] is not [`crate::Lifecycle`]: what a grilling can
+/// be refused for and what a steer can be refused for are different lists, and
+/// one list would say each press can be refused for things it never could.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerCompanionRefusal {
+    /// The Repo named is the Conversation's own. It is already the work's
+    /// repository, so adding it beside itself would be a second checkout of it
+    /// in one sandbox.
+    OwnRepo,
+
+    /// It is a companion of this Conversation already.
+    ///
+    /// Not an add that quietly changes the row it found: the frozen set only
+    /// widens, so a submit naming one that is already there is a page arguing
+    /// with the record rather than a change to obey.
+    AlreadyAdded,
+
+    /// An upgrade named a Repo that is not a companion of this Conversation at
+    /// all — its own repository, or one nothing ever put in.
+    ///
+    /// The mirror of [`Self::AlreadyAdded`], and refused for its reason: a
+    /// steer opens up a row that is there, and one that is not there is a page
+    /// arguing with the record rather than a change to obey.
+    NotACompanion,
+
+    /// An upgrade named a companion that is read-write already, which is as
+    /// open as a companion gets.
+    ///
+    /// Obeying it would be re-cutting a branch over work that has been
+    /// committed to one — the taking-back the whole of this is written to
+    /// prevent — so it is refused rather than done again.
+    AlreadyReadWrite,
+
+    /// Git would not fetch from that repository's remote, so what its checkout
+    /// would come off cannot be trusted to be what the remote is holding.
+    FetchFailed,
+
+    /// Nothing in it answers to the base its checkout would come off.
+    NoBaseCommit,
+
+    /// A read-write companion's branch is already there, in that repository.
+    /// Verkstead did not make it, so it will not take it over.
+    BranchExists,
+
+    /// Git would not make the worktree. The reason is in the server's log.
+    WorktreeRefused,
 }
 
 /// What became of pressing Adopt.
@@ -2573,7 +3001,7 @@ pub enum ConversationSteered {
 /// something different for them to go and do. What is decided while nobody is
 /// watching says itself on a Timeline instead — see the server's `continuing`
 /// module, which starts the same stage by the other route.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Adopted {
     /// The branch and the worktree are made, the stage brief is the Brief, and
@@ -2639,6 +3067,22 @@ pub enum Adopted {
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.
     WorktreeRefused,
+
+    /// A companion repo could not be checked out beside the stage's own, and
+    /// this is which one and why.
+    ///
+    /// A Conversation adopting a roadmap is drafting like any other, so its
+    /// setup card configures companions like any other — and adoption is the
+    /// other press that takes a Draft past drafting, so it checks them out
+    /// exactly as a grill start does. Which is why this is
+    /// [`GrillingStarted::Companion`] word for word: the same four questions
+    /// asked of the same repositories at the other door.
+    Companion {
+        /// The Repo's registered name.
+        repo: String,
+
+        why: CompanionRefusal,
+    },
 }
 
 /// What became of pressing Stop or Force stop.

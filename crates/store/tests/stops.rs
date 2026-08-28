@@ -336,6 +336,7 @@ async fn a_stop_from_outside_the_human_is_waiting_on_them_in_the_sidebar() {
         id,
         "abc1234",
         Path::new("/data/worktrees/rate-limiting"),
+        &[],
     )
     .await
     .unwrap();
@@ -403,6 +404,7 @@ async fn the_humans_own_stop_is_not_waiting_on_them_in_the_sidebar() {
             id,
             "abc1234",
             Path::new("/data/worktrees/rate-limiting"),
+            &[],
         )
         .await
         .unwrap();
@@ -444,6 +446,7 @@ async fn a_closed_conversation_is_not_waiting_on_them_whatever_stopped_it() {
         id,
         "abc1234",
         Path::new("/data/worktrees/rate-limiting"),
+        &[],
     )
     .await
     .unwrap();

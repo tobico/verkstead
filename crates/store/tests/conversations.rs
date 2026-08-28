@@ -345,7 +345,8 @@ async fn starting_to_grill_records_the_base_commit_the_worktree_and_the_move() {
             &pool,
             id,
             "deadbeef",
-            Path::new("/state/worktrees/verkstead-rate-limiting")
+            Path::new("/state/worktrees/verkstead-rate-limiting"),
+            &[],
         )
         .await
         .unwrap(),
@@ -379,7 +380,7 @@ async fn the_base_commit_is_written_even_where_the_human_overrode_nothing() {
         "nothing was overridden, so there is only the rule"
     );
 
-    start_grilling(&pool, id, "0123456", Path::new("/state/worktrees/x"))
+    start_grilling(&pool, id, "0123456", Path::new("/state/worktrees/x"), &[])
         .await
         .unwrap();
 
@@ -401,12 +402,12 @@ async fn a_conversation_that_is_not_drafting_cannot_start_grilling() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
 
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
+    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
         .await
         .unwrap();
 
     assert_eq!(
-        start_grilling(&pool, id, "cafe", Path::new("/state/worktrees/y"))
+        start_grilling(&pool, id, "cafe", Path::new("/state/worktrees/y"), &[])
             .await
             .unwrap(),
         Grilling::NotDrafting
@@ -427,7 +428,7 @@ async fn grilling_a_conversation_that_is_not_there_says_so() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        start_grilling(&pool, 404, "deadbeef", Path::new("/state/worktrees/x"))
+        start_grilling(&pool, 404, "deadbeef", Path::new("/state/worktrees/x"), &[])
             .await
             .unwrap(),
         Grilling::NoSuchConversation
@@ -442,7 +443,7 @@ async fn grilling_freezes_the_brief_and_the_branch_name() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
 
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
+    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
         .await
         .unwrap();
 
@@ -472,7 +473,7 @@ async fn grilling_freezes_the_brief_and_the_branch_name() {
 async fn closing_forgets_the_worktree_and_keeps_the_branch() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
+    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
         .await
         .unwrap();
 
@@ -498,7 +499,7 @@ async fn closing_forgets_the_worktree_and_keeps_the_branch() {
 async fn closing_twice_is_not_an_error() {
     let (_dir, pool) = fresh_pool().await;
     let id = drafted(&pool).await;
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
+    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
         .await
         .unwrap();
 
@@ -540,7 +541,7 @@ async fn a_closed_conversation_cannot_start_grilling() {
     close_conversation(&pool, id).await.unwrap();
 
     assert_eq!(
-        start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
+        start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
             .await
             .unwrap(),
         Grilling::NotDrafting
@@ -633,7 +634,7 @@ async fn a_conversation_that_is_not_closed_cannot_be_archived() {
         Archiving::NotClosed
     );
 
-    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
+    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
         .await
         .unwrap();
 
@@ -803,6 +804,7 @@ async fn a_worktree_survives_the_database_being_reopened() {
         id,
         "deadbeef",
         Path::new("/state/worktrees/verkstead-rate-limiting"),
+        &[],
     )
     .await
     .unwrap();

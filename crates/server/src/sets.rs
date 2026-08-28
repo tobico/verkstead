@@ -7,6 +7,11 @@
 //! the project or the branch it derived. Two Conversations grilling one Repo
 //! would be indistinguishable by either of those.
 //!
+//! Knowing the Conversation is also what lets the Diff be read here rather than
+//! sent: the Worktrees it names are on this host, so their uncommitted changes
+//! are composed as the Set arrives, one block per repository — see
+//! [`crate::diffs`].
+//!
 //! And the other end of the same subject: closing the Sets a Conversation has
 //! left open, which is what [`lock`] below is. Two things reach for it — a
 //! grilling relaunched over a session that died, and a Conversation being closed
@@ -65,7 +70,7 @@ pub(crate) async fn create_set(
     Query(asking): Query<Asking>,
     body: String,
 ) -> Response {
-    let set = match QuestionSet::from_yaml(&body) {
+    let mut set = match QuestionSet::from_yaml(&body) {
         Ok(set) => set,
         Err(error) => {
             return yaml(
@@ -84,6 +89,15 @@ pub(crate) async fn create_set(
             ),
         );
     }
+
+    // Whatever the Set claims its Diff is, the Conversation's Worktrees are the
+    // authority — and this is where that read happens now, close enough to them
+    // to do it. One block per repository the work may be written in, and the
+    // single field a Set used to carry left empty: it is what the Sets stored
+    // before the Diff became a list are read back through, and not somewhere for
+    // a claim of the agent's to survive. See [`crate::diffs`].
+    set.diff = None;
+    set.diffs = crate::diffs::compose(&state.pool, conversation_id).await;
 
     match store::ask(&state.pool, conversation_id, &set, asking.kind()).await {
         Ok(Some(created)) => {

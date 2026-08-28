@@ -24,17 +24,59 @@
 //! card opened by a right-click and put where the pointer was — no trigger, no
 //! anchor, and nowhere to give the focus back to. Every other thing a menu is,
 //! the two of them share.
+//!
+//! A card can hold more than one level of rows: a [`Nested`] row opens another
+//! level of the menu it is in, with a way back out at the top of it. One card,
+//! one backdrop, one Escape and one focus given back however deep it is — which
+//! is what makes it a level of this menu rather than a second menu, and what
+//! the flat alternative would have cost on a page with a dozen repositories to
+//! list.
 
 import {
   Show,
+  createContext,
   createSignal,
   createUniqueId,
   onCleanup,
   onMount,
+  useContext,
 } from "solid-js";
 import type { JSX } from "solid-js";
 
 import styles from "./Menu.module.css";
+
+/// A level of a menu below its first: what the row that opens it reads as, and
+/// the rows it holds.
+type Level = {
+  label: string;
+  children: () => JSX.Element;
+};
+
+/// How a [`Nested`] row reaches the menu it is drawn inside of.
+///
+/// A context rather than a prop, because a nested row is written where the rows
+/// are — inside the caller's own thunk — and threading the way to open a level
+/// down through whatever the caller has built there would be the caller's
+/// problem rather than this component's.
+const Levels = createContext<{
+  /// Show this level instead of the one the card is on.
+  open: (level: Level) => void;
+
+  /// Whether this row is the one the human has just stepped back out of, asked
+  /// once: the row that opened a level is where the focus goes when the level
+  /// is left, and it is a new element by then.
+  returning: (label: string) => boolean;
+}>();
+
+/// Take the focus to a row that has just been built.
+///
+/// In a microtask because focusing an element the document does not hold yet
+/// does nothing at all: a row is built here and put in the page after.
+function focusing(row: HTMLElement): void {
+  queueMicrotask(() => {
+    if (row.isConnected) row.focus();
+  });
+}
 
 /// A menu, and the button that drops it.
 export function Menu(props: {
@@ -74,6 +116,9 @@ export function Menu(props: {
   /// when it closes, so anything the caller wants standing while it is shut
   /// belongs outside it. A thunk rather than plain children because *built when
   /// it opens* is the whole of what a row that takes the focus depends on.
+  ///
+  /// A [`Nested`] among them is a row that opens another level of this same
+  /// menu rather than doing something.
   children: () => JSX.Element;
 }): JSX.Element {
   // `true` while the menu hangs open under the trigger.
@@ -132,10 +177,118 @@ export function Menu(props: {
           onClick={() => setOpen(false)}
         />
         <div class={styles.drop} id={id} role="menu" aria-label={props.name}>
-          {props.children()}
+          <Rows rows={props.children} />
         </div>
       </Show>
     </div>
+  );
+}
+
+/// What is inside the card: the caller's rows, or whichever level of them the
+/// human has walked to.
+///
+/// The one part of a menu that is neither the chrome nor the caller's, and it
+/// belongs to the drop rather than to either shape of menu — which is what
+/// gives the right-click menu its levels without a line of its own. Built with
+/// the card it is in and thrown away with it, so a menu that has been shut and
+/// opened is at its first level again: a card that came back down where it was
+/// left would be showing a level the human closed their way out of.
+function Rows(props: { rows: () => JSX.Element }): JSX.Element {
+  // Which level the card is showing, or `null` at the first of them. One card,
+  // one backdrop and one way out however deep it is: what a level changes is
+  // the rows inside, and nothing about what a menu is.
+  const [level, setLevel] = createSignal<Level | null>(null);
+
+  // The level just stepped back out of, held for exactly as long as it takes
+  // the row that opened it to be built again — that row is where the focus
+  // belongs, and it is a new element by the time it is there to take it.
+  const [back, setBack] = createSignal<string | null>(null);
+
+  return (
+    <Levels.Provider
+      value={{
+        open: (opened) => setLevel(opened),
+        returning: (label) => {
+          if (back() !== label) return false;
+          setBack(null);
+          return true;
+        },
+      }}
+    >
+      {/* One level or the other, never both: a level is what the card is
+          showing rather than something drawn beside what it was showing
+          before. */}
+      <Show when={level()} fallback={props.rows()}>
+        {(inner) => (
+          <>
+            {/* The way back out, at the top of the level it leaves — and
+                where the focus goes as the level opens, so a hand on the
+                keyboard is inside the card rather than at the top of the
+                page. */}
+            <button
+              type="button"
+              role="menuitem"
+              class={styles.back}
+              ref={focusing}
+              onClick={() => {
+                setBack(inner().label);
+                setLevel(null);
+              }}
+            >
+              <span aria-hidden="true">←</span>
+              {inner().label}
+            </button>
+            {inner().children()}
+          </>
+        )}
+      </Show>
+    </Levels.Provider>
+  );
+}
+
+/// A row that opens another level of the menu it is in, rather than doing
+/// something.
+///
+/// The one thing a nested level is *not* is another menu: it comes down in the
+/// same card, over the same backdrop, and goes back the same two ways —
+/// Escape, or a press away from it — which is the whole reason there is one
+/// menu component at all. What it adds is a third way, which belongs to the
+/// level alone: the row back out of it, at the top of the rows it holds.
+///
+/// The rows are a thunk for [`Menu`]'s reason, and it matters more here: they
+/// are built when the level is opened rather than when the menu is, so a level
+/// listing something the caller is still reading is a level that reads it when
+/// the human asks for it.
+///
+/// Drawn inside a [`Menu`] or a [`ContextMenu`] and nowhere else — outside one
+/// there is no card for a level to come down in, and the row does nothing.
+export function Nested(props: {
+  /// What the row reads as, and what the way back out of the level it opens
+  /// says. One word for both, because they are the same place named twice.
+  label: string;
+
+  /// What the level holds.
+  children: () => JSX.Element;
+}): JSX.Element {
+  const levels = useContext(Levels);
+
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      class={styles.nested}
+      aria-haspopup="menu"
+      ref={(row) => {
+        if (levels?.returning(props.label)) focusing(row);
+      }}
+      onClick={() =>
+        levels?.open({ label: props.label, children: props.children })
+      }
+    >
+      {props.label}
+      {/* Which way the row goes, and no part of what it says. */}
+      <span aria-hidden="true">›</span>
+    </button>
   );
 }
 
@@ -200,9 +353,7 @@ export function ContextMenu(props: {
                 props.close();
               }}
             />
-            <Pointed at={at} name={props.name}>
-              {props.children()}
-            </Pointed>
+            <Pointed at={at} name={props.name} rows={props.children} />
           </>
         )}
       </Show>
@@ -224,7 +375,7 @@ export function ContextMenu(props: {
 function Pointed(props: {
   at: { x: number; y: number };
   name?: string;
-  children: JSX.Element;
+  rows: () => JSX.Element;
 }): JSX.Element {
   let drop!: HTMLDivElement;
 
@@ -266,7 +417,7 @@ function Pointed(props: {
       aria-label={props.name}
       style={{ left: `${put().x}px`, top: `${put().y}px` }}
     >
-      {props.children}
+      <Rows rows={props.rows} />
     </div>
   );
 }

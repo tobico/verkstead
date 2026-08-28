@@ -246,8 +246,8 @@ export function Sheet(props: {
       </Show>
       {/* Between the Preface and the Questions: the Preface says what the agent
           is asking about, and the Diff is the evidence for it. */}
-      <Show when={props.set.diff}>
-        {(diff) => <Diff diff={diff()} wrapped={wrapped()} flip={flip} />}
+      <Show when={props.set.diff.length > 0}>
+        <Diff blocks={props.set.diff} wrapped={wrapped()} flip={flip} />
       </Show>
       <Show
         when={decided()}

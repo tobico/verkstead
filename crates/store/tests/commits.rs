@@ -5,13 +5,17 @@
 //! branch sweeps the whole of it every time it looks — a branch is not a queue
 //! — so nearly every commit it offers has been recorded already, and the store
 //! is what makes offering one twice cost nothing.
+//!
+//! And *once per repository*, which is the other half of the same rule: a
+//! Conversation is swept in its own repo and in each read-write companion, and
+//! two repositories are two histories.
 
 use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Commit, Event, commit, open_database, record_commit, recorded_commits, register_repo,
-    start_conversation, timeline,
+    Commit, Event, add_companion, commit, commit_repo, open_database, record_commit,
+    recorded_commits, register_repo, start_conversation, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -23,23 +27,35 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     (dir, pool)
 }
 
-/// A Conversation to land commits on.
-async fn conversation(pool: &SqlitePool) -> i64 {
-    let repo = register_repo(pool, Path::new("/watched/verkstead"), "verkstead", "main")
+/// A Conversation to land commits on, and the Repo it is in — which is what a
+/// commit is recorded against.
+async fn conversation(pool: &SqlitePool) -> (i64, i64) {
+    let repo = registered(pool, "verkstead").await;
+
+    let id = start_conversation(pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    (id, repo)
+}
+
+/// One more registered Repo, for the Conversations and the companions that want
+/// a second one.
+async fn registered(pool: &SqlitePool, name: &str) -> i64 {
+    register_repo(pool, &Path::new("/watched").join(name), name, "main")
         .await
         .unwrap()
         .expect("nothing was registered at that path yet")
-        .id;
-
-    start_conversation(pool, repo, "rate-limiting")
-        .await
-        .unwrap()
-        .expect("the Repo was just registered")
+        .id
 }
 
 /// A commit as git would have described it, saying nothing about itself — which
 /// is what a bookkeeping commit is, and what every commit recorded before
 /// summaries were kept looks like.
+///
+/// Unlabeled, which is what the sweep offers and what the Conversation's own
+/// repository reads back as.
 fn landed(sha: &str, subject: &str) -> Commit {
     Commit {
         sha: sha.to_owned(),
@@ -48,6 +64,7 @@ fn landed(sha: &str, subject: &str) -> Commit {
         insertions: 31,
         deletions: 4,
         summary: None,
+        repo: None,
     }
 }
 
@@ -75,9 +92,9 @@ async fn on_the_timeline(pool: &SqlitePool, id: i64) -> Vec<Commit> {
 #[tokio::test]
 async fn a_commit_lands_on_the_timeline_as_what_it_changed() {
     let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
+    let (id, repo) = conversation(&pool).await;
 
-    let event = record_commit(&pool, id, &landed("a1b2c3d", "feat: rate limiting"))
+    let event = record_commit(&pool, id, repo, &landed("a1b2c3d", "feat: rate limiting"))
         .await
         .unwrap()
         .expect("a commit on a Conversation that is there is recorded");
@@ -101,13 +118,14 @@ async fn a_commit_lands_on_the_timeline_as_what_it_changed() {
 #[tokio::test]
 async fn a_commit_carries_the_summary_it_was_recorded_with() {
     let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
+    let (id, repo) = conversation(&pool).await;
 
     let written = "```mermaid\nflowchart LR\n  in --> out\n```\n\nA bucket per account.";
 
     let event = record_commit(
         &pool,
         id,
+        repo,
         &summarised("a1b2c3d", "feat: rate limiting", written),
     )
     .await
@@ -133,9 +151,9 @@ async fn a_commit_carries_the_summary_it_was_recorded_with() {
 #[tokio::test]
 async fn a_commit_with_no_summary_has_none() {
     let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
+    let (id, repo) = conversation(&pool).await;
 
-    let event = record_commit(&pool, id, &landed("a1b2c3d", "chore: plan the tasks"))
+    let event = record_commit(&pool, id, repo, &landed("a1b2c3d", "chore: plan the tasks"))
         .await
         .unwrap()
         .unwrap();
@@ -153,14 +171,17 @@ async fn a_commit_with_no_summary_has_none() {
 #[tokio::test]
 async fn a_summary_is_recorded_once_with_its_commit() {
     let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
+    let (id, repo) = conversation(&pool).await;
 
     let written = summarised("a1b2c3d", "feat: rate limiting", "A bucket per account.");
 
-    let event = record_commit(&pool, id, &written).await.unwrap().unwrap();
+    let event = record_commit(&pool, id, repo, &written)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(
-        record_commit(&pool, id, &written).await.unwrap(),
+        record_commit(&pool, id, repo, &written).await.unwrap(),
         None,
         "the second sweep finds nothing left to do",
     );
@@ -177,12 +198,12 @@ async fn a_summary_is_recorded_once_with_its_commit() {
 #[tokio::test]
 async fn the_same_commit_offered_twice_is_recorded_once() {
     let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
+    let (id, repo) = conversation(&pool).await;
 
-    let first = record_commit(&pool, id, &landed("a1b2c3d", "feat: rate limiting"))
+    let first = record_commit(&pool, id, repo, &landed("a1b2c3d", "feat: rate limiting"))
         .await
         .unwrap();
-    let again = record_commit(&pool, id, &landed("a1b2c3d", "feat: rate limiting"))
+    let again = record_commit(&pool, id, repo, &landed("a1b2c3d", "feat: rate limiting"))
         .await
         .unwrap();
 
@@ -202,26 +223,22 @@ async fn the_same_commit_offered_twice_is_recorded_once() {
 #[tokio::test]
 async fn one_commit_can_be_on_two_conversations() {
     let (_dir, pool) = fresh_pool().await;
-    let one = conversation(&pool).await;
+    let (one, own) = conversation(&pool).await;
 
-    let repo = register_repo(&pool, Path::new("/watched/other"), "other", "main")
-        .await
-        .unwrap()
-        .expect("nothing was registered there yet")
-        .id;
-    let two = start_conversation(&pool, repo, "stacked")
+    let other = registered(&pool, "other").await;
+    let two = start_conversation(&pool, other, "stacked")
         .await
         .unwrap()
         .unwrap();
 
     assert!(
-        record_commit(&pool, one, &landed("a1b2c3d", "feat: rate limiting"))
+        record_commit(&pool, one, own, &landed("a1b2c3d", "feat: rate limiting"))
             .await
             .unwrap()
             .is_some()
     );
     assert!(
-        record_commit(&pool, two, &landed("a1b2c3d", "feat: rate limiting"))
+        record_commit(&pool, two, other, &landed("a1b2c3d", "feat: rate limiting"))
             .await
             .unwrap()
             .is_some(),
@@ -238,14 +255,14 @@ async fn one_commit_can_be_on_two_conversations() {
 #[tokio::test]
 async fn commits_come_back_in_the_order_they_were_recorded() {
     let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
+    let (id, repo) = conversation(&pool).await;
 
     for (sha, subject) in [
         ("1111111", "test: a failing test"),
         ("2222222", "feat: rate limiting"),
         ("3333333", "docs: say what it does"),
     ] {
-        record_commit(&pool, id, &landed(sha, subject))
+        record_commit(&pool, id, repo, &landed(sha, subject))
             .await
             .unwrap()
             .expect("each of these is new");
@@ -272,20 +289,20 @@ async fn commits_come_back_in_the_order_they_were_recorded() {
 #[tokio::test]
 async fn what_is_already_recorded_can_be_asked_for_by_sha() {
     let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
+    let (id, repo) = conversation(&pool).await;
 
     assert_eq!(
-        recorded_commits(&pool, id).await.unwrap(),
+        recorded_commits(&pool, id, repo).await.unwrap(),
         Vec::<String>::new(),
         "a Conversation that has committed nothing has nothing recorded",
     );
 
-    record_commit(&pool, id, &landed("a1b2c3d", "feat: rate limiting"))
+    record_commit(&pool, id, repo, &landed("a1b2c3d", "feat: rate limiting"))
         .await
         .unwrap();
 
     assert_eq!(
-        recorded_commits(&pool, id).await.unwrap(),
+        recorded_commits(&pool, id, repo).await.unwrap(),
         vec!["a1b2c3d".to_owned()],
     );
 }
@@ -296,9 +313,10 @@ async fn what_is_already_recorded_can_be_asked_for_by_sha() {
 #[tokio::test]
 async fn a_commit_on_no_conversation_is_not_recorded() {
     let (_dir, pool) = fresh_pool().await;
+    let repo = registered(&pool, "verkstead").await;
 
     assert_eq!(
-        record_commit(&pool, 404, &landed("a1b2c3d", "feat: rate limiting"))
+        record_commit(&pool, 404, repo, &landed("a1b2c3d", "feat: rate limiting"))
             .await
             .unwrap(),
         None,
@@ -311,12 +329,184 @@ async fn a_commit_on_no_conversation_is_not_recorded() {
 #[tokio::test]
 async fn a_commit_is_not_readable_through_another_conversation() {
     let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
+    let (id, repo) = conversation(&pool).await;
 
-    let event = record_commit(&pool, id, &landed("a1b2c3d", "feat: rate limiting"))
+    let event = record_commit(&pool, id, repo, &landed("a1b2c3d", "feat: rate limiting"))
         .await
         .unwrap()
         .unwrap();
 
     assert_eq!(commit(&pool, id + 1, event).await.unwrap(), None);
+}
+
+/// The other half of *exactly once*: one commit per Conversation per Repo. A
+/// Conversation is swept in its own repository and in each read-write
+/// companion, and what a sha means is a fact about one repository — so the same
+/// string out of two of them is two commits, and each lands.
+#[tokio::test]
+async fn a_sha_is_the_same_commit_only_within_one_repository() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, own) = conversation(&pool).await;
+
+    let askance = registered(&pool, "askance").await;
+    assert_eq!(
+        add_companion(&pool, id, askance).await.unwrap(),
+        verkstead_store::Adding::Added,
+    );
+
+    assert!(
+        record_commit(&pool, id, own, &landed("a1b2c3d", "feat: rate limiting"))
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        record_commit(
+            &pool,
+            id,
+            askance,
+            &landed("a1b2c3d", "feat: the other half")
+        )
+        .await
+        .unwrap()
+        .is_some(),
+        "another repository's history is another history",
+    );
+
+    assert_eq!(
+        on_the_timeline(&pool, id).await.len(),
+        2,
+        "so both are on the Timeline",
+    );
+
+    assert_eq!(
+        record_commit(
+            &pool,
+            id,
+            askance,
+            &landed("a1b2c3d", "feat: the other half")
+        )
+        .await
+        .unwrap(),
+        None,
+        "and the companion's next sweep still finds nothing left to do",
+    );
+}
+
+/// What a sweep asks is what *its own* repository has recorded. A sha on the
+/// companion's branch is nothing the Conversation's own sweep could act on, so
+/// it must not come back as one it has already dealt with.
+#[tokio::test]
+async fn a_sweep_is_told_what_its_own_repository_has_recorded() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, own) = conversation(&pool).await;
+
+    let askance = registered(&pool, "askance").await;
+    add_companion(&pool, id, askance).await.unwrap();
+
+    record_commit(
+        &pool,
+        id,
+        askance,
+        &landed("a1b2c3d", "feat: the other half"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(
+        recorded_commits(&pool, id, own).await.unwrap(),
+        Vec::<String>::new(),
+        "the Conversation's own repository has committed nothing",
+    );
+    assert_eq!(
+        recorded_commits(&pool, id, askance).await.unwrap(),
+        vec!["a1b2c3d".to_owned()],
+    );
+}
+
+/// The label: a companion's commit says which repository it came out of, and
+/// the Conversation's own says nothing, because an unlabeled card means the
+/// work's own repo.
+#[tokio::test]
+async fn a_companion_repos_commit_is_labelled_and_the_conversations_own_is_not() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, own) = conversation(&pool).await;
+
+    let askance = registered(&pool, "askance").await;
+    add_companion(&pool, id, askance).await.unwrap();
+
+    let ours = record_commit(&pool, id, own, &landed("a1b2c3d", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+    let theirs = record_commit(
+        &pool,
+        id,
+        askance,
+        &landed("9f8e7d6", "feat: the other half"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(commit(&pool, id, ours).await.unwrap().unwrap().repo, None);
+    assert_eq!(
+        commit(&pool, id, theirs).await.unwrap().unwrap().repo,
+        Some("askance".to_owned()),
+        "the Repo's registered name, which is what the card draws",
+    );
+
+    let drawn: Vec<Option<String>> = on_the_timeline(&pool, id)
+        .await
+        .into_iter()
+        .map(|commit| commit.repo)
+        .collect();
+
+    assert_eq!(
+        drawn,
+        vec![None, Some("askance".to_owned())],
+        "and the Timeline says the same thing the pane does",
+    );
+}
+
+/// Which repository the details pane reads a commit's diff out of: the one it
+/// was recorded against. A companion's commit is in the companion's repository,
+/// and the Conversation's own would know nothing about it.
+#[tokio::test]
+async fn a_commit_says_which_repository_to_read_it_out_of() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, own) = conversation(&pool).await;
+
+    let askance = registered(&pool, "askance").await;
+    add_companion(&pool, id, askance).await.unwrap();
+
+    let ours = record_commit(&pool, id, own, &landed("a1b2c3d", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+    let theirs = record_commit(
+        &pool,
+        id,
+        askance,
+        &landed("9f8e7d6", "feat: the other half"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(
+        commit_repo(&pool, id, ours).await.unwrap().unwrap().path,
+        Path::new("/watched/verkstead"),
+    );
+    assert_eq!(
+        commit_repo(&pool, id, theirs).await.unwrap().unwrap().path,
+        Path::new("/watched/askance"),
+    );
+
+    assert_eq!(
+        commit_repo(&pool, id + 1, theirs).await.unwrap(),
+        None,
+        "and it is reached through the Timeline it is on, like the commit itself",
+    );
 }

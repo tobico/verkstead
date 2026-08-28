@@ -137,12 +137,25 @@ export function Contents(props: {
               <Show when={section.entries.length > 0}>
                 <ol class={contents.entries}>
                   <For each={section.entries}>
-                    {(line) => (
-                      <ContentsEntry
-                        entry={line}
-                        watched={props.watched}
-                        nav={props.nav}
-                      />
+                    {(line, at) => (
+                      <>
+                        {/* The repository these files came out of, said once
+                            over the run of them — wherever the Diff named one,
+                            and nothing else. Not a line to press: what it names
+                            is the block, and the files under it are what the
+                            nav takes the reader to. Not
+                            hidden from assistive tech either, unlike the
+                            floating header: this is the only place the nav says
+                            which repository a path belongs to. */}
+                        <Show when={opens(section.entries, at())}>
+                          {(repo) => <li class={contents.group}>{repo()}</li>}
+                        </Show>
+                        <ContentsEntry
+                          entry={line}
+                          watched={props.watched}
+                          nav={props.nav}
+                        />
+                      </>
                     )}
                   </For>
                 </ol>
@@ -153,6 +166,21 @@ export function Contents(props: {
       </ol>
     </nav>
   );
+}
+
+/// The repository heading this line opens, and `null` where it opens none: the
+/// first entry of a run naming one repository, which is the first file of each
+/// block the Diff named.
+///
+/// Read off the entries themselves rather than carried as a shape of its own, so
+/// that the nav's grouping and the page's labels are the same answer read the
+/// same way round — a block is a run of files with one name on them.
+function opens(entries: Entry[], at: number): string | null {
+  const group = entries[at]?.group ?? null;
+
+  return group !== null && group !== (entries[at - 1]?.group ?? null)
+    ? group
+    : null;
 }
 
 /// One nested line of the nav.

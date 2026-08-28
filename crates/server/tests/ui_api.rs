@@ -297,6 +297,7 @@ fn bare(title: &str) -> QuestionSet {
         project: Some("verkstead".to_owned()),
         branch: Some("solid-viewer".to_owned()),
         diff: None,
+        diffs: Vec::new(),
     }
 }
 

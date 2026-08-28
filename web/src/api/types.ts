@@ -64,7 +64,11 @@ stage_title: string, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused";
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+/**
+ * The Repo's registered name.
+ */
+repo: string, why: CompanionRefusal, } };
 
 /**
  * The stage an adoption would start, named.
@@ -482,7 +486,15 @@ subject: string, files: number, insertions: number, deletions: number,
  * what it carried was a Diagram and nothing else. Both draw the card that
  * has always been drawn.
  */
-snippet: string | null, };
+snippet: string | null, 
+/**
+ * Which repository it landed in, where that is not the Conversation's own.
+ *
+ * `None` is the work's own repository and draws nothing: an unlabeled card
+ * means the repo the Conversation is in, and the label earns its place when
+ * a Timeline carries more than one repository's commits.
+ */
+repo: string | null, };
 
 /**
  * One commit, as the details pane receives it: what it said about itself, and
@@ -522,6 +534,165 @@ diagrams: boolean,
  * is a 404, because there is nothing there to draw a pane about.
  */
 diff: DiffView | null, };
+
+/**
+ * What became of adding one.
+ *
+ * Every refusal is named rather than collapsed into one, because each is a
+ * different sentence to put in front of the human — and two of them are about
+ * what a companion *is* rather than about anything that has gone wrong.
+ */
+export type CompanionAdded = "Added" | "NoSuchConversation" | "NotDrafting" | "NoSuchRepo" | "OwnRepo" | "AlreadyAdded";
+
+/**
+ * One registered Repo a steer puts on a Conversation, with everything a setup
+ * row would have settled about it.
+ *
+ * The same four facts a drafting companion is configured with — which Repo,
+ * how far into it the work may reach, what its checkout comes off, and what a
+ * read-write one's branch is called — because this is the one other moment
+ * those questions can be asked: the setup rows have gone by the time anything
+ * is steered.
+ */
+export type CompanionAddition = { repo_id: number, mode: CompanionMode, 
+/**
+ * The branch of that repository's own the checkout comes off, or `null`
+ * for the rule the Conversation's own base follows: that repository's
+ * default branch, as origin holds it at the moment of the steer.
+ */
+base_ref: string | null, 
+/**
+ * What a read-write one's branch is to be called, or empty for
+ * *mirroring* — the Conversation's own branch name. Empty on a read-only
+ * one as well, its checkout being detached and holding no branch.
+ */
+branch: string, };
+
+/**
+ * And of choosing the branch a companion's checkout comes off.
+ *
+ * The Conversation's own [`BaseRecorded`] with the companion refusal added,
+ * rather than that enum reused: the branch this is about is the companion
+ * repository's own, and a Conversation and a companion of it are two
+ * repositories with two lists of branches.
+ */
+export type CompanionBaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "NoSuchCompanion" | "NoSuchBranch";
+
+/**
+ * And of naming the branch a read-write companion's work is done on.
+ *
+ * The empty name is not refused, because empty is not a name: it is
+ * *mirroring*, which is what a companion nobody has typed into is on and what
+ * clearing the field goes back to.
+ */
+export type CompanionBranchRenamed = "Renamed" | "NoSuchConversation" | "NotDrafting" | "NoSuchCompanion" | "NotABranchName";
+
+/**
+ * How far into a companion a session may reach.
+ *
+ * Two, and no third: a repository is there to be read, or it is there to be
+ * worked in. What the word decides is the sandbox's binds and whether a branch
+ * is cut for it, and neither of those has a halfway.
+ */
+export type CompanionMode = "ReadOnly" | "ReadWrite";
+
+/**
+ * How far into a companion a session may reach, as the switch on its row sends
+ * it.
+ */
+export type CompanionModeChoice = { mode: CompanionMode, };
+
+/**
+ * What became of flipping that switch.
+ *
+ * *No such companion* is among these and is not among a removal's refusals: a
+ * removal asked for a row to be gone, and a row that was never there is that.
+ * A configuration asked for a row to say something, and where there is no row
+ * there is nothing to say it — so the press did nothing, which is worth
+ * saying rather than reporting as done.
+ */
+export type CompanionModeChosen = "Chosen" | "NoSuchConversation" | "NotDrafting" | "NoSuchCompanion";
+
+/**
+ * Which of a companion repo's four ways of not being checked out this was.
+ *
+ * The Conversation's own four, asked of a companion: everything git is asked
+ * for one is what it is asked for the other, in the same order and for the same
+ * reasons. Separate from [`GrillingStarted`] rather than four more variants of
+ * it, so that the repository is named once instead of four times.
+ */
+export type CompanionRefusal = "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+
+/**
+ * And of taking one away.
+ *
+ * No *no such companion*: a row that is not there is the state the press asked
+ * for, so it comes back as [`CompanionRemoved::Removed`] like any other.
+ */
+export type CompanionRemoved = "Removed" | "NoSuchConversation" | "NotDrafting";
+
+/**
+ * One companion of a Conversation the steer opens up: read-only until now,
+ * read-write from here.
+ *
+ * **Two fields rather than four, and the missing two are the point.** There is
+ * no mode, because there is one direction — a row that could carry read-only
+ * would be a row that could take back what a session was given. And there is
+ * no base: what the upgrade comes off is the base already on the row, picked
+ * while the Conversation drafted, re-resolved at this moment because the
+ * companion is joining the work now.
+ */
+export type CompanionUpgrade = { repo_id: number, 
+/**
+ * What the branch cut in it is to be called, or empty for *mirroring* —
+ * the Conversation's own branch name, exactly as at draft time.
+ */
+branch: string, };
+
+/**
+ * One companion repo of a Conversation: which Repo, how far into it a session
+ * may reach, and what its checkout comes off.
+ *
+ * The Repo in the shape the Repo list sends one, for [`ConversationView`]'s
+ * reason: the card names it and links nowhere else, and a second shape for a
+ * Repo would be a second opinion about what one is.
+ */
+export type CompanionView = { repo: RepoEntry, mode: CompanionMode, 
+/**
+ * The branch this companion's checkout comes off, where the human named
+ * one. `null` is the same rule the Conversation's own base follows: that
+ * repository's default branch, as it stands when grilling starts.
+ */
+base_ref: string | null, 
+/**
+ * What a read-write companion's branch will be called, or empty for
+ * *mirroring* — the Conversation's own branch name, followed as it is
+ * renamed. Empty on a read-only companion as well, there being no branch
+ * to name: its checkout is detached at the commit the base resolved to.
+ */
+branch: string, 
+/**
+ * Where this companion was checked out, once grilling has made its
+ * worktree.
+ *
+ * `null` while the Conversation drafts and again once it is closed, which
+ * is the Conversation's own worktree's rule: a companion has a directory
+ * for exactly as long as the work does.
+ */
+worktree: Worktree | null, 
+/**
+ * The commit its base resolved to when that checkout was made.
+ *
+ * What a read-only companion is detached at, and what a read-write one's
+ * branch was cut from. Kept beside [`Self::base_ref`] rather than instead
+ * of it, because the two say different things: the ref is the *name* the
+ * human picked and what a rename or a steer would follow, and this is where
+ * that name stood at the one moment it mattered.
+ *
+ * `null` wherever [`Self::worktree`] is, and on a checkout made before
+ * Verkstead kept the commit.
+ */
+base_commit: string | null, };
 
 /**
  * And what became of archiving one: putting a Closed Conversation away, so the
@@ -622,7 +793,11 @@ unseen: boolean, };
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
+/**
+ * The Repo's registered name.
+ */
+repo: string, why: SteerCompanionRefusal, } };
 
 /**
  * What became of pressing Stop or Force stop.
@@ -665,7 +840,16 @@ repo: RepoEntry, branch: string,
  * `null` is the rule itself: the default branch's tip, as it stands when
  * grilling starts — which is why there is no value here to show instead.
  */
-base_commit: string | null, state: Lifecycle, 
+base_commit: string | null, 
+/**
+ * The other registered Repos this Conversation works alongside, by name.
+ *
+ * Empty is the ordinary Conversation. Beside the branch and the base
+ * because it is the same kind of fact — what the work is configured with —
+ * and settled in the same place and at the same moment: the setup card
+ * while the Brief drafts, frozen when grilling starts.
+ */
+companions: Array<CompanionView>, state: Lifecycle, 
 /**
  * The Profile and model the grilling session will run under, whole rather
  * than by id: the pane says what they are, and whether the Profile is
@@ -949,8 +1133,19 @@ export type Direction = "inline" | "task-list" | "roadmap";
  * is something different for the human to go and do: choose a Profile, write a
  * Brief, pick another commit, deal with a branch that is already there. A
  * single "cannot start" would leave them guessing which.
+ *
+ * A companion repo can fail in four of the same ways the Conversation's own
+ * does, and which repository it was is the thing the human needs — so those
+ * four are carried together under [`GrillingStarted::Companion`], named for
+ * the Repo they are about. Nothing gates the button on a companion: the
+ * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+/**
+ * What the companion Repo is called, which is what the human picked it
+ * by and what they will go and look at.
+ */
+repo: string, why: CompanionRefusal, } };
 
 /**
  * The handoff document as the page receives it.
@@ -1040,6 +1235,14 @@ at: string, state: Lifecycle, };
  * from.
  */
 export type NewAdoption = { repo_id: number, roadmap: string, };
+
+/**
+ * Which registered Repo to work alongside.
+ *
+ * The id and nothing else: everything a companion holds beyond which Repo it
+ * is has a default worth having, and a press in a menu is one decision.
+ */
+export type NewCompanion = { repo_id: number, };
 
 /**
  * Starting a Conversation: the Repo it is against, and nothing else.
@@ -1365,6 +1568,16 @@ title: string,
  */
 url: string, 
 /**
+ * Which repository it was opened in, where that is not the Conversation's
+ * own.
+ *
+ * `None` is the work's own repository and draws nothing, by the rule a
+ * commit's label follows: an unlabeled card means the repo the Conversation
+ * is in, and the label earns its place when the pinned block holds a
+ * companion's pull request as well.
+ */
+repo: string | null, 
+/**
  * How the checks on it were getting on the last time anything asked, or
  * nothing where nothing has — a pull request in a repository with no CI,
  * and one opened before Verkstead started writing this down.
@@ -1486,6 +1699,27 @@ export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPa
  * `project` and `branch` instead of trusting them.
  */
 export type Registration = { path: string, };
+
+/**
+ * One repository's block of a Set's Diff: what it is called, and its
+ * uncommitted changes rendered as any other Diff is.
+ *
+ * The blocks come in the order they were composed in — the Conversation's own
+ * repository first, then its read-write companions — and the anchors inside
+ * them run on across the whole Diff, so `paths[0]` of the second block is
+ * whichever `diff-n` the first one left off before.
+ */
+export type RepoDiffView = { 
+/**
+ * The repository's registered name, and `null` on the Conversation's own
+ * repository drawn as the whole of the Diff: an unlabeled block *is* the
+ * work's own repo, so saying it there would be saying it twice.
+ *
+ * A companion's block is named whether or not it is the only one — it is
+ * somebody else's repository however little else is uncommitted that day —
+ * which is the rule a commit card follows, asked the same way round.
+ */
+repo: string | null, diff: DiffView, };
 
 /**
  * One row of the Repo list.
@@ -1678,7 +1912,13 @@ export type SetView = { id: number,
  * a way back that arrived a moment later would be a page that briefly led
  * nowhere.
  */
-conversation: number, title: string, project: string | null, branch: string | null, preface_html: string | null, diff: DiffView | null, questions: Array<QuestionView>, 
+conversation: number, title: string, project: string | null, branch: string | null, preface_html: string | null, 
+/**
+ * The uncommitted changes the Set was asked over, one block per repository
+ * — see [`RepoDiffView`]. Empty where there were none, which is what leaves
+ * the Diff off the page altogether.
+ */
+diff: Array<RepoDiffView>, questions: Array<QuestionView>, 
 /**
  * What the agent closed the Set with, for the page to draw above the
  * set-level comment box. Rendered here like the Preface, because it is the
@@ -1900,6 +2140,27 @@ export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "L
 export type Started = { "Started": { id: number, } } | "NoSuchRepo";
 
 /**
+ * Which of a companion's ways of not being delivered by a steer this was.
+ *
+ * [`CompanionRefusal`]'s four asked again at the other moment a companion is
+ * checked out, and four more that only a steer can meet: the setup card
+ * catches those the moment a row is pressed, and a steer is where the same
+ * questions are asked past drafting, with nothing in front of them but the
+ * submit.
+ *
+ * Two of the four are about the *set* rather than about git, and they come in
+ * a pair because a steer does two things to it: an add is refused where the
+ * Repo is a companion already, and an upgrade is refused where it is not one
+ * yet — or where it is already as open as a companion gets.
+ *
+ * A vocabulary of its own rather than more variants of the grill start's, for
+ * the reason [`SteerTarget`] is not [`crate::Lifecycle`]: what a grilling can
+ * be refused for and what a steer can be refused for are different lists, and
+ * one list would say each press can be refused for things it never could.
+ */
+export type SteerCompanionRefusal = "OwnRepo" | "AlreadyAdded" | "NotACompanion" | "AlreadyReadWrite" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+
+/**
  * A steer as the page receives it: when, where the human sent it, and what
  * they wrote to send it there with.
  *
@@ -2049,7 +2310,42 @@ follow_up: string | null,
  * Nothing anywhere else reads it: a target that starts no grilling starts
  * nothing to prime.
  */
-digest: boolean, };
+digest: boolean, 
+/**
+ * The registered Repos to put into the sandbox the sessions to come run
+ * in, each with what a setup row would have said about it.
+ *
+ * Sandbox setup rather than a property of one state, which is why it rides
+ * every target work goes on in rather than one of them. Empty is the
+ * ordinary case and the whole of what most steers carry.
+ *
+ * **Adding only.** Nothing here may name a companion the Conversation
+ * already has — one that does is refused rather than obeyed, because the
+ * frozen set only widens and what a session was once given is never taken
+ * back mid-Conversation. Which is also why there is no list beside this
+ * one for taking a companion away.
+ *
+ * Nothing anywhere else reads it: a target nothing runs in has no sandbox
+ * to set up.
+ */
+added: Array<CompanionAddition>, 
+/**
+ * And the companions already there that the steer opens up: read-only
+ * until now, read-write from here, each with what the branch cut in it is
+ * called.
+ *
+ * **Upgrading only, which is why there is no mode on the rows.** Read-only
+ * is not something this can ask for and neither is removal, so a
+ * downgrade cannot be spelled here at all — what a session was once given
+ * is never taken back mid-Conversation. Nothing here may name a companion
+ * that is read-write already, or a Repo the Conversation has not got: both
+ * are refused rather than obeyed, the first being a row with nothing left
+ * to open and the second a page arguing with the record.
+ *
+ * Nothing anywhere else reads it, for [`Self::added`]'s reason: a target
+ * nothing runs in has no sandbox to open up.
+ */
+upgraded: Array<CompanionUpgrade>, };
 
 /**
  * Where a steer can send a Conversation.

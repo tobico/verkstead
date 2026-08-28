@@ -33,6 +33,16 @@ const AS_IT_ARRIVED: &str = "The Diff, as it arrived";
 /// contents can name the folds without reading them back out of the markup it
 /// was handed.
 pub fn to_html(diff: &str) -> Option<DiffView> {
+    block(diff, 1)
+}
+
+/// The same, for a patch that is one block of a Diff made of several: `first` is
+/// the position its first file takes, counting from one across the whole Diff.
+///
+/// The positions run on rather than restarting per block, because they are ids
+/// on one page: two blocks that each numbered from one would put two `diff-1`s
+/// in it, and a jump would land on whichever came first.
+pub fn block(diff: &str, first: usize) -> Option<DiffView> {
     if diff.trim().is_empty() {
         return None;
     }
@@ -41,13 +51,13 @@ pub fn to_html(diff: &str) -> Option<DiffView> {
 
     // Whatever this is, git did not write it — but it was attached to the Set as
     // the Diff, so it gets shown as it arrived rather than swallowed. It is
-    // still the Diff's first and only section, so it is anchored as one, and
+    // still the block's first and only section, so it is anchored as one, and
     // named as one.
     if files.is_empty() {
         // Marked as verbatim, because it has none of the line cells that hold a
         // hunk's text off the left edge and so needs the inset put on it.
         let mut html = format!(
-            r#"<details class="diffFile" id="diff-1" open><summary><span class="diffPath">{AS_IT_ARRIVED}</span></summary><div class="diffHunk"><pre class="diffLines diffVerbatim"><code>"#
+            r#"<details class="diffFile" id="diff-{first}" open><summary><span class="diffPath">{AS_IT_ARRIVED}</span></summary><div class="diffHunk"><pre class="diffLines diffVerbatim"><code>"#
         );
         html.push_str(&escaped(diff));
         html.push_str("</code></pre></div></details>");
@@ -59,7 +69,7 @@ pub fn to_html(diff: &str) -> Option<DiffView> {
 
     let mut html = String::new();
     for (position, file) in files.iter().enumerate() {
-        file.render(&mut html, position + 1);
+        file.render(&mut html, first + position);
     }
     Some(DiffView {
         html,

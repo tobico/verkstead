@@ -34,20 +34,22 @@ pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
     BriefEvent, BriefSaved, Capture, CheckRollup, Checked, Comment, CommitEvent, CommitPane,
-    CommitRecord, ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, GrillingStarted, HandoffEvent,
-    Lifecycle, ManualTaskEvent, MovedEvent, NewAdoption, NewConversation, NewOrder, NoticeEvent,
-    PinnedEvent, ProposalView, PullRequestCheck, PullRequestComment, PullRequestCommit,
-    PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent, Resumed,
-    RoadmapPane, Screen, SetRow, ShowingArchived, Shown, Size, StageDocument, StageEntry,
-    StageListEvent, StageListReached, StageSource, Started, SteerEvent, SteerOpened,
-    SteerSubmission, SteerTarget, TaskDocument, TaskEntry, TaskListEvent, TaskListReached,
-    TaskSource, TimelineEvent, UnreadableSetEvent, Watching, Worktree, agent_output_event,
-    backlog_pane, brief_event, commit_event, commit_pane, handoff_event, manual_task_event,
-    moved_event, notice_event, proposal_view, pull_request_details, pull_request_event,
-    pull_request_reached, question_set_event, roadmap_pane, stage_list, stage_list_event,
-    stage_list_reached, steer_event, task_list, task_list_event, task_list_reached,
-    unreadable_set_event,
+    CommitRecord, CompanionAdded, CompanionAddition, CompanionBaseRecorded, CompanionBranchRenamed,
+    CompanionMode, CompanionModeChoice, CompanionModeChosen, CompanionRefusal, CompanionRemoved,
+    CompanionUpgrade, CompanionView, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
+    GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, MovedEvent, NewAdoption,
+    NewCompanion, NewConversation, NewOrder, NoticeEvent, PinnedEvent, ProposalView,
+    PullRequestCheck, PullRequestComment, PullRequestCommit, PullRequestDetails, PullRequestEvent,
+    PullRequestSummary, QuestionSetEvent, Resumed, RoadmapPane, Screen, SetRow, ShowingArchived,
+    Shown, Size, StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
+    SteerCompanionRefusal, SteerEvent, SteerOpened, SteerSubmission, SteerTarget, TaskDocument,
+    TaskEntry, TaskListEvent, TaskListReached, TaskSource, TimelineEvent, UnreadableSetEvent,
+    Watching, Worktree, agent_output_event, backlog_pane, brief_event, commit_event, commit_pane,
+    handoff_event, manual_task_event, moved_event, notice_event, proposal_view,
+    pull_request_details, pull_request_event, pull_request_reached, question_set_event,
+    roadmap_pane, stage_list, stage_list_event, stage_list_reached, steer_event, task_list,
+    task_list_event, task_list_reached, unreadable_set_event,
 };
 pub use profiles::{
     AgentType, Broken, PairingView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
@@ -64,8 +66,8 @@ pub use transcript::{
 };
 pub use update::UpdateNotice;
 pub use view::{
-    Answered, AskView, DiffView, OptionView, QuestionView, SetReading, SetView, Standing,
-    UnreadableSet,
+    Answered, AskView, DiffView, OptionView, QuestionView, RepoDiffView, SetReading, SetView,
+    Standing, UnreadableSet,
 };
 
 pub mod diff;

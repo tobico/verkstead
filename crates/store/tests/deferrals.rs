@@ -68,6 +68,7 @@ fn set(title: &str) -> QuestionSet {
         project: Some("verkstead".to_owned()),
         branch: Some("deferred-asks".to_owned()),
         diff: None,
+        diffs: Vec::new(),
     }
 }
 

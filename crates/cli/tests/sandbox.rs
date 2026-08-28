@@ -248,7 +248,7 @@ fn grilling() -> Grilling {
         store::set_implementation_pairing(&pool, id, profile.id, None)
             .await
             .unwrap();
-        store::start_grilling(&pool, id, &commit, &worktree)
+        store::start_grilling(&pool, id, &commit, &worktree, &[])
             .await
             .unwrap();
 

@@ -1,5 +1,6 @@
 /* What is still the human's to change while the brief is a draft: the branch,
-   the base commit and the two pairings. See `Setup.tsx`.
+   the base commit, the repos the work runs alongside and the two pairings. See
+   `Setup.tsx`.
 
    Drawn under the brief it belongs to, on the same card, which is why the block
    opens with a rule rather than with a heading of its own. */
@@ -43,8 +44,148 @@
   margin-bottom: 1.5rem;
 }
 
+/* The ⋯ at the end of that row, and the first one drawn inside a card body
+   rather than at the head of a pane — so it is painted here rather than taking
+   the mark the two pane headers share. It sits level with the bottom of the
+   fields beside it, because that is where the controls are: the labels above
+   them are what the row is taller than a button by.
+
+   It does not stretch with them either, having nothing to fill: the two fields
+   ask for half a wide pane each and this asks for the width of a mark. */
+.setupMenu {
+  flex: 0 0 auto;
+  align-self: end;
+  margin-bottom: 1.5rem;
+}
+
+.setupMenu > button {
+  padding: 0.5rem 0.5rem;
+  font-size: 1.1rem;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+}
+
+/* Darkened while the menu is down, so the mark says the drop under it is this
+   card's — the same thing the pane headers' ⋯ does. */
+.setupMenu > button[aria-expanded="true"] {
+  color: var(--ink);
+}
+
+/* Wide enough for a repository name and the row that opens the level listing
+   them, rather than as wide as the longest name happens to be. */
+.setupMenu > [role="menu"] {
+  min-width: 14rem;
+}
+
+/* The repos this conversation works alongside, under the row they were added
+   from. A list, because that is what it is — and one with no bullets and no
+   indent, the rows being cards of their own rather than prose. */
+.companions {
+  margin: 0 0 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.companion {
+  padding: 0.5rem 0.6rem;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.companion + .companion {
+  margin-top: 0.5rem;
+}
+
+/* The name at one end and the × at the other. What the work will do with the
+   repository is under it rather than in it: the branch field is drawn in one of
+   the two modes only, so a place for it in this line would be a hole in the
+   other. */
+.companionLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+/* Where the checkout comes off and how far in the work may reach, side by side
+   wherever there is room for two and stacked where there is not — the same wrap
+   the branch row above uses, at the width a row inside a card can afford. */
+.companionConfig {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  column-gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.companionConfig > .baseBranch {
+  flex: 1 1 12rem;
+  min-width: 0;
+  margin-bottom: 0.5rem;
+}
+
+/* The switch asks for the width of its own words rather than half the row, and
+   sits level with the picker beside it — the label above that one is what the
+   picker's line is taller by. */
+.companionMode {
+  flex: 0 0 auto;
+  margin-bottom: 0.75rem;
+}
+
+/* And the branch a read-write one's work goes on, under both of them. */
+.companionBranch {
+  margin-bottom: 0.25rem;
+}
+
+/* Which repository a companion's control belongs to, for whoever is not reading
+   the row it is in: the labels say "Base" and "Branch" because the name is a
+   line above them, and a screen reader tabbing between controls gets no line
+   above. Said in every one of them and shown in none. */
+.forRepo {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.companionName {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The × that takes one away: quiet until it is reached for, because taking a
+   repository off is not what the row is there to invite. */
+.forget {
+  flex: 0 0 auto;
+  padding: 0 0.3rem;
+  font: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+.forget:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .branchName label,
-.baseBranch label {
+.baseBranch label,
+.companionBranch label {
   display: block;
   margin-bottom: 0.35rem;
   font-size: 0.9rem;
@@ -86,6 +227,13 @@
 .conversationProfiles .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
+}
+
+/* Inside a companion row every one of them is smaller, the row being a card
+   inside a card. */
+.companion .failure {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
 }
 
 /* The two accounts the work runs under. Separate choices because they are
@@ -153,20 +301,33 @@
 }
 
 /* The field being typed in or picked from, which is no pointer's doing: the
-   border says which of the four the branch, the base or a pairing is going
-   into. */
+   border says which of them the human is in — the branch, a base, a pairing,
+   or a companion's own. */
 .fieldLine input:focus-visible,
 .baseBranch select:focus-visible,
 .profileChoice select:focus-visible {
   border-color: var(--accent);
 }
 
-/* And the same four under the pointer, one border darker. There is nothing else
-   in this block to hover: the setup is fields alone. */
+/* And the same under the pointer, one border darker — with the two controls
+   that are not fields taking the accent instead, which is what a control the
+   app draws itself does everywhere else. */
 @media (hover: hover) {
   .fieldLine input:hover,
   .baseBranch select:hover,
   .profileChoice select:hover {
     border-color: var(--ink-soft);
   }
+
+  .setupMenu > button:not(:disabled):hover,
+  .forget:not(:disabled):hover {
+    color: var(--accent);
+  }
+}
+
+/* The two of them reached from the keyboard, which no pointer's rule covers. */
+.setupMenu > button:focus-visible,
+.forget:focus-visible {
+  border-color: var(--accent);
+  color: var(--ink);
 }

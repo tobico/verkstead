@@ -1,5 +1,5 @@
 //! What happens the moment a Conversation's own work is finished: the pull
-//! request the session opened is found, and the Conversation moves into
+//! requests the session opened are found, and the Conversation moves into
 //! Wrapping.
 //!
 //! Three endings arrive here, because three kinds of work end on a pull request.
@@ -24,9 +24,17 @@
 //! which is why nothing here sets a state: the store does both in one
 //! transaction, so a Wrapping with no PR under it cannot exist.
 //!
+//! And then the companions, one repository at a time. A Conversation working
+//! alongside read-write repositories ends on one pull request per repository it
+//! committed in — the finish sequence the session followed extends to each of
+//! them, in that repository's own words — so what moved the Conversation is
+//! asked for first and every touched companion is asked about beside it. See
+//! [`covering`], which is where *touched* is settled and where a companion left
+//! without one stops the run.
+//!
 //! Nothing waits on approval. There is no gate in front of the finish and none
-//! in front of the PR: merging stays the human act, and everything up to it runs
-//! unattended.
+//! in front of the PRs: merging stays the human act, and everything up to it
+//! runs unattended.
 //!
 //! A `gh` that cannot answer — absent, not logged in, no PR on the branch —
 //! stops, leaving the Conversation where it is with the reason on the Timeline
@@ -70,11 +78,11 @@ use crate::store;
 /// unattended run with nobody watching, and what it has to say it says on the
 /// Timeline.
 pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Option<i64>) {
-    let Some((branch, found)) = asked(state, conversation_id).await else {
+    let Some((repo_id, branch, found)) = asked(state, conversation_id).await else {
         return;
     };
 
-    record(state, conversation_id, &branch, found, writing).await
+    record(state, conversation_id, repo_id, &branch, found, writing).await
 }
 
 /// Make of an answer `gh` has already given what [`opened`] makes of its own.
@@ -86,11 +94,13 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
 /// this function's to record or to stop over, exactly as it always was, so the
 /// deciding stays in one place and the caller hands back what it was given.
 ///
-/// `branch` is the branch that was asked about, which is what the stop is logged
-/// against.
+/// `repo_id` is the registered Repo it was opened in, which is which of a
+/// Conversation's pull requests this one is, and `branch` is the branch that was
+/// asked about, which is what the stop is logged against.
 pub(crate) async fn record(
     state: &AppState,
     conversation_id: i64,
+    repo_id: i64,
     branch: &str,
     found: Result<store::PullRequest, github::Trouble>,
     writing: Option<i64>,
@@ -110,7 +120,7 @@ pub(crate) async fn record(
         }
     };
 
-    match store::record_pull_request(&state.pool, conversation_id, &opened).await {
+    match store::record_pull_request(&state.pool, conversation_id, repo_id, &opened).await {
         Ok(store::Wrapping::Started) => {
             tracing::info!(
                 conversation_id,
@@ -177,6 +187,71 @@ pub(crate) async fn record(
     }
 }
 
+/// The pull request one watcher follows: where to ask GitHub about it, what to
+/// call it, and where its work is done.
+///
+/// What both of a wrap-up's per-pull-request watchers need before they can go to
+/// the network, and one thing rather than two because it is one question: a
+/// Conversation ends on a pull request per repository it was worked in, and
+/// asking GitHub about one — its checks or what has been said on it — means
+/// running `gh` in that repository and sending whoever answers to that
+/// repository's checkout. See [`crate::checks`] and [`crate::comments`].
+pub(crate) struct Watched {
+    /// The registered Repo it was opened in, which is where `gh` is run and what
+    /// the feedback and the Notice name it by.
+    pub(crate) repo: store::Repo,
+
+    /// The number GitHub gave it, which is what everybody calls it by — in that
+    /// repository and nowhere else.
+    pub(crate) number: i64,
+
+    /// The checkout its branch is on: the Conversation's own worktree, or the
+    /// companion's beside it. Where a session sent at it is sent to work.
+    pub(crate) worktree: PathBuf,
+}
+
+/// Where the pull request opened in `repo_id` is, and where its work is done.
+///
+/// The Conversation's own repository and Worktree, or the companion's beside it.
+/// `None` where the Conversation has neither — a companion taken off it, or a
+/// checkout that is gone — which is a pull request nothing can do anything
+/// about.
+pub(crate) fn watched(
+    conversation: &store::Conversation,
+    repo_id: i64,
+    number: i64,
+) -> Option<Watched> {
+    let (repo, worktree) = match conversation.repo.id == repo_id {
+        true => (&conversation.repo, conversation.worktree.as_ref()?),
+        false => {
+            let companion = conversation
+                .companions
+                .iter()
+                .find(|companion| companion.repo.id == repo_id)?;
+
+            (&companion.repo, companion.worktree.as_ref()?)
+        }
+    };
+
+    Some(Watched {
+        repo: repo.clone(),
+        number,
+        worktree: worktree.clone(),
+    })
+}
+
+/// The pull request in words, which is its number and the repository it is in.
+///
+/// Both halves every time: `#7` is a number in one repository and a different
+/// pull request or nothing at all in another, and a Conversation now ends on one
+/// per repository it was worked in.
+pub(crate) fn named(watched: &Watched) -> String {
+    format!(
+        "pull request #{} of `{}`",
+        watched.number, watched.repo.name
+    )
+}
+
 /// Which review a wrap-up's watchers start.
 ///
 /// The one thing that differs between the two ways of starting a wrap-up's
@@ -195,9 +270,10 @@ pub(crate) enum Reviewing {
     Afresh,
 }
 
-/// Everything a wrapping Conversation has going on: its pull request's checks
-/// watched, its comments read, its branch reviewed where nobody has read it yet,
-/// and the rule that ends the whole thing waiting to be true.
+/// Everything a wrapping Conversation has going on: the companions it committed
+/// in carried to pull requests of their own, every pull request's checks watched
+/// and its comments read, its branch reviewed where nobody has read it yet, and
+/// the rule that ends the whole thing waiting to be true.
 ///
 /// One place that says what a wrap-up *is*, because everything that starts one
 /// has to start the whole of it: the finish step opening the pull request, a
@@ -208,31 +284,280 @@ pub(crate) enum Reviewing {
 /// Each of them decides for itself whether there is anything to do, so starting
 /// them twice is not starting two of anything: a review that has already settled
 /// returns, a second of anything queues on the Worktree behind the first and
-/// finds the work done, and a Conversation that has stopped wrapping up stops
-/// every one of them.
+/// finds the work done, a companion already covered is read past, and a
+/// Conversation that has stopped wrapping up stops every one of them.
 ///
 /// Which is also why a restart and a Resume both come through here rather than
 /// picking their own step. What either of them is looking at is a wrap-up with
 /// nothing running, and that is one situation with several possible causes: a
 /// branch nobody has read, a review whose session went between its ask and the
-/// answers, a batch's proposal in the same state. Each of the four asks the
-/// record what it is looking at rather than being told — see
-/// [`crate::review::run`] and [`crate::responding::unattended`].
+/// answers, a batch's proposal in the same state, a companion whose pull request
+/// the human has since opened by hand. Each of them asks the record what it is
+/// looking at rather than being told — see [`covering`], [`crate::review::run`]
+/// and [`crate::responding::unattended`].
 ///
 /// `reviewing` is the one thing the two ways of starting them differ over, and
 /// it is the human's press that makes the difference: a review already asking is
 /// something to stop over where a server found it, and something to read past
 /// where they have read the Notice and asked for another go.
 pub(crate) fn watching(state: &AppState, conversation_id: i64, reviewing: Reviewing) {
-    driving(state, conversation_id, crate::checks::watch);
-    driving(state, conversation_id, crate::comments::watch);
+    driving(state, conversation_id, crate::checks::watching);
+    driving(state, conversation_id, crate::comments::watching);
 
-    match reviewing {
-        Reviewing::AsFound => driving(state, conversation_id, crate::review::run),
-        Reviewing::Afresh => driving(state, conversation_id, crate::review::afresh),
-    }
+    // The companions covered, and then the branch read — one task rather than
+    // two, because the second of them waits on the first. One review reads the
+    // whole of the work, and *the whole of it* is what covering settles: which
+    // pull requests there are, and so what has been said on each of them. A
+    // review started beside it would be given the Conversation's own pull
+    // request's comments and leave the companion's standing for a batch session
+    // to be dispatched about ungated — which is the thing folding them into the
+    // review exists to prevent.
+    //
+    // A wrap-up whose companions are already covered spends a read of the record
+    // per companion on this and gets to the review, and one that stops here —
+    // work committed in a companion with no pull request — has a review that asks
+    // whether the run has stopped before it reads a line.
+    driving(
+        state,
+        conversation_id,
+        move |state: AppState, conversation_id| async move {
+            covering(state.clone(), conversation_id).await;
+
+            match reviewing {
+                Reviewing::AsFound => crate::review::run(state, conversation_id).await,
+                Reviewing::Afresh => crate::review::afresh(state, conversation_id).await,
+            }
+        },
+    );
 
     driving(state, conversation_id, crate::settling::watch);
+}
+
+/// Find the pull requests the finish opened in the companions it committed in,
+/// and record each one beside the Conversation's own.
+///
+/// The other half of [`opened`], and the reason it is a watcher rather than a
+/// step inside it: what this is looking at is a wrap-up whose companions are not
+/// all covered yet, and that is the same situation however it arose — a finish
+/// that has just happened, a server coming back up, a human who has opened the
+/// missing pull request by hand and pressed Resume. A companion already recorded
+/// is read past, so running it twice records nothing twice.
+///
+/// **Touched means commits beyond the base**, asked of git in the companion's
+/// own repository — see [`crate::commits::touched`]. A read-only companion is
+/// not asked at all, and a read-write one with nothing on its branch is ignored
+/// by the whole of wrap-up: no pull request expected, nothing recorded, nothing
+/// waited on.
+///
+/// **Each one is recorded as it is found**, and the missing ones are gathered up
+/// rather than stopped at. So a wrap-up that cannot find all of them still shows
+/// the human the ones that exist, pinned and clickable, while they sort out the
+/// one that is missing.
+///
+/// And a companion that was committed in and left without a pull request stops
+/// the run, with a Notice naming the repository — [`stopped`]'s shape, for
+/// [`stopped`]'s reason: the work ran and left no pull request, so what is wrong
+/// is out here rather than in a driver that went away.
+pub(crate) async fn covering(state: AppState, conversation_id: i64) {
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => {
+            tracing::error!(
+                conversation_id,
+                "there is no Conversation left to find the companions' pull requests for"
+            );
+            return;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation whose companions to ask about failed");
+            return;
+        }
+    };
+
+    // The one state anything a wrap-up does belongs to, and the stop every
+    // watcher asks about before it goes to the network — see
+    // [`crate::stopping::stopped`]. A run that has stopped is one nothing
+    // advances past, this included.
+    if conversation.state != store::Lifecycle::Wrapping
+        || crate::stopping::stopped(&state, conversation_id).await
+    {
+        return;
+    }
+
+    let mut missing = Vec::new();
+
+    for companion in &conversation.companions {
+        // A read-only companion is detached and bound read-only, so nothing can
+        // have landed on it and there is no branch to ask GitHub about.
+        if companion.mode != store::CompanionMode::ReadWrite {
+            continue;
+        }
+
+        // Mirroring resolved, which is the record's own business — see
+        // [`store::Companion::branch_for`].
+        let Some(branch) = companion.branch_for(&conversation.branch) else {
+            continue;
+        };
+
+        // Recorded already: a finish that ran twice, a server that came back up,
+        // or a Resume over a wrap-up that stopped on another companion. Asked
+        // before git and before GitHub, both being dearer than a row.
+        match store::pull_request(&state.pool, conversation_id, companion.repo.id).await {
+            Ok(Some(_)) => continue,
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, repo = companion.repo.name, "reading whether a companion's pull request was recorded failed");
+                return;
+            }
+        }
+
+        let Some(base) = companion.base_commit.clone() else {
+            tracing::error!(
+                conversation_id,
+                repo = companion.repo.name,
+                "a read-write companion has no base commit, so what the work committed \
+                 in it cannot be told from what it branched off"
+            );
+            continue;
+        };
+
+        let repo = companion.repo.path.clone();
+
+        // Off the runtime's threads: git is a process, and so is `gh`.
+        let touched = {
+            let repo = repo.clone();
+            let branch = branch.clone();
+
+            match tokio::task::spawn_blocking(move || {
+                crate::commits::touched(&repo, &base, &branch)
+            })
+            .await
+            {
+                Ok(touched) => touched,
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id, repo = companion.repo.name, "asking git what a companion holds failed");
+                    return;
+                }
+            }
+        };
+
+        if !touched {
+            continue;
+        }
+
+        let asked = {
+            let gh = state.github.clone();
+            let repo = repo.clone();
+            let branch = branch.clone();
+
+            tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &branch)).await
+        };
+
+        let found = match asked {
+            Ok(found) => found,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, repo = companion.repo.name, "asking gh for a companion's pull request failed");
+                return;
+            }
+        };
+
+        let opened = match found {
+            Ok(opened) => opened,
+            Err(trouble) => {
+                tracing::warn!(
+                    conversation_id,
+                    repo = companion.repo.name,
+                    branch,
+                    why = trouble.why(),
+                    "the work committed in a companion Verkstead can find no pull request in",
+                );
+
+                missing.push(format!("`{}`: {}", companion.repo.name, trouble.why()));
+                continue;
+            }
+        };
+
+        match store::record_another_pull_request(
+            &state.pool,
+            conversation_id,
+            companion.repo.id,
+            &opened,
+        )
+        .await
+        {
+            Ok(true) => {
+                tracing::info!(
+                    conversation_id,
+                    repo = companion.repo.name,
+                    number = opened.number,
+                    url = opened.url,
+                    "a companion the work committed in is on a pull request of its own",
+                );
+
+                // And it is watched and read from here, this being the moment
+                // there is something to watch: the watchers this wrap-up started
+                // could only start one each per pull request that was already
+                // recorded, and this one was not. A wrap-up found already covered
+                // starts none of these — a companion recorded already is read
+                // past above — so a server coming back up over one gets its
+                // watchers from [`watching`] rather than from here.
+                let repo_id = companion.repo.id;
+
+                driving(&state, conversation_id, move |state, conversation_id| {
+                    crate::checks::watch(state, conversation_id, repo_id)
+                });
+
+                driving(&state, conversation_id, move |state, conversation_id| {
+                    crate::comments::watch(state, conversation_id, repo_id)
+                });
+
+                // The Timeline has something new pinned on it, and an open page
+                // should say so without being reloaded. Announced per pull
+                // request rather than at the end, because each is recorded as it
+                // is found.
+                state.nudges.announce(Nudge::Conversation {
+                    conversation: conversation_id,
+                });
+            }
+            Ok(false) => tracing::error!(
+                conversation_id,
+                "there is no Conversation left to record a companion's pull request against"
+            ),
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, repo = companion.repo.name, "recording a companion's pull request failed");
+                return;
+            }
+        }
+    }
+
+    if missing.is_empty() {
+        return;
+    }
+
+    // Asked again on the far side of the asking, which is where every wait for
+    // something slow is: the answers came off a network, and a Conversation
+    // steered on or closed in the meantime is no place for a Notice about a
+    // pull request nobody is waiting for any more.
+    if !still_going(&state, conversation_id).await {
+        return;
+    }
+
+    // The tail of whatever last ran, which is where a session that opened no
+    // pull request usually says why — the same thing [`opened`] is handed by the
+    // finish it followed. Read back here rather than passed in, this having been
+    // started by a watcher rather than by the step that ended.
+    let writing = crate::stalls::said_last(&state, conversation_id).await;
+
+    stopped(
+        &state,
+        conversation_id,
+        &format!(
+            "the work committed in a companion repo that has no pull request — {}",
+            missing.join("; ")
+        ),
+        writing,
+    )
+    .await;
 }
 
 /// Start one of them, registered as a driver of the Conversation for as long as
@@ -241,11 +566,14 @@ pub(crate) fn watching(state: &AppState, conversation_id: i64, reviewing: Review
 /// The registration goes with the task rather than around the spawning, which
 /// is the whole of what makes it worth a function: a wrap-up is driven while
 /// any one of the four is still going, and each of them ends in its own time —
-/// the review once it has asked, the rest once the Conversation stops wrapping
-/// up. Counted rather than flagged, so a second set started over the top of the
-/// first — which is what Resume on a stopped wrap-up does — does not have the
-/// first of them to finish taking the Conversation off the register. See
-/// [`crate::drivers`].
+/// the companions and then the review once that has asked, the rest once the
+/// Conversation stops wrapping up. And the ones started after them:
+/// [`covering`] starts a checks watcher and a comments watcher for each
+/// companion's pull request as it finds one, through here, so the Conversation
+/// is driven while those are going too. Counted rather than flagged, so a second
+/// set started over the top of the first — which is what Resume on a stopped
+/// wrap-up does — does not have the first of them to finish taking the
+/// Conversation off the register. See [`crate::drivers`].
 fn driving<W, F>(state: &AppState, conversation_id: i64, watcher: W)
 where
     W: FnOnce(AppState, i64) -> F,
@@ -326,7 +654,8 @@ pub(crate) async fn stopped(
 }
 
 /// Ask the host's `gh` what pull request `conversation_id`'s branch has, and
-/// hand back the branch it asked about alongside the answer.
+/// hand back the repository it asked in and the branch it asked about alongside
+/// the answer.
 ///
 /// Whether there is one is a question two phases ask. [`opened`] asks it at the
 /// end of a run, where a pull request is what the work was carried to, and
@@ -335,14 +664,17 @@ pub(crate) async fn stopped(
 /// implement — see [`crate::runner`]. What each makes of the answer is its own,
 /// so the answer is what this hands back rather than anything it does about it.
 ///
+/// The Repo comes back with it because a pull request is recorded against one:
+/// two repositories are two sets of numbers, and this is the Conversation's own.
+///
 /// `None` where there was nothing to ask about or the asking itself fell over,
 /// both of which are in the log already: neither leaves a caller anything to
 /// say.
 pub(crate) async fn asked(
     state: &AppState,
     conversation_id: i64,
-) -> Option<(String, Result<store::PullRequest, github::Trouble>)> {
-    let (repo, branch) = branch(state, conversation_id).await?;
+) -> Option<(i64, String, Result<store::PullRequest, github::Trouble>)> {
+    let (repo_id, repo, branch) = branch(state, conversation_id).await?;
 
     let asked = {
         let gh = state.github.clone();
@@ -354,7 +686,7 @@ pub(crate) async fn asked(
     };
 
     match asked {
-        Ok(found) => Some((branch, found)),
+        Ok(found) => Some((repo_id, branch, found)),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "asking gh for a pull request failed");
             None
@@ -362,14 +694,19 @@ pub(crate) async fn asked(
     }
 }
 
-/// Which repository to ask `gh` in, and which branch to ask about.
+/// Which registered Repo to ask `gh` in, where it is on disk, and which branch
+/// to ask about.
 ///
 /// The repository rather than the Worktree, exactly as the branch watcher asks
 /// it: the remotes and the refs are the repository's, and a Worktree may have
 /// been removed by the time this runs.
-async fn branch(state: &AppState, conversation_id: i64) -> Option<(PathBuf, String)> {
+async fn branch(state: &AppState, conversation_id: i64) -> Option<(i64, PathBuf, String)> {
     match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => Some((conversation.repo.path, conversation.branch)),
+        Ok(Some(conversation)) => Some((
+            conversation.repo.id,
+            conversation.repo.path,
+            conversation.branch,
+        )),
         Ok(None) => {
             tracing::error!(
                 conversation_id,

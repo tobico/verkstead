@@ -31,6 +31,19 @@
 //! to invent, so the branch comes off the default branch and the Timeline says
 //! so.
 //!
+//! **And the companions come across with it.** A stage is given everything a
+//! human would have settled before pressing anything, and the parent
+//! Conversation's companion repos belong in that list for the same reason the
+//! Pairings do: a stage has no draft moment of its own, so there is nowhere else
+//! the set could come from. Read-only ones come across as they are and are
+//! checked out detached at whatever their base resolves to now; read-write ones
+//! cut a branch of their own per stage, named after the stage's branch, and
+//! standing on the predecessor stage's companion branch wherever the stage's own
+//! branch stands on the predecessor's. Every one of them is checked out in the
+//! same act as the stage's own worktree and recorded with it — and a companion
+//! that cannot be delivered starts nothing, the way everything else that stops a
+//! stage stops it.
+//!
 //! Nothing here is refused for and nothing is returned. It runs at the end of an
 //! unattended run with nobody watching, and what it has to say it says on the
 //! Timeline as a notice — which is what a decision taken while nobody was looking
@@ -38,7 +51,7 @@
 //! finished — the devices are told as well, because a notice on a Timeline
 //! nobody has open reaches nobody at all.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use verkstead_schema::Nudge;
 
@@ -253,50 +266,104 @@ async fn start(
     };
 
     // Everything the human would have settled before pressing anything: who it
-    // runs as, and what it is about. Both while it is still drafting, which is
-    // the only state either can be recorded in.
+    // runs as, what it is about, and which repositories it works alongside. All
+    // of it while it is still drafting, which is the only state any of them can
+    // be recorded in.
     if let Err(error) = settle(state, id, conversation, &stage).await {
         tracing::error!(error = ?error, settled, stage = id, "preparing the next stage's Conversation failed");
+
+        say(
+            state,
+            settled,
+            &format!(
+                "Stage {} of the `{}` roadmap could not be given everything it inherits from \
+                 this Conversation: {error}. Nothing was started.",
+                stage.label, stage.roadmap,
+            ),
+        )
+        .await;
+
         return gave_up(state, id).await;
     }
 
     let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch);
 
+    // Every checkout the stage needs, asked of git before any of them is made:
+    // the branch off `from`, and one per companion it has just inherited. The
+    // whole list is planned first for the reason a grill start plans one — that
+    // is what lets a stage that cannot be given one companion start with nothing
+    // left behind anywhere.
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
         let branch = branch.clone();
         let from = from.clone();
-        move || {
-            let commit = worktrees::resolve(&repo, &from)?;
+        let data = state.data_dir.clone();
+        let companions = conversation.companions.clone();
+        let predecessor = stacked_on.clone();
 
-            worktrees::add(&repo, &path, &branch, &commit).then_some(commit)
+        move || {
+            let Some(commit) = worktrees::resolve(&repo, &from) else {
+                return Err(Halted::Own);
+            };
+
+            let mut planned = vec![Checkout {
+                companion: None,
+                repo,
+                path,
+                branch: Some(branch.clone()),
+                commit: commit.clone(),
+            }];
+
+            for companion in companions {
+                // Whatever has been planned so far: until they exist the
+                // filesystem cannot tell two directories apart, so two
+                // companions coming off one branch name would otherwise be
+                // handed the same one. See [`worktrees::unclaimed_path`].
+                let claimed: Vec<PathBuf> = planned
+                    .iter()
+                    .map(|checkout| checkout.path.clone())
+                    .collect();
+
+                planned.push(beside(
+                    &data,
+                    id,
+                    &branch,
+                    predecessor.as_deref(),
+                    companion,
+                    &claimed,
+                )?);
+            }
+
+            make(&planned)?;
+
+            Ok((commit, recorded(&planned)))
         }
     })
     .await;
 
-    let commit = match made {
-        Ok(Some(commit)) => commit,
-        Ok(None) => {
-            say(
-                state,
-                settled,
-                &format!(
-                    "Stage {} of the `{}` roadmap could not be given a worktree on `{branch}` \
-                     off `{from}`. Nothing was started.",
-                    stage.label, stage.roadmap,
-                ),
-            )
-            .await;
+    let (commit, checkouts) = match made {
+        Ok(Ok(made)) => made,
+        Ok(Err(halted)) => {
+            say(state, settled, &halted.said(&stage, &branch, &from)).await;
 
             return gave_up(state, id).await;
         }
         Err(error) => {
-            tracing::error!(error = ?error, settled, stage = id, "making the next stage's worktree failed");
+            tracing::error!(error = ?error, settled, stage = id, "making the next stage's worktrees failed");
             return gave_up(state, id).await;
         }
     };
 
-    match store::start_stage(&state.pool, id, &commit, &path, stacked_on.as_deref()).await {
+    match store::start_stage(
+        &state.pool,
+        id,
+        &commit,
+        &path,
+        stacked_on.as_deref(),
+        &checkouts,
+    )
+    .await
+    {
         Ok(store::Staged::Started) => {}
         Ok(refused) => {
             tracing::error!(
@@ -405,8 +472,288 @@ fn begun(stage: &Stage, branch: &str, stacked_on: Option<&str>, from: &str) -> S
     }
 }
 
+/// One checkout a stage start is about to make: which repository, where it goes,
+/// what it holds and what it came off.
+///
+/// The stage's own and each of its companions in the one shape, because from the
+/// moment they are planned they are the same thing — a worktree of a registered
+/// repository. What differs between them is two fields, and both of them read as
+/// what they are: a companion is named, and a checkout that holds no branch is
+/// detached.
+struct Checkout {
+    /// The companion Repo this is a checkout of — its id and what it is called —
+    /// or `None` for the stage's own.
+    ///
+    /// The id is what the record is written against, and the name is what a
+    /// notice says. Together they are the whole of what a companion's checkout
+    /// needs that the stage's own does not.
+    companion: Option<(i64, String)>,
+
+    /// The repository the worktree is made from.
+    repo: PathBuf,
+
+    /// Where the checkout goes, under the Data Directory.
+    path: PathBuf,
+
+    /// The branch to cut, or `None` for a detached checkout — which is what a
+    /// read-only companion gets, having nothing to commit and no business taking
+    /// a name in somebody else's repository.
+    branch: Option<String>,
+
+    /// The commit it comes off.
+    commit: String,
+}
+
+/// Why a stage was not started, once there was git to ask.
+///
+/// Every one of them halts the stage rather than carrying it on without: nobody
+/// is at a button to be refused, and a stage that quietly built without a
+/// repository the roadmap was grilled against is a worse outcome than a stage
+/// that waited.
+enum Halted {
+    /// The stage's own checkout: git would not say what its branch comes off, or
+    /// would not make the worktree.
+    ///
+    /// One case rather than two, as it always was: what the human does about
+    /// either is look at the repository the branch was going into.
+    Own,
+
+    /// One of the companions it inherits, named — because *which one* is the
+    /// whole of what the human needs.
+    Companion { repo: String, why: Why },
+}
+
+/// What git would not do for a companion, in the order it is asked: the three
+/// [`beside`] asks before anything is made, and then the making itself.
+enum Why {
+    FetchFailed,
+    NoBaseCommit,
+    BranchExists,
+    WorktreeRefused,
+}
+
+impl Halted {
+    /// The notice this goes on the settled Conversation's Timeline as.
+    ///
+    /// Which repository and what git would not do, and then that nothing was
+    /// started and nothing was left behind — because the human reading it is
+    /// deciding whether there is a half-made stage somewhere to go and tidy, and
+    /// there never is.
+    fn said(&self, stage: &Stage, branch: &str, from: &str) -> String {
+        let start = format!("Stage {} of the `{}` roadmap", stage.label, stage.roadmap);
+
+        match self {
+            Self::Own => format!(
+                "{start} could not be given a worktree on `{branch}` off `{from}`. Nothing was \
+                 started.",
+            ),
+            Self::Companion { repo, why } => format!(
+                "{start} works alongside `{repo}`, the companion repository it inherits from \
+                 this Conversation, and {}. Nothing was started, and nothing it had begun to \
+                 check out was left behind.",
+                why.said(),
+            ),
+        }
+    }
+}
+
+impl Why {
+    /// The clause that goes after the repository's name.
+    fn said(&self) -> &'static str {
+        match self {
+            Self::FetchFailed => {
+                "git would not fetch from that repository's remote — so what its checkout would \
+                 come off cannot be trusted to be what origin is holding, and the server log \
+                 says why the fetch failed"
+            }
+            Self::NoBaseCommit => "what its checkout comes off resolves to no commit there",
+            Self::BranchExists => {
+                "the branch this stage would cut in it is already a branch of that repository"
+            }
+            Self::WorktreeRefused => "git would not make its checkout",
+        }
+    }
+}
+
+/// Ask git everything one inherited companion's checkout turns on, and come back
+/// with what it will be.
+///
+/// **A read-write companion is cut a branch named after the stage's own**,
+/// whatever the predecessor's row said — see [`settle`], which is where the
+/// typed name is dropped. Where the stage's own branch stands on the
+/// predecessor's, this branch stands on the predecessor's companion branch in
+/// the same repository: that is where the work it builds on is, the predecessor
+/// having committed in it and its pull request there being unmerged for just as
+/// long. Which is `predecessor`'s whole job — the settled Conversation's branch
+/// where the stage stacks, and `None` where it does not.
+///
+/// A branch on this machine and nowhere else has no remote copy to be behind, so
+/// a stacked companion asks for no fetch, exactly as a stacked stage's own
+/// branch does not.
+///
+/// **Everything else fetches, then resolves, then checks the branch** — the
+/// grill start's order, for the grill start's reasons. An unstacked stage's
+/// read-write companion comes off the base its row names, and a read-only one is
+/// detached at whatever that base comes to at this moment, that being the only
+/// commit anything will ever be able to name it by. A companion whose repository
+/// has no remote has nothing to fetch and is never halted for it.
+///
+/// Nothing is made here. What comes back is a plan, and the making waits until
+/// every checkout has one: that is what lets a stage that cannot be given one
+/// companion start without having checked out another.
+fn beside(
+    data: &Path,
+    id: i64,
+    branch: &str,
+    predecessor: Option<&str>,
+    companion: store::Companion,
+    claimed: &[PathBuf],
+) -> Result<Checkout, Halted> {
+    let repo = companion.repo.path.clone();
+    let halted = |why| Halted::Companion {
+        repo: companion.repo.name.clone(),
+        why,
+    };
+
+    // The row this stage will hold is the predecessor's with the branch name
+    // taken off, so what it is called resolves through the mirroring rule rather
+    // than being assigned here — one place for that rule, and it is
+    // [`store::Companion::branch_for`].
+    let cut = store::Companion {
+        branch: String::new(),
+        ..companion.clone()
+    }
+    .branch_for(branch);
+
+    // And the predecessor's own name in this repository, resolved the same way
+    // against the branch the settled Conversation was worked on. `None` on a
+    // read-only companion and on an unstacked stage, both of which come off the
+    // configured base instead.
+    let stands_on = predecessor.and_then(|predecessor| companion.branch_for(predecessor));
+
+    let named = match &stands_on {
+        Some(stands_on) => stands_on.clone(),
+        None => {
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+                tracing::error!(
+                    said,
+                    repo = %repo.display(),
+                    "fetching a companion Repo's remotes failed, so the next stage is not being started",
+                );
+
+                return Err(halted(Why::FetchFailed));
+            }
+
+            // The branch of that repository's own the human picked while
+            // drafting, or its default branch as origin holds it — the rule the
+            // stage's own base follows, asked of the companion's repository.
+            match companion.base_ref.clone() {
+                Some(picked) => picked,
+                None => worktrees::default_ref(&repo, &companion.repo.default_branch),
+            }
+        }
+    };
+
+    let Some(commit) = worktrees::resolve(&repo, &named) else {
+        return Err(halted(Why::NoBaseCommit));
+    };
+
+    // A name already taken in that repository is somebody else's work — this
+    // stage has never been started, so nothing of its own can be holding it.
+    if let Some(cut) = &cut
+        && worktrees::branch_exists(&repo, cut)
+    {
+        return Err(halted(Why::BranchExists));
+    }
+
+    // Named for the Repo and what the checkout holds, as the stage's own is: the
+    // branch where there is one, and otherwise the base it stands at — a
+    // read-only companion holds no branch to be named for.
+    let holds = cut.clone().unwrap_or(named);
+
+    Ok(Checkout {
+        companion: Some((companion.repo.id, companion.repo.name.clone())),
+        path: worktrees::unclaimed_path(data, id, &companion.repo.name, &holds, claimed),
+        repo,
+        branch: cut,
+        commit,
+    })
+}
+
+/// Make every checkout of a start, or unmake the ones already made and say which
+/// one would not be.
+///
+/// The one place a stage start creates anything, which is what makes *nothing
+/// left behind* something to hold rather than something to hope for. What is
+/// unwound is directory and branch together — see [`worktrees::unmake`] —
+/// because a branch cut moments ago by a start that then halted holds nothing
+/// worth keeping.
+fn make(planned: &[Checkout]) -> Result<(), Halted> {
+    for (nth, checkout) in planned.iter().enumerate() {
+        let made = match &checkout.branch {
+            Some(branch) => {
+                worktrees::add(&checkout.repo, &checkout.path, branch, &checkout.commit)
+            }
+            None => worktrees::add_detached(&checkout.repo, &checkout.path, &checkout.commit),
+        };
+
+        if made {
+            continue;
+        }
+
+        // This one included, and first: an `add` that fell over may have made
+        // the directory, or the branch, or neither, and what is being unwound is
+        // whatever it did get as far as. The rest newest first, which is the
+        // order they were made in reversed.
+        for done in planned[..=nth].iter().rev() {
+            worktrees::unmake(&done.repo, &done.path, done.branch.as_deref());
+        }
+
+        return Err(match &checkout.companion {
+            Some((_, repo)) => Halted::Companion {
+                repo: repo.clone(),
+                why: Why::WorktreeRefused,
+            },
+            None => Halted::Own,
+        });
+    }
+
+    Ok(())
+}
+
+/// Where each companion of a start was checked out and what it came off, for the
+/// record that follows the work.
+///
+/// The commit as well as the directory, because a companion's base is a *name*
+/// on its row and a name moves: a read-only companion is detached at whatever
+/// that name came to at this moment, and this is the only thing that will ever
+/// know which commit that was.
+///
+/// The stage's own is not among them: it goes on the row the store has always
+/// kept for it, one per Conversation.
+fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
+    planned
+        .iter()
+        .filter_map(|checkout| {
+            let (repo_id, _) = checkout.companion.as_ref()?;
+
+            Some(store::CompanionWorktree {
+                repo_id: *repo_id,
+                path: checkout.path.clone(),
+                base_commit: Some(checkout.commit.clone()),
+            })
+        })
+        .collect()
+}
+
 /// Give the new Conversation everything a human would have settled before
-/// pressing anything: the two Pairings, and the stage brief as its Brief.
+/// pressing anything: the two Pairings, the stage brief as its Brief, and the
+/// companion repos the work goes on alongside.
+///
+/// The one inheritance funnel, which is why the companions are here rather than
+/// beside it: a stage has no draft moment of its own, so everything it would
+/// have been set up with has to arrive in the one act, and a set copied
+/// somewhere else would be a second place for it to be forgotten.
 ///
 /// The Pairings are the predecessor's, both of them. The implementation one is
 /// what the work runs under; the grilling one is carried across because a stage
@@ -416,6 +763,18 @@ fn begun(stage: &Stage, branch: &str, stacked_on: Option<&str>, from: &str) -> S
 /// Carried whole, model and all — and a predecessor whose Profile was chosen
 /// before pairings existed carries no model, which leaves this stage running on
 /// the same Profile's own model, exactly as its predecessor did.
+///
+/// **The companions come across in the mode they were in**, off the same three
+/// presses the setup card makes, this Conversation being a Draft with no branch
+/// made — which is the only state any of them is allowed in. Every one of the
+/// predecessor's, because a stage of a roadmap grilled against a repository is
+/// the work that roadmap settled and needs what it was settled against.
+///
+/// **What does not come across is a typed branch name.** A companion branch
+/// somebody named while drafting is the roadmap Conversation's own, and two
+/// stages sharing one companion branch would be two review units on one branch
+/// with two pull requests fighting over it. So the row is left mirroring, and
+/// the stage's own branch is what its companion branches are called.
 async fn settle(
     state: &AppState,
     id: i64,
@@ -444,7 +803,66 @@ async fn settle(
 
     store::save_brief(&state.pool, id, &stage.brief).await?;
 
+    for companion in &conversation.companions {
+        let named = &companion.repo.name;
+
+        // Added the way the card adds one — read-only, on the default-branch
+        // rule and mirroring — and then moved to what the predecessor's row
+        // says. A Repo that has left the registry between the predecessor being
+        // read and this write is the one thing that can refuse it, and it is
+        // said with the repository named: a stage quietly built without a
+        // repository the roadmap was grilled against is the worse outcome.
+        let added = store::add_companion(&state.pool, id, companion.repo.id).await?;
+
+        if added != store::Adding::Added {
+            anyhow::bail!("`{named}` could not be put on it ({added:?})");
+        }
+
+        if companion.mode == store::CompanionMode::ReadWrite {
+            configured(
+                store::configure_companion(
+                    &state.pool,
+                    id,
+                    companion.repo.id,
+                    store::Change::Mode(store::CompanionMode::ReadWrite),
+                )
+                .await?,
+                named,
+            )?;
+        }
+
+        // The base as the human picked it, which is what an unstacked stage's
+        // checkout comes off and what a read-only one is detached at. `None` is
+        // the default-branch rule, which is what a fresh row already holds.
+        if let Some(base) = companion.base_ref.as_deref() {
+            configured(
+                store::configure_companion(
+                    &state.pool,
+                    id,
+                    companion.repo.id,
+                    store::Change::Base(Some(base)),
+                )
+                .await?,
+                named,
+            )?;
+        }
+    }
+
     Ok(())
+}
+
+/// What a press on an inherited companion's row came to, with the repository
+/// named where it came to nothing.
+///
+/// Only ever a race — the stage is drafting and the row was written a moment
+/// ago — but a refusal swallowed here would leave a stage running against a
+/// companion in the wrong mode, which is a session writing where it was never
+/// given leave to.
+fn configured(configured: store::Configured, repo: &str) -> anyhow::Result<()> {
+    match configured {
+        store::Configured::Saved => Ok(()),
+        refused => anyhow::bail!("`{repo}` could not be set up on it ({refused:?})"),
+    }
 }
 
 /// Stop the half-made Conversation, where a stage got as far as a record and no
@@ -455,8 +873,9 @@ async fn settle(
 /// nobody is going to start by hand. Closing is the work stopping wherever it
 /// was, which is exactly what happened.
 ///
-/// Nothing was checked out by the time this can run, so there is nothing to
-/// clean up but the row.
+/// Nothing is left checked out by the time this can run, so there is nothing to
+/// clean up but the row: the stage's worktree and its companions' are made in
+/// one act that unmakes whatever it managed before it halted — see [`make`].
 async fn gave_up(state: &AppState, id: i64) {
     if let Err(error) = store::close_conversation(&state.pool, id).await {
         tracing::error!(error = ?error, conversation_id = id, "stopping a half-made stage failed");

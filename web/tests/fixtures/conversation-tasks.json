@@ -4,6 +4,7 @@
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
   "blocked_on": null,
   "branch": "task-runner",
+  "companions": [],
   "direction": "task-list",
   "driven": false,
   "grilling_pairing": {
@@ -85,14 +86,14 @@
         "at": "2026-08-03T09:07:11.000Z",
         "frozen": true,
         "html": "<h1>One session per task</h1>\n<p>The backlog is worked one task at a time, each in a session of its\nown.</p>\n",
-        "id": 17,
+        "id": 18,
         "markdown": "# One session per task\n\nThe backlog is worked one task at a time, each in a session of its\nown.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 18,
+        "id": 19,
         "state": "Grilling"
       }
     },
@@ -101,8 +102,9 @@
         "at": "2026-08-03T09:07:11.000Z",
         "deletions": 0,
         "files": 5,
-        "id": 19,
+        "id": 20,
         "insertions": 132,
+        "repo": null,
         "sha": "5c2a9e14b7f36d80a1c4e9b2f7d53081a6e4c9b2",
         "snippet": null,
         "subject": "chore: plan the task-runner tasks"
@@ -111,7 +113,7 @@
     {
       "TaskList": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 20,
+        "id": 21,
         "list": {
           "feature": "Task runner",
           "tasks": [
@@ -142,7 +144,7 @@
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 21,
+        "id": 22,
         "state": "Implementing"
       }
     }

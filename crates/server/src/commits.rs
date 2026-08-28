@@ -19,6 +19,12 @@
 //! of counts per commit — happens only for the ones that are not. And what makes
 //! it *correct* is the same thing, because a branch is not a queue: one that was
 //! amended, reset or rebased has commits before its tip that no sweep has seen.
+//!
+//! One session may be watching several branches. A Conversation's own is one of
+//! them and each read-write companion is another — see [`watched`] — and each
+//! gets a watcher of exactly this shape, reading its own repository. A read-only
+//! companion is checked out detached and bound read-only, so there is nothing
+//! there for a commit to land on.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -51,13 +57,9 @@ pub(crate) async fn watch(
     pool: SqlitePool,
     nudges: Nudges,
     conversation_id: i64,
-    repo: PathBuf,
-    branch: String,
-    base: String,
+    branch: Branch,
     mut stopping: oneshot::Receiver<()>,
 ) {
-    let branch = Branch { repo, branch, base };
-
     sweep(&pool, &nudges, conversation_id, &branch).await;
 
     loop {
@@ -79,7 +81,12 @@ pub(crate) async fn watch(
 /// be removed while its branch lives on. The refs are the repository's — a
 /// worktree shares them — so this is asking the thing that actually knows.
 #[derive(Debug, Clone)]
-struct Branch {
+pub(crate) struct Branch {
+    /// The registered Repo the branch is in, which is what a commit is recorded
+    /// against: two repositories are two histories, and a sha says nothing
+    /// across them.
+    repo_id: i64,
+
     repo: PathBuf,
     branch: String,
 
@@ -87,6 +94,70 @@ struct Branch {
     /// what stops the whole history of the default branch arriving as this
     /// Conversation's commits.
     base: String,
+}
+
+/// Every branch a session running for `conversation` can land a commit on: the
+/// Conversation's own, and one per read-write companion.
+///
+/// Worked out here rather than where the watchers are spawned, so that what is
+/// watched and what a sweep does with it are the one module's answer. Each entry
+/// names the repository rather than the checkout — the refs are the
+/// repository's, which a worktree shares — and the commit that repository's own
+/// base resolved to when its checkout was made.
+///
+/// What is left out is left out with a line in the log, because each absence is
+/// a record that has been got at rather than an ordinary state: a Conversation
+/// with a session running has a base commit, and so has every companion that was
+/// checked out for it. A read-only companion is the one silent omission — its
+/// checkout is detached and bound read-only, so there is nothing to sweep.
+pub(crate) fn watched(conversation: &store::Conversation) -> Vec<Branch> {
+    let mut watching = Vec::new();
+
+    match conversation.base_commit.clone() {
+        Some(base) => watching.push(Branch {
+            repo_id: conversation.repo.id,
+            repo: conversation.repo.path.clone(),
+            branch: conversation.branch.clone(),
+            base,
+        }),
+        None => tracing::error!(
+            conversation_id = conversation.id,
+            "a session is running on a Conversation with no base commit, \
+             so its commits cannot be told from what it branched off"
+        ),
+    }
+
+    for companion in &conversation.companions {
+        if companion.mode != store::CompanionMode::ReadWrite {
+            continue;
+        }
+
+        // Mirroring resolved, which is the record's own business rather than
+        // this sweep's: an empty name on the row is the Conversation's branch
+        // followed as it is renamed.
+        let Some(branch) = companion.branch_for(&conversation.branch) else {
+            continue;
+        };
+
+        let Some(base) = companion.base_commit.clone() else {
+            tracing::error!(
+                conversation_id = conversation.id,
+                repo = companion.repo.name,
+                "a read-write companion has no base commit, so what its session \
+                 commits cannot be told from what it branched off"
+            );
+            continue;
+        };
+
+        watching.push(Branch {
+            repo_id: companion.repo.id,
+            repo: companion.repo.path.clone(),
+            branch,
+            base,
+        });
+    }
+
+    watching
 }
 
 /// Take one look at the branch, and record whatever is on it that is not on the
@@ -98,7 +169,7 @@ struct Branch {
 /// elsewhere, and a watcher that gave up the first time git was busy would be
 /// one that stopped watching without anybody noticing.
 async fn sweep(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, branch: &Branch) {
-    let recorded = match store::recorded_commits(pool, conversation_id).await {
+    let recorded = match store::recorded_commits(pool, conversation_id, branch.repo_id).await {
         Ok(recorded) => recorded,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading a Conversation's commits failed");
@@ -126,20 +197,21 @@ async fn sweep(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, branch:
     let mut recorded_any = false;
 
     for commit in landed {
-        match store::record_commit(pool, conversation_id, &commit).await {
+        match store::record_commit(pool, conversation_id, branch.repo_id, &commit).await {
             Ok(Some(event_id)) => {
                 tracing::info!(
                     conversation_id,
                     event_id,
                     sha = commit.sha,
+                    repo = %branch.repo.display(),
                     "a commit landed on the Timeline"
                 );
                 recorded_any = true;
             }
             // Recorded by another sweep between the read above and this write.
-            // One watcher per Conversation makes that unlikely rather than
-            // impossible, and the point of the store's unique index is that
-            // being wrong about it costs nothing.
+            // One watcher per repository per Conversation makes that unlikely
+            // rather than impossible, and the point of the store's unique index
+            // is that being wrong about it costs nothing.
             Ok(None) => {}
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id, sha = commit.sha, "recording a commit failed");
@@ -263,6 +335,10 @@ fn describe(repo: &Path, sha: &str) -> Option<store::Commit> {
         insertions,
         deletions,
         summary: without_trailers(body),
+        // Which repository this is read out of is what the sweep already knows,
+        // and the row is written with its id — see [`store::record_commit`].
+        // The name here is what a read gives back for drawing.
+        repo: None,
     })
 }
 
@@ -325,6 +401,49 @@ fn trailer(line: &str) -> bool {
                 .chars()
                 .all(|it| it.is_ascii_alphanumeric() || it == '-')
     })
+}
+
+/// Whether anything has landed on `branch` past the commit it was cut from.
+///
+/// What *touched* means about a companion repository, and the whole of what
+/// decides whether a wrap-up expects a pull request of it: a read-write
+/// companion the work committed in is carried to one of its own, and one nobody
+/// committed in is ignored by the whole of wrap-up — nothing asked of GitHub,
+/// nothing recorded, nothing waited on. A read-only companion is never asked
+/// this at all: its checkout is detached and bound read-only, so nothing can
+/// have landed on it.
+///
+/// Asked of git rather than of the commits the sweep has already put on the
+/// Timeline. The sweep should agree — it sweeps once more as a session ends —
+/// but it is a poller's record, and one that failed on a busy repository would
+/// leave a touched companion looking untouched, and Verkstead would silently
+/// expect no pull request from it.
+///
+/// A repository that will not say reads as untouched, with a line in the log.
+/// It is the only answer with anything behind it: a branch git cannot list is
+/// one nothing could have opened a pull request on either, and the other way
+/// round would stop a run over a repository nothing can be read from.
+///
+/// Blocking, like everything that shells out to git.
+pub(crate) fn touched(repo: &Path, base: &str, branch: &str) -> bool {
+    let Some(counted) = git(
+        repo,
+        &[
+            "rev-list",
+            "--count",
+            "--end-of-options",
+            &format!("{base}..{branch}"),
+        ],
+    ) else {
+        tracing::warn!(
+            repo = %repo.display(),
+            branch,
+            "the repository would not say what is on this branch, so nothing is expected of it",
+        );
+        return false;
+    };
+
+    counted.trim().parse::<i64>().unwrap_or(0) > 0
 }
 
 /// One commit's diff, as the renderer takes it: the patch alone, with no commit
@@ -579,6 +698,7 @@ mod tests {
         }
 
         let branch = Branch {
+            repo_id: 1,
             repo: path.to_owned(),
             branch: "rate-limiting".to_owned(),
             base: base.clone(),
@@ -609,6 +729,41 @@ mod tests {
         );
     }
 
+    /// What a wrap-up asks of a companion repository before it expects a pull
+    /// request of it: whether the work committed in it at all.
+    ///
+    /// The base is the commit its checkout was cut from, so a branch sitting
+    /// exactly where it started is untouched however much history is behind it —
+    /// which is the ordinary state of a companion somebody only read.
+    #[test]
+    fn a_branch_is_touched_once_something_has_landed_past_its_base() {
+        let dir = repository();
+        let path = dir.path();
+        let base = head(path);
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+
+        assert!(
+            !touched(path, &base, "rate-limiting"),
+            "a branch cut and not committed on is one nothing is expected of",
+        );
+
+        std::fs::write(path.join("halves.md"), "the other half\n").unwrap();
+        run(path, &["add", "halves.md"]);
+        run(path, &["commit", "-m", "feat: the other half"]);
+
+        assert!(
+            touched(path, &base, "rate-limiting"),
+            "and one commit past the base is the whole of what touched means",
+        );
+
+        assert!(
+            !touched(path, &base, "no-such-branch"),
+            "a branch git cannot list is one nothing could have opened a pull \
+         request on either",
+        );
+    }
+
     /// The repository being swept is one an agent is working in, and the moment
     /// a sweep is most likely to land on is the moment a session is committing
     /// — which is exactly when `index.lock` is held.
@@ -633,6 +788,7 @@ mod tests {
         std::fs::write(&lock, "").unwrap();
 
         let branch = Branch {
+            repo_id: 1,
             repo: path.to_owned(),
             branch: "rate-limiting".to_owned(),
             base,
@@ -664,6 +820,7 @@ mod tests {
         let path = dir.path();
 
         let branch = Branch {
+            repo_id: 1,
             repo: path.to_owned(),
             branch: "main".to_owned(),
             base: head(path),

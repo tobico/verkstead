@@ -16,7 +16,7 @@ import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
 
-import { ContextMenu, Menu } from "../src/Menu";
+import { ContextMenu, Menu, Nested } from "../src/Menu";
 // The one menu, both ways: the hashed names to query the page by, and the
 // source to read the rules off, jsdom laying nothing out to read them from.
 import menu from "../src/Menu.module.css";
@@ -166,6 +166,187 @@ describe("a dropdown menu", () => {
     fireEvent.click(trigger(container));
 
     expect(drop(container)).toBeNull();
+  });
+});
+
+/// A menu with a level below its first: the row that opens one, the rows it
+/// holds, and the way back out.
+///
+/// The whole of what makes it a *level* rather than a second menu is that none
+/// of the chrome is doubled — one card, one backdrop, one Escape, one focus
+/// given back — so that is what is asked of it here.
+describe("a nested level of a menu", () => {
+  /// A menu with an ordinary row and a row that opens a level, and a count of
+  /// how many times that level has been built.
+  function mountNested(): { container: HTMLElement; built: () => number } {
+    let built = 0;
+
+    const { container } = render(() => (
+      <Menu class="example" label="Example actions" name="Example actions" trigger="⋯">
+        {() => (
+          <>
+            <button type="button" role="menuitem" class="row">
+              Do the thing
+            </button>
+            <Nested label="More things">
+              {() => {
+                built += 1;
+                return (
+                  <button type="button" role="menuitem" class="deeper">
+                    Do the deeper thing
+                  </button>
+                );
+              }}
+            </Nested>
+          </>
+        )}
+      </Menu>
+    ));
+
+    return { container, built: () => built };
+  }
+
+  /// The row that opens one, which is drawn as every other row is and says of
+  /// itself that it opens a menu.
+  function nested(container: ParentNode): HTMLButtonElement {
+    return container.querySelector<HTMLButtonElement>(`.${menu.nested}`)!;
+  }
+
+  /// And the way back out of it, at the top of the rows it holds.
+  function back(container: ParentNode): HTMLButtonElement | null {
+    return container.querySelector<HTMLButtonElement>(`.${menu.back}`);
+  }
+
+  it("draws its row like any other, and opens rather than does", () => {
+    const { container } = mountNested();
+    fireEvent.click(trigger(container));
+
+    expect(nested(container).textContent).toContain("More things");
+    expect(nested(container).getAttribute("role")).toBe("menuitem");
+    expect(nested(container).getAttribute("aria-haspopup")).toBe("menu");
+  });
+
+  /// The level replaces what the card was showing rather than standing beside
+  /// it: the rows above it are a level up, not a heading over what is open.
+  it("shows its rows in place of the ones it was opened from", () => {
+    const { container } = mountNested();
+    fireEvent.click(trigger(container));
+
+    fireEvent.click(nested(container));
+
+    expect(container.querySelector(".deeper")).toBeTruthy();
+    expect(container.querySelector(".row")).toBeNull();
+    expect(nested(container)).toBeNull();
+
+    // One card and one wash under it, however deep the human has walked.
+    expect(container.querySelectorAll(`.${menu.drop}`)).toHaveLength(1);
+    expect(container.querySelectorAll(`.${menu.backdrop}`)).toHaveLength(1);
+  });
+
+  /// Built when the level is opened rather than when the menu is: a level
+  /// listing something the caller is still reading should read it when the
+  /// human asks for it.
+  it("builds the level when it is opened, not when the menu is", () => {
+    const { container, built } = mountNested();
+
+    fireEvent.click(trigger(container));
+    expect(built()).toBe(0);
+
+    fireEvent.click(nested(container));
+    expect(built()).toBe(1);
+  });
+
+  /// The way back, and the focus with it: the row that opened the level is
+  /// where the hand was, and it is a new element by the time it is there again.
+  it("goes back to the level it was opened from, and gives that row the focus", async () => {
+    const { container } = mountNested();
+    fireEvent.click(trigger(container));
+    fireEvent.click(nested(container));
+
+    expect(back(container)!.textContent).toContain("More things");
+
+    fireEvent.click(back(container)!);
+
+    expect(container.querySelector(".row")).toBeTruthy();
+    expect(back(container)).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(nested(container)));
+  });
+
+  /// And on the way in, so a hand on the keyboard is inside the card rather
+  /// than at the top of the page.
+  it("takes the focus into the level as it opens", async () => {
+    const { container } = mountNested();
+    fireEvent.click(trigger(container));
+
+    fireEvent.click(nested(container));
+
+    await waitFor(() => expect(document.activeElement).toBe(back(container)));
+  });
+
+  /// One Escape handler, and it belongs to the menu: from a level down it takes
+  /// the whole menu back and puts the focus on the trigger, exactly as it does
+  /// from the first level.
+  it("closes the whole menu on escape, from a level down", async () => {
+    const { container } = mountNested();
+    fireEvent.click(trigger(container));
+    fireEvent.click(nested(container));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(drop(container)).toBeNull());
+    expect(document.activeElement).toBe(trigger(container));
+  });
+
+  /// And a press away from it lands on the one backdrop, from a level down as
+  /// from the first.
+  it("closes the whole menu on a press outside it, from a level down", async () => {
+    const { container } = mountNested();
+    fireEvent.click(trigger(container));
+    fireEvent.click(nested(container));
+
+    fireEvent.click(container.querySelector(`.${menu.backdrop}`)!);
+
+    await waitFor(() => expect(drop(container)).toBeNull());
+  });
+
+  /// A menu that came back down where it was left would be showing a level the
+  /// human closed their way out of.
+  it("comes back down at its first level", () => {
+    const { container } = mountNested();
+    fireEvent.click(trigger(container));
+    fireEvent.click(nested(container));
+
+    fireEvent.click(container.querySelector(`.${menu.backdrop}`)!);
+    fireEvent.click(trigger(container));
+
+    expect(container.querySelector(".row")).toBeTruthy();
+    expect(container.querySelector(".deeper")).toBeNull();
+  });
+
+  /// The nesting belongs to the drop rather than to either shape of menu, so
+  /// the one opened by a right-click has it without a line of its own.
+  it("is the right-click menu's too", () => {
+    const [at, setAt] = createSignal<{ x: number; y: number } | null>(null);
+
+    const { container } = render(() => (
+      <ContextMenu class="example" at={at()} close={() => setAt(null)}>
+        {() => (
+          <Nested label="More things">
+            {() => (
+              <button type="button" role="menuitem" class="deeper">
+                Do the deeper thing
+              </button>
+            )}
+          </Nested>
+        )}
+      </ContextMenu>
+    ));
+
+    setAt({ x: 10, y: 10 });
+    fireEvent.click(nested(container));
+
+    expect(container.querySelector(".deeper")).toBeTruthy();
+    expect(container.querySelectorAll(`.${menu.drop}`)).toHaveLength(1);
   });
 });
 

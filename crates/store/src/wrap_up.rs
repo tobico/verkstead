@@ -1,6 +1,16 @@
 //! What wrap-up is still waiting on, how many goes the machine has had at a red
 //! check, which comments it has already dispatched about — and the move to Done
-//! that having settled all three is.
+//! that having settled all of it is.
+//!
+//! Everything here but the review is kept per pull request rather than per
+//! Conversation: the checks that have settled, the goes one of them has had,
+//! whether anything said is left unaddressed, and which comments a session has
+//! been dispatched about. A Conversation ends on one pull request per repository
+//! it was worked in, each with a suite of its own and a conversation of its own —
+//! `Rust` red on two of them is two failures rather than one, and a human writing
+//! on one of them is not writing on the other — so the Repo the pull request was
+//! opened in is part of what each row is about. The review is one review across
+//! the whole of it and is written against no pull request at all.
 //!
 //! Four small tables and one Timeline Event, which is the whole shape of this
 //! module. Everything else a human reads about wrap-up is already an Event — the
@@ -31,15 +41,24 @@ use super::conversations::{Lifecycle, moved};
 
 /// One of the things a Conversation has to have settled before wrap-up is over.
 ///
-/// All three together and nothing else. What is *not* here is the merge: stages
-/// stack on unmerged predecessors, so a Conversation that stayed in Wrapping
-/// until its pull request landed would hold up every stage behind it — and
-/// merging is the human act this pipeline is built around rather than a step in
-/// it.
+/// Three kinds of thing and nothing else, though not three settlements: the
+/// checks and what has been said are one each per pull request, and a
+/// Conversation ends on one pull request per repository it was worked in, so a
+/// wrap-up with a companion is waiting on five things rather than three. What is
+/// *not* here is the merge: stages stack on unmerged predecessors, so a
+/// Conversation that stayed in Wrapping until its pull request landed would hold
+/// up every stage behind it — and merging is the human act this pipeline is
+/// built around rather than a step in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitingOn {
-    /// The pull request's checks are green.
-    Checks,
+    /// The checks are green on the pull request opened in this Repo.
+    ///
+    /// One per pull request rather than one per Conversation, because a suite
+    /// is a fact about a pull request: a Conversation ends on one per
+    /// repository it was worked in, each with its own checks running against
+    /// its own branch, and a wrap-up that settled *the* checks would be one
+    /// where a green companion stood for a red one.
+    Checks(i64),
 
     /// The self-review has been answered — or found nothing to ask about.
     ///
@@ -54,14 +73,20 @@ pub enum WaitingOn {
     /// it — see [`super::implement_again`] — and the second wrap reviews afresh.
     Review,
 
-    /// Nothing has been said on the pull request that has not had a session
-    /// dispatched about it.
+    /// Nothing has been said on the pull request opened in this Repo that has
+    /// not had a session dispatched about it.
     ///
     /// Like the checks and unlike the review: a comment landing after this
     /// settled unsettles it again, because a wrap-up that stopped reading its
     /// pull request the first time it went quiet would be one a human could not
     /// reach.
-    Comments,
+    ///
+    /// And per pull request for the checks' reason. A human writes on the pull
+    /// request they are reading, and a Conversation ends on one per repository
+    /// it was worked in: a wrap-up that settled *the* comments would be one
+    /// where a quiet companion stood for a busy one, and the pull request that
+    /// went quiet is the one that has nothing outstanding on it.
+    Comments(i64),
 }
 
 impl WaitingOn {
@@ -69,31 +94,60 @@ impl WaitingOn {
     /// opened by hand says something.
     fn stored(self) -> &'static str {
         match self {
-            Self::Checks => "checks",
+            Self::Checks(_) => "checks",
             Self::Review => "review",
-            Self::Comments => "comments",
+            Self::Comments(_) => "comments",
         }
     }
 
-    /// The one a stored word names. An unknown word is a database written by a
-    /// Verkstead this one does not understand, exactly as an unknown lifecycle
-    /// state is.
-    fn read(word: &str) -> Result<Self> {
+    /// And which pull request it is about, by the Repo that one was opened
+    /// in.
+    ///
+    /// [`NO_PULL_REQUEST`] for the ones that are about the wrap-up as a
+    /// whole, which is what the review is: one review across every pull
+    /// request the Conversation ended on.
+    fn repo(self) -> i64 {
+        match self {
+            Self::Checks(repo_id) | Self::Comments(repo_id) => repo_id,
+            Self::Review => NO_PULL_REQUEST,
+        }
+    }
+
+    /// The one a stored word and a Repo name between them. An unknown word is
+    /// a database written by a Verkstead this one does not understand,
+    /// exactly as an unknown lifecycle state is.
+    fn read(word: &str, repo_id: i64) -> Result<Self> {
         Ok(match word {
-            "checks" => Self::Checks,
+            "checks" => Self::Checks(repo_id),
             "review" => Self::Review,
-            "comments" => Self::Comments,
+            "comments" => Self::Comments(repo_id),
             other => bail!("a wrap-up is waiting on the unknown thing {other:?}"),
         })
     }
 }
 
-/// Everything wrap-up has to have settled before it is over.
+/// What stands in the Repo column of a settlement about no pull request.
+///
+/// Zero, which is no repository: SQLite hands rowids out from one, so nothing
+/// registered can collide with it. Which is also why that column is not a
+/// foreign key — a reference to `repos` would refuse the review's own row.
+const NO_PULL_REQUEST: i64 = 0;
+
+/// Everything wrap-up waits on that there is one of per Conversation.
+///
+/// The review, and nothing beside it: one review reads the whole of the work
+/// however many repositories it was worked in, so it is the one thing here that
+/// is not a fact about a pull request.
 ///
 /// Written out rather than derived, because what it is for is the one question
 /// [`finish_wrap_up`] asks — and a list that grew a variant without anybody
 /// deciding it belonged here would be a wrap-up quietly waiting on something new.
-pub const WAITED_ON: [WaitingOn; 3] = [WaitingOn::Checks, WaitingOn::Review, WaitingOn::Comments];
+///
+/// The checks and what has been said are not here, and could not be: there is a
+/// suite and a conversation per pull request, and which pull requests a
+/// Conversation ended on is a fact about the record rather than a constant. So
+/// the rule reads them off it and waits on every one — see [`finish_wrap_up`].
+pub const WAITED_ON: [WaitingOn; 1] = [WaitingOn::Review];
 
 /// What became of asking whether a wrap-up is over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,12 +173,24 @@ pub enum Finished {
 /// that happened, so none of them is something to draw. They are what Verkstead
 /// knows about a Conversation it is wrapping up.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
+    // The Repo is which pull request a settlement is about, and part of what it
+    // is rather than a note beside it: the checks settle per pull request.
+    // [`NO_PULL_REQUEST`] stands there for the ones about the whole wrap-up,
+    // which is why the column references nothing.
+    //
+    // A database written before a Conversation could end on more than one pull
+    // request has neither the column nor the rule. Which is
+    // [`super::migrations`]'s to put right as the database opens rather than this
+    // function's: the rule is declared inline as the primary key, so it is the
+    // table itself that has to be rebuilt, and that is not something a `CREATE
+    // TABLE IF NOT EXISTS` can reach.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS wrap_up_settled (
              conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL,
              waiting_on      TEXT NOT NULL,
              at              TEXT NOT NULL,
-             PRIMARY KEY (conversation_id, waiting_on)
+             PRIMARY KEY (conversation_id, repo_id, waiting_on)
          ) STRICT",
     )
     .execute(pool)
@@ -135,12 +201,18 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // name is what survives what this is counting: a fix session pushes a commit,
     // GitHub starts a whole new run with new ids, and *the same check* has to
     // mean the same thing across both.
+    //
+    // And by the Repo whose pull request it went red on, for the reason the
+    // settlements above carry one: the same check name red on two pull requests
+    // is two different failures, and one spending the other's attempts would stop
+    // a run that still had somewhere to go.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS check_fix_attempts (
              conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
              check_name      TEXT NOT NULL,
              attempts        INTEGER NOT NULL,
-             PRIMARY KEY (conversation_id, check_name)
+             PRIMARY KEY (conversation_id, repo_id, check_name)
          ) STRICT",
     )
     .execute(pool)
@@ -150,12 +222,20 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // Keyed by what GitHub calls the comment, which is what survives a restart:
     // a server that came back up and read every comment as new would dispatch a
     // session about feedback that was addressed yesterday.
+    //
+    // And by the Repo whose pull request it was left on, for the reason the rows
+    // above carry one: what settles is *this pull request has nothing
+    // outstanding*, which is what lets one go quiet while another is still being
+    // answered. GitHub's ids are unique across repositories, so the Repo is not
+    // what keeps two comments apart — it is what says which pull request a row
+    // is an answer about.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS addressed_comments (
              conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
              comment_id      TEXT NOT NULL,
              at              TEXT NOT NULL,
-             PRIMARY KEY (conversation_id, comment_id)
+             PRIMARY KEY (conversation_id, repo_id, comment_id)
          ) STRICT",
     )
     .execute(pool)
@@ -195,11 +275,12 @@ pub async fn settle_wrap_up(
     waiting_on: WaitingOn,
 ) -> Result<()> {
     sqlx::query(
-        "INSERT INTO wrap_up_settled (conversation_id, waiting_on, at)
-         VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         ON CONFLICT (conversation_id, waiting_on) DO NOTHING",
+        "INSERT INTO wrap_up_settled (conversation_id, repo_id, waiting_on, at)
+         VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (conversation_id, repo_id, waiting_on) DO NOTHING",
     )
     .bind(conversation_id)
+    .bind(waiting_on.repo())
     .bind(waiting_on.stored())
     .execute(pool)
     .await
@@ -239,17 +320,21 @@ pub(crate) async fn unsettle(
     conversation_id: i64,
     waiting_on: WaitingOn,
 ) -> Result<()> {
-    sqlx::query("DELETE FROM wrap_up_settled WHERE conversation_id = ? AND waiting_on = ?")
-        .bind(conversation_id)
-        .bind(waiting_on.stored())
-        .execute(&mut *tx)
-        .await
-        .with_context(|| {
-            format!(
-                "putting {waiting_on:?} back to waiting for the wrap-up of \
-                 Conversation {conversation_id}"
-            )
-        })?;
+    sqlx::query(
+        "DELETE FROM wrap_up_settled
+         WHERE conversation_id = ? AND repo_id = ? AND waiting_on = ?",
+    )
+    .bind(conversation_id)
+    .bind(waiting_on.repo())
+    .bind(waiting_on.stored())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| {
+        format!(
+            "putting {waiting_on:?} back to waiting for the wrap-up of \
+             Conversation {conversation_id}"
+        )
+    })?;
 
     Ok(())
 }
@@ -259,8 +344,8 @@ pub(crate) async fn unsettle(
 /// The whole set rather than one asked about at a time, because what it is for
 /// is the question *is wrap-up over* — which is about all of them together.
 pub async fn wrap_up_settled(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<WaitingOn>> {
-    let rows: Vec<(String,)> =
-        sqlx::query_as("SELECT waiting_on FROM wrap_up_settled WHERE conversation_id = ?")
+    let rows: Vec<(String, i64)> =
+        sqlx::query_as("SELECT waiting_on, repo_id FROM wrap_up_settled WHERE conversation_id = ?")
             .bind(conversation_id)
             .fetch_all(pool)
             .await
@@ -269,7 +354,7 @@ pub async fn wrap_up_settled(pool: &SqlitePool, conversation_id: i64) -> Result<
             })?;
 
     rows.into_iter()
-        .map(|(waiting_on,)| WaitingOn::read(&waiting_on))
+        .map(|(waiting_on, repo_id)| WaitingOn::read(&waiting_on, repo_id))
         .collect()
 }
 
@@ -310,8 +395,8 @@ async fn narrowed(tx: &mut sqlx::SqliteConnection, conversation_id: i64) -> Resu
         return Ok(false);
     }
 
-    let settled: Vec<(String,)> =
-        sqlx::query_as("SELECT waiting_on FROM wrap_up_settled WHERE conversation_id = ?")
+    let settled: Vec<(String, i64)> =
+        sqlx::query_as("SELECT waiting_on, repo_id FROM wrap_up_settled WHERE conversation_id = ?")
             .bind(conversation_id)
             .fetch_all(&mut *tx)
             .await
@@ -321,17 +406,39 @@ async fn narrowed(tx: &mut sqlx::SqliteConnection, conversation_id: i64) -> Resu
 
     let settled: Vec<WaitingOn> = settled
         .into_iter()
-        .map(|(waiting_on,)| WaitingOn::read(&waiting_on))
+        .map(|(waiting_on, repo_id)| WaitingOn::read(&waiting_on, repo_id))
         .collect::<Result<_>>()?;
 
-    // Everything else settled and the checks not: narrowing is a wrap-up having
-    // got down to the one of [`WAITED_ON`] nothing here can hurry, which is why
-    // it is worth saying out loud rather than leaving as plain Wrapping.
-    Ok(!settled.contains(&WaitingOn::Checks)
-        && WAITED_ON
-            .iter()
-            .filter(|one| **one != WaitingOn::Checks)
-            .all(|one| settled.contains(one)))
+    let opened: Vec<(i64,)> =
+        sqlx::query_as("SELECT repo_id FROM pull_requests WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_all(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("reading which pull requests Conversation {conversation_id} is on")
+            })?;
+
+    let opened: Vec<i64> = opened.into_iter().map(|(repo_id,)| repo_id).collect();
+
+    // Everything else settled and some suite still running: narrowing is a
+    // wrap-up having got down to the one thing nothing here can hurry, which is
+    // why it is worth saying out loud rather than leaving as plain Wrapping.
+    //
+    // Read off the same two facts [`finish_wrap_up`] reads, and asked the same
+    // way: the review once for the whole of the work, and the comments once per
+    // pull request the Conversation ended on. One suite outstanding is enough —
+    // a wrap-up down to a companion's red checks is as narrowed as one down to
+    // its own, and both are waiting on the same thing.
+    let everything_else = WAITED_ON
+        .into_iter()
+        .chain(opened.iter().map(|repo_id| WaitingOn::Comments(*repo_id)))
+        .all(|one| settled.contains(&one));
+
+    let a_suite_outstanding = opened
+        .iter()
+        .any(|repo_id| !settled.contains(&WaitingOn::Checks(*repo_id)));
+
+    Ok(everything_else && a_suite_outstanding)
 }
 
 /// What a look at whether a wrap-up has narrowed found, and what the looker owes
@@ -491,9 +598,11 @@ pub async fn settled_when(
     waiting_on: WaitingOn,
 ) -> Result<Option<String>> {
     let row: Option<(String,)> = sqlx::query_as(
-        "SELECT at FROM wrap_up_settled WHERE conversation_id = ? AND waiting_on = ?",
+        "SELECT at FROM wrap_up_settled
+         WHERE conversation_id = ? AND repo_id = ? AND waiting_on = ?",
     )
     .bind(conversation_id)
+    .bind(waiting_on.repo())
     .bind(waiting_on.stored())
     .fetch_optional(pool)
     .await
@@ -507,21 +616,36 @@ pub async fn settled_when(
     Ok(row.map(|(at,)| at))
 }
 
-/// How many fix sessions this check has already had.
+/// How many fix sessions this check has already had on the pull request opened
+/// in `repo_id`.
 ///
 /// Zero for a check nothing has been dispatched for, which is every check the
 /// first time it goes red.
-pub async fn fix_attempts(pool: &SqlitePool, conversation_id: i64, check: &str) -> Result<i64> {
+///
+/// The Repo is part of the question rather than a filter on it: the same check
+/// name red on two of a Conversation's pull requests is two different failures,
+/// and one spending the other's attempts would stop a run that still had
+/// somewhere to go.
+pub async fn fix_attempts(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+    check: &str,
+) -> Result<i64> {
     let row: Option<(i64,)> = sqlx::query_as(
         "SELECT attempts FROM check_fix_attempts
-         WHERE conversation_id = ? AND check_name = ?",
+         WHERE conversation_id = ? AND repo_id = ? AND check_name = ?",
     )
     .bind(conversation_id)
+    .bind(repo_id)
     .bind(check)
     .fetch_optional(pool)
     .await
     .with_context(|| {
-        format!("reading what has been tried about {check:?} on Conversation {conversation_id}")
+        format!(
+            "reading what has been tried about {check:?} in Repo {repo_id} on Conversation \
+             {conversation_id}"
+        )
     })?;
 
     Ok(row.map(|(attempts,)| attempts).unwrap_or(0))
@@ -535,44 +659,60 @@ pub async fn fix_attempts(pool: &SqlitePool, conversation_id: i64, check: &str) 
 pub async fn record_fix_attempt(
     pool: &SqlitePool,
     conversation_id: i64,
+    repo_id: i64,
     check: &str,
 ) -> Result<i64> {
     let (attempts,): (i64,) = sqlx::query_as(
-        "INSERT INTO check_fix_attempts (conversation_id, check_name, attempts)
-         VALUES (?, ?, 1)
-         ON CONFLICT (conversation_id, check_name)
+        "INSERT INTO check_fix_attempts (conversation_id, repo_id, check_name, attempts)
+         VALUES (?, ?, ?, 1)
+         ON CONFLICT (conversation_id, repo_id, check_name)
              DO UPDATE SET attempts = attempts + 1
          RETURNING attempts",
     )
     .bind(conversation_id)
+    .bind(repo_id)
     .bind(check)
     .fetch_one(pool)
     .await
     .with_context(|| {
-        format!("counting a fix session for {check:?} on Conversation {conversation_id}")
+        format!(
+            "counting a fix session for {check:?} in Repo {repo_id} on Conversation \
+             {conversation_id}"
+        )
     })?;
 
     Ok(attempts)
 }
 
-/// Which of a pull request's comments have already had a session dispatched
-/// about them.
+/// Which of the comments on the pull request opened in `repo_id` have already
+/// had a session dispatched about them.
 ///
 /// The whole set rather than one asked about at a time, because what it is for
 /// is the question *which of these are new* — which is about all of them at once,
 /// and the comments arrive from GitHub as a list.
-pub async fn addressed_comments(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<String>> {
-    let rows: Vec<(String,)> =
-        sqlx::query_as("SELECT comment_id FROM addressed_comments WHERE conversation_id = ?")
-            .bind(conversation_id)
-            .fetch_all(pool)
-            .await
-            .with_context(|| {
-                format!(
-                    "reading which of Conversation {conversation_id}'s comments have been \
-                     dispatched for"
-                )
-            })?;
+///
+/// One pull request's rather than the Conversation's, because that is the
+/// question a watcher asks: it read one pull request's comments and is deciding
+/// which of *those* to dispatch about.
+pub async fn addressed_comments(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+) -> Result<Vec<String>> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT comment_id FROM addressed_comments
+         WHERE conversation_id = ? AND repo_id = ?",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "reading which of Conversation {conversation_id}'s comments in Repo {repo_id} \
+             have been dispatched for"
+        )
+    })?;
 
     Ok(rows.into_iter().map(|(comment_id,)| comment_id).collect())
 }
@@ -591,27 +731,26 @@ pub async fn addressed_comments(pool: &SqlitePool, conversation_id: i64) -> Resu
 pub async fn record_addressed_comments(
     pool: &SqlitePool,
     conversation_id: i64,
+    repo_id: i64,
     comments: &[String],
 ) -> Result<()> {
-    let mut tx = pool
-        .begin()
-        .await
-        .context("recording which comments have been dispatched for")?;
+    let mut tx = super::writing(pool, "recording which comments have been dispatched for").await?;
 
     for comment in comments {
         sqlx::query(
-            "INSERT INTO addressed_comments (conversation_id, comment_id, at)
-             VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-             ON CONFLICT (conversation_id, comment_id) DO NOTHING",
+            "INSERT INTO addressed_comments (conversation_id, repo_id, comment_id, at)
+             VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT (conversation_id, repo_id, comment_id) DO NOTHING",
         )
         .bind(conversation_id)
+        .bind(repo_id)
         .bind(comment)
         .execute(&mut *tx)
         .await
         .with_context(|| {
             format!(
-                "recording that {comment:?} has been dispatched for on Conversation \
-                 {conversation_id}"
+                "recording that {comment:?} has been dispatched for in Repo {repo_id} on \
+                 Conversation {conversation_id}"
             )
         })?;
     }
@@ -638,30 +777,58 @@ pub async fn record_addressed_comments(
 pub async fn forget_addressed_comments(
     pool: &SqlitePool,
     conversation_id: i64,
+    repo_id: i64,
     comments: &[String],
 ) -> Result<()> {
-    let mut tx = pool
-        .begin()
-        .await
-        .context("forgetting which comments have been dispatched for")?;
+    let mut tx = super::writing(pool, "forgetting which comments have been dispatched for").await?;
 
     for comment in comments {
-        sqlx::query("DELETE FROM addressed_comments WHERE conversation_id = ? AND comment_id = ?")
-            .bind(conversation_id)
-            .bind(comment)
-            .execute(&mut *tx)
-            .await
-            .with_context(|| {
-                format!(
-                    "forgetting that {comment:?} was dispatched for on Conversation \
-                     {conversation_id}"
-                )
-            })?;
+        sqlx::query(
+            "DELETE FROM addressed_comments
+             WHERE conversation_id = ? AND repo_id = ? AND comment_id = ?",
+        )
+        .bind(conversation_id)
+        .bind(repo_id)
+        .bind(comment)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!(
+                "forgetting that {comment:?} was dispatched for in Repo {repo_id} on \
+                 Conversation {conversation_id}"
+            )
+        })?;
     }
 
     tx.commit()
         .await
         .context("forgetting which comments have been dispatched for")?;
+
+    Ok(())
+}
+
+/// The same for every comment on every one of a Conversation's pull requests.
+///
+/// What a batch session nobody can identify leaves behind: a server that came
+/// back up over one has no way of knowing which pull request it was answering,
+/// let alone which of that pull request's comments were its batch and which the
+/// review folded in before it. So every one of them is read again — a comment
+/// read twice costs a session's work and one dropped costs the human theirs.
+///
+/// Called for the reason [`forget_addressed_comments`] is, and under the same
+/// guarantee: the run has stopped with a Notice saying so, and nothing is racing
+/// this to dispatch about them.
+pub async fn forget_every_addressed_comment(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM addressed_comments WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(pool)
+        .await
+        .with_context(|| {
+            format!(
+                "forgetting which of Conversation {conversation_id}'s comments have been \
+                 dispatched for"
+            )
+        })?;
 
     Ok(())
 }
@@ -672,6 +839,14 @@ pub async fn forget_addressed_comments(
 /// The rule that ends a wrap-up, and Verkstead's own to apply: there is nobody at
 /// the workbench to press anything, which is the whole of what running unattended
 /// means. Any one of [`WAITED_ON`] still outstanding leaves it where it is.
+///
+/// And every pull request's checks and comments beside it, which is the part
+/// that is read off the record rather than written out: a Conversation ends on
+/// one pull request per repository it was worked in, each with a suite of its
+/// own and a conversation of its own, and one still red or one with something
+/// said on it that nobody has been sent to answer is a wrap-up still going. Read
+/// inside the transaction with the settlements, so that a companion's pull
+/// request recorded while this was deciding is one the decision waits for.
 ///
 /// One transaction, as every move is, and the settlements are read inside it so
 /// that the answer still holds when the update acts on it — which is what makes
@@ -697,8 +872,8 @@ pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<F
         return Ok(Finished::NotWrapping);
     }
 
-    let settled: Vec<(String,)> =
-        sqlx::query_as("SELECT waiting_on FROM wrap_up_settled WHERE conversation_id = ?")
+    let settled: Vec<(String, i64)> =
+        sqlx::query_as("SELECT waiting_on, repo_id FROM wrap_up_settled WHERE conversation_id = ?")
             .bind(conversation_id)
             .fetch_all(&mut *tx)
             .await
@@ -708,10 +883,25 @@ pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<F
 
     let settled: Vec<WaitingOn> = settled
         .into_iter()
-        .map(|(waiting_on,)| WaitingOn::read(&waiting_on))
+        .map(|(waiting_on, repo_id)| WaitingOn::read(&waiting_on, repo_id))
         .collect::<Result<_>>()?;
 
-    if !WAITED_ON.iter().all(|one| settled.contains(one)) {
+    let opened: Vec<(i64,)> =
+        sqlx::query_as("SELECT repo_id FROM pull_requests WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_all(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("reading which pull requests Conversation {conversation_id} is on")
+            })?;
+
+    let waiting_on = WAITED_ON.into_iter().chain(
+        opened
+            .into_iter()
+            .flat_map(|(repo_id,)| [WaitingOn::Checks(repo_id), WaitingOn::Comments(repo_id)]),
+    );
+
+    if !waiting_on.into_iter().all(|one| settled.contains(&one)) {
         return Ok(Finished::StillWaiting);
     }
 

@@ -470,11 +470,26 @@
   color: var(--ink-soft);
 }
 
-/* And how its checks are, on the other end of the head's line. The mark itself
+/* Which repository it was opened in, between the number and the way out. Drawn
+   only where that is not the conversation's own — see `Timeline.tsx` — so an
+   unlabelled card is the work's own repo, and every label in the pinned block
+   belongs to a companion.
+
+   The same quiet outline a commit's label wears, because it says the same
+   thing about the same set of repositories. */
+.pullRequest .repo {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* And how its checks are, at the other end of the head's line. The mark itself
    is `Checks.module.css`'s; what is here is where it stands, which belongs to
    the line that drew it. `margin-left: auto` rather than a `space-between`,
-   because the head is `flex-start` here — the number sits against the heading
-   and the checks against the card's edge. */
+   because the head is `flex-start` here — the number and the label sit against
+   the heading and the checks against the card's edge. */
 .pullRequest .checkRollup {
   margin-left: auto;
 }
@@ -953,6 +968,22 @@
 .commit .what {
   font-size: 1.1rem;
   font-weight: 600;
+}
+
+/* Which repository the commit landed in, between the word and the hash. Drawn
+   only where that is not the conversation's own — see `Timeline.tsx` — so a
+   column of unlabelled cards is a conversation working in one repo, and every
+   label in it belongs to a companion.
+
+   A quiet outline rather than a colour, for the reason the `live` badge above
+   is coloured: this says which of several things a row is about, not that
+   anything is waiting on the human. */
+.commit .repo {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
 }
 
 /* The hash, shortened for reading. Monospaced wherever it appears, because it

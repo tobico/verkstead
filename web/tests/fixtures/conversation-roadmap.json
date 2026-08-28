@@ -4,6 +4,7 @@
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
   "blocked_on": null,
   "branch": "mvp-roadmap",
+  "companions": [],
   "direction": "roadmap",
   "driven": false,
   "grilling_pairing": {
@@ -86,21 +87,21 @@
         "at": "2026-08-03T09:07:11.000Z",
         "frozen": true,
         "html": "<h1>A staged roadmap</h1>\n<p>Too much for one feature, so it is cut into stages and each becomes a\nfeature of its own.</p>\n",
-        "id": 39,
+        "id": 40,
         "markdown": "# A staged roadmap\n\nToo much for one feature, so it is cut into stages and each becomes a\nfeature of its own.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 40,
+        "id": 41,
         "state": "Grilling"
       }
     },
     {
       "StageList": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 41,
+        "id": 42,
         "roadmaps": [
           {
             "name": "mvp",
@@ -135,7 +136,7 @@
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p>Stage 01 of the <code>mvp</code> roadmap — <em>Workbench</em> — has started as a Conversation of its own, on <code>workbench</code>.</p>\n",
-        "id": 42
+        "id": 43
       }
     }
   ],

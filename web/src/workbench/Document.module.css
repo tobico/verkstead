@@ -1,5 +1,6 @@
-/* A timeline document, opened: the brief, the handoff the grilling wrote, or the
-   instruction a manual task was set going with. See `Document.tsx`.
+/* A timeline document, opened: the handoff the grilling wrote, or the
+   instruction a manual task was set going with. See `Document.tsx` — the frozen
+   Brief is read in a pane of its own, which says the same thing of its markdown.
 
    One rule, because that is the whole of what this pane is: the markdown the
    server rendered, set at the width prose is read at everywhere else. The cards

@@ -54,16 +54,19 @@ _Avoid_: task, session, job, thread, ticket
 The checkout a Conversation's work is done in, made when grilling starts along
 with the branch it holds, and removed when the Conversation is closed — the
 branch outlives it, because a branch is cheap and may hold work worth reading.
-A steered Conversation keeps the one it has; where the directory has gone, one
-is checked out again on the branch that was worked, which is the only time a
-Worktree is made without a branch being made with it.
+A Conversation may have more than one: its own, and one per Companion Repo,
+made when its own is made and given back when its own is. A steered
+Conversation keeps the one it has; where the directory has gone, one is checked
+out again on the branch that was worked, which is one of the two times a
+Worktree is made without a branch being made with it — a read-only companion's,
+checked out detached, is the other.
 A removal git refuses — a directory it no longer reads as a Worktree — does not
 hold the close up: it is logged with its path and left on disk, closing being
 what the human asked for and a directory nobody can be rid of being what they
 were trying to escape.
-Named for the Repo and the branch, and it lives in the Data Directory rather
-than inside a Watched Path: Verkstead made it, so it goes among Verkstead's own
-things.
+Named for the Repo and what the checkout holds — the branch, or the base a
+detached one stands at — and it lives in the Data Directory rather than inside
+a Watched Path: Verkstead made it, so it goes among Verkstead's own things.
 _Avoid_: checkout, working copy, sandbox (that's what runs *in* it), clone
 
 **Data Directory**:
@@ -82,12 +85,15 @@ What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
 Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills and
 the Verkstead executable read-only, and nothing else of the machine at all
-— not even the checkout the Worktree was made from. The filesystem is the
-boundary and the network is not: inside, it is the host's own, whole and
-unfiltered, because what stops a session doing harm is that there is nothing
-within reach to harm. The `verkstead` a session asks with is the running
-server's own image, first on the `PATH` inside, so the CLI a session asks with
-and the server it asks are one build and cannot disagree about a schema.
+— not even the checkout the Worktree was made from. Each Companion Repo the
+Conversation was configured with is inside as well: its Worktree and the git
+directory behind it, both at that companion's own mode, so a read-only one is
+read-only through both. The filesystem is the boundary and the network is not:
+inside, it is the host's own, whole and unfiltered, because what stops a
+session doing harm is that there is nothing within reach to harm. The
+`verkstead` a session asks with is the running server's own image, first on the
+`PATH` inside, so the CLI a session asks with and the server it asks are one
+build and cannot disagree about a schema.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
@@ -97,6 +103,82 @@ composed over it. Configured where the Watched Paths are rather than anywhere
 the workbench can reach: every one of them is a hole in the boundary, and
 widening a boundary is the installer's to do.
 _Avoid_: sandbox settings, mounts, extra paths
+
+**Companion Repo**:
+Another registered Repo a Conversation is given to work alongside its own,
+**read-only** or **read-write**, checked out beside the Conversation's own
+Worktree and bound into every one of its sessions' Sandboxes at whichever of
+the two it is set to. Registered is the whole of the trust boundary: what a
+Conversation may compose is what the human has already put in the registry. The
+Conversation's own Repo is refused — it is the work's repository already, and a
+second checkout of it in one sandbox is not a companion — and so is a Repo
+added twice.
+
+**Configured beside the branch while the Brief drafts**, on the setup card and
+by the setup's own rules: freely added, edited and taken away, and frozen at
+grill start along with the branch and the base. What is configured is the mode,
+the branch the checkout comes off — that repository's default branch where none
+is picked, the rule the Conversation's own base follows — and, for a read-write
+one, what its branch is to be called. Empty is not a branch called nothing but
+*mirroring*: the Conversation's own branch name, followed as it is renamed,
+until a name is typed and stands on its own.
+
+**Frozen only means it stops narrowing.** A **Steer** may put another
+registered Repo in and open a read-only one up to read-write, on every target
+the work goes on in, because what that settles is the sandbox the sessions to
+come run in rather than a property of one state. Never the other way: nothing
+removes a companion and nothing puts one back to read-only, so what a session
+was once given is never taken back mid-Conversation. What is added at a steer
+answers the setup card's questions again, and what is opened up is cut its
+branch off the base its row already names, re-resolved at that moment — the
+repository is joining the work now, so it starts from now rather than from the
+commit its detached checkout was left at.
+
+**A Stage inherits its predecessor's whole set**, through the one act that
+gives it the Pairings and the stage brief: a stage has no draft moment of its
+own, so there is nowhere else the set could come from, and a roadmap grilled
+against a repository would otherwise build without it. Read-only ones come
+across as they are; read-write ones cut a branch of their own per stage, named
+after the stage's own branch rather than carrying a name somebody typed while
+drafting the roadmap, because two stages sharing one companion branch would be
+two review units on one branch. Where the stage's own branch stacks on its
+predecessor's, its companion branches stack too.
+
+**Always a Worktree of Verkstead's own, never the human's checkout.** Whenever
+one is made — a grill start, an adopted stage, a steer, a stage a settling
+predecessor starts — each companion is fetched and then resolved, the
+Conversation's repository's order for the Conversation's repository's reasons.
+A read-only one is checked out **detached** at the commit its base resolved to,
+having nothing to commit and no business taking a name in somebody else's
+repository; a read-write one is cut a branch from its base, exactly as the
+Conversation's repository is. Every question is asked before anything is made,
+so an answer git will not give — the fetch that failed, the base that resolves
+to nothing, the branch already taken — refuses the whole press naming the
+repository and leaves neither a directory nor a branch behind; where nobody is
+at a button, it halts the stage and says so on the Timeline instead. Closed the
+way the Conversation's own is: the directory goes and the branch stays.
+
+**A session gets the checkout, and is told it is there.** The worktree and the
+git directory behind it are both bound at the companion's mode — read-only
+reaches the git directory too, or the history would be writable around the back
+— and the companion Repo's own Sandbox Configuration binds are composed in
+beside them, because building in it needs them. Its flake is not entered for
+the session: the dev shell is the Conversation's own worktree's alone, and an
+agent that needs a companion's enters it itself, `nix` being on the sandbox
+`PATH`. The prompt carries one neutral `# Companion repositories` listing —
+each one named with its directory, what it holds and whether it may be written
+to — and no instructions with it, because what a companion is for is the
+Brief's to say. What a Conversation was configured with is read on the Brief's
+details pane ever after, the setup rows having gone when the card froze.
+
+**A read-write one's branch is swept like the Conversation's own.** Every commit
+that lands on it reaches the same Timeline, labelled with the Repo's registered
+name — where a commit in the Conversation's own repository draws unlabelled,
+because an unlabelled card means the work's own repo and the label earns its
+place when repos mix. Opening one shows its diff read out of the companion's
+repository. A read-only companion is swept by nothing: its checkout is detached
+and bound read-only, so there is nothing there for a commit to land on.
+_Avoid_: submodule, dependency, linked repo, sibling checkout, secondary repo
 
 **Skill**:
 One of the workflows Verkstead runs its sessions by — grilling, implementing,
@@ -151,7 +233,8 @@ _Avoid_: item, record, message, step
 
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose
-first, a delta Diagram after it — kept by the sweep with its trailers stripped,
+first, a delta Diagram after it — kept by the sweep of whichever repository it
+landed in with its trailers stripped,
 rendered as the **Message** above the diff in the commit's details pane —
 headed and boxed there the way a Set's Preface is — and clamped to a prose
 snippet on its Timeline card. Written for commits that deliver work; pure
@@ -532,7 +615,11 @@ second.
 source is the more of it there is to make. A Worktree whose directory has gone
 is checked out afresh from the branch, exactly as a pressed Resume makes one; a
 Draft has no branch either, so it is cut where a grill start would have cut it —
-off the base the human fixed, resolved at that moment.
+off the base the human fixed, resolved at that moment. Every **Companion Repo**
+the record holds with nothing on disk is checked out again beside it, which is
+what a steered Draft and a Conversation steered back out of Closed both need:
+without it either would reach a running state with companions the sandbox skips
+in silence.
 
 **What a target takes is what it has to be about.** Grilling takes a new Brief,
 optional, empty being the round starting on the one already there; and a choice
@@ -547,6 +634,19 @@ nothing on the branch a follow-up could fall back on — it is something the hum
 wanted rather than a step of the run. Wrapping takes nothing: its watchers
 recompute over whatever the branch now holds, the fix attempts forgotten. Done
 takes nothing at all, there being nothing to run in it.
+
+**And every target work goes on in takes the sandbox.** A companion section
+under all three of them — Grilling, Implementing and Wrapping — because what it
+settles is the world the sessions to come run in rather than a payload of one
+state: the **Companion Repos** already there to read, a tick that opens a
+read-only one up to read-write, and a row per registered Repo not on the
+Conversation yet, asking what a setup row asks. Not under Done, where nothing
+runs and there is nothing a companion could be for. One direction only: no row
+offers removal and no switch offers read-only, so a downgrade cannot be spelled
+at all. Everything it takes in is checked out as the steer lands, and a
+companion it cannot deliver refuses the whole press by name — a press that did
+not happen, with no directory, no branch, no row, nothing ended and no stop
+cleared.
 
 **The record is the move with the human's own line above it.** The Steer is an
 Event of its own — somebody decided this — carrying the instruction, or the
@@ -884,9 +984,19 @@ May contain zero Answers.
 _Avoid_: submission, result
 
 **Diff**:
-The uncommitted changes (including untracked files) of the asking repo,
-captured by the CLI at send time and attached to every Question Set, so code
-approval can happen in the web UI.
+The uncommitted changes (including untracked files) of the Worktrees a Question
+Set was asked from, read by the server as it arrives and attached to it, so code
+approval can happen in the web UI. The server knows which Conversation a Set was
+asked from and can read those Worktrees itself, so nothing about it is taken on
+trust from what was sent.
+One block per repository a session may write in — the Conversation's own first,
+then each read-write Companion Repo — each named by its Repo. A repository with
+a clean Worktree contributes no block, and every one of them clean is a Set with
+no Diff. The page draws the blocks under one *Diff* heading and labels every one
+of them but the Conversation's own drawn alone — an unlabelled block means the
+work's own repo, so naming it there would be naming it twice, and a companion's
+block is named however alone it is. Which is the rule a commit card follows,
+asked the same way round.
 _Avoid_: patch, changeset
 
 **Diagram**:

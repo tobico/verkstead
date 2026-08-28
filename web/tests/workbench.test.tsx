@@ -24,6 +24,7 @@ import type {
   Capture,
   CheckRollup,
   CommitPane,
+  CompanionView,
   ConversationArchived,
   ConversationClosed,
   ConversationEntry,
@@ -33,6 +34,7 @@ import type {
   ConversationView,
   GrillingStarted,
   ProfileEntry,
+  PinnedEvent,
   PullRequestDetails,
   Resumed,
   RoadmapPane,
@@ -74,8 +76,10 @@ import {
 import actions from "../src/workbench/Actions.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import adoption from "../src/workbench/Adoption.module.css";
-// The detail panes, each a module of its own: a commit, a document read whole,
-// one session's record and the terminal it was printed on, and a pull request.
+// The detail panes, each a module of its own: the brief and what the
+// conversation was configured with, a commit, a document read whole, one
+// session's record and the terminal it was printed on, and a pull request.
+import briefPane from "../src/workbench/Brief.module.css";
 import commitPane from "../src/workbench/Commit.module.css";
 import commitPaneCss from "../src/workbench/Commit.module.css?raw";
 // The Diff section the commit pane draws, which is the Set page's own component
@@ -123,10 +127,22 @@ import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // jsdom lays nothing out for, and the pane names everything else is found by.
 import shell from "../src/workbench/Workbench.module.css";
 import shellCss from "../src/workbench/Workbench.module.css?raw";
-import { CLAMPED_LINES, RESUME_REFUSAL, SWIPE } from "../src/workbench/Timeline";
+import {
+  ABBREVIATED,
+  CLAMPED_LINES,
+  RESUME_REFUSAL,
+  SWIPE,
+} from "../src/workbench/Timeline";
+import {
+  COMPANION_BRANCH_REFUSAL,
+  COMPANION_MODE_REFUSAL,
+  COMPANION_REFUSAL,
+  COMPANION_REMOVAL_REFUSAL,
+} from "../src/workbench/Setup";
 import { STEER_REFUSAL } from "../src/workbench/Steer";
 import {
   BRANCHES,
+  COMPANION_BRANCHES,
   HIDING_ARCHIVED,
   OPEN,
   PROFILES,
@@ -2657,6 +2673,447 @@ describe("a conversation's setup", () => {
       container.querySelector(`.${setup.baseBranch} .${notices.note}`),
     ).toBeNull();
     expect(screen.queryByText(/branches from/)).toBeNull();
+  });
+});
+
+/// The other repositories a conversation works alongside: added from the ⋯ at
+/// the end of the branch row, and drawn as a row apiece under it.
+///
+/// Whether a repository may be added at all is the server's — its own repo and
+/// one already there are refused over there, and the tests in
+/// `crates/server/tests/conversations.rs` are what say so. What is asked here is
+/// that the press goes out, that the row is drawn, and that a refusal is said in
+/// words where it was made.
+describe("a conversation's companion repos", () => {
+  /// The two presses it takes to get to the list of repos: the ⋯ at the end of
+  /// the branch row, and then the row that opens the level they are listed in.
+  async function openTheList(container: ParentNode): Promise<void> {
+    fireEvent.click(
+      await drawn<HTMLButtonElement>(
+        container,
+        `.${setup.setupMenu} > button`,
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /Add companion repo/ }),
+    );
+  }
+
+  it("lists the registered repos in a level of the one menu", async () => {
+    theWorkbenchWith({ companions: [] });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openTheList(container);
+
+    // Every registered repo, including this conversation's own: what may be
+    // added is the server's to say, and a list that quietly left one out would
+    // send the human hunting for a repo that is registered.
+    for (const repo of REPOS) {
+      expect(screen.getByRole("menuitem", { name: repo.name })).toBeTruthy();
+    }
+
+    // One card and one wash, because a level is a place in this menu rather
+    // than a menu of its own.
+    expect(container.querySelectorAll(`.${dropdown.drop}`)).toHaveLength(1);
+    expect(container.querySelectorAll(`.${dropdown.backdrop}`)).toHaveLength(1);
+  });
+
+  it("sends the repo that was pressed", async () => {
+    const fetching = theWorkbenchWith({ companions: [] }, whenever(
+      `/api/ui/conversations/${OPEN.id}/companions`,
+      json("Added"),
+      "POST",
+    ));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openTheList(container);
+    fireEvent.click(screen.getByRole("menuitem", { name: REPOS[1]!.name }));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/companions`),
+      ).toEqual({ repo_id: REPOS[1]!.id }),
+    );
+
+    // The menu is a way to say which repository, and the row appearing under
+    // the branch is the confirmation — so the card comes back.
+    await waitFor(() => expect(container.querySelector(`.${dropdown.drop}`)).toBeNull());
+  });
+
+  /// A refusal is not an error: it is a sentence about the repository that was
+  /// pressed, and it is said in the level the press was made in — which is
+  /// still open, because a menu that shut would take the only place it had left
+  /// to be said.
+  it("says a refusal where the press was made, and stays open to say it", async () => {
+    theWorkbenchWith({ companions: [] }, whenever(
+      `/api/ui/conversations/${OPEN.id}/companions`,
+      json("OwnRepo"),
+      "POST",
+    ));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openTheList(container);
+    fireEvent.click(screen.getByRole("menuitem", { name: OPEN.repo.name }));
+
+    await waitFor(() =>
+      expect(container.textContent).toContain(COMPANION_REFUSAL.OwnRepo),
+    );
+    expect(container.querySelector(`.${dropdown.drop}`)).toBeTruthy();
+  });
+
+  /// A row apiece under the branch row, naming the repository.
+  it("draws a row per companion under the branch row", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const rows = await drawn(container, `.${setup.companions}`);
+    expect([...rows.querySelectorAll(`.${setup.companionName}`)].map(
+      (name) => name.textContent,
+    )).toEqual(OPEN.companions.map((companion) => companion.repo.name));
+
+    // Under the two fields rather than over them: the branch row is what they
+    // were added from.
+    const branches = container.querySelector(`.${setup.branches}`)!;
+    expect(
+      branches.compareDocumentPosition(rows) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("takes one away when its × is pressed", async () => {
+    const companion = OPEN.companions[0]!;
+    const removing = `/api/ui/conversations/${OPEN.id}/companions/${companion.repo.id}/remove`;
+    const fetching = theWorkbench(whenever(removing, json("Removed"), "POST"));
+    mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await waitFor(() =>
+        screen.getByRole("button", { name: `Remove ${companion.repo.name}` }),
+      ),
+    );
+
+    await waitFor(() => expect(writes(fetching, removing)).toBe(1));
+  });
+
+  it("says why a removal was refused, on the row it was refused for", async () => {
+    const companion = OPEN.companions[0]!;
+    const removing = `/api/ui/conversations/${OPEN.id}/companions/${companion.repo.id}/remove`;
+    theWorkbench(whenever(removing, json("NotDrafting"), "POST"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await waitFor(() =>
+        screen.getByRole("button", { name: `Remove ${companion.repo.name}` }),
+      ),
+    );
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${setup.companion} .${setup.failure}`)
+          ?.textContent,
+      ).toBe(COMPANION_REMOVAL_REFUSAL.NotDrafting),
+    );
+  });
+
+  /// A conversation with none has nothing here to say, so nothing is drawn —
+  /// not an empty list with a heading over it.
+  it("draws nothing at all where there are none", async () => {
+    theWorkbenchWith({ companions: [] });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${setup.branches}`);
+
+    expect(container.querySelector(`.${setup.companions}`)).toBeNull();
+
+    // And the way to add one is still there: having none is the state most
+    // conversations are in rather than a thing to be locked out of.
+    expect(container.querySelector(`.${setup.setupMenu}`)).toBeTruthy();
+  });
+
+  /// The rows freeze with the branch and the base, because the server freezes
+  /// all three at the same moment: a row whose × comes back refused is worse
+  /// than no row.
+  it("goes with the branch and the base when the card freezes", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
+
+    expect(container.querySelector(`.${setup.companions}`)).toBeNull();
+    expect(container.querySelector(`.${setup.setupMenu}`)).toBeNull();
+  });
+});
+
+
+/// What a companion row settles about the repository it names: where its
+/// checkout comes off, whether the work may write to it, and — where it may —
+/// what its branch is called.
+///
+/// Whether any of it may be changed at all is the server's, and the tests in
+/// `crates/server/tests/conversations.rs` are what say so. What is asked here
+/// is that each control draws what the record holds, that its save goes out,
+/// and that a refusal is said on the row it was refused for.
+describe("configuring a companion repo", () => {
+  /// The fixture's one companion, which every test here alters.
+  const ASKANCE = OPEN.companions[0]!;
+
+  /// Where each of the three saves goes.
+  const MODE = `/api/ui/conversations/${OPEN.id}/companions/${ASKANCE.repo.id}/mode`;
+  const BASE = `/api/ui/conversations/${OPEN.id}/companions/${ASKANCE.repo.id}/base`;
+  const NAMING = `/api/ui/conversations/${OPEN.id}/companions/${ASKANCE.repo.id}/branch`;
+
+  /// The workbench with that companion altered — and both repositories'
+  /// branches served, the conversation's row and the companion's each having a
+  /// dropdown over a list of its own.
+  function theCompanion(
+    over: Partial<CompanionView>,
+    ...answers: Parameters<typeof serving>
+  ) {
+    return theWorkbenchWith(
+      { companions: [{ ...ASKANCE, ...over }] },
+      whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
+      whenever(
+        `/api/ui/repos/${ASKANCE.repo.id}/branches`,
+        json(COMPANION_BRANCHES),
+      ),
+      ...answers,
+    );
+  }
+
+  /// What one of that row's controls is called: the words on the label, and
+  /// the repository it belongs to, which the label carries where nobody sees
+  /// it — a card with two companions on it has two of every control.
+  const named = (control: string) => `${control} for ${ASKANCE.repo.name}`;
+
+  /// The branch field on the companion's row, which is told from the
+  /// conversation's own by the repository its label names.
+  function branchField(): HTMLInputElement {
+    return screen.getByLabelText(named("Branch")) as HTMLInputElement;
+  }
+
+  /// The rule first and then the branches, as the conversation's own base
+  /// dropdown offers them — but read off the companion's repository, which is a
+  /// different repository with a default branch and a list of its own.
+  it("offers the companion repo's own rule and then its own branches", async () => {
+    theCompanion({});
+    mount(`/conversations/${OPEN.id}`);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText(named("Base")),
+    )) as HTMLSelectElement;
+
+    await waitFor(() => expect(picker.options).toHaveLength(3));
+    expect([...picker.options].map((option) => option.value)).toEqual([
+      "",
+      ...COMPANION_BRANCHES,
+    ]);
+    expect(picker.options[0]!.textContent).toContain(
+      ASKANCE.repo.default_branch,
+    );
+    expect(picker.options[0]!.textContent).not.toContain(
+      OPEN.repo.default_branch,
+    );
+  });
+
+  it("records the base branch that was picked, by name", async () => {
+    const fetching = theCompanion({}, whenever(BASE, json("Recorded"), "POST"));
+    mount(`/conversations/${OPEN.id}`);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText(named("Base")),
+    )) as HTMLSelectElement;
+    await waitFor(() =>
+      expect([...picker.options].map((option) => option.value)).toContain(
+        "trunk",
+      ),
+    );
+
+    fireEvent.change(picker, { target: { value: "trunk" } });
+
+    await waitFor(() =>
+      expect(sent(fetching, BASE)).toEqual({ branch: "trunk" }),
+    );
+  });
+
+  /// The switch is what says whether the work may commit to the repository, and
+  /// it is the one control on the row that changes what the row is: there is no
+  /// branch to name until it is on.
+  it("flips to read-write, and there is nothing to name until it is on", async () => {
+    const fetching = theCompanion({}, whenever(MODE, json("Chosen"), "POST"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const toggle = (await waitFor(() =>
+      screen.getByLabelText(named("Read-write")),
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(
+      container.querySelector(`#companion-${ASKANCE.repo.id}-branch`),
+    ).toBeNull();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(sent(fetching, MODE)).toEqual({ mode: "ReadWrite" }),
+    );
+  });
+
+  /// A read-write companion the human has never typed a name into is
+  /// *mirroring*: the field is drawn prefilled with the conversation's own
+  /// branch, so what they read is what they will get.
+  it("prefills a mirroring branch with the conversation's own name", async () => {
+    theCompanion({ mode: "ReadWrite", branch: "" });
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => expect(branchField().value).toBe(OPEN.branch));
+  });
+
+  /// And it follows that name: renaming the conversation's branch renames this
+  /// one with it, for as long as nothing has been typed here.
+  it("moves a mirroring branch with the conversation's own", async () => {
+    theWorkbenchWith(
+      {
+        branch: "counter-in-redis",
+        companions: [{ ...ASKANCE, mode: "ReadWrite", branch: "" }],
+      },
+      whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
+      whenever(
+        `/api/ui/repos/${ASKANCE.repo.id}/branches`,
+        json(COMPANION_BRANCHES),
+      ),
+    );
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => expect(branchField().value).toBe("counter-in-redis"));
+  });
+
+  /// A name that has been typed stands on its own and stops following.
+  it("leaves a named branch where it is, whatever the conversation's is called", async () => {
+    theCompanion({ mode: "ReadWrite", branch: "alongside" });
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => expect(branchField().value).toBe("alongside"));
+    expect(branchField().value).not.toBe(OPEN.branch);
+  });
+
+  /// It keeps itself the way the conversation's own branch field does: there is
+  /// nothing to press, and leaving the field is what sends what is in it.
+  it("saves a typed branch name on the way out of the field", async () => {
+    const fetching = theCompanion(
+      { mode: "ReadWrite", branch: "" },
+      whenever(NAMING, json("Renamed"), "POST"),
+    );
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => branchField());
+
+    expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
+    fireEvent.input(branchField(), { target: { value: "alongside" } });
+    fireEvent.blur(branchField());
+
+    await waitFor(() =>
+      expect(sent(fetching, NAMING)).toEqual({ branch: "alongside" }),
+    );
+  });
+
+  /// And clearing it is going back to mirroring rather than a branch called
+  /// nothing — so the record is asked to hold no name, and the field fills
+  /// itself in again with what mirroring will now give.
+  it("goes back to mirroring when the field is cleared", async () => {
+    let held = "alongside";
+    const fetching = serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
+      whenever(
+        `/api/ui/repos/${ASKANCE.repo.id}/branches`,
+        json(COMPANION_BRANCHES),
+      ),
+      // The record as the save leaves it, so that what the field falls back to
+      // is read rather than assumed.
+      whenever(`/api/ui/conversations/${OPEN.id}`, () =>
+        json({
+          ...OPEN,
+          companions: [{ ...ASKANCE, mode: "ReadWrite", branch: held }],
+        })(),
+      ),
+      whenever(
+        NAMING,
+        () => {
+          held = "";
+          return json("Renamed")();
+        },
+        "POST",
+      ),
+    );
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => expect(branchField().value).toBe("alongside"));
+
+    fireEvent.input(branchField(), { target: { value: "" } });
+    fireEvent.blur(branchField());
+
+    await waitFor(() => expect(sent(fetching, NAMING)).toEqual({ branch: "" }));
+    await waitFor(() => expect(branchField().value).toBe(OPEN.branch));
+  });
+
+  /// A refusal is a sentence about the row it was refused for, said on that
+  /// row: the card draws one per companion, and a refusal said anywhere else
+  /// would be about a repository the human has to guess at.
+  it("says why a change was refused, on the row it was refused for", async () => {
+    theCompanion({}, whenever(MODE, json("NotDrafting"), "POST"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await waitFor(() => screen.getByLabelText(named("Read-write"))));
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${setup.companion} .${setup.failure}`)
+          ?.textContent,
+      ).toBe(COMPANION_MODE_REFUSAL.NotDrafting),
+    );
+  });
+
+  /// The same for the field, which is refused for a name git will not take as
+  /// well as for a conversation that has moved on — and heals, for the reason
+  /// the conversation's own branch field does: the keystroke after a refusal
+  /// may well be what fixes it.
+  it("says why a branch name was refused, and heals when it is valid", async () => {
+    let outcome = "NotABranchName";
+    const fetching = theCompanion(
+      { mode: "ReadWrite", branch: "" },
+      whenever(NAMING, () => json(outcome)(), "POST"),
+    );
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => branchField());
+
+    fireEvent.input(branchField(), { target: { value: "two..dots" } });
+    fireEvent.blur(branchField());
+
+    await waitFor(() =>
+      expect(screen.getAllByText(COMPANION_BRANCH_REFUSAL.NotABranchName)),
+    );
+
+    outcome = "Renamed";
+    fireEvent.input(branchField(), { target: { value: "two-dots" } });
+    fireEvent.blur(branchField());
+
+    await waitFor(() => expect(writes(fetching, NAMING)).toBe(2));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(COMPANION_BRANCH_REFUSAL.NotABranchName),
+      ).toBeNull(),
+    );
+  });
+
+  /// The three of them go with the branch and the base when the card freezes,
+  /// because the server freezes every one of them at the same moment.
+  it("goes with the rest of the setup when the card freezes", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
+
+    expect(screen.queryByLabelText(named("Base"))).toBeNull();
+    expect(screen.queryByLabelText(named("Read-write"))).toBeNull();
   });
 });
 
@@ -5868,6 +6325,10 @@ describe("steering a conversation", () => {
         // sent.
         brief: null,
         digest: false,
+        // And nothing is being put in the sandbox either, which every target work
+        // goes on in carries.
+        added: [],
+        upgraded: [],
         instruction: null,
         follow_up: "Does it count the 429s it sends?",
       }),
@@ -6042,6 +6503,8 @@ describe("steering a conversation", () => {
         // sent.
         brief: null,
         digest: false,
+        added: [],
+        upgraded: [],
         instruction: "Note the window the count is against.",
         follow_up: null,
       }),
@@ -6115,6 +6578,8 @@ describe("steering a conversation", () => {
         // document about nothing.
         brief: null,
         digest: false,
+        added: [],
+        upgraded: [],
         instruction: null,
         follow_up: null,
       }),
@@ -6154,6 +6619,8 @@ describe("steering a conversation", () => {
         pairing: { profile_id: own.profile.id, model: own.model },
         brief: "# Retries\n\nThe backoff is wrong.\n",
         digest: true,
+        added: [],
+        upgraded: [],
         instruction: null,
         follow_up: null,
       }),
@@ -6230,6 +6697,10 @@ describe("steering a conversation", () => {
         pairing: null,
         brief: null,
         digest: false,
+        // Nor a sandbox: nothing runs in done, so there is nothing a
+        // companion could be for.
+        added: [],
+        upgraded: [],
         instruction: null,
         follow_up: null,
       }),
@@ -6287,6 +6758,215 @@ describe("steering a conversation", () => {
     const refused = await drawn(document.body, `.${steerModal.steerConversation} .${steerModal.failure}`);
 
     expect(refused.textContent).toBe(STEER_REFUSAL.NoSuchConversation);
+  });
+
+  /// The companion section is sandbox setup rather than a payload of one state,
+  /// so it is drawn under every target work goes on in — and not under done,
+  /// where nothing runs and there is nothing a companion could be for.
+  it("offers the repos to work alongside on every target work goes on in", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: false, ready_to_continue: true },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(`/api/ui/repos/${REPOS[0]!.id}/branches`, json(COMPANION_BRANCHES)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+
+    for (const target of ["Grilling", "Implementing"]) {
+      fireEvent.click(
+        await drawn(modal, `.${steerModal.steerTarget} input[value="${target}"]`),
+      );
+
+      const offered = await drawn(modal, `.${steerModal.steerAdding}`);
+
+      expect(
+        [...offered.querySelectorAll(`.${steerModal.steerAddName}`)].map(
+          (row) => row.textContent,
+        ),
+      ).toEqual(["askance"]);
+    }
+
+    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Done"]`));
+
+    await waitFor(() =>
+      expect(modal.querySelector(`.${steerModal.steerCompanions}`)).toBeNull(),
+    );
+  });
+
+  /// And ticking one is what puts it in the submit, with everything a setup row
+  /// would have said about it: how far in, off which branch, and under what
+  /// name. The branch field opens only where there is a branch to name — a
+  /// read-only companion is checked out detached.
+  it("sends the repos ticked to go into the sandbox", async () => {
+    const alongside = REPOS[0]!;
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: false, ready_to_continue: true },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(`/api/ui/repos/${alongside.id}/branches`, json(COMPANION_BRANCHES)),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+
+    // Nothing opens until the row is ticked: an untouched row says only that
+    // the repository is registered.
+    expect(modal.querySelector(`.${steerModal.steerAddConfig}`)).toBeNull();
+
+    fireEvent.click(await drawn(modal, `.${steerModal.steerAddName} input`));
+
+    const opened = await drawn(modal, `.${steerModal.steerAddConfig}`);
+
+    // Read-only to begin with, which is the least a human has to say — and a
+    // read-only checkout is detached, so there is no branch to name.
+    expect(opened.querySelector(`.${steerModal.steerAddBranch}`)).toBeNull();
+
+    fireEvent.click(await drawn(opened, "input[type='checkbox']"));
+
+    const branch = (await drawn(
+      opened,
+      `#steer-companion-${alongside.id}-branch`,
+    )) as HTMLInputElement;
+
+    // Prefilled with the conversation's own branch, which is what mirroring
+    // comes to: what the human reads is what they will get.
+    expect(branch.value).toBe(GRILLING.branch);
+
+    fireEvent.input(branch, { target: { value: "alongside" } });
+
+    // The base dropdown is over the *companion's* own branches, which are read
+    // when the row opens: picked once they are there, the way the setup card's
+    // own is.
+    const base = (await drawn(
+      opened,
+      `#steer-companion-${alongside.id}-base`,
+    )) as HTMLSelectElement;
+
+    await waitFor(() =>
+      expect([...base.options].map((option) => option.value)).toContain(
+        COMPANION_BRANCHES[0]!,
+      ),
+    );
+
+    fireEvent.change(base, { target: { value: COMPANION_BRANCHES[0]! } });
+
+    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toMatchObject({
+        added: [
+          {
+            repo_id: alongside.id,
+            mode: "ReadWrite",
+            base_ref: COMPANION_BRANCHES[0]!,
+            branch: "alongside",
+          },
+        ],
+      }),
+    );
+  });
+
+  /// And a repo that came in read-only can be opened up on the row that says so,
+  /// with the branch to cut beside the tick — the same question the setup card
+  /// asked at draft time, asked at the one other moment it can be.
+  ///
+  /// One direction only: nothing here offers read-only and nothing offers
+  /// removal, so a read-write row carries no control at all.
+  it("opens a read-only repo up, and offers nothing on a read-write one", async () => {
+    const askance = REPOS[0]!;
+    const reading: CompanionView = {
+      repo: askance,
+      mode: "ReadOnly",
+      base_ref: null,
+      branch: "",
+      worktree: { path: "/state/worktrees/askance-trunk", missing: false },
+      base_commit: "c0ffee",
+    };
+    const fetching = theGrillingStanding(
+      {
+        ready_to_stop: true,
+        working: false,
+        ready_to_continue: true,
+        companions: [reading],
+      },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    const row = await drawn(modal, `.${steerModal.steerAlong}`);
+
+    // Nothing opens until the tick: the row says what the repo is and how far
+    // into it the work reaches, and that is all.
+    expect(row.querySelector(`.${steerModal.steerOpenBranch}`)).toBeNull();
+    expect(row.textContent).toContain("read-only");
+
+    fireEvent.click(await drawn(row, `.${steerModal.steerOpenUp} input`));
+
+    // Ticked, the row says what it will be rather than what it was, and the
+    // branch to cut opens under it.
+    await waitFor(() => expect(row.textContent).toContain("read-write"));
+    expect(row.textContent).not.toContain("read-only");
+
+    const branch = (await drawn(
+      row,
+      `#steer-open-${askance.id}-branch`,
+    )) as HTMLInputElement;
+
+    // Prefilled with the conversation's own, which is what mirroring comes to.
+    expect(branch.value).toBe(GRILLING.branch);
+
+    fireEvent.input(branch, { target: { value: "alongside" } });
+    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+
+    // No mode on the wire, because there is one direction: a row that could
+    // carry read-only would be a row that could take back what was given.
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toMatchObject({
+        added: [],
+        upgraded: [{ repo_id: askance.id, branch: "alongside" }],
+      }),
+    );
+  });
+
+  /// And a read-write companion offers nothing at all: it is already as open as
+  /// a repo gets, and there is no way back from it.
+  it("offers no control on a companion that is read-write already", async () => {
+    theGrillingStanding(
+      {
+        ready_to_stop: true,
+        working: false,
+        ready_to_continue: true,
+        companions: [
+          {
+            repo: REPOS[0]!,
+            mode: "ReadWrite",
+            base_ref: null,
+            branch: "",
+            worktree: null,
+            base_commit: null,
+          },
+        ],
+      },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    const row = await drawn(modal, `.${steerModal.steerAlong}`);
+
+    expect(row.querySelector(`.${steerModal.steerOpenUp}`)).toBeNull();
+    expect(row.querySelector("input")).toBeNull();
   });
 
   /// The record of one: the human's own line, and the machine's plain move under
@@ -6854,14 +7534,15 @@ const COMMITS = BUILDING.timeline.flatMap((event) =>
 /// One commit, as the details pane fetches it: no summary, which is the
 /// bookkeeping commit and every commit recorded before summaries were kept.
 ///
-/// The diff is built from the answering set's own attached diff rather than
-/// written by hand: it is the same `DiffView`, rendered by the same server-side
-/// renderer that a commit's diff goes through — which is the whole reason a
-/// commit needs no diff machinery of its own.
+/// The diff is built from the one block of the answering set's own attached
+/// Diff rather than written by hand: it is the same `DiffView`, rendered by the
+/// same server-side renderer that a commit's diff goes through — which is the
+/// whole reason a commit needs no diff machinery of its own. One repository's,
+/// because a commit lands in one.
 const COMMIT_PANE: CommitPane = {
   summary: null,
   diagrams: false,
-  diff: readable(answeringSet).diff,
+  diff: readable(answeringSet).diff[0]!.diff,
 };
 
 /// The same commit with something to say for itself: the summary as the server
@@ -6976,8 +7657,30 @@ describe("a commit on the timeline", () => {
       ...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.commit} .${timeline.subject}`),
     ].map((it) => it.textContent);
 
-    expect(COMMITS).toHaveLength(2);
+    expect(COMMITS).toHaveLength(3);
     expect(subjects).toEqual(COMMITS.map((commit) => commit.subject));
+  });
+
+  /// Which repository a commit landed in, where that is not the conversation's
+  /// own. The fixture's timeline carries both — two commits in the repo the work
+  /// is in and one out of the companion — and only the companion's is labelled:
+  /// an unlabelled card means the work's own repo.
+  it("labels a commit that landed in a companion repo, and only that one", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`);
+
+    const labelled = COMMITS.filter((commit) => commit.repo !== null);
+    expect(labelled).toHaveLength(1);
+
+    const drawnLabels = [
+      ...container.querySelectorAll(
+        `.${timeline.timelineEvent} > .${timeline.commit} .${timeline.repo}`,
+      ),
+    ].map((it) => it.textContent);
+
+    expect(drawnLabels).toEqual([labelled[0]!.repo]);
   });
 
   /// There is nothing to decide about a commit. The design gives it no
@@ -7042,6 +7745,36 @@ describe("a commit on the timeline", () => {
 
     expect(header.textContent).toContain(COMMITS[0]!.subject);
     expect(header.textContent).toContain(COMMITS[0]!.sha.slice(0, 7));
+    expect(header.querySelector(`.${commitPane.repo}`)).toBeNull();
+  });
+
+  /// And which repository it landed in, where the pane is opened on a companion
+  /// repo's commit: the same label the card carries, said again beside the hash,
+  /// because the diff under it is that repository's rather than the work's own.
+  it("says which repository a companion's commit came from", async () => {
+    const companions = COMMITS.find((commit) => commit.repo !== null)!;
+
+    theBuilding(
+      {},
+      whenever(
+        `/api/ui/conversations/${BUILDING.id}/commit/${companions.id}`,
+        json(COMMIT_PANE),
+      ),
+    );
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`);
+
+    fireEvent.click(
+      [...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.commit}`)].find(
+        (card) =>
+          card.querySelector(`.${timeline.subject}`)!.textContent === companions.subject,
+      )!,
+    );
+
+    const header = await drawn(container, `.${shell.detailsPane} .${commitPane.header}`);
+
+    expect(header.querySelector(`.${commitPane.repo}`)!.textContent).toBe(companions.repo);
   });
 
   /// What the commit said about itself, between the header and the diff — the
@@ -9007,6 +9740,24 @@ const OPENED = (() => {
   return pinned.PullRequest;
 })();
 
+/// And the pull request the same wrap-up opened in a read-write companion repo:
+/// a repository of its own, a number of its own, and its name on the card.
+///
+/// Composed rather than a fixture of its own, because what is being read here is
+/// how the pinned block draws more than one — the card itself is the same card
+/// the server's own fixture carries.
+const BESIDE_IT: PinnedEvent = {
+  PullRequest: {
+    id: OPENED.id + 1,
+    at: "2026-08-21T08:32:11.000Z",
+    number: 7,
+    title: "Rate limiting",
+    url: "https://github.com/tobico/askance/pull/7",
+    repo: "askance",
+    checks: null,
+  },
+};
+
 /// What is on it, which the details pane fetches from the server, which asks
 /// GitHub through the host's `gh`.
 const CARRIED: PullRequestDetails = {
@@ -9344,6 +10095,74 @@ describe("the pinned pull request", () => {
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(0);
   });
 
+  /// A conversation ends on one pull request per repository it was worked in,
+  /// so the pinned block draws every one of them rather than the last it finds.
+  /// The work's own is unlabelled and a companion's carries its repository, by
+  /// the rule a commit's label follows.
+  it("draws every pull request, naming the ones in a companion repo", async () => {
+    theWrapping({ pinned: [...WRAPPING.pinned, BESIDE_IT] });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const dots = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.carousel} > .${timeline.dots}`,
+    );
+
+    expect(
+      [...dots.querySelectorAll("button")].map((dot) =>
+        dot.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Pull request", "Pull request in askance"]);
+
+    const own = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
+    expect(own.querySelector(`.${timeline.repo}`)).toBeNull();
+
+    fireEvent.click([...dots.querySelectorAll("button")][1]!);
+
+    const companions = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.pullRequest} .${timeline.repo}`,
+    );
+    expect(companions.textContent).toBe("askance");
+  });
+
+  /// And opening a companion's asks the server about that pull request's own
+  /// event, which is what says which repository to ask GitHub in.
+  it("opens a companion's pull request against its own event", async () => {
+    const fetching = theWrapping(
+      { pinned: [...WRAPPING.pinned, BESIDE_IT] },
+      whenever(
+        `/api/ui/conversations/${WRAPPING.id}/pull-request/${BESIDE_IT.PullRequest.id}`,
+        json(CARRIED),
+      ),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const dots = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.carousel} > .${timeline.dots}`,
+    );
+    fireEvent.click([...dots.querySelectorAll("button")][1]!);
+
+    const companions = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.pullRequest} .${timeline.repo}`,
+    );
+    // The card itself, which is the whole of the press.
+    fireEvent.click(companions.closest(`.${timeline.pullRequest}`)!);
+
+    await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
+
+    expect(
+      askedFor(
+        fetching,
+        `/api/ui/conversations/${WRAPPING.id}/pull-request/${BESIDE_IT.PullRequest.id}`,
+      ),
+    ).toBe(1);
+    expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(0);
+  });
+  });
+
 /// A conversation with all three kinds pinned at once: the backlog it was built
 /// from, the roadmap the branch wrote to, and the pull request it ended on.
 ///
@@ -9622,7 +10441,6 @@ describe("the pinned carousel", () => {
     await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBeGreaterThan(0);
   });
-});
 });
 
 /// A wrap-up narrowed to its checks: the review answered, nothing said on the
@@ -9929,7 +10747,9 @@ describe("the documents on a timeline", () => {
 
     fireEvent.click(brief);
 
-    const opened = await drawn(details(), `.${documentPane.document}`);
+    // Its own pane rather than the one the handoff and the instruction share,
+    // because it carries the configuration summary under the markdown.
+    const opened = await drawn(details(), `.${briefPane.brief}`);
 
     expect(details().querySelector("h1")!.textContent).toBe("Brief");
     // The whole of it, and not inside a clamp: the pane is where a document
@@ -10040,6 +10860,216 @@ describe("the documents on a timeline", () => {
 
     expect(notice.querySelector(`.${timeline.clamp}`)).toBeNull();
     expect(notice.getAttribute("role")).toBeNull();
+  });
+});
+
+/// What the conversation was configured with, under the brief that started it.
+///
+/// The setup card goes when the brief freezes, so this is the only place the
+/// rest of a conversation's life says what it was set up with — a read-write
+/// companion surfaces later through its commits and its pull request, and a
+/// read-only one never does. The worktree directories and the two pairings are
+/// as unfindable, which is why they are here too.
+describe("the configuration on the brief's pane", () => {
+  /// The details pane, and the summary it has drawn.
+  const details = () => screen.getByLabelText("Details");
+  const summary = () => details().querySelector(`.${briefPane.configuration}`);
+
+  /// Every term the summary lays out against what it says, which is how the
+  /// pane is read: down the terms, past the ones it was not opened for.
+  function facts(list: Element): Record<string, string> {
+    return Object.fromEntries(
+      [...list.querySelectorAll(`.${briefPane.fact}`)].map((fact) => [
+        fact.querySelector("dt")!.textContent,
+        fact.querySelector("dd")!.textContent,
+      ]),
+    );
+  }
+
+  /// The conversation's own facts, which are the first list on the pane — a
+  /// companion's are inside the block that names it.
+  function configuration(): Record<string, string> {
+    return facts(summary()!.querySelector(`.${briefPane.facts}`)!);
+  }
+
+  /// Every companion block, in the order the conversation carries them.
+  function companions(): Record<string, string>[] {
+    return [...summary()!.querySelectorAll(`.${briefPane.companion}`)].map(
+      (block) => ({
+        Repo: block.querySelector(`.${briefPane.companionName}`)!.textContent!,
+        ...facts(block.querySelector(`.${briefPane.facts}`)!),
+      }),
+    );
+  }
+
+  /// The brief opened, whichever conversation is being served.
+  async function openBrief(conversation: ConversationView): Promise<void> {
+    const { container } = mount(`/conversations/${conversation.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`),
+    );
+
+    await drawn(details(), `.${briefPane.configuration}`);
+  }
+
+  /// A read-only companion left on the rule, and a read-write one left
+  /// mirroring: the two shapes a companion row can freeze in, which no fixture
+  /// holds — a golden file is one payload, and these are a conversation
+  /// configured two ways at once.
+  const READING: CompanionView = {
+    repo: {
+      id: 2,
+      name: "askance",
+      path: "/srv/repos/askance",
+      default_branch: "trunk",
+    },
+    mode: "ReadOnly",
+    base_ref: null,
+    branch: "",
+    worktree: {
+      path: "/var/lib/verkstead/worktrees/askance-trunk",
+      missing: false,
+    },
+    base_commit: "8b1c3d5e76f32b11a0c4d1e8f5b3a97c2d0e4f6a",
+  };
+
+  const WRITING: CompanionView = {
+    repo: {
+      id: 3,
+      name: "tobico-skills",
+      path: "/srv/repos/tobico-skills",
+      default_branch: "main",
+    },
+    mode: "ReadWrite",
+    base_ref: "main",
+    branch: "",
+    worktree: {
+      path: `/var/lib/verkstead/worktrees/tobico-skills-${GRILLING.branch}`,
+      missing: false,
+    },
+    base_commit: "0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e76f32b11a",
+  };
+
+  it("says the repo, the branch, the base commit, the worktree and both pairings", async () => {
+    theGrilling();
+    await openBrief(GRILLING);
+
+    // Under the brief itself rather than over it: the document is what the pane
+    // is titled for, and this is what follows it.
+    const panes = [...details().children];
+    const markdown = panes.findIndex((pane) =>
+      pane.classList.contains(briefPane.brief!),
+    );
+    expect(markdown).toBeGreaterThan(-1);
+    expect(
+      panes.findIndex((pane) =>
+        pane.classList.contains(briefPane.configuration!),
+      ),
+    ).toBeGreaterThan(markdown);
+
+    expect(configuration()).toEqual({
+      Repo: GRILLING.repo.name,
+      Branch: GRILLING.branch,
+      // The commit, abbreviated the way every other commit on the page is.
+      Base: GRILLING.base_commit!.slice(0, ABBREVIATED),
+      Worktree: GRILLING.worktree!.path,
+      Grilling: "fable — claude-fable-5",
+      Implementation: "opus — claude-opus-5",
+    });
+  });
+
+  it("lists each companion with its mode, its branch and its directory", async () => {
+    theGrillingStanding({ companions: [READING, WRITING] });
+    await openBrief(GRILLING);
+
+    expect(companions()).toEqual([
+      {
+        Repo: "askance",
+        Access: "Read-only",
+        // No branch, because a read-only companion is checked out detached —
+        // and the commit it is detached at rather than the branch that was
+        // picked, which is the same honesty the base row above is written for:
+        // a name that has moved since would say the checkout is somewhere it
+        // is not. Abbreviated the way every other commit on the page is.
+        "Detached at": READING.base_commit!.slice(0, ABBREVIATED),
+        Worktree: READING.worktree!.path,
+      },
+      {
+        Repo: "tobico-skills",
+        Access: "Read-write",
+        // Left mirroring, which is the conversation's own branch name — the
+        // record holds nothing, and this is what nothing resolves to.
+        Branch: GRILLING.branch,
+        Worktree: WRITING.worktree!.path,
+      },
+    ]);
+  });
+
+  /// A checkout made before Verkstead kept the commit has only the name to fall
+  /// back on — the base that was picked, or that repo's own default branch
+  /// where nothing was.
+  it("falls back to the base's name where no commit was recorded", async () => {
+    theGrillingStanding({
+      companions: [{ ...READING, base_commit: null }],
+    });
+    await openBrief(GRILLING);
+
+    expect(companions()[0]!["Detached at"]).toBe(READING.repo.default_branch);
+  });
+
+  it("summarises a conversation with no companions all the same", async () => {
+    theGrilling();
+    await openBrief(GRILLING);
+
+    expect(GRILLING.companions).toHaveLength(0);
+    expect(Object.keys(configuration())).toContain("Worktree");
+    // No heading over an empty list: a section saying a conversation has no
+    // companions would read as something having gone missing.
+    expect(summary()!.querySelector(`.${briefPane.companions}`)).toBeNull();
+  });
+
+  /// A directory somebody deleted by hand is a conversation with a problem,
+  /// said where the directory is said rather than left for whatever next tries
+  /// to work in it to fall over on.
+  it("says which checkout is gone from disk", async () => {
+    theGrillingStanding({
+      worktree: { ...GRILLING.worktree!, missing: true },
+    });
+    await openBrief(GRILLING);
+
+    expect(configuration().Worktree).toContain(GRILLING.worktree!.path);
+    expect(summary()!.querySelector(`.${briefPane.gone}`)!.textContent).toBe(
+      "gone from disk",
+    );
+  });
+
+  /// The pane reports the configuration; the setup card is still the only place
+  /// any of it is changed. So there is nothing on it to press, and a
+  /// conversation past drafting has nothing here it could press anyway.
+  it("changes nothing", async () => {
+    theGrillingStanding({ companions: [READING, WRITING] });
+    await openBrief(GRILLING);
+
+    expect(
+      summary()!.querySelectorAll("button, input, select, textarea, a"),
+    ).toHaveLength(0);
+  });
+
+  /// The other two documents are unchanged by it: they are read in the plain
+  /// pane they have always been read in, and neither has a configuration to
+  /// carry.
+  it("leaves the handoff and the instruction panes alone", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timelineEvent} > .${timeline.handoff}`),
+    );
+
+    await drawn(details(), `.${documentPane.document}`);
+
+    expect(details().querySelector(`.${briefPane.configuration}`)).toBeNull();
   });
 });
 

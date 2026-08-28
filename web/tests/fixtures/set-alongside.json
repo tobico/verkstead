@@ -1,0 +1,125 @@
+{
+  "Set": {
+    "branch": "solid-viewer",
+    "conversation": 1,
+    "diagrams": false,
+    "diff": [
+      {
+        "diff": {
+          "html": "<details class=\"diffFile\" id=\"diff-1\" open><summary><span class=\"diffPath\">src/limits.rs</span><span class=\"diffStat\"><span class=\"add\">+1</span><span class=\"del\">−1</span></span></summary><div class=\"diffHunk\"><p class=\"diffHunkHeader\">@@ -1,4 +1,4 @@</p><pre class=\"diffLines\"><code><span class=\"diffLine ctx\"><span class=\"diffNumber\">1</span><span class=\"marker\"> </span><span class=\"tok-source tok-rust\"><span class=\"tok-meta tok-function tok-rust\"><span class=\"tok-meta tok-function tok-rust\"><span class=\"tok-storage tok-modifier tok-rust\">pub</span> <span class=\"tok-storage tok-type tok-function tok-rust\">fn</span> </span><span class=\"tok-entity tok-name tok-function tok-rust\">allowance</span></span><span class=\"tok-meta tok-function tok-rust\"><span class=\"tok-meta tok-function tok-parameters tok-rust\"><span class=\"tok-punctuation tok-section tok-parameters tok-begin tok-rust\">(</span></span><span class=\"tok-meta tok-function tok-rust\"><span class=\"tok-meta tok-function tok-parameters tok-rust\"><span class=\"tok-punctuation tok-section tok-parameters tok-end tok-rust\">)</span></span></span></span><span class=\"tok-meta tok-function tok-rust\"> <span class=\"tok-meta tok-function tok-return-type tok-rust\"><span class=\"tok-punctuation tok-separator tok-rust\">-&gt;</span> <span class=\"tok-storage tok-type tok-rust\">u32</span></span> </span><span class=\"tok-meta tok-function tok-rust\"><span class=\"tok-meta tok-block tok-rust\"><span class=\"tok-punctuation tok-section tok-block tok-begin tok-rust\">{</span></span></span></span></span><span class=\"diffLine del\"><span class=\"diffNumber\"></span><span class=\"marker\">-</span><span class=\"tok-source tok-rust\">    <span class=\"tok-constant tok-numeric tok-integer tok-decimal tok-rust\">60</span></span></span><span class=\"diffLine add\"><span class=\"diffNumber\">2</span><span class=\"marker\">+</span><span class=\"tok-source tok-rust\">    <span class=\"tok-constant tok-numeric tok-integer tok-decimal tok-rust\">600</span></span></span><span class=\"diffLine ctx\"><span class=\"diffNumber\">3</span><span class=\"marker\"> </span><span class=\"tok-source tok-rust\">}</span></span></code></pre></div></details><details class=\"diffFile\" id=\"diff-2\" open><summary><span class=\"diffPath\">notes.txt</span><span class=\"diffStatus\">new file</span><span class=\"diffStat\"><span class=\"add\">+2</span><span class=\"del\">−0</span></span></summary><div class=\"diffHunk\"><p class=\"diffHunkHeader\">@@ -0,0 +1,2 @@</p><pre class=\"diffLines\"><code><span class=\"diffLine add\"><span class=\"diffNumber\">1</span><span class=\"marker\">+</span>the queue backed up at 40k/min</span><span class=\"diffLine add\"><span class=\"diffNumber\">2</span><span class=\"marker\">+</span>a shared counter needs redis</span></code></pre></div></details>",
+          "paths": [
+            "src/limits.rs",
+            "notes.txt"
+          ]
+        },
+        "repo": "verkstead"
+      },
+      {
+        "diff": {
+          "html": "<details class=\"diffFile\" id=\"diff-3\" open><summary><span class=\"diffPath\">src/set.rs</span><span class=\"diffStat\"><span class=\"add\">+1</span><span class=\"del\">−1</span></span></summary><div class=\"diffHunk\"><p class=\"diffHunkHeader\">@@ -1,3 +1,3 @@</p><pre class=\"diffLines\"><code><span class=\"diffLine ctx\"><span class=\"diffNumber\">1</span><span class=\"marker\"> </span><span class=\"tok-source tok-rust\"><span class=\"tok-meta tok-struct tok-rust\"><span class=\"tok-storage tok-modifier tok-rust\">pub</span> <span class=\"tok-storage tok-type tok-struct tok-rust\">struct</span> </span><span class=\"tok-meta tok-struct tok-rust\"><span class=\"tok-entity tok-name tok-struct tok-rust\">QuestionSet</span> </span><span class=\"tok-meta tok-struct tok-rust\"><span class=\"tok-meta tok-block tok-rust\"><span class=\"tok-punctuation tok-section tok-block tok-begin tok-rust\">{</span></span></span></span></span><span class=\"diffLine del\"><span class=\"diffNumber\"></span><span class=\"marker\">-</span><span class=\"tok-source tok-rust\">    <span class=\"tok-storage tok-modifier tok-rust\">pub</span> diff<span class=\"tok-punctuation tok-separator tok-rust\">:</span> <span class=\"tok-meta tok-generic tok-rust\"><span class=\"tok-support tok-type tok-rust\">Option</span><span class=\"tok-punctuation tok-definition tok-generic tok-begin tok-rust\">&lt;</span><span class=\"tok-support tok-type tok-rust\">String</span><span class=\"tok-punctuation tok-definition tok-generic tok-end tok-rust\">&gt;</span></span><span class=\"tok-punctuation tok-separator tok-rust\">,</span></span></span><span class=\"diffLine add\"><span class=\"diffNumber\">2</span><span class=\"marker\">+</span><span class=\"tok-source tok-rust\">    <span class=\"tok-storage tok-modifier tok-rust\">pub</span> diffs<span class=\"tok-punctuation tok-separator tok-rust\">:</span> <span class=\"tok-meta tok-generic tok-rust\"><span class=\"tok-support tok-type tok-rust\">Vec</span><span class=\"tok-punctuation tok-definition tok-generic tok-begin tok-rust\">&lt;</span>RepoDiff<span class=\"tok-punctuation tok-definition tok-generic tok-end tok-rust\">&gt;</span></span><span class=\"tok-punctuation tok-separator tok-rust\">,</span></span></span><span class=\"diffLine ctx\"><span class=\"diffNumber\">3</span><span class=\"marker\"> </span><span class=\"tok-source tok-rust\">}</span></span></code></pre></div></details>",
+          "paths": [
+            "src/set.rs"
+          ]
+        },
+        "repo": "askance"
+      }
+    ],
+    "follow_up": false,
+    "id": 1,
+    "postscript_html": null,
+    "preface_html": "<p><code>POST /v1/messages</code> has no rate limit.</p>\n<ul>\n<li>one client sent 40k requests in a minute</li>\n<li>the queue was backed up for twenty</li>\n</ul>\n",
+    "project": "verkstead",
+    "proposal": null,
+    "questions": [
+      {
+        "ask": {
+          "columns": [],
+          "name": "Q1",
+          "options": [
+            {
+              "cells": [],
+              "n": 1,
+              "recommended": false,
+              "text_html": "In-process, per instance — see <code>Counter::local</code>."
+            },
+            {
+              "cells": [],
+              "n": 2,
+              "recommended": true,
+              "text_html": "In <strong>Redis</strong>, shared across instances."
+            }
+          ],
+          "text_html": "<p>Where should the request counter live?</p>\n<ul>\n<li>in-process, per instance</li>\n<li>in <code>redis</code>, shared across instances</li>\n</ul>\n"
+        },
+        "heading": false,
+        "nav_text": "Where should the request counter live? in-process, per instance in redis, shared across instances",
+        "subquestions": []
+      },
+      {
+        "ask": {
+          "columns": [],
+          "name": "Q2",
+          "options": [
+            {
+              "cells": [],
+              "n": 1,
+              "recommended": false,
+              "text_html": "A bare 429. no headers no body"
+            },
+            {
+              "cells": [],
+              "n": 2,
+              "recommended": false,
+              "text_html": "A 429 plus RateLimit headers."
+            }
+          ],
+          "text_html": "<p>How should a throttled client be told to back off?</p>\n<div class=\"wide\"><pre><code><span class=\"\"><span class=\"\"><span class=\"\"><span class=\"tok-storage\">fn</span> </span><span class=\"tok-entity tok-name\">allowance</span></span><span class=\"\"><span class=\"\"><span class=\"\">(</span></span><span class=\"\"><span class=\"\"><span class=\"\">)</span></span></span></span><span class=\"\"> <span class=\"\"><span class=\"\">-&gt;</span> <span class=\"tok-storage\">u32</span></span> </span><span class=\"\"><span class=\"\"><span class=\"\">{</span> <span class=\"tok-constant\">600</span> </span><span class=\"\"><span class=\"\">}</span></span></span></span></code></pre></div>"
+        },
+        "heading": false,
+        "nav_text": "How should a throttled client be told to back off? fn allowance() -> u32 { 600 }",
+        "subquestions": [
+          {
+            "columns": [],
+            "name": "Q2a",
+            "options": [
+              {
+                "cells": [],
+                "n": 1,
+                "recommended": false,
+                "text_html": "The exact number of seconds."
+              },
+              {
+                "cells": [],
+                "n": 2,
+                "recommended": false,
+                "text_html": "A rounded number."
+              }
+            ],
+            "text_html": "<p>What should Retry-After say?</p>\n<div class=\"wide\"><table><thead><tr><th>header</th><th>seconds</th></tr></thead><tbody>\n<tr><td>Retry-After</td><td>30</td></tr>\n</tbody></table>\n</div>"
+          },
+          {
+            "columns": [],
+            "name": "Q2b",
+            "options": [],
+            "text_html": "<p>Anything else about the headers?</p>\n"
+          }
+        ]
+      },
+      {
+        "ask": {
+          "columns": [],
+          "name": "Q3",
+          "options": [],
+          "text_html": "<p>Anything I should know before starting?</p>\n"
+        },
+        "heading": false,
+        "nav_text": "Anything I should know before starting?",
+        "subquestions": []
+      }
+    ],
+    "standing": {
+      "Waiting": "waiting"
+    },
+    "title": "Rate limiting for the public API"
+  }
+}

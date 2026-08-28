@@ -27,6 +27,27 @@
   gap: 0.6rem;
 }
 
+/* Which repository the block under it came out of, drawn wherever the Diff
+   names one — see `Diff.tsx`. A name over a run of files rather than a heading
+   of the page's own: the section is the Diff, and this says which part of it
+   the reader is in.
+
+   The table of contents says the same word over the same files, in `.group`
+   there, and the two are meant to read as one name. */
+.repo {
+  margin: 0.9rem 0 0.4rem;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* The first block opens right under the section's own heading, which has left
+   the room already. */
+.repo:first-of-type {
+  margin-top: 0;
+}
+
 /* Word wrap, remembered per device and switched on beside the heading. It undoes
    the three rules that hold a hunk on one line: the `pre`'s own `white-space`,
    the box measured to the longest line, and — because a wrapped line has to

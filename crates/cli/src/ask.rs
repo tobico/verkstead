@@ -41,12 +41,13 @@ pub fn ask(file: Option<&Path>, deferred: bool, server: &str) -> Result<()> {
     })?;
 
     // Whatever the agent put in these, the working directory is the authority
-    // (ADR-0001), so they are overwritten rather than trusted.
+    // (ADR-0001), so they are overwritten rather than trusted. The Diff is the
+    // authority's too and is not here: the server reads it off the Worktree the
+    // Set is asked from, and overwrites whatever arrives in the same spirit.
     let cwd = std::env::current_dir().context("reading the working directory")?;
     let derived = repo::enrichment(&cwd);
     set.project = derived.project;
     set.branch = derived.branch;
-    set.diff = derived.diff;
 
     // A wait that goes to plan is silent. A harness runs this in the background
     // and captures both streams into one file, so anything said here on the way

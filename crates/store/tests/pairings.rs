@@ -70,7 +70,7 @@ async fn grilled(pool: &SqlitePool, repo: &Repo, grilling: &Profile, implementat
         .await
         .unwrap();
 
-    start_grilling(pool, id, "deadbeef", Path::new("/state/worktrees/x"))
+    start_grilling(pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
         .await
         .unwrap();
 }

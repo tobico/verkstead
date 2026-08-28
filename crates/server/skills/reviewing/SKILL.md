@@ -1,19 +1,34 @@
 ---
 name: reviewing
-description: Review a branch that is already on a pull request, propose the fixes it and its comments need as one Question Set, and land the ones the human accepts. Use when a session has been dispatched to review work at the end of a wrap-up.
+description: Review work that is already on a pull request — one, or one per repository it reached — propose the fixes it and its comments need as one Question Set, and land the ones the human accepts. Use when a session has been dispatched to review work at the end of a wrap-up.
 ---
 
-Review the branch this worktree is on, put what you find to the human, and fix
-what they accept. **You propose, and then you fix what was agreed to.** Nothing
-you find is changed before they have said so, and everything they say yes to is
-changed here rather than by somebody else afterwards.
+Review the work this Conversation carried to a pull request, put what you find
+to the human, and fix what they accept.
+**You propose, and then you fix what was agreed to.** Nothing you find is
+changed before they have said so, and everything they say yes to is changed here
+rather than by somebody else afterwards.
 
 You are the first thing to see this work whole. The sessions that wrote it each
 saw one task and none of them saw the branch, and you have none of their
 context — which is the point. Read it as somebody who has to live with it.
 
-What you propose about is the branch **and** whatever has already been said on
-its pull request. Nobody else is sent to act on those comments: what they ask for
+**The work may be on more than one pull request.** A Conversation that committed
+in a companion repository ends on one there too, and the whole of the work is all
+of them. Where your prompt has a **The pull requests this work is on** section,
+it names each — the repository, the number, the URL, and the worktree that
+repository's branch is checked out in. Read each of them where it lives: `cd`
+into that worktree first, because `git` and `gh` both read their repository from
+wherever they are run, so a `gh pr diff` from the wrong directory reads somebody
+else's pull request. Where your prompt lists none, the branch in the worktree
+you started in is the whole of the work.
+
+They are one piece of work however many repositories they are spread across, and
+that is why one session reads them: a change in a companion and the change here
+that needed it are one thing to judge, and they go into one Set together.
+
+What you propose about is the work **and** whatever has already been said on its
+pull requests. Nobody else is sent to act on those comments: what they ask for
 goes into your Set beside what you found yourself, so the human decides about
 their own words rather than watching a session act on them unasked.
 
@@ -22,37 +37,45 @@ offer to split it out into a backlog for sessions of their own instead — see
 step 5. That is the exception and not the shape of the job: the ordinary review
 is a handful of fixes, made here.
 
-The branch is already pushed and already has an open pull request. There is
-nothing to create, nothing to switch to, and nothing to open.
+Every branch of it is already pushed and already has an open pull request. There
+is nothing to create, nothing to switch to, and nothing to open.
 
 ## 1. Read the work
 
-Read the whole diff first, before you form an opinion about any part of it:
+Read the whole diff first, before you form an opinion about any part of it — and
+where the work is on more than one pull request, all of them, each read in the
+worktree its own repository is checked out in:
 
+    cd <the worktree that pull request is in>
     gh pr diff
 
 Then go and read what it landed in. A diff shows what changed and hides what it
 changed *around* — the callers, the sibling module doing the same job a
-different way, the test that should have caught this and does not.
+different way, the test that should have caught this and does not. Where the work
+is spread across repositories, that reading crosses them: the caller of what
+changed in a companion may be what changed here.
 
-Read what the repository says about itself, too: its `CLAUDE.md` or
+Read what each repository says about itself, too: its `CLAUDE.md` or
 `AGENTS.md`, the docs it keeps for agents, the conventions its neighbouring code
-actually follows. The work is meant to look like it belongs here.
+actually follows. The work is meant to look like it belongs where it landed, and
+what belongs in one repository is not what belongs in the next — judge each half
+by its own repository's conventions rather than by the one you started in.
 
 The Brief and the handoff in your prompt say what the work was *for*. Review
 against those rather than against what you would have built.
 
 ## 2. Read what has already been said
 
-Where anything had been said on the pull request before you started, it is under
+Where anything had been said on the pull requests before you started, it is under
 **What has been said on the pull request** at the end of your prompt: the
 comments whole, in the order they were said in, and where each of them was said.
-A comment left on a line of the diff carries its file and line, which is half of
-what it means.
+Every comment names the pull request it was left on, and one left on a line of
+the diff carries its file and line beside it — both halves are what it means.
 
-Read it as what it is — somebody who has read this branch, telling whoever wrote
+Read it as what it is — somebody who has read this work, telling whoever wrote
 it what they think — and go and look at what each one is about before you decide
-what it is asking for.
+what it is asking for. Which is in the worktree of the repository whose pull
+request it was left on: the file it names is that repository's.
 
 **You are the only session that will act on these.** Nothing else is dispatched
 about them, so a comment you leave out is a comment nobody answers. Work out what
@@ -75,6 +98,11 @@ see across tasks, so look hardest at what only shows up from here:
 - **Correctness** — the bug, the unhandled case, the thing that is wrong.
 - **Seams between the pieces** — two tasks that solved the same problem twice,
   an abstraction introduced by one and ignored by the next, a half-done rename.
+- **Seams between the repositories**, where the work is on more than one — the
+  half that changed here and the half that changed in a companion disagreeing: a
+  caller passing what the callee no longer takes, a rename one side made and the
+  other did not. You are the only session that ever sees both, so this is the
+  seam nobody else could have found.
 - **Drift from what was settled** — where the branch quietly decided something
   the handoff had already decided differently.
 - **Tests that do not test** — the assertion that passes whatever the code does,
@@ -158,6 +186,13 @@ questions:
   Question which comment it answers and whose it was, so the human can see their
   own words being taken up — their comment is where it came from and not what it
   says to do.
+- **One Set for the whole of the work**, however many repositories it reached.
+  Every finding goes in it, and a finding about a companion
+  **names the repository it is about** in the Question's own words, so what they
+  are picking between says plainly what would change and where. Findings about
+  the repository you started in need no such label: unlabelled means the work's
+  own repository, and saying so on every Question would cost a read and buy
+  nothing.
 - **Read `verkstead guide` before you write it** — how a Set is labelled, how
   much belongs in one, and the shape it goes over the wire in. It ships inside
   the binary, so nothing else has to be found. A review that has found more than
@@ -241,8 +276,9 @@ may reframe the answers above it.
 Fix each accepted finding as what it is: the cause rather than the symptom, and
 nothing beside what they agreed to. Anything else you notice on the way is a
 finding you did not raise, and fixing it now is a decision they did not get to
-make. Then run the repository's tests and make sure what you did works before it
-goes anywhere.
+make. Fix it where it lives — in the worktree of the repository the finding is
+about — and then run that repository's tests and make sure what you did works
+before it goes anywhere.
 
 ## 7. Fix whatever the checks have gone red on
 
@@ -250,13 +286,20 @@ You have held this Worktree since before you asked, and you hold it until you
 end: the ask that blocked for hours is a session working rather than a Worktree
 free. So a check that went red while you waited has had nobody sent to it —
 nothing is dispatched into a Worktree something is already working in. It is
-yours, the way the comments are.
+yours, the way the comments are. Every pull request's checks, not just the one
+you started in: none of them had anybody sent to it either.
 
-Once the answers are in, ask the pull request how its checks are getting on:
+Once the answers are in, ask each pull request how its checks are getting on, in
+the worktree that one lives in:
 
+    cd <the worktree that pull request is in>
     gh pr checks
 
-Whatever is failing, fix it here, alongside the findings they accepted and
+Asked where it lives, because `gh` reads its repository from wherever it is run:
+a `gh pr checks` from the wrong directory answers about somebody else's suite,
+which is the one report that looks exactly like the one you wanted.
+
+Whatever is failing, fix it there, alongside the findings they accepted and
 before you push. Go and read what the check actually complained about — its run
 is linked from that output, and the repository says how to run the failing thing
 yourself. A fix written from the name of a job is a guess.
@@ -282,6 +325,14 @@ A finding they answered by splitting it out is not work for this session. What
 you owe it is a `.tasks/` backlog — written here, committed here, and worked by
 nobody in this Worktree today.
 
+**In the worktree you started in**, whichever repository the finding is about.
+That is the Conversation's own, and it is the one place Verkstead reads a backlog
+off: a list written in a companion's worktree is one nothing will ever find, and
+the work you split out would be waited for by nobody. Say in the task file which
+repository the work is in, where it is not the one the list is sitting in — the
+session that works it starts where you did and is checked out beside every
+companion, exactly as you are.
+
 The branch's own backlog is finished with by the time you are reading it, so
 what you write is a fresh one:
 
@@ -305,9 +356,9 @@ what you write is a fresh one:
 
 What follows is Verkstead's. It reads the backlog off the branch, sends this
 Conversation back to be built, and works the list a session at a time; the finish
-that follows the last task wraps the work up again on this same pull request, and
-a fresh review reads the whole branch then. So there is nothing here to hand over
-and nobody to hand it to — the task files are the handover.
+that follows the last task wraps the work up again on the pull requests it
+already had, and a fresh review reads the whole of it then. So there is nothing
+here to hand over and nobody to hand it to — the task files are the handover.
 
 If they split nothing out, there is nothing to write. Leave no `.tasks/` behind:
 an empty backlog is a run Verkstead would start and find nothing in.
@@ -317,19 +368,26 @@ an empty backlog is a run Verkstead would start and find nothing in.
 **Nothing waits on approval.** The approval was their Response, and there is
 nobody at this terminal to ask for a second one.
 
-One commit per finding, so each reads against the decision that asked for it:
+One commit per finding, so each reads against the decision that asked for it, in
+the worktree that finding's fix was made in:
 
     git add -A
     git commit -m "fix: <the finding, and what you did about it>"
 
-Then push once, when the last of them is in — the backlog's commit included, if
-you wrote one:
+Then push each worktree you committed in, once, when the last of its commits is
+in — the backlog's commit included, if you wrote one:
 
     git push
 
-Push, unlike most sessions here: this branch is already on a pull request, and a
-fix that stays local is one nobody can see and nothing re-runs. The push is what
-puts the commits in front of the checks again.
+Every one of them: a repository you fixed something in and did not push is a
+decision the human made and nobody can see. `git` reads its repository from
+wherever it is run, so a push from the wrong directory pushes the wrong branch —
+and a repository you committed nothing in has nothing to push, which is most of
+them on most reviews.
+
+Push, unlike most sessions here: these branches are already on pull requests, and
+a fix that stays local is one nobody can see and nothing re-runs. The push is
+what puts the commits in front of the checks again.
 
 ### What the message body says
 
@@ -369,24 +427,28 @@ Trailers go at the end as usual; the workbench takes them off what it shows.
       class throttle removed
     ```
 
-Do not open a pull request, do not touch any other branch, and do not merge
-anything. The pull request exists, and merging is the human's act.
+Do not open a pull request, do not merge anything, and do not touch any branch
+beyond the ones you were sent to: the branches checked out in the worktrees your
+prompt named, or the one you started in where it named none. Every other branch —
+in these repositories and in every companion beside them — belongs to somebody
+else's piece of work. The pull requests exist, and merging is the human's act.
 
-Then say what you fixed, what you split out and what you left, and stop.
+Then say what you fixed, what you split out and what you left, and where each of
+it was, and stop.
 
 ## 10. A review with nothing to raise
 
 Nothing to raise means both halves: you found nothing yourself, *and* nothing
-said on the pull request asks for anything. Comments you were given are the other
-source of a decision here — a branch you would not have touched, where somebody
+said on the pull requests asks for anything. Comments you were given are the
+other source of a decision here — work you would not have touched, where somebody
 has asked for a change, is a review that proposes about that change alone.
 
 Ask nothing where there is genuinely neither.
-**Say plainly, as the last thing you print, that you reviewed the branch and
+**Say plainly, as the last thing you print, that you reviewed the work and
 found nothing worth raising** — that line is what the human sees on the
-Timeline — and stop. Say that you read what was said on the pull request too,
-where there was anything to read: it is the only report that any of it was
-looked at.
+Timeline — and stop. Say which pull requests you read, where there was more than
+one, and that you read what was said on them too where there was anything to
+read: it is the only report that any of it was looked at.
 
 A Set with no findings in it is a row for them to dismiss, and the point of this
 phase is to spend their attention only where there is a decision. Finding

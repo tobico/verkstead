@@ -23,16 +23,20 @@ import { createSignal, type JSX, Show } from "solid-js";
 import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
+import { COMPANION_REFUSAL } from "./Timeline";
 import styles from "./Adoption.module.css";
 
 /// Each way of being refused an adoption, in the words of what to go and do
-/// about it.
+/// about it — for the conversation's own repo.
 ///
 /// One line each rather than a single "cannot adopt", because the server names
 /// them separately for exactly this: a profile to choose, a box somebody
 /// ticked, a branch somebody is on and a worktree git would not make are four
 /// different jobs, and only the human can tell which they are looking at.
-export const ADOPT_REFUSAL: Record<Adopted, string> = {
+export const ADOPT_REFUSAL: Record<
+  Exclude<Adopted, { Companion: unknown }>,
+  string
+> = {
   Adopted: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been adopted.",
@@ -57,6 +61,21 @@ export const ADOPT_REFUSAL: Record<Adopted, string> = {
     "The stage's own branch already exists, and Verkstead did not make it.",
   WorktreeRefused: "Git would not make the worktree. The server log says why.",
 };
+
+/// What to say about an adoption that was refused.
+///
+/// A companion's refusal names the repository, because that is the whole of what
+/// makes it different from the same failing on the conversation's own: the thing
+/// to go and look at is one of several repos rather than the obvious one. The
+/// four lines are the grill start's own, because the four failings are — see
+/// `COMPANION_REFUSAL` in [`Timeline`](./Timeline.tsx).
+export function adoptRefusal(outcome: Adopted): string {
+  if (typeof outcome === "object") {
+    return `${outcome.Companion.repo}: ${COMPANION_REFUSAL[outcome.Companion.why]}`;
+  }
+
+  return ADOPT_REFUSAL[outcome];
+}
 
 export function Adoption(props: {
   conversation: ConversationView;
@@ -132,11 +151,18 @@ export function Adoption(props: {
           This creates the branch and its worktree, takes the stage brief as
           this conversation's brief, and starts the work on it. Both agent
           profiles have to be chosen first.
+          {/* And the companions, where any were configured while it drafted:
+              the press checks them out beside the stage's own, so it is worth
+              saying that it is this press that makes them. */}
+          <Show when={props.conversation.companions.length}>
+            {" "}
+            The repos alongside are checked out with it.
+          </Show>
         </Note>
 
         <Show when={refused()}>
           {(outcome) => (
-            <ErrorLine class={styles.failure}>{ADOPT_REFUSAL[outcome()]}</ErrorLine>
+            <ErrorLine class={styles.failure}>{adoptRefusal(outcome())}</ErrorLine>
           )}
         </Show>
         <Show when={adopt.isError}>

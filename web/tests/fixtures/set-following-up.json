@@ -3,7 +3,7 @@
     "branch": "rate-limiting",
     "conversation": 1,
     "diagrams": false,
-    "diff": null,
+    "diff": [],
     "follow_up": true,
     "id": 1,
     "postscript_html": "<p>Both are pushed as separate commits, so the second can go on its own.</p>\n",

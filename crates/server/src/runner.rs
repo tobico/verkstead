@@ -627,7 +627,8 @@ async fn nothing_left(
     base: Option<&str>,
     driving: Driving,
 ) {
-    let Some((branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
+    let Some((_repo_id, branch, found)) = crate::wrapping::asked(&state, conversation_id).await
+    else {
         return;
     };
 
@@ -723,7 +724,7 @@ async fn nothing_left(
 ///   when it came to push, and the halt is what reaches the human on their
 ///   phone.
 async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
-    let Some((branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
+    let Some((_, branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
         return;
     };
 
@@ -1030,12 +1031,14 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
 /// so that a stop written before anything else runs carries the tail of what *it*
 /// last said, and `None` where there is no session left to read one off.
 async fn to_a_pull_request(state: &AppState, conversation_id: i64, writing: Option<i64>) {
-    let Some((branch, found)) = crate::wrapping::asked(state, conversation_id).await else {
+    let Some((repo_id, branch, found)) = crate::wrapping::asked(state, conversation_id).await
+    else {
         return;
     };
 
     if !matches!(found, Err(github::Trouble::NoPullRequest)) {
-        return crate::wrapping::record(state, conversation_id, &branch, found, writing).await;
+        return crate::wrapping::record(state, conversation_id, repo_id, &branch, found, writing)
+            .await;
     }
 
     tracing::warn!(
@@ -1251,8 +1254,8 @@ async fn follow_inline(
 
     // Taken before the waiting starts, so it is a count of what the run had
     // landed before this session rather than including what it goes on to do.
-    let already = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len(),
+    let already = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
             return;
@@ -1340,8 +1343,8 @@ async fn follow_inline(
     // Read after the session is over, which is after its relay has waited out the
     // final sweep of the branch: a session's last act is usually a commit, and it
     // lands a poll after the process that made it has gone.
-    let landed = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len() > already,
+    let landed = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed > already,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what an inline session committed failed");
             return;
@@ -1385,7 +1388,7 @@ async fn follow_inline(
             // A branch that could not be asked about at all falls the same way,
             // that being in the log already and no more of an answer than it
             // was.
-            Some((_, Err(github::Trouble::NoPullRequest))) | None => {
+            Some((_, _, Err(github::Trouble::NoPullRequest))) | None => {
                 "the session ended without committing anything".to_owned()
             }
             // Anything else is what the landed arm above makes of it, made in
@@ -1459,8 +1462,8 @@ pub(crate) async fn instructed(
     // Taken before the session starts, so it is a count of what the branch
     // carried before the instruction rather than one that includes what it goes
     // on to do.
-    let already = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len(),
+    let already = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
             return;
@@ -1534,8 +1537,8 @@ pub(crate) async fn instructed(
     // whichever way it ended, exactly as a step's landing is: what was committed
     // is committed, and an agent that did the work and then fell over on its way
     // out has left the human nothing to decide about.
-    let landed = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len() > already,
+    let landed = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed > already,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what an instruction session committed failed");
             return;
@@ -1630,7 +1633,8 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
     // sweep could find the Conversation undriven and stop it all over again.
     let _driving = driving;
 
-    let Some((branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
+    let Some((_repo_id, branch, found)) = crate::wrapping::asked(&state, conversation_id).await
+    else {
         return;
     };
 
@@ -1737,8 +1741,8 @@ pub(crate) async fn following_up(
     // follow-up's own: whether the wrap-up's checks go back to waiting turns on
     // whether *this* follow-up pushed anything, and a Conversation on a pull
     // request has a run of commits behind it already.
-    let already = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len(),
+    let already = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
             return;
@@ -1909,8 +1913,8 @@ async fn over(state: &AppState, conversation_id: i64, already: usize, driving: D
 
     state.sessions.end(conversation_id).await;
 
-    let pushed = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len() > already,
+    let pushed = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed > already,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what a follow-up had committed failed");
             true
@@ -2191,8 +2195,8 @@ async fn follow_roadmap(
 pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &str) -> Option<i64> {
     // Taken before the session starts, so it is a count of what the branch
     // carried before this fix rather than one that includes it.
-    let already = match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len(),
+    let already = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
             return None;
@@ -2282,15 +2286,26 @@ pub(crate) enum Reviewed {
 
 /// Run the one review session a wrap-up gets, and wait until it is over.
 ///
-/// `said` is what was written on the pull request before this started, which the
-/// caller reads inside the Turn it is holding and records as addressed — so this
-/// session is the one that proposes about it, and nothing else is sent to.
+/// One session however many pull requests the work ended up on: `on` is every one
+/// of them, so that the session reading the work whole knows where the whole of
+/// it is — see [`crate::review::across`].
+///
+/// `said` is what was written on those pull requests before this started, which
+/// the caller reads inside the Turn it is holding and records as addressed — so
+/// this session is the one that proposes about it, and nothing else is sent to.
 pub(crate) async fn review(
     state: &AppState,
     conversation_id: i64,
+    on: Option<String>,
     said: Option<String>,
 ) -> Reviewed {
-    proposing(state, conversation_id, Prompt::Reviewing(said), "review").await
+    proposing(
+        state,
+        conversation_id,
+        Prompt::Reviewing { on, said },
+        "review",
+    )
+    .await
 }
 
 /// Run one batch session, and wait until it is over.
@@ -2568,8 +2583,8 @@ pub(crate) async fn committed_since(
     conversation_id: i64,
     already: usize,
 ) -> bool {
-    match store::recorded_commits(&state.pool, conversation_id).await {
-        Ok(recorded) => recorded.len() > already,
+    match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed > already,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what a session committed failed");
             false
@@ -3093,9 +3108,18 @@ enum Prompt {
     Addressing(String),
 
     /// The reviewing skill, which the one session a wrap-up starts with runs
-    /// inside — carrying whatever was said on the pull request before it started,
-    /// which is the other half of what it has to propose about.
-    Reviewing(Option<String>),
+    /// inside — carrying every pull request the work ended up on, and whatever
+    /// was said on them before it started, which is the other half of what it has
+    /// to propose about.
+    Reviewing {
+        /// Every pull request the work is on, where it is on more than one: one
+        /// review reads the whole of the work, and this is where the whole of it
+        /// is.
+        on: Option<String>,
+
+        /// What was standing on those pull requests when the review started.
+        said: Option<String>,
+    },
 
     /// The responding skill, which a session answering a batch of comments runs
     /// inside — carrying the batch, which is the whole of what it is about.
@@ -3202,7 +3226,9 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                     skills::instruction(&brief, handoff, instruction)
                 }
                 Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
-                Prompt::Reviewing(said) => skills::reviewing(&brief, handoff, said.as_deref()),
+                Prompt::Reviewing { on, said } => {
+                    skills::reviewing(&brief, handoff, on.as_deref(), said.as_deref())
+                }
                 Prompt::Responding(said) => skills::responding(&brief, handoff, said),
                 Prompt::FollowingUp(follow_up) => {
                     skills::following_up(&brief, handoff, &follow_up.brief, &follow_up.settled)

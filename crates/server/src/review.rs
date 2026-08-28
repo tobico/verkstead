@@ -21,6 +21,16 @@
 //! session per finding would throw all of that away and re-read the diff to get
 //! half of it back.
 //!
+//! **One review however many pull requests the work is on**, for the same reason
+//! one is one review of one branch. A Conversation that committed in a companion
+//! ends on a pull request there too, and the change in the companion and the
+//! change here that needed it are one thing to judge: two sessions each seeing
+//! half would each be stuck inside the very frame this phase exists to escape. So
+//! the session is told where every one of them is — the repository, the number,
+//! the URL and the worktree to read it in, [`across`] — and it settles once,
+//! having read the lot. A Conversation whose work touched nothing else is told
+//! what it has always been told.
+//!
 //! **What is already on the pull request is part of what it reads.** A human who
 //! commented before the review started has said something about this branch, and
 //! this is the session that reads the branch — so those comments go into its
@@ -206,6 +216,13 @@ async fn reading(state: &AppState, conversation_id: i64) {
         "the work is on a pull request nobody has read, so a review session is starting"
     );
 
+    // Every pull request the work ended up on, because one review reads the whole
+    // of it and the whole of it may be several branches. Read here rather than
+    // passed in for the reason everything in this module reads the record: what
+    // started this may have been a finish, a restart or a press, and none of them
+    // knows what the companions were covered with.
+    let on = across(state, conversation_id).await;
+
     // Read inside the Turn, which is what makes *what was said before the review
     // started* a fact rather than a race: nothing can dispatch about a comment
     // while this holds the Worktree, and one that lands from here on is the next
@@ -213,13 +230,79 @@ async fn reading(state: &AppState, conversation_id: i64) {
     // nothing is later sent to do ungated what the Set is about to propose.
     let said = crate::comments::for_the_review(state, conversation_id).await;
 
-    match crate::runner::review(state, conversation_id, said).await {
+    match crate::runner::review(state, conversation_id, on, said).await {
         Reviewed::Done => over(state, conversation_id, None).await,
         Reviewed::Stopped { how, writing } => {
             over(state, conversation_id, Some((how, writing))).await
         }
         Reviewed::Nothing => {}
     }
+}
+
+/// Every pull request this Conversation's work ended up on, written out for the
+/// session that is about to read the whole of it.
+///
+/// One review across all of them — the work was conceived as one Conversation
+/// and reads best whole, a change in a companion and the change here that needed
+/// it being one thing to judge — so what the session is told is where the whole
+/// of the work is: the repository each pull request was opened in, its number,
+/// its URL, and the worktree that repository's branch is checked out in. A
+/// session starts in the Conversation's own worktree and both `git` and `gh` read
+/// their repository from wherever they are run, so one left where it landed would
+/// read the same diff twice and the companion's never.
+///
+/// `None` where there is one, which is the ordinary Conversation and is told what
+/// it has always been told: the branch this worktree is on is the whole of the
+/// work, and a list naming the one pull request it is already reading would be a
+/// heading over something the prompt says twice.
+///
+/// A pull request whose Repo or checkout is gone is left out rather than named
+/// without one — there is nowhere to send anybody to read it — and a Conversation
+/// or a store that will not answer is the same as one pull request: the review
+/// reads the branch it is standing in, which is what it does today.
+pub(crate) async fn across(state: &AppState, conversation_id: i64) -> Option<String> {
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return None,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation whose pull requests to review failed");
+            return None;
+        }
+    };
+
+    let opened = match store::pull_requests(&state.pool, conversation_id).await {
+        Ok(opened) => opened,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading which pull requests the review reads failed");
+            return None;
+        }
+    };
+
+    let listed: Vec<String> = opened
+        .iter()
+        .filter_map(|(repo, pull_request)| {
+            let watched = crate::wrapping::watched(&conversation, repo.id, pull_request.number)?;
+
+            Some(format!(
+                "- {}, at {} — its worktree is at `{}`.",
+                crate::wrapping::named(&watched),
+                pull_request.url,
+                watched.worktree.display(),
+            ))
+        })
+        .collect();
+
+    if listed.len() < 2 {
+        return None;
+    }
+
+    tracing::info!(
+        conversation_id,
+        pull_requests = listed.len(),
+        "the work is on more than one pull request, so the review is told where each is",
+    );
+
+    Some(listed.join("\n"))
 }
 
 /// Pick up a review whose session is no longer there, whatever the human has or

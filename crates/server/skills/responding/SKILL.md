@@ -3,18 +3,29 @@ name: responding
 description: Answer a batch of comments left on a pull request: propose what to do about them as one Question Set, and land what the human accepts. Use when a session has been dispatched with fresh pull request comments as its feedback.
 ---
 
-Answer what has just been said on this branch's pull request.
+Answer what has just been said on one of this Conversation's pull requests.
 **You propose, and then you fix what was agreed to.** Nothing anybody wrote is
 acted on before the human has said so, and everything they say yes to is done
 here rather than by somebody else afterwards.
 
 The comments are at the end of your prompt, under **What has just been said on
 the pull request**: the batch whole, in the order it was said in, and where each
-of it was said. A comment left on a line of the diff carries its file and line,
-which is half of what it means.
+of it was said. Every comment names the pull request it was left on, and one
+left on a line of the diff carries its file and line beside it — both halves are
+what it means.
 
-The branch is already pushed and already has a pull request open. There is
-nothing to create, nothing to switch to, and nothing to open.
+**Work where the feedback says.** This Conversation may hold a pull request in
+more than one repository — its own, and one per companion repository the work
+committed in — so the comments name the repository, the pull request and the
+worktree to work in. `cd` into that worktree first and do the whole job there:
+`git` and `gh` both read their repository from wherever they are run, so a
+`gh pr diff` from the wrong directory reads somebody else's pull request, and a
+push from there puts your answer on somebody else's branch.
+
+You start in a worktree of the Conversation's own repository. Whichever worktree
+you end up working in, it is one branch and one pull request: already pushed and
+already open, so there is nothing to create, nothing to switch to and nothing to
+open.
 
 ## 1. Read what was said, and what it is about
 
@@ -23,7 +34,8 @@ person's thinking rather than a list — three replies in a minute are one point
 being made — so the last of them often says what the first was getting at.
 
 Then go and look. A comment names a symptom and the code says what the cause
-is:
+is — in the worktree the comments named, `gh` reading its repository from
+wherever it is run:
 
     gh pr diff
 
@@ -178,6 +190,10 @@ Then push once, when the last of them is in:
 
     git push
 
+In the worktree the comments named, which is where the fixes were made: those
+are one repository's, and a commit made in the wrong directory is a change to
+work nobody asked about.
+
 Push, unlike most sessions here: this branch is already on a pull request, and a
 fix that stays local is one nobody can see and nothing re-runs. The push is what
 puts the commits in front of the checks again and in front of whoever left the
@@ -221,8 +237,11 @@ Trailers go at the end as usual; the workbench takes them off what it shows.
       class throttle removed
     ```
 
-Do not open a pull request, do not touch any other branch, and do not merge
-anything. The pull request exists, and merging is the human's act.
+Do not open a pull request, do not merge anything, and do not touch any branch
+beyond the one you were sent to: the branch checked out in the worktree the
+comments named. Every other branch — in this repository and in every companion
+beside it — belongs to somebody else's piece of feedback. The pull request
+exists, and merging is the human's act.
 
 Then say what you did and what you left, and stop.
 

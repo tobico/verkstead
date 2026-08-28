@@ -44,11 +44,12 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, ConversationClosed,
-    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Lifecycle,
-    NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size,
-    StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
-    TimelineEvent, TranscriptView, Turn, Watching,
+    Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, CompanionAdded,
+    CompanionMode, CompanionModeChosen, CompanionView, ConversationClosed, ConversationSteered,
+    ConversationStopped, ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PinnedEvent,
+    ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size, StageListReached, Started,
+    SteerOpened, Submitted, TaskListEvent, TaskListReached, TimelineEvent, TranscriptView, Turn,
+    Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::handoffs::Handoffs;
@@ -650,6 +651,32 @@ impl Grilling {
         .await
     }
 
+    /// And the submit that opens a companion up as it moves: which of the ones
+    /// already there goes to read-write, and what the branch cut in it is
+    /// called — empty being *mirroring*, the Conversation's own branch name.
+    ///
+    /// No mode on the row, because there is one direction: read-only is not
+    /// something the modal can ask for.
+    async fn steer_opening(
+        &self,
+        target: &str,
+        instruction: &str,
+        repo_id: i64,
+        branch: &str,
+    ) -> ConversationSteered {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/steer/submit", self.id),
+            &serde_json::json!({
+                "target": target,
+                "interrupt": false,
+                "instruction": instruction,
+                "upgraded": [{ "repo_id": repo_id, "branch": branch }],
+            }),
+        )
+        .await
+    }
+
     /// And the submit into Follow-up, which carries the payload that is always
     /// required: the brief the session it starts opens the follow-up on.
     async fn steer_following_up(&self, brief: &str) -> ConversationSteered {
@@ -1183,6 +1210,53 @@ printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
 exit 1
 "#;
 
+/// A `gh` that answers for two repositories at once: the Conversation's own,
+/// and the companion beside it.
+///
+/// Told apart by the directory the call is made in, which is how the real one
+/// tells them apart too — Verkstead runs `gh` in the repository it is asking
+/// about, `#41` meaning something else entirely in another one. `companion` is
+/// the whole of what it does when it is asked in `askance`.
+///
+/// The Conversation's own pull request is green and nothing has been said on
+/// it, so what a wrap-up is left waiting on is the companion and nothing else.
+fn gh_alongside(companion: &str) -> String {
+    format!(
+        r#"
+case "$(pwd -P)" in
+*/askance)
+{companion}
+    ;;
+esac
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+case "$5" in
+*statusCheckRollup*)
+{green}
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#,
+        green = GREEN,
+    )
+}
+
+/// What that companion says when the finish opened a pull request in it.
+const COMPANION_PULL_REQUEST: &str = r#"    printf '{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}'
+    exit 0"#;
+
+/// And what it says when the finish left it without one, in the words the real
+/// `gh` uses.
+const COMPANION_NO_PULL_REQUEST: &str = r#"    printf 'no pull requests found for branch "%s"\n' "$3" >&2
+    exit 1"#;
+
 /// One of those scripts as a `gh` the server can run: `sh -c` gives `$0` the
 /// program's own name, so what Verkstead passes lands in `$1` onwards.
 fn gh_stub(script: &str) -> Gh {
@@ -1200,6 +1274,60 @@ async fn grilling(stub: &str) -> Grilling {
     grilling_spilling(tempfile::tempdir().unwrap(), stub, PULL_REQUEST).await
 }
 
+/// The same, with a second repository registered beside this one and added to
+/// the Conversation as a companion before the press — which is a companion in
+/// the mode one is added in, read-only.
+async fn grilling_alongside(stub: &str, companion: &str) -> Grilling {
+    grilling_at_pace(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[(companion, CompanionMode::ReadOnly)],
+    )
+    .await
+}
+
+/// And the same with that companion in the other mode: a branch of its own, a
+/// sandbox that may write to it, and a sweep of that branch beside the
+/// Conversation's own.
+async fn grilling_building_in(stub: &str, companion: &str) -> Grilling {
+    grilling_at_pace(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[(companion, CompanionMode::ReadWrite)],
+    )
+    .await
+}
+
+/// The same with the companion in the mode one is added in — read-only — and a
+/// `gh` of the caller's choosing.
+async fn grilling_alongside_asking(stub: &str, companion: &str, gh: &str) -> Grilling {
+    grilling_at_pace(
+        tempfile::tempdir().unwrap(),
+        stub,
+        gh,
+        *BRISKLY,
+        &[(companion, CompanionMode::ReadOnly)],
+    )
+    .await
+}
+
+/// And the same again with something else where `gh` goes, for the tests about
+/// what a wrap-up makes of the pull requests a finish opened in the companion.
+async fn grilling_building_in_asking(stub: &str, companion: &str, gh: &str) -> Grilling {
+    grilling_at_pace(
+        tempfile::tempdir().unwrap(),
+        stub,
+        gh,
+        *BRISKLY,
+        &[(companion, CompanionMode::ReadWrite)],
+    )
+    .await
+}
+
 /// The same, with something else where `gh` goes — for the tests about what
 /// Verkstead does when GitHub cannot be asked.
 async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
@@ -1209,18 +1337,52 @@ async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
 /// The same, on a server that sweeps for a stalled Conversation briskly enough
 /// to watch it do so — see [`SWEEPING`].
 async fn grilling_swept(stub: &str) -> Grilling {
-    grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, *SWEEPING).await
+    grilling_at_pace(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *SWEEPING,
+        &[],
+    )
+    .await
 }
 
 /// The same, over a directory the caller already has the name of — which is
 /// what a stub that has to write somewhere the worktree is not needs, the
 /// script naming the path being written before there is a fixture to ask.
 async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    grilling_at_pace(spill, stub, gh, *BRISKLY).await
+    grilling_at_pace(spill, stub, gh, *BRISKLY, &[]).await
 }
 
-/// And the same again at a pace of the caller’s choosing.
-async fn grilling_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pace) -> Grilling {
+/// The same with a read-write companion beside it, for the tests about a
+/// Conversation that ends on a pull request in each: the sessions spill what they
+/// were told somewhere that outlives their worktrees, and `gh` answers for both
+/// repositories.
+async fn grilling_spilling_alongside(
+    spill: tempfile::TempDir,
+    stub: &str,
+    companion: &str,
+    gh: &str,
+) -> Grilling {
+    grilling_at_pace(
+        spill,
+        stub,
+        gh,
+        *BRISKLY,
+        &[(companion, CompanionMode::ReadWrite)],
+    )
+    .await
+}
+
+/// And the same again at a pace of the caller’s choosing, alongside whatever
+/// `companions` names — no repository at all being the ordinary Conversation.
+async fn grilling_at_pace(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    pace: Pace,
+    companions: &[(&str, CompanionMode)],
+) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace).await;
     let app = &bench.app;
 
@@ -1235,6 +1397,32 @@ async fn grilling_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: 
     };
 
     bench.under_both_pairings(id).await;
+
+    // While it is still drafting, which is the only time a companion can be
+    // added or configured — and off the same endpoints the setup card presses.
+    for (name, mode) in companions {
+        let repo_id = bench.register(name).await;
+
+        let added: CompanionAdded = post(
+            app,
+            &format!("/api/ui/conversations/{id}/companions"),
+            &serde_json::json!({ "repo_id": repo_id }),
+        )
+        .await;
+        assert_eq!(added, CompanionAdded::Added);
+
+        // Only where it is not the mode one is added in, so the read-only case
+        // still goes through exactly the presses it always did.
+        if *mode != CompanionMode::ReadOnly {
+            let chosen: CompanionModeChosen = post(
+                app,
+                &format!("/api/ui/conversations/{id}/companions/{repo_id}/mode"),
+                &serde_json::json!({ "mode": mode }),
+            )
+            .await;
+            assert_eq!(chosen, CompanionModeChosen::Chosen);
+        }
+    }
 
     let saved: BriefSaved = post(
         app,
@@ -1300,6 +1488,31 @@ impl Bench {
             .await;
             assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
         }
+    }
+
+    /// Register a second repository under the watched directory, and hand back
+    /// the id a Conversation would add it as a companion by.
+    ///
+    /// A repository of its own rather than a checkout of this one: what a
+    /// companion is, is another registered Repo, and two Repos over one
+    /// directory is a different thing entirely.
+    async fn register(&self, name: &str) -> i64 {
+        let path = repository(self.watched.path().join(name));
+        let registered: Registered = post(
+            &self.app,
+            "/api/ui/repos",
+            &serde_json::json!({ "path": path }),
+        )
+        .await;
+        assert_eq!(registered, Registered::Added);
+
+        let repos: Vec<verkstead_render::RepoEntry> = get(&self.app, "/api/ui/repos").await;
+
+        repos
+            .into_iter()
+            .find(|repo| repo.name == name)
+            .expect("the repository was just registered")
+            .id
     }
 
     /// The fixture the tests read, once there is a Conversation running in it.
@@ -1532,6 +1745,19 @@ fn pull_request(view: &ConversationView) -> Option<&PullRequestEvent> {
     })
 }
 
+/// And every pull request pinned, which is one per repository the work was
+/// carried to: the Conversation's own, and one for each companion it committed
+/// in.
+fn pull_requests(view: &ConversationView) -> Vec<&PullRequestEvent> {
+    view.pinned
+        .iter()
+        .filter_map(|pinned| match pinned {
+            PinnedEvent::PullRequest(opened) => Some(opened),
+            _ => None,
+        })
+        .collect()
+}
+
 /// A Conversation's own directory outside its worktree, as the host sees it —
 /// the far side of the `/tmp/verkstead` a session writes its handoff into.
 ///
@@ -1660,6 +1886,49 @@ async fn fetch(app: &Router, request: Request<Body>) -> (StatusCode, String) {
 
 fn read<T: DeserializeOwned>(body: &str) -> T {
     serde_json::from_str(body).unwrap_or_else(|err| panic!("reading {body:?}: {err}"))
+}
+
+/// And what a Conversation with a companion repo tells its grilling session:
+/// the same prompt, with the companion named under it.
+///
+/// The grilling session and not one of the ones that build, because it is the
+/// one whose prompt is built nowhere near the rest — if the listing reaches
+/// this one, it reaches them by the same line.
+#[tokio::test]
+async fn a_grilling_session_is_told_about_the_companion_repos_too() {
+    let fixture = grilling_alongside(r#"printf 'prompt=%s' "$2""#, "askance").await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(BRIEF),
+        "the Brief is still what the grilling starts from: {said:?}"
+    );
+    assert!(
+        said.contains("# Companion repositories"),
+        "and the companion is named under it: {said:?}"
+    );
+    assert!(
+        said.contains("`askance` at `"),
+        "with where it was checked out: {said:?}"
+    );
+
+    // The commit it is detached at rather than the branch that was picked: the
+    // two are the same thing only on the day, and a session told it was on
+    // `main` would be told something the next push makes untrue.
+    let at = fixture.view().await.companions[0]
+        .base_commit
+        .clone()
+        .expect("a checked-out companion says what its base came to");
+
+    assert!(
+        said.contains(&format!("detached at `{at}`, read-only.")),
+        "and what it holds and whether it may be written to: {said:?}"
+    );
 }
 
 /// The whole of what pressing the button now does: the Profile's agent, on the
@@ -3779,6 +4048,53 @@ claude-grilling-5)
 esac
 "#;
 
+/// The same backlog again, in a Conversation with a read-write companion — and a
+/// finish that carries that companion to a pull request of its own, which is what
+/// the bundled forks tell a session to do about every repository it committed in.
+///
+/// The companion's commit lands after the finish commit and before the session
+/// says anything, exactly as a finish sequence worked in order leaves it: the
+/// Conversation's own repository first, then each companion in its own worktree.
+const A_BACKLOG_ALONGSIDE: &str = r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+        cd ../askance-*
+        printf 'the other half\n' > halves.md
+        git add halves.md
+        git commit --quiet -m 'feat: the other half'
+        printf 'pushed both, and the pull requests are open\n'
+    fi
+    sleep 300
+    ;;
+esac
+"#;
+
 /// The same backlog, with the session Verkstead sends after a finish that opened
 /// nothing doing the one thing it is sent for.
 ///
@@ -4041,20 +4357,72 @@ fn fixes(view: &ConversationView) -> usize {
         .count()
 }
 
-/// Whether Verkstead has recorded this Conversation's checks as green.
+/// Whether Verkstead has recorded this Conversation's own pull request's checks
+/// as green.
 ///
 /// Read out of the store rather than off the Timeline, because that is where it
 /// is: settling is bookkeeping about what wrap-up is still waiting on rather
 /// than something that happened, and nothing that is not an Event goes on a
 /// Timeline.
+///
+/// The Conversation's own, there being one suite per pull request: a companion's
+/// is [`companion_checks_settled`]'s.
 async fn checks_settled(fixture: &Grilling) -> bool {
+    settled(
+        fixture,
+        verkstead_server::store::WaitingOn::Checks(own_repo(fixture).await),
+    )
+    .await
+}
+
+/// And whether the pull request opened in the companion beside it is green.
+async fn companion_checks_settled(fixture: &Grilling) -> bool {
+    settled(
+        fixture,
+        verkstead_server::store::WaitingOn::Checks(companion_repo(fixture).await),
+    )
+    .await
+}
+
+/// Whether one of the things this wrap-up waits on is settled.
+async fn settled(fixture: &Grilling, waiting_on: verkstead_server::store::WaitingOn) -> bool {
     let pool = open_database(&fixture.database).await.unwrap();
     let settled = verkstead_server::store::wrap_up_settled(&pool, fixture.id)
         .await
         .unwrap();
     pool.close().await;
 
-    settled.contains(&verkstead_server::store::WaitingOn::Checks)
+    settled.contains(&waiting_on)
+}
+
+/// The Repo the Conversation's own work is in, which is what its own pull
+/// request's checks and fix sessions are keyed by.
+async fn own_repo(fixture: &Grilling) -> i64 {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let conversation = verkstead_server::store::load_conversation(&pool, fixture.id)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+    pool.close().await;
+
+    conversation.repo.id
+}
+
+/// And the one beside it, for the fixtures that are configured with a companion.
+async fn companion_repo(fixture: &Grilling) -> i64 {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let conversation = verkstead_server::store::load_conversation(&pool, fixture.id)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+    pool.close().await;
+
+    conversation
+        .companions
+        .first()
+        .expect("this Conversation was configured with a companion")
+        .repo
+        .id
 }
 
 /// How Verkstead has written down that this Conversation's checks are, or
@@ -4074,15 +4442,17 @@ async fn check_rollup(fixture: &Grilling) -> Option<verkstead_server::store::Rol
 }
 
 /// How many fix sessions Verkstead has counted against one of this
-/// Conversation's checks.
+/// Conversation's checks, on its own pull request.
 ///
 /// The count that *two attempts, then ask* is kept by, read the way the watcher
-/// reads it. What a check the review folded into its own session has spent is
-/// nothing: an attempt is counted where a fix session is dispatched, and none is
-/// dispatched into a Worktree the review is holding.
+/// reads it — per check and per pull request, the same check name red on two of
+/// them being two different failures. What a check the review folded into its
+/// own session has spent is nothing: an attempt is counted where a fix session
+/// is dispatched, and none is dispatched into a Worktree the review is holding.
 async fn attempts_spent(fixture: &Grilling, check: &str) -> i64 {
+    let repo = own_repo(fixture).await;
     let pool = open_database(&fixture.database).await.unwrap();
-    let spent = verkstead_server::store::fix_attempts(&pool, fixture.id, check)
+    let spent = verkstead_server::store::fix_attempts(&pool, fixture.id, repo, check)
         .await
         .unwrap();
     pool.close().await;
@@ -4608,6 +4978,271 @@ async fn a_finish_whose_pull_request_never_arrives_leaves_the_conversation_where
     );
 }
 
+/// A finish that carried a companion it committed in to a pull request of its
+/// own has both of them pinned: the Conversation's own unlabelled, and the
+/// companion's named with the repository it was opened in.
+///
+/// Which is the whole of the split, one repository further out: the push and the
+/// pull requests are the session's, and what is Verkstead's is knowing that they
+/// happened — asked of the host's `gh` in each repository in turn, `#41` and `#7`
+/// being numbers in two different places.
+#[tokio::test]
+async fn a_companion_the_work_committed_in_is_pinned_beside_the_conversations_own() {
+    let fixture = grilling_building_in_asking(
+        A_BACKLOG_ALONGSIDE,
+        "askance",
+        &gh_alongside(COMPANION_PULL_REQUEST),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| (pull_requests(view).len() == 2).then(|| view.clone()))
+        .await;
+
+    let pinned = pull_requests(&view);
+    let named = |repo: Option<&str>| {
+        pinned
+            .iter()
+            .find(|opened| opened.repo.as_deref() == repo)
+            .unwrap_or_else(|| panic!("no pull request from {repo:?} among {pinned:#?}"))
+    };
+
+    assert_eq!(
+        named(None).number,
+        41,
+        "the work's own repository draws unlabelled, as its commits do",
+    );
+    assert_eq!(
+        named(Some("askance")).number,
+        7,
+        "and the companion's says which repository it was opened in",
+    );
+    assert_eq!(
+        named(Some("askance")).url,
+        "https://github.com/tobico/askance/pull/7",
+        "with the URL of that repository's own pull request rather than a number \
+         built onto this one's",
+    );
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(
+        view.blocked_on, None,
+        "and nothing is waiting on the human: every repository the work committed \
+         in is on a pull request",
+    );
+}
+
+/// A read-write companion nobody committed in is ignored by the whole of
+/// wrap-up: nothing asked of GitHub, nothing recorded, nothing waited on.
+///
+/// The `gh` this is given would stop the run if it were asked about `askance` at
+/// all — it answers there the way one does for a branch nothing was opened on —
+/// so a Conversation that reaches a settled wrap-up with one pull request pinned
+/// and no Notice is one that never asked.
+#[tokio::test]
+async fn a_companion_nothing_was_committed_in_is_never_asked_about() {
+    let fixture = grilling_building_in_asking(
+        A_BACKLOG_OF_ONE,
+        "askance",
+        &gh_alongside(COMPANION_NO_PULL_REQUEST),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    // Waited on rather than read straight off: what says nothing was asked is
+    // the wrap-up getting past the point where it would have asked.
+    let deadline = Instant::now() + *PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up never got as far as its checks: {}",
+            standing(&fixture.view().await),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        pull_requests(&view).len(),
+        1,
+        "one pull request, for the one repository the work committed in: {:#?}",
+        pull_requests(&view),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing to say about a companion nobody wrote in: {:?}",
+        notices(&view),
+    );
+    assert_eq!(view.blocked_on, None);
+}
+
+/// And a read-only companion is not asked at all, whatever its repository holds.
+///
+/// Its checkout is detached and bound read-only, so nothing a session did can be
+/// on it — which is why the branch given to it here is made from outside, the way
+/// the sweep's own read-only test makes one. A wrap-up that asked git about it
+/// would find a branch a commit ahead of where that checkout was cut, ask GitHub
+/// about it, and stop over the answer.
+#[tokio::test]
+async fn a_read_only_companion_is_not_asked_about_a_pull_request() {
+    let fixture = grilling_alongside_asking(
+        A_BACKLOG_OF_ONE,
+        "askance",
+        &gh_alongside(COMPANION_NO_PULL_REQUEST),
+    )
+    .await;
+
+    // Put there before anything reaches a wrap-up, so it is in front of the
+    // asking rather than behind it.
+    let view = fixture.view().await;
+    let companion = Path::new(&view.companions[0].repo.path).to_owned();
+
+    git(&companion, &["checkout", "--quiet", "-b", &view.branch]);
+    std::fs::write(companion.join("halves.md"), "the other half\n").unwrap();
+    git(&companion, &["add", "halves.md"]);
+    git(
+        &companion,
+        &["commit", "--quiet", "-m", "feat: the other half"],
+    );
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up never got as far as its checks: {}",
+            standing(&fixture.view().await),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        pull_requests(&view).len(),
+        1,
+        "one pull request, for the one repository a session could commit in: {:#?}",
+        pull_requests(&view),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing to say about a repository nothing was ever asked about: {:?}",
+        notices(&view),
+    );
+}
+
+/// And a companion the work *did* commit in and left without a pull request stops
+/// the run, with a Notice naming the repository.
+///
+/// A deliberate stop, the shape a missing pull request already had: the work ran
+/// and left none, so what is wrong is out here rather than in a driver that went
+/// away. What was already found stays found — the Conversation's own pull request
+/// is pinned and clickable while the human sorts out the one that is missing.
+#[tokio::test]
+async fn a_committed_in_companion_without_a_pull_request_stops_the_run_naming_it() {
+    let fixture = grilling_building_in_asking(
+        A_BACKLOG_ALONGSIDE,
+        "askance",
+        &gh_alongside(COMPANION_NO_PULL_REQUEST),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("askance"),
+        "the Notice names the repository that was left without one: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("no pull request"),
+        "and the reason is `gh`'s, in words: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Decision::Verkstead,
+        "looking again would find the same missing thing",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "the work is on a pull request of its own, which is what wrapping up is",
+    );
+    assert_eq!(
+        pull_requests(&view).len(),
+        1,
+        "and the one that was found stays found: {:#?}",
+        pull_requests(&view),
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human, which is what the badge is for",
+    );
+
+    // And it must not reach Done past its own Notice. A wrap-up that stopped on
+    // a companion has nothing unsettled to hold it — nothing was recorded about
+    // the missing pull request to be unsettled about — so the recorded one going
+    // green, the review answered and nothing outstanding is exactly the state
+    // the rule that ends a wrap-up would finish on. Written here rather than
+    // waited for, the watchers having stopped along with everything else.
+    settle_everything(&fixture).await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "a stopped wrap-up is not finished, however little is left outstanding",
+    );
+}
+
+/// Everything a wrap-up waits on, recorded as settled without any of it having
+/// happened.
+///
+/// What a green suite, an answered review and a quiet pull request would leave
+/// behind, put there directly because the watchers that would have written it
+/// stop when the run does — see [`verkstead_server::store::settle_wrap_up`].
+async fn settle_everything(fixture: &Grilling) {
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    let opened = verkstead_server::store::pull_requests(&pool, fixture.id)
+        .await
+        .unwrap();
+
+    // The one there is one of per Conversation, and a green suite and a quiet
+    // conversation for every pull request the wrap-up found — which is what the
+    // rule that ends one asks for.
+    let waiting_on =
+        verkstead_server::store::WAITED_ON
+            .into_iter()
+            .chain(opened.into_iter().flat_map(|(repo, _)| {
+                [
+                    verkstead_server::store::WaitingOn::Checks(repo.id),
+                    verkstead_server::store::WaitingOn::Comments(repo.id),
+                ]
+            }));
+
+    for waiting_on in waiting_on {
+        verkstead_server::store::settle_wrap_up(&pool, fixture.id, waiting_on)
+            .await
+            .unwrap();
+    }
+
+    pool.close().await;
+}
+
 /// The findings of a review, as the bundled reviewing skill writes them: a
 /// Question per finding, each offering a way to fix it beside leaving it alone.
 ///
@@ -4768,6 +5403,27 @@ const REVIEW_THEN_FIX: &str = "    SAYING='reading the branch'\n    \
      git add -A\n    \
      git commit --quiet -m 'fix: reset the counter as the window rolls'\n    \
      printf 'fixed what was accepted and left the rest\\n'";
+
+/// One that fixes what was accepted in both of the repositories the work
+/// reached: a commit in the worktree it started in and one in the companion's
+/// beside it.
+///
+/// What a review of work on two pull requests lands. The findings were one Set
+/// across the lot of them, and where they landed is wherever the finding was
+/// about — so the session commits in each worktree it fixed something in and
+/// pushes each of them.
+const REVIEW_THEN_FIX_BOTH: &str = "    SAYING='reading the branch'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'a fix\\n' >> fixes.md\n    \
+     git add -A\n    \
+     git commit --quiet -m 'fix: reset the counter as the window rolls'\n    \
+     cd ../askance-*\n    \
+     printf 'a fix\\n' >> halves.md\n    \
+     git add -A\n    \
+     git commit --quiet -m 'fix: take the other half with it'\n    \
+     printf 'fixed what was accepted in both, and pushed both\\n'";
 
 /// One that waits for the answers and then goes without landing any of them,
 /// which is the failure a session dying between the deciding and the doing
@@ -5072,6 +5728,11 @@ async fn the_review_proposes_its_findings_and_then_fixes_what_was_accepted() {
     assert!(
         started[0].contains("The API has none."),
         "and told what the work was meant to be: {told}",
+    );
+    assert!(
+        !started[0].contains("The pull requests this work is on"),
+        "a Conversation whose work touched nothing else is told what it has always \
+         been told, the branch this worktree is on being the whole of it: {told}",
     );
 
     assert!(
@@ -6111,14 +6772,23 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
             .unwrap(),
         verkstead_server::store::Rebuilding::Started,
     );
+    let repo = verkstead_server::store::load_conversation(&pool, fixture.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .repo
+        .id;
+
     assert_eq!(
         verkstead_server::store::record_pull_request(
             &pool,
             fixture.id,
+            repo,
             &verkstead_server::store::PullRequest {
                 number: 41,
                 title: "Rate limiting".to_owned(),
                 url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                repo: None,
             },
         )
         .await
@@ -6765,16 +7435,27 @@ async fn a_red_check_waits_for_the_worktree_rather_than_ending_the_review() {
     );
 }
 
-/// Whether Verkstead has recorded that nothing said on this pull request is left
-/// unaddressed.
+/// Whether Verkstead has recorded that nothing said on this Conversation's own
+/// pull request is left unaddressed.
+///
+/// The Conversation's own, there being one conversation per pull request: a
+/// companion's is [`companion_comments_settled`]'s.
 async fn comments_settled(fixture: &Grilling) -> bool {
-    let pool = open_database(&fixture.database).await.unwrap();
-    let settled = verkstead_server::store::wrap_up_settled(&pool, fixture.id)
-        .await
-        .unwrap();
-    pool.close().await;
+    settled(
+        fixture,
+        verkstead_server::store::WaitingOn::Comments(own_repo(fixture).await),
+    )
+    .await
+}
 
-    settled.contains(&verkstead_server::store::WaitingOn::Comments)
+/// And whether nothing is left unaddressed on the pull request opened in the
+/// companion beside it.
+async fn companion_comments_settled(fixture: &Grilling) -> bool {
+    settled(
+        fixture,
+        verkstead_server::store::WaitingOn::Comments(companion_repo(fixture).await),
+    )
+    .await
 }
 
 /// What was already said on the pull request when the wrap-up's review starts is
@@ -7208,10 +7889,17 @@ async fn a_restart_over_a_batch_waiting_on_its_ask_stops_the_run_and_reads_what_
     );
 }
 
-/// Which of a pull request's comments Verkstead has recorded as dealt with.
+/// Which of this Conversation's own pull request's comments Verkstead has
+/// recorded as dealt with.
 async fn addressed(fixture: &Grilling) -> Vec<String> {
+    addressed_on(fixture, own_repo(fixture).await).await
+}
+
+/// The same for the pull request opened in `repo_id`, which is what a companion's
+/// is read by.
+async fn addressed_on(fixture: &Grilling, repo_id: i64) -> Vec<String> {
     let pool = open_database(&fixture.database).await.unwrap();
-    let addressed = verkstead_server::store::addressed_comments(&pool, fixture.id)
+    let addressed = verkstead_server::store::addressed_comments(&pool, fixture.id, repo_id)
         .await
         .unwrap();
     pool.close().await;
@@ -7846,6 +8534,245 @@ async fn a_breakdown_question_reaches_the_human_as_an_ordinary_set() {
         1,
         "and nothing was launched: the session writing the backlog is the one that \
          proposed",
+    );
+}
+
+/// The same watching, in a read-write companion: a commit landing on the
+/// companion's branch reaches the Timeline as a commit on the Conversation's
+/// own does, and says which repository it came from.
+///
+/// The stub commits in the companion's checkout — which is a directory beside
+/// the worktree it starts in, on a branch of its own — and then exits, so what
+/// this asks is both halves at once: that the companion is being watched at all,
+/// and that the last commit a session makes is caught for it too. Nothing tells
+/// Verkstead a commit happened in either repository.
+#[tokio::test]
+async fn what_a_session_commits_in_a_companion_lands_on_the_timeline_labelled() {
+    let fixture = grilling_building_in(
+        r#"
+        printf 'a limiter\n' > limiter.md
+        git add limiter.md
+        git commit --quiet -m 'feat: rate limiting'
+
+        cd ../askance-*
+        printf 'the other half\n' > halves.md
+        git add halves.md
+        git commit --quiet -m 'feat: the other half'
+        "#,
+        "askance",
+    )
+    .await;
+
+    let landed = fixture
+        .until(|view| {
+            let landed = commits(view);
+            (landed.len() == 2).then(|| landed.into_iter().cloned().collect::<Vec<_>>())
+        })
+        .await;
+
+    // Read by what each commit was called rather than by where it is in the
+    // list: two repositories swept at once are two repositories noticed in
+    // whichever order the sweeps got there, and the Timeline's order is the
+    // order Verkstead saw them.
+    let named = |subject: &str| {
+        landed
+            .iter()
+            .find(|commit| commit.subject == subject)
+            .unwrap_or_else(|| panic!("no commit called {subject:?} among {landed:#?}"))
+    };
+
+    assert_eq!(
+        named("feat: rate limiting").repo,
+        None,
+        "the work's own repository draws unlabelled",
+    );
+    assert_eq!(
+        named("feat: the other half").repo,
+        Some("askance".to_owned()),
+        "and a companion's commit says which repository it came from",
+    );
+
+    // And the pane, which is the other half of what a commit is: the diff read
+    // out of the repository it was recorded against rather than the
+    // Conversation's own, which knows nothing about it.
+    let pane = fixture.commit_pane(named("feat: the other half").id).await;
+
+    let diff = pane.diff.expect("a commit that added a file has a diff");
+
+    assert_eq!(diff.paths, vec!["halves.md".to_owned()]);
+    assert!(diff.html.contains("the other half"), "{}", diff.html);
+}
+
+/// And a companion a steer opened up is one the session that steer launches may
+/// write in: the commit it makes there lands on the Timeline labelled with the
+/// Repo's registered name, exactly as one in a companion that came in
+/// read-write does.
+///
+/// The whole of what an upgrade is for, end to end. The grilling session is
+/// running against a companion it may only read; the steer ticks it up and
+/// starts a session on an instruction; and that session commits in it. Nothing
+/// but the upgrade stands between the two — the same repository, the same
+/// Conversation, the same sandbox — so a commit landing at all is the sandbox
+/// binding the new checkout writable, and the label on it is the sweep having
+/// picked the branch up.
+#[tokio::test]
+async fn a_companion_a_steer_opened_up_is_one_the_next_session_writes_in() {
+    let fixture = grilling_alongside(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            sleep 300
+            ;;
+        *)
+            cd ../askance-*
+            printf 'the other half\n' > halves.md
+            git add halves.md
+            git commit --quiet -m 'feat: the other half'
+            printf 'committed in the companion\n'
+            sleep 300
+            ;;
+        esac
+        "#,
+        "askance",
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let view = fixture.view().await;
+    let askance = view
+        .companions
+        .first()
+        .expect("the fixture added one companion");
+
+    assert_eq!(
+        askance.mode,
+        CompanionMode::ReadOnly,
+        "a companion is added in the mode one is added in",
+    );
+
+    let repo_id = askance.repo.id;
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened { working: true });
+    assert_eq!(
+        fixture
+            .steer_opening("Implementing", "write the other half", repo_id, "")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    // The commit the session makes in it, which nothing tells Verkstead about:
+    // what puts it here is the sweep of the branch the upgrade cut.
+    let landed = fixture
+        .until(|view| {
+            commits(view)
+                .into_iter()
+                .find(|commit| commit.subject == "feat: the other half")
+                .cloned()
+        })
+        .await;
+
+    assert_eq!(
+        landed.repo,
+        Some("askance".to_owned()),
+        "a companion's commit says which repository it came from",
+    );
+
+    let view = fixture.view().await;
+    let opened = view
+        .companions
+        .first()
+        .expect("the companion is still the one companion");
+
+    assert_eq!(opened.mode, CompanionMode::ReadWrite);
+    assert_eq!(
+        opened.branch, "",
+        "the field was left empty, which is the row following the Conversation's \
+         own branch",
+    );
+}
+
+/// A Conversation with a read-only companion has one branch being swept, not
+/// two: that checkout is detached and bound read-only, so there is nothing there
+/// for a commit to land on — and the Conversation's own commits draw exactly as
+/// they always did.
+///
+/// The companion repository is given something a sweep of it would find: a
+/// branch named as this Conversation's is, a commit ahead of the base its
+/// checkout was made at. That is exactly what a read-write companion's watcher
+/// resolves *mirroring* to, so a sweep that reached this one would put that
+/// commit on the Timeline labelled `askance`. Nothing this session does can put
+/// it there — no session can commit in a read-only checkout, which is why the
+/// branch is made from outside — so what the Timeline still holding one commit
+/// says is that nothing swept the companion at all.
+#[tokio::test]
+async fn a_read_only_companion_is_not_swept_and_the_conversations_own_is_unlabelled() {
+    let fixture = grilling_alongside(
+        r#"
+        printf 'a limiter\n' > limiter.md
+        git add limiter.md
+        git commit --quiet -m 'feat: rate limiting'
+
+        printf 'committed\n'
+        sleep 300
+        "#,
+        "askance",
+    )
+    .await;
+
+    // Put it there before waiting for anything, so it is in front of every sweep
+    // this test gives the watchers rather than only the last few.
+    let view = fixture.view().await;
+    let companion = Path::new(&view.companions[0].repo.path).to_owned();
+
+    git(&companion, &["checkout", "--quiet", "-b", &view.branch]);
+    std::fs::write(companion.join("halves.md"), "the other half\n").unwrap();
+    git(&companion, &["add", "halves.md"]);
+    git(
+        &companion,
+        &["commit", "--quiet", "-m", "feat: the other half"],
+    );
+
+    // Waited for by name rather than by there being one: what this is about is
+    // a commit that must never arrive, so the wait has to be one a commit
+    // arriving would not simply time out.
+    let landed = fixture
+        .until(|view| {
+            let landed = commits(view);
+            landed
+                .iter()
+                .any(|commit| commit.subject == "feat: rate limiting")
+                .then(|| landed.into_iter().cloned().collect::<Vec<_>>())
+        })
+        .await;
+
+    let ours = landed
+        .iter()
+        .find(|commit| commit.subject == "feat: rate limiting")
+        .expect("the wait above is for exactly this commit");
+
+    assert_eq!(
+        ours.repo, None,
+        "an unlabelled card means the work's own repo",
+    );
+
+    // Long enough for several more sweeps of both repositories, one of which is
+    // not being swept at all.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    let drawn = fixture.view().await;
+    let subjects: Vec<&str> = commits(&drawn)
+        .into_iter()
+        .map(|commit| &*commit.subject)
+        .collect();
+
+    assert_eq!(
+        subjects,
+        ["feat: rate limiting"],
+        "the companion's branch is nobody's to sweep, so what is on it reaches no Timeline",
     );
 }
 
@@ -10034,11 +10961,21 @@ async fn a_repository_with_no_stacking_recorded_gets_a_stage_off_the_default_bra
 /// The caller keeps the directory the upstream is in alive: the fetch this
 /// sets up is against a path rather than a server, and a tempdir that had gone
 /// would look exactly like being offline.
+///
+/// `--no-local` because `repo` is not sitting still while this runs. A clone
+/// from a path copies the object store file by file, and git's own manual says
+/// that races with anything writing to it — which is precisely what the session
+/// running in this Conversation's worktree does, its commits landing as loose
+/// objects in the very directory being copied. The clone dies on the temp file
+/// that was renamed out from under it. Going through the git transport instead
+/// asks the source what it holds and takes a pack of it, so a write arriving
+/// mid-clone is simply not in the answer.
 fn behind_an_origin(repo: &Path, upstream: &Path) {
     git(
         upstream.parent().unwrap(),
         &[
             "clone",
+            "--no-local",
             &repo.to_string_lossy(),
             &upstream.to_string_lossy(),
         ],
@@ -10145,6 +11082,341 @@ async fn a_stage_whose_fetch_fails_halts_with_a_notice_and_starts_nothing() {
     assert!(
         !planning.exists(),
         "so no session was launched inside the next-stage fork either",
+    );
+}
+
+/// One companion of a Conversation, by the name of the Repo it is a checkout of.
+fn alongside<'a>(view: &'a ConversationView, name: &str) -> &'a CompanionView {
+    view.companions
+        .iter()
+        .find(|companion| companion.repo.name == name)
+        .unwrap_or_else(|| {
+            panic!(
+                "`{name}` should be a companion of this Conversation, which has {:?}",
+                view.companions
+                    .iter()
+                    .map(|companion| companion.repo.name.as_str())
+                    .collect::<Vec<_>>(),
+            )
+        })
+}
+
+/// Where a companion was checked out, and what git says that directory is
+/// holding: the branch it is on, or `HEAD` where it is detached.
+fn holding(companion: &CompanionView) -> (PathBuf, String) {
+    let path = PathBuf::from(
+        &companion
+            .worktree
+            .as_ref()
+            .unwrap_or_else(|| {
+                panic!(
+                    "`{}` should be checked out somewhere",
+                    companion.repo.name.as_str()
+                )
+            })
+            .path,
+    );
+
+    let head = git(&path, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .trim()
+        .to_owned();
+
+    (path, head)
+}
+
+/// Move a companion repository's default branch on, and hand back the commit it
+/// now stands at.
+///
+/// What tells the two base rules apart. A checkout cut from the configured base
+/// holds this commit, and one cut from the predecessor stage's companion branch
+/// — which was made before it — does not.
+fn moved_on(repo: &Path) -> String {
+    std::fs::write(repo.join("moved-on.md"), "# the companion moved on\n").unwrap();
+    git(repo, &["add", "moved-on.md"]);
+    git(repo, &["commit", "-m", "docs: the companion moves on"]);
+
+    git(repo, &["rev-parse", "HEAD"]).trim().to_owned()
+}
+
+/// A roadmap grilled with companions builds with them: the stage a settled
+/// wrap-up starts carries its parent Conversation's whole companion set across,
+/// and has every one of them checked out before its first session runs.
+///
+/// A stage has no draft moment of its own, so the inheritance funnel is the only
+/// place the set could come from — without it a roadmap grilled against two
+/// repositories would build against one.
+///
+/// Read-only comes across as it is and is detached at whatever its base resolves
+/// to *for this stage*; read-write cuts a branch of its own named after the
+/// stage's own branch, whatever the roadmap Conversation's row was called. This
+/// one does not stack, so both come off the configured base as it stands at the
+/// moment the stage starts.
+#[tokio::test]
+async fn a_stage_inherits_the_companion_set_its_roadmap_was_grilled_with() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &gh_about(GREEN, "", ""),
+        *BRISKLY,
+        &[
+            ("askance", CompanionMode::ReadWrite),
+            ("chronicle", CompanionMode::ReadOnly),
+        ],
+    )
+    .await;
+
+    let roadmap = fixture.view().await;
+    let written = alongside(&roadmap, "askance").clone();
+    let read = alongside(&roadmap, "chronicle").clone();
+
+    // What mirroring came to for the roadmap Conversation itself, which is the
+    // branch no stage of that roadmap may share.
+    let (_, cut_for_the_roadmap) = holding(&written);
+    assert_eq!(cut_for_the_roadmap, roadmap.branch);
+
+    // Both companion repositories move on after this Conversation was checked
+    // out, which is what tells the base rules apart.
+    let ahead = [
+        moved_on(Path::new(&written.repo.path)),
+        moved_on(Path::new(&read.repo.path)),
+    ];
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+    let inherited = alongside(&stage, "askance").clone();
+    let detached = alongside(&stage, "chronicle").clone();
+
+    assert_eq!(
+        stage
+            .companions
+            .iter()
+            .map(|companion| (companion.repo.name.as_str(), companion.mode))
+            .collect::<Vec<_>>(),
+        [
+            ("askance", CompanionMode::ReadWrite),
+            ("chronicle", CompanionMode::ReadOnly),
+        ],
+        "every companion of the parent, in the mode it was in",
+    );
+
+    let (built_in, on) = holding(&inherited);
+
+    assert_eq!(
+        on, stage.branch,
+        "a read-write companion's branch is named after the stage's own",
+    );
+    assert_ne!(
+        on, roadmap.branch,
+        "so no two stages of one roadmap can share a companion branch",
+    );
+
+    let (looked_in, head) = holding(&detached);
+
+    assert_eq!(
+        head, "HEAD",
+        "and a read-only one is checked out detached, having nothing to commit",
+    );
+
+    // Both off the configured base as it stands now: this stage does not stack,
+    // so what its checkouts come off is each repository's default branch,
+    // resolved at the moment the stage started rather than when the roadmap was.
+    assert_eq!(git(&built_in, &["rev-parse", "HEAD"]).trim(), ahead[0]);
+    assert_eq!(git(&looked_in, &["rev-parse", "HEAD"]).trim(), ahead[1]);
+
+    assert_eq!(
+        detached.base_commit.as_deref(),
+        Some(ahead[1].as_str()),
+        "and the record says which commit that was, nothing else being able to",
+    );
+
+    // And the session the stage starts in is told about both of them, which is
+    // how the agent finds out either is there at all.
+    let prompt = until_written(&planning).await;
+
+    assert!(
+        prompt.contains(&format!(
+            "- `askance` at `{}`, on branch `{}`, read-write.",
+            built_in.display(),
+            stage.branch,
+        )),
+        "the stage's first session is told where it may build: {prompt:?}",
+    );
+    assert!(
+        prompt.contains(&format!(
+            "- `chronicle` at `{}`, detached at `{}`, read-only.",
+            looked_in.display(),
+            ahead[1],
+        )),
+        "and where it may only read: {prompt:?}",
+    );
+}
+
+/// Where the stage's own branch stacks, its companion branches stack too: a
+/// read-write companion is in exactly the position the stage is, the predecessor
+/// having committed in it with a pull request there unmerged for just as long.
+///
+/// So the branch is cut from the predecessor stage's companion branch in that
+/// repository rather than from the companion's configured base — which is what
+/// the companion repository moving on afterwards is here to tell apart.
+///
+/// A read-only companion has no branch to stand on anything, so a stacked stage
+/// reads it exactly as an unstacked one does: detached at whatever its base
+/// resolves to now.
+#[tokio::test]
+async fn a_stacked_stage_cuts_its_companion_branch_from_the_predecessors() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING),
+        &gh_about(GREEN, "", ""),
+        *BRISKLY,
+        &[
+            ("askance", CompanionMode::ReadWrite),
+            ("chronicle", CompanionMode::ReadOnly),
+        ],
+    )
+    .await;
+
+    let roadmap = fixture.view().await;
+    let written = alongside(&roadmap, "askance").clone();
+    let read = alongside(&roadmap, "chronicle").clone();
+    let (predecessor, cut_for_the_roadmap) = holding(&written);
+
+    let stood_on = git(&predecessor, &["rev-parse", "HEAD"]).trim().to_owned();
+    let ahead = [
+        moved_on(Path::new(&written.repo.path)),
+        moved_on(Path::new(&read.repo.path)),
+    ];
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+    let (built_in, on) = holding(alongside(&stage, "askance"));
+
+    assert_eq!(on, stage.branch);
+    assert_ne!(on, cut_for_the_roadmap);
+
+    assert_eq!(
+        git(&built_in, &["rev-parse", "HEAD"]).trim(),
+        stood_on,
+        "the companion branch stands on the predecessor stage's, which is where \
+         the work it builds on is",
+    );
+    assert_ne!(
+        git(&built_in, &["rev-parse", "HEAD"]).trim(),
+        ahead[0],
+        "rather than on the companion's configured base, which has moved since",
+    );
+
+    let (looked_in, head) = holding(alongside(&stage, "chronicle"));
+
+    assert_eq!(head, "HEAD");
+    assert_eq!(
+        git(&looked_in, &["rev-parse", "HEAD"]).trim(),
+        ahead[1],
+        "and a read-only companion is that repository as it stands now, stacking \
+         being about branches and it having none",
+    );
+}
+
+/// A companion that cannot be delivered starts no stage at all: nobody is at a
+/// button to refuse, so what halts it is a notice naming the repository and what
+/// git would not do.
+///
+/// Halted rather than built without: a stage that quietly went ahead without a
+/// repository the roadmap was grilled against is a worse outcome than a stage
+/// that waited. And nothing is left behind — no half-made Conversation, and no
+/// branch or directory in either repository.
+#[tokio::test]
+async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &gh_about(GREEN, "", ""),
+        *BRISKLY,
+        &[("askance", CompanionMode::ReadWrite)],
+    )
+    .await;
+
+    // Somebody else's branch, by the name this stage's companion branch would
+    // take: `counter` is the first stage brief's own name, which is what the
+    // stage's branch and so its companion branch are called.
+    let companion = PathBuf::from(&alongside(&fixture.view().await, "askance").repo.path);
+    git(&companion, &["branch", "counter"]);
+
+    staged_and_settled(&fixture).await;
+
+    let said = said_by(&fixture).await;
+
+    assert!(
+        said.contains("<code>askance</code>"),
+        "the repository that stopped it is named: {said:?}",
+    );
+    assert!(
+        said.contains("already a branch of that repository"),
+        "and what git would not do about it: {said:?}",
+    );
+
+    // The record the stage got as far as is closed rather than left drafting:
+    // drafting is a Conversation waiting for a human to write a Brief and press
+    // something, and this is a stage nobody is going to start by hand.
+    let half_made = conversations(&fixture.app)
+        .await
+        .into_iter()
+        .find(|entry| entry.id != fixture.id)
+        .expect("the stage got as far as a record before git was asked anything");
+
+    assert_eq!(
+        half_made.state,
+        Lifecycle::Closed,
+        "no half-made stage Conversation is left running",
+    );
+
+    let closed: ConversationView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}", half_made.id),
+    )
+    .await;
+
+    // Its rows say what it would have worked alongside, as any closed
+    // Conversation's do — and none of them says a directory, nothing having
+    // been checked out anywhere.
+    assert!(
+        closed.worktree.is_none()
+            && closed
+                .companions
+                .iter()
+                .all(|companion| companion.worktree.is_none()),
+        "with nothing checked out anywhere: {:?}",
+        (closed.worktree, closed.companions),
+    );
+
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
+    );
+    assert!(
+        !git(&fixture.repo(), &["branch", "--list", "counter"])
+            .trim()
+            .contains("counter"),
+        "and the stage's own branch was never cut, every question being asked \
+         before any of them is answered",
+    );
+    assert!(
+        !git(&companion, &["worktree", "list"]).contains("counter"),
+        "nor was anything checked out in the companion",
     );
 }
 
@@ -11924,18 +13196,26 @@ async fn halted_by(fixture: &Grilling, decision: Decision) {
 async fn wrapping_unwatched(fixture: &Grilling) {
     let pool = open_database(&fixture.database).await.unwrap();
 
+    let repo = verkstead_server::store::load_conversation(&pool, fixture.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .repo
+        .id;
+
     let recorded = verkstead_server::store::record_pull_request(
         &pool,
         fixture.id,
+        repo,
         &verkstead_server::store::PullRequest {
             number: 41,
             title: "Rate limiting".to_owned(),
             url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
         },
     )
     .await
     .unwrap();
-
     pool.close().await;
 
     assert_eq!(recorded, verkstead_server::store::Wrapping::Started);
@@ -12871,6 +14151,7 @@ async fn steering_into_implementing_carries_on_a_backlog_whose_worktree_has_gone
         &a_backlog_then_once_then_staying(&remembered),
         PULL_REQUEST,
         *SWEEPING,
+        &[],
     )
     .await;
 
@@ -13431,6 +14712,7 @@ async fn steering_into_follow_up_runs_the_skill_on_the_brief_and_is_never_swept(
         &a_backlog_then_a_follow_up(&reviews, A_ROUND_THEN_WAITING),
         &gh_about(GREEN, "", ""),
         *SWEEPING,
+        &[],
     )
     .await;
 
@@ -15335,6 +16617,7 @@ async fn resuming_a_conversation_whose_worktree_has_gone_makes_it_again() {
         &once_then_staying(&remembered),
         PULL_REQUEST,
         *SWEEPING,
+        &[],
     )
     .await;
 
@@ -15388,6 +16671,7 @@ async fn resuming_leaves_a_worktree_that_is_still_one_alone() {
         &once_then_staying(&remembered),
         PULL_REQUEST,
         *SWEEPING,
+        &[],
     )
     .await;
 
@@ -15429,6 +16713,7 @@ async fn a_worktree_that_cannot_be_made_again_refuses_by_name() {
         &once_then_staying(&remembered),
         PULL_REQUEST,
         *SWEEPING,
+        &[],
     )
     .await;
 
@@ -16306,4 +17591,1042 @@ async fn an_answered_deferred_set_is_folded_into_the_next_session_and_no_later_o
             "each Answer is folded once: {step} was told again: {prompt:?}",
         );
     }
+}
+
+/// A `gh` that answers for two repositories at once with a suite of its own in
+/// each: `own` is what it says about the checks where the work's own repository
+/// is, and `companion` what it says in `askance`.
+///
+/// [`gh_alongside`] one step further out. That one is about finding the pull
+/// requests; this is about what is happening to them afterwards, which is a
+/// different answer per repository — a suite runs against a branch in a
+/// repository, and the two have nothing to do with each other.
+fn gh_alongside_checking(own: &str, companion: &str) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+case "$(pwd -P)" in
+*/askance*)
+    case "$5" in
+    *statusCheckRollup*)
+{companion}
+        ;;
+    *commits*)
+        printf '{{"commits":[],"comments":[]}}'
+        ;;
+    *comments*)
+        printf '{{"comments":[],"reviews":[]}}'
+        ;;
+    *)
+        printf '{{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}}'
+        ;;
+    esac
+    exit 0
+    ;;
+esac
+case "$5" in
+*statusCheckRollup*)
+{own}
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#
+    )
+}
+
+/// A red suite, as an answer about the checks — whichever repository it is asked
+/// in.
+///
+/// The same check name in both, which is the whole point of asking twice: `Rust`
+/// red on two pull requests is two different failures, and neither of them
+/// spends the other's attempts.
+const RED: &str = r#"    printf '{"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
+
+/// One that is red until `fixed` is there and green once it is, which is what a
+/// fix session that reached the right pull request does to it.
+fn red_until(fixed: &Path) -> String {
+    format!(
+        r#"    if [ -s {fixed} ]; then how=SUCCESS; else how=FAILURE; fi
+    printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$how""#,
+        fixed = quoted(fixed),
+    )
+}
+
+/// The backlog worked alongside a companion and carried to two pull requests,
+/// plus the sessions a wrap-up runs: a review that finds nothing worth raising,
+/// and a fix session that writes down the prompt it was given.
+///
+/// The fix session says which pull request it was sent at by leaving a marker
+/// named for it — `#7` is the companion's and anything else is the work's own —
+/// so a `gh` beside it can turn *that* repository's suite green, and a fix that
+/// reached the wrong one is visible from outside.
+///
+/// And it says whether it was ever in there beside another: `busy` exists for as
+/// long as one is working, so a second session started over the top of one
+/// writes down that they collided.
+fn a_backlog_alongside_then_fixes(
+    dispatched: &Path,
+    busy: &Path,
+    own: &Path,
+    companion: &Path,
+) -> String {
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    *addressing/SKILL.md*)
+        if [ -e {busy} ]; then printf 'COLLIDED\n' >> {dispatched}; fi
+        printf 'x' > {busy}
+        printf '%s\n=====\n' "$2" >> {dispatched}
+        case "$2" in
+        *"pull request #7"*) printf 'x' > {companion} ;;
+        *) printf 'x' > {own} ;;
+        esac
+        printf 'having a go at the check\n'
+        printf 'a fix\n' >> fixes.md
+        git add -A
+        git commit --quiet -m 'fix: have a go at the failing check'
+        rm -f {busy}
+        sleep 300
+        ;;
+    esac
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+        cd ../askance-*
+        printf 'the other half\n' > halves.md
+        git add halves.md
+        git commit --quiet -m 'feat: the other half'
+        printf 'pushed both, and the pull requests are open\n'
+    fi
+    sleep 300
+    ;;
+esac
+"#,
+        busy = quoted(busy),
+        dispatched = quoted(dispatched),
+        own = quoted(own),
+        companion = quoted(companion),
+    )
+}
+
+/// A red check on a companion's pull request is fixed in that companion's
+/// worktree, and the run stops naming the pull request that would not go green.
+///
+/// Which is the whole of what a fix session has to be told once a Conversation
+/// holds more than one pull request. It starts in the Conversation's own
+/// worktree and `gh` reads its repository from wherever it runs, so a session
+/// sent at `#7` and left to work where it landed would ask `verkstead` how
+/// `askance`'s checks were getting on — and be told about a suite that is green.
+///
+/// Two goes and then the human, per pull request: the work's own is green
+/// throughout and has nothing dispatched about it, and the two the companion
+/// spends are its own.
+#[tokio::test]
+async fn a_red_check_on_a_companions_pull_request_is_fixed_in_that_companions_worktree() {
+    let spill = tempfile::tempdir().unwrap();
+    let dispatched = spill.path().join("fix-prompts");
+    let busy = spill.path().join("busy");
+    let own = spill.path().join("fixed-own");
+    let companion = spill.path().join("fixed-companion");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
+        "askance",
+        &gh_alongside_checking(GREEN, RED),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+    let worktree = fixture.view().await.companions[0]
+        .worktree
+        .clone()
+        .expect("the companion is checked out")
+        .path;
+
+    let told = std::fs::read_to_string(&dispatched).expect("both fix sessions wrote their prompt");
+    let prompts: Vec<&str> = told
+        .split("=====")
+        .filter(|it| !it.trim().is_empty())
+        .collect();
+
+    assert_eq!(
+        prompts.len(),
+        2,
+        "two goes at the companion's check and no more: {told}",
+    );
+
+    for prompt in &prompts {
+        assert!(
+            prompt.contains("#7") && prompt.contains("askance"),
+            "the session is told which pull request in which repository: {prompt}",
+        );
+        assert!(
+            prompt.contains(&worktree),
+            "and the worktree to work in, {worktree} being where that repository's \
+             branch is: {prompt}",
+        );
+    }
+
+    assert!(
+        stopped.html.contains("#7") && stopped.html.contains("askance"),
+        "the Notice says which pull request would not go green: {:?}",
+        stopped.html,
+    );
+
+    assert!(
+        !own.exists(),
+        "nothing was ever dispatched about the work's own pull request, it having \
+         been green from the first poll",
+    );
+    assert_eq!(
+        attempts_spent(&fixture, "Rust").await,
+        0,
+        "and the work's own `Rust` spent nothing: it was green the whole time, and \
+         the companion's two are the companion's",
+    );
+}
+
+/// Two red pull requests queue rather than collide: one fix session at a time,
+/// and the second dispatched once the Worktree is free.
+///
+/// Both of them are red from the moment the wrap-up starts and each goes green on
+/// its own fix, so each gets exactly one session — and the two sessions are the
+/// two watchers taking the Conversation's Turn in turn. A watcher that dispatched
+/// without it would put two agents in one sandbox, which is what the marker file
+/// here would catch.
+///
+/// And then the wrap-up ends, which it could only do with both suites green.
+#[tokio::test]
+async fn two_red_pull_requests_are_fixed_one_session_at_a_time() {
+    let spill = tempfile::tempdir().unwrap();
+    let dispatched = spill.path().join("fix-prompts");
+    let busy = spill.path().join("busy");
+    let own = spill.path().join("fixed-own");
+    let companion = spill.path().join("fixed-companion");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
+        "askance",
+        &gh_alongside_checking(&red_until(&own), &red_until(&companion)),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let told = std::fs::read_to_string(&dispatched).expect("both pull requests were fixed");
+
+    assert!(
+        !told.contains("COLLIDED"),
+        "two fix sessions were in the Worktree at once: {told}",
+    );
+
+    let prompts: Vec<&str> = told
+        .split("=====")
+        .filter(|it| !it.trim().is_empty())
+        .collect();
+
+    assert!(
+        prompts
+            .iter()
+            .any(|prompt| prompt.contains("#41") && prompt.contains("verkstead")),
+        "the work's own pull request had a session of its own: {told}",
+    );
+    assert!(
+        prompts
+            .iter()
+            .any(|prompt| prompt.contains("#7") && prompt.contains("askance")),
+        "and so did the companion's: {told}",
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: both suites went green on their fix — {:?}",
+        notices(&view),
+    );
+}
+
+/// A wrap-up is over when *every* pull request's checks are green, and not
+/// before.
+///
+/// The work's own is green from the first poll and the companion's suite is still
+/// running, which is neither red nor green: nothing is dispatched about it and
+/// nothing is settled either. A rule that waited on the Conversation's own alone
+/// would have finished here — with a pull request nobody had heard back about.
+#[tokio::test]
+async fn a_wrap_up_waits_for_every_pull_requests_checks() {
+    let spill = tempfile::tempdir().unwrap();
+    let dispatched = spill.path().join("fix-prompts");
+    let busy = spill.path().join("busy");
+    let own = spill.path().join("fixed-own");
+    let running = spill.path().join("companion-finished");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &running),
+        "askance",
+        &gh_alongside_checking(GREEN, &green_after(&running)),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the work's own checks never settled: {}",
+            standing(&fixture.view().await),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Long enough for many polls of a wrap-up with one suite green and one still
+    // running.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(
+        !companion_checks_settled(&fixture).await,
+        "a suite that has not finished settles nothing",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "so the Conversation waits, whatever its own pull request is doing",
+    );
+    assert!(
+        !dispatched.exists(),
+        "and nothing was dispatched about either of them: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+
+    // And now the companion's finishes, green.
+    std::fs::write(&running, "x").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+}
+
+/// The same check name red on two pull requests gets two fix sessions each: two
+/// different failures, and neither of them spending the other's attempts.
+///
+/// `Rust` is red on both from the first poll and stays red, so this is *two
+/// attempts, then ask the human* running twice over — which a count kept per
+/// check alone would have cut to two sessions altogether, with one of the two
+/// pull requests never looked at.
+///
+/// The four alternate, because the Worktree is what they queue for: a watcher
+/// that could not take the Turn tries again a poll later, and a poll later is
+/// always sooner than the watcher whose session has just ended and has a whole
+/// interval to sleep off.
+#[tokio::test]
+async fn the_same_check_red_on_two_pull_requests_gets_two_goes_each() {
+    let spill = tempfile::tempdir().unwrap();
+    let dispatched = spill.path().join("fix-prompts");
+    let busy = spill.path().join("busy");
+    let own = spill.path().join("fixed-own");
+    let companion = spill.path().join("fixed-companion");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
+        "askance",
+        &gh_alongside_checking(RED, RED),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+    let told = std::fs::read_to_string(&dispatched).expect("the fix sessions wrote their prompts");
+    let prompts: Vec<&str> = told
+        .split("=====")
+        .filter(|it| !it.trim().is_empty())
+        .collect();
+
+    let about = |number: &str| {
+        prompts
+            .iter()
+            .filter(|prompt| prompt.contains(number))
+            .count()
+    };
+
+    assert_eq!(
+        (about("#41"), about("#7")),
+        (2, 2),
+        "two goes at each pull request, and no more: {told}",
+    );
+
+    assert!(
+        stopped.html.contains("pull request #"),
+        "and the Notice says which one would not go green: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        attempts_spent(&fixture, "Rust").await,
+        2,
+        "the work's own `Rust` spent its own two, whatever the companion's spent",
+    );
+}
+
+/// A `gh` that answers for two repositories at once with a conversation of its
+/// own in each: `own` is what has been said where the work's own repository is,
+/// and `companion` what has been said in `askance`.
+///
+/// [`gh_alongside_checking`]'s other half. A human writes on the pull request
+/// they are reading and a Conversation now ends on one per repository it was
+/// worked in, so what has been said is a different answer per repository — and
+/// `#7` is a number in one of them and nothing at all in the other.
+///
+/// The checks are green in both, so that what holds a wrap-up up in these tests
+/// is what was said and nothing else.
+fn gh_alongside_saying(own: &str, companion: &str) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+case "$(pwd -P)" in
+*/askance*)
+    case "$5" in
+    *statusCheckRollup*)
+{GREEN}
+        ;;
+    *commits*)
+        printf '{{"commits":[],"comments":[]}}'
+        ;;
+    *comments*)
+{companion}
+        ;;
+    *)
+        printf '{{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}}'
+        ;;
+    esac
+    exit 0
+    ;;
+esac
+case "$5" in
+*statusCheckRollup*)
+{GREEN}
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+{own}
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#
+    )
+}
+
+/// Nothing said, as an answer about one pull request's conversation.
+const NOTHING_SAID: &str = r#"    printf '{"comments":[],"reviews":[]}'"#;
+
+/// One comment said in it, `id` being what GitHub calls the comment — which is
+/// what tells one pull request's from another's in the record.
+fn saying(id: &str, body: &str) -> String {
+    format!(
+        r#"    printf '{{"comments":[{{"id":"{id}","author":{{"login":"tobico"}},"body":"{body}","createdAt":"2026-08-21T09:00:00Z"}}],"reviews":[]}}'"#
+    )
+}
+
+/// The same, said only once `after` is there with something in it — which is how
+/// a test says a comment landed after the review had started, and so is a batch
+/// session's rather than the review's.
+fn saying_once(after: &Path, id: &str, body: &str) -> String {
+    format!(
+        r#"    if [ -s {after} ]; then
+{said}
+    else
+{nothing}
+    fi"#,
+        after = quoted(after),
+        said = saying(id, body),
+        nothing = NOTHING_SAID,
+    )
+}
+
+/// And one that cannot be asked what was said at all until `logged_in` is there,
+/// and answers *nothing was said* once it is.
+///
+/// An account whose login has expired, which is the ordinary way this goes wrong
+/// on a machine nobody is sitting at — and the one answer that is neither
+/// *something was said* nor *nothing was*.
+fn nothing_said_once_asked(logged_in: &Path) -> String {
+    format!(
+        r#"    if [ -s {logged_in} ]; then
+{nothing}
+    else
+        printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
+        exit 1
+    fi"#,
+        logged_in = quoted(logged_in),
+        nothing = NOTHING_SAID,
+    )
+}
+
+/// The backlog worked alongside a companion and carried to two pull requests,
+/// plus the two sessions a wrap-up's reading runs: a review that writes down the
+/// prompt it was given and finds nothing worth raising, and a batch session that
+/// writes down its own and then does whatever `responding` says.
+///
+/// [`a_backlog_alongside_then_fixes`]'s other half, and the same backlog: the
+/// finish commits in the companion beside the work's own repository, which is
+/// what makes the wrap-up cover two pull requests rather than one.
+fn a_backlog_alongside_then_answers(reviews: &Path, batches: &Path, responding: &str) -> String {
+    a_backlog_alongside_then_reviews(reviews, batches, REVIEW_AND_FIND_NOTHING, responding)
+}
+
+/// The same again, with a review of the caller's choosing.
+///
+/// What the tests about one review across two pull requests need: reading the
+/// prompt it was given is one half of what a review of work in two repositories
+/// does, and what it lands in each of their worktrees is the other.
+fn a_backlog_alongside_then_reviews(
+    reviews: &Path,
+    batches: &Path,
+    review: &str,
+    responding: &str,
+) -> String {
+    let review = review.replace("WHILE_NOBODY_HAS_ASKED", WHILE_NOBODY_HAS_ASKED);
+    let responding = responding.replace("WHILE_NOBODY_HAS_ASKED", WHILE_NOBODY_HAS_ASKED);
+
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf '%s\n=====\n' "$2" >> {reviews}
+{review}
+        exit 0
+        ;;
+    *responding/SKILL.md*)
+        printf '%s\n=====\n' "$2" >> {batches}
+{responding}
+        exit 0
+        ;;
+    esac
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+        cd ../askance-*
+        printf 'the other half\n' > halves.md
+        git add halves.md
+        git commit --quiet -m 'feat: the other half'
+        printf 'pushed both, and the pull requests are open\n'
+    fi
+    sleep 300
+    ;;
+esac
+"#,
+        reviews = quoted(reviews),
+        batches = quoted(batches),
+    )
+}
+
+/// A comment left on a companion's pull request is answered by a session that is
+/// told which repository, which pull request and which worktree it is answering
+/// in.
+///
+/// Which is the whole of what a batch session has to be told once a Conversation
+/// holds more than one pull request. It starts in the Conversation's own worktree
+/// and both `git` and `gh` read their repository from wherever they run, so a
+/// session sent at `#7` and left to work where it landed would read `verkstead`'s
+/// diff and push its answer onto `verkstead`'s branch.
+///
+/// The comment lands after the review has started, so it is a batch's rather than
+/// the review's — everything standing when the review starts is the review's to
+/// propose about.
+#[tokio::test]
+async fn a_comment_on_a_companions_pull_request_is_answered_in_that_companions_worktree() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let said = saying_once(&reviews, "IC_7", "This is the wrong way round.");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_answers(&reviews, &batches, RESPOND_AND_FIND_NOTHING),
+        "askance",
+        &gh_alongside_saying(NOTHING_SAID, &said),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let told = std::fs::read_to_string(&batches).expect("the batch session wrote its prompt");
+    let worktree = fixture.view().await.companions[0]
+        .worktree
+        .clone()
+        .expect("the companion is checked out")
+        .path;
+
+    assert!(
+        told.contains("#7") && told.contains("askance"),
+        "the session is told which pull request in which repository was commented \
+         on: {told}",
+    );
+    assert!(
+        told.contains(&worktree),
+        "and the worktree to work in, {worktree} being where that repository's \
+         branch is: {told}",
+    );
+    assert!(
+        told.contains("This is the wrong way round."),
+        "with what was actually said under it: {told}",
+    );
+
+    assert_eq!(
+        addressed_on(&fixture, companion_repo(&fixture).await).await,
+        vec!["IC_7".to_owned()],
+        "and the comment is written down as dealt with against the pull request it \
+         was left on",
+    );
+    assert!(
+        addressed(&fixture).await.is_empty(),
+        "rather than against the Conversation's own, which nobody said anything on",
+    );
+}
+
+/// One review reads the whole of the work, so it is told where the whole of it
+/// is: every pull request the Conversation holds, each with its number, the
+/// repository it was opened in, its URL and the worktree to read it in.
+///
+/// Which is what a session that starts in the Conversation's own worktree cannot
+/// work out for itself. Both `git` and `gh` read their repository from wherever
+/// they are run, so a review left where it landed would read `verkstead`'s diff
+/// twice and `askance`'s never — and the seam between the two halves of the work
+/// is exactly what one session reading both is for.
+#[tokio::test]
+async fn the_review_is_told_every_pull_request_and_where_to_read_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_answers(&reviews, &batches, RESPOND_AND_FIND_NOTHING),
+        "askance",
+        &gh_alongside_saying(NOTHING_SAID, NOTHING_SAID),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let told = std::fs::read_to_string(&reviews).expect("the review session wrote its prompt");
+    let view = fixture.view().await;
+    let own = view.worktree.clone().expect("the work has a worktree").path;
+    let companion = view.companions[0]
+        .worktree
+        .clone()
+        .expect("the companion is checked out")
+        .path;
+
+    assert!(
+        told.contains("#41") && told.contains("#7") && told.contains("askance"),
+        "each pull request by its number and the repository it was opened in: {told}",
+    );
+    assert!(
+        told.contains("https://github.com/tobico/verkstead/pull/41")
+            && told.contains("https://github.com/tobico/askance/pull/7"),
+        "with the URL of each, rather than a number built onto one repository's: \
+         {told}",
+    );
+    assert!(
+        told.contains(&own) && told.contains(&companion),
+        "and the worktree to read each of them in, {companion} being where the \
+         companion's branch is: {told}",
+    );
+
+    assert_eq!(
+        prompts(&told).len(),
+        1,
+        "one review across the lot of them, and one only: {told}",
+    );
+}
+
+/// A review that splits a finding out still sends the work back to be built, and
+/// the second wrap's review is told every pull request again.
+///
+/// The one move down the ladder, with a companion beside it: the list is worked
+/// like any other, the finish that follows the last task wraps the work up again
+/// on the pull requests it already had, and the review that reads it afresh knows
+/// nothing of the first — including where the other half of the work is, which is
+/// why it is told again rather than remembered.
+#[tokio::test]
+async fn the_second_wrap_of_a_split_out_backlog_reviews_every_pull_request_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let once = spill.path().join("split-written");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_reviews(
+            &reviews,
+            &batches,
+            &review_then_split(&once, ""),
+            RESPOND_AND_FIND_NOTHING,
+        ),
+        "askance",
+        &gh_alongside_saying(NOTHING_SAID, NOTHING_SAID),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Implementing) == 2).then_some(()))
+        .await;
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Wrapping) == 2).then_some(()))
+        .await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    let read_again = loop {
+        let written = std::fs::read_to_string(&reviews).unwrap_or_default();
+
+        if prompts(&written).len() > 1 {
+            break written;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the second wrap never read the work: {written}",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+
+    let read_again = prompts(&read_again);
+    let companion = fixture.view().await.companions[0]
+        .worktree
+        .clone()
+        .expect("the companion is checked out")
+        .path;
+
+    assert_eq!(read_again.len(), 2, "one review per wrap: {read_again:?}");
+    assert!(
+        read_again[1].contains("#41")
+            && read_again[1].contains("#7")
+            && read_again[1].contains(&companion),
+        "and the second is told every pull request the work is on and where to \
+         read each, exactly as the first was: {:?}",
+        read_again[1],
+    );
+}
+
+/// A review that accepts findings in two repositories lands them in both, and
+/// the wrap-up settles over the lot of it.
+///
+/// One review, one Set, and what it was answered carried out wherever each
+/// finding was about: the session commits in the worktree it started in and in
+/// the companion's beside it, and both commits reach the Timeline saying which
+/// repository they came from. Nothing is dispatched to fix anything and nothing
+/// reviews anything a second time — the session that raised the findings is the
+/// one that lands them, however many repositories they were spread across.
+#[tokio::test]
+async fn a_review_that_accepts_findings_in_two_repositories_lands_them_in_both() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_reviews(
+            &reviews,
+            &batches,
+            REVIEW_THEN_FIX_BOTH,
+            RESPOND_AND_FIND_NOTHING,
+        ),
+        "askance",
+        &gh_alongside_saying(NOTHING_SAID, NOTHING_SAID),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    // The review is up and waiting on the human, which is the Set the test puts
+    // on its behalf and the answer it writes the marker for. Put once the session
+    // is reading, because a proposal standing before there is a session behind it
+    // is exactly what a wrap-up stops over.
+    let set = fixture.ask(REVIEW).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1 },
+                    { "label": "Q2", "selected": 1 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let view = fixture
+        .until(|view| (fixes(view) == 2).then(|| view.clone()))
+        .await;
+
+    let landed = commits(&view);
+    let named = |subject: &str| {
+        landed
+            .iter()
+            .find(|commit| commit.subject == subject)
+            .unwrap_or_else(|| panic!("no commit called {subject:?} among {landed:#?}"))
+    };
+
+    assert_eq!(
+        named("fix: reset the counter as the window rolls").repo,
+        None,
+        "the fix made in the work's own repository draws unlabelled",
+    );
+    assert_eq!(
+        named("fix: take the other half with it").repo,
+        Some("askance".to_owned()),
+        "and the one made in the companion says which repository it landed in",
+    );
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the session landed both fixes and the review never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
+        1,
+        "one review across both of them, and nothing reads either a second time",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// What was already said on *every* pull request when the review starts is part
+/// of what that session reads, and nothing is dispatched to act on any of it.
+///
+/// One review across the whole of the work, so a review given the Conversation's
+/// own pull request alone would leave the companion's comments for a batch
+/// session to be sent about ungated — the thing the review folding them in exists
+/// to prevent.
+///
+/// And each comment says which pull request it was left on, because that is what
+/// it means: *this is the wrong way round* is an instruction with the repository
+/// and a riddle without it.
+#[tokio::test]
+async fn the_review_is_given_what_was_said_on_every_pull_request() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_answers(&reviews, &batches, RESPOND_AND_FIND_NOTHING),
+        "askance",
+        &gh_alongside_saying(
+            &saying("IC_41", "Rename the window field."),
+            &saying("IC_7", "This is the wrong way round."),
+        ),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let told = std::fs::read_to_string(&reviews).expect("the review session wrote its prompt");
+
+    assert!(
+        told.contains("Rename the window field.") && told.contains("This is the wrong way round."),
+        "the review is given what was said on both of them: {told}",
+    );
+    assert!(
+        told.contains("#41") && told.contains("#7") && told.contains("askance"),
+        "each of it saying which pull request it was left on: {told}",
+    );
+
+    assert!(
+        !batches.exists(),
+        "and nothing was dispatched about any of it: {:?}",
+        std::fs::read_to_string(&batches).ok(),
+    );
+
+    assert_eq!(
+        addressed(&fixture).await,
+        vec!["IC_41".to_owned()],
+        "both are written down as dealt with, against the pull request each was \
+         left on",
+    );
+    assert_eq!(
+        addressed_on(&fixture, companion_repo(&fixture).await).await,
+        vec!["IC_7".to_owned()],
+    );
+}
+
+/// A wrap-up is over when nothing is left unaddressed on *every* pull request,
+/// and not before.
+///
+/// The work's own pull request is quiet from the first poll and the companion's
+/// cannot be asked what has been said on it at all — which is neither *something
+/// was said* nor *nothing was*, so nothing is settled about it and nothing is
+/// dispatched. A rule that settled *the* comments would have finished here, with
+/// a pull request Verkstead had never managed to read.
+#[tokio::test]
+async fn a_wrap_up_waits_for_every_pull_requests_comments() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let logged_in = spill.path().join("logged-in");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_answers(&reviews, &batches, RESPOND_AND_FIND_NOTHING),
+        "askance",
+        &gh_alongside_saying(NOTHING_SAID, &nothing_said_once_asked(&logged_in)),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the work's own pull request never went quiet: {}",
+            standing(&fixture.view().await),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Long enough for many polls of a wrap-up with one pull request quiet and one
+    // that cannot be read at all.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(
+        !companion_comments_settled(&fixture).await,
+        "a pull request nobody could ask about settles nothing",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "so the Conversation waits, whatever its own pull request is doing",
+    );
+
+    // And now `gh` can be asked, and finds nothing said.
+    std::fs::write(&logged_in, "x").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert!(
+        !batches.exists(),
+        "nothing was ever dispatched: nobody said anything on either of them — {:?}",
+        std::fs::read_to_string(&batches).ok(),
+    );
 }

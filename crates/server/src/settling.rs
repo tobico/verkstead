@@ -1,9 +1,18 @@
 //! The rule that ends a wrap-up, and the condition it passes through on the way.
 //!
-//! A Conversation leaves Wrapping for **Done** when three things are true
-//! together: the pull request's checks are green, the self-review's Question Set
-//! has been answered, and nothing said on the pull request is left unaddressed.
-//! Any one of the three missing keeps it where it is.
+//! A Conversation leaves Wrapping for **Done** when three kinds of thing are
+//! true together: every pull request's checks are green, the self-review's
+//! Question Set has been answered, and nothing said on any of the pull requests
+//! is left unaddressed. Any one of them missing keeps it where it is.
+//!
+//! Three kinds rather than three things, because a Conversation ends on a pull
+//! request per repository it was worked in and each of them has a suite and a
+//! conversation of its own: the review is one review across the whole of it, and
+//! the checks and the comments are one settlement each per pull request. Which
+//! pull requests those are is read off the record every time the rule is asked —
+//! a companion's found a poll after the Conversation's own is two more things to
+//! wait on, and a wrap-up that had already counted its three would have finished
+//! in between. See [`store::finish_wrap_up`].
 //!
 //! Verkstead decides that itself. There is nobody at the workbench to press
 //! anything, which is the whole of what running unattended means — and each of
@@ -16,11 +25,20 @@
 //! pipeline is built around rather than a step in it. Done means Verkstead has
 //! finished with the work, not that it is on `main`.
 //!
-//! A loop rather than a call from each of the three, and deliberately so: the
+//! **And never over a stop.** Every other stop a wrap-up can take leaves
+//! something unsettled behind it — red checks, a review nobody finished, a batch
+//! nobody answered — so the rule never had to ask whether the run was stopped.
+//! A companion whose pull request was never found leaves nothing unsettled,
+//! because nothing was recorded to be unsettled about: the pull requests that
+//! were found could all go green and the Conversation would sail to Done past
+//! its own Notice. So this asks too, the way every watcher already asks before
+//! it dispatches anything — see [`crate::stopping::stopped`].
+//!
+//! A loop rather than a call from each of the watchers, and deliberately so: the
 //! things that settle are in three different places — a poll of GitHub, another
 //! poll of GitHub, and the endpoint that takes a Response — and a wrap-up left
 //! for ever because one of them forgot to ask would be the failure nobody
-//! notices. Asking costs one read of a table.
+//! notices. Asking costs a few reads of a table.
 //!
 //! Which is also why the condition on the way is noticed here — see
 //! [`narrowing`]. A wrap-up whose review and comments have settled and whose
@@ -40,6 +58,22 @@ use crate::store;
 /// what it has to say it says on the Timeline or in the log.
 pub(crate) async fn watch(state: AppState, conversation_id: i64) {
     loop {
+        // Before the rule rather than inside it, because what a stop means here
+        // is the same as what it means in front of a launch: the run does not
+        // advance past one, and Done is as much an advance as a session is.
+        // Started again by the press that clears it — see [`crate::resume`],
+        // which starts the whole of a wrap-up over.
+        //
+        // And before the narrowing below for the same reason: a run that has
+        // stopped is not a wrap-up waiting on its checks, so it says nothing.
+        if crate::stopping::stopped(&state, conversation_id).await {
+            tracing::info!(
+                conversation_id,
+                "driving has stopped, so the wrap-up is not being finished",
+            );
+            return;
+        }
+
         // Before the rule itself, because the two are readings of the same
         // facts a moment apart and this is the one that has something to say
         // about a wrap-up that is *not* over: the narrowing is what is left
@@ -51,8 +85,9 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
             Ok(store::Finished::Done) => {
                 tracing::info!(
                     conversation_id,
-                    "the checks are green, the review is answered and nothing is left \
-                     unaddressed, so the work is done",
+                    "every pull request's checks are green and nothing said on any of \
+                     them is left unaddressed, and the review is answered, so the work \
+                     is done",
                 );
 
                 // The sidebar keeps the news until the human has looked at it,

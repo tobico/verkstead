@@ -29,12 +29,14 @@ fn the_example_set_is_a_legal_question_set() {
     set.validate()
         .unwrap_or_else(|invalid| panic!("examples/questions.yaml should be legal:\n{invalid}"));
 
-    // The CLI overwrites these from the working directory, so an example that
-    // supplied them would only be teaching the reader a habit that does not
-    // survive contact with `verkstead ask`.
+    // All three are overwritten before the Set is stored — the first two by the
+    // CLI, from the working directory, and the Diff by the server, from the
+    // Worktrees it was asked from. An example that supplied any of them would
+    // only be teaching the reader a habit that does not survive contact with
+    // `verkstead ask`.
     assert_eq!(set.project, None, "the CLI derives the project");
     assert_eq!(set.branch, None, "the CLI derives the branch");
-    assert_eq!(set.diff, None, "the CLI captures the Diff");
+    assert_eq!(set.diff, None, "the server reads the Diff");
 }
 
 #[test]

@@ -6,12 +6,20 @@
 //! beside it name — so there is nothing here to render and no diff parser in
 //! the browser at all. The folds are the browser's own `details`, which is why
 //! they work without a line of script.
+//!
+//! One section, and a block inside it per repository the work may be written in.
+//! Which repository a block came out of is drawn over it wherever the server
+//! named one — which is everywhere except the conversation's own repository
+//! drawn as the whole of the Diff, an unlabelled block meaning the work's own
+//! repo already. A companion's block is named however alone it is, exactly as a
+//! commit card is.
 
+import { For, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
 import app from "../App.module.css";
 import { Switch } from "../Switch";
-import type { DiffView } from "../api/types";
+import type { RepoDiffView } from "../api/types";
 import styles from "./Diff.module.css";
 
 /// The attached Diff, and the one setting that governs how it is read.
@@ -24,7 +32,7 @@ import styles from "./Diff.module.css";
 /// Wrapping is a class and nothing more: the Diff arrived rendered, so there is
 /// nothing here to render again and the stylesheet is the whole of the change.
 export function Diff(props: {
-  diff: DiffView;
+  blocks: RepoDiffView[];
   wrapped: boolean;
   flip: (on: boolean) => void;
 }): JSX.Element {
@@ -37,9 +45,21 @@ export function Diff(props: {
         <h2 class={app.sectionHeading}>Diff</h2>
         <Switch label="Word wrap" on={props.wrapped} flip={props.flip} />
       </div>
-      {/* The per-file anchors are stamped by the renderer, since this arrives
-          already rendered. */}
-      <div class={styles.diffFiles} innerHTML={props.diff.html} />
+      <For each={props.blocks}>
+        {(block) => (
+          <>
+            {/* Which repository this is, wherever the server named one. The
+                table of contents says the same word over the same files, which
+                is how the two read as one account of the Diff. */}
+            <Show when={block.repo}>
+              {(repo) => <h3 class={styles.repo}>{repo()}</h3>}
+            </Show>
+            {/* The per-file anchors are stamped by the renderer, since this
+                arrives already rendered. */}
+            <div class={styles.diffFiles} innerHTML={block.diff.html} />
+          </>
+        )}
+      </For>
     </section>
   );
 }

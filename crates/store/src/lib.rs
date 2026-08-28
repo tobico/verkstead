@@ -31,6 +31,7 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 mod archives;
 mod captures;
 mod commits;
+mod companions;
 mod conversations;
 mod deferrals;
 mod endings;
@@ -54,7 +55,11 @@ pub use archives::{
     unarchive_conversation,
 };
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
-pub use commits::{Commit, commit, record_commit, recorded_commits};
+pub use commits::{Commit, commit, commit_repo, commits_landed, record_commit, recorded_commits};
+pub use companions::{
+    Adding, Change, Companion, CompanionMode, CompanionWorktree, Configured, Joining, Opening,
+    Removing, add_companion, companions, configure_companion, remove_companion,
+};
 pub use conversations::{
     Chosen, Closing, Conversation, ConversationRow, Directing, Edited, Ending, Event, Grilling,
     Implementing, Landed, Lifecycle, Rebuilding, Role, SetOnTimeline, Settling, Staged, Steer,
@@ -75,8 +80,8 @@ pub use profiles::{
     load_profile, profiles, update_profile,
 };
 pub use pull_requests::{
-    PullRequest, Rollup, Wrapping, check_rollup, pull_request, record_check_rollup,
-    record_pull_request,
+    PullRequest, Rollup, Wrapping, check_rollup, pull_request, pull_request_repo, pull_requests,
+    record_another_pull_request, record_check_rollup, record_pull_request,
 };
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
@@ -92,9 +97,9 @@ pub use unseen::{see_conversation, stamp_unseen};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
     Finished, Narrowing, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
-    forget_addressed_comments, forget_fix_attempts, forget_narrowing, narrowed_to_checks,
-    narrowing, record_addressed_comments, record_fix_attempt, settle_wrap_up, unsettle_wrap_up,
-    wrap_up_settled,
+    forget_addressed_comments, forget_every_addressed_comment, forget_fix_attempts,
+    forget_narrowing, narrowed_to_checks, narrowing, record_addressed_comments, record_fix_attempt,
+    settle_wrap_up, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Set as the store holds it: what was asked plus the identity the server
@@ -639,6 +644,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // The Conversations attached to them, and their Timelines. After the Repos
     // and the Profiles, because a Conversation's row references all three.
     conversations::apply_schema(pool).await?;
+
+    // And the other registered Repos each Conversation works alongside. After
+    // the Conversations and the Repos both, because a companion's row
+    // references one of each.
+    companions::apply_schema(pool).await?;
 
     // And what each Repo was last grilled with, so a Conversation started on
     // it arrives with both pickers filled. After the Conversations only for

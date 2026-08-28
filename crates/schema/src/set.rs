@@ -15,9 +15,9 @@ use ts_rs::TS;
 /// A batch of Questions submitted together by one agent.
 ///
 /// `title`, `preface`, `questions` and `postscript` come from the agent;
-/// `project`, `branch` and `diff` are filled in by the CLI, which derives them
-/// from the working directory rather than trusting the agent. The server treats
-/// all three as opaque.
+/// `project` and `branch` are filled in by the CLI, which derives them from the
+/// working directory rather than trusting the agent, and the server treats both
+/// as opaque. The Diff is the server's own — see [`QuestionSet::diffs`].
 ///
 /// Read off the wire through [`Wire`], which is where the one field a Set no
 /// longer has is accepted and thrown away.
@@ -63,10 +63,53 @@ pub struct QuestionSet {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
 
-    /// The repo's uncommitted changes at send time. Absent on a clean tree or
-    /// outside a repo.
+    /// The uncommitted changes of one repository, on a Set stored before the
+    /// Diff became a list of them.
+    ///
+    /// Nothing writes one again: what carries a Set's Diff now is
+    /// [`Self::diffs`], which says which repository each patch came out of. It
+    /// is still read, because a Set is a record and the ones already stored have
+    /// theirs here — a Set with this and no list is drawn from this, exactly as
+    /// it always was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff: Option<String>,
+
+    /// The uncommitted changes of every repository the Conversation may write
+    /// to: its own first, then each read-write companion. Composed by the server
+    /// as the Set arrives — see `verkstead_server::diffs`.
+    ///
+    /// A list rather than one patch, because work is done in more than one
+    /// repository and a patch that did not say which one it came out of is
+    /// evidence nobody can place. A repository with nothing uncommitted is not
+    /// in it, so an empty list is every worktree clean.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diffs: Vec<RepoDiff>,
+}
+
+/// One repository's uncommitted changes, named by the repository they came out
+/// of.
+///
+/// The name is the Repo's registered one — what the workbench calls that
+/// repository everywhere else, a commit card's own label included.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepoDiff {
+    pub repo: String,
+
+    /// Whether this is the Conversation's own repository rather than one of its
+    /// companions.
+    ///
+    /// True of exactly one block, and of the first, because that is the order
+    /// they are composed in. It says the one thing a name cannot: which of
+    /// these repositories the work itself is in. That is what decides whether a
+    /// block drawn on its own is labeled — the same question a commit card is
+    /// labeled by, asked the same way round.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own: bool,
+
+    /// The patch, in the unified format git writes: everything not in the last
+    /// commit, staged or not, plus the contents of untracked files.
+    pub diff: String,
 }
 
 /// A Set as it comes off the wire, which is a Set plus the one key an older
@@ -116,6 +159,9 @@ struct Wire {
 
     #[serde(default)]
     diff: Option<String>,
+
+    #[serde(default)]
+    diffs: Vec<RepoDiff>,
 }
 
 impl From<Wire> for QuestionSet {
@@ -130,6 +176,7 @@ impl From<Wire> for QuestionSet {
             project,
             branch,
             diff,
+            diffs,
         } = wire;
 
         Self {
@@ -141,6 +188,7 @@ impl From<Wire> for QuestionSet {
             project,
             branch,
             diff,
+            diffs,
         }
     }
 }
