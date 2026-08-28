@@ -45,7 +45,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, CompanionAdded,
-    CompanionMode, CompanionModeChosen, ConversationClosed, ConversationSteered,
+    CompanionMode, CompanionModeChosen, CompanionView, ConversationClosed, ConversationSteered,
     ConversationStopped, ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PinnedEvent,
     ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size, StageListReached, Started,
     SteerOpened, Submitted, TaskListEvent, TaskListReached, TimelineEvent, TranscriptView, Turn,
@@ -10394,6 +10394,341 @@ async fn a_stage_whose_fetch_fails_halts_with_a_notice_and_starts_nothing() {
     assert!(
         !planning.exists(),
         "so no session was launched inside the next-stage fork either",
+    );
+}
+
+/// One companion of a Conversation, by the name of the Repo it is a checkout of.
+fn alongside<'a>(view: &'a ConversationView, name: &str) -> &'a CompanionView {
+    view.companions
+        .iter()
+        .find(|companion| companion.repo.name == name)
+        .unwrap_or_else(|| {
+            panic!(
+                "`{name}` should be a companion of this Conversation, which has {:?}",
+                view.companions
+                    .iter()
+                    .map(|companion| companion.repo.name.as_str())
+                    .collect::<Vec<_>>(),
+            )
+        })
+}
+
+/// Where a companion was checked out, and what git says that directory is
+/// holding: the branch it is on, or `HEAD` where it is detached.
+fn holding(companion: &CompanionView) -> (PathBuf, String) {
+    let path = PathBuf::from(
+        &companion
+            .worktree
+            .as_ref()
+            .unwrap_or_else(|| {
+                panic!(
+                    "`{}` should be checked out somewhere",
+                    companion.repo.name.as_str()
+                )
+            })
+            .path,
+    );
+
+    let head = git(&path, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .trim()
+        .to_owned();
+
+    (path, head)
+}
+
+/// Move a companion repository's default branch on, and hand back the commit it
+/// now stands at.
+///
+/// What tells the two base rules apart. A checkout cut from the configured base
+/// holds this commit, and one cut from the predecessor stage's companion branch
+/// — which was made before it — does not.
+fn moved_on(repo: &Path) -> String {
+    std::fs::write(repo.join("moved-on.md"), "# the companion moved on\n").unwrap();
+    git(repo, &["add", "moved-on.md"]);
+    git(repo, &["commit", "-m", "docs: the companion moves on"]);
+
+    git(repo, &["rev-parse", "HEAD"]).trim().to_owned()
+}
+
+/// A roadmap grilled with companions builds with them: the stage a settled
+/// wrap-up starts carries its parent Conversation's whole companion set across,
+/// and has every one of them checked out before its first session runs.
+///
+/// A stage has no draft moment of its own, so the inheritance funnel is the only
+/// place the set could come from — without it a roadmap grilled against two
+/// repositories would build against one.
+///
+/// Read-only comes across as it is and is detached at whatever its base resolves
+/// to *for this stage*; read-write cuts a branch of its own named after the
+/// stage's own branch, whatever the roadmap Conversation's row was called. This
+/// one does not stack, so both come off the configured base as it stands at the
+/// moment the stage starts.
+#[tokio::test]
+async fn a_stage_inherits_the_companion_set_its_roadmap_was_grilled_with() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &gh_about(GREEN, "", ""),
+        BRISKLY,
+        &[
+            ("askance", CompanionMode::ReadWrite),
+            ("chronicle", CompanionMode::ReadOnly),
+        ],
+    )
+    .await;
+
+    let roadmap = fixture.view().await;
+    let written = alongside(&roadmap, "askance").clone();
+    let read = alongside(&roadmap, "chronicle").clone();
+
+    // What mirroring came to for the roadmap Conversation itself, which is the
+    // branch no stage of that roadmap may share.
+    let (_, cut_for_the_roadmap) = holding(&written);
+    assert_eq!(cut_for_the_roadmap, roadmap.branch);
+
+    // Both companion repositories move on after this Conversation was checked
+    // out, which is what tells the base rules apart.
+    let ahead = [
+        moved_on(Path::new(&written.repo.path)),
+        moved_on(Path::new(&read.repo.path)),
+    ];
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+    let inherited = alongside(&stage, "askance").clone();
+    let detached = alongside(&stage, "chronicle").clone();
+
+    assert_eq!(
+        stage
+            .companions
+            .iter()
+            .map(|companion| (companion.repo.name.as_str(), companion.mode))
+            .collect::<Vec<_>>(),
+        [
+            ("askance", CompanionMode::ReadWrite),
+            ("chronicle", CompanionMode::ReadOnly),
+        ],
+        "every companion of the parent, in the mode it was in",
+    );
+
+    let (built_in, on) = holding(&inherited);
+
+    assert_eq!(
+        on, stage.branch,
+        "a read-write companion's branch is named after the stage's own",
+    );
+    assert_ne!(
+        on, roadmap.branch,
+        "so no two stages of one roadmap can share a companion branch",
+    );
+
+    let (looked_in, head) = holding(&detached);
+
+    assert_eq!(
+        head, "HEAD",
+        "and a read-only one is checked out detached, having nothing to commit",
+    );
+
+    // Both off the configured base as it stands now: this stage does not stack,
+    // so what its checkouts come off is each repository's default branch,
+    // resolved at the moment the stage started rather than when the roadmap was.
+    assert_eq!(git(&built_in, &["rev-parse", "HEAD"]).trim(), ahead[0]);
+    assert_eq!(git(&looked_in, &["rev-parse", "HEAD"]).trim(), ahead[1]);
+
+    assert_eq!(
+        detached.base_commit.as_deref(),
+        Some(ahead[1].as_str()),
+        "and the record says which commit that was, nothing else being able to",
+    );
+
+    // And the session the stage starts in is told about both of them, which is
+    // how the agent finds out either is there at all.
+    let prompt = until_written(&planning).await;
+
+    assert!(
+        prompt.contains(&format!(
+            "- `askance` at `{}`, on branch `{}`, read-write.",
+            built_in.display(),
+            stage.branch,
+        )),
+        "the stage's first session is told where it may build: {prompt:?}",
+    );
+    assert!(
+        prompt.contains(&format!(
+            "- `chronicle` at `{}`, detached at `{}`, read-only.",
+            looked_in.display(),
+            ahead[1],
+        )),
+        "and where it may only read: {prompt:?}",
+    );
+}
+
+/// Where the stage's own branch stacks, its companion branches stack too: a
+/// read-write companion is in exactly the position the stage is, the predecessor
+/// having committed in it with a pull request there unmerged for just as long.
+///
+/// So the branch is cut from the predecessor stage's companion branch in that
+/// repository rather than from the companion's configured base — which is what
+/// the companion repository moving on afterwards is here to tell apart.
+///
+/// A read-only companion has no branch to stand on anything, so a stacked stage
+/// reads it exactly as an unstacked one does: detached at whatever its base
+/// resolves to now.
+#[tokio::test]
+async fn a_stacked_stage_cuts_its_companion_branch_from_the_predecessors() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING),
+        &gh_about(GREEN, "", ""),
+        BRISKLY,
+        &[
+            ("askance", CompanionMode::ReadWrite),
+            ("chronicle", CompanionMode::ReadOnly),
+        ],
+    )
+    .await;
+
+    let roadmap = fixture.view().await;
+    let written = alongside(&roadmap, "askance").clone();
+    let read = alongside(&roadmap, "chronicle").clone();
+    let (predecessor, cut_for_the_roadmap) = holding(&written);
+
+    let stood_on = git(&predecessor, &["rev-parse", "HEAD"]).trim().to_owned();
+    let ahead = [
+        moved_on(Path::new(&written.repo.path)),
+        moved_on(Path::new(&read.repo.path)),
+    ];
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+    let (built_in, on) = holding(alongside(&stage, "askance"));
+
+    assert_eq!(on, stage.branch);
+    assert_ne!(on, cut_for_the_roadmap);
+
+    assert_eq!(
+        git(&built_in, &["rev-parse", "HEAD"]).trim(),
+        stood_on,
+        "the companion branch stands on the predecessor stage's, which is where \
+         the work it builds on is",
+    );
+    assert_ne!(
+        git(&built_in, &["rev-parse", "HEAD"]).trim(),
+        ahead[0],
+        "rather than on the companion's configured base, which has moved since",
+    );
+
+    let (looked_in, head) = holding(alongside(&stage, "chronicle"));
+
+    assert_eq!(head, "HEAD");
+    assert_eq!(
+        git(&looked_in, &["rev-parse", "HEAD"]).trim(),
+        ahead[1],
+        "and a read-only companion is that repository as it stands now, stacking \
+         being about branches and it having none",
+    );
+}
+
+/// A companion that cannot be delivered starts no stage at all: nobody is at a
+/// button to refuse, so what halts it is a notice naming the repository and what
+/// git would not do.
+///
+/// Halted rather than built without: a stage that quietly went ahead without a
+/// repository the roadmap was grilled against is a worse outcome than a stage
+/// that waited. And nothing is left behind — no half-made Conversation, and no
+/// branch or directory in either repository.
+#[tokio::test]
+async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &gh_about(GREEN, "", ""),
+        BRISKLY,
+        &[("askance", CompanionMode::ReadWrite)],
+    )
+    .await;
+
+    // Somebody else's branch, by the name this stage's companion branch would
+    // take: `counter` is the first stage brief's own name, which is what the
+    // stage's branch and so its companion branch are called.
+    let companion = PathBuf::from(&alongside(&fixture.view().await, "askance").repo.path);
+    git(&companion, &["branch", "counter"]);
+
+    staged_and_settled(&fixture).await;
+
+    let said = said_by(&fixture).await;
+
+    assert!(
+        said.contains("<code>askance</code>"),
+        "the repository that stopped it is named: {said:?}",
+    );
+    assert!(
+        said.contains("already a branch of that repository"),
+        "and what git would not do about it: {said:?}",
+    );
+
+    // The record the stage got as far as is closed rather than left drafting:
+    // drafting is a Conversation waiting for a human to write a Brief and press
+    // something, and this is a stage nobody is going to start by hand.
+    let half_made = conversations(&fixture.app)
+        .await
+        .into_iter()
+        .find(|entry| entry.id != fixture.id)
+        .expect("the stage got as far as a record before git was asked anything");
+
+    assert_eq!(
+        half_made.state,
+        Lifecycle::Closed,
+        "no half-made stage Conversation is left running",
+    );
+
+    let closed: ConversationView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}", half_made.id),
+    )
+    .await;
+
+    // Its rows say what it would have worked alongside, as any closed
+    // Conversation's do — and none of them says a directory, nothing having
+    // been checked out anywhere.
+    assert!(
+        closed.worktree.is_none()
+            && closed
+                .companions
+                .iter()
+                .all(|companion| companion.worktree.is_none()),
+        "with nothing checked out anywhere: {:?}",
+        (closed.worktree, closed.companions),
+    );
+
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
+    );
+    assert!(
+        !git(&fixture.repo(), &["branch", "--list", "counter"])
+            .trim()
+            .contains("counter"),
+        "and the stage's own branch was never cut, every question being asked \
+         before any of them is answered",
+    );
+    assert!(
+        !git(&companion, &["worktree", "list"]).contains("counter"),
+        "nor was anything checked out in the companion",
     );
 }
 

@@ -31,4 +31,4 @@ Roadmap stage: [04: Steer and stages](docs/roadmaps/companion-repos/04-steer-and
 
 - [x] 01: A steer adds a companion — [details](01-a-steer-adds-a-companion.md)
 - [x] 02: A steer upgrades a companion — [details](02-a-steer-upgrades-a-companion.md)
-- [ ] 03: A stage inherits the companion set — [details](03-a-stage-inherits-the-companions.md)
+- [x] 03: A stage inherits the companion set — [details](03-a-stage-inherits-the-companions.md)

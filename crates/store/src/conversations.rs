@@ -2918,12 +2918,19 @@ pub async fn record_roadmap(pool: &SqlitePool, id: i64) -> Result<Landed> {
 /// where it came off the default branch. Written here because this is the
 /// transaction that makes the Conversation a stage, and read back by whatever
 /// starts a session in it — the first one, and any the human asks for again.
+///
+/// `companions` is where the stage's inherited companion repos were checked
+/// out, written in this transaction for [`start_grilling`]'s reason: a stage
+/// that said it was implementing with companions nothing had checked out would
+/// be one nothing could bind into a sandbox and nothing would come back and
+/// remove.
 pub async fn start_stage(
     pool: &SqlitePool,
     id: i64,
     base_commit: &str,
     worktree: &Path,
     stacks_on: Option<&str>,
+    companions: &[super::CompanionWorktree],
 ) -> Result<Staged> {
     let worktree = super::repos::text(worktree)?;
 
@@ -2976,6 +2983,8 @@ pub async fn start_stage(
         .execute(&mut *tx)
         .await
         .with_context(|| format!("recording what the branch of Conversation {id} stands on"))?;
+
+    super::companions::record_worktrees(&mut tx, id, companions).await?;
 
     moved(&mut tx, id, Lifecycle::Implementing).await?;
 

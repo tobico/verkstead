@@ -1288,7 +1288,9 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     store::rename_branch(pool, id, &branch).await?;
     store::save_brief(pool, id, &stage.brief).await?;
 
-    match store::start_stage(pool, id, &commit, &path, None).await? {
+    // And no companion checkouts: adoption makes the Conversation's own worktree
+    // and nothing beside it, so there is nowhere for one to have been put.
+    match store::start_stage(pool, id, &commit, &path, None, &[]).await? {
         store::Staged::Started => {}
         store::Staged::NoSuchConversation => return Ok(Adopted::NoSuchConversation),
         store::Staged::NotDrafting => return Ok(Adopted::NotDrafting),
