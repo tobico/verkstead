@@ -944,7 +944,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         .announce(Nudge::Conversation { conversation: id });
     state.nudges.announce(Nudge::Repos);
 
-    tokio::spawn(crate::runner::plan_stage(state.clone(), id, None));
+    // Taken here rather than by the planning, which is started from more than one
+    // place and takes the registration from all of them — see
+    // [`crate::runner::plan_stage`].
+    let driving = state.drivers.driving(id);
+
+    tokio::spawn(crate::runner::plan_stage(state.clone(), id, None, driving));
 
     Ok(Adopted::Adopted)
 }
@@ -981,6 +986,21 @@ fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
 /// made before one: what is recorded is what happened. A Conversation that said
 /// it had stopped while its directory was still on disk would be one nothing
 /// would ever come back and remove.
+///
+/// But a worktree that will not go does not hold the close up. Git refuses to
+/// remove a directory it no longer reads as a worktree — one hollowed out, one
+/// whose `.git` file has gone, one whose repository has moved out from under it
+/// — and that is precisely the state a human is trying to get out of when they
+/// press Close. Refusing them would leave a Conversation nothing can ever end,
+/// which is worse than the directory it was protecting. So the removal is
+/// attempted, a failure is logged with the path in it, and the close is
+/// recorded regardless: what is left behind is one directory under the Data
+/// Directory, named in the log, for a human to delete.
+///
+/// And what it was still drawing the human with goes last of all — the questions
+/// it left open, in [`asked`], and the news mark it was carrying, in [`read`].
+/// The record says Closed by then, which is the order the rest of this is in:
+/// what has happened is written down, and then whatever outlived it is shut.
 pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClosed> {
     let pool = &state.pool;
 
@@ -992,15 +1012,16 @@ pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClose
 
     if let Some(path) = conversation.worktree.clone() {
         let repo = conversation.repo.path.clone();
+        let left = path.clone();
 
         let removed = tokio::task::spawn_blocking(move || worktrees::remove(&repo, &path)).await?;
 
         if !removed {
-            tracing::error!(
+            tracing::warn!(
                 conversation_id = id,
-                "a Conversation's worktree could not be removed"
+                worktree = %left.display(),
+                "a Conversation's worktree could not be removed, so it was closed around it"
             );
-            return Ok(ConversationClosed::WorktreeStuck);
         }
     }
 
@@ -1011,11 +1032,84 @@ pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClose
     let handoffs = Handoffs::under(&state.data_dir);
     tokio::task::spawn_blocking(move || handoffs.remove(id)).await?;
 
-    Ok(match store::close_conversation(pool, id).await? {
+    let closing = store::close_conversation(pool, id).await?;
+
+    if closing == store::Closing::Closed {
+        asked(state, id).await;
+        read(state, id).await;
+    }
+
+    Ok(match closing {
         store::Closing::Closed => ConversationClosed::Closed,
         store::Closing::AlreadyClosed => ConversationClosed::AlreadyClosed,
         store::Closing::NoSuchConversation => ConversationClosed::NoSuchConversation,
     })
+}
+
+/// Lock whatever the Conversation was still asking, now that it has closed.
+///
+/// Closing takes away every session there will ever be, so an open Set is a
+/// question with no reader and no reader coming: what the human wrote into one
+/// would go nowhere, and the marks over it would go on saying somebody was
+/// waiting. Locking unanswered is what that Set has always meant — see
+/// [`crate::sets::lock`], which a relaunched grilling reaches for over the same
+/// facts.
+///
+/// **Every open Set, Deferred Asks included**, which is the wider of the two
+/// readings [`crate::sets::Open`] holds. A relaunch leaves a Deferred Ask
+/// standing because the session after it will fold the answer in; here there is
+/// no session after it, so the question is over with the Conversation.
+///
+/// The stop the Conversation carries is left exactly as it was. That is history
+/// rather than something outstanding, and what stops it reading as *waiting on
+/// you* is the Closed state itself — see [`crate::ui`], where the header's mark
+/// is decided, and the sidebar's own `waiting` in the store.
+///
+/// Nothing is refused for, and nothing is read back: a Conversation is closed
+/// whether or not the questions it left could be shut.
+async fn asked(state: &AppState, id: i64) {
+    let timeline = match store::timeline(&state.pool, id).await {
+        Ok(timeline) => timeline,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a closed Conversation was asking failed");
+            return;
+        }
+    };
+
+    crate::sets::lock(
+        state,
+        id,
+        &crate::sets::open(&timeline, crate::sets::Open::Either),
+        "the Conversation that asked it is closed",
+    )
+    .await;
+}
+
+/// Take away the news mark, now that the Conversation has closed.
+///
+/// The other half of what [`asked`] does, over the other thing a closed
+/// Conversation could still be drawing the human with. The mark means *there is
+/// news here to read*, and closing is them saying the work is over wherever it
+/// had got to — so there is nothing left to go and read, and a disc on the
+/// Conversation they have just put away is the one that teaches them to stop
+/// reading the discs.
+///
+/// Which is what the sidebar's own `waiting` says of a closed row already — see
+/// the store's `conversations` — and the mark beside it is the same disc drawn
+/// for the other reason, so the two say it together or the row goes on glowing
+/// over nothing.
+///
+/// Cleared rather than hidden. The row is the whole of the mark, and a
+/// Conversation steered back into life is not one the human has news about: what
+/// they missed was the wrap-up they closed it in front of.
+///
+/// Nothing is refused for, and no Nudge is sent: the close announces the list
+/// has moved on its own account, and every open page reads the row again on the
+/// strength of that.
+async fn read(state: &AppState, id: i64) {
+    if let Err(error) = store::see_conversation(&state.pool, id).await {
+        tracing::error!(error = ?error, conversation_id = id, "clearing the news mark on a closed Conversation failed");
+    }
 }
 
 /// Why these two Pairings are not something to run the work under, or `None`

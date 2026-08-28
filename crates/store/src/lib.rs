@@ -24,7 +24,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use sqlx::SqlitePool;
-use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
 use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
@@ -33,6 +33,7 @@ mod captures;
 mod commits;
 mod conversations;
 mod deferrals;
+mod endings;
 mod migrations;
 mod pairings;
 mod pauses;
@@ -44,6 +45,7 @@ mod repos;
 mod session_names;
 mod stops;
 mod transcripts;
+mod unseen;
 mod waits;
 mod wrap_up;
 
@@ -54,16 +56,17 @@ pub use archives::{
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
-    Chosen, Closing, Conversation, ConversationRow, Directing, Edited, Event, Grilling,
+    Chosen, Closing, Conversation, ConversationRow, Directing, Edited, Ending, Event, Grilling,
     Implementing, Landed, Lifecycle, Rebuilding, Role, SetOnTimeline, Settling, Staged, Steer,
     Steering, TimelineEvent, adopting, ask, asked_from, close_conversation, conversations,
-    implement_again, last_batch_proposal, last_proposal, load_conversation, note, pick_direction,
-    record_backlog, record_handoff, record_roadmap, rename_branch, save_brief, set_asked_from,
-    set_base_commit, set_grilling_pairing, set_implementation_pairing, set_state, stacks_on,
-    start_adoption, start_conversation, start_grilling, start_implementing, start_stage,
-    steer_conversation, timeline, unanswered_set_since,
+    follow_up_over, implement_again, last_batch_proposal, last_proposal, load_conversation, note,
+    open_set, pick_direction, record_backlog, record_handoff, record_roadmap, rename_branch,
+    save_brief, set_asked_from, set_base_commit, set_grilling_pairing, set_implementation_pairing,
+    set_state, stacks_on, start_adoption, start_conversation, start_grilling, start_implementing,
+    start_stage, state, steer_conversation, timeline, unanswered_set_since,
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
+pub use endings::{ended_on, nothing_else};
 pub use pairings::{RepoPairings, remembered_pairings};
 pub use pauses::Pause;
 pub use placements::place_conversations;
@@ -71,7 +74,10 @@ pub use profiles::{
     AgentType, Deleting, Pairing, Profile, ProfileFacts, Saving, create_profile, delete_profile,
     load_profile, profiles, update_profile,
 };
-pub use pull_requests::{PullRequest, Wrapping, pull_request, record_pull_request};
+pub use pull_requests::{
+    PullRequest, Rollup, Wrapping, check_rollup, pull_request, record_check_rollup,
+    record_pull_request,
+};
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
     store_subscription, vapid_keys,
@@ -82,11 +88,13 @@ pub use stops::{
     Decision, Stopped, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop, stopped,
 };
 pub use transcripts::{append_transcript, transcript, transcript_after};
+pub use unseen::{see_conversation, stamp_unseen};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
-    Finished, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
-    forget_addressed_comments, forget_fix_attempts, record_addressed_comments, record_fix_attempt,
-    settle_wrap_up, unsettle_wrap_up, wrap_up_settled,
+    Finished, Narrowing, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
+    forget_addressed_comments, forget_fix_attempts, forget_narrowing, narrowed_to_checks,
+    narrowing, record_addressed_comments, record_fix_attempt, settle_wrap_up, unsettle_wrap_up,
+    wrap_up_settled,
 };
 
 /// A Set as the store holds it: what was asked plus the identity the server
@@ -487,6 +495,22 @@ async fn settled_set(pool: &SqlitePool, set_id: i64) -> Result<SettledSet> {
 
 /// Open the SQLite database at `path`, creating the file if it is absent and
 /// bringing its schema up to date.
+///
+/// **Write-ahead logging**, which sqlx will not turn on by itself — it leaves
+/// `journal_mode` alone because switching a database into or out of WAL takes an
+/// exclusive lock no busy timeout can wait on, and it will not do that behind an
+/// application's back. Here it is this application's decision to make, and the
+/// moment to make it is this one: a server that has just opened its database has
+/// nothing else running against it.
+///
+/// It is worth making because of what the default costs. Under a rollback
+/// journal a reader and a writer cannot hold the file at once, so every poll of
+/// a Timeline is something a session's Capture write has to queue behind. Verkstead
+/// writes continuously while a session runs and reads on every open page. WAL is
+/// the mode that shape of use is for.
+///
+/// It is not, on its own, what makes a write safe from a concurrent one — see
+/// [`writing`], which is the other half.
 pub async fn open_database(path: &Path) -> Result<SqlitePool> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)
@@ -495,7 +519,8 @@ pub async fn open_database(path: &Path) -> Result<SqlitePool> {
 
     let options = SqliteConnectOptions::new()
         .filename(path)
-        .create_if_missing(true);
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal);
 
     let pool = SqlitePool::connect_with(options)
         .await
@@ -504,6 +529,43 @@ pub async fn open_database(path: &Path) -> Result<SqlitePool> {
     apply_schema(&pool).await?;
 
     Ok(pool)
+}
+
+/// Open a transaction that is going to write, with `doing` as the words any
+/// failure of it is reported under.
+///
+/// `BEGIN IMMEDIATE` rather than the plain `BEGIN` sqlx opens, and every
+/// transaction in the store goes through here, because every transaction in the
+/// store writes. What each of them does is read the record, decide on it, and
+/// write — a state read before the move it authorises, a count read before the
+/// row that changes it — and that shape is the one SQLite handles worst.
+///
+/// A deferred `BEGIN` takes no lock. The first read takes a shared one, and the
+/// first write then has to promote it. **SQLite will not wait for that
+/// promotion**: where another connection is holding its own read of the same
+/// database, promoting would deadlock the pair of them, so rather than call the
+/// busy handler it fails the statement at once with *database is locked*. The
+/// five-second busy timeout never comes into it, and no amount of raising it
+/// would. Under a rollback journal that is a shared lock in the way; under WAL
+/// it is `SQLITE_BUSY_SNAPSHOT`, another connection having committed since the
+/// snapshot this transaction is reading. Both are the same bug to a caller.
+///
+/// `BEGIN IMMEDIATE` takes the write lock up front, before the first read, so
+/// there is no promotion to fail — and *waiting for a lock that is already
+/// held* is exactly the case the busy timeout does cover. The cost is that
+/// writers queue against each other from the first statement rather than the
+/// first write, which is the right trade for a store whose transactions are all
+/// short and all end in a write.
+///
+/// This was not a theoretical failure. A finish step recorded its pull request
+/// through [`record_pull_request`] while the session that opened it was still
+/// writing its Capture, the promotion failed, and the Conversation was left
+/// implementing with the work on a pull request nothing knew about.
+pub(crate) async fn writing(
+    pool: &SqlitePool,
+    doing: &'static str,
+) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    pool.begin_with("BEGIN IMMEDIATE").await.context(doing)
 }
 
 /// Bring an opened database up to the shape the server expects. Safe to run
@@ -558,6 +620,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // Which Sets were asked deferred, and which of those have been folded into a
     // prompt. It hangs off a Set for a lock's reason, said again there.
     deferrals::apply_schema(pool).await?;
+
+    // And which Responses said there was nothing else, which hangs off a Set for
+    // that reason too — and for one of its own: what is kept here is deliberately
+    // not in the body the agent is handed. See [`endings`].
+    endings::apply_schema(pool).await?;
 
     // The push identity and the devices subscribed to it, which also generates
     // the keypair when this is the database's first run.
@@ -629,6 +696,12 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // the work either.
     archives::apply_schema(pool).await?;
 
+    // And which of them Verkstead has told the human about and they have not
+    // looked at yet, which sits beside the Conversations for that reason again —
+    // and is the one fact here about the person reading the list rather than
+    // about the work on it. See [`unseen`].
+    unseen::apply_schema(pool).await?;
+
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite
     // moves rows into is one of them — see [`migrations`], where each rewrite
@@ -690,12 +763,29 @@ pub async fn set_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// devices cannot leave the same Set both answered and locked by racing.
 ///
 /// The Response is expected to have been validated against its Set already.
+///
+/// The Nothing-else mark is the one thing that does not go into the body: it is
+/// taken off here and recorded beside the row, so the Response a waiting agent
+/// is handed is byte for byte the one it would have been handed without a mark
+/// — see [`endings`]. The two are written in one transaction, because a mark
+/// without its Response, or a Response whose mark did not land, would each be a
+/// follow-up nobody could say the state of.
 pub async fn insert_response(
     pool: &SqlitePool,
     set_id: i64,
     response: &Response,
 ) -> Result<Option<ResponseAccepted>> {
-    let body = serde_json::to_string(response).context("serialising the Response")?;
+    let ended = response.nothing_else;
+    let body = serde_json::to_string(&Response {
+        nothing_else: false,
+        ..response.clone()
+    })
+    .context("serialising the Response")?;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .with_context(|| format!("storing the Response to Question Set {set_id}"))?;
 
     let row: Option<(String,)> = sqlx::query_as(
         "INSERT INTO responses (set_id, submitted_at, body)
@@ -707,9 +797,19 @@ pub async fn insert_response(
     .bind(set_id)
     .bind(body)
     .bind(set_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("storing the Response to Question Set {set_id}"))?;
+
+    // Only where the Response is the one that landed: a second submitter is
+    // refused above, and their mark is refused with it.
+    if row.is_some() && ended {
+        endings::mark(&mut tx, set_id).await?;
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| format!("storing the Response to Question Set {set_id}"))?;
 
     Ok(row.map(|(submitted_at,)| ResponseAccepted {
         set_id,

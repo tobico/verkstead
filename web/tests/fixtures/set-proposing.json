@@ -4,6 +4,7 @@
     "conversation": 1,
     "diagrams": false,
     "diff": null,
+    "follow_up": false,
     "id": 1,
     "postscript_html": null,
     "preface_html": "<p>We settled all four questions. Here is what I think we build.</p>\n",

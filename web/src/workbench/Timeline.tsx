@@ -110,12 +110,16 @@ import { Empty, ErrorLine, Note } from "../notices";
 import unreadable from "../set/Unreadable.module.css";
 import { Actions } from "./Actions";
 import { Adoption } from "./Adoption";
+import { Checks } from "./Checks";
 import { Mark } from "./Mark";
 import { PaneHead } from "./PaneHead";
 import { Setup } from "./Setup";
 import styles from "./Timeline.module.css";
 import shell from "./Workbench.module.css";
+import { WAITING_ON_CHECKS } from "./conditions";
+import { ENDED, STATE } from "./states";
 import { keeping } from "./settling";
+import { windowed } from "./windowing";
 
 /// What the details pane is showing, as the card that opened it names itself.
 ///
@@ -205,11 +209,13 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
   NoDirection:
     "Nothing on the record says how this work is being built, so there is no run to pick up.",
   NothingToWork:
-    "There is no backlog left to work — nothing was written, or it is finished with. Set the next thing going by hand.",
+    "There is no backlog left to work and nothing was ever written on this branch, so there is nothing built here to carry anywhere. Set the next thing going by hand.",
   NoGrillingPairing:
     "Choose a grilling profile and model first, on the brief.",
   NoImplementationPairing:
     "Choose an implementation profile and model first, on the brief.",
+  NoFollowUpBrief:
+    "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
 };
 
 /// Whether the event the *blocked on you* badge points at has a details pane
@@ -299,11 +305,12 @@ function Clamped(props: {
 
 /// A card whose whole surface opens the details pane.
 ///
-/// Every other openable Event is a `button`, and these three cannot be: what
-/// they hold is rendered markdown, and a link inside a button is not something a
-/// browser will have. So the affordance goes on the article instead — the press,
-/// the keyboard and the role that says what it is — and it reads as the same
-/// card either way.
+/// Every other openable Event is a `button`, and the cards drawn through here
+/// cannot be: the documents hold rendered markdown, and a link inside a button
+/// is not something a browser will have; the lists and the pull request hold a
+/// heading and rows, which a button would flatten to one run of text. So the
+/// affordance goes on the article instead — the press, the keyboard and the
+/// role that says what it is — and it reads as the same card either way.
 ///
 /// `open` is nothing where the card is not openable, which is the Brief for as
 /// long as it is a draft: a field is not a thing to press, and neither is the
@@ -381,23 +388,54 @@ export function Timeline(props: {
           back={{ to: "Conversations", go: props.back }}
           title={props.conversation.branch}
         >
+          {/* Where the work got to, for the two states it stops at: a Done
+              conversation says *Done* and a closed one says *Closed*, beside
+              the branch they are named for.
+
+              Only those two. A state on the way up the ladder is what a
+              conversation is doing right now, and the record under the header
+              is that answer at length — a word repeating it would be chrome
+              earning nothing. An ended one has no record still being written,
+              so the last move is the bottom of a long scroll and the one glance
+              that answers *is this finished?* has nowhere else to land.
+
+              A plain word and nothing to press: unlike the marks below it there
+              is no one event this stands for, and nowhere it could send
+              anybody. */}
+          <Show when={ENDED.has(props.conversation.state)}>
+            <span class={styles.ended}>
+              {STATE[props.conversation.state]}
+            </span>
+          </Show>
           {/* What the work has stopped on, said where the conversation is named
               rather than only down in the list: a timeline is long by the time a
-              run gets far enough to stop, and a badge the human had to go
+              run gets far enough to stop, and a mark the human had to go
               hunting behind would not be one. It points at the event that
               stopped it, which is what makes it worth pressing.
 
               Which is one kind of event now: whatever stopped a run — a session
-              that fell over, a press, an account out of window — the badge marks
-              the notice saying so, where it stands in the record. There is
+              that fell over, a press, an account out of window — the mark goes
+              to the notice saying so, where it stands in the record. There is
               nothing behind a pane for it, so a narrow window stays on the
               record rather than being sent away from the very thing there is to
-              read. */}
+              read.
+
+              Two marks over the one event, and which it is comes off the wire
+              rather than being weighed here. A stop that happened without the
+              human is loud: `Blocked on you`, in the accent, because it is the
+              one they have to go and look at. A stop they pressed themselves is
+              quiet: `Stopped`, drawn as the condition beside it is, because
+              they were there — the word is worth reading and there is nothing
+              to shout about. Both go to the same place. */}
           <Show when={props.conversation.blocked_on}>
             {(event) => (
               <button
                 type="button"
-                class={styles.blocked}
+                class={
+                  props.conversation.stopped_by_hand
+                    ? styles.stopped
+                    : styles.blocked
+                }
                 onClick={() => {
                   props.select(event());
 
@@ -406,9 +444,21 @@ export function Timeline(props: {
                   }
                 }}
               >
-                Blocked on you
+                {props.conversation.stopped_by_hand
+                  ? "Stopped"
+                  : "Blocked on you"}
               </button>
             )}
+          </Show>
+          {/* And what a wrap-up has narrowed to, in the same place and drawn
+              far more quietly: the review is answered, nothing said on the pull
+              request is left unaddressed, and the checks going green is all
+              that is left. A label rather than a control — there is nothing to
+              press and nowhere to go, the checks being GitHub's to finish — and
+              a condition of Wrapping rather than a state, which is why it is
+              drawn beside the branch and never in place of it. */}
+          <Show when={props.conversation.waiting_on_checks}>
+            <span class={styles.waitingOnChecks}>{WAITING_ON_CHECKS}</span>
           </Show>
           <Actions conversation={props.conversation} />
           {/* And the way on to the next level, drawn only where there is a next
@@ -1104,12 +1154,15 @@ function Card(props: {
   );
 }
 
-/// The pull request the finish step opened: what it is called, and its number.
+/// The pull request the finish step opened: what it is called, its number, and
+/// how its checks are getting on.
 ///
-/// A button, because what is *on* it — the commits and the comments — is in the
-/// details pane, fetched from GitHub when this is opened. The link out is a link
-/// rather than part of the button: merging is the human's act and it happens
-/// over there, so getting there must not depend on this page's own panes.
+/// The whole card is the press, as the two lists beside it are: what is *on* it
+/// — the commits and the comments — is in the details pane, fetched from GitHub
+/// when this is opened, and there is nothing else on the card to press. The way
+/// out to GitHub went with the button it used to sit beside: a card with a link
+/// on it has two targets and only one of them is the card, so the link lives in
+/// the pane instead, which is where it was already written out in full.
 ///
 /// Drawn twice, from the pinned block and from the record, because it belongs in
 /// both. The two are the same Event and so the same selection: opening either
@@ -1120,27 +1173,22 @@ function PullRequest(props: {
   open: () => void;
 }): JSX.Element {
   return (
-    <article
-      class={styles.pullRequest}
-      classList={{ [styles.selected!]: props.selected }}
+    <Openable
+      kind={styles.pullRequest!}
+      selected={props.selected}
+      open={props.open}
     >
       <div class={styles.eventHead}>
         <h2>Pull request</h2>
         <span class={styles.number}>#{props.opened.number}</span>
-        <a
-          class={styles.out}
-          href={props.opened.url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          On GitHub
-        </a>
+        {/* On the other end of the line, where every card's second thing sits:
+            the checks are what is true of the pull request now, beside what it
+            was called when it opened. */}
+        <Checks checks={props.opened.checks} class={styles.checkRollup!} />
       </div>
 
-      <button type="button" class={styles.openPullRequest} onClick={props.open}>
-        {props.opened.title}
-      </button>
-    </article>
+      <p class={styles.pullRequestTitle}>{props.opened.title}</p>
+    </Openable>
   );
 }
 
@@ -1230,10 +1278,36 @@ function Box(props: { done: boolean }): JSX.Element {
   );
 }
 
-/// The backlog: every task of it, and how far through it the work has got.
+/// The entries a windowed list is not showing, at the end they are hidden at.
 ///
-/// The whole list rather than a summary, because the whole list is short and it
-/// is the one thing a conversation being built from a backlog is *about*.
+/// An ellipsis rather than a count, because what it says is that the list goes
+/// on and the card is not the place to read it in — the details pane the card
+/// opens is, and it holds every entry. Nothing at all where the list runs to
+/// that end already: a row saying none are hidden is a row about nothing.
+///
+/// The count itself is in words beside the glyph, out of the layout and still
+/// in the document, the way a row's own state word is: an ellipsis read aloud
+/// says nothing whatever.
+function Hidden(props: { count: number }): JSX.Element {
+  return (
+    <Show when={props.count > 0}>
+      <li class={styles.more}>
+        <span aria-hidden="true">…</span>
+        <span class={styles.state}>{props.count} more</span>
+      </li>
+    </Show>
+  );
+}
+
+/// The backlog: where the work has got to in it, and how far through it that
+/// is.
+///
+/// Five entries rather than the whole list — the ones around the task being
+/// worked, with an ellipsis wherever the rest of them are. It is the one thing
+/// a conversation being built from a backlog is *about*, so it is pinned above
+/// the record for the whole of one, and a card that grew with the backlog would
+/// push the record out from under itself. The progress line still counts the
+/// whole list; see `windowing.ts` for where the five sit.
 ///
 /// It opens, and what it opens is not the list again: each entry names a
 /// document in `.tasks/` that says what that task is, and those are what the
@@ -1254,6 +1328,13 @@ function TaskList(props: {
 }): JSX.Element {
   const done = () => props.tasks.tasks.filter((task) => task.done).length;
 
+  // What the card draws: five entries around the one being worked, and the
+  // count of what is out of sight at either end. The progress line above them
+  // keeps counting the whole list, which is what it is there for.
+  const shown = createMemo(() =>
+    windowed(props.tasks.tasks, (task) => task.done),
+  );
+
   return (
     <Openable
       kind={styles.taskList!}
@@ -1271,7 +1352,8 @@ function TaskList(props: {
       </div>
 
       <ol class={styles.tasks}>
-        <For each={props.tasks.tasks}>
+        <Hidden count={shown().before} />
+        <For each={shown().entries}>
           {(task) => (
             <li classList={{ [styles.done!]: task.done }}>
               <Box done={task.done} />
@@ -1287,15 +1369,17 @@ function TaskList(props: {
             </li>
           )}
         </For>
+        <Hidden count={shown().after} />
       </ol>
     </Openable>
   );
 }
 
-/// The roadmap: every stage of it, and how far through it the effort has got.
+/// The roadmap: where the effort has got to in it, and how far through it that
+/// is.
 ///
-/// Beside the task list and drawn the same way, because it is the same kind of
-/// thing one level up — and it is read out of `docs/roadmaps/` in the worktree
+/// Beside the task list and drawn the same way, windowed to five and all,
+/// because it is the same kind of thing one level up — and it is read out of `docs/roadmaps/` in the worktree
 /// every time the page reads the conversation, so a stage finishing moves this
 /// without anybody pressing anything, in both of the places it is drawn.
 ///
@@ -1316,6 +1400,12 @@ function StageList(props: {
 }): JSX.Element {
   const done = () => props.stages.stages.filter((stage) => stage.done).length;
 
+  // The same window the task list draws, because it is the same card one level
+  // up — see `windowing.ts`.
+  const shown = createMemo(() =>
+    windowed(props.stages.stages, (stage) => stage.done),
+  );
+
   return (
     <Openable
       kind={styles.stageList!}
@@ -1333,7 +1423,8 @@ function StageList(props: {
       </div>
 
       <ol class={styles.stages}>
-        <For each={props.stages.stages}>
+        <Hidden count={shown().before} />
+        <For each={shown().entries}>
           {(stage) => (
             <li classList={{ [styles.done!]: stage.done }}>
               <Box done={stage.done} />
@@ -1348,6 +1439,7 @@ function StageList(props: {
             </li>
           )}
         </For>
+        <Hidden count={shown().after} />
       </ol>
     </Openable>
   );
@@ -1451,7 +1543,7 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
       class={styles.moved}
       classList={{ [styles[props.moved.state.toLowerCase()]!]: true }}
     >
-      {props.from} → {props.moved.state}
+      {STATE[props.from]} → {STATE[props.moved.state]}
     </p>
   );
 }
@@ -1468,11 +1560,12 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
 /// above this one and is already on the page, and what a steer adds is the
 /// deciding.
 ///
-/// **A card where it carries an instruction**, which is a steer into
-/// implementing that wrote one: the instruction is what a session was sent off
-/// to do, so it is a document like the brief and the handoff and is read the
-/// same way — clamped here, whole in the details pane. A steer that carried
-/// nothing written stays the line it always was, there being nothing to open.
+/// **A card where it carries a document**, which is a steer into implementing
+/// that wrote an instruction, or one into follow-up, which always writes a
+/// brief: either is what a session was sent off to do, so it is a document like
+/// the brief and the handoff and is read the same way — clamped here, whole in
+/// the details pane. A steer that carried nothing written stays the line it
+/// always was, there being nothing to open.
 function Steered(props: {
   steer: SteerEvent;
   selected: boolean;
@@ -1483,7 +1576,7 @@ function Steered(props: {
       class={styles.steered}
       classList={{ [styles[props.steer.target.toLowerCase()]!]: true }}
     >
-      You steered this into {props.steer.target}
+      You steered this into {STATE[props.steer.target]}
     </p>
   );
 

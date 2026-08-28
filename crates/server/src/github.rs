@@ -374,32 +374,6 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Vec<Check>, Tr
         status_check_rollup: Vec<Reported>,
     }
 
-    /// One entry of it, which is one of two different things.
-    ///
-    /// A `CheckRun` is an Actions job and carries a `status` and a `conclusion`;
-    /// a `StatusContext` is the older commit-status API and carries a `state`
-    /// alone. Both are read here rather than only the first, because a
-    /// repository is free to use either and a Verkstead that saw only Actions
-    /// would call a red Buildkite green.
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Reported {
-        #[serde(default)]
-        name: String,
-        #[serde(default)]
-        context: String,
-        #[serde(default)]
-        status: String,
-        #[serde(default)]
-        conclusion: String,
-        #[serde(default)]
-        state: String,
-        #[serde(default)]
-        details_url: String,
-        #[serde(default)]
-        target_url: String,
-    }
-
     let said = gh.ask(
         repo,
         &[
@@ -414,8 +388,46 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Vec<Check>, Tr
     let rollup: Rollup = serde_json::from_str(&said)
         .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
 
-    Ok(rollup
-        .status_check_rollup
+    Ok(read_checks(rollup.status_check_rollup))
+}
+
+/// One entry of `statusCheckRollup`, which is one of two different things.
+///
+/// A `CheckRun` is an Actions job and carries a `status` and a `conclusion`; a
+/// `StatusContext` is the older commit-status API and carries a `state` alone.
+/// Both are read here rather than only the first, because a repository is free
+/// to use either and a Verkstead that saw only Actions would call a red
+/// Buildkite green.
+///
+/// Out here rather than inside [`checks`] because two questions come back with
+/// this field on them: the watcher's, which asks about the checks alone, and the
+/// details pane's, which asks about the whole pull request. One shape and one
+/// reading for the two, so the icon on the card and the list in the pane cannot
+/// come to disagree about a suite they are both looking at.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Reported {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    context: String,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    conclusion: String,
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    details_url: String,
+    #[serde(default)]
+    target_url: String,
+}
+
+/// What GitHub reported, as the checks Verkstead reads: a name to count and
+/// call it by, one of three words for how it is getting on, and where its run
+/// is.
+fn read_checks(reported: Vec<Reported>) -> Vec<Check> {
+    reported
         .into_iter()
         .map(|reported| Check {
             name: match (reported.name.is_empty(), reported.context.is_empty()) {
@@ -431,7 +443,7 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Vec<Check>, Tr
                 false => reported.details_url,
             },
         })
-        .collect())
+        .collect()
 }
 
 /// How one check is getting on, out of the three words GitHub says it in.
@@ -710,26 +722,42 @@ fn identity(id: &str, url: &str, author: &str, at: &str) -> String {
     format!("{author} at {at}")
 }
 
-/// What is on the pull request now: the commits it carries and what has been
-/// said about it.
+/// What one reading of a pull request comes back with.
+///
+/// Two things out of the one question: what the details pane draws, and the
+/// checks as [`checks`] would have read them. The second is not a second copy of
+/// the first — it is what the rollup written down beside the Conversation is
+/// taken from, and the caller wants the checks in the shape the aggregate is
+/// read out of rather than in the shape a page draws.
+pub(crate) struct Details {
+    pub(crate) pane: verkstead_render::PullRequestDetails,
+    pub(crate) checks: Vec<Check>,
+}
+
+/// What is on the pull request now: the commits it carries, what GitHub is
+/// running against it and what has been said about it.
 ///
 /// Fetched rather than remembered, which is the whole arrangement — the same way
 /// the task list is read off the Worktree rather than stored. A PR is being
 /// worked on while the human is looking at it, and a commit list written down
 /// when it opened would be wrong by the time anybody read it.
-pub(crate) fn details(
-    gh: &Gh,
-    repo: &Path,
-    number: i64,
-) -> Result<verkstead_render::PullRequestDetails, Trouble> {
-    /// What `--json commits,comments` comes back as, of which this takes the
-    /// fields the details pane draws.
+///
+/// The checks come back on the same question rather than a second one, `gh`
+/// taking a list of fields: two questions would be two round trips over somebody
+/// else's network, and a commit list from before a push beside checks from after
+/// it.
+pub(crate) fn details(gh: &Gh, repo: &Path, number: i64) -> Result<Details, Trouble> {
+    /// What `--json commits,comments,statusCheckRollup` comes back as, of which
+    /// this takes the fields the details pane draws.
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct Carried {
         #[serde(default)]
         commits: Vec<Landed>,
         #[serde(default)]
         comments: Vec<Said>,
+        #[serde(default)]
+        status_check_rollup: Vec<Reported>,
     }
 
     /// `gh` writes its JSON in the field names the GraphQL API uses, which are
@@ -760,32 +788,54 @@ pub(crate) fn details(
             "view",
             &number.to_string(),
             "--json",
-            "commits,comments",
+            "commits,comments,statusCheckRollup",
         ],
     )?;
 
     let carried: Carried = serde_json::from_str(&said)
         .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
 
-    Ok(verkstead_render::pull_request_details(
-        carried
-            .commits
-            .into_iter()
-            .map(|commit| verkstead_render::PullRequestCommit {
-                sha: commit.oid,
-                subject: commit.message_headline,
-            })
-            .collect(),
-        carried
-            .comments
-            .into_iter()
-            .map(|comment| verkstead_render::Comment {
-                author: comment.author.login,
-                at: comment.created_at,
-                markdown: comment.body,
-            })
-            .collect(),
-    ))
+    let checks = read_checks(carried.status_check_rollup);
+
+    Ok(Details {
+        pane: verkstead_render::pull_request_details(
+            carried
+                .commits
+                .into_iter()
+                .map(|commit| verkstead_render::PullRequestCommit {
+                    sha: commit.oid,
+                    subject: commit.message_headline,
+                })
+                .collect(),
+            carried
+                .comments
+                .into_iter()
+                .map(|comment| verkstead_render::Comment {
+                    author: comment.author.login,
+                    at: comment.created_at,
+                    markdown: comment.body,
+                })
+                .collect(),
+            checks.iter().map(drawn).collect(),
+        ),
+        checks,
+    })
+}
+
+/// One check as the details pane draws it.
+///
+/// The same three facts under a different set of names: this side of the wire is
+/// the workbench's vocabulary, and [`Check`] is `gh`'s reading.
+fn drawn(check: &Check) -> verkstead_render::PullRequestCheck {
+    verkstead_render::PullRequestCheck {
+        name: check.name.clone(),
+        how: match check.how {
+            Checked::Passed => verkstead_render::Checked::Passed,
+            Checked::Running => verkstead_render::Checked::Running,
+            Checked::Failed => verkstead_render::Checked::Failed,
+        },
+        link: check.link.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -920,19 +970,83 @@ mod tests {
             "",
         );
 
-        let details = details(&gh, dir.path(), 41).unwrap();
+        let pane = details(&gh, dir.path(), 41).unwrap().pane;
 
-        assert_eq!(details.commits.len(), 1);
-        assert_eq!(details.commits[0].sha, "c0ffee1");
-        assert_eq!(details.commits[0].subject, "feat: count the requests");
+        assert_eq!(pane.commits.len(), 1);
+        assert_eq!(pane.commits[0].sha, "c0ffee1");
+        assert_eq!(pane.commits[0].subject, "feat: count the requests");
 
-        assert_eq!(details.comments.len(), 1);
-        assert_eq!(details.comments[0].author, "tobico");
-        assert_eq!(details.comments[0].at, "2026-08-21T09:00:00Z");
+        assert_eq!(pane.comments.len(), 1);
+        assert_eq!(pane.comments[0].author, "tobico");
+        assert_eq!(pane.comments[0].at, "2026-08-21T09:00:00Z");
         assert!(
-            details.comments[0].html.contains("<strong>good</strong>"),
+            pane.comments[0].html.contains("<strong>good</strong>"),
             "a comment is markdown, and it arrives rendered: {:?}",
-            details.comments[0].html,
+            pane.comments[0].html,
+        );
+    }
+
+    /// And the checks, off the same answer: the pane lists each of them by name
+    /// with the run to follow, and the caller gets them in `gh`'s own shape as
+    /// well, which is what the rollup beside the Conversation is written from.
+    #[test]
+    fn the_checks_are_read_off_the_same_answer_the_commits_are() {
+        let (dir, gh) = stub(
+            r#"{"commits":[],"comments":[],"statusCheckRollup":[
+                {"__typename":"CheckRun","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2",
+                 "name":"Rust","status":"COMPLETED"},
+                {"__typename":"CheckRun","conclusion":"FAILURE","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/3",
+                 "name":"Viewer","status":"COMPLETED"}]}"#,
+            "",
+        );
+
+        let read = details(&gh, dir.path(), 41).unwrap();
+
+        assert_eq!(
+            read.pane.checks,
+            [
+                verkstead_render::PullRequestCheck {
+                    name: "Rust".to_owned(),
+                    how: verkstead_render::Checked::Passed,
+                    link: "https://github.com/tobico/verkstead/actions/runs/1/job/2".to_owned(),
+                },
+                verkstead_render::PullRequestCheck {
+                    name: "Viewer".to_owned(),
+                    how: verkstead_render::Checked::Failed,
+                    link: "https://github.com/tobico/verkstead/actions/runs/1/job/3".to_owned(),
+                },
+            ],
+        );
+
+        assert_eq!(
+            read.checks
+                .iter()
+                .map(|check| check.how)
+                .collect::<Vec<_>>(),
+            [Checked::Passed, Checked::Failed],
+        );
+    }
+
+    /// A check GitHub gave no run for is a name and nothing to follow, which the
+    /// pane draws as plain text — the same empty link the fix session's list
+    /// falls back to.
+    #[test]
+    fn a_check_with_no_run_reaches_the_pane_as_a_name_alone() {
+        let (dir, gh) = stub(
+            r#"{"commits":[],"comments":[],"statusCheckRollup":[
+                {"__typename":"StatusContext","context":"buildkite","state":"PENDING"}]}"#,
+            "",
+        );
+
+        let pane = details(&gh, dir.path(), 41).unwrap().pane;
+
+        assert_eq!(
+            pane.checks,
+            [verkstead_render::PullRequestCheck {
+                name: "buildkite".to_owned(),
+                how: verkstead_render::Checked::Running,
+                link: String::new(),
+            }],
         );
     }
 
@@ -1074,14 +1188,15 @@ mod tests {
         assert_eq!(checks(&gh, dir.path(), 41), Err(Trouble::NotLoggedIn));
     }
 
-    /// A PR nobody has said anything on, which is every PR the moment it opens.
+    /// A PR nobody has said anything on and nothing is running against, which is
+    /// every PR the moment it opens in a repository with no CI.
     #[test]
     fn a_pull_request_with_no_comments_reads_back_as_none() {
         let (dir, gh) = stub(r#"{"commits":[],"comments":[]}"#, "");
 
-        let details = details(&gh, dir.path(), 41).unwrap();
+        let pane = details(&gh, dir.path(), 41).unwrap().pane;
 
-        assert!(details.commits.is_empty() && details.comments.is_empty());
+        assert!(pane.commits.is_empty() && pane.comments.is_empty() && pane.checks.is_empty());
     }
 
     /// A `gh` that answers `viewed` for `gh pr view` and `on_the_diff` for `gh

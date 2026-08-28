@@ -17,12 +17,13 @@
   scroll-margin-top: var(--jump-clear);
 }
 
-/* The same box the Preface's body is — see `.prefaceBody` in
-   `Sheet.module.css`, which is the same five lines and has to stay the same
-   five — drawn around the body rather than being it, because the comment sits
-   inside the card with it: both are the agent's own prose, said at either end
-   of the Set, and one drawn as a card while the other was loose prose would
-   read as two different kinds of thing. */
+/* The same box the Preface is drawn in — see `.cardBody` in `Card.module.css`,
+   which is the same five lines and has to stay the same five — drawn around the
+   body rather than being it, because the comment sits inside the card with it:
+   both are the agent's own prose, said at either end of the Set, and one drawn
+   as a card while the other was loose prose would read as two different kinds of
+   thing. Not the shared component itself, for that reason: the Preface's card
+   holds one block and this one holds two. */
 .postscriptCard {
   padding: 1rem;
   background: var(--card);
@@ -46,10 +47,11 @@
   margin-top: 0.75rem;
 }
 
-/* The Gutter this section reserves down its left once the window is wide, with
+/* The Gutter this section reserves down its left once the column is wide, with
    nothing to hang in it: the axis is the page's rather than each section's, so
-   a card holds it empty exactly as the Preface's does. What the Gutter is and
-   why is in `Sheet.module.css`, where it is named. */
+   a card holds it empty exactly as the Preface's does — the two lines
+   `Card.module.css` says of the shared card. What the Gutter is and why is in
+   `styles/base.css`, where it is named. */
 @media (min-width: 60rem) {
   .postscriptCard {
     --bleed: var(--gutter);

@@ -46,7 +46,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// arrives — neither is the human getting anything wrong, and refusing the whole
 /// order over one stale id would throw away a drag that was about the others.
 pub async fn place_conversations(pool: &SqlitePool, order: &[i64]) -> Result<()> {
-    let mut tx = pool.begin().await.context("placing the Conversations")?;
+    let mut tx = super::writing(pool, "placing the Conversations").await?;
 
     sqlx::query("DELETE FROM placements")
         .execute(&mut *tx)

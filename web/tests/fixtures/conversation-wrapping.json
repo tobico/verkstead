@@ -5,6 +5,7 @@
   "blocked_on": null,
   "branch": "rate-limiting",
   "direction": "task-list",
+  "driven": false,
   "grilling_pairing": {
     "model": "claude-fable-5",
     "profile": {
@@ -39,6 +40,7 @@
     {
       "PullRequest": {
         "at": "2026-08-03T09:07:11.000Z",
+        "checks": "Running",
         "id": 32,
         "number": 41,
         "title": "Rate limiting",
@@ -58,6 +60,8 @@
   },
   "resets": null,
   "state": "Wrapping",
+  "stop_asked": false,
+  "stopped_by_hand": false,
   "timeline": [
     {
       "Brief": {
@@ -97,6 +101,7 @@
     {
       "PullRequest": {
         "at": "2026-08-03T09:07:11.000Z",
+        "checks": "Running",
         "id": 32,
         "number": 41,
         "title": "Rate limiting",
@@ -118,6 +123,7 @@
       }
     }
   ],
+  "waiting_on_checks": false,
   "working": false,
   "worktree": {
     "missing": false,

@@ -23,6 +23,7 @@ import type { Accessor, JSX, Signal } from "solid-js";
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 
 import app from "../App.module.css";
+import { BY_HAND, scroller } from "../scrolling";
 import { Switch } from "../Switch";
 import shell from "../workbench/Workbench.module.css";
 import contents from "./Contents.module.css";
@@ -565,25 +566,6 @@ function bring(target: Element): void {
   window.requestAnimationFrame(step);
 }
 
-/// The box a jump has to move to bring `target` into view: the nearest ancestor
-/// that scrolls, and `null` for the page itself.
-///
-/// Asked of the layout rather than assumed, because the one page a Set is drawn
-/// on is not the only place it is read: in the workbench the same sheet is a
-/// details pane, and a pane above the first breakpoint scrolls on its own while
-/// the window behind it does not move at all. Scrolling the window there would
-/// be a jump that goes nowhere.
-function scroller(target: Element): HTMLElement | null {
-  for (let at = target.parentElement; at !== null; at = at.parentElement) {
-    const how = getComputedStyle(at).overflowY;
-    if (how === "auto" || how === "scroll") {
-      return at;
-    }
-  }
-
-  return null;
-}
-
 /// Where the reading line sits, written as the margins the browser is to put
 /// around the window before it decides what is in view.
 ///
@@ -594,14 +576,6 @@ function scroller(target: Element): HTMLElement | null {
 /// section to have started, and one that stopped counting from up there was not
 /// going to be the last.
 const READING_LINE = "100000px 0px -90% 0px";
-
-/// The reader taking the scroll back off a jump: the ways of moving a page that
-/// are the human's own rather than something the page did to itself.
-///
-/// A wheel, a finger or a key, and `pointerdown` for the scrollbar being taken
-/// hold of. A press on the nav itself is a `pointerdown` too, which is
-/// harmless: the click that follows it pins the highlight again straight after.
-const BY_HAND = ["wheel", "pointerdown", "keydown"];
 
 /// Follow the reader down the page: keep `here` on the last of the watched
 /// parts to have started above the reading line, which is the one whose text
@@ -666,7 +640,9 @@ function follow(watched: Accessor<Watched[]>, nav: Nav): void {
 
     // The reader taking over: the pin goes, and the highlight catches up to
     // where the page is in the same breath, since nothing may cross the reading
-    // line for a while yet.
+    // line for a while yet. A press on the nav itself is one of these gestures
+    // too, which is harmless: the click that follows it pins the highlight
+    // again straight after.
     const byHand = () => {
       if (nav.pinned.held) {
         nav.pinned.held = false;

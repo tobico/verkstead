@@ -303,6 +303,7 @@ fn decided_every_way() -> Response {
         ],
         comment: Some("Do the in-process one first; we can move it later.".to_owned()),
         direction: None,
+        nothing_else: false,
     }
 }
 
@@ -886,6 +887,71 @@ async fn where_the_ask_came_from_travels_with_it_and_nothing_does_when_there_is_
     assert_eq!(from_nowhere.branch, None);
 }
 
+/// The Nothing-else option is drawn from where the Conversation stands rather
+/// than from anything in the Set, so what the payload has to carry is that
+/// standing — and it has to carry it on the Sets of a follow-up and on no
+/// others.
+#[tokio::test]
+async fn only_a_follow_ups_sets_say_the_closing_section_carries_the_option() {
+    for state in [
+        store::Lifecycle::Draft,
+        store::Lifecycle::Grilling,
+        store::Lifecycle::Implementing,
+        store::Lifecycle::Wrapping,
+        store::Lifecycle::Done,
+        store::Lifecycle::Closed,
+    ] {
+        let (_dir, pool, app) = fresh_app().await;
+        store::set_state(&pool, ASKING_FROM, state).await.unwrap();
+
+        let (view, _) = set_json(&app, &pool, &full_grammar_set()).await;
+        assert!(
+            !view.follow_up,
+            "a Set asked from a Conversation in {state:?} carries no option"
+        );
+    }
+
+    let (_dir, pool, app) = fresh_app().await;
+    store::set_state(&pool, ASKING_FROM, store::Lifecycle::FollowUp)
+        .await
+        .unwrap();
+
+    let (view, _) = set_json(&app, &pool, &full_grammar_set()).await;
+    assert!(
+        view.follow_up,
+        "and a follow-up's own round is the one that does"
+    );
+}
+
+/// What the option is drawn from is the Conversation, so a Set stored before any
+/// of this — or asked earlier in the same Conversation — is untouched by it: the
+/// stored body is the agent's words and nothing about the ending is written into
+/// it.
+#[tokio::test]
+async fn nothing_about_the_option_reaches_the_stored_set() {
+    let (_dir, pool, app) = fresh_app().await;
+    store::set_state(&pool, ASKING_FROM, store::Lifecycle::FollowUp)
+        .await
+        .unwrap();
+
+    let asked = full_grammar_set();
+    let stored = put(&pool, &asked).await.unwrap();
+    let (view, _) = fetch_set(&app, stored.id).await;
+    assert!(view.follow_up);
+
+    let body: (String,) = sqlx::query_as("SELECT body FROM question_sets WHERE id = ?")
+        .bind(stored.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let read: QuestionSet = serde_json::from_str(&body.0).unwrap();
+
+    assert_eq!(
+        read, asked,
+        "the Set is stored exactly as the agent sent it"
+    );
+}
+
 #[tokio::test]
 async fn a_preface_of_nothing_but_whitespace_is_the_same_as_none() {
     let (_dir, pool, app) = fresh_app().await;
@@ -1313,6 +1379,47 @@ async fn pairings(pool: &SqlitePool, conversation: i64, profiles: &[store::Profi
         .unwrap();
 }
 
+/// One round of a follow-up: an ordinary Set, closed with a Postscript.
+///
+/// Nothing on it says it is a follow-up's — that is where the Conversation
+/// stands, which is the whole point of the arrangement. What makes its fixture
+/// different from any other waiting Set's is the state it was asked from.
+fn follow_up_round() -> QuestionSet {
+    QuestionSet {
+        title: "The reset header, and what the window should be".to_owned(),
+        preface: Some(
+            "The header is in and pushed. Two things I could not settle from the code.\n"
+                .to_owned(),
+        ),
+        questions: vec![
+            Question {
+                label: "Q1".to_owned(),
+                text: "Should `Retry-After` be seconds or a timestamp?".to_owned(),
+                columns: Vec::new(),
+                options: vec![
+                    option(1, "Seconds, which is what the spec's examples use", true),
+                    option(2, "An HTTP-date, which is easier to read in a log", false),
+                ],
+                subquestions: Vec::new(),
+            },
+            Question {
+                label: "Q2".to_owned(),
+                text: "The window is a minute. Was that deliberate?".to_owned(),
+                columns: Vec::new(),
+                options: Vec::new(),
+                subquestions: Vec::new(),
+            },
+        ],
+        postscript: Some(
+            "Both are pushed as separate commits, so the second can go on its own.\n".to_owned(),
+        ),
+        proposal: None,
+        project: Some("verkstead".to_owned()),
+        branch: Some("rate-limiting".to_owned()),
+        diff: None,
+    }
+}
+
 fn accepting_the_proposal() -> Response {
     Response {
         answers: vec![Answer {
@@ -1323,6 +1430,7 @@ fn accepting_the_proposal() -> Response {
         }],
         comment: None,
         direction: Some(verkstead_schema::Direction::Inline),
+        nothing_else: false,
     }
 }
 
@@ -1384,6 +1492,18 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let (_dir, pool, app) = fresh_app().await;
     let (_, json) = answered_set(&app, &pool, &wrap_up_proposal(), &accepting_the_proposal()).await;
     write("set-proposed.json", &pinned(&json));
+
+    // A round of a follow-up, which is the one kind whose closing section
+    // carries the Nothing-else option. An ordinary Set in every other respect:
+    // what puts the option there is the Conversation being in Follow-up while it
+    // is answered, which is why this one is asked from a steered Conversation
+    // rather than built differently.
+    let (_dir, pool, app) = fresh_app().await;
+    store::set_state(&pool, ASKING_FROM, store::Lifecycle::FollowUp)
+        .await
+        .unwrap();
+    let (_, json) = set_json(&app, &pool, &follow_up_round()).await;
+    write("set-following-up.json", &json);
 
     // The Repo list: two registrations, put in through the store rather than
     // through the endpoint, because what is being written here is the shape of a
@@ -1646,7 +1766,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             lines: 3,
             // The turns of the Transcript written just below, which is what the
             // relay would have counted as it followed the log: everything there
-            // but the one line of the backend's own bookkeeping.
+            // but the two lines of the backend's own bookkeeping.
             turns: Some(6),
             latest: "What should happen to a delivery that has failed forty times?".to_owned(),
         },
@@ -1658,7 +1778,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // which is what the pane draws instead of the bytes wherever there is one.
     // The lines are the shape a backend writes them in, because that is what the
     // renderer reads — and one of everything, because what the pane has to draw
-    // is one of everything.
+    // is one of everything: the two lines it folds away, the known kind and the
+    // one nobody here has heard of, and the block inside a turn that it does
+    // not know and shows where it was said.
     store::append_transcript(
         &pool,
         capture,
@@ -1669,7 +1791,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"rg -n 'retry' crates/server/src","description":"Find where a delivery is retried"}}]}}"#.to_owned(),
             r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","is_error":false,"content":"crates/server/src/queue.rs:118:    retry(delivery).await;"}]}}"#.to_owned(),
             r#"{"type":"attachment","attachment":{"type":"todos","content":"three things still to do"}}"#.to_owned(),
-            r#"{"type":"divination","omen":"a kind from a version nobody here has met"}"#.to_owned(),
+            r#"{"type":"atis-latch","latched":"a kind from a version nobody here has met"}"#.to_owned(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"divination","omen":"a block from a version nobody here has met"}]}}"#.to_owned(),
         ],
     )
     .await
@@ -1986,7 +2109,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::stop(
         &pool,
         tasked,
-        store::Decision::Deliberate,
+        // Verkstead's own brake: a session exited 1 and nobody pressed anything,
+        // which is the stop the accent badge is for.
+        store::Decision::Verkstead,
         "**The task in .tasks/03-commit-events.md** stopped.\n\n\
          the session exited with status 1\n\n\
          ### The worktree\n\n\
@@ -2080,7 +2205,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::stop(
         &pool,
         waiting,
-        store::Decision::Deliberate,
+        store::Decision::Verkstead,
         &format!(
             "**Implementing the work** stopped.\n\n\
              the account **{}** was being spent is out of window: {printed}\n\n\
@@ -2190,6 +2315,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap();
 
+    // And how its checks are getting on, which the checks watcher writes down on
+    // every poll — recorded here rather than watched for, as the pull request
+    // above is. Still running, which is the ordinary state of a wrap-up: the
+    // suite is what it is waiting on.
+    store::record_check_rollup(&pool, wrapping, store::Rollup::Running)
+        .await
+        .unwrap();
+
     write(
         "conversation-wrapping.json",
         &pin_health(&pin_timeline(
@@ -2209,6 +2342,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap();
     }
     store::finish_wrap_up(&pool, wrapping).await.unwrap();
+
+    // The suite went green on the way, which is what settling the checks above
+    // means: the last thing the watcher wrote down before it stopped watching,
+    // and what the card on a finished Conversation goes on showing.
+    store::record_check_rollup(&pool, wrapping, store::Rollup::Passed)
+        .await
+        .unwrap();
 
     store::steer_conversation(
         &pool,

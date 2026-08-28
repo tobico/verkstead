@@ -33,6 +33,13 @@ pub enum Lifecycle {
     Grilling,
     Implementing,
     Wrapping,
+
+    /// Beside the ladder rather than on it: the human following up on work that
+    /// is already on a pull request, in a session they steered into being.
+    /// Reachable from Done and from Wrapping, and leading back into the
+    /// wrap-up.
+    FollowUp,
+
     Done,
 
     /// Off the ladder rather than on it: the work stopped wherever it had got
@@ -47,11 +54,11 @@ pub enum Lifecycle {
 ///
 /// Where it has got to is drawn rather than worded — a turning ring for a
 /// session getting on with it, the same ring empty for one that has gone quiet,
-/// a dot for a Conversation that wants answering, a dotted border for a draft
-/// and a dimmed card for work that has stopped. Which is why the facts below are
-/// facts and not one collapsed verdict: the row says what is true of the
-/// Conversation, and which mark that comes out as is the one rule the viewer
-/// keeps.
+/// a dot for a Conversation that wants answering or has news on it, a dotted
+/// border for a draft and a dimmed card for work that has stopped. Which is why
+/// the facts below are facts and not one collapsed verdict: the row says what is
+/// true of the Conversation, and which mark that comes out as is the one rule
+/// the viewer keeps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ConversationEntry {
@@ -86,6 +93,32 @@ pub struct ConversationEntry {
     /// them. A Draft is never one of them: it is drawn as a draft, and that is
     /// the whole of what a draft has to say.
     pub waiting: bool,
+
+    /// Whether this one is a wrap-up that has narrowed to its checks: the review
+    /// and the comments settled, the checks not, and nothing running on it.
+    ///
+    /// A derived condition of Wrapping rather than a state, which is why it sits
+    /// beside `state` the way *blocked on you* does rather than in it. Nothing
+    /// is stored for it: it is the wrap-up's own settle facts read a particular
+    /// way, folded here so the row does not have to.
+    ///
+    /// The row draws no state in words, so what this comes out as is the label
+    /// read aloud — *Waiting on checks* where the plain state word would be.
+    pub waiting_on_checks: bool,
+
+    /// Whether Verkstead has told the human something about this Conversation
+    /// that they have not looked at yet.
+    ///
+    /// One thing writes it: the wrap-up that carries a Conversation to Done and
+    /// pushes the news to the devices, in the same breath as the push. A
+    /// milestone nobody was watching happen is what a mark saying *look here*
+    /// is for, and a Done the human steered to themselves is what it is not.
+    ///
+    /// Beside `waiting` rather than folded into it, because the row draws one
+    /// disc for the two and says which of them it is in the label read aloud:
+    /// *something wants you* against *there is news here*. Cleared by opening
+    /// the Conversation, which the browser says in a call of its own.
+    pub unseen: bool,
 }
 
 /// One Repo's notice under the new-conversation box: the roadmaps in it that
@@ -255,6 +288,23 @@ pub struct ConversationView {
     /// [`working`]: ConversationView::working
     pub ready_to_stop: bool,
 
+    /// And whether a stop has already been asked for and is waiting for the step
+    /// the run is on to finish.
+    ///
+    /// What takes **Stop** off the menu, the press having been made: it is
+    /// recorded, the run halts the moment the step lands, and a row still
+    /// offering it would be Verkstead asking for a decision it already has.
+    /// Force stop is left where it is — it is the escalation from here, and the
+    /// one thing a human who has changed their mind about waiting can still
+    /// press.
+    ///
+    /// Beside [`ready_to_stop`] rather than folded into it, because the two say
+    /// different things: that one is *there is a run to stop*, which is what
+    /// draws Force stop, and this is *and you have already said so*.
+    ///
+    /// [`ready_to_stop`]: ConversationView::ready_to_stop
+    pub stop_asked: bool,
+
     /// And whether a steer into Implementing has anything to carry on: the
     /// branch holds a backlog with work left in it, or a roadmap it has
     /// written.
@@ -314,7 +364,44 @@ pub struct ConversationView {
     ///
     /// *Blocked on you* is a badge on an active state and never a state of its
     /// own, which is why this sits beside `state` rather than in it.
+    ///
+    /// Set for every stop, however it stopped. Which of the two marks the
+    /// header draws is `stopped_by_hand` below — both of them point here, a
+    /// stop the human has to find being the same Notice as a stop they made
+    /// themselves.
     pub blocked_on: Option<i64>,
+
+    /// Whether that stop is the human's own press, or a row from before the
+    /// two were told apart and read as one.
+    ///
+    /// Which of the two marks the header draws, decided here rather than in the
+    /// browser: `false` is the accent *Blocked on you* badge — Verkstead pulled
+    /// the brake, or a crash took the driver away — and `true` is the quiet
+    /// **Stopped** label, which goes to the same Notice and says nothing about
+    /// anybody waiting. The sidebar's disc follows the same rule from its own
+    /// end of the wire, where the row's `waiting` has already folded it in.
+    ///
+    /// `false` where nothing has stopped, which is the ordinary Conversation:
+    /// there is no mark to choose between.
+    pub stopped_by_hand: bool,
+
+    /// Whether the wrap-up has narrowed to its checks: the review answered, the
+    /// comments dealt with, the checks alone outstanding, and nothing running in
+    /// the Worktree.
+    ///
+    /// What the *Waiting on checks* label is drawn from, and a condition of
+    /// Wrapping rather than a state of its own — the precedent is `blocked_on`
+    /// above, and this sits beside `state` for the same reason. Nothing is
+    /// stored for it: it is the settle facts and the register read together, at
+    /// the moment the page was read.
+    ///
+    /// A flag rather than an Event id, because unlike a stop there is nothing to
+    /// go and look at and nothing to do about it — the Notice saying so is on
+    /// the record where it happened, and the label is a label.
+    ///
+    /// `false` in every state but Wrapping, which is where the condition is
+    /// derived from and the only place it can hold.
+    pub waiting_on_checks: bool,
 
     /// What the stop shows about the account that ran out coming back, and
     /// `null` on every stop that is not a usage window's — which is nearly all
@@ -341,6 +428,30 @@ pub struct ConversationView {
     /// sessions at all, so every Conversation then reads as not working, which
     /// is what each of them is.
     pub working: bool,
+
+    /// And whether any driver of Verkstead's own is registered for it as of
+    /// this read: the runner working a backlog, the driver following an inline
+    /// run or a roadmap, one of the watchers a wrap-up has going — see the
+    /// server's own drivers register.
+    ///
+    /// The same register [`ready_to_resume`] is decided against, reported raw
+    /// rather than judged: this says what *is* driving and that one says what
+    /// ought to be. So it is a plain `false` wherever nothing holds a
+    /// registration, including the states nothing is supposed to be driving —
+    /// a Closed Conversation is not one being driven, whatever the resume rule
+    /// makes of it.
+    ///
+    /// Read for the reason [`working`] is, one register along, and true only as
+    /// of the moment it was read. The pair is what says a Conversation has gone
+    /// quiet all the way through: no session running *and* nothing left holding
+    /// it. Which is a stronger thing than the first alone, because a driver
+    /// lets go only once its task has ended — so a watcher that is off here has
+    /// finished its last call to the outside world rather than merely started
+    /// it.
+    ///
+    /// [`ready_to_resume`]: ConversationView::ready_to_resume
+    /// [`working`]: ConversationView::working
+    pub driven: bool,
 
     /// Oldest first, which is reading order and puts the Brief at the top.
     pub timeline: Vec<TimelineEvent>,
@@ -603,9 +714,10 @@ pub struct TaskEntry {
 
     pub title: String,
 
-    /// Whether the task is finished, which is the task file having gone from
-    /// `.tasks/`. That is the done-signal the task runner turns on, and a
-    /// checkbox is how an entry is written rather than what says it is done.
+    /// Whether the task is finished, which is the entry's own checkbox. That is
+    /// the done-signal the task runner turns on, and it is the list saying so
+    /// rather than anything the directory beside it happens to hold — a task
+    /// whose document has not been written yet is a task nobody has done.
     pub done: bool,
 }
 
@@ -649,9 +761,18 @@ pub struct TaskDocument {
 
     pub title: String,
 
-    /// The document rendered and sanitized, or `null` where there is no file to
-    /// render — which is a task that is done, the file going being what says so.
-    /// The pane says as much in words rather than drawing a gap.
+    /// Whether the task is finished, which is the entry's checkbox — see
+    /// [`TaskEntry::done`]. Carried on the document because a finished task
+    /// still has one: its file stays in `.tasks/` until the feature is over, so
+    /// the done state is something the section says about itself rather than the
+    /// reason it is empty. The same way round as a stage's — see
+    /// [`StageDocument::done`].
+    pub done: bool,
+
+    /// The document rendered and sanitized, or `null` where there is nothing to
+    /// render. Not the ordinary end of a task's life but the list pointing at a
+    /// file nobody wrote, which the pane says in words rather than drawing a
+    /// gap.
     pub html: Option<String>,
 }
 
@@ -664,8 +785,10 @@ pub struct TaskDocument {
 pub struct TaskSource {
     pub number: String,
     pub title: String,
+    pub done: bool,
 
-    /// The markdown, or `None` where the task's file has gone from `.tasks/`.
+    /// The markdown, or `None` where the file the entry names is not there to
+    /// read.
     pub markdown: Option<String>,
 }
 
@@ -814,10 +937,36 @@ pub struct PullRequestEvent {
     /// The whole URL, because merging is the human's act and this is the way to
     /// where they do it.
     pub url: String,
+
+    /// How the checks on it were getting on the last time anything asked, or
+    /// nothing where nothing has — a pull request in a repository with no CI,
+    /// and one opened before Verkstead started writing this down.
+    ///
+    /// The aggregate rather than the checks, because what the card has room for
+    /// is one icon: which of the three a suite is, and not what each of them is
+    /// called.
+    ///
+    /// It can be stale, and on a Conversation nothing is watching any more it
+    /// will be: what keeps it fresh is the checks watcher, and that stops when
+    /// the wrap-up is over.
+    pub checks: Option<CheckRollup>,
 }
 
-/// What is on a pull request now: the commits it carries, and what has been said
-/// about it.
+/// How a pull request's checks are getting on, taken all together.
+///
+/// The store's own word, carried across the wire — see the reading behind it
+/// there. Three states and no fourth: *nobody has asked* is the absence of one
+/// rather than a variant, which is a card with no icon on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum CheckRollup {
+    Passed,
+    Running,
+    Failed,
+}
+
+/// What is on a pull request now: the commits it carries, what GitHub is running
+/// against it, and what has been said about it.
 ///
 /// Its own request rather than a field on the Conversation, for the reason a
 /// commit's diff is one — and for a further reason of its own: reading this is
@@ -834,6 +983,15 @@ pub struct PullRequestDetails {
     pub commits: Vec<PullRequestCommit>,
 
     pub comments: Vec<PullRequestComment>,
+
+    /// Every check GitHub is running against it, in the order GitHub lists
+    /// them. Empty where there are none, which is a repository with no CI.
+    ///
+    /// Each of them rather than the one word the card draws — see
+    /// [`CheckRollup`]. What the card has room for is which of the three a
+    /// suite is; this is the pane somebody opens to find out *which* check is
+    /// red and where its run is.
+    pub checks: Vec<PullRequestCheck>,
 }
 
 /// One commit of a pull request: what it is, and what it was called.
@@ -870,6 +1028,41 @@ pub struct PullRequestComment {
     pub at: String,
 
     pub html: String,
+}
+
+/// One check GitHub is running against a pull request, as the details pane
+/// receives it: what it is called, how it is getting on, and where its run is.
+///
+/// A line of a list GitHub keeps, in the spirit [`PullRequestCommit`] is one:
+/// read at the moment the pane is opened rather than written down, because a
+/// suite is still running while the human is looking at it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PullRequestCheck {
+    /// What GitHub calls it, which is what the human calls it by.
+    pub name: String,
+
+    pub how: Checked,
+
+    /// Where its run is, as GitHub gave it — the one thing a red check cannot
+    /// be read without. Empty where GitHub gave none, which is a check drawn as
+    /// its name and nothing to follow.
+    pub link: String,
+}
+
+/// How one check is getting on.
+///
+/// The same three words as [`CheckRollup`] and not the same thing: this is one
+/// check and that is a whole suite taken together. Three rather than GitHub's
+/// dozen, because three is what anybody does anything about — a red one is the
+/// thing to go and look at, one still running is nothing to do yet, and the
+/// rest are green.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Checked {
+    Passed,
+    Running,
+    Failed,
 }
 
 /// A commit as the Timeline shows it: what it was called, and how much of the
@@ -1021,9 +1214,10 @@ pub struct ManualTaskEvent {
 /// The one Event that is sometimes a move and sometimes a document. A steer
 /// into Wrapping or Done says nothing but the state, like the move it stands
 /// above; a steer into Implementing carries the instruction the session was set
-/// going on, which is the whole of what that session was asked to do. A steer
-/// into Grilling carries a document too, and that one arrives as a Brief Event
-/// of its own — it opens a round, and a round starts from a Brief.
+/// going on, and one into Follow-up the brief it was, which is the whole of what
+/// that session was asked to do. A steer into Grilling carries a document too,
+/// and that one arrives as a Brief Event of its own — it opens a round, and a
+/// round starts from a Brief.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct SteerEvent {
@@ -1587,9 +1781,13 @@ pub fn task_list(feature: String, tasks: Vec<TaskEntry>) -> TaskListEvent {
 ///
 /// Here rather than in the server for the reason the commit pane's rendering is:
 /// this is the crate with the markdown parser and the sanitizer in it. A task
-/// whose file has gone comes back with nothing to draw rather than with an empty
-/// document — the file going is what says the task is done, and the pane says so
-/// in words.
+/// whose document is not there to read comes back with nothing to draw, and the
+/// pane says so in words — the list pointing at a file nobody wrote is a thing
+/// to say rather than a gap to leave, exactly as a roadmap's is.
+///
+/// Whether the task is done is the entry's own checkbox and travels beside the
+/// document, because a done task still has one: nothing deletes a task file
+/// until the feature is finished with.
 ///
 /// A document of nothing but whitespace is the same as no document at all, which
 /// is what an empty file left behind would otherwise draw: a box with a gap in
@@ -1600,6 +1798,7 @@ pub fn backlog_pane(feature: String, read: Vec<TaskSource>) -> BacklogPane {
         .map(|task| TaskDocument {
             number: task.number,
             title: task.title,
+            done: task.done,
             html: task
                 .markdown
                 .as_deref()
@@ -1725,6 +1924,7 @@ fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestE
         number: opened.number,
         title: opened.title,
         url: opened.url,
+        checks: opened.checks,
     }
 }
 
@@ -1738,20 +1938,27 @@ pub struct PullRequestSummary {
     pub number: i64,
     pub title: String,
     pub url: String,
+
+    /// How its checks were, as the store last wrote it down.
+    pub checks: Option<CheckRollup>,
 }
 
 /// What a pull request holds, as the details pane receives it: the commit list
-/// as it stands, and every comment rendered from the markdown it was written in.
+/// and the check list as they stand, and every comment rendered from the
+/// markdown it was written in.
 ///
 /// The comments are the only part with anything to render, and they are the part
 /// that most needs it: a PR comment is markdown written by whoever can reach the
-/// repository, so it is sanitized here rather than in a browser.
+/// repository, so it is sanitized here rather than in a browser. A commit's
+/// subject and a check's name are text and are put in the page as text.
 pub fn pull_request_details(
     commits: Vec<PullRequestCommit>,
     comments: Vec<Comment>,
+    checks: Vec<PullRequestCheck>,
 ) -> PullRequestDetails {
     PullRequestDetails {
         commits,
+        checks,
         comments: comments
             .into_iter()
             .map(|comment| PullRequestComment {
@@ -2035,8 +2242,11 @@ pub enum Resumed {
     /// because a direction was picked.
     NoDirection,
 
-    /// The backlog it was working has nothing left in it — never written, or
-    /// finished with. Either way there is no step to read off `.tasks/`.
+    /// The backlog it was working has nothing left in it and this branch never
+    /// wrote one: there is no step to read off `.tasks/` and nothing built on
+    /// the branch to carry to a pull request either. A backlog that *was*
+    /// written and worked to empty is not this — that one has work on the
+    /// branch, so the press has somewhere to go.
     NothingToWork,
 
     /// The grilling Pairing has gone, and a grilling runs under that one
@@ -2046,6 +2256,11 @@ pub enum Resumed {
     /// And the implementation Pairing has gone, which is what every session of
     /// the work itself runs under.
     NoImplementationPairing,
+
+    /// It says it is following the work up and nothing on its Timeline says what
+    /// about: another record that cannot be true, a steer being the only way
+    /// into Follow-up and one without a brief being refused.
+    NoFollowUpBrief,
 }
 
 /// What clicking Steer found, which is what the modal it opens is drawn from.
@@ -2081,11 +2296,12 @@ pub enum SteerOpened {
 /// Where a steer can send a Conversation.
 ///
 /// Draft and Closed are not among them and never will be: each has a way in of
-/// its own, and a steer is for the four states the work is *done in*. A target
-/// the modal offers is a target something can be set going in, which is why
-/// Wrapping is offered only where the work is already on a pull request — the
-/// one of the four that is drawn out at all, an instruction being writable
-/// anywhere and Done needing nothing.
+/// its own, and a steer is for the states the work is *done in* — the four rungs
+/// of the ladder, and Follow-up beside them, which has no other way in at all. A
+/// target the modal offers is a target something can be set going in, which is
+/// why the two that turn on a pull request are drawn out where there is none: an
+/// instruction is writable anywhere and Done needs nothing, but there is no
+/// wrapping up and no following up of work nobody can see.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerTarget {
@@ -2131,6 +2347,22 @@ pub enum SteerTarget {
     /// one — see [`ConversationSteered::NoPullRequest`].
     Wrapping,
 
+    /// The pull request followed up on: a session started on the brief the human
+    /// wrote, which answers what they asked, does what they want done about work
+    /// that is already pushed, and goes on asking until they are finished.
+    ///
+    /// **The brief is required**, unlike either of the other written payloads:
+    /// there is nothing on the branch that could stand for it, a follow-up being
+    /// a thing the human wanted rather than a step of the run. A submit without
+    /// one is refused by name — see [`ConversationSteered::NoFollowUpBrief`].
+    ///
+    /// Offered only where the record holds a pull request, as Wrapping is and
+    /// refused by the same name, and only from Done and Wrapping: what a
+    /// follow-up follows up is work that has been seen through, and a
+    /// Conversation still building has the ordinary ways of saying what to do
+    /// next.
+    FollowUp,
+
     /// Finished with. Nothing runs, so there is no Pairing to settle and no
     /// payload to carry: a steer into Done is the move alone.
     Done,
@@ -2146,7 +2378,7 @@ impl SteerTarget {
     /// the same question could come to different answers.
     pub fn runs(self) -> bool {
         match self {
-            Self::Grilling | Self::Implementing | Self::Wrapping => true,
+            Self::Grilling | Self::Implementing | Self::Wrapping | Self::FollowUp => true,
             Self::Done => false,
         }
     }
@@ -2217,6 +2449,23 @@ pub struct SteerSubmission {
     #[serde(default)]
     pub instruction: Option<String>,
 
+    /// The brief, for a steer into Follow-up.
+    ///
+    /// It lands as the Steer Event's own body, exactly as the instruction above
+    /// it does, and the session started on it opens the follow-up: it answers
+    /// what the brief asks, does what it asks for, and asks the human what else
+    /// there is until they say there is nothing.
+    ///
+    /// **Required**, which is what makes it the one written payload with no
+    /// quiet meaning. Nothing on the branch could stand in for it — a follow-up
+    /// is not a step of the run to be picked up — so a submit that names
+    /// Follow-up without one is refused by name; see
+    /// [`ConversationSteered::NoFollowUpBrief`].
+    ///
+    /// Whitespace alone is nothing written, as everywhere else here.
+    #[serde(default)]
+    pub follow_up: Option<String>,
+
     /// Whether the session is primed with everything the human has already
     /// answered.
     ///
@@ -2248,13 +2497,14 @@ pub enum ConversationSteered {
 
     NoSuchConversation,
 
-    /// Wrapping was named for a Conversation whose work is on no pull request.
+    /// Wrapping or Follow-up was named for a Conversation whose work is on no
+    /// pull request.
     ///
     /// A wrapping Conversation is defined by the one under it — the store writes
     /// the move and the pull-request row as one act — so there is no wrapping up
-    /// to steer into here. The modal does not offer the target on such a
-    /// Conversation at all; this is the same rule asked again on arrival, the
-    /// way every named refusal here is.
+    /// to steer into here, and nothing for a follow-up to follow up either. The
+    /// modal does not offer either target on such a Conversation; this is the
+    /// same rule asked again on arrival, the way every named refusal here is.
     NoPullRequest,
 
     /// Implementing was named with nothing written, for a Conversation with
@@ -2269,6 +2519,15 @@ pub enum ConversationSteered {
     /// [`ConversationView::ready_to_continue`], which is what it draws that by
     /// — and this is the same rule asked again on arrival.
     NoInstruction,
+
+    /// Follow-up was named with no brief written.
+    ///
+    /// The one written payload that is always required. A steer into
+    /// Implementing with nothing written carries on what the branch holds and a
+    /// steer into Grilling with nothing written grills the Brief that is there;
+    /// a follow-up is neither the run's next step nor a round of it, so an empty
+    /// one is a session with nothing to follow up.
+    NoFollowUpBrief,
 
     /// Grilling was named with no brief written, for a Conversation whose newest
     /// Brief is empty.
@@ -2424,6 +2683,11 @@ pub enum ConversationStopped {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum ConversationClosed {
     /// Closed: the worktree is gone and the branch is not.
+    ///
+    /// Said too where the worktree would not go — a directory git no longer
+    /// reads as a worktree is logged and left, rather than standing between the
+    /// human and the end of the Conversation. See [`crate::ConversationView`]'s
+    /// worktree, which is `None` from here on either way.
     Closed,
 
     /// It was closed already, which is not an error — what was asked for holds
@@ -2431,11 +2695,6 @@ pub enum ConversationClosed {
     AlreadyClosed,
 
     NoSuchConversation,
-
-    /// The worktree could not be removed, so nothing was recorded: a Conversation
-    /// that said it had stopped while its directory was still there would be one
-    /// nothing would ever clean up.
-    WorktreeStuck,
 }
 
 /// And what became of archiving one: putting a Closed Conversation away, so the

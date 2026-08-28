@@ -1,0 +1,45 @@
+/* A card of the agent's own writing — see `Card.tsx`. One box for the two
+   sections that are this: a Set's Preface, and the Message a commit's pane opens
+   with.
+
+   Nothing about the markdown itself is here. `.markdown` in
+   `styles/markdown.css` holds the blocks' own rhythm, including the flush top
+   and bottom edges that let the padding below be the whole of the gap. */
+
+.card {
+  margin: 0 0 1.5rem;
+  /* Where a jump from the table of contents lands, clear of whatever is pinned
+     across the top edge — `--jump-clear` in `set/Contents.module.css`, which is
+     what does the pinning. */
+  scroll-margin-top: var(--jump-clear);
+}
+
+/* The box itself. No measure on it: the card spans the column, and the prose
+   inside it keeps the measure block by block — see `styles/base.css`, which
+   names every block that is prose and leaves the table, the fence and the
+   Diagram out of it. A card held to the measure would have taken those down
+   with the prose. */
+.cardBody {
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* The Gutter this card reserves down its left once the column is wide, with
+   nothing to hang in it: the axis is the page's rather than each section's, so
+   this holds it empty exactly as a Question holds it full. What the Gutter is
+   and why is in `styles/base.css`, where it is named on the column every page
+   sits in — which is what makes this one rule the whole of the wiring, on the
+   Set page and in a details pane alike.
+
+   And with the Gutter reserved, the agent's own blocks that were never prose
+   may reach back out into it: `--bleed` is how far, and `.markdown > .wide` in
+   `styles/markdown.css` is what works out how much of it each one takes. A
+   Diagram takes all of it. */
+@media (min-width: 60rem) {
+  .cardBody {
+    --bleed: var(--gutter);
+    padding-left: calc(1rem + var(--gutter));
+  }
+}

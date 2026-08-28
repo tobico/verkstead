@@ -14,6 +14,7 @@
   "blocked_on": null,
   "branch": "spring-otter",
   "direction": null,
+  "driven": false,
   "grilling_pairing": null,
   "id": 1,
   "implementation_pairing": null,
@@ -30,6 +31,8 @@
   },
   "resets": null,
   "state": "Draft",
+  "stop_asked": false,
+  "stopped_by_hand": false,
   "timeline": [
     {
       "Brief": {
@@ -41,6 +44,7 @@
       }
     }
   ],
+  "waiting_on_checks": false,
   "working": false,
   "worktree": null
 }

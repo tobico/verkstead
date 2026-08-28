@@ -5,6 +5,7 @@
   "blocked_on": 27,
   "branch": "deferred-asks",
   "direction": null,
+  "driven": false,
   "grilling_pairing": {
     "model": null,
     "profile": {
@@ -48,6 +49,8 @@
   },
   "resets": "3pm",
   "state": "Implementing",
+  "stop_asked": false,
+  "stopped_by_hand": false,
   "timeline": [
     {
       "Brief": {
@@ -87,6 +90,7 @@
       }
     }
   ],
+  "waiting_on_checks": false,
   "working": false,
   "worktree": {
     "missing": false,

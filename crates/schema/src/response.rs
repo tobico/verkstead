@@ -53,6 +53,24 @@ pub struct Response {
     /// human disagreeing, and `None` anywhere else is every ordinary Response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direction: Option<Direction>,
+
+    /// The human saying there is nothing else, on a Set asked while its
+    /// Conversation is in Follow-up.
+    ///
+    /// A field of the Response rather than an Answer for the reason
+    /// [`Response::direction`] is one: the control is the viewer's, injected
+    /// onto the Set's closing section, and it answers no Question anybody
+    /// asked.
+    ///
+    /// **The agent never sees it.** The mark comes off the Response on the way
+    /// into the store and is recorded beside it — see `verkstead_store`'s
+    /// `endings` — so what a waiting session is handed is byte for byte what it
+    /// would have been handed without one. How a follow-up ends is Verkstead's
+    /// business rather than the session's: the agent writes an ordinary
+    /// Postscript and reads an ordinary Response, and the ending is entirely
+    /// the system's.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub nothing_else: bool,
 }
 
 /// One question's slot in a Response: either an Answer — a selected Option

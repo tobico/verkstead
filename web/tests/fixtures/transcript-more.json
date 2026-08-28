@@ -1,12 +1,12 @@
 {
   "bookkeeping": [
     {
-      "id": 2,
+      "id": 3,
       "kind": "attachment",
       "line": "{\n  \"attachment\": {\n    \"content\": \"one thing still to do\",\n    \"type\": \"todos\"\n  },\n  \"type\": \"attachment\"\n}"
     }
   ],
-  "cursor": "9.7.2",
+  "cursor": "10.7.3",
   "turns": [
     {
       "html": "<p>Forty attempts is a <em>loop</em>, not a policy.</p>\n",
