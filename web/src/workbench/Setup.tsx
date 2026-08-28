@@ -485,15 +485,16 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
 
 /// What the first entry of the base dropdown sends, which is nothing: the rule
 /// is the override taken away, and the record holds no branch for it.
-const RULE = "";
+export const RULE = "";
 
 /// The branch a checkout comes off, out of the repository's own branches.
 ///
-/// One control for the conversation's own base and for each companion's,
-/// because it is one choice asked twice: the rule — that repository's default
-/// branch as it stands when grilling starts — as the first entry, then its
-/// branches. There is nothing to type: a sha or a tag would pin the work to a
-/// moment, and what this asks is which line of work to come off.
+/// One control for the conversation's own base, for each companion's, and for
+/// each row of the steer modal's companion section, because it is one choice
+/// asked in three places: the rule — that repository's default branch as it
+/// stands when the checkout is made — as the first entry, then its branches.
+/// There is nothing to type: a sha or a tag would pin the work to a moment, and
+/// what this asks is which line of work to come off.
 ///
 /// A picked branch is stored by name and resolved when grilling starts, so the
 /// checkout comes off wherever that branch stands then — which is the point of
@@ -502,7 +503,7 @@ const RULE = "";
 /// The list is read under the *Repo's* key rather than the conversation's,
 /// because that is what it belongs to: two conversations against one repository
 /// are reading the same list, and so is every companion row that names it.
-function BasePicker(props: {
+export function BasePicker(props: {
   /// The control's own id, for the `<label>` that names it — one per repo on a
   /// card that may draw several of these.
   id: string;

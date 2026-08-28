@@ -5892,6 +5892,7 @@ describe("steering a conversation", () => {
         // sent.
         brief: null,
         digest: false,
+        added: [],
         instruction: "Note the window the count is against.",
       }),
     );
@@ -5964,6 +5965,7 @@ describe("steering a conversation", () => {
         // document about nothing.
         brief: null,
         digest: false,
+        added: [],
         instruction: null,
       }),
     );
@@ -6002,6 +6004,7 @@ describe("steering a conversation", () => {
         pairing: { profile_id: own.profile.id, model: own.model },
         brief: "# Retries\n\nThe backoff is wrong.\n",
         digest: true,
+        added: [],
         instruction: null,
       }),
     );
@@ -6077,6 +6080,9 @@ describe("steering a conversation", () => {
         pairing: null,
         brief: null,
         digest: false,
+        // Nor a sandbox: nothing runs in done, so there is nothing a
+        // companion could be for.
+        added: [],
         instruction: null,
       }),
     );
@@ -6133,6 +6139,117 @@ describe("steering a conversation", () => {
     const refused = await drawn(document.body, `.${steerModal.steerConversation} .${steerModal.failure}`);
 
     expect(refused.textContent).toBe(STEER_REFUSAL.NoSuchConversation);
+  });
+
+  /// The companion section is sandbox setup rather than a payload of one state,
+  /// so it is drawn under every target work goes on in — and not under done,
+  /// where nothing runs and there is nothing a companion could be for.
+  it("offers the repos to work alongside on every target work goes on in", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: false, ready_to_continue: true },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(`/api/ui/repos/${REPOS[0]!.id}/branches`, json(COMPANION_BRANCHES)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+
+    for (const target of ["Grilling", "Implementing"]) {
+      fireEvent.click(
+        await drawn(modal, `.${steerModal.steerTarget} input[value="${target}"]`),
+      );
+
+      const offered = await drawn(modal, `.${steerModal.steerAdding}`);
+
+      expect(
+        [...offered.querySelectorAll(`.${steerModal.steerAddName}`)].map(
+          (row) => row.textContent,
+        ),
+      ).toEqual(["askance"]);
+    }
+
+    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Done"]`));
+
+    await waitFor(() =>
+      expect(modal.querySelector(`.${steerModal.steerCompanions}`)).toBeNull(),
+    );
+  });
+
+  /// And ticking one is what puts it in the submit, with everything a setup row
+  /// would have said about it: how far in, off which branch, and under what
+  /// name. The branch field opens only where there is a branch to name — a
+  /// read-only companion is checked out detached.
+  it("sends the repos ticked to go into the sandbox", async () => {
+    const alongside = REPOS[0]!;
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: false, ready_to_continue: true },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(`/api/ui/repos/${alongside.id}/branches`, json(COMPANION_BRANCHES)),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+
+    // Nothing opens until the row is ticked: an untouched row says only that
+    // the repository is registered.
+    expect(modal.querySelector(`.${steerModal.steerAddConfig}`)).toBeNull();
+
+    fireEvent.click(await drawn(modal, `.${steerModal.steerAddName} input`));
+
+    const opened = await drawn(modal, `.${steerModal.steerAddConfig}`);
+
+    // Read-only to begin with, which is the least a human has to say — and a
+    // read-only checkout is detached, so there is no branch to name.
+    expect(opened.querySelector(`.${steerModal.steerAddBranch}`)).toBeNull();
+
+    fireEvent.click(await drawn(opened, "input[type='checkbox']"));
+
+    const branch = (await drawn(
+      opened,
+      `#steer-companion-${alongside.id}-branch`,
+    )) as HTMLInputElement;
+
+    // Prefilled with the conversation's own branch, which is what mirroring
+    // comes to: what the human reads is what they will get.
+    expect(branch.value).toBe(GRILLING.branch);
+
+    fireEvent.input(branch, { target: { value: "alongside" } });
+
+    // The base dropdown is over the *companion's* own branches, which are read
+    // when the row opens: picked once they are there, the way the setup card's
+    // own is.
+    const base = (await drawn(
+      opened,
+      `#steer-companion-${alongside.id}-base`,
+    )) as HTMLSelectElement;
+
+    await waitFor(() =>
+      expect([...base.options].map((option) => option.value)).toContain(
+        COMPANION_BRANCHES[0]!,
+      ),
+    );
+
+    fireEvent.change(base, { target: { value: COMPANION_BRANCHES[0]! } });
+
+    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toMatchObject({
+        added: [
+          {
+            repo_id: alongside.id,
+            mode: "ReadWrite",
+            base_ref: COMPANION_BRANCHES[0]!,
+            branch: "alongside",
+          },
+        ],
+      }),
+    );
   });
 
   /// The record of one: the human's own line, and the machine's plain move under

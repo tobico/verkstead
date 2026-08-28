@@ -1950,7 +1950,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &[store::CompanionWorktree {
             repo_id: repos[1].id,
             path: std::path::PathBuf::from("/var/lib/verkstead/worktrees/askance-usage-limits"),
-            base_commit: "1f0b6d2e94a7c3518d0f2b6a4e9c7d31b5a08f4e".to_owned(),
+            base_commit: Some("1f0b6d2e94a7c3518d0f2b6a4e9c7d31b5a08f4e".to_owned()),
         }],
     )
     .await
@@ -2444,6 +2444,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 "/var/lib/verkstead/worktrees/verkstead-rate-limiting",
             )),
             base_commit: None,
+            companions: &[],
+            checkouts: &[],
+            said: None,
         },
     )
     .await

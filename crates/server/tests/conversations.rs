@@ -25,7 +25,7 @@ use verkstead_render::{
     CompanionRefusal, CompanionRemoved, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationUnarchived, ConversationView,
     GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered, RoadmapPane,
-    ShowingArchived, Started, SteerOpened, TimelineEvent,
+    ShowingArchived, Started, SteerCompanionRefusal, SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
@@ -4304,6 +4304,435 @@ fn notices(view: &ConversationView) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// Submit the modal with a companion section filled in: where the work goes, and
+/// which registered Repos go into the sandbox with it.
+///
+/// The rows as the modal sends them — the Repo, how far in, the branch its
+/// checkout comes off and what a read-write one's branch is called — because
+/// that is the whole of what a setup row settles and this is the one other
+/// moment it can be settled.
+async fn steer_alongside(
+    app: &Router,
+    id: i64,
+    target: &str,
+    added: serde_json::Value,
+) -> ConversationSteered {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({ "target": target, "interrupt": false, "added": added }),
+    )
+    .await
+}
+
+/// One row of that section, with the least a human has to say about it.
+fn alongside(repo_id: i64, mode: &str) -> serde_json::Value {
+    serde_json::json!({
+        "repo_id": repo_id,
+        "mode": mode,
+        "base_ref": serde_json::Value::Null,
+        "branch": "",
+    })
+}
+
+/// The whole of what a companion costs a steer: a checkout of its own beside the
+/// Conversation's, detached where it is only read and on a branch of its own
+/// where it is worked in, the row and the worktree recorded in the same act as
+/// the move, and a line under the Steer saying what went in.
+///
+/// The one moment those questions can be asked past drafting. What the setup
+/// card's rows settle is frozen when grilling starts, and this is the section
+/// that asks them again — of a repository joining now, and of nothing else.
+#[tokio::test]
+async fn steering_puts_a_companion_in_and_checks_it_out() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let reading = second_repo(&app, watched.path(), "askance").await;
+    let writing = second_repo(&app, watched.path(), "granit").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+    assert!(companions(&app, id).await.is_empty());
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_alongside(
+            &app,
+            id,
+            "Grilling",
+            serde_json::json!([
+                alongside(reading, "ReadOnly"),
+                alongside(writing, "ReadWrite"),
+            ]),
+        )
+        .await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(companions(&app, id).await, ["askance", "granit"]);
+
+    // The read-only one is detached at whatever its base came to, and holds no
+    // branch in somebody else's repository.
+    let askance = watched.path().join("askance");
+    let detached = checked_out(&view, "askance");
+
+    assert_eq!(companion(&view, "askance").mode, CompanionMode::ReadOnly);
+    assert_eq!(companion(&view, "askance").branch, "");
+    assert_eq!(
+        git(&detached, &["rev-parse", "HEAD"]).trim(),
+        git(&askance, &["rev-parse", "HEAD"]).trim(),
+        "detached at its default branch's tip, resolved at the steer",
+    );
+    assert_eq!(
+        companion(&view, "askance").base_commit.as_deref(),
+        Some(git(&askance, &["rev-parse", "HEAD"]).trim()),
+    );
+
+    // And the read-write one is on a branch of its own, mirroring the
+    // Conversation's because nothing was typed in the field.
+    let granit = watched.path().join("granit");
+    let worked = checked_out(&view, "granit");
+
+    assert_eq!(companion(&view, "granit").mode, CompanionMode::ReadWrite);
+    assert_eq!(
+        git(&worked, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        view.branch,
+    );
+    assert!(has_branch(&granit, &view.branch));
+
+    // Both under the data directory, and both registered with git — which is
+    // what makes them worktrees rather than copies.
+    for path in [&detached, &worked] {
+        assert_eq!(
+            path.parent(),
+            Some(dir.path().join("worktrees").as_path()),
+            "{path:?}",
+        );
+    }
+
+    assert!(worktrees(&askance).contains(&detached.canonicalize().unwrap()));
+    assert!(worktrees(&granit).contains(&worked.canonicalize().unwrap()));
+
+    // And the Timeline says what went in and at which mode, directly under the
+    // human's own line rather than beside it.
+    let mut after = view
+        .timeline
+        .iter()
+        .skip_while(|event| !matches!(event, TimelineEvent::Steer(_)))
+        .skip(1);
+
+    let Some(TimelineEvent::Notice(said)) = after.next() else {
+        panic!("what stands under the Steer is the line saying what went in");
+    };
+
+    assert!(
+        said.html.contains("askance") && said.html.contains("read-only"),
+        "the read-only one is named with its mode: {}",
+        said.html,
+    );
+    assert!(
+        said.html.contains("granit") && said.html.contains("read-write"),
+        "and so is the read-write one: {}",
+        said.html,
+    );
+}
+
+/// And a steer into Done puts nothing in, whatever the submit carried.
+///
+/// Nothing runs there, so there is no sandbox to set up and nothing a companion
+/// could be for — which is why the modal draws no section on that target. A
+/// submit carrying one anyway is a page sending a field it should not have
+/// drawn, and it is answered the way a brief beside a wrap-up is: ignored rather
+/// than obeyed.
+#[tokio::test]
+async fn steering_into_done_puts_no_companion_in() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let joining = second_repo(&app, watched.path(), "granit").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_alongside(
+            &app,
+            id,
+            "Done",
+            serde_json::json!([alongside(joining, "ReadWrite")]),
+        )
+        .await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Done);
+    assert!(companions(&app, id).await.is_empty());
+    assert!(
+        notices(&view).iter().all(|said| !said.contains("granit")),
+        "and nothing on the Timeline says a repository went anywhere",
+    );
+    assert!(
+        !has_branch(&watched.path().join("granit"), &view.branch),
+        "nor is there a branch in it",
+    );
+}
+
+/// Each of the three questions git is asked about a companion refuses the whole
+/// steer and says which repository it was — and leaves nothing behind: no
+/// directory, no branch, no row, and the Conversation exactly where it stood.
+#[tokio::test]
+async fn a_companion_a_steer_cannot_deliver_refuses_it_by_name() {
+    for why in [
+        SteerCompanionRefusal::FetchFailed,
+        SteerCompanionRefusal::NoBaseCommit,
+        SteerCompanionRefusal::BranchExists,
+    ] {
+        let (watched, dir, app, _repo, repo_id) = workbench().await;
+        let joining = second_repo(&app, watched.path(), "askance").await;
+        let id = ready(&app, watched.path(), repo_id).await;
+
+        assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+        let askance = watched.path().join("askance");
+        let branch = opened(&app, id).await.branch;
+
+        let row = match why {
+            // A remote that answers to nothing: what the checkout would come off
+            // cannot be trusted to be what the remote is holding.
+            SteerCompanionRefusal::FetchFailed => {
+                let nowhere = dir.path().join("no-such-remote");
+                git(
+                    &askance,
+                    &["remote", "add", "origin", &nowhere.to_string_lossy()],
+                );
+
+                alongside(joining, "ReadOnly")
+            }
+            // A base picked in the modal that the repository does not have.
+            SteerCompanionRefusal::NoBaseCommit => serde_json::json!({
+                "repo_id": joining,
+                "mode": "ReadOnly",
+                "base_ref": "release-1.4",
+                "branch": "",
+            }),
+            // And a name in that repository that is already somebody's work.
+            _ => {
+                git(&askance, &["branch", &branch]);
+
+                alongside(joining, "ReadWrite")
+            }
+        };
+
+        assert_eq!(
+            steer(&app, id).await,
+            SteerOpened::Opened { working: false }
+        );
+        assert_eq!(
+            steer_alongside(&app, id, "Grilling", serde_json::json!([row])).await,
+            ConversationSteered::Companion {
+                repo: "askance".to_owned(),
+                why,
+            },
+        );
+
+        // The press did not happen: no row, no checkout, no move, and the stop
+        // the click wrote is still there for the human to resume out of.
+        let view = opened(&app, id).await;
+
+        assert!(companions(&app, id).await.is_empty(), "{why:?}");
+        assert_eq!(view.state, Lifecycle::Grilling, "{why:?}");
+        assert_eq!(
+            worktrees(&askance).len(),
+            1,
+            "only the companion repository itself: {why:?}",
+        );
+        assert!(
+            view.blocked_on.is_some(),
+            "the stop is still there: {why:?}"
+        );
+    }
+}
+
+/// The three questions the record answers about a companion, each refused by
+/// name — and the repository said wherever there is one to say.
+///
+/// Nothing here changes a row that is already on the Conversation: the frozen
+/// set only widens, so a submit naming one that is already there is refused
+/// rather than obeyed.
+#[tokio::test]
+async fn a_repo_a_steer_cannot_put_in_is_refused_by_name() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let already = second_repo(&app, watched.path(), "askance").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    add_companion(&app, id, already).await;
+    companion_mode(&app, id, already, CompanionMode::ReadWrite).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let asked = [
+        (
+            repo_id,
+            ConversationSteered::Companion {
+                repo: "verkstead".to_owned(),
+                why: SteerCompanionRefusal::OwnRepo,
+            },
+        ),
+        (
+            already,
+            ConversationSteered::Companion {
+                repo: "askance".to_owned(),
+                why: SteerCompanionRefusal::AlreadyAdded,
+            },
+        ),
+        (repo_id + 404, ConversationSteered::NoSuchCompanionRepo),
+    ];
+
+    for (repo, refusal) in asked {
+        assert_eq!(
+            steer(&app, id).await,
+            SteerOpened::Opened { working: false }
+        );
+        assert_eq!(
+            steer_alongside(
+                &app,
+                id,
+                "Grilling",
+                serde_json::json!([alongside(repo, "ReadOnly")]),
+            )
+            .await,
+            refusal,
+        );
+
+        // And the one that was there is exactly as it was: no downgrade, no
+        // removal, and no move.
+        let view = opened(&app, id).await;
+
+        assert_eq!(companions(&app, id).await, ["askance"]);
+        assert_eq!(companion(&view, "askance").mode, CompanionMode::ReadWrite);
+        assert_eq!(view.state, Lifecycle::Grilling);
+    }
+}
+
+/// A steered Draft's companions are checked out with its own, which is the
+/// source with nothing on disk at all: they were recorded on the setup card and
+/// nothing has ever made them.
+///
+/// Without this the Conversation would reach a running state with companions the
+/// sandbox skips in silence — a session quietly missing the repository it was
+/// given.
+#[tokio::test]
+async fn steering_a_draft_checks_out_the_companions_it_was_configured_with() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let reading = second_repo(&app, watched.path(), "askance").await;
+    let writing = second_repo(&app, watched.path(), "granit").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    add_companion(&app, id, reading).await;
+    add_companion(&app, id, writing).await;
+    companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
+
+    assert!(
+        opened(&app, id)
+            .await
+            .companions
+            .iter()
+            .all(|companion| companion.worktree.is_none()),
+        "nothing has been checked out while it drafts",
+    );
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_grilling(&app, id, None).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling);
+    checked_out(&view, "askance");
+
+    let worked = checked_out(&view, "granit");
+
+    assert_eq!(
+        git(&worked, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        view.branch,
+    );
+
+    // Nothing was added, so there is nothing for the Timeline to announce: what
+    // this steer did was make what the record already said.
+    assert!(notices(&view).is_empty());
+}
+
+/// And a Conversation steered back out of Closed gets every companion checked
+/// out again, the read-write ones on the branches they kept.
+///
+/// Closing removed the directories and forgot the rows while keeping the
+/// branches, so what is on those branches is what the work committed there — and
+/// a branch that is still there is checked out again rather than cut over.
+#[tokio::test]
+async fn steering_a_closed_conversation_checks_its_companions_out_again() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let reading = second_repo(&app, watched.path(), "askance").await;
+    let writing = second_repo(&app, watched.path(), "granit").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    add_companion(&app, id, reading).await;
+    add_companion(&app, id, writing).await;
+    companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let branch = opened(&app, id).await.branch;
+    let granit = watched.path().join("granit");
+
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+    assert!(
+        opened(&app, id)
+            .await
+            .companions
+            .iter()
+            .all(|companion| companion.worktree.is_none()),
+        "the directories went with the close and the rows were forgotten",
+    );
+    assert!(
+        has_branch(&granit, &branch),
+        "and the branch the companion was worked on was kept",
+    );
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_into(&app, id, "Grilling", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling);
+    checked_out(&view, "askance");
+
+    let worked = checked_out(&view, "granit");
+
+    assert_eq!(
+        git(&worked, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        branch,
+        "on the branch it kept rather than one cut over the top of it",
+    );
 }
 
 /// The whole of what pressing Adopt does: the stage's own branch off the base

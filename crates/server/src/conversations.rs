@@ -1106,7 +1106,7 @@ fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
             Some(store::CompanionWorktree {
                 repo_id: *repo_id,
                 path: checkout.path.clone(),
-                base_commit: checkout.commit.clone(),
+                base_commit: Some(checkout.commit.clone()),
             })
         })
         .collect()

@@ -521,6 +521,30 @@ diff: DiffView | null, };
 export type CompanionAdded = "Added" | "NoSuchConversation" | "NotDrafting" | "NoSuchRepo" | "OwnRepo" | "AlreadyAdded";
 
 /**
+ * One registered Repo a steer puts on a Conversation, with everything a setup
+ * row would have settled about it.
+ *
+ * The same four facts a drafting companion is configured with — which Repo,
+ * how far into it the work may reach, what its checkout comes off, and what a
+ * read-write one's branch is called — because this is the one other moment
+ * those questions can be asked: the setup rows have gone by the time anything
+ * is steered.
+ */
+export type CompanionAddition = { repo_id: number, mode: CompanionMode, 
+/**
+ * The branch of that repository's own the checkout comes off, or `null`
+ * for the rule the Conversation's own base follows: that repository's
+ * default branch, as origin holds it at the moment of the steer.
+ */
+base_ref: string | null, 
+/**
+ * What a read-write one's branch is to be called, or empty for
+ * *mirroring* — the Conversation's own branch name. Empty on a read-only
+ * one as well, its checkout being detached and holding no branch.
+ */
+branch: string, };
+
+/**
  * And of choosing the branch a companion's checkout comes off.
  *
  * The Conversation's own [`BaseRecorded`] with the companion refusal added,
@@ -699,7 +723,11 @@ waiting: boolean, };
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
+/**
+ * The Repo's registered name.
+ */
+repo: string, why: SteerCompanionRefusal, } };
 
 /**
  * What became of pressing Stop or Force stop.
@@ -1884,6 +1912,21 @@ export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "L
 export type Started = { "Started": { id: number, } } | "NoSuchRepo";
 
 /**
+ * Which of a companion's ways of not being delivered by a steer this was.
+ *
+ * [`CompanionRefusal`]'s four asked again at the other moment a companion is
+ * checked out, and two more that only a steer can meet: the setup card catches
+ * them the moment a row is pressed, and a steer is where the same questions are
+ * asked past drafting, with nothing in front of them but the submit.
+ *
+ * A vocabulary of its own rather than more variants of the grill start's, for
+ * the reason [`SteerTarget`] is not [`crate::Lifecycle`]: what a grilling can
+ * be refused for and what a steer can be refused for are different lists, and
+ * one list would say each press can be refused for things it never could.
+ */
+export type SteerCompanionRefusal = "OwnRepo" | "AlreadyAdded" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+
+/**
  * A steer as the page receives it: when, where the human sent it, and what
  * they wrote to send it there with.
  *
@@ -2015,7 +2058,25 @@ instruction: string | null,
  * Nothing anywhere else reads it: a target that starts no grilling starts
  * nothing to prime.
  */
-digest: boolean, };
+digest: boolean, 
+/**
+ * The registered Repos to put into the sandbox the sessions to come run
+ * in, each with what a setup row would have said about it.
+ *
+ * Sandbox setup rather than a property of one state, which is why it rides
+ * every target work goes on in rather than one of them. Empty is the
+ * ordinary case and the whole of what most steers carry.
+ *
+ * **Adding only.** Nothing here may name a companion the Conversation
+ * already has — one that does is refused rather than obeyed, because the
+ * frozen set only widens and what a session was once given is never taken
+ * back mid-Conversation. Which is also why there is no list beside this
+ * one for taking a companion away.
+ *
+ * Nothing anywhere else reads it: a target nothing runs in has no sandbox
+ * to set up.
+ */
+added: Array<CompanionAddition>, };
 
 /**
  * Where a steer can send a Conversation.

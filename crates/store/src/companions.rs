@@ -150,7 +150,12 @@ pub struct CompanionWorktree {
 
     /// The commit the companion's base resolved to — see
     /// [`Companion::base_commit`].
-    pub base_commit: String,
+    ///
+    /// `None` where nothing resolved one: a companion whose checkout was made
+    /// again on a branch it already held has no base to have come off, that
+    /// branch having been cut by whatever cut it and what it was cut from having
+    /// been forgotten with the row.
+    pub base_commit: Option<String>,
 }
 
 /// What became of adding one.
@@ -265,6 +270,66 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
             .execute(pool)
             .await
             .context("adding the base commit column to the companion worktrees")?;
+    }
+
+    Ok(())
+}
+
+/// A companion joining a Conversation past drafting, as a steer puts it there.
+///
+/// The four columns of a companion's row, borrowed straight off what the modal
+/// submitted and living exactly as long as the call — [`super::Settling`]'s
+/// shape and for its reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Joining<'a> {
+    pub repo_id: i64,
+
+    pub mode: CompanionMode,
+
+    /// The branch its checkout comes off, or `None` for the default-branch
+    /// rule — see [`Companion::base_ref`].
+    pub base_ref: Option<&'a str>,
+
+    /// What a read-write one's branch is called, or empty for mirroring — see
+    /// [`Companion::branch`].
+    pub branch: &'a str,
+}
+
+/// Put companions on a Conversation that is past drafting.
+///
+/// The one write here with no `editable` guard in front of it, and deliberately:
+/// past drafting is exactly where this writes. A steer may widen a frozen set —
+/// see the server's `steering` module, which is the only caller — so what would
+/// refuse it is the very state it is for.
+///
+/// Inserted rather than written over, because there is nothing here to write
+/// over: a Repo that is a companion already is refused above this, and the
+/// primary key is what says so if two presses somehow raced. The frozen set only
+/// widens, so an add that landed on an existing row would be a downgrade
+/// dressed as an add.
+///
+/// Takes the transaction the Conversation is moving in, for
+/// [`record_worktrees`]'s reason: a Conversation that said it had moved without
+/// saying which repositories moved with it would be one nothing could bind into
+/// a sandbox.
+pub(crate) async fn join(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+    joining: &[Joining<'_>],
+) -> Result<()> {
+    for companion in joining {
+        sqlx::query(
+            "INSERT INTO companions (conversation_id, repo_id, mode, base_ref, branch)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(companion.repo_id)
+        .bind(companion.mode.stored())
+        .bind(companion.base_ref)
+        .bind(companion.branch)
+        .execute(&mut **tx)
+        .await
+        .with_context(|| format!("putting Repo {} on Conversation {id}", companion.repo_id))?;
     }
 
     Ok(())

@@ -36,8 +36,26 @@
 //! behind a deleted directory is the very thing this button is for. A closed
 //! Conversation kept its branch and lost its Worktree, so it gets one back on
 //! the branch. And a Draft has neither, so the branch is cut where a grill start
-//! would have cut it: off the base the human fixed, resolved at this moment. See
-//! [`somewhere`], which is the one place any of it is decided.
+//! would have cut it: off the base the human fixed, resolved at this moment.
+//!
+//! **Every companion checkout the record says is missing is made again too**,
+//! beside the Conversation's own, because the two sources with nothing on disk
+//! have companions with nothing on disk: a Draft's were recorded on the setup
+//! card and never checked out, and a Conversation steered back out of Closed had
+//! its directories removed and its rows forgotten while its branches were kept.
+//! Without this either would reach a running state with companions the sandbox
+//! skips in silence — a session quietly missing the repository it was given. See
+//! [`plan`], which is the one place any of it is decided, and [`make`], which is
+//! the one place any of it is created.
+//!
+//! **And a steer may widen the set it works alongside.** The modal's companion
+//! section puts another registered Repo in, and the steer checks it out as part
+//! of the move: fetch, resolve, cut or detach, bind — the grill start's shape,
+//! including the fetch this deliberately skips for the Conversation's own
+//! repository, a companion joining now being new work rather than an old
+//! checkout being put back. Widening only, and never the other way: nothing here
+//! removes a companion or narrows one, so what a session was once given is never
+//! taken back mid-Conversation.
 //!
 //! **The record is two Events, a Pairing and whatever was made.** The Steer is
 //! the human's — *I moved this* — the machine's plain Moved line stands under
@@ -67,9 +85,12 @@
 //! Nothing is reverted, reset or stashed, here or anywhere a stop is written:
 //! the Worktree is left exactly as whatever was running left it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use verkstead_render::{ConversationSteered, SteerOpened, SteerSubmission, SteerTarget};
+use verkstead_render::{
+    CompanionMode, ConversationSteered, SteerCompanionRefusal, SteerOpened, SteerSubmission,
+    SteerTarget,
+};
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
@@ -120,17 +141,21 @@ pub(crate) async fn click(state: &AppState, conversation_id: i64) -> anyhow::Res
 /// Submit the modal: move the Conversation where the human said, and record that
 /// they said it.
 ///
-/// In order: refuse what cannot be done at all; end what is running where
-/// **Interrupt current task** was ticked; make whatever the work needs and has
-/// not got — a Worktree, and the branch under it; clear the stop the click left;
-/// move the Conversation, recording the Steer, the Brief, the Pairing and what
-/// was just made as one act; and then start whatever the target needs starting.
+/// In order: refuse what cannot be done at all; work out every checkout the
+/// work needs and has not got, without making any of it; end what is running
+/// where **Interrupt current task** was ticked; make those checkouts; clear the
+/// stop the click left; move the Conversation, recording the Steer, the Brief,
+/// the Pairing, the companions and what was just made as one act; and then start
+/// whatever the target needs starting.
 ///
-/// **The refusals go first**, before anything is ended, rebuilt or cleared. The
-/// browser is holding the request open for the answer, and a refusal that had
-/// already ended somebody's session would be a press that half happened — see
-/// [`refusal`], which is every one of them asked of the record alone. What is
-/// after them either happens or is a failure.
+/// **Every question goes first**, before anything is ended, rebuilt or cleared —
+/// the ones asked of the record and the ones asked of git alike. The browser is
+/// holding the request open for the answer, and a refusal that had already ended
+/// somebody's session would be a press that half happened. See [`refusal`],
+/// which is every one asked of the record alone, [`additions`], which is the
+/// three a companion is held to, and [`plan`], which asks git everything a
+/// directory turns on and makes none of it. What is after them either happens or
+/// is a failure.
 ///
 /// The stop goes before the move rather than after, because what it is in front
 /// of is the launch: a run does not advance past a stop — see
@@ -162,6 +187,24 @@ pub(crate) async fn submit(
     // the early returns does.
     let driving = state.drivers.driving(conversation_id);
 
+    // Which registered Repos the modal named, read back as rows and held against
+    // what the Conversation already has — and then everything git is asked about
+    // a directory: what has to be made, and whether any of it can be.
+    //
+    // Both in front of the interrupt below, which is what makes a steer refused
+    // for a companion a press that did not happen: no directory, no branch, no
+    // row, nothing ended and no stop cleared. The registration above is dropped
+    // on each of these by the early return.
+    let added = match additions(state, &conversation, submission).await? {
+        Additions::Refused(refusal) => return Ok(refusal),
+        Additions::Ready(added) => added,
+    };
+
+    let planned = match plan(state, &conversation, submission.target, &added).await? {
+        Planning::Refused(refusal) => return Ok(refusal),
+        Planning::Ready(planned) => planned,
+    };
+
     if submission.interrupt {
         // Ended rather than force-stopped, because the stop is already written:
         // the click wrote one, or recorded the request that the next launch
@@ -182,7 +225,7 @@ pub(crate) async fn submit(
         );
     }
 
-    let made = match somewhere(state, &conversation, submission.target).await? {
+    let made = match make(planned).await? {
         Making::Refused(refusal) => return Ok(refusal),
         Making::Ready(made) => made,
     };
@@ -190,6 +233,21 @@ pub(crate) async fn submit(
     clear(state, conversation_id).await?;
 
     let instruction = instruction(submission);
+
+    // The rows the added companions become, borrowed off what was read back
+    // above rather than off the submit: an empty branch name is *mirroring* and
+    // a whitespace base is the rule, and both were settled once already.
+    let joining: Vec<store::Joining<'_>> = added
+        .iter()
+        .map(|companion| store::Joining {
+            repo_id: companion.repo.id,
+            mode: companion.mode,
+            base_ref: companion.base_ref.as_deref(),
+            branch: &companion.branch,
+        })
+        .collect();
+
+    let said = announced(&added);
 
     let steer = store::Steer {
         target,
@@ -199,6 +257,9 @@ pub(crate) async fn submit(
         direction: directing(&conversation, instruction),
         worktree: made.worktree.as_deref(),
         base_commit: made.base_commit.as_deref(),
+        companions: &joining,
+        checkouts: &made.checkouts,
+        said: said.as_deref(),
     };
 
     match store::steer_conversation(&state.pool, conversation_id, steer).await? {
@@ -517,7 +578,7 @@ pub(crate) enum Standing {
     ///
     /// **Not a refusal**, and that is the whole of why this is three answers.
     /// The steer checks the branch out again before anything runs in it — see
-    /// [`somewhere`] — so a directory that has gone says nothing about what the
+    /// [`plan`] — so a directory that has gone says nothing about what the
     /// branch holds, and the Conversation stuck behind a deleted one is the very
     /// thing this button is for. What decides it instead is
     /// [`crate::runner::implementing_again`], which reads the Worktree the steer
@@ -577,7 +638,7 @@ impl Standing {
 /// however git feels about its registration — and this runs on every draw of
 /// every Conversation, which a workbench re-reads on every Nudge, so three git
 /// processes here would be three git processes a second on a page nobody is
-/// touching. [`somewhere`] asks git the harder question a moment later, where it
+/// touching. [`plan`] asks git the harder question a moment later, where it
 /// is asked once and a rebuild turns on it.
 ///
 /// Off the runtime's threads, every one of these readings being a filesystem or
@@ -677,18 +738,193 @@ fn fixed(conversation: &Conversation, role: Role) -> Option<&store::Pairing> {
     }
 }
 
-/// Make sure there is somewhere to work, and say what had to be made.
+/// The line that goes under the Steer, naming every companion the steer put in
+/// and the mode it went in at — or `None` where it put none in.
 ///
-/// Nothing made and nothing looked at where the target runs nothing: Done needs
-/// no directory, and a steer into it must not turn on whether one is still
+/// What a Conversation was configured with is read on the Brief's details pane
+/// ever after, and that pane says only what the set *is*. This is what says when
+/// it changed and who changed it: it sits under the human's own Event, so the
+/// Timeline reads as one moment rather than as a machine's aside beside it.
+///
+/// The mode with each, because that is the difference between a repository a
+/// session may read and one it may commit in — and the whole of what a companion
+/// costs whoever reads the work afterwards.
+fn announced(added: &[store::Companion]) -> Option<String> {
+    if added.is_empty() {
+        return None;
+    }
+
+    let named: Vec<String> = added
+        .iter()
+        .map(|companion| {
+            let mode = match companion.mode {
+                store::CompanionMode::ReadOnly => "read-only",
+                store::CompanionMode::ReadWrite => "read-write",
+            };
+
+            format!("`{}` {mode}", companion.repo.name)
+        })
+        .collect();
+
+    Some(format!("Steered into the sandbox: {}.", named.join(", ")))
+}
+
+/// Which registered Repos the steer is putting into the sandbox, read back as
+/// rows — or why one of them cannot go in.
+///
+/// The three questions the setup card asks the moment a row is pressed, asked
+/// here because a steer is where they are asked past drafting: a Conversation is
+/// not a companion of itself, a Repo added twice would be one repository with
+/// two checkouts in one sandbox, and a Repo that is not registered is outside
+/// the boundary Verkstead may operate in.
+///
+/// The Conversation's own and the set it already has come before the registry,
+/// for the reason [`store::add_companion`] asks them in that order: they are the
+/// cheaper questions and the more specific answers, and each of them can say
+/// which repository it was. The registry cannot — see
+/// [`ConversationSteered::NoSuchCompanionRepo`], which is the one refusal here
+/// with no repository in it.
+///
+/// **Nothing here changes a row that is already there.** A submit naming a
+/// companion the Conversation already has is refused rather than obeyed: the
+/// frozen set only widens, and an add that landed on an existing row would be a
+/// downgrade dressed as an add.
+///
+/// **And nothing at all where the target runs nothing.** Done has no sandbox to
+/// set up, so the modal draws no section there and a submit carrying one is
+/// answered the way [`brief`] and [`instruction`] answer a payload beside the
+/// wrong target: as a page sending a field it should not have drawn.
+///
+/// What comes back is a [`store::Companion`] apiece, the shape the record holds
+/// — so everything past this treats a companion the modal has just named and one
+/// the Conversation has had all along as the one kind of thing.
+async fn additions(
+    state: &AppState,
+    conversation: &Conversation,
+    submission: &SteerSubmission,
+) -> anyhow::Result<Additions> {
+    // Nothing at all where the target runs nothing, whatever arrived: Done has
+    // no sandbox to set up and nothing a companion could be for, so the modal
+    // does not draw the section there and a submit carrying one is a page
+    // sending a field it should not have drawn. The rule [`brief`] and
+    // [`instruction`] follow, asked of the third payload.
+    if !submission.target.runs() {
+        return Ok(Additions::Ready(Vec::new()));
+    }
+
+    let mut added: Vec<store::Companion> = Vec::new();
+
+    for addition in &submission.added {
+        let refused = |repo: &str, why| {
+            Additions::Refused(ConversationSteered::Companion {
+                repo: repo.to_owned(),
+                why,
+            })
+        };
+
+        if addition.repo_id == conversation.repo.id {
+            return Ok(refused(
+                &conversation.repo.name,
+                SteerCompanionRefusal::OwnRepo,
+            ));
+        }
+
+        // The set as the record holds it and the set this submit has built up so
+        // far, because one page sending the same Repo twice is the same mistake
+        // as one sending a Repo that is there already.
+        if let Some(already) = conversation
+            .companions
+            .iter()
+            .map(|companion| &companion.repo)
+            .chain(added.iter().map(|companion| &companion.repo))
+            .find(|repo| repo.id == addition.repo_id)
+        {
+            return Ok(refused(&already.name, SteerCompanionRefusal::AlreadyAdded));
+        }
+
+        let Some(repo) = store::load_repo(&state.pool, addition.repo_id).await? else {
+            return Ok(Additions::Refused(ConversationSteered::NoSuchCompanionRepo));
+        };
+
+        added.push(store::Companion {
+            repo,
+            mode: mode(addition.mode),
+
+            // Whitespace alone is the rule rather than a branch called nothing,
+            // exactly as the setup card's picker records it: what the dropdown's
+            // first entry sends is the override taken away.
+            base_ref: addition
+                .base_ref
+                .as_deref()
+                .map(str::trim)
+                .filter(|base| !base.is_empty())
+                .map(str::to_owned),
+            branch: addition.branch.trim().to_owned(),
+
+            // Nothing on disk yet, which is what makes it one of the checkouts
+            // [`plan`] has to make.
+            worktree: None,
+            base_commit: None,
+        });
+    }
+
+    Ok(Additions::Ready(added))
+}
+
+/// What reading the companions the modal named came to.
+enum Additions {
+    Ready(Vec<store::Companion>),
+
+    /// One of them cannot go in, and the human is told which and why.
+    Refused(ConversationSteered),
+}
+
+/// How far into a companion the modal said the work may reach.
+///
+/// The wire's word and the record's held to each other, which is what the two
+/// vocabularies always need between them — see [`target`], which does the same
+/// job for the states.
+fn mode(mode: CompanionMode) -> store::CompanionMode {
+    match mode {
+        CompanionMode::ReadOnly => store::CompanionMode::ReadOnly,
+        CompanionMode::ReadWrite => store::CompanionMode::ReadWrite,
+    }
+}
+
+/// Whether a companion is joining the work now or coming back to a checkout it
+/// lost.
+///
+/// The one thing that reads differently between them, and it is the whole of why
+/// this is a distinction: a branch already taken in that repository is somebody
+/// else's work where a companion is joining, and is *this* companion's own work
+/// where it is coming back. So the first is refused and the second is checked
+/// out again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Joining {
+    /// The modal has just named it. Everything about its checkout is new.
+    Added,
+
+    /// The record holds it and nothing on disk does: a steered Draft's
+    /// companion, recorded on the setup card and never checked out, or one of a
+    /// Conversation steered back out of Closed, whose directory was removed and
+    /// whose row was forgotten while its branch was kept.
+    Recorded,
+}
+
+/// Work out every checkout this steer has to make, and ask git everything each
+/// of them turns on — without making any of it.
+///
+/// Nothing planned and nothing looked at where the target runs nothing: Done
+/// needs no directory, and a steer into it must not turn on whether one is still
 /// there.
 ///
-/// Otherwise the three cases, cheapest first, and which one a Conversation is in
-/// is a fact about it rather than a choice:
+/// **The Conversation's own** is the three cases, cheapest first, and which one
+/// a Conversation is in is a fact about it rather than a choice:
 ///
 /// - **A Worktree git can still answer about is left exactly as it stands**,
 ///   uncommitted changes and all — see [`crate::worktrees::healthy`], which is
-///   the same reading a pressed Resume makes.
+///   the same reading a pressed Resume makes. There is nothing to make, so
+///   nothing is planned for it.
 /// - **A branch with no Worktree on it gets one**: a directory deleted, hollowed
 ///   out or dropped from the repository's list of worktrees, and a closed
 ///   Conversation whose Worktree was taken away and whose branch was kept. A
@@ -708,15 +944,30 @@ fn fixed(conversation: &Conversation, role: Role) -> Option<&store::Pairing> {
 /// else's work is the mistake pressing the button again cannot undo, so a read
 /// git would not answer counts as a branch that is there.
 ///
+/// **And every companion with nothing on disk**, which is three sources between
+/// them: the ones the modal has just added, a steered Draft's — recorded on the
+/// setup card and never checked out — and those of a Conversation steered back
+/// out of Closed, whose directories were removed and whose rows were forgotten
+/// while their branches were kept. All three would otherwise reach a running
+/// state with companions the sandbox skips in silence, which is a session
+/// quietly missing the repository it was given. A companion the record already
+/// holds a directory for is left exactly where it is.
+///
+/// **Every question is asked before any of them is answered**, as at a grill
+/// start, which is what lets a steer refused over one companion leave no
+/// directory and no branch anywhere. See [`make`], which is the one place any of
+/// this creates anything.
+///
 /// Off the runtime's threads, a checkout of a large repository being no quick
 /// call and every part of this blocking.
-async fn somewhere(
+async fn plan(
     state: &AppState,
     conversation: &Conversation,
     target: SteerTarget,
-) -> anyhow::Result<Making> {
+    added: &[store::Companion],
+) -> anyhow::Result<Planning> {
     if !target.runs() {
-        return Ok(Making::Ready(Made::default()));
+        return Ok(Planning::Ready(Planned::default()));
     }
 
     let path = conversation.worktree.clone().unwrap_or_else(|| {
@@ -730,6 +981,8 @@ async fn somewhere(
 
     let repo = conversation.repo.path.clone();
     let branch = conversation.branch.clone();
+    let id = conversation.id;
+    let data_dir = state.data_dir.clone();
 
     // What a branch that has never been cut comes off, named rather than
     // resolved: a drafting Conversation's column holds the *branch* the human
@@ -739,57 +992,388 @@ async fn somewhere(
         .clone()
         .unwrap_or_else(|| conversation.repo.default_branch.clone());
 
-    let made = tokio::task::spawn_blocking({
+    // Every companion this steer has to check out: the ones just added, and the
+    // ones the record holds with nowhere on disk. The added first because that
+    // is what the human is standing at; nothing else turns on the order.
+    let checking_out: Vec<(Joining, store::Companion)> = added
+        .iter()
+        .cloned()
+        .map(|companion| (Joining::Added, companion))
+        .chain(
+            conversation
+                .companions
+                .iter()
+                .filter(|companion| companion.worktree.is_none())
+                .cloned()
+                .map(|companion| (Joining::Recorded, companion)),
+        )
+        .collect();
+
+    let planned = tokio::task::spawn_blocking({
         let path = path.clone();
+        let branch = branch.clone();
 
         move || {
-            if crate::worktrees::healthy(&repo, &path, &branch) {
-                return Ok(None);
+            let mut checkouts = Vec::new();
+            let mut base_commit = None;
+
+            // The Conversation's own first, so that whatever directory it takes
+            // is taken before any companion asks for one.
+            if !crate::worktrees::healthy(&repo, &path, &branch) {
+                let holding = match crate::worktrees::branch_taken(&repo, &branch) {
+                    true => Holding::Kept(branch.clone()),
+                    false => {
+                        let Some(commit) = crate::worktrees::resolve(&repo, &named) else {
+                            return Err(ConversationSteered::NoBaseCommit);
+                        };
+
+                        base_commit = Some(commit.clone());
+
+                        Holding::Cut(branch.clone(), commit)
+                    }
+                };
+
+                checkouts.push(Checkout {
+                    companion: None,
+                    repo,
+                    path: path.clone(),
+                    holding,
+                });
             }
 
-            if crate::worktrees::branch_taken(&repo, &branch) {
-                return crate::worktrees::rebuild(&repo, &path, &branch)
-                    .then_some(None)
-                    .ok_or(ConversationSteered::WorktreeRefused);
+            for (joining, companion) in checking_out {
+                // Whatever the Conversation's own holds and whatever has been
+                // planned so far: until they exist the filesystem cannot tell
+                // two directories apart, so two companions coming off one branch
+                // name would otherwise be handed the same one. See
+                // [`crate::worktrees::unclaimed_path`].
+                let claimed: Vec<PathBuf> = std::iter::once(path.clone())
+                    .chain(checkouts.iter().map(|checkout| checkout.path.clone()))
+                    .collect();
+
+                checkouts.push(alongside(
+                    &data_dir, id, &branch, joining, companion, &claimed,
+                )?);
             }
 
-            let Some(commit) = crate::worktrees::resolve(&repo, &named) else {
-                return Err(ConversationSteered::NoBaseCommit);
+            Ok(Planned {
+                worktree: Some(path),
+                base_commit,
+                checkouts,
+            })
+        }
+    })
+    .await?;
+
+    Ok(match planned {
+        Ok(planned) => Planning::Ready(planned),
+        Err(refusal) => Planning::Refused(refusal),
+    })
+}
+
+/// Ask git everything one companion's checkout turns on, and come back with what
+/// it will be.
+///
+/// Fetch, then resolve, then check the branch — the grill start's order, for the
+/// grill start's reasons, and each failure refused by the same name with the
+/// repository said. Including the fetch that this module deliberately skips for
+/// the Conversation's own repository: a companion joining now is new work rather
+/// than an old checkout being put back, so it comes off what the remote is
+/// holding at this moment. A companion whose repository has no remote has
+/// nothing to fetch and is never refused for it.
+///
+/// **A companion coming back to a branch it still holds asks git none of it.**
+/// That branch was cut for this Conversation and holds everything that was
+/// committed to it, so it is checked out again rather than cut, and there is no
+/// base for a branch that is already there to come off — which is why the row
+/// that comes back records no base commit. See [`Joining`], which is the whole
+/// of the difference between that and the same branch under a companion joining
+/// now: there, a name already taken is somebody else's work and refuses the
+/// steer.
+///
+/// Otherwise a read-write companion is cut a branch of its own from its base,
+/// mirroring the Conversation's where the row names none, and a read-only one is
+/// checked out detached at whatever that base comes to at this moment — that
+/// being the only commit anything can still name.
+///
+/// Nothing is made here. What comes back is a plan, and the making waits until
+/// every checkout has one: that is what lets a steer that cannot deliver one
+/// companion refuse without having made another.
+fn alongside(
+    data: &Path,
+    id: i64,
+    branch: &str,
+    joining: Joining,
+    companion: store::Companion,
+    claimed: &[PathBuf],
+) -> Result<Checkout, ConversationSteered> {
+    let repo = companion.repo.path.clone();
+    let refused = |why| ConversationSteered::Companion {
+        repo: companion.repo.name.clone(),
+        why,
+    };
+
+    // A read-write companion is cut a branch of its own: the one that was typed,
+    // or the Conversation's where nothing was, which is what mirroring is. A
+    // read-only one takes no name at all.
+    let cut = companion.branch_for(branch);
+
+    // The one checkout that asks git nothing else: the branch is there, it is
+    // this companion's own, and what is missing is only the directory it was
+    // worked in.
+    if joining == Joining::Recorded
+        && let Some(cut) = &cut
+        && crate::worktrees::branch_taken(&repo, cut)
+    {
+        return Ok(Checkout {
+            companion: Some((companion.repo.id, companion.repo.name.clone())),
+            path: crate::worktrees::unclaimed_path(data, id, &companion.repo.name, cut, claimed),
+            repo,
+            holding: Holding::Kept(cut.clone()),
+        });
+    }
+
+    if let crate::worktrees::Fetched::Failed(said) = crate::worktrees::fetch(&repo) {
+        tracing::error!(
+            said,
+            repo = %repo.display(),
+            "fetching a companion Repo's remotes failed, so the steer is not being made",
+        );
+
+        return Err(refused(SteerCompanionRefusal::FetchFailed));
+    }
+
+    // The branch of that repository's own the human picked, or its default
+    // branch as origin holds it — the rule the Conversation's base follows,
+    // asked of the companion's repository.
+    let named = match companion.base_ref.clone() {
+        Some(picked) => picked,
+        None => crate::worktrees::default_ref(&repo, &companion.repo.default_branch),
+    };
+
+    let Some(commit) = crate::worktrees::resolve(&repo, &named) else {
+        return Err(refused(SteerCompanionRefusal::NoBaseCommit));
+    };
+
+    if let Some(cut) = &cut
+        && crate::worktrees::branch_exists(&repo, cut)
+    {
+        return Err(refused(SteerCompanionRefusal::BranchExists));
+    }
+
+    // Named for the Repo and what the checkout holds, as the Conversation's own
+    // is: the branch where there is one, and otherwise the base it stands at —
+    // a read-only companion holds no branch to be named for.
+    let holds = cut.clone().unwrap_or(named);
+
+    Ok(Checkout {
+        companion: Some((companion.repo.id, companion.repo.name.clone())),
+        path: crate::worktrees::unclaimed_path(data, id, &companion.repo.name, &holds, claimed),
+        repo,
+        holding: match cut {
+            Some(cut) => Holding::Cut(cut, commit),
+            None => Holding::Detached(commit),
+        },
+    })
+}
+
+/// Make every checkout the plan holds, or unmake the ones already made and say
+/// which one would not be.
+///
+/// The one place a steer creates anything, which is what makes *leaves nothing
+/// behind* something to hold rather than something to hope for. What is unwound
+/// is directory and branch together for a branch this steer cut — see
+/// [`crate::worktrees::unmake`], a branch cut moments ago by a steer that then
+/// refused holding nothing worth keeping — and the directory alone for one it
+/// did not: a branch that was already there is work somebody committed, and a
+/// checkout taken away again is the nothing this Conversation already had.
+///
+/// Off the runtime's threads, every part of this blocking.
+async fn make(planned: Planned) -> anyhow::Result<Making> {
+    let Planned {
+        worktree,
+        base_commit,
+        checkouts,
+    } = planned;
+
+    let made = tokio::task::spawn_blocking(move || {
+        for (nth, checkout) in checkouts.iter().enumerate() {
+            let made = match &checkout.holding {
+                Holding::Cut(branch, commit) => {
+                    crate::worktrees::add(&checkout.repo, &checkout.path, branch, commit)
+                }
+                Holding::Kept(branch) => {
+                    crate::worktrees::rebuild(&checkout.repo, &checkout.path, branch)
+                }
+                Holding::Detached(commit) => {
+                    crate::worktrees::add_detached(&checkout.repo, &checkout.path, commit)
+                }
             };
 
-            crate::worktrees::add(&repo, &path, &branch, &commit)
-                .then_some(Some(commit))
-                .ok_or(ConversationSteered::WorktreeRefused)
+            if made {
+                continue;
+            }
+
+            // This one included, and first: an `add` that fell over may have
+            // made the directory, or the branch, or neither, and what is being
+            // unwound is whatever it did get as far as. The rest newest first,
+            // which is the order they were made in reversed.
+            for done in checkouts[..=nth].iter().rev() {
+                crate::worktrees::unmake(&done.repo, &done.path, done.holding.cut());
+            }
+
+            return Err(checkout.refused());
         }
+
+        Ok(recorded(&checkouts))
     })
     .await?;
 
     Ok(match made {
         // The path either way, healthy or made: the record may never have held
         // one, and writing back the one it did hold changes nothing.
-        Ok(base_commit) => Making::Ready(Made {
-            worktree: Some(path),
+        Ok(checkouts) => Making::Ready(Made {
+            worktree,
             base_commit,
+            checkouts,
         }),
         Err(refusal) => Making::Refused(refusal),
     })
 }
 
-/// What making somewhere to work came to.
+/// Where each companion checkout of a steer went and what it came off, for the
+/// record that follows the work.
+///
+/// The Conversation's own is not among them: it goes on the row the store has
+/// always kept for it, one per Conversation.
+fn recorded(checkouts: &[Checkout]) -> Vec<store::CompanionWorktree> {
+    checkouts
+        .iter()
+        .filter_map(|checkout| {
+            let (repo_id, _) = checkout.companion.as_ref()?;
+
+            Some(store::CompanionWorktree {
+                repo_id: *repo_id,
+                path: checkout.path.clone(),
+                base_commit: checkout.holding.commit().map(str::to_owned),
+            })
+        })
+        .collect()
+}
+
+/// One checkout a steer is about to make: which repository, where it goes and
+/// what it will hold.
+///
+/// The Conversation's own and each companion in the one shape, because from the
+/// moment they are planned they are the same thing — a worktree of a registered
+/// repository. What differs between them is which repository is named where git
+/// will not make it.
+struct Checkout {
+    /// The companion Repo this is a checkout of — its id and what it is called —
+    /// or `None` for the Conversation's own.
+    companion: Option<(i64, String)>,
+
+    /// The repository the worktree is made from.
+    repo: PathBuf,
+
+    /// Where the checkout goes, under the Data Directory.
+    path: PathBuf,
+
+    holding: Holding,
+}
+
+impl Checkout {
+    /// How git refusing to make this checkout is refused back: the
+    /// Conversation's own repository says only that git would not, and a
+    /// companion says which repository it was.
+    fn refused(&self) -> ConversationSteered {
+        match &self.companion {
+            Some((_, repo)) => ConversationSteered::Companion {
+                repo: repo.clone(),
+                why: SteerCompanionRefusal::WorktreeRefused,
+            },
+            None => ConversationSteered::WorktreeRefused,
+        }
+    }
+}
+
+/// What a checkout will hold, which is the whole of how it is made.
+enum Holding {
+    /// A branch to cut, and the commit its base resolved to.
+    Cut(String, String),
+
+    /// A branch that is already there, checked out again into a directory that
+    /// has gone — the Conversation's own after a close, and a read-write
+    /// companion's the same way. Nothing was resolved for it: the branch holds
+    /// what was committed to it, and what it was cut from is not this steer's to
+    /// say.
+    Kept(String),
+
+    /// No branch at all: a read-only companion, detached at the commit its base
+    /// resolved to.
+    Detached(String),
+}
+
+impl Holding {
+    /// The branch this steer would be cutting, which is the only one an unwind
+    /// may take away — see [`make`].
+    fn cut(&self) -> Option<&str> {
+        match self {
+            Self::Cut(branch, _) => Some(branch.as_str()),
+            Self::Kept(_) | Self::Detached(_) => None,
+        }
+    }
+
+    /// The commit a base resolved to, where anything resolved one.
+    fn commit(&self) -> Option<&str> {
+        match self {
+            Self::Cut(_, commit) | Self::Detached(commit) => Some(commit.as_str()),
+            Self::Kept(_) => None,
+        }
+    }
+}
+
+/// What working out where a steer will run came to.
+enum Planning {
+    Ready(Planned),
+
+    /// Something the record or git was asked says it cannot run there, and the
+    /// human is told which way — see [`ConversationSteered::NoBaseCommit`] and
+    /// [`ConversationSteered::Companion`].
+    Refused(ConversationSteered),
+}
+
+/// Everywhere the steer will work, before any of it exists.
+///
+/// All of it empty for a target nothing runs in, which is what [`Default`] is
+/// here for: a steer into Done plans nothing and writes nothing about a
+/// directory.
+#[derive(Default)]
+struct Planned {
+    /// Where the Conversation's own work goes on.
+    worktree: Option<PathBuf>,
+
+    /// What its branch will be cut from, where this steer is what cuts it.
+    base_commit: Option<String>,
+
+    /// Every checkout to make, the Conversation's own first.
+    checkouts: Vec<Checkout>,
+}
+
+/// What making them came to.
 enum Making {
     Ready(Made),
 
     /// Git would not, and the human is told which way it would not — see
     /// [`ConversationSteered::WorktreeRefused`] and
-    /// [`ConversationSteered::NoBaseCommit`].
+    /// [`ConversationSteered::Companion`].
     Refused(ConversationSteered),
 }
 
 /// What the steer has to record about where the work will run.
 ///
-/// Both `None` for a target nothing runs in, which is what [`Default`] is here
-/// for: a steer into Done makes nothing and writes nothing about a directory.
-#[derive(Default)]
+/// All of it empty for a target nothing runs in: a steer into Done makes nothing
+/// and writes nothing about a directory.
 struct Made {
     /// Where the work goes on.
     worktree: Option<PathBuf>,
@@ -798,6 +1382,9 @@ struct Made {
     /// Conversation that had a branch already: what it branched from was
     /// resolved once, and it is not resolved again.
     base_commit: Option<String>,
+
+    /// And where each companion's checkout went.
+    checkouts: Vec<store::CompanionWorktree>,
 }
 
 /// The state a target names.

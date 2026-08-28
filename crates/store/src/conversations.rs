@@ -2444,6 +2444,13 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// the filesystem are the server's to reach, and what this writes is the record
 /// of work that has already happened. See [`Steer`].
 ///
+/// **And the companions the steer widened the set with**, their rows and their
+/// checkouts, and a line under the Steer naming what came in. Past drafting is
+/// exactly where this writes, so none of it goes through the setup card's own
+/// guarded writes — see [`super::companions::join`]. Widening only: nothing here
+/// takes a companion away or writes over one that is already on the row, the
+/// frozen set only ever growing.
+///
 /// Nothing about the run is touched, and what has to stop running is stopped
 /// before this is called — see the server's `steering` module, which is the only
 /// caller.
@@ -2456,6 +2463,9 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         direction,
         worktree,
         base_commit,
+        companions,
+        checkouts,
+        said,
     } = steer;
 
     let mut tx = super::begin_writing(pool)
@@ -2483,6 +2493,26 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
 
     if landed == 0 {
         return Ok(Steering::NoSuchConversation);
+    }
+
+    // And what came into the sandbox with it, directly under the human's own
+    // line. The Steer says a person moved this; this says which repositories
+    // moved with it, and it belongs to the Steer rather than to the move — what
+    // a Conversation is configured with is read on the Brief's details pane ever
+    // after, and this is what says when the set changed and who changed it.
+    if let Some(said) = said {
+        let notice = Event::Notice(said.to_owned());
+
+        sqlx::query(
+            "INSERT INTO timeline_events (conversation_id, at, kind, body)
+             VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
+        )
+        .bind(id)
+        .bind(notice.kind())
+        .bind(notice.body().into_owned())
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("saying what a steer of Conversation {id} took in"))?;
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
@@ -2522,6 +2552,15 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         .await
         .with_context(|| format!("recording the worktree of Conversation {id}"))?;
     }
+
+    // And the companions the steer widened the set with, and where every
+    // checkout it made went — the ones just added, and every one the record held
+    // with no directory behind it. Both in the move's own transaction, for the
+    // reason the Worktree above is: a Conversation that said it had moved
+    // without saying which repositories moved with it would be one nothing could
+    // bind into a sandbox and nothing would come back and remove.
+    super::companions::join(&mut tx, id, companions).await?;
+    super::companions::record_worktrees(&mut tx, id, checkouts).await?;
 
     // And how the work is built from here, for a Conversation that has never
     // said. `DO NOTHING` rather than an upsert, which is what makes the rule the
@@ -2645,6 +2684,31 @@ pub struct Steer<'a> {
 
     /// And what its branch was cut from, where the steer is what cut it.
     pub base_commit: Option<&'a str>,
+
+    /// The companions the steer is putting on, which are rows this writes and
+    /// nothing else could.
+    ///
+    /// Past drafting is where a steer writes, so this does not go through the
+    /// setup card's own guarded writes — see [`super::companions::join`]. Empty
+    /// is the ordinary case: most steers widen nothing.
+    pub companions: &'a [super::Joining<'a>],
+
+    /// And where every companion checkout the steer made went, which is the ones
+    /// just added and every one the record held with no directory behind it.
+    ///
+    /// In the same transaction as the move, for the reason the Conversation's
+    /// own Worktree is: one that said it had moved without saying where its
+    /// companions went would be one nothing could bind into a sandbox and
+    /// nothing would come back and remove.
+    pub checkouts: &'a [super::CompanionWorktree],
+
+    /// What the steer has to say about the set it widened, for the Timeline.
+    ///
+    /// Under the Steer Event rather than beside it: the Steer is the human's
+    /// own line — *I moved this* — and this is what came into the sandbox with
+    /// it. `None` is a steer that widened nothing, which is a steer with nothing
+    /// to announce.
+    pub said: Option<&'a str>,
 }
 
 /// A Pairing a steer settles: which of the two roles, and both halves of the

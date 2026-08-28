@@ -2490,6 +2490,50 @@ pub struct SteerSubmission {
     /// nothing to prime.
     #[serde(default)]
     pub digest: bool,
+
+    /// The registered Repos to put into the sandbox the sessions to come run
+    /// in, each with what a setup row would have said about it.
+    ///
+    /// Sandbox setup rather than a property of one state, which is why it rides
+    /// every target work goes on in rather than one of them. Empty is the
+    /// ordinary case and the whole of what most steers carry.
+    ///
+    /// **Adding only.** Nothing here may name a companion the Conversation
+    /// already has — one that does is refused rather than obeyed, because the
+    /// frozen set only widens and what a session was once given is never taken
+    /// back mid-Conversation. Which is also why there is no list beside this
+    /// one for taking a companion away.
+    ///
+    /// Nothing anywhere else reads it: a target nothing runs in has no sandbox
+    /// to set up.
+    #[serde(default)]
+    pub added: Vec<CompanionAddition>,
+}
+
+/// One registered Repo a steer puts on a Conversation, with everything a setup
+/// row would have settled about it.
+///
+/// The same four facts a drafting companion is configured with — which Repo,
+/// how far into it the work may reach, what its checkout comes off, and what a
+/// read-write one's branch is called — because this is the one other moment
+/// those questions can be asked: the setup rows have gone by the time anything
+/// is steered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CompanionAddition {
+    pub repo_id: i64,
+
+    pub mode: CompanionMode,
+
+    /// The branch of that repository's own the checkout comes off, or `null`
+    /// for the rule the Conversation's own base follows: that repository's
+    /// default branch, as origin holds it at the moment of the steer.
+    pub base_ref: Option<String>,
+
+    /// What a read-write one's branch is to be called, or empty for
+    /// *mirroring* — the Conversation's own branch name. Empty on a read-only
+    /// one as well, its checkout being detached and holding no branch.
+    pub branch: String,
 }
 
 /// What became of submitting one.
@@ -2499,7 +2543,7 @@ pub struct SteerSubmission {
 /// where it goes, so the source is not something to be refused for. What is left
 /// to be wrong about is the *target* — a state whose work cannot be set going
 /// from what the record holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum ConversationSteered {
     /// Moved: the Steer Event is on the Timeline beside the move, and any stop
@@ -2564,6 +2608,71 @@ pub enum ConversationSteered {
 
     /// What the record names is not a Worktree any more, and git would not make
     /// it again from the branch.
+    WorktreeRefused,
+
+    /// One of the Repos the modal named is not on the registry — taken off it
+    /// between the list the modal read and the submit that named it.
+    ///
+    /// The one companion refusal with no repository in it, because there is no
+    /// repository to name: a Repo that is not registered is a row Verkstead
+    /// knows nothing about but the id the page sent.
+    NoSuchCompanionRepo,
+
+    /// A companion could not be put into the sandbox, and this is which one and
+    /// why.
+    ///
+    /// The repository said, because *which one* is the whole of what the human
+    /// needs — the same reason [`GrillingStarted::Companion`] says it. Nothing
+    /// is made and nothing is moved for any of these: every question a
+    /// companion turns on is asked in front of the session that gets ended, the
+    /// stop that gets cleared and the worktree that gets rebuilt, so a steer
+    /// refused here is a press that did not happen.
+    Companion {
+        /// The Repo's registered name.
+        repo: String,
+
+        why: SteerCompanionRefusal,
+    },
+}
+
+/// Which of a companion's ways of not being delivered by a steer this was.
+///
+/// [`CompanionRefusal`]'s four asked again at the other moment a companion is
+/// checked out, and two more that only a steer can meet: the setup card catches
+/// them the moment a row is pressed, and a steer is where the same questions are
+/// asked past drafting, with nothing in front of them but the submit.
+///
+/// A vocabulary of its own rather than more variants of the grill start's, for
+/// the reason [`SteerTarget`] is not [`crate::Lifecycle`]: what a grilling can
+/// be refused for and what a steer can be refused for are different lists, and
+/// one list would say each press can be refused for things it never could.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerCompanionRefusal {
+    /// The Repo named is the Conversation's own. It is already the work's
+    /// repository, so adding it beside itself would be a second checkout of it
+    /// in one sandbox.
+    OwnRepo,
+
+    /// It is a companion of this Conversation already.
+    ///
+    /// Not an add that quietly changes the row it found: the frozen set only
+    /// widens, so a submit naming one that is already there is a page arguing
+    /// with the record rather than a change to obey.
+    AlreadyAdded,
+
+    /// Git would not fetch from that repository's remote, so what its checkout
+    /// would come off cannot be trusted to be what the remote is holding.
+    FetchFailed,
+
+    /// Nothing in it answers to the base its checkout would come off.
+    NoBaseCommit,
+
+    /// A read-write companion's branch is already there, in that repository.
+    /// Verkstead did not make it, so it will not take it over.
+    BranchExists,
+
+    /// Git would not make the worktree. The reason is in the server's log.
     WorktreeRefused,
 }
 

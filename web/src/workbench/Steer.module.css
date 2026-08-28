@@ -128,6 +128,104 @@
   color: var(--ink-soft);
 }
 
+/* The sandbox the sessions to come run in: what is already alongside, and what
+   could be. Drawn under every target work goes on in, because it is setup
+   rather than a property of one state — and set apart by a rule, as the
+   interrupt below it is, because it is about the world rather than the move. */
+.steerCompanions {
+  padding: 0.9rem 0 0;
+  margin: 0 0 1rem;
+  border: 0;
+  border-top: 1px solid var(--edge);
+}
+
+.steerCompanions legend {
+  padding: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.steerAlongside,
+.steerAdding {
+  padding: 0;
+  margin: 0.5rem 0 0;
+  list-style: none;
+}
+
+/* One line apiece for what is already there: something to read, so it reads as
+   a line rather than as a row of controls. */
+.steerAlong {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.3rem 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.steerAlong + .steerAlong {
+  border-top: 1px solid var(--edge);
+}
+
+.steerAlongName {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* And a card apiece for the ones that could go in, because each of them opens
+   into three questions the moment it is ticked. */
+.steerAdd {
+  padding: 0.5rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.steerAdd + .steerAdd {
+  margin-top: 0.5rem;
+}
+
+.steerAddName {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-weight: 600;
+}
+
+.steerAddConfig {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0.6rem 0 0 1.5rem;
+}
+
+.steerAddBranch label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.steerAddBranch input {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.steerCompanions .fieldNote,
+.steerCompanions .nothing {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.steerCompanions .failure {
+  font-size: 0.85rem;
+}
+
 /* The one control here that is about the world rather than about the move, so it
    is set apart from the targets by a rule rather than by spacing alone. */
 .steerInterrupt {

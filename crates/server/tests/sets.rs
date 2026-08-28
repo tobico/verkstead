@@ -167,7 +167,7 @@ async fn asking_alongside(
         checkouts.push(store::CompanionWorktree {
             repo_id: companion.id,
             path: checkout,
-            base_commit: at,
+            base_commit: Some(at),
         });
     }
 
