@@ -116,7 +116,7 @@ import { Setup } from "./Setup";
 import styles from "./Timeline.module.css";
 import shell from "./Workbench.module.css";
 import { WAITING_ON_CHECKS } from "./conditions";
-import { STATE } from "./states";
+import { ENDED, STATE } from "./states";
 import { keeping } from "./settling";
 
 /// What the details pane is showing, as the card that opened it names itself.
@@ -385,6 +385,25 @@ export function Timeline(props: {
           back={{ to: "Conversations", go: props.back }}
           title={props.conversation.branch}
         >
+          {/* Where the work got to, for the two states it stops at: a Done
+              conversation says *Done* and a closed one says *Closed*, beside
+              the branch they are named for.
+
+              Only those two. A state on the way up the ladder is what a
+              conversation is doing right now, and the record under the header
+              is that answer at length — a word repeating it would be chrome
+              earning nothing. An ended one has no record still being written,
+              so the last move is the bottom of a long scroll and the one glance
+              that answers *is this finished?* has nowhere else to land.
+
+              A plain word and nothing to press: unlike the marks below it there
+              is no one event this stands for, and nowhere it could send
+              anybody. */}
+          <Show when={ENDED.has(props.conversation.state)}>
+            <span class={styles.ended}>
+              {STATE[props.conversation.state]}
+            </span>
+          </Show>
           {/* What the work has stopped on, said where the conversation is named
               rather than only down in the list: a timeline is long by the time a
               run gets far enough to stop, and a mark the human had to go

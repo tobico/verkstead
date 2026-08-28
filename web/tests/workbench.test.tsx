@@ -8267,7 +8267,7 @@ describe("a conversation the human stopped themselves", () => {
 
     // Drawn as the condition beside it is — the outline in the edge grey rather
     // than a filled red — which is the whole of what *quietly* means here.
-    expect(timelineCss).toContain(".waitingOnChecks,\n.stopped {");
+    expect(timelineCss).toContain(".waitingOnChecks,\n.stopped,\n.ended {");
   });
 
   /// Quiet is not the same as inert. There is one notice saying what stopped
@@ -8835,6 +8835,80 @@ describe("a wrap-up waiting on its checks", () => {
     expect(
       narrowed!.querySelector("button")!.getAttribute("aria-label"),
     ).not.toContain("Wrapping");
+  });
+});
+
+/// And the other end of the ladder, where the word is the state itself rather
+/// than a condition of one.
+///
+/// Done and Closed are where a conversation stops. Neither has a record still
+/// being written, so the move that says so is the bottom of a scroll that may
+/// be long — and *is this finished?* is a question worth answering above the
+/// fold. The states on the way answer themselves in the record under the
+/// header and say nothing here.
+describe("a conversation that has ended", () => {
+  it("says Done where the work reached the end of the ladder", async () => {
+    theWorkbenchWith({ state: "Done" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const label = await drawn(container, `.${paneHead.head} .${timeline.ended}`);
+
+    expect(label.textContent).toBe("Done");
+
+    // A word and nothing to press: unlike the marks beside it there is no one
+    // event it stands for and nowhere it could send anybody.
+    expect(label.tagName).toBe("SPAN");
+    expect(label.closest("button")).toBeNull();
+
+    // Drawn as the quiet labels beside it are — the outline in the edge grey
+    // rather than a filled red.
+    expect(timelineCss).toContain(".waitingOnChecks,\n.stopped,\n.ended {");
+  });
+
+  it("says Closed where the work stopped wherever it was", async () => {
+    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const label = await drawn(container, `.${paneHead.head} .${timeline.ended}`);
+
+    expect(label.textContent).toBe("Closed");
+  });
+
+  /// The states on the way up carry their own answer in the record, and the two
+  /// conditions worth a word — a stop and a wrap-up down to its checks — have
+  /// their own marks already.
+  it("says no state word while the work is still going", async () => {
+    for (const state of [
+      "Draft",
+      "Grilling",
+      "Implementing",
+      "Wrapping",
+      "FollowUp",
+    ] as const) {
+      theWorkbenchWith({ state });
+      const { container, unmount } = mount(`/conversations/${OPEN.id}`);
+
+      await drawn(container, `.${timeline.timeline}`);
+      expect(container.querySelector(`.${timeline.ended}`)).toBeNull();
+
+      unmount();
+    }
+  });
+
+  /// Beside the branch rather than in place of it, and beside what was already
+  /// there: an ended conversation may still be holding a stop worth pointing
+  /// at, and the word for where it got to does not take that mark's place.
+  it("stands beside the marks that were already there", async () => {
+    theStopped({ state: "Done" });
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const word = await drawn(container, `.${paneHead.head} .${timeline.ended}`);
+    const head = word.closest(`.${paneHead.head}`)!;
+
+    expect(word.textContent).toBe("Done");
+    expect(head.querySelector(`.${timeline.blocked}`)!.textContent).toBe(
+      "Blocked on you",
+    );
   });
 });
 

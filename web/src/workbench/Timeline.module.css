@@ -63,14 +63,17 @@
    the edge grey rather than a filled red, which is what a condition worth
    reading looks like beside one worth shouting.
 
-   Two of them wear it. What a wrap-up that has narrowed to its checks says is a
-   label and nothing to press — the checks are GitHub's to finish and there is
+   Three of them wear it. What a wrap-up that has narrowed to its checks says is
+   a label and nothing to press — the checks are GitHub's to finish and there is
    nowhere to go about them. A stop the human pressed themselves is a button
    like the badge above, going to the same notice: they know why it stopped, so
    the word is worth reading rather than worth shouting, but the way to what
-   stopped it is worth keeping. */
+   stopped it is worth keeping. And the word an ended conversation says about
+   itself is a label too: Done and Closed are where the work got to rather than
+   something to go and look at. */
 .waitingOnChecks,
-.stopped {
+.stopped,
+.ended {
   padding: 0.15rem 0.5rem;
   font: inherit;
   font-size: 0.8rem;
@@ -81,7 +84,7 @@
   border-radius: 0.3rem;
 }
 
-/* And the one of the two that is a button carries the pointer that says so. */
+/* And the one of the three that is a button carries the pointer that says so. */
 .stopped {
   cursor: pointer;
 }
