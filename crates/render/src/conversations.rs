@@ -948,8 +948,8 @@ pub enum CheckRollup {
     Failed,
 }
 
-/// What is on a pull request now: the commits it carries, and what has been said
-/// about it.
+/// What is on a pull request now: the commits it carries, what GitHub is running
+/// against it, and what has been said about it.
 ///
 /// Its own request rather than a field on the Conversation, for the reason a
 /// commit's diff is one — and for a further reason of its own: reading this is
@@ -966,6 +966,15 @@ pub struct PullRequestDetails {
     pub commits: Vec<PullRequestCommit>,
 
     pub comments: Vec<PullRequestComment>,
+
+    /// Every check GitHub is running against it, in the order GitHub lists
+    /// them. Empty where there are none, which is a repository with no CI.
+    ///
+    /// Each of them rather than the one word the card draws — see
+    /// [`CheckRollup`]. What the card has room for is which of the three a
+    /// suite is; this is the pane somebody opens to find out *which* check is
+    /// red and where its run is.
+    pub checks: Vec<PullRequestCheck>,
 }
 
 /// One commit of a pull request: what it is, and what it was called.
@@ -1002,6 +1011,41 @@ pub struct PullRequestComment {
     pub at: String,
 
     pub html: String,
+}
+
+/// One check GitHub is running against a pull request, as the details pane
+/// receives it: what it is called, how it is getting on, and where its run is.
+///
+/// A line of a list GitHub keeps, in the spirit [`PullRequestCommit`] is one:
+/// read at the moment the pane is opened rather than written down, because a
+/// suite is still running while the human is looking at it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PullRequestCheck {
+    /// What GitHub calls it, which is what the human calls it by.
+    pub name: String,
+
+    pub how: Checked,
+
+    /// Where its run is, as GitHub gave it — the one thing a red check cannot
+    /// be read without. Empty where GitHub gave none, which is a check drawn as
+    /// its name and nothing to follow.
+    pub link: String,
+}
+
+/// How one check is getting on.
+///
+/// The same three words as [`CheckRollup`] and not the same thing: this is one
+/// check and that is a whole suite taken together. Three rather than GitHub's
+/// dozen, because three is what anybody does anything about — a red one is the
+/// thing to go and look at, one still running is nothing to do yet, and the
+/// rest are green.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Checked {
+    Passed,
+    Running,
+    Failed,
 }
 
 /// A commit as the Timeline shows it: what it was called, and how much of the
@@ -1883,17 +1927,21 @@ pub struct PullRequestSummary {
 }
 
 /// What a pull request holds, as the details pane receives it: the commit list
-/// as it stands, and every comment rendered from the markdown it was written in.
+/// and the check list as they stand, and every comment rendered from the
+/// markdown it was written in.
 ///
 /// The comments are the only part with anything to render, and they are the part
 /// that most needs it: a PR comment is markdown written by whoever can reach the
-/// repository, so it is sanitized here rather than in a browser.
+/// repository, so it is sanitized here rather than in a browser. A commit's
+/// subject and a check's name are text and are put in the page as text.
 pub fn pull_request_details(
     commits: Vec<PullRequestCommit>,
     comments: Vec<Comment>,
+    checks: Vec<PullRequestCheck>,
 ) -> PullRequestDetails {
     PullRequestDetails {
         commits,
+        checks,
         comments: comments
             .into_iter()
             .map(|comment| PullRequestComment {

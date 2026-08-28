@@ -23,7 +23,7 @@ order is the dependency.
 - [x] 07: List windowing — [details](07-list-windowing.md)
 - [x] 08: Pull request card — [details](08-pull-request-card.md)
 - [x] 09: Check rollup and icon — [details](09-check-rollup-icon.md)
-- [ ] 10: Checks in the details pane — [details](10-checks-details-pane.md)
+- [x] 10: Checks in the details pane — [details](10-checks-details-pane.md)
 - [ ] 11: Unknown lines to bookkeeping — [details](11-unknown-lines-bookkeeping.md)
 - [ ] 12: Transcript autoscroll — [details](12-transcript-autoscroll.md)
 - [ ] 13: Drag-drop capture — [details](13-drag-drop-capture.md)

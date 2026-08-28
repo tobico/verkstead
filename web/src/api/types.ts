@@ -424,6 +424,17 @@ export type Capture = { text: string, };
 export type CheckRollup = "Passed" | "Running" | "Failed";
 
 /**
+ * How one check is getting on.
+ *
+ * The same three words as [`CheckRollup`] and not the same thing: this is one
+ * check and that is a whole suite taken together. Three rather than GitHub's
+ * dozen, because three is what anybody does anything about — a red one is the
+ * thing to go and look at, one still running is nothing to do yet, and the
+ * rest are green.
+ */
+export type Checked = "Passed" | "Running" | "Failed";
+
+/**
  * A commit as the Timeline shows it: what it was called, and how much of the
  * repository it moved.
  *
@@ -1219,6 +1230,26 @@ export type Prose = {
 id: number, html: string, };
 
 /**
+ * One check GitHub is running against a pull request, as the details pane
+ * receives it: what it is called, how it is getting on, and where its run is.
+ *
+ * A line of a list GitHub keeps, in the spirit [`PullRequestCommit`] is one:
+ * read at the moment the pane is opened rather than written down, because a
+ * suite is still running while the human is looking at it.
+ */
+export type PullRequestCheck = { 
+/**
+ * What GitHub calls it, which is what the human calls it by.
+ */
+name: string, how: Checked, 
+/**
+ * Where its run is, as GitHub gave it — the one thing a red check cannot
+ * be read without. Empty where GitHub gave none, which is a check drawn as
+ * its name and nothing to follow.
+ */
+link: string, };
+
+/**
  * One comment on a pull request: who said it, when, and what they said.
  *
  * The body arrives rendered, like everything else an outsider wrote — a comment
@@ -1257,8 +1288,8 @@ sha: string,
 subject: string, };
 
 /**
- * What is on a pull request now: the commits it carries, and what has been said
- * about it.
+ * What is on a pull request now: the commits it carries, what GitHub is running
+ * against it, and what has been said about it.
  *
  * Its own request rather than a field on the Conversation, for the reason a
  * commit's diff is one — and for a further reason of its own: reading this is
@@ -1273,7 +1304,17 @@ export type PullRequestDetails = {
 /**
  * Oldest first, as GitHub lists them, which is the order they landed.
  */
-commits: Array<PullRequestCommit>, comments: Array<PullRequestComment>, };
+commits: Array<PullRequestCommit>, comments: Array<PullRequestComment>, 
+/**
+ * Every check GitHub is running against it, in the order GitHub lists
+ * them. Empty where there are none, which is a repository with no CI.
+ *
+ * Each of them rather than the one word the card draws — see
+ * [`CheckRollup`]. What the card has room for is which of the three a
+ * suite is; this is the pane somebody opens to find out *which* check is
+ * red and where its run is.
+ */
+checks: Array<PullRequestCheck>, };
 
 /**
  * The pull request as the Timeline shows it: what it is called and what number

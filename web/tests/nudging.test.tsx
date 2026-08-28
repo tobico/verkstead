@@ -488,6 +488,7 @@ const WHAT_IS_ON_IT = `/api/ui/conversations/${WRAPPED.id}/pull-request/${PULL_R
 const CARRIED: PullRequestDetails = {
   commits: [{ sha: "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8", subject: "chore: finish" }],
   comments: [],
+  checks: [],
 };
 
 /// The workbench with that pull request to hand.

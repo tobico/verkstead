@@ -243,6 +243,10 @@ async fn once(state: &AppState, conversation_id: i64, writing: Option<i64>) -> W
 
 /// Write down how the suite is, and tell the open pages where that is news.
 ///
+/// The watcher's, and the details pane's too: opening the pane asks GitHub the
+/// same question, so it is also what freshens a rollup on a Conversation nothing
+/// is watching any more.
+///
 /// The aggregate rather than the checks themselves: what the card has room for
 /// is one icon, and which of the three afternoons this is is what a human wants
 /// out of one. What every check is called and where its run is is not thrown
@@ -251,7 +255,7 @@ async fn once(state: &AppState, conversation_id: i64, writing: Option<i64>) -> W
 /// Nudged only where the word changed. A suite that is still running says the
 /// same thing every thirty seconds for as long as it takes, and a page told each
 /// time would be a page re-reading a Timeline nothing had happened on.
-async fn remember(state: &AppState, conversation_id: i64, checks: &[Check]) {
+pub(crate) async fn remember(state: &AppState, conversation_id: i64, checks: &[Check]) {
     // A pull request with no checks on it at all is not passing and is not
     // failing: there is nothing to say about a repository with no CI, and a
     // green tick would be one this suite never earned. So nothing is written

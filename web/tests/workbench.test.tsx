@@ -92,7 +92,10 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 import prPane from "../src/workbench/PullRequest.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in.
-import { SPOKEN as CHECKS_SPOKEN } from "../src/workbench/Checks";
+import {
+  SAID as CHECKS_SAID,
+  SPOKEN as CHECKS_SPOKEN,
+} from "../src/workbench/Checks";
 import checkMarks from "../src/workbench/Checks.module.css";
 // The Screen, both ways: it is the one pane with a height of its own, and the
 // rules that give it one are what jsdom cannot lay out.
@@ -8573,6 +8576,11 @@ const CARRIED: PullRequestDetails = {
       html: "<p>The counter wants a <strong>test</strong>.</p>",
     },
   ],
+  checks: [
+    { name: "Rust", how: "Passed", link: "https://github.com/tobico/verkstead/actions/runs/1/job/2" },
+    // One GitHub gave no run for, which is a name and nothing to follow.
+    { name: "buildkite", how: "Running", link: "" },
+  ],
 };
 
 /// Where the pane fetches it from.
@@ -8791,6 +8799,59 @@ describe("the pinned pull request", () => {
     );
 
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBeGreaterThan(0);
+  });
+
+  /// The card above has one icon for a whole suite; this is where the human
+  /// finds out which check it was and goes and reads the run. The same three
+  /// marks, so the pane and the card are read in one alphabet.
+  it("lists every check with its mark and the way to its run", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+    );
+
+    const checks = await drawn(
+      container,
+      `.${shell.detailsPane} .${prPane.checks}`,
+    );
+
+    expect(
+      [...checks.querySelectorAll(`.${prPane.ran} li`)].map((row) => [
+        row.querySelector(`.${prPane.check}`)!.textContent,
+        row.querySelector(`.${checkMarks.checks}`)!.getAttribute("aria-label"),
+        row.querySelector(`.${prPane.check}`)!.getAttribute("href"),
+      ]),
+    ).toEqual([
+      ["Rust", CHECKS_SAID.Passed, CARRIED.checks[0]!.link],
+      // The one GitHub gave no run for is a name and nothing to follow, so it
+      // is drawn as text rather than as a link to nowhere.
+      ["buildkite", CHECKS_SAID.Running, null],
+    ]);
+  });
+
+  /// And a repository with no CI says so quietly, the way the two lists beside
+  /// it do: nothing ran, which is nothing to go and look at.
+  it("says so quietly when nothing is running against it", async () => {
+    theWrapping(
+      {},
+      whenever(WHAT_IS_ON_IT, json({ ...CARRIED, checks: [] })),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+    );
+
+    const checks = await drawn(
+      container,
+      `.${shell.detailsPane} .${prPane.checks}`,
+    );
+
+    expect(checks.querySelector(`.${notices.empty}`)!.textContent).toBe(
+      "Nothing is running against it.",
+    );
   });
 
   /// Every way `gh` cannot answer is a different afternoon for the human, so

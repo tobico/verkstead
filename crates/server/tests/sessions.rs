@@ -916,11 +916,16 @@ static SWEEPING: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// It tells the questions apart by the fields being asked for, because that is
 /// what tells them apart on the command line — except the comments left on the
 /// lines of the diff, which are `gh api`'s and so are told by `$1`.
+///
+/// The checks are on the details pane's question and on nothing else here: the
+/// watcher asks about them on their own and this answers that with the pull
+/// request itself, which reads as a suite of nothing. Which is what makes the
+/// pane's own freshening visible — nothing else writes a rollup down.
 const PULL_REQUEST: &str = r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
 case "$5" in
 *commits*)
-    printf '{"commits":[{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}],"comments":[{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}]}'
+    printf '{"commits":[{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}],"comments":[{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}],"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'
     ;;
 *comments*)
     printf '{"comments":[],"reviews":[]}'
@@ -3868,6 +3873,10 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
         notices(&view),
     );
 
+    // Nothing has written down how the checks are: this `gh` answers the
+    // watcher's question with a pull request that has no suite on it.
+    assert_eq!(check_rollup(&fixture).await, None);
+
     // And what is on the PR is fetched when the pane opens it, through the same
     // host `gh` — never written down.
     let carried: verkstead_render::PullRequestDetails = get(
@@ -3883,6 +3892,28 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
     assert_eq!(carried.commits[0].subject, "feat: count the requests");
     assert_eq!(carried.comments.len(), 1);
     assert!(carried.comments[0].html.contains("<strong>good</strong>"));
+
+    // The checks come back on the same answer, each with the run to follow.
+    assert_eq!(
+        carried
+            .checks
+            .iter()
+            .map(|check| (check.name.as_str(), check.how, check.link.as_str()))
+            .collect::<Vec<_>>(),
+        [(
+            "Rust",
+            verkstead_render::Checked::Passed,
+            "https://github.com/tobico/verkstead/actions/runs/1/job/2",
+        )],
+    );
+
+    // And opening it is what freshens the rollup the card draws: the watcher
+    // stops when the wrap-up is over, so on a Conversation nothing is watching
+    // the pane is the one thing left that asks GitHub.
+    assert_eq!(
+        check_rollup(&fixture).await,
+        Some(verkstead_server::store::Rollup::Passed),
+    );
 }
 
 /// The same backlog, plus a session that plays a fix: it writes down the prompt
@@ -3936,6 +3967,22 @@ async fn checks_settled(fixture: &Grilling) -> bool {
     pool.close().await;
 
     settled.contains(&verkstead_server::store::WaitingOn::Checks)
+}
+
+/// How Verkstead has written down that this Conversation's checks are, or
+/// nothing where nothing has asked.
+///
+/// The rollup the pull request card draws its icon from, read out of the store
+/// because that is where it is: what a poll or an opened details pane learned
+/// from GitHub outlives both.
+async fn check_rollup(fixture: &Grilling) -> Option<verkstead_server::store::Rollup> {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let rollup = verkstead_server::store::check_rollup(&pool, fixture.id)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    rollup
 }
 
 /// How many fix sessions Verkstead has counted against one of this

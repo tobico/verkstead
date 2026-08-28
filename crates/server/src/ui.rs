@@ -1500,6 +1500,12 @@ async fn roadmap(
 /// A `gh` that will not answer is refused with the reason it gave, which is the
 /// one thing the human can act on: what the pane then shows is "there is no `gh`
 /// on this machine's PATH" rather than a spinner.
+///
+/// The same question carries back how the checks are, so opening this is also
+/// what freshens the rollup the card draws — see [`crate::checks::remember`].
+/// The checks watcher keeps that fresh while a wrap-up is running and stops when
+/// the wrap-up is over, so on a Conversation carried to Done the pane is the one
+/// thing left that asks.
 async fn pull_request(
     State(state): State<AppState>,
     Path((id, event)): Path<(String, String)>,
@@ -1547,7 +1553,14 @@ async fn pull_request(
             .await;
 
     match asked {
-        Ok(Ok(details)) => Json(details).into_response(),
+        Ok(Ok(read)) => {
+            // Written down before the answer goes out, so a page that redraws
+            // the card on the Nudge this sends draws what the pane is about to
+            // show it.
+            crate::checks::remember(&state, id, &read.checks).await;
+
+            Json(read.pane).into_response()
+        }
         // GitHub could not be asked, or would not say. Refused with `gh`'s own
         // reason rather than a bare failure: every one of those reasons is
         // something different for the human to go and do.

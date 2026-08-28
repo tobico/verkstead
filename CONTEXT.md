@@ -622,7 +622,9 @@ draws beside a pull request — a tick, a cross, a dot — on the right of its h
 Written down on every poll of the checks watcher, so it outlives both the poll
 and the server: a Conversation carried to Done keeps the icon the last poll
 earned it. Which also means it can be stale, the watching stopping when the
-wrap-up is over.
+wrap-up is over — and what freshens a stale one is opening the pull request's
+details pane, which asks GitHub the same question on its way to listing every
+check by name, with its own mark and a link to its run.
 
 Never guessed at. A pull request nothing has asked GitHub about has no rollup,
 and neither has one in a repository with no CI — *not known* is a third thing
