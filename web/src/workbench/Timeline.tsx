@@ -126,35 +126,9 @@ import styles from "./Timeline.module.css";
 import shell from "../Panes.module.css";
 import { WAITING_ON_CHECKS } from "./conditions";
 import { ENDED, STATE } from "./states";
+import { opensRoadmap, type Opening } from "./openings";
 import { keeping } from "./settling";
 import { windowed } from "./windowing";
-
-/// What the details pane is showing, as the card that opened it names itself.
-///
-/// An event's id, for the kinds of event that have a full self to open. And a
-/// word for the two plan cards, which have none: each is read off the worktree
-/// every time the conversation is, so the row that says where it landed fixes a
-/// position rather than an identity. The backlog is the bare word, there being
-/// one per conversation; a roadmap carries its own name after it, a worktree
-/// being allowed any number of those.
-///
-/// One channel for all of them, so that opening any closes the rest — a details
-/// pane shows one thing. A string rather than an object for the same reason:
-/// what is open is compared against what a card would open, and two of the same
-/// selection have to be the same value.
-export type Opening = number | "backlog" | `roadmap:${string}`;
-
-/// What opens the named roadmap, by the directory name that is its identity.
-export function opensRoadmap(name: string): Opening {
-  return `roadmap:${name}`;
-}
-
-/// And which roadmap an opening names, or `null` where it names none.
-export function roadmapOpened(opening: Opening | null): string | null {
-  return typeof opening === "string" && opening.startsWith("roadmap:")
-    ? opening.slice("roadmap:".length)
-    : null;
-}
 
 /// How much of a commit's hash the timeline shows.
 ///

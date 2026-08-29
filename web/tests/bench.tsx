@@ -107,7 +107,16 @@ export function mount(at = "/") {
       <QueryClientProvider client={client}>
         <MemoryRouter history={history}>
           <Route path="/" component={Workbench} />
-          <Route path="/conversations/:id" component={Workbench} />
+          {/* And the details panes nested under the Conversation, exactly as
+              `App.tsx` nests them: the nesting is what keeps the middle pane up
+              while the leaf under it changes, so a mount that flattened them
+              would be testing a page the app does not build. */}
+          <Route path="/conversations/:id" component={Workbench}>
+            <Route path="/" />
+            <Route path="/events/:event" />
+            <Route path="/backlog" />
+            <Route path="/roadmaps/:name" />
+          </Route>
         </MemoryRouter>
       </QueryClientProvider>
     )),

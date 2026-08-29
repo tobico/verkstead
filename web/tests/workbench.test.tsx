@@ -3445,6 +3445,9 @@ describe("the panes on a narrow window", () => {
   /// So walking in to the third level is opening something, and the way forward
   /// is what stands afterwards: it is drawn for a selection rather than for a
   /// conversation.
+  ///
+  /// Waited on, because opening something is a navigation now — the pane the
+  /// path names is drawn once the router has moved to it.
   it("walks on to the details by opening an event, and back out again", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -3455,7 +3458,9 @@ describe("the panes on a narrow window", () => {
     fireEvent.click(output);
     expect(frame(container).dataset.pane).toBe("details");
 
-    fireEvent.click(screen.getByRole("button", { name: "← Timeline" }));
+    fireEvent.click(
+      await waitFor(() => screen.getByRole("button", { name: "← Timeline" })),
+    );
     expect(frame(container).dataset.pane).toBe("middle");
 
     // Still open, so the way forward is there to be taken again.
@@ -11282,5 +11287,180 @@ describe("a clamped document", () => {
     // On `.cut` and nowhere else, which is what makes a short document show
     // whole with no fade over its last line.
     expect(timelineCss).not.toContain(".clamp::after");
+  });
+});
+
+/// Where a details pane stands, as a path of its own under the Conversation it
+/// belongs to.
+///
+/// The arithmetic behind these paths is `pathing.test.ts`, which holds it true
+/// as a value; what is asked here is what the page does with it — that a card
+/// press writes the path, that a path drawn cold opens the pane, and which of
+/// the two kinds of navigation grows the history stack.
+describe("the path a details pane stands at", () => {
+  /// A press on any of the three kinds of card — an Event, the backlog, a
+  /// roadmap — leaves the page at the path that pane stands at.
+  it("writes the path of whatever card is pressed", async () => {
+    theGrilling();
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${OUTPUT.id}`,
+      ),
+    );
+  });
+
+  it("writes the backlog's path by the word, there being one per conversation", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container, history } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${TASKED.id}/backlog`),
+    );
+  });
+
+  it("writes a roadmap's path by its own directory name", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${STAGED.id}/roadmaps/${ROADMAP.name}`,
+      ),
+    );
+  });
+
+  /// Which is the whole point of putting it there: the pane is drawn from the
+  /// path, so a reload or a link somebody kept opens what it names.
+  it("opens the event a path names on a cold load", async () => {
+    theSpeaking();
+    const { container } = mount(
+      `/conversations/${GRILLING.id}/events/${OUTPUT.id}`,
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${outputPane.turn}`);
+  });
+
+  it("opens the backlog a path names on a cold load", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}/backlog`);
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+  });
+
+  it("opens the roadmap a path names on a cold load", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(
+      `/conversations/${STAGED.id}/roadmaps/${ROADMAP.name}`,
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+  });
+
+  /// And a path naming something the Conversation has not got leaves the pane
+  /// empty, exactly as a stale selection did: the URL is a record of what was
+  /// picked rather than a promise that it is still there.
+  it("leaves the pane empty where the path names no such event", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}/events/99999`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${paneHead.head}`),
+    ).toBeNull();
+  });
+
+  /// A phone shows one level at a time, and the level a cold load lands on is
+  /// the one the path names — the details, rather than the Timeline the human
+  /// would have to walk forward from a second time.
+  it("lands a narrow window on the details pane it was opened at", async () => {
+    theSpeaking();
+    const { container } = mount(
+      `/conversations/${GRILLING.id}/events/${OUTPUT.id}`,
+    );
+
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("details"));
+
+    // And the walk back out of it is the pane's own, as it is from a pane
+    // opened by pressing a card.
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${paneHead.back}`),
+    );
+    expect(frame(container).dataset.pane).toBe("middle");
+  });
+
+  /// Entering a Conversation is the page changing, so it pushes: Back from
+  /// inside one leaves it for the list it was entered from.
+  it("pushes entering a conversation, so back leaves it", async () => {
+    theWorkbench();
+    const { container, history } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    fireEvent.click(screen.getByText(DRAFTING.branch));
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${DRAFTING.id}`),
+    );
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("conversations"),
+    );
+  });
+
+  /// Opening a details pane is a place in that page rather than a page, so it
+  /// replaces: however many the human walks between, Back leaves the
+  /// Conversation rather than retracing them one at a time.
+  it("replaces between details, so back leaves the conversation whole", async () => {
+    theGrilling();
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${OUTPUT.id}`,
+      ),
+    );
+
+    fireEvent.click(await drawn(container, `.${timeline.brief}`));
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${briefOf(GRILLING).id}`,
+      ),
+    );
+
+    // Two details walked between, and one step out of the Conversation: the
+    // entry the second press wrote is the entry the first one wrote.
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// What the nesting under the Conversation's route is for: the middle pane
+  /// stands through a change of detail, so nothing it is holding — a Brief half
+  /// typed into above all — goes when a card is pressed.
+  it("leaves the timeline pane standing while the detail changes", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const before = await drawn(container, `.${shell.middlePane} .${timeline.timeline}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+    await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
+
+    expect(container.querySelector(`.${shell.middlePane} .${timeline.timeline}`)).toBe(
+      before,
+    );
   });
 });

@@ -14,25 +14,32 @@
 //! was, so nothing changed and a phone could not get back into the Conversation
 //! it had only just left.
 //!
-//! What is open is held here rather than in the Timeline, because it is what the
+//! What is open is the URL's rather than this page's, because it is what the
 //! third pane is *about*: the pane is that one thing's full self and nothing
 //! else, so with nothing open it is bare paper. Nearly always that is an Event;
 //! the backlog and the roadmap are the exceptions, being read off the worktree
 //! rather than recorded, and they name themselves by a word instead of an id.
+//! Each of the three has a path of its own under the Conversation — see
+//! `openings.ts` — so a details pane survives being navigated away from and
+//! back, and can be linked to.
 //!
 //! What a Conversation *is* is not drawn there — the setup it needs is on the
 //! Brief card, where it is used — and the way on to an empty pane is not
 //! offered, so a narrow window can only walk into the pane by opening something.
-//! The selection is not in the URL — what is opened is a place in a page rather
-//! than a page, and a Conversation whose Timeline has moved on is not one to
-//! restore a scroll position into.
+//!
+//! Which navigations push and which replace is the difference between a page and
+//! a place in one. Entering a Conversation and leaving it push, because they are
+//! the page changing; opening a details pane and switching between them replace,
+//! because walking between the details of one Conversation is not a walk the
+//! history stack should be growing with. So Back from a details pane leaves the
+//! Conversation, which is where the human came in from.
 //!
 //! The Conversation itself is read once here and drawn in the two panes it is
 //! read in, each of them keyed on its id so that switching between Conversations
 //! builds those panes again rather than reading the second Conversation into the
 //! first one's page.
 
-import { useNavigate, useParams } from "@solidjs/router";
+import { useLocation, useNavigate, useParams } from "@solidjs/router";
 import type { UseQueryResult } from "@tanstack/solid-query";
 import {
   Match,
@@ -70,7 +77,14 @@ import { Document } from "./Document";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
-import { Timeline, roadmapOpened, type Opening } from "./Timeline";
+import { Timeline } from "./Timeline";
+import {
+  openingAt,
+  pathOf,
+  pathTo,
+  roadmapOpened,
+  type Opening,
+} from "./openings";
 
 /// The read the two panes share, as each of them is handed it: one query behind
 /// both, because they are two views of the one Conversation.
@@ -160,13 +174,9 @@ function noticeIn(open: Opened): NoticeEvent | undefined {
 export function Workbench(): JSX.Element {
   const params = useParams();
   const navigate = useNavigate();
+  const where = useLocation();
 
   const [pane, setPane] = createSignal<Pane>("conversations");
-
-  /// What the details pane is showing, where anything is open: a Timeline
-  /// Event, or the backlog or a roadmap, neither of which has an Event to be
-  /// named by — see [`Opening`].
-  const [event, setEvent] = createSignal<Opening | null>(null);
 
   /// Which Conversation the URL names, or the empty string on the bare
   /// workbench. Unparsed, like a Set's id: the server decides what names
@@ -177,17 +187,38 @@ export function Workbench(): JSX.Element {
   /// not.
   const selected = createMemo(() => params.id ?? "");
 
+  /// And what the details pane is showing, where anything is open: a Timeline
+  /// Event, or the backlog or a roadmap, neither of which has an Event to be
+  /// named by — see [`Opening`].
+  ///
+  /// Derived from the path rather than held beside it, so there is one account
+  /// of what is open. Nothing has to be closed when the Conversation changes
+  /// either: a path names the Conversation and the detail together, so a new
+  /// Conversation's path names no detail of the old one's.
+  const event = createMemo(() => openingAt(where.pathname));
+
+  /// Opening a details pane, which is a navigation to where that pane stands.
+  ///
+  /// It replaces rather than pushes: the details of one Conversation are places
+  /// in a page rather than pages, so walking between them should not have to be
+  /// walked back out of one at a time. What Back leaves is the Conversation.
+  const select = (opening: Opening) =>
+    navigate(pathTo(selected(), opening), { replace: true });
+
   // Opening a Conversation is what walks a phone into the Timeline, and leaving
   // the workbench route walks it back out. Written as an effect on the URL
   // rather than done in the click handler, because Back is a way of changing the
   // selection too and it never goes through one.
   //
-  // Whatever Event was open closes with it: an Event belongs to one
-  // Conversation, and an id kept across the change would name nothing.
+  // Straight to the details where the path names one, which is what a cold load
+  // of a details pane is — a reload, or a link somebody kept. The URL says which
+  // pane it is about, so that is the pane it opens on; the walk back out of it
+  // is the pane's own "← Timeline".
   createEffect(
     on(selected, (id) => {
-      setPane(id === "" ? "conversations" : "middle");
-      setEvent(null);
+      setPane(
+        id === "" ? "conversations" : event() === null ? "middle" : "details",
+      );
 
       // And opening one is the human having looked at it, which takes the news
       // mark off its sidebar row — on every device, the mark being the
@@ -275,7 +306,7 @@ export function Workbench(): JSX.Element {
       conversations={
         <Conversations
           selected={selected()}
-          open={(id) => navigate(`/conversations/${id}`)}
+          open={(id) => navigate(pathOf(id))}
         />
       }
       middle={
@@ -284,7 +315,7 @@ export function Workbench(): JSX.Element {
             id={selected()}
             conversation={conversation}
             event={event()}
-            select={setEvent}
+            select={select}
             pane={setPane}
             list={() => navigate("/")}
           />

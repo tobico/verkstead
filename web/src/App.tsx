@@ -43,7 +43,24 @@ export function App(): JSX.Element {
             record of which one is open rather than a document of its own — the
             same page draws both. */}
         <Route path="/" component={Workbench} />
-        <Route path="/conversations/:id" component={Workbench} />
+        {/* And each of that Conversation's details panes under it, so what is
+            open survives a reload and can be linked to. Nested rather than
+            written out as four routes of their own, because the workbench is
+            one page across all of them: a route the router swaps for another
+            takes its component down with it, and everything the middle pane was
+            holding — a Brief half typed into above all — would go every time a
+            card was pressed. A parent route stays up while the leaf under it
+            changes, and these leaves draw nothing: what they are is what the
+            path says, and the page reads that off the URL.
+
+            The `events/` segment keeps the ids apart from the panes named by a
+            word beside them — see `openings.ts`. */}
+        <Route path="/conversations/:id" component={Workbench}>
+          <Route path="/" />
+          <Route path="/events/:event" />
+          <Route path="/backlog" />
+          <Route path="/roadmaps/:name" />
+        </Route>
         {/* Everything the human configures, on one page: the GitHub token and
             the git author Verkstead was told, the Agent Profiles a session runs
             under, and the Repos a Conversation is started against. The Repos
