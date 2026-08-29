@@ -12,7 +12,7 @@
 //! tests over there are what say so — and this side's job is to send what was
 //! typed and say in words what came back.
 
-import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -50,6 +50,12 @@ import type {
   Turn,
 } from "../src/api/types";
 // The one menu, which all three of this page's ⋯ and dropdowns are drawn as.
+// The app's own retry rule, which is what a read that gave up on its deadline
+// is answered by.
+import { retrying } from "../src/api/client";
+// The app itself, for the one test in this file whose subject is the app's own
+// query client rather than anything a page draws.
+import { App } from "../src/App";
 import app from "../src/App.module.css";
 // The card a Set's Preface and a commit's Message are both drawn as, both ways:
 // the hashed names to query the two panes by, and the source to read the box's
@@ -165,6 +171,7 @@ import {
 } from "./bench";
 import {
   askedFor,
+  hangs,
   json,
   readable,
   reads,
@@ -2142,6 +2149,287 @@ describe("a conversation's timeline", () => {
     await waitFor(() =>
       screen.getByText(/the Conversation could not be read/),
     );
+  });
+});
+
+/// The one route out of a Conversation whose page will not load.
+///
+/// The read behind the pane has half a dozen ways to fail, and every one of them
+/// used to leave the human with a line of error and nothing to press — on the
+/// very Conversation they most wanted to be rid of. The presses themselves never
+/// needed the reading; only the menu did. So the header is drawn without it, and
+/// what it carries is the way out. See `Hatch.tsx`.
+describe("the escape hatch on a conversation that will not load", () => {
+  /// The workbench with the open Conversation's own read refusing, which is the
+  /// state the hatch exists for. `list` replaces the sidebar's answer, for the
+  /// tests about what the hatch reads off it.
+  function theBrokenConversation(...answers: Parameters<typeof serving>) {
+    return serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever("/api/ui/abandoned-roadmaps", json([])),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}`,
+        json({ error: "the Conversation could not be read" }, 500),
+      ),
+      ...answers,
+    );
+  }
+
+  /// The sidebar with the open Conversation in whichever state a test is about.
+  const listedAs = (state: ConversationEntry["state"]) =>
+    whenever(
+      "/api/ui/conversations",
+      json(
+        SIDEBAR.map((entry) =>
+          entry.id === OPEN.id ? { ...entry, state } : entry,
+        ),
+      ),
+    );
+
+  const CLOSE_AND_ARCHIVE = `/api/ui/conversations/${OPEN.id}/close-and-archive`;
+  const ARCHIVE = `/api/ui/conversations/${OPEN.id}/archive`;
+
+  /// A header where there could be no header: the branch off the sidebar's own
+  /// list, the ⋯ the ordinary pane carries, and the error still under it.
+  it("draws a header with the ⋯ on it, over the error", async () => {
+    theBrokenConversation();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const head = await drawn(container, `.${shell.timelinePane} .${paneHead.head}`);
+    expect(head.querySelector("h1")?.textContent).toBe(DRAFTING.branch);
+
+    await drawn(container, `.${actions.conversationActions} > .${dropdown.trigger}`);
+    await waitFor(() => screen.getByText(/the Conversation could not be read/));
+  });
+
+  /// And the way back out, which is the whole reason the hatch is on the pane
+  /// rather than on the sidebar's right-click: a phone has no right-click, and
+  /// a page it cannot leave is worse than one it cannot read.
+  it("carries the way back to the conversations", async () => {
+    theBrokenConversation();
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await drawn(container, `.${shell.timelinePane} .${shell.paneBack}`));
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// One row, and the one that covers every state: close refuses nothing but a
+  /// Conversation that is gone, and an already-closed one still archives.
+  it("offers close and archive on a conversation that is not closed", async () => {
+    theBrokenConversation();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+
+    expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+    expect(menu.querySelector(`.${actions.archive}`)).toBeNull();
+    expect(menu.querySelector(`.${actions.close}`)).toBeNull();
+    expect(menu.querySelector(`.${actions.steer}`)).toBeNull();
+    expect(menu.querySelectorAll("button")).toHaveLength(1);
+  });
+
+  /// And the same row where the sidebar cannot say either — the list not in
+  /// hand, or holding no row for this one. The human's own words: if we cannot
+  /// tell which, show only Close and archive, since it covers everything.
+  it("offers it too when the list says nothing about this conversation", async () => {
+    theBrokenConversation(whenever("/api/ui/conversations", json([])));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+
+    expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+    expect(menu.querySelector(`.${actions.archive}`)).toBeNull();
+  });
+
+  /// Archive stands there instead only where the list says the Conversation is
+  /// closed — because Archive on one that is not answers `NotClosed` and goes
+  /// nowhere, which is a dead end rather than an escape.
+  it("offers archive alone where the list says it is closed", async () => {
+    theBrokenConversation(listedAs("Closed"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+
+    // Waited for rather than read at once: the rows are reactive, so the one
+    // the list settles on arrives whenever the list does.
+    await drawn(container, `.${actions.archive}`);
+    expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeNull();
+    expect(menu.querySelectorAll("button")).toHaveLength(1);
+  });
+
+  it("posts to the conversation's own close-and-archive route", async () => {
+    const fetching = theBrokenConversation(
+      whenever(CLOSE_AND_ARCHIVE, json("Closed" satisfies ConversationClosed), "POST"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() => expect(sent(fetching, CLOSE_AND_ARCHIVE)).toEqual({}));
+  });
+
+  it("posts to the archive route where that is the row it drew", async () => {
+    const fetching = theBrokenConversation(
+      listedAs("Closed"),
+      whenever(ARCHIVE, json("Archived" satisfies ConversationArchived), "POST"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.archive}`));
+
+    await waitFor(() => expect(sent(fetching, ARCHIVE)).toEqual({}));
+  });
+
+  /// A press that lands leaves, unlike the ordinary menu's, which stays where it
+  /// is for the re-read to correct. There is nothing here to stay for: the page
+  /// could not be read before the press and will not be read after it. On a
+  /// narrow window that is the way back to the list and on a wide one the empty
+  /// pane, which is one navigation.
+  it("leaves the page a press has landed on", async () => {
+    theBrokenConversation(
+      whenever(CLOSE_AND_ARCHIVE, json("Closed" satisfies ConversationClosed), "POST"),
+    );
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+    await waitFor(() => screen.getByText("Pick a conversation, or start one."));
+  });
+
+  /// The other way a page ends up in front of the hatch, and the one the
+  /// incident behind all this really was: a read that never comes back at all.
+  /// The server has a deadline of its own on the fetch that hung, and this is
+  /// the net under the hang classes nobody has met yet.
+  describe("a read that never comes back", () => {
+    /// The deadline, as `AbortSignal.timeout` is asked for it.
+    const DEADLINE = 30_000;
+
+    /// The signal the read is really given, so the test can fire the deadline
+    /// itself rather than sitting through it.
+    function atOurOwnPace() {
+      const controller = new AbortController();
+      const timeout = vi
+        .spyOn(AbortSignal, "timeout")
+        .mockReturnValue(controller.signal);
+
+      return {
+        timeout,
+        expire: () =>
+          controller.abort(new DOMException("timed out", "TimeoutError")),
+      };
+    }
+
+    it("gives the conversation's own read a deadline, and nothing else one", async () => {
+      const fetching = theWorkbench();
+      mount(`/conversations/${OPEN.id}`);
+      await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+      const signalOf = (path: string) =>
+        fetching.mock.calls.find(([asked]) => String(asked) === path)?.[1]
+          ?.signal;
+
+      expect(signalOf(READING)).toBeInstanceOf(AbortSignal);
+      expect(signalOf("/api/ui/conversations")).toBeUndefined();
+    });
+
+    it("draws the hatch on a read hung past its deadline", async () => {
+      const { timeout, expire } = atOurOwnPace();
+
+      theWorkbench(whenever(READING, hangs()));
+      const { container } = mount(`/conversations/${OPEN.id}`);
+
+      await waitFor(() => screen.getByText("Loading…"));
+      expect(timeout).toHaveBeenCalledWith(DEADLINE);
+
+      expire();
+
+      const menu = await openActions(container);
+      expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+
+      timeout.mockRestore();
+    });
+
+    /// And it is not read again on the strength of having given up: three more
+    /// deadlines' worth of nothing before the page is allowed to say anything,
+    /// and what it would say is what it already knew. An ordinary failure is
+    /// still worth the ordinary three attempts, which is the other half of the
+    /// rule and the half only this can ask about.
+    it("is not one the app makes again", () => {
+      const gave_up = new DOMException("timed out", "TimeoutError");
+
+      expect(retrying(0, gave_up)).toBe(false);
+      expect(retrying(0, new Error("the server fell over"))).toBe(true);
+      expect(retrying(2, new Error("the server fell over"))).toBe(true);
+      expect(retrying(3, new Error("the server fell over"))).toBe(false);
+    });
+
+    /// And the app really reads that way — the hatch drawn off the one request,
+    /// with no second one behind it.
+    ///
+    /// Through `App` rather than through [`mount`], which is the whole point of
+    /// this one: what is being asked about is the app's own query client, and
+    /// every mount in this file builds a client that retries nothing, so a page
+    /// driven through one would only be asking about the client it built. It is
+    /// the reason `resuming.test.tsx` drives `App` too.
+    ///
+    /// Which matters because the rule is one line, and without it the ordinary
+    /// three retries stand: four deadlines' worth of nothing, with a backoff
+    /// between each, before the page may say anything at all. That is two
+    /// minutes of *Loading…* rather than thirty seconds — near enough to the
+    /// hang this whole branch is about that nothing should be able to take the
+    /// line away quietly.
+    it("draws the hatch off that one read, the app making no second one", async () => {
+      const { timeout, expire } = atOurOwnPace();
+
+      const fetching = theWorkbench(whenever(READING, hangs()));
+      window.history.pushState({}, "", `/conversations/${OPEN.id}`);
+      const { container } = render(() => <App />);
+
+      await waitFor(() => screen.getByText("Loading…"));
+
+      expire();
+
+      const menu = await openActions(container);
+      expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+      expect(askedFor(fetching, READING)).toBe(1);
+
+      timeout.mockRestore();
+    });
+  });
+
+  /// And a refusal goes where every other refusal in this menu goes: the
+  /// console. There is no row left to correct and nowhere on a page that will
+  /// not load to put a sentence.
+  it("logs a refusal and stays where it is", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    theBrokenConversation(
+      whenever(
+        CLOSE_AND_ARCHIVE,
+        json("NoSuchConversation" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() =>
+      expect(logged).toHaveBeenCalledWith(CLOSE_REFUSAL.NoSuchConversation),
+    );
+    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
+    expect(screen.queryByText("This conversation is gone.")).toBeNull();
+
+    logged.mockRestore();
   });
 });
 

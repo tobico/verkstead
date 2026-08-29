@@ -3202,6 +3202,121 @@ async fn archiving_a_conversation_that_is_not_there_says_so() {
     );
 }
 
+/// Write a state word into a Conversation's row that no Verkstead knows, and
+/// say what the column holds afterwards.
+///
+/// However it got there — a database restored from before a migration, one
+/// written by a Verkstead ahead of this one, a row edited by hand — the human
+/// is left with a Conversation every ordinary read refuses. Which is the state
+/// the two tests below are about, and the reason there is an escape hatch on
+/// the pane at all.
+async fn corrupt_the_state(dir: &tempfile::TempDir, id: i64) {
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind("meandering")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+}
+
+async fn stored_state(dir: &tempfile::TempDir, id: i64) -> String {
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let (state,): (String,) = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    state
+}
+
+/// A Conversation whose state word nothing can parse is one the human can still
+/// see, still reach, and still end.
+///
+/// Its own page refuses — the read that draws it will not guess at where the
+/// work stands — which is the error state the pane draws its escape hatch in.
+/// What has to hold for that hatch to be reachable and to work is all here: the
+/// sidebar still draws the row, close-and-archive goes through, and what the
+/// close leaves behind is a row holding `closed`, so the Conversation reads
+/// again afterwards.
+#[tokio::test]
+async fn a_conversation_whose_state_word_is_unreadable_can_still_be_closed_and_archived() {
+    let (watched, dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    corrupt_the_state(&dir, id).await;
+
+    // The pane cannot be drawn, which is what puts the human in front of the
+    // hatch rather than the ordinary ⋯ menu.
+    let (status, _) = fetch(
+        &app,
+        Request::builder()
+            .uri(format!("/api/ui/conversations/{id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    // And the sidebar is still there, with the row on it — drawn as a draft,
+    // which is the fallback the hatch reads as *not closed* and so offers
+    // Close and archive for.
+    let row = only_row(&app).await;
+    assert_eq!(row.id, id);
+    assert_eq!(row.state, Lifecycle::Draft);
+
+    assert_eq!(
+        close_and_archive(&app, id).await,
+        ConversationClosed::Closed
+    );
+
+    assert!(!path.exists(), "the worktree directory should be gone");
+    assert_eq!(
+        worktrees(&repo).len(),
+        1,
+        "git should hold only the repository"
+    );
+    assert!(sidebar(&app).await.is_empty());
+
+    // The close wrote `closed` over the word nobody could read, so everything
+    // that was locked behind that column reads again.
+    assert_eq!(stored_state(&dir, id).await, "closed");
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert!(view.archived);
+    assert_eq!(view.worktree, None);
+}
+
+/// Archiving one on its own says it is not closed, rather than failing.
+///
+/// The safe way round: archiving is *hide it from the list*, and hiding a
+/// Conversation whose worktree may still be live would put the work out of
+/// sight without ending it. Which is why the hatch offers Close and archive
+/// wherever it cannot read the state.
+#[tokio::test]
+async fn archiving_a_conversation_whose_state_word_is_unreadable_says_it_is_not_closed() {
+    let (_watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    corrupt_the_state(&dir, id).await;
+
+    assert_eq!(archive(&app, id).await, ConversationArchived::NotClosed);
+    assert_eq!(sidebar(&app).await.len(), 1);
+}
+
 /// The toggle is the way to see what has been put away without taking it back:
 /// on, the archived Conversations are on the list in their ordinary places; off,
 /// they are not drawn at all.

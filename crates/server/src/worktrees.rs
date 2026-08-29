@@ -15,8 +15,11 @@
 //! and leaves the branch: a branch is a name and a commit, and it may hold work
 //! worth reading; a worktree is a directory the human never asked to keep.
 
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use crate::repos::git;
 
@@ -192,7 +195,9 @@ pub(crate) enum Fetched {
     NoRemote,
 
     /// Git would not fetch, in git's own words — offline, or an authentication
-    /// that has expired, or a remote that has gone.
+    /// that has expired, or a remote that has gone. Or, where the caller gave
+    /// it a deadline, git having been stopped for running past it: a fetch that
+    /// never answers is a failure like any other to whoever was waiting.
     Failed(String),
 }
 
@@ -213,6 +218,32 @@ pub(crate) enum Fetched {
 /// difference is not worth splitting here: what follows either way is a refusal
 /// naming something the human can go and look at.
 pub(crate) fn fetch(repo: &Path) -> Fetched {
+    fetching(repo, None)
+}
+
+/// The same fetch, given only so long to answer.
+///
+/// `GIT_TERMINAL_PROMPT` and a null stdin stop git waiting for a *human*, and
+/// nothing stops it waiting for the *network*: a route that is dropping packets
+/// rather than refusing them leaves `git fetch` sitting there indefinitely, and
+/// git has no deadline of its own to fall back on. Whoever is reading is left
+/// looking at a page that never resolves, which is worse than any answer.
+///
+/// So this is for the callers that are *drawing* something — where an answer
+/// off what was last fetched beats no answer at all. The presses that fetch
+/// have no deadline: what they do with the result is act on it, and acting on a
+/// stale reading is not the same trade.
+///
+/// The timeout kills the fetch rather than walking away from it. Git spawns a
+/// transport helper of its own and that is nearly always where a hang really
+/// is, so the child is put in a process group of its own and the whole group is
+/// killed — a signal to the parent alone would leave the helper running with
+/// nothing left to wait for it.
+pub(crate) fn fetch_within(repo: &Path, limit: Duration) -> Fetched {
+    fetching(repo, Some(limit))
+}
+
+fn fetching(repo: &Path, limit: Option<Duration>) -> Fetched {
     let remotes = git(repo, &["remote"]).unwrap_or_default();
 
     if remotes.trim().is_empty() {
@@ -221,7 +252,9 @@ pub(crate) fn fetch(repo: &Path) -> Fetched {
 
     // Not [`crate::repos::git`]: that one throws git's stderr away, and git's
     // stderr is the whole of what a fetch that failed has to say.
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+
+    command
         .args(["fetch", "--all", "--quiet"])
         .current_dir(repo)
         // A fetch that wants a password must fail rather than wait for one:
@@ -229,8 +262,50 @@ pub(crate) fn fetch(repo: &Path) -> Fetched {
         // that has gone is one of the two things this is expected to catch.
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
-        .output();
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
+    let Some(limit) = limit else {
+        return answered(command.output());
+    };
+
+    // A group of its own, so that the kill below reaches the transport helper
+    // git started as well as git itself.
+    command.process_group(0);
+
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => return Fetched::Failed(error.to_string()),
+    };
+
+    // Kept before the child is handed over, because the group is named by it and
+    // the thread below is where the child goes.
+    let group = child.id();
+
+    // Waited on by a thread rather than by polling, so that the pipes are
+    // drained while git is still writing to them: a fetch blocked on a full
+    // pipe would look exactly like the hang this is here to end.
+    let (finished, waited) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = finished.send(child.wait_with_output());
+    });
+
+    match waited.recv_timeout(limit) {
+        Ok(output) => answered(output),
+        Err(_) => {
+            stop(group);
+
+            // The thread above is left to reap it, which it does as soon as the
+            // group is gone.
+            Fetched::Failed(format!(
+                "git did not answer within {limit:?}, so it was stopped"
+            ))
+        }
+    }
+}
+
+/// What a fetch that ran to the end came to.
+fn answered(output: std::io::Result<std::process::Output>) -> Fetched {
     let output = match output {
         Ok(output) => output,
         Err(error) => return Fetched::Failed(error.to_string()),
@@ -246,6 +321,29 @@ pub(crate) fn fetch(repo: &Path) -> Fetched {
         true => "git would not say why".to_owned(),
         false => said,
     })
+}
+
+/// Kill a fetch that has run past its deadline, and everything it started.
+///
+/// The group rather than the process: `git fetch` does its talking through a
+/// transport helper it spawns, and that helper is where a stalled network
+/// leaves things waiting. Signalling git alone would end the wait here and
+/// leave the helper behind with nobody to reap it.
+fn stop(group: u32) {
+    let Ok(group) = i32::try_from(group) else {
+        return;
+    };
+
+    let Some(group) = rustix::process::Pid::from_raw(group) else {
+        return;
+    };
+
+    if let Err(error) = rustix::process::kill_process_group(group, rustix::process::Signal::KILL) {
+        tracing::warn!(
+            error = ?error,
+            "a fetch that ran past its deadline could not be killed"
+        );
+    }
 }
 
 /// The name an unpicked base resolves through: origin's copy of `default`,
@@ -568,7 +666,91 @@ pub(crate) fn rebuild(repo: &Path, path: &Path, branch: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+    use std::net::{TcpListener, TcpStream};
+
     use super::*;
+
+    /// A remote that accepts the connection and then says nothing, ever.
+    ///
+    /// Which is the hang this is all about: a route that drops packets rather
+    /// than refusing them leaves git waiting on a socket that will never
+    /// answer, with no deadline of its own to fall back on. Hands back the
+    /// `git://` url to point a remote at, and the accepted connection — reading
+    /// EOF off it is how the test knows git really died rather than being
+    /// walked away from.
+    fn a_remote_that_never_answers() -> (String, std::thread::JoinHandle<TcpStream>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let held = std::thread::spawn(move || listener.accept().unwrap().0);
+
+        (format!("git://127.0.0.1:{port}/repo"), held)
+    }
+
+    /// A fetch that would wait for ever answers inside its deadline, and git is
+    /// stopped rather than left running.
+    ///
+    /// Both halves matter. Answering is what keeps the page the fetch is read
+    /// behind from hanging; killing is what keeps a server that has drawn that
+    /// page a hundred times from holding a hundred stalled gits.
+    #[test]
+    fn a_fetch_given_a_deadline_answers_at_it_and_kills_the_git_it_stopped() {
+        let (_dir, repo) = repository();
+        let (url, held) = a_remote_that_never_answers();
+        run(&repo, &["remote", "add", "origin", &url]);
+
+        let started = std::time::Instant::now();
+        let fetched = fetch_within(&repo, Duration::from_millis(500));
+
+        let Fetched::Failed(said) = fetched else {
+            panic!("a fetch that never answers is a fetch that failed");
+        };
+
+        assert!(said.contains("did not answer"), "it said {said:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the deadline is what ends the wait, not the fetch"
+        );
+
+        // And the far end sees the connection go, which nothing but the death
+        // of every process holding it could do.
+        let mut connection = held.join().unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+
+        let mut read = Vec::new();
+        connection.read_to_end(&mut read).unwrap();
+    }
+
+    /// And a repository with a remote that answers is fetched as it always was:
+    /// the deadline is a ceiling on the wait rather than a change to the fetch.
+    #[test]
+    fn a_fetch_inside_its_deadline_is_an_ordinary_fetch() {
+        let (dir, upstream) = repository();
+        let clone = dir.path().join("clone");
+
+        run(
+            dir.path(),
+            &[
+                "clone",
+                &upstream.to_string_lossy(),
+                &clone.to_string_lossy(),
+            ],
+        );
+
+        assert!(matches!(
+            fetch_within(&clone, Duration::from_secs(30)),
+            Fetched::Fresh
+        ));
+
+        // And one with nowhere to fetch from still says so rather than waiting.
+        assert!(matches!(
+            fetch_within(&upstream, Duration::from_secs(30)),
+            Fetched::NoRemote
+        ));
+    }
 
     #[test]
     fn a_worktree_is_named_for_its_repo_and_its_branch() {
