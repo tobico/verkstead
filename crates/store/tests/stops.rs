@@ -11,9 +11,9 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    ConversationRow, Decision, Event, Stopped, ask_to_stop, asked_to_stop, clear_stop,
+    ConversationRow, Decision, Event, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop,
     close_conversation, conversations, forget_stop, open_database, register_repo,
-    start_conversation, start_grilling, stop, stopped, timeline,
+    start_conversation, start_grilling, stop, stop_as_asked, stopped, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -316,6 +316,61 @@ async fn a_conversation_asks_to_stop_once() {
     assert!(
         !asked_to_stop(&pool, id).await.unwrap(),
         "and what Resume overtakes is forgotten",
+    );
+}
+
+/// A stop that stands on the human's request stands on it still being there
+/// when it is written — and the write is what takes it away.
+///
+/// Nothing else here would say so. The run reads the request in front of a
+/// launch and writes the stop a moment later, and a Steer or a Resume in that
+/// moment takes the request back: what they are overtaking is a stop nothing has
+/// written yet. Written anyway, it lands on the far side of the press that undid
+/// it — the Conversation has moved, a fresh run is starting, and it stops that
+/// run before it has launched anything.
+#[tokio::test]
+async fn a_stop_asked_for_and_taken_back_is_not_written() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    assert_eq!(
+        stop_as_asked(&pool, id, Decision::Human, SAID, None)
+            .await
+            .unwrap(),
+        Stopping::Withdrawn,
+        "nobody asked, so there is nothing here to land",
+    );
+    assert_eq!(stopped(&pool, id).await.unwrap(), None);
+    assert!(notices(&pool, id).await.is_empty());
+
+    ask_to_stop(&pool, id).await.unwrap();
+
+    let landed = stop_as_asked(&pool, id, Decision::Human, SAID, None)
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(landed, Stopping::Stopped(_)),
+        "and asked for, it lands: {landed:?}",
+    );
+    assert_eq!(notices(&pool, id).await, vec![SAID.to_owned()]);
+    assert!(
+        !asked_to_stop(&pool, id).await.unwrap(),
+        "the request goes with the stop it became, rather than landing again at \
+         the next launch",
+    );
+
+    // And the stop an ordinary run makes is not held to any of that: what it
+    // stands on is what the run has to say, and nobody pressed anything.
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    assert!(
+        stop(&pool, id, Decision::Verkstead, SAID, None)
+            .await
+            .unwrap()
+            .is_some(),
+        "Verkstead's own brake needs no request behind it",
     );
 }
 

@@ -52,6 +52,7 @@ use verkstead_render::{
     TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
+use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Executable, Home, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
@@ -366,6 +367,9 @@ impl Grilling {
                 },
                 Reachable::at(LISTENING),
                 SandboxConfig::resolve(&[self.spill.path().display().to_string()]).unwrap(),
+                // No shared build cache: what these tests are about runs a stub
+                // where claude goes and builds nothing at all.
+                BuildCache::none(),
                 Skills::installed(self.state.path()).expect("this binary carries skills"),
                 equipped(),
                 Handoffs::under(self.state.path()),
@@ -1817,6 +1821,7 @@ async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pac
         },
         Reachable::at(LISTENING),
         SandboxConfig::resolve(&[spill.path().display().to_string()]).unwrap(),
+        BuildCache::none(),
         Skills::installed(state.path()).expect("this binary carries skills"),
         equipped(),
         Handoffs::under(state.path()),
@@ -2724,10 +2729,20 @@ async fn a_running_sessions_row_says_when_it_has_stopped_talking() {
 
     // Then it speaks again, and the row says so without anything having had to
     // remember to put it back.
+    //
+    // Read back until the line is on the row as well, rather than asserting it
+    // off the first view that had come out of idle: idle is computed live off
+    // the clock the terminal moved, and what a session printed reaches the
+    // store on the flush after it — so the crossing is readable a moment
+    // before the statement that caused it is.
     let woken = fixture
         .until(|view| {
             output(view)
-                .filter(|output| output.running && !output.idle)
+                .filter(|output| {
+                    output.running
+                        && !output.idle
+                        && output.latest == "What should happen when the queue is full?"
+                })
                 .cloned()
         })
         .await;
@@ -3145,6 +3160,7 @@ async fn a_capture_survives_the_server_restarting() {
             },
             Reachable::at(LISTENING),
             SandboxConfig::default(),
+            BuildCache::none(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
             equipped(),
             Handoffs::under(fixture.state.path()),
@@ -5130,6 +5146,7 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
             },
             Reachable::at(LISTENING),
             SandboxConfig::default(),
+            BuildCache::none(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
             equipped(),
             Handoffs::under(fixture.state.path()),
@@ -18867,10 +18884,12 @@ async fn a_wrap_up_waits_for_every_pull_requests_checks() {
 /// check alone would have cut to two sessions altogether, with one of the two
 /// pull requests never looked at.
 ///
-/// The four alternate, because the Worktree is what they queue for: a watcher
-/// that could not take the Turn tries again a poll later, and a poll later is
-/// always sooner than the watcher whose session has just ended and has a whole
-/// interval to sleep off.
+/// All four go, whatever order they go in. Which watcher takes the Turn next is
+/// nobody's to say — both poll on the same interval, and the one whose session
+/// has just ended is as likely to take it again as the one that has been waiting
+/// — so what makes each pull request spend its own two is the stop waiting for
+/// the other: a watcher out of goes does not stop a run that still has somewhere
+/// to go.
 #[tokio::test]
 async fn the_same_check_red_on_two_pull_requests_gets_two_goes_each() {
     let spill = tempfile::tempdir().unwrap();
@@ -18889,10 +18908,11 @@ async fn the_same_check_red_on_two_pull_requests_gets_two_goes_each() {
 
     worked_to_empty(&fixture).await;
 
-    // Waited for by the count rather than read at the first Notice. Each pull
-    // request runs out of goes on its own watcher's schedule, so the Notice that
-    // arrives first is the first one's — and the other's last session may not
-    // have been dispatched yet, let alone written anything down.
+    // Waited for by the count rather than read at the first Notice. The stop is
+    // written once both pull requests have run out of goes, so a Notice is
+    // evidence that all four were dispatched — but a session that has been
+    // dispatched is not yet a session that has written anything down, and the
+    // last of them is still starting up as the stop lands.
     let told = until_written_by(&dispatched, 4).await;
     let stopped = fixture.stopped().await;
     let prompts = prompts(&told);

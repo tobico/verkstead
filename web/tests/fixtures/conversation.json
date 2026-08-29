@@ -20,6 +20,7 @@
       "worktree": null
     }
   ],
+  "compiles_uncached": false,
   "direction": null,
   "driven": false,
   "grilling_pairing": {

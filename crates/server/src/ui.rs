@@ -28,19 +28,20 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, CompanionAdded,
-    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChoice,
-    CompanionModeChosen, CompanionRemoved, CompanionView, ConversationArchived, ConversationClosed,
-    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Cursor, GrillingStarted, Lifecycle, Locked, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RepoEntry, Resumed, RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
-    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup,
+    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
+    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
+    ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
+    Lifecycle, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
+    ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed, RoleChoice, SetReading,
+    SetView, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Standing, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
-use crate::settings::{Config, GitAuthor, Secrets};
+use crate::settings::{Config, GitAuthor, RustBuildCache, Secrets};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -969,6 +970,16 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         brief,
     );
 
+    // And whether this Repo is one the missing sccache costs anything — see
+    // [`ConversationView::compiles_uncached`]. A `Cargo.toml` at the root is a
+    // look at the filesystem, and it is only worth taking where the other two
+    // halves already hold: the answer is the same for a repository that is not
+    // Rust, and this way the settings file is read only on a server that has
+    // something to warn about.
+    let compiles_uncached = !state.sessions.caches_compiles()
+        && state.settings.config().rust_build_cache().enabled()
+        && crate::build_cache::builds_rust(&conversation.repo.path);
+
     // Which Brief is still being written, where one is. A Brief freezes when its
     // round's grilling starts, so the one open is the newest — and only while the
     // Conversation is drafting. An adopting Conversation's first Brief is nobody
@@ -1142,6 +1153,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         companions,
         state: lifecycle(conversation.state),
         ready_to_grill,
+        compiles_uncached,
         ready_to_resume,
         ready_to_stop,
         stop_asked,
@@ -2545,7 +2557,7 @@ async fn unsubscribe(
 /// that reads them: the files are the source of truth, so a token or an author
 /// somebody hand-edited into place is what this comes back with.
 async fn settings(State(state): State<AppState>) -> HttpResponse {
-    Json(as_told(&state.settings)).into_response()
+    Json(as_told(&state.settings, state.sessions.caches_compiles())).into_response()
 }
 
 /// `POST /api/ui/settings` — write the author down, and set or clear the token.
@@ -2570,11 +2582,19 @@ async fn save_settings(
     // One blocking hop for the whole save: two files written and, where a token
     // was set, a `gh` run. Everything here is the filesystem or a process, and
     // none of it belongs on the runtime's threads.
+    let caches_compiles = state.sessions.caches_compiles();
+
     let saved = tokio::task::spawn_blocking(move || {
-        settings.save_config(&Config::of_author(GitAuthor::of(
-            Some(edit.git_author.name),
-            Some(edit.git_author.email),
-        )))?;
+        settings.save_config(&Config::of(
+            GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
+            // The size as it was typed, and an empty field as nothing
+            // configured: clearing it is how the human asks for the default
+            // back, and a size of nothing is not a size.
+            RustBuildCache::of(
+                edit.rust_build_cache.enabled,
+                Some(edit.rust_build_cache.size),
+            ),
+        ))?;
 
         let verifying = match &edit.github_token {
             TokenEdit::Keep => None,
@@ -2600,7 +2620,7 @@ async fn save_settings(
         });
 
         Ok::<_, std::io::Error>(SettingsSaved {
-            settings: as_told(&settings),
+            settings: as_told(&settings, caches_compiles),
             verified,
         })
     })
@@ -2630,15 +2650,27 @@ async fn save_settings(
 /// token nobody can read back out is a token that cannot leak through a page,
 /// and the four characters are the whole of what the human needs to tell one
 /// from another.
-fn as_told(settings: &crate::settings::Settings) -> SettingsView {
+fn as_told(settings: &crate::settings::Settings, caches_compiles: bool) -> SettingsView {
     let secrets = settings.secrets();
     let config = settings.config();
     let author = config.git_author();
+    let cache = config.rust_build_cache();
 
     SettingsView {
         git_author: Author {
             name: author.name().unwrap_or_default().to_owned(),
             email: author.email().unwrap_or_default().to_owned(),
+        },
+        rust_build_cache: BuildCacheView {
+            enabled: cache.enabled(),
+            // The default where nobody has typed one, with the flag beside it
+            // saying which of the two this is — a field showing a value nobody
+            // chose should say so, and it says so as a placeholder.
+            size: cache.size().to_owned(),
+            size_configured: cache.size_configured().is_some(),
+            // Not out of the files at all: this is the server's own
+            // environment, and the one thing on this page the human cannot set.
+            compiles_cached: caches_compiles,
         },
         github_token: secrets.github_token().map(|token| TokenSaved {
             last_four: last_four(token),

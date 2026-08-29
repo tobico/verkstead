@@ -1,0 +1,119 @@
+/* The shared Rust build cache — see `BuildCache.tsx`.
+
+   Two halves in two panes, like the credentials above it: the card carries how
+   the cache stands and the warning about what the browser cannot fix, and the
+   controls that change it stand in the details pane beside it.
+
+   What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
+   while its pane is open, and what it does under the pointer. What is here is
+   only what stands on it. */
+
+.buildCacheCard {
+  margin-bottom: 1.5rem;
+}
+
+.buildCacheCard h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+/* How the cache stands, in a line: the same quiet the credentials say what is
+   configured in. */
+.standing {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.standing .size {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink);
+}
+
+/* Something the human would have to leave the browser to fix. Drawn as a notice
+   rather than as an error — nothing has failed, and what it says is what will be
+   slower until somebody acts on it. The stopped red rather than the accent, the
+   way the credentials draw a setting that is not there.
+
+   No fill of its own: on the card it stands on a surface that shifts a step
+   under the hand and another while its pane is open, and an edge with the red
+   down its side says it on all three. */
+.warning {
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--stopped);
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+}
+
+/* And the details pane: the switch, what it means, and the size beside them. */
+.buildCache .warning {
+  margin: 0.85rem 0 0;
+}
+
+.sizing {
+  margin-top: 0.85rem;
+}
+
+.sizing label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* The box and its press on one line: the value is short — `30G` — so a field
+   the width of the pane would say it was expecting prose. */
+.field {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.field input {
+  width: 7rem;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.field button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.field button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+.field input:focus-visible {
+  border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .field input:hover {
+    border-color: var(--ink-soft);
+  }
+
+  .field button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

@@ -287,6 +287,69 @@ pub(crate) async fn stop(
     how: &str,
     writing: Option<i64>,
 ) -> Result<Option<i64>> {
+    Ok(
+        match land(
+            pool,
+            nudges,
+            conversation_id,
+            decided,
+            what,
+            how,
+            writing,
+            false,
+        )
+        .await?
+        {
+            store::Stopping::Stopped(notice) => Some(notice),
+            store::Stopping::Already | store::Stopping::Withdrawn => None,
+        },
+    )
+}
+
+/// The same, for the stop the human asked for while a session was still
+/// running: written only while they are still asking for it.
+///
+/// [`store::stop_as_asked`]'s half of the server, and its doc is where the
+/// reason lives. What comes back says which of the three happened, because the
+/// caller has a decision to make about the one that is new: a request that was
+/// withdrawn is not a stop, and the launch it was in front of is one to let
+/// through. See [`crate::stops::asked`].
+pub(crate) async fn stop_as_asked(
+    pool: &SqlitePool,
+    nudges: &Nudges,
+    conversation_id: i64,
+    decided: Decided<'_>,
+    what: &str,
+    how: &str,
+    writing: Option<i64>,
+) -> Result<store::Stopping> {
+    land(
+        pool,
+        nudges,
+        conversation_id,
+        decided,
+        what,
+        how,
+        writing,
+        true,
+    )
+    .await
+}
+
+/// Both of the above: gather the evidence, write the stop, and tell whoever is
+/// watching. `asked` is whether the human's standing request is the condition of
+/// the write — see [`stop_as_asked`].
+#[allow(clippy::too_many_arguments)]
+async fn land(
+    pool: &SqlitePool,
+    nudges: &Nudges,
+    conversation_id: i64,
+    decided: Decided<'_>,
+    what: &str,
+    how: &str,
+    writing: Option<i64>,
+    asked: bool,
+) -> Result<store::Stopping> {
     let said = said(
         what,
         how,
@@ -294,17 +357,33 @@ pub(crate) async fn stop(
         &session_tail(pool, conversation_id, writing).await,
     );
 
-    let stopped = store::stop(
-        pool,
-        conversation_id,
-        decided.decision(),
-        &said,
-        decided.resets(),
-    )
-    .await?;
+    let stopped = match asked {
+        true => {
+            store::stop_as_asked(
+                pool,
+                conversation_id,
+                decided.decision(),
+                &said,
+                decided.resets(),
+            )
+            .await?
+        }
+        false => match store::stop(
+            pool,
+            conversation_id,
+            decided.decision(),
+            &said,
+            decided.resets(),
+        )
+        .await?
+        {
+            Some(notice) => store::Stopping::Stopped(notice),
+            None => store::Stopping::Already,
+        },
+    };
 
     match stopped {
-        Some(notice) => {
+        store::Stopping::Stopped(notice) => {
             tracing::warn!(
                 conversation_id,
                 notice,
@@ -329,10 +408,16 @@ pub(crate) async fn stop(
                 crate::push::told(pool, conversation_id, news);
             }
         }
-        None => tracing::info!(
+        store::Stopping::Already => tracing::info!(
             conversation_id,
             how,
             "driving stopped where it had stopped already, so the first stop stands"
+        ),
+
+        store::Stopping::Withdrawn => tracing::info!(
+            conversation_id,
+            how,
+            "the stop the human asked for was taken back before it landed, so nothing stopped"
         ),
     }
 

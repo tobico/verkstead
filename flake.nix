@@ -116,6 +116,12 @@
               # design, and the sandbox's own tests prove the surface by running
               # a probe in one rather than by reading the flags.
               bubblewrap
+              # What the shared Rust build cache compiles through. The server
+              # resolves one off its own `PATH` at startup and binds it into
+              # every sandbox, so a checkout run gets the whole feature rather
+              # than the half of it that only shares the downloads — the
+              # packaged unit puts it on the service's path for the same reason.
+              sccache
               # The probe's one tool: it proves the sandbox is on the host's
               # network by reaching a listener the test itself is holding open,
               # which is the sharing proved without touching the internet.

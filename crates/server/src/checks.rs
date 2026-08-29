@@ -42,6 +42,14 @@
 //! is kept in the store, so a restarted server does not start the counting
 //! again.
 //!
+//! **And the stop waits for the rest of them.** A stop is the Conversation's
+//! rather than one pull request's — nothing is dispatched past one — so a
+//! watcher that wrote one the moment its own pull request ran out would spend
+//! the other's goes for it, which is the thing counting per pull request exists
+//! to stop. Whichever of them got the Turn first would be the one that got its
+//! two. So a pull request out of goes waits, and the human is asked once every
+//! one of them has gone green or run out as well — see [`owed_elsewhere`].
+//!
 //! **Sessions still run one at a time.** Two red pull requests do not collide:
 //! a fix session takes the Conversation's Turn, and the watcher that cannot get
 //! it comes back to its pull request on the next poll rather than queueing
@@ -541,8 +549,22 @@ async fn fix(
     }
 
     // Every failed check has had its two goes, so the machine has nothing left to
-    // try and the human is asked instead.
+    // try here — and the human is asked once it has nothing left to try anywhere.
+    // See [`owed_elsewhere`], which is what keeps a pull request out of goes from
+    // spending another one's.
     if fixable.is_empty() {
+        if owed_elsewhere(state, conversation_id, watched.repo.id).await {
+            tracing::debug!(
+                conversation_id,
+                repo = watched.repo.name,
+                number = watched.number,
+                "this pull request has had its goes and another still has one, so the \
+                 run is not stopped over it yet",
+            );
+
+            return Watching::Again(writing);
+        }
+
         return ask(state, conversation_id, watched, failed, writing).await;
     }
 
@@ -596,6 +618,80 @@ async fn fix(
     let said = crate::runner::address(state, conversation_id, &feedback(watched, &fixable)).await;
 
     Watching::Again(said.or(writing))
+}
+
+/// Whether another of this Conversation's pull requests still has a go coming to
+/// it, which is what a pull request out of goes waits for before the run is
+/// stopped over it.
+///
+/// The attempts are counted per pull request because the same check name red on
+/// two of them is two different failures, and one spending the other's would
+/// stop a run that still had somewhere to go. A stop is the Conversation's
+/// rather than one pull request's, though — nothing is dispatched past one — so
+/// the first watcher to run out writing one would spend the other's goes just as
+/// surely as sharing the count would, and which watcher that is is a matter of
+/// which of them got the Turn first. So the human is asked once there is nowhere
+/// left to go: every other pull request green, or out of goes as well.
+///
+/// Read off what has been counted rather than off the other watchers, which is
+/// what makes it a fact a restarted server has too. A pull request nothing has
+/// been dispatched about is one with its goes still in hand — whether its suite
+/// is red and waiting for the Turn, or still running, or was never red at all —
+/// and a wrap-up waits on a suite it has not read the end of anyway.
+///
+/// `false` where the record cannot be read, which is the stop this was in front
+/// of going ahead: what that costs is a go, and holding a stop open on an
+/// unreadable record would cost the human ever being told.
+async fn owed_elsewhere(state: &AppState, conversation_id: i64, repo_id: i64) -> bool {
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return false,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation whose pull requests still had a go failed");
+            return false;
+        }
+    };
+
+    let opened = match store::pull_requests(&state.pool, conversation_id).await {
+        Ok(opened) => opened,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading which pull requests still had a go failed");
+            return false;
+        }
+    };
+
+    let settled = match store::wrap_up_settled(&state.pool, conversation_id).await {
+        Ok(settled) => settled,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading which pull requests had gone green failed");
+            return false;
+        }
+    };
+
+    for (repo, opened) in opened {
+        // This one, and one that has gone green: neither has a go coming.
+        if repo.id == repo_id || settled.contains(&store::WaitingOn::Checks(repo.id)) {
+            continue;
+        }
+
+        // And one there is nowhere left to ask about, which is a repository
+        // taken off the registry mid-wrap-up. Its own watcher stopped on that
+        // same fact, so a go it is owed is one nothing will ever spend — and
+        // waiting for it would be a stop the human never got.
+        if crate::wrapping::watched(&conversation, repo.id, opened.number).is_none() {
+            continue;
+        }
+
+        match store::most_fix_attempts(&state.pool, conversation_id, repo.id).await {
+            Ok(spent) if spent < ATTEMPTS => return true,
+            Ok(_) => {}
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, repo = repo.name, "reading what a pull request had been given failed");
+            }
+        }
+    }
+
+    false
 }
 
 /// Stop asking the machine: stop the run, and put what failed on the Timeline.

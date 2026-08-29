@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use support::repo_with_a_commit;
 use verkstead_schema::{Direction, QuestionSet, Response};
+use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Executable, Home, Reachable, Sandbox};
 use verkstead_server::settings::Settings;
@@ -103,6 +104,9 @@ impl Grilling {
             &Handoffs::under(self.state.path()),
             &settings.secrets(),
             &settings.config(),
+            // What this asks is whether the bundled CLI reaches its server, so
+            // there is nothing here to build and no cache to build it into.
+            &BuildCache::none(),
             vec![],
         )
         .expect("a grilling Conversation has a worktree to build a sandbox around")

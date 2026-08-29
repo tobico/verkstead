@@ -325,6 +325,21 @@ pub struct ConversationView {
     /// what it says is true only as of the moment it was read.
     pub ready_to_grill: bool,
 
+    /// Whether to warn, where the work is started from, that this repository's
+    /// dependency compiles will not be cached.
+    ///
+    /// True on three things at once: the Repo is a Cargo workspace — a
+    /// `Cargo.toml` at its root — the shared Rust build cache is switched on,
+    /// and the server found no sccache to compile through. Then a session's
+    /// crate downloads are shared and its dependencies are compiled from
+    /// scratch every time, which is a slow build rather than a broken one — so
+    /// it is a note above the button, not a refusal on it.
+    ///
+    /// The server's rule rather than three fields for the page to combine, for
+    /// the reason [`ConversationView::ready_to_grill`] is one: two of the three
+    /// are facts about the server that nothing else on this payload carries.
+    pub compiles_uncached: bool,
+
     /// Whether there is driving to start again: the Conversation is in a state
     /// something ought to be driving, and nothing is.
     ///

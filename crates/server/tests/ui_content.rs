@@ -2818,6 +2818,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &serde_json::json!({
             "git_author": { "name": "Ada Lovelace", "email": "ada@example.com" },
             "github_token": { "Set": { "token": "ghp_0123456789abcdef" } },
+            // A size the human typed, so the fixture carries the half of the
+            // build cache that has been configured rather than only its
+            // defaults — `settings-unset.json` above is the other half.
+            "rust_build_cache": { "enabled": true, "size": "50G" },
         }),
     )
     .await;

@@ -58,7 +58,8 @@ pub use profiles::{
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use repos::{Registered, Registration, RepoEntry, RepoRemoved, RepoView};
 pub use settings::{
-    Author, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified,
+    Author, BuildCacheEdit, BuildCacheView, SettingsEdit, SettingsSaved, SettingsView, TokenEdit,
+    TokenSaved, Verified,
 };
 pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,

@@ -8,7 +8,9 @@
 //! out of the workbench to set a machine up, and a sidebar naming each of them;
 //! folded together they are sections of one pane, read down in the order a
 //! fresh install needs them: credentials first, because without them nothing a
-//! session does with a Repo can be pushed.
+//! session does with a Repo can be pushed, then the shared Rust build cache
+//! every session builds into, then the Agent Profiles and the Repos a
+//! Conversation is settled against.
 //!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
@@ -48,6 +50,7 @@ import { UpdateNotice } from "../update/UpdateNotice";
 import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
+import { BuildCacheCard, BuildCachePane } from "./BuildCache";
 import { GithubCard, GithubPane } from "./Credentials";
 import {
   SETTINGS,
@@ -165,6 +168,14 @@ function Settings(props: {
           open={props.opening === "github"}
           press={() => props.select("github")}
         />
+        {/* Under the credentials and above the lists: it is the other thing
+            Verkstead itself was told rather than anything a Conversation is
+            settled against, and the one setting on this page about what a
+            session runs inside. */}
+        <BuildCacheCard
+          open={props.opening === "build-cache"}
+          press={() => props.select("build-cache")}
+        />
         {/* Told which of its own things is open rather than the whole opening:
             where a Profile's pane stands is this page's arithmetic, and a
             section that knew the settings' paths would be a second opinion
@@ -225,6 +236,9 @@ function Details(props: {
     <Switch>
       <Match when={props.opening === "github"}>
         <GithubPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "build-cache"}>
+        <BuildCachePane back={props.back} />
       </Match>
       {/* The Repos' two panes are two components rather than one asked about a
           Repo that does not exist yet, the way the Profiles' one form is: what

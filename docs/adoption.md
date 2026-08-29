@@ -50,7 +50,7 @@ services.verkstead = {
   enable = true;
   watchedPaths = [ "/home/you/src" ];
   home = "/home/you";                 # optional; the service's own by default
-  sandboxBinds = [ "verkstead=/var/cache/verkstead-cargo" ];
+  sandboxBinds = [ "verkstead=/var/cache/verkstead-node" ];
 };
 ```
 
@@ -69,6 +69,19 @@ each is a boundary rather than a convenience:
   in the boundary, which is why it is set here and not anywhere the workbench
   can reach. A bare path goes to every session; `name=path` goes only to
   sessions working in the Repo registered under that name.
+
+A Rust build cache is not one of them, and there is nothing to configure for
+one. The **Build Cache** is the server's own: the module makes
+`/var/cache/verkstead`, puts `sccache` on the service's path, and every Sandbox
+gets the directory writable with `CARGO_HOME` inside it and `sccache` as its
+`RUSTC_WRAPPER` — so a crate is downloaded once and compiled once for the
+machine rather than once per Conversation. The sccache server every Sandbox
+compiles through is Verkstead's own, in a Sandbox of its own holding the
+worktrees and the cache, and it comes and goes with the service. Whether
+Sandboxes get one, and how
+large its compiled half may grow, are in the workbench settings; it is on with
+nothing configured. `systemctl clean --what=cache verkstead` empties it, and
+nothing but build output is in it.
 
 The server binds loopback and speaks plain HTTP. Answering from a phone needs
 HTTPS, which is `tailscale serve --bg 8422` in front of it — and push

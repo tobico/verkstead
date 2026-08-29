@@ -115,10 +115,11 @@ describe("the Update Notice", () => {
     expect(links.map((link) => link.getAttribute("href"))).toEqual([UPDATING]);
     expect(banner()!.querySelectorAll("button, input, form")).toHaveLength(0);
     // And it added nothing outside itself either: what the settings pane can be
-    // pressed and typed into is what it configures — the credentials card, the
-    // profiles, the repos and the notifications switch — all of which were there
-    // before the banner and are not the banner's. The conversations pane beside
-    // it has plenty to press and none of it is this page's.
+    // pressed and typed into is what it configures — the credentials and build
+    // cache cards, the profiles, the repos and the notifications switch — all of
+    // which were there before the banner and are not the banner's. The
+    // conversations pane beside it has plenty to press and none of it is this
+    // page's.
     const pressable = [...settingsPane(container).querySelectorAll("button, input, form")];
     expect(
       pressable.filter(

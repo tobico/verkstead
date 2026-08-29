@@ -43,6 +43,25 @@ directories and the settings files. `--data-dir` says where, or
 `VERKSTEAD_DATA_DIR`; it defaults to the working directory, which is what a dev
 run out of a checkout wants.
 
+One directory is made outside it: the **Build Cache**, at
+`$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
+`--build-cache-dir` says otherwise. Every sandboxed session gets it writable,
+with `CARGO_HOME` inside it, so a crate is downloaded once for the machine
+rather than once per Conversation; with `sccache` on the `PATH` the server was
+started from, it is bound into each sandbox as `RUSTC_WRAPPER` and the
+compiling is cached too. The dev shell carries one, so a checkout run gets the
+whole thing. It is on with nothing configured, and the settings page is where
+it is switched off or given a size.
+
+The sccache **server** is Verkstead's own, not the sessions'. It comes up as a
+`bwrap` child of the running server the first time a session starts on a repo
+with a root `Cargo.toml`, in a sandbox holding `<data-dir>/worktrees` and the
+build cache and nothing else — so `ps` shows a `bwrap … verkstead-compiling`
+beside each session's, and it goes when the server does. Every session's
+`sccache` is only the client half reaching it. Sessions starting their own is
+what this replaces: they all bind one port, and the loser's compiles then run
+in the winner's sandbox where its worktree is not mounted.
+
 A session's GitHub auth and the author of its commits are two of those settings
 rather than anything found in a home directory. Put a token in `secrets.yaml`
 beside the database, and who you are in `config.yaml`:
@@ -57,6 +76,9 @@ github_token: ghp_...
 git_author:
   name: Tobias Cohen
   email: tobi@tobico.net
+rust_build_cache:
+  enabled: true
+  size: 30G
 ```
 
 Every session started after that gets the token as `GH_TOKEN`, which `gh`
@@ -76,13 +98,18 @@ what the settings page saves through:
 
 ```console
 $ curl http://127.0.0.1:8422/api/ui/settings
-{"git_author":{"name":"","email":""},"github_token":null}
+{"git_author":{"name":"","email":""},"github_token":null,
+ "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
+   "compiles_cached":true}}
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
-         "github_token":{"Set":{"token":"ghp_..."}}}' \
+         "github_token":{"Set":{"token":"ghp_..."}},
+         "rust_build_cache":{"enabled":true,"size":""}}' \
     http://127.0.0.1:8422/api/ui/settings
 {"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
-  "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"}},
+  "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
+  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
+    "compiles_cached":true}},
  "verified":{"Account":{"login":"tobico"}}}
 ```
 
@@ -93,7 +120,10 @@ and writes it down either way, because a token is pasted once out of a page that
 will not show it again, and a network that was briefly down is no reason to send
 somebody back for another. `"github_token"` is `"Keep"` to leave the configured
 one alone, which is what a save of the author fields sends, and `"Clear"` to take
-it away.
+it away. `"rust_build_cache"` is a pair of values rather than an action: an
+empty `"size"` is no size configured, which puts the default back, and
+`"compiles_cached"` is read-only — it says whether the server found an
+`sccache`, which is its own environment rather than anybody's setting.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory

@@ -21,6 +21,15 @@ let
   # say it.
   stateDir = "/var/lib/verkstead";
 
+  # And what the server is given as its shared Rust build cache: one directory
+  # every sandboxed session downloads its crates and compiles its dependencies
+  # into. systemd creates and owns it, and it survives a restart with everything
+  # in it; the server would otherwise put it under the service's home, which is
+  # not where a cache belongs on a packaged install.
+  #
+  # Named once because `CacheDirectory`, `BindPaths` and the flag all say it.
+  cacheDir = "/var/cache/verkstead";
+
   # The directory half of a `sandboxBinds` entry: a plain path is the whole of
   # it, and `name=path` is the part after the `=` — the same rule the server
   # reads them by, so what the unit binds in is what the server hands out.
@@ -141,15 +150,20 @@ in
       example = lib.literalExpression ''
         [
           "/var/cache/shared"
-          "verkstead=/var/cache/verkstead-cargo"
+          "verkstead=/var/cache/verkstead-node"
         ]
       '';
       description = ''
         Extra read-write directories every sandboxed session gets, as
         `--sandbox-bind`. A plain path is given to every session; `name=path`
         is given only to sessions working in the Repo registered under that
-        name, so a repository that needs a build cache can have one without
-        every repository getting it.
+        name, so a repository that needs a cache of its own can have one
+        without every repository getting it.
+
+        A Rust build cache is not one of them any more: the server gives every
+        sandbox one of its own at `/var/cache/verkstead`, with sccache on this
+        service's path to compile through, and the switch that turns it off is
+        in the workbench settings. Nothing here has to be set for it.
 
         This is the Sandbox Configuration. A session otherwise sees its own
         worktree, its Repo's git directory and its Agent Profile's claude pair
@@ -225,9 +239,17 @@ in
       # logged in as — there is no token here and no GitHub App — so a unit whose
       # home has never run `gh auth login` will say so on the Timeline rather
       # than move a Conversation into Wrapping.
+      #
+      # `sccache` is what the shared Rust build cache compiles through. It is on
+      # the service's path rather than named by a flag because that is where the
+      # server looks for it: it resolves one at startup and binds it into every
+      # sandbox read-only. Without it the cache is still a cache — the crate
+      # downloads are shared — so the server says so in the log and carries on,
+      # but on a module install it never has to.
       path = [
         pkgs.bubblewrap
         pkgs.gh
+        pkgs.sccache
       ];
 
       serviceConfig = {
@@ -242,6 +264,8 @@ in
             cfg.listen
             "--data-dir"
             stateDir
+            "--build-cache-dir"
+            cacheDir
           ]
           # One flag per directory rather than the `:`-separated form the
           # environment variable takes: a path with a colon in it would split
@@ -277,6 +301,15 @@ in
         ]
         ++ lib.optional homeIsOurs (lib.removePrefix "/var/lib/" "${cfg.home}");
         StateDirectoryMode = "0750";
+
+        # The shared build cache, made and owned the same way — and separately,
+        # because it is the one directory here whose contents nobody would mind
+        # losing: what is in it is rebuildable, and `systemctl clean --what=cache
+        # verkstead` is how somebody reclaims the disk without touching the
+        # database.
+        CacheDirectory = "verkstead";
+        CacheDirectoryMode = "0750";
+
         WorkingDirectory = stateDir;
 
         # An agent is blocked on an answer whenever the server is down, so come
@@ -406,7 +439,18 @@ in
         #
         # The Sandbox Configuration's binds come in the same way and for the
         # same reason: what the service cannot see it cannot hand to a session.
-        BindPaths = map (path: "${path}") cfg.watchedPaths ++ map bindPath cfg.sandboxBinds;
+        #
+        # The build cache is first, and it is here by the same rule rather than
+        # because something is currently hiding it: `CacheDirectory` above
+        # already exempts it from `ProtectSystem = "strict"`. This list is what
+        # says which directories a *session* has to be able to reach, and a
+        # cache missing from it is one a later tightening could take away
+        # silently — from every Rust build in every sandbox, at once.
+        BindPaths = [
+          cacheDir
+        ]
+        ++ map (path: "${path}") cfg.watchedPaths
+        ++ map bindPath cfg.sandboxBinds;
 
         # A home the human named somewhere of their own, bound in for the reason
         # a Watched Path is: it is usually under `/home`, which `ProtectHome`

@@ -165,6 +165,19 @@ flowchart LR
   2026-08-27, staging companion-repos*; this said "wanted and is not built"):
   the sandbox takes a composed list, so it was a source to add rather than
   anything to undo.
+- **The shared Rust build cache is the one deliberate exception** to the line
+  above (*settled 2026-08-29, grilling shared-rust-build-cache*). It is a hole
+  the **server** opens in every sandbox by default, and the switch that closes
+  it is in the workbench settings — the first sandbox-affecting control the web
+  UI has. The exception was raised explicitly and taken anyway, on the rule that
+  *a human should never have a worse experience for not having checked the
+  settings*: every conversation cold-built otherwise, because `target/` is
+  inside a worktree that is deleted on close and the cargo registry landed in a
+  per-session tmpfs `$HOME`. What makes it safe to reach from a browser is that
+  the hole is not the installer's to justify — it is one directory of
+  Verkstead's own making, holding nothing but build output, and the control is
+  the one that *takes it away*. The installer-only rule still holds for
+  `sandboxBinds`, which are somebody else's directories.
 - **Companion repos** (*settled 2026-08-27, staging companion-repos — being
   built by that roadmap*): a conversation may add other registered repos to its
   sandbox, each read-only or read-write. Configured while the brief drafts — an
@@ -350,6 +363,48 @@ flowchart LR
     pasted once out of a page that will not show it again (*refined 2026-08-23,
     building intentional-credentials*).
   - per-repo extra binds from sandbox configuration
+  - **A shared Rust build cache, on by default** (*settled 2026-08-29, grilling
+    shared-rust-build-cache*): one directory the server resolves at startup —
+    `--build-cache-dir`, `VERKSTEAD_BUILD_CACHE_DIR`, else
+    `$XDG_CACHE_HOME/verkstead`; the packaged unit passes `/var/cache/verkstead`
+    — bound writable at the same path inside, with `CARGO_HOME` in it so crates
+    are downloaded once for the machine. It is the one directory outside the
+    Data Directory Verkstead *creates*, because a feature on by default cannot
+    ask for a `mkdir` first. Where the server resolved an `sccache` off its own
+    `PATH` — which the module arranges by putting it on the service's path —
+    that binary is bound read-only at `/verkstead/bin/sccache` and named
+    absolutely as `RUSTC_WRAPPER`, with `SCCACHE_DIR` and `SCCACHE_CACHE_SIZE`
+    beside it, so the compiling is cached too.
+
+    **Verkstead runs the sccache server itself** (*settled 2026-08-29, reviewing
+    shared-rust-build-cache*), in a sandbox of its own holding the worktrees
+    directory and the cache and nothing else it keeps. An sccache server is
+    what executes `rustc` — the client in a sandbox only hands it a command
+    line — and every sandbox shares the host's network, so clients left to
+    start their own all reach for one port: the session that lost the race has
+    its compiles run inside the winner's sandbox, where its worktree is not
+    bound, and the build **fails** rather than merely missing the cache
+    (reproduced in a pair of sandboxes; `error: could not compile`). The
+    worktrees directory whole rather than one worktree, so a conversation
+    grilled later is one the running server can already compile for. Not on the
+    host, because `rustc` runs proc macros while it compiles and the database
+    and the settings files are in the Data Directory's root, outside the one
+    bind it gets. Started before the first session of a conversation whose repo
+    has a root `Cargo.toml`, so a machine that never builds Rust never runs one,
+    and started again when the size changes because sccache reads it once.
+    Without one it degrades rather
+    than failing: the downloads are still shared, a startup line says the
+    compiling is not, and the setup card warns on a repo with a root
+    `Cargo.toml`. `CARGO_INCREMENTAL` is deliberately untouched — cargo builds
+    dependencies non-incrementally already, which is exactly what sccache can
+    cache, and the workspace's own crates stay incremental in the worktree's
+    `target/`. A shared `CARGO_TARGET_DIR` was rejected: its lock serialises
+    concurrent sessions and artifacts collide across feature sets. One global
+    cache for every repo and every profile — cross-project poisoning was raised
+    and accepted, sessions already sharing one uid and the whole host network.
+    The switch and the size are `rust_build_cache` in `config.yaml`, read at
+    every spawn, so a change applies to the next session; absent means on at
+    30G. Named for Rust so a sibling can stand beside it later.
   - Nix dev-shell autodetection kept (wrap in `nix develop` only when a shell
     attribute actually evaluates)
   - This drops today's blanket rw bind of all of `~/src`.
@@ -590,14 +645,16 @@ Timeline events:
 - **The page is read as cards and panes** (*settled 2026-08-29, building
   settings-redesign*). Everything on it that used to open a modal is a card in
   the middle pane and a details pane beside it: the credentials as one github
-  card, each Agent Profile, each registered Repo. What is on a card is what a
-  list is scanned for and the rest is in the pane — a Profile's mounted paths,
-  agent type and Remove; a Repo's branches, how much work is on it and what it
-  is holding that nothing is driving. Adding one is a plus icon on the section's
-  heading line, which opens the same pane blank and reads as open while it
-  stands. The two switches that are about the device and the server rather than
-  about anything configured stay as they were: notifications on the pane head's
-  line, and the update banner above everything.
+  card, each Agent Profile, each registered Repo — and the shared Rust build
+  cache, whose card says how it stands and whose pane holds the switch and the
+  size. What is on a card is what a list is scanned for and the rest is in the
+  pane — a Profile's mounted paths, agent type and Remove; a Repo's branches,
+  how much work is on it and what it is holding that nothing is driving; the
+  cache's switch and the size of its compiled half. Adding one is a plus icon on
+  the section's heading line, which opens the same pane blank and reads as open
+  while it stands. The two switches that are about the device and the server
+  rather than about anything configured stay as they were: notifications on the
+  pane head's line, and the update banner above everything.
 - **A Repo can be taken off the registry** from its own pane (*settled
   2026-08-29, building settings-redesign*) — an unregistering rather than a
   delete, refused while live work is on it. See **Repo** in `CONTEXT.md` for

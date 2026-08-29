@@ -332,12 +332,97 @@ pub async fn stop(
     markdown: &str,
     resets: Option<&str>,
 ) -> Result<Option<i64>> {
+    match write_stop(
+        pool,
+        conversation_id,
+        decision,
+        markdown,
+        resets,
+        Standing::Whatever,
+    )
+    .await?
+    {
+        Stopping::Stopped(notice) => Ok(Some(notice)),
+        Stopping::Already | Stopping::Withdrawn => Ok(None),
+    }
+}
+
+/// The same, for the stop the human asked for while a session was still
+/// running — and only for as long as they are still asking for it.
+///
+/// The request is read, and forgotten, inside the transaction that writes the
+/// stop. What makes that the difference between a fix and a comment is the act
+/// on the other side of the race: a Steer and a Resume each take the request
+/// back on their way past — see [`forget_stop`] — and what they are taking back
+/// is a stop nothing has written yet. Read outside the write, a run landing one
+/// writes it on the far side of the steer that withdrew it: the Conversation
+/// has moved, a fresh run is starting, and a stop nobody is asking for any more
+/// stops that run before it has launched anything.
+///
+/// So the request is the condition rather than the cue. Withdrawn first and
+/// nothing is written; written first and the steer clears the stop it finds,
+/// which is what it was always going to do. Either order leaves the human with
+/// the one they pressed.
+pub async fn stop_as_asked(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    decision: Decision,
+    markdown: &str,
+    resets: Option<&str>,
+) -> Result<Stopping> {
+    write_stop(
+        pool,
+        conversation_id,
+        decision,
+        markdown,
+        resets,
+        Standing::Asked,
+    )
+    .await
+}
+
+/// What landing a stop came to — see [`stop_as_asked`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stopping {
+    /// Written, and this is the Notice it put on the Timeline.
+    Stopped(i64),
+
+    /// Nothing written, and nothing wrong: the Conversation had stopped
+    /// already, or it is not there at all.
+    Already,
+
+    /// Nothing written because nobody is asking any more: the request this
+    /// stop stands on was taken back before the write got to it.
+    Withdrawn,
+}
+
+/// What a stop being written stands on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Standing {
+    /// Whatever the run had to say. The ordinary stop: a session that fell
+    /// over, an account out of window, the human's own press.
+    Whatever,
+
+    /// The request the human left behind them — see [`stop_as_asked`].
+    Asked,
+}
+
+/// Both of the above, and the transaction they share.
+async fn write_stop(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    decision: Decision,
+    markdown: &str,
+    resets: Option<&str>,
+    standing: Standing,
+) -> Result<Stopping> {
     let mut tx = super::writing(pool, "stopping a Conversation").await?;
 
     // Asked inside the transaction, so the answer still holds when the write
-    // below acts on it.
-    let already: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT stopped_at FROM conversations WHERE id = ?")
+    // below acts on it. Both columns for the one reason: a stop standing on the
+    // human's request is a stop the request has to still be there for.
+    let already: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT stopped_at, stop_asked_at FROM conversations WHERE id = ?")
             .bind(conversation_id)
             .fetch_optional(&mut *tx)
             .await
@@ -347,10 +432,14 @@ pub async fn stop(
 
     // A Conversation that is not there has nobody left to tell, and one that has
     // stopped has been told already.
-    match already {
-        None => return Ok(None),
-        Some((Some(_),)) => return Ok(None),
-        Some((None,)) => {}
+    let asked_for = match already {
+        None => return Ok(Stopping::Already),
+        Some((Some(_), _)) => return Ok(Stopping::Already),
+        Some((None, asked_for)) => asked_for,
+    };
+
+    if standing == Standing::Asked && asked_for.is_none() {
+        return Ok(Stopping::Withdrawn);
     }
 
     let event = Event::Notice(markdown.to_owned());
@@ -375,7 +464,7 @@ pub async fn stop(
     })?;
 
     let Some((notice,)) = written else {
-        return Ok(None);
+        return Ok(Stopping::Already);
     };
 
     sqlx::query(
@@ -394,9 +483,22 @@ pub async fn stop(
     .await
     .with_context(|| format!("recording that Conversation {conversation_id} has stopped"))?;
 
+    // And the request goes with the stop it became, in the transaction that
+    // wrote it: one left behind would be read as a stop still to come and land
+    // all over again at the next launch.
+    if standing == Standing::Asked {
+        sqlx::query("UPDATE conversations SET stop_asked_at = NULL WHERE id = ?")
+            .bind(conversation_id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("forgetting the stop Conversation {conversation_id} was asked to make")
+            })?;
+    }
+
     tx.commit().await.context("stopping a Conversation")?;
 
-    Ok(Some(notice))
+    Ok(Stopping::Stopped(notice))
 }
 
 /// Whether a Conversation is stopped, and what the stop is.

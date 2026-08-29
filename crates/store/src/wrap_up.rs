@@ -651,6 +651,39 @@ pub async fn fix_attempts(
     Ok(row.map(|(attempts,)| attempts).unwrap_or(0))
 }
 
+/// The most any one check on the pull request opened in `repo_id` has had.
+///
+/// Zero where nothing has been dispatched about that pull request at all, which
+/// is a suite that has never been red and one that is still running alike.
+///
+/// What *has this pull request run out of goes* is asked with, by a watcher
+/// deciding whether the run has anywhere left to go — see `checks::owed_elsewhere`
+/// in the server. The most rather than the least, because a check that has never
+/// failed has no row here at all and would otherwise read as one with both its
+/// goes still in hand.
+pub async fn most_fix_attempts(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+) -> Result<i64> {
+    let (attempts,): (i64,) = sqlx::query_as(
+        "SELECT COALESCE(MAX(attempts), 0) FROM check_fix_attempts
+         WHERE conversation_id = ? AND repo_id = ?",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .fetch_one(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "reading what has been tried about the checks in Repo {repo_id} on Conversation \
+             {conversation_id}"
+        )
+    })?;
+
+    Ok(attempts)
+}
+
 /// Count one more, and say how many that makes.
 ///
 /// Counted as the session is dispatched rather than as it ends, which is the way

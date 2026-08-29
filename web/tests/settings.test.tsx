@@ -54,6 +54,7 @@ import repoList from "../src/repos/RepoList.module.css";
 import card from "../src/CardButton.module.css";
 import { GithubCard, GithubPane } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
+import buildCache from "../src/settings/BuildCache.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
 import {
   openingAt,
@@ -396,6 +397,13 @@ describe("saving", () => {
           email: "ada@analytical.engine",
         },
         github_token: "Keep",
+        // The build cache rides along as it stands, because the endpoint
+        // writes the whole of `config.yaml` and this form only means to
+        // change the author.
+        rust_build_cache: {
+          enabled: TOLD.rust_build_cache.enabled,
+          size: TOLD.rust_build_cache.size,
+        },
       }),
     );
   });
@@ -569,7 +577,13 @@ describe("replacing and clearing the token", () => {
   /// server writes both files in one request.
   it("clears the token without taking the author with it", async () => {
     const cleared: SettingsSaved = {
-      settings: { git_author: TOLD.git_author, github_token: null },
+      settings: {
+        git_author: TOLD.git_author,
+        github_token: null,
+        // Untouched by this form, and so untouched in what the save answers
+        // with — see the section below it for what does change these.
+        rust_build_cache: TOLD.rust_build_cache,
+      },
       verified: null,
     };
     const fetching = theSettings(TOLD, json(cleared));
@@ -582,6 +596,10 @@ describe("replacing and clearing the token", () => {
       expect(sent(fetching)).toEqual({
         git_author: TOLD.git_author,
         github_token: "Clear",
+        rust_build_cache: {
+          enabled: TOLD.rust_build_cache.enabled,
+          size: TOLD.rust_build_cache.size,
+        },
       }),
     );
 
@@ -633,6 +651,7 @@ function thePage(at = "/settings") {
           <Route path="/settings" component={SettingsPage}>
             <Route path="/" />
             <Route path="/github" />
+            <Route path="/build-cache" />
             <Route path="/profiles/:profile" />
             <Route path="/repos/:repo" />
           </Route>
@@ -674,7 +693,7 @@ describe("the settings page", () => {
   /// One page for everything the human configures: what Verkstead itself was
   /// told, and the two things a Conversation is settled against — in the reading
   /// order a fresh install needs them in.
-  it("holds the credentials, the profiles and the repos", async () => {
+  it("holds the credentials, the build cache, the profiles and the repos", async () => {
     const { container } = thePage();
 
     const settings = panes(container)[1]!;
@@ -682,6 +701,7 @@ describe("the settings page", () => {
     // The repo names are on the New conversation menu as well as on this list,
     // so each list is waited for inside the pane it belongs to.
     await drawn(settings, `.${styles.githubCard}`);
+    await drawn(settings, `.${buildCache.buildCacheCard}`);
     await drawn(settings, `.${profileList.profiles} .${profileList.profile}`);
     await drawn(settings, `.${repoList.repos} .${repoList.repo}`);
 
@@ -784,6 +804,36 @@ describe("the path a details pane stands at", () => {
     // pane that was just opened.
     history.back();
     await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// The build cache is the other pane a word names, and it opens the way the
+  /// credentials do.
+  it("opens the build cache at /settings/build-cache, replacing", async () => {
+    const { container, history } = thePage();
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${buildCache.buildCacheCard}`,
+    );
+    fireEvent.click(face);
+
+    await waitFor(() => expect(history.get()).toBe("/settings/build-cache"));
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("draws the switch in the details pane, and reads the cache card as open", async () => {
+    const { container } = thePage("/settings/build-cache");
+
+    await waitFor(() => screen.getByRole("switch", { name: /build cache/i }));
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${buildCache.buildCacheCard}`,
+    );
+    expect(face.getAttribute("aria-pressed")).toBe("true");
+    expect(face.classList).toContain(card.open);
   });
 
   it("draws the form in the details pane, and reads the card as open", async () => {
@@ -1050,6 +1100,7 @@ describe("the path a details pane stands at", () => {
 describe("where a settings details pane stands", () => {
   it("puts an id behind a segment of its own, and a word beside it", () => {
     expect(pathTo("github")).toBe("/settings/github");
+    expect(pathTo("build-cache")).toBe("/settings/build-cache");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
     expect(pathTo(opensRepo(7))).toBe("/settings/repos/7");
@@ -1059,6 +1110,7 @@ describe("where a settings details pane stands", () => {
   it("reads back everything it writes", () => {
     for (const opening of [
       "github",
+      "build-cache",
       opensProfile(7),
       opensProfile("new"),
       opensRepo(7),
