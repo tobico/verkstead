@@ -32,8 +32,9 @@ use verkstead_schema::Direction;
 use verkstead_store::{
     AgentType, Directing, Edited, Event, Lifecycle, ProfileFacts, Role, Settling, Steer, Steering,
     WaitingOn, create_profile, fix_attempts, load_conversation, open_database, pick_direction,
-    record_fix_attempt, register_repo, save_brief, settle_wrap_up, start_conversation,
-    start_grilling, steer_conversation, timeline, wrap_up_settled,
+    record_fix_attempt, register_repo, save_brief, settle_naming, settle_wrap_up,
+    start_conversation, start_grilling, start_unnamed_conversation, steer_conversation, timeline,
+    wrap_up_settled,
 };
 
 /// The plainest steer there is: the move and nothing beside it.
@@ -101,6 +102,33 @@ async fn grilling(pool: &SqlitePool) -> i64 {
     .unwrap();
 
     id
+}
+
+/// A Draft nobody has named, which is the only source the instruction is ever
+/// about.
+async fn unnamed(pool: &SqlitePool) -> i64 {
+    let repo = register_repo(pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let id = start_unnamed_conversation(pool, repo.id, "amber-kestrel")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    save_brief(pool, id, "# Rate limiting\n").await.unwrap();
+
+    id
+}
+
+/// Whether the branch is still waiting to be named.
+async fn naming(pool: &SqlitePool, id: i64) -> bool {
+    load_conversation(pool, id)
+        .await
+        .unwrap()
+        .expect("the Conversation is there")
+        .naming
 }
 
 /// An Agent Profile to pair with, by name and with the models it lists.
@@ -760,4 +788,67 @@ async fn a_steer_survives_the_database_being_reopened() {
             ("moved", Lifecycle::Done),
         ],
     );
+}
+
+/// A Draft steered into a state something runs in has its branch left to the
+/// session the steer starts, exactly as a grill start would leave it.
+///
+/// It is the same moment for the same reason: nobody has named this branch, and
+/// the session about to read the Brief is the first thing in the system that
+/// knows what the work is about.
+#[tokio::test]
+async fn steering_a_draft_into_the_work_leaves_its_branch_to_be_named() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = unnamed(&pool).await;
+
+    assert_eq!(
+        steer_conversation(&pool, id, into(Lifecycle::Implementing))
+            .await
+            .unwrap(),
+        Steering::Steered,
+    );
+
+    assert!(naming(&pool, id).await);
+}
+
+/// A Draft steered into Done is not: nothing is started there, so nothing would
+/// ever be along to answer the instruction.
+#[tokio::test]
+async fn steering_a_draft_into_done_settles_for_the_name_it_has() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = unnamed(&pool).await;
+
+    steer_conversation(&pool, id, into(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    assert!(!naming(&pool, id).await);
+}
+
+/// And a Conversation steered from anywhere else has had its first session
+/// already, whatever its branch ended up being called.
+#[tokio::test]
+async fn steering_work_that_has_already_run_leaves_its_branch_alone() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = unnamed(&pool).await;
+
+    start_grilling(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/state/worktrees/amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // What the session that ran here left behind: it read the instruction and
+    // settled for the name, which is one of the two ways the waiting ends.
+    settle_naming(&pool, id).await.unwrap();
+
+    steer_conversation(&pool, id, into(Lifecycle::Implementing))
+        .await
+        .unwrap();
+
+    assert!(!naming(&pool, id).await);
 }

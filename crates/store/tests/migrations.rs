@@ -46,8 +46,8 @@ use verkstead_store::{
     Commit, Decision, Event, Finished, Lifecycle, PullRequest, WaitingOn, asked_to_stop,
     clear_stop, commit_repo, conversations, finish_wrap_up, fix_attempts, load_conversation,
     open_database, pull_request, pull_request_repo, record_another_pull_request, record_commit,
-    record_fix_attempt, recorded_commits, register_repo, start_conversation, start_grilling, stop,
-    stopped, timeline, wrap_up_settled,
+    record_fix_attempt, recorded_commits, register_repo, start_conversation, start_grilling,
+    start_unnamed_conversation, stop, stopped, timeline, wrap_up_settled,
 };
 
 /// A database with the old table in it, and a Conversation to hang stops off.
@@ -1540,6 +1540,72 @@ async fn a_conversation_from_before_the_branch_name_had_an_owner_keeps_its_name(
             conversation.branch_named,
             "the name it has been read by is one to go on reading it by",
         );
+
+        pool.close().await;
+    }
+}
+
+/// And a Conversation written before a branch could be left to its first session
+/// to name has nobody naming it.
+///
+/// There was no instruction to leave it to when it was started, so whatever it
+/// is called it is called that: the column arrives with the answer already in
+/// its default, and nothing under it has to say so a second time.
+#[tokio::test]
+async fn a_conversation_from_before_the_naming_instruction_is_waiting_on_nobody() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    // The one that would be waiting if anything were: started on a name
+    // Verkstead invented, and past drafting, which is where the instruction goes
+    // out.
+    let id = start_unnamed_conversation(&pool, repo, "brave-otter")
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/data/worktrees/brave-otter"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // The column off, which is the whole of what says this database is one from
+    // before: a branch nobody had named was still the name it was drawn by.
+    sqlx::query("ALTER TABLE conversations DROP COLUMN naming")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let conversation = load_conversation(&pool, id).await.unwrap().expect(opening);
+
+        assert!(
+            !conversation.naming,
+            "nobody was told to name a branch before there was an instruction to tell them with",
+        );
+        assert_eq!(conversation.branch, "brave-otter");
 
         pool.close().await;
     }

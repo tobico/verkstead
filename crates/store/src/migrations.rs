@@ -12,10 +12,11 @@
 //! about, and which pull request a comment somebody was sent to deal with was
 //! left on, are all a pull request's rather than a Conversation's now.
 //!
-//! Two of them are a column arriving rather than rows moving between tables —
-//! the Review role's Profile, and the branch name somebody settled on — which is
-//! the same kind of one-time rewrite: the rows already there are given the value
-//! that says what was true of them before the column existed.
+//! Three of them are a column arriving rather than rows moving between tables —
+//! the Review role's Profile, the branch name somebody settled on, and whether a
+//! branch is still waiting to be named — which is the same kind of one-time
+//! rewrite: the rows already there are given the value that says what was true
+//! of them before the column existed.
 //!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
@@ -38,7 +39,38 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     settlements_that_named_no_pull_request(pool).await?;
     addressed_comments_that_named_no_pull_request(pool).await?;
     conversations_that_had_no_review_profile(pool).await?;
-    conversations_whose_branch_name_had_no_owner(pool).await
+    conversations_whose_branch_name_had_no_owner(pool).await?;
+    conversations_whose_branch_nobody_was_naming(pool).await
+}
+
+/// Give every Conversation written before a branch could be left to its first
+/// session to name the column that says whether one is.
+///
+/// Nobody is: the naming instruction goes out with the start press, and every
+/// row this reaches was started before there was one to go out — see
+/// [`super::Conversation::naming`]. So the column's own default is the whole of
+/// the rewrite, and there is no `UPDATE` under it.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn conversations_whose_branch_nobody_was_naming(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('conversations') WHERE name = ?")
+            .bind("naming")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the branch a Conversation is still having named")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE conversations ADD COLUMN naming INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await
+        .context("settling the branch names the Conversations written before this carry")?;
+
+    Ok(())
 }
 
 /// Give every Conversation written before a branch name had an owner the column

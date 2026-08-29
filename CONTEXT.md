@@ -61,6 +61,26 @@ the naming back, and the name the Conversation started on stands again rather
 than another being invented. Two drafts against one Repo both reading *Draft*
 beside the same Repo name is what two drafts are: they are few, and they are
 short-lived.
+
+**And where nobody has named it, the work's first session is asked to.** The
+press that starts the work leaves the naming to the session it starts — the
+grilling one, the ungrilled build one, or the one a steered Draft starts — and
+its prompt carries the instruction under the Brief: switch the branch to a short
+kebab-case name taken from what the work is about, with git, before anything
+lands on it. Nothing is asked back, a rename being read off the checkout the way
+commits are. A Conversation the human named carries no such instruction, having
+nothing to leave to anybody.
+
+Which is why the **Draft** title outlives the Draft. Starting the work is not
+what makes an invented name worth reading, so the sidebar row, the pane header
+and the row read aloud go on saying *Draft* through the first minutes of
+Grilling or Implementing — and say the branch the moment the name is settled.
+Two things settle it and both are final: the session renames the branch and
+Verkstead follows it, or the session ends having left the name alone, and the
+name it left is the Conversation's. The setup card is not part of this: the
+branch is a plan while the Conversation drafts and a fact from the moment it is
+cut, so the field goes when the card does, whatever the name on it turns out to
+be.
 _Avoid_: task, session, job, thread, ticket
 
 **Worktree**:

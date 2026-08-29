@@ -8,8 +8,8 @@ use verkstead_store::{
     Archiving, Closing, Edited, Event, Grilling, Lifecycle, Unarchiving, adopting,
     archive_conversation, archived, close_conversation, conversation_branch, conversations,
     follow_branch, load_conversation, open_database, register_repo, rename_branch, save_brief,
-    set_base_commit, set_state, show_archived, showing_archived, start_adoption,
-    start_conversation, start_grilling, start_unnamed_conversation, timeline,
+    set_base_commit, set_state, settle_naming, show_archived, showing_archived, start_adoption,
+    start_building, start_conversation, start_grilling, start_unnamed_conversation, timeline,
     unarchive_conversation,
 };
 
@@ -232,6 +232,169 @@ async fn a_conversation_can_be_started_on_a_name_nobody_has_settled_on() {
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(conversation.branch, "amber-kestrel");
     assert!(!conversation.branch_named);
+}
+
+/// Starting the work on a name nobody settled on leaves the naming of it to the
+/// first session, and starting it on a name the human typed leaves nothing to
+/// anybody.
+#[tokio::test]
+async fn starting_the_work_leaves_an_invented_branch_name_to_be_replaced() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let invented = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+    let typed = start_conversation(&pool, repo_id, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Before the press there is nothing to name: the field is the human's until
+    // the branch is cut.
+    assert!(
+        !load_conversation(&pool, invented)
+            .await
+            .unwrap()
+            .unwrap()
+            .naming
+    );
+
+    for (id, worktree) in [(invented, "amber-kestrel"), (typed, "rate-limiting")] {
+        start_grilling(
+            &pool,
+            id,
+            "c0ffee",
+            &Path::new("/data/worktrees").join(worktree),
+            &[],
+        )
+        .await
+        .unwrap();
+    }
+
+    assert!(
+        load_conversation(&pool, invented)
+            .await
+            .unwrap()
+            .unwrap()
+            .naming,
+        "the first session is the one told to pick a name",
+    );
+    assert!(
+        !load_conversation(&pool, typed)
+            .await
+            .unwrap()
+            .unwrap()
+            .naming,
+        "a name the human typed has nothing to wait for",
+    );
+}
+
+/// A start with no grilling in it leaves the same job to the session it starts,
+/// there being nothing different about it but which state it lands in.
+#[tokio::test]
+async fn a_start_with_no_grilling_leaves_the_branch_to_be_named_too() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_building(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/data/worktrees/amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Implementing);
+    assert!(conversation.naming);
+}
+
+/// The rename the instruction asked for is the end of the waiting, and so is a
+/// session that ended without making one.
+#[tokio::test]
+async fn a_branch_stops_waiting_to_be_named_by_being_renamed_or_by_being_settled_for() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let renamed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+    let left = start_unnamed_conversation(&pool, repo_id, "brave-otter")
+        .await
+        .unwrap()
+        .unwrap();
+
+    for (id, worktree) in [(renamed, "amber-kestrel"), (left, "brave-otter")] {
+        start_grilling(
+            &pool,
+            id,
+            "c0ffee",
+            &Path::new("/data/worktrees").join(worktree),
+            &[],
+        )
+        .await
+        .unwrap();
+    }
+
+    follow_branch(&pool, renamed, "rate-limiting")
+        .await
+        .unwrap();
+    settle_naming(&pool, left).await.unwrap();
+
+    let renamed = load_conversation(&pool, renamed).await.unwrap().unwrap();
+    assert_eq!(renamed.branch, "rate-limiting");
+    assert!(!renamed.naming);
+
+    let left = load_conversation(&pool, left).await.unwrap().unwrap();
+    assert_eq!(
+        left.branch, "brave-otter",
+        "settling for a name is not changing it",
+    );
+    assert!(!left.naming);
+    assert!(
+        !left.branch_named,
+        "settling for a name is not somebody having chosen it either",
+    );
+}
+
+/// And the sidebar row says the same thing, being what draws the title.
+#[tokio::test]
+async fn a_row_says_whether_its_branch_is_still_to_be_named() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/data/worktrees/amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let rows = conversations(&pool).await.unwrap();
+    let row = rows.iter().find(|row| row.id == id).unwrap();
+    assert!(row.naming);
+    assert!(!row.branch_named);
+
+    settle_naming(&pool, id).await.unwrap();
+
+    let rows = conversations(&pool).await.unwrap();
+    assert!(!rows.iter().find(|row| row.id == id).unwrap().naming);
 }
 
 /// Following a session's rename moves the name and leaves whose it is where it

@@ -57,6 +57,7 @@
       "name": "opus"
     }
   },
+  "naming": false,
   "pinned": [],
   "ready_to_continue": false,
   "ready_to_grill": false,

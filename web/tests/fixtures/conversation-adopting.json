@@ -20,6 +20,7 @@
   "grilling_pairing": "Nothing",
   "id": 1,
   "implementation_pairing": null,
+  "naming": false,
   "pinned": [],
   "ready_to_continue": false,
   "ready_to_grill": false,

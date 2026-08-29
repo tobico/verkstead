@@ -20,10 +20,10 @@ rename is still followed as any rename is.
 
 ## Acceptance criteria
 
-- [ ] An auto-named Conversation's first session prompt carries the naming
+- [x] An auto-named Conversation's first session prompt carries the naming
       instruction — grilling, ungrilled build and steered-Draft starts alike —
       and a typed-name Conversation's carries none.
-- [ ] The title reads "Draft" from the start press until the rename lands,
+- [x] The title reads "Draft" from the start press until the rename lands,
       then the new branch name everywhere the branch is the title.
-- [ ] A first session that ends without renaming drops the title to the
+- [x] A first session that ends without renaming drops the title to the
       branch name.

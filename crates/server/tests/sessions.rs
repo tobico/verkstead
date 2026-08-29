@@ -2084,6 +2084,77 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
     );
 }
 
+/// A Conversation is started on a branch name Verkstead invented, so its first
+/// session is told to pick a real one — and the record follows the name it
+/// picks, which is what stops it being called a Draft.
+///
+/// The whole of the loop in one press: the instruction goes out under the Brief,
+/// the session renames the branch in its own worktree, and Verkstead reads the
+/// rename off the checkout rather than being told about it.
+#[tokio::test]
+async fn a_first_session_is_told_to_name_the_branch_and_is_followed_to_the_name() {
+    let fixture = grilling(
+        r#"
+        printf 'prompt=%s' "$2"
+        git branch -m rate-limiting
+        "#,
+    )
+    .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(BRIEF),
+        "the Brief is still what the grilling starts from: {said:?}"
+    );
+    assert!(
+        said.contains("# This branch has no name yet"),
+        "and under it, the one thing to do before anything lands on the branch: {said:?}"
+    );
+
+    let branch = fixture
+        .until(|view| (!view.naming).then(|| view.branch.clone()))
+        .await;
+
+    assert_eq!(
+        branch, "rate-limiting",
+        "the record follows the session to the name it picked",
+    );
+}
+
+/// And a first session that reads the instruction and leaves the name alone
+/// settles it: the name it was given is the Conversation's from then on.
+///
+/// Otherwise the Conversation would read *Draft* for the rest of its life, on
+/// the strength of a session that has been and gone.
+#[tokio::test]
+async fn a_first_session_that_renames_nothing_settles_for_the_name_it_was_given() {
+    let fixture = grilling(r#"printf 'prompt=%s' "$2""#).await;
+
+    let prefilled = fixture.view().await.branch;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("# This branch has no name yet"),
+        "the instruction went out all the same: {said:?}"
+    );
+
+    let branch = fixture
+        .until(|view| (!view.naming).then(|| view.branch.clone()))
+        .await;
+
+    assert_eq!(branch, prefilled, "settling for a name is not changing it",);
+}
+
 /// The terminal a session is on, asked from inside the sandbox.
 ///
 /// Verkstead opens the pair and starts the sandbox on it — see

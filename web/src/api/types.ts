@@ -738,6 +738,21 @@ export type ConversationEntry = { id: number, branch: string,
  */
 branch_named: boolean, 
 /**
+ * And whether the name it is carrying is still the first session's to
+ * replace.
+ *
+ * The work starting is not what makes an invented name worth drawing: the
+ * first session is told to switch the branch to something the Brief is
+ * about, and until it has the name says no more than it did while this was
+ * a draft. So the row goes on reading *Draft* while this is true, and reads
+ * the branch the moment it is not — the session renamed it, or the session
+ * ended and the name it left is the one this is called by.
+ *
+ * Always `false` where the human typed a name: there was never anything to
+ * wait for.
+ */
+naming: boolean, 
+/**
  * What the Repo this Conversation is against is called.
  */
 repo: string, state: Lifecycle, 
@@ -859,6 +874,16 @@ repo: RepoEntry, branch: string,
  * saying what leaving it empty means. The name itself is drawn nowhere.
  */
 branch_named: boolean, 
+/**
+ * And whether the name it is carrying is still the first session's to
+ * replace — see [`ConversationEntry::naming`], which is the same fact drawn
+ * as a title.
+ *
+ * The header keeps reading *Draft* through it, the setup card having gone
+ * by then. What the card would have shown is settled: the branch is cut and
+ * the field is frozen, whatever the name on it turns out to be.
+ */
+naming: boolean, 
 /**
  * The commit the work will branch from, where the human overrode the rule.
  * `null` is the rule itself: the default branch's tip, as it stands when

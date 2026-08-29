@@ -676,6 +676,46 @@ pub(crate) fn alongside(prompt: &str, branch: &str, companions: &[store::Compani
     )
 }
 
+/// And the same prompt once more, with the one instruction the first session of
+/// a Conversation nobody has named gets: pick the branch a name.
+///
+/// A Conversation is started on a name Verkstead invented, because there has to
+/// be a branch to cut and nobody has thought about the work yet. Nothing is
+/// drawn under that name — see the store's `Conversation::naming` — and this is
+/// the other half of that: the session that reads the Brief first is the first
+/// thing in the system that knows what the work is about, so naming the branch
+/// is its job.
+///
+/// Said as an instruction with a reason rather than as a rule, and said last, so
+/// that it is read as the first thing to do rather than as what the session is
+/// for. What it asks for is one `git branch -m` before anything lands on the
+/// branch: a rename with commits already on it works exactly as well, and a
+/// human reading the pull request later sees one name rather than two.
+///
+/// Nothing is asked back. Verkstead reads the rename off the checkout the way it
+/// reads commits — see [`crate::renames`] — so a session that renames has
+/// reported it, and one that leaves the name alone has settled for it.
+///
+/// A branch nobody is waiting on is the prompt unchanged, which is every session
+/// but one: a Conversation the human named had nothing to leave to anybody, and
+/// after the first session the name is the Conversation's whatever it is.
+pub(crate) fn naming(prompt: &str, naming: bool) -> String {
+    if !naming {
+        return prompt.to_owned();
+    }
+
+    format!(
+        "{}\n\n# This branch has no name yet\n\nThe branch this session starts on \
+         carries a name Verkstead invented at random, because the work had not \
+         been read by anybody when it was cut. Switch it to a short kebab-case \
+         name taken from what the Brief above is about — `git branch -m <name>` \
+         in this worktree — before anything lands on it, and carry on. There is \
+         nobody to ask and nothing to report: the rename is read off the \
+         checkout, and the name is left as it is by leaving it alone.\n",
+        prompt.trim_end(),
+    )
+}
+
 /// The body they are all primed with, under whichever opening line names the
 /// skill.
 fn on_the_documents(opening: &str, brief: &str, handoff: Option<&str>) -> String {
@@ -2755,6 +2795,61 @@ mod tests {
             ),
             "and a read-write one is on the branch cut for it, mirroring the \
              Conversation's: {prompt:?}"
+        );
+    }
+
+    /// The first session of a Conversation nobody has named is told to name the
+    /// branch, under whatever it was already being told.
+    #[test]
+    fn the_first_session_of_an_unnamed_conversation_is_told_to_name_the_branch() {
+        let prompt = naming(&grilling("# Rate limiting\n\nThe API has none.\n"), true);
+
+        assert!(
+            prompt.contains("# Rate limiting"),
+            "the Brief is still what the session is being grilled about: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("# This branch has no name yet"),
+            "and under it, the one thing to do first: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("`git branch -m <name>`"),
+            "said as the command that does it, in this worktree: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("kebab-case"),
+            "and the shape of the name to pick: {prompt:?}"
+        );
+    }
+
+    /// And it is told to get on with it rather than to come back about it: a
+    /// rename is read off the checkout, so there is nobody to ask.
+    #[test]
+    fn the_naming_instruction_asks_for_nothing_back() {
+        let prompt = naming(&ungrilled("# Rate limiting\n"), true);
+
+        assert!(
+            prompt.contains("There is nobody to ask and nothing to report"),
+            "the rename reports itself: {prompt:?}"
+        );
+        assert_eq!(
+            prompt.matches("# This branch has no name yet").count(),
+            1,
+            "one instruction, whatever the prompt was built by: {prompt:?}"
+        );
+    }
+
+    /// And a session on a branch nobody is waiting to see named is told nothing
+    /// about it: the human typed the name, or the first session has been and
+    /// gone.
+    #[test]
+    fn a_session_on_a_settled_branch_is_told_nothing_about_naming_it() {
+        let built = implementing("# Rate limiting\n", Some("Use a token bucket.\n"));
+
+        assert_eq!(
+            naming(&built, false),
+            built,
+            "a heading over nothing would tell a session the name was in question",
         );
     }
 

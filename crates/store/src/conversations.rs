@@ -162,6 +162,22 @@ pub struct Conversation {
     /// where it was, so it stands again.
     pub branch_named: bool,
 
+    /// Whether the branch is still waiting to be named by the session that was
+    /// told to name it.
+    ///
+    /// Set where the work starts on a name Verkstead invented, because that is
+    /// where the first session is told to switch to an appropriate one. It says
+    /// nothing about the name itself: what it says is that nobody has settled
+    /// for the one the record holds yet, which is why the Conversation goes on
+    /// being drawn as a Draft after it has stopped being one.
+    ///
+    /// Put down two ways and both of them final: the session renames the branch
+    /// and the record follows it — see [`follow_branch`] — or the session ends
+    /// having left the name alone, and the name it left is the Conversation's.
+    /// Always `false` where the human typed a name, there being nothing to wait
+    /// for.
+    pub naming: bool,
+
     /// The commit to branch from, where the human named one. `None` is not a
     /// missing value: it is the rule that the default branch's tip at grill
     /// start is what gets used, which is a thing to resolve then rather than a
@@ -247,6 +263,14 @@ pub struct ConversationRow {
     /// [`Conversation::branch_named`], which is the same fact about the same
     /// record.
     pub branch_named: bool,
+
+    /// And whether the name it is carrying is still the first session's to
+    /// replace — see [`Conversation::naming`], which is the same fact about the
+    /// same record.
+    ///
+    /// What keeps the row reading *Draft* through the first minutes of the work,
+    /// and what stops it reading that for ever.
+    pub naming: bool,
 
     /// What the Repo is called, which is the only thing about it a row shows.
     pub repo: String,
@@ -810,6 +834,10 @@ pub enum Closing {
 /// Verkstead prefilled it with, and `named_branch` the one somebody settled on
 /// where anybody has. Which is why handing a name back is the prefill standing
 /// again rather than another name invented — see [`Conversation::branch_named`].
+///
+/// And a third column beside them for the stretch between: `naming` says the
+/// work has started on a name Verkstead invented and the first session has been
+/// told to pick a real one — see [`Conversation::naming`].
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS conversations (
@@ -818,6 +846,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              created_at                TEXT NOT NULL,
              branch                    TEXT NOT NULL,
              named_branch              TEXT,
+             naming                    INTEGER NOT NULL DEFAULT 0,
              base_commit               TEXT,
              state                     TEXT NOT NULL,
              grilling_profile_id       INTEGER REFERENCES profiles(id),
@@ -1268,11 +1297,12 @@ async fn started(
 /// the sidebar should ever be read.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     /// The columns in the order the query below selects them.
-    type Row = (i64, String, bool, String, String, bool, bool, bool);
+    type Row = (i64, String, bool, bool, String, String, bool, bool, bool);
 
     let rows: Vec<Row> = sqlx::query_as(&format!(
         "SELECT c.id, COALESCE(c.named_branch, c.branch),
                 c.named_branch IS NOT NULL AS branch_named,
+                c.naming,
                 r.name, c.state,
                 c.state NOT IN ('draft', 'closed') AND (
                     EXISTS (
@@ -1321,11 +1351,22 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
 
     rows.into_iter()
         .map(
-            |(id, branch, branch_named, repo, state, waiting, narrowed_to_checks, unseen)| {
+            |(
+                id,
+                branch,
+                branch_named,
+                naming,
+                repo,
+                state,
+                waiting,
+                narrowed_to_checks,
+                unseen,
+            )| {
                 Ok(ConversationRow {
                     id,
                     branch,
                     branch_named,
+                    naming,
                     repo,
                     state: Lifecycle::read(&state)?,
                     waiting,
@@ -1350,6 +1391,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         String,
         String,
         bool,
+        bool,
         Option<String>,
         String,
         Option<i64>,
@@ -1365,6 +1407,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         "SELECT c.id, c.created_at,
                 COALESCE(c.named_branch, c.branch),
                 c.named_branch IS NOT NULL AS branch_named,
+                c.naming,
                 c.base_commit, c.state,
                 c.grilling_profile_id, c.implementation_profile_id,
                 c.review_profile_id,
@@ -1383,6 +1426,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         created_at,
         branch,
         branch_named,
+        naming,
         base_commit,
         state,
         grilling_profile_id,
@@ -1408,6 +1452,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         },
         branch,
         branch_named,
+        naming,
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
         state: Lifecycle::read(&state)?,
         grilling_pairing: picked(pool, id, Role::Grilling, grilling_profile_id).await?,
@@ -2384,6 +2429,28 @@ pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: Option<&str>) -> 
     Ok(Edited::Saved)
 }
 
+/// Settle for the branch name a Conversation is carrying, the session that was
+/// told to replace it having ended without doing so.
+///
+/// The other end of the naming instruction, and the one that has to be there:
+/// without it a session that read the instruction and left the name alone would
+/// leave the Conversation reading *Draft* for the rest of its life. What it
+/// settles is nothing about the name — whose it is and what it is are both
+/// exactly what they were — only that nobody is waiting for another one.
+///
+/// Written after every session rather than after the first, because the first is
+/// the only one it can ever find anything to write: nothing sets this but the
+/// start of the work — see [`Conversation::naming`].
+pub async fn settle_naming(pool: &SqlitePool, id: i64) -> Result<()> {
+    sqlx::query("UPDATE conversations SET naming = 0 WHERE id = ? AND naming = 1")
+        .bind(id)
+        .execute(pool)
+        .await
+        .with_context(|| format!("settling for the branch name of Conversation {id}"))?;
+
+    Ok(())
+}
+
 /// The branch a Conversation's work is on right now, and nothing else about it.
 ///
 /// [`load_conversation`] answers this too, along with everything else a
@@ -2417,11 +2484,18 @@ pub async fn conversation_branch(pool: &SqlitePool, id: i64) -> Result<Option<St
 /// name Verkstead invented is still on one Verkstead is responsible for after a
 /// session picked a better one, and one the human typed is still theirs; what
 /// moves is the name itself, in whichever of the two columns is holding it.
+///
+/// What does end here is the waiting. A rename is the answer to the naming
+/// instruction, so a Conversation still holding one is done holding it and the
+/// name it has just moved to is what it is called from now on — see
+/// [`Conversation::naming`]. A rename nobody was waiting for writes the same
+/// nothing over the nothing already there.
 pub async fn follow_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<()> {
     sqlx::query(
         "UPDATE conversations
          SET branch = ?,
-             named_branch = CASE WHEN named_branch IS NULL THEN NULL ELSE ? END
+             named_branch = CASE WHEN named_branch IS NULL THEN NULL ELSE ? END,
+             naming = 0
          WHERE id = ?",
     )
     .bind(branch)
@@ -2611,9 +2685,14 @@ async fn start(
         return Ok(Grilling::NotDrafting);
     }
 
+    // And whether the branch still has to be named, which is settled by the same
+    // press for the same reason the base commit is: the name Verkstead invented
+    // was a prefill while this was a Draft and is the branch the work is on from
+    // here, so this is the moment the first session inherits the job of picking
+    // a better one. A Conversation the human named has nothing to wait for.
     sqlx::query(
         "UPDATE conversations
-         SET base_commit = ?, state = ?
+         SET base_commit = ?, state = ?, naming = (named_branch IS NULL)
          WHERE id = ?",
     )
     .bind(base_commit)
@@ -3083,6 +3162,29 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         .execute(&mut *tx)
         .await
         .with_context(|| format!("saying what a steer of Conversation {id} took in"))?;
+    }
+
+    // Before the move rather than after it, because what it asks about is where
+    // the steer found the Conversation. A Draft steered into a state something
+    // runs in is work starting on a branch nobody has named, exactly as a grill
+    // start is — so its first session is the one told to name it. Every other
+    // source has had its first session already, whatever its branch ended up
+    // being called.
+    //
+    // Into Done it is not asked at all: nothing is started there, so nothing
+    // would ever be along to answer it and the Conversation would read *Draft*
+    // for the rest of its life. What it is called is the name its branch was cut
+    // on, which is the only name it is ever going to have.
+    if target != Lifecycle::Done {
+        sqlx::query(
+            "UPDATE conversations SET naming = (named_branch IS NULL)
+             WHERE id = ? AND state = ?",
+        )
+        .bind(id)
+        .bind(Lifecycle::Draft.stored())
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("leaving the branch of Conversation {id} to be named"))?;
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")

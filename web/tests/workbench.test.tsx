@@ -847,6 +847,25 @@ describe("how a card says where its conversation has got to", () => {
     ).toEqual(["Draft, verkstead", "rate-limiting, verkstead, Draft"]);
   });
 
+  /// And the Draft carries past the draft. Starting the work is not what makes
+  /// an invented name worth reading: the first session is told to replace it, so
+  /// the row goes on saying Draft until somebody has settled the name — by
+  /// renaming the branch, or by the session ending and leaving it.
+  it("keeps calling work on an unnamed branch a draft while it is being named", async () => {
+    theSidebar(
+      { branch: "amber-kestrel", branch_named: false, naming: true, state: "Grilling" },
+      { branch: "brave-otter", branch_named: false, naming: false, state: "Grilling" },
+      { branch: "rate-limiting", branch_named: true, naming: false, state: "Implementing" },
+    );
+    const { container } = mount();
+    const rows = await cards(container);
+
+    expect(
+      rows.map((card) => card.querySelector(`.${sidebar.title}`)!.textContent),
+    ).toEqual([DRAFT, "brave-otter", "rate-limiting"]);
+    expect(container.textContent).not.toContain("amber-kestrel");
+  });
+
   /// Which of the two it was is the details pane's to say. The sidebar's business
   /// is that there is nothing here to do.
   it("dims finished and closed work identically", async () => {
@@ -2498,6 +2517,42 @@ describe("a conversation's setup", () => {
     const pane = container.querySelector(`.${shell.timelinePane}`)!;
     expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(DRAFT);
     expect(pane.textContent).not.toContain(OPEN.branch);
+  });
+
+  /// And the header goes on saying it once the work has started, for as long as
+  /// the name is the first session's to replace. The card has gone by then, so
+  /// there is no field left to say anything about — only the title.
+  it("heads the pane Draft until the branch has been named", async () => {
+    theWorkbenchWith({
+      branch_named: false,
+      naming: true,
+      state: "Grilling",
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const pane = container.querySelector(`.${shell.timelinePane}`)!;
+    await waitFor(() =>
+      expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(DRAFT),
+    );
+    expect(pane.textContent).not.toContain(OPEN.branch);
+  });
+
+  /// And says the branch the moment nobody is waiting on the name — the session
+  /// renamed it, or ended and left it. Nothing reads Draft for ever.
+  it("heads the pane with the branch once the naming is over", async () => {
+    theWorkbenchWith({
+      branch_named: false,
+      naming: false,
+      state: "Grilling",
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const pane = container.querySelector(`.${shell.timelinePane}`)!;
+    await waitFor(() =>
+      expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(
+        OPEN.branch,
+      ),
+    );
   });
 
   /// And emptying it hands the name back, which is a rename like any other: the
