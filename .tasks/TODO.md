@@ -14,7 +14,7 @@ each task file carries the decisions its slice needs.
 
 ## Tasks
 
-- [ ] 01: Known models constant and the profile model picker — [details](01-known-models.md)
+- [x] 01: Known models constant and the profile model picker — [details](01-known-models.md)
 - [ ] 02: The waiting fold on ConversationView — [details](02-waiting-fold.md)
 - [ ] 03: The running session's pairing on the record — [details](03-session-pairing.md)
 - [ ] 04: The StatusButton — [details](04-status-button.md)
