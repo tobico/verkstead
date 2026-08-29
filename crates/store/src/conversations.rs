@@ -1370,6 +1370,97 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
     }))
 }
 
+/// Everything closing a Conversation needs to know about it, and nothing else.
+///
+/// Which is: that there is one, and where every directory it was given to work
+/// in stands. The state it is in does not come into it — closing is reachable
+/// from all of them — and neither does the direction, the pairings, the base
+/// commit or a companion's mode.
+///
+/// See [`closable`] for why that is a read of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Closable {
+    /// The Repo the worktree below was cut from, which is the directory git is
+    /// asked to remove it from.
+    pub repo: std::path::PathBuf,
+
+    /// And the worktree, where grilling has made one.
+    pub worktree: Option<std::path::PathBuf>,
+
+    /// The same pair again for every companion, plus what the Repo is called —
+    /// a worktree that will not go is logged, and a log naming a path and no
+    /// repository is a line nobody can act on.
+    pub companions: Vec<ClosableCompanion>,
+}
+
+/// One companion of a [`Closable`]: where its repository is, what it is called,
+/// and the directory it was checked out into.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClosableCompanion {
+    pub repo: std::path::PathBuf,
+    pub name: String,
+    pub worktree: Option<std::path::PathBuf>,
+}
+
+/// The same Conversation [`load_conversation`] reads, cut down to what a close
+/// acts on — and read without parsing a single stored word.
+///
+/// A sibling read rather than a flag on the other one, because the difference
+/// is not how much is fetched but what it is allowed to refuse. The full read
+/// parses the state, the direction and each companion's mode, and any of the
+/// three going bad takes the close with it — which is exactly backwards: a
+/// Conversation whose record has gone strange is the one a human most needs to
+/// be able to end. This one has nothing to parse, so there is nothing in it to
+/// refuse but a Conversation that is not there.
+///
+/// Every other reader still goes through [`load_conversation`], and should: a
+/// reader that is going to *act* on the state wants to be told the word is bad
+/// rather than handed a guess.
+pub async fn closable(pool: &SqlitePool, id: i64) -> Result<Option<Closable>> {
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT r.path, w.path
+         FROM conversations c
+         JOIN repos r ON r.id = c.repo_id
+         LEFT JOIN worktrees w ON w.conversation_id = c.id
+         WHERE c.id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading what closing Conversation {id} would remove"))?;
+
+    let Some((repo, worktree)) = row else {
+        return Ok(None);
+    };
+
+    let companions: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT r.path, r.name, w.path
+         FROM companions c
+         JOIN repos r ON r.id = c.repo_id
+         LEFT JOIN companion_worktrees w
+                ON w.conversation_id = c.conversation_id AND w.repo_id = c.repo_id
+         WHERE c.conversation_id = ?
+         ORDER BY r.name, r.id",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading the companion checkouts of Conversation {id}"))?;
+
+    Ok(Some(Closable {
+        repo: std::path::PathBuf::from(repo),
+        worktree: worktree.map(std::path::PathBuf::from),
+        companions: companions
+            .into_iter()
+            .map(|(repo, name, worktree)| ClosableCompanion {
+                repo: std::path::PathBuf::from(repo),
+                name,
+                worktree: worktree.map(std::path::PathBuf::from),
+            })
+            .collect(),
+    }))
+}
+
 /// One of a Conversation's two Pairings: the Profile its column names, and the
 /// model paired with it where one was.
 ///
