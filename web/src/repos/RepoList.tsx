@@ -463,8 +463,13 @@ export function RepoPane(props: {
       }
 
       // The list behind the pane is now out of date — the repo appearing on it
-      // is the whole of the confirmation.
+      // is the whole of the confirmation. And the roadmaps waiting go with it,
+      // as they do when a repo is removed: they are read off whatever is
+      // registered, so a repository arriving with an unadopted roadmap in it has
+      // something to offer the moment it lands — and registering a path that was
+      // taken away brings a whole repository's worth back at once.
       void queries.invalidateQueries({ queryKey: ["repos"] });
+      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
       props.done();
     },
   }));

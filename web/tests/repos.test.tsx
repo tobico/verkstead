@@ -55,13 +55,17 @@ function client(): QueryClient {
 
 /// Whichever half of the section a test is about, over one query client: both
 /// halves read the same list, so a test mounting the pair reads it once, exactly
-/// as the page does.
+/// as the page does. The client comes back with it, for the tests that are about
+/// what a write leaves out of date rather than about what is drawn.
 function mounting(what: () => JSX.Element) {
   const queries = client();
 
-  return render(() => (
-    <QueryClientProvider client={queries}>{what()}</QueryClientProvider>
-  ));
+  return {
+    ...render(() => (
+      <QueryClientProvider client={queries}>{what()}</QueryClientProvider>
+    )),
+    queries,
+  };
 }
 
 /// The cards in the middle pane, and what pressing one of them — or the plus
@@ -555,6 +559,25 @@ describe("the pane the plus opens", () => {
     register("/srv/repos/verkstead");
 
     await waitFor(() => expect(done).toHaveBeenCalled());
+  });
+
+  /// And the roadmaps waiting are read again with the list, as they are when a
+  /// repo is removed. The offers are drawn from whatever is registered, in the
+  /// conversations pane standing right beside this one — so a repository
+  /// arriving with an unadopted roadmap in it, or a taken-away path registered
+  /// again, has something to offer the moment it lands.
+  it("reads the roadmap offers again with the list", async () => {
+    theRepos(json("Added"));
+    const { queries, done } = mountPane();
+    const invalidated = vi.spyOn(queries, "invalidateQueries");
+
+    register("/srv/repos/verkstead");
+
+    await waitFor(() => expect(done).toHaveBeenCalled());
+    expect(invalidated).toHaveBeenCalledWith({ queryKey: ["repos"] });
+    expect(invalidated).toHaveBeenCalledWith({
+      queryKey: ["abandoned-roadmaps"],
+    });
   });
 
   /// Every way the server can turn a path away, each said in its own words: a
