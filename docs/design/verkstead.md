@@ -618,8 +618,10 @@ Timeline events:
   settings-redesign*): a menu of one way out and one switch is a press with a
   press in front of it, and the gear is the same kind of thing the cards below
   it are — something in this pane that is selected and opened into the pane
-  beside it. The ⋯ at the head of a Conversation's timeline is a different menu
-  and stays.
+  beside it. The ⋯ at the head of a Conversation's timeline went the same way in
+  the end, into the status button under the title: what there is to do about a
+  Conversation is reached from the thing that says what it is doing (*settled
+  2026-08-30, building status-button*).
 - **Push notifications** for needs-you — a blocking question set, a stop
   Verkstead decided on, an exhausted usage window among them — **and
   milestones** (PR opened, stage complete, conversation done). A stop nobody

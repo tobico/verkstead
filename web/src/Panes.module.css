@@ -199,13 +199,13 @@
   background: var(--paper);
 }
 
-/* Chrome inside the chrome — the timeline's header, wrapped with the pinned
-   block below it — takes the layer over what it is wrapped with. That is what
-   lets its ⋯ menu come down over the pinned items rather than behind them,
-   where it could not be pressed. The layer belongs to the header rather than to
-   the menu that wanted it: everything the header ever hangs underneath itself
-   is over the pinned block by being part of the header, and the next thing hung
-   there needs no rule of its own. */
+/* Chrome inside the chrome — the timeline's header, wrapped with the status
+   button and the pinned block below it — takes the layer over what it is
+   wrapped with, so that anything the header hangs underneath itself comes down
+   over what follows it rather than behind it, where it could not be pressed.
+   The layer belongs to the header rather than to whatever wanted it, which is
+   why it outlived the ⋯ that did: the menu the status button drops is a
+   positioned card of its own and clears the pinned items on its own account. */
 .paneChrome > .paneChrome {
   position: relative;
   z-index: 1;

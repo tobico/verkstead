@@ -1,6 +1,6 @@
 //! What can be done to a Conversation as a whole, rather than to any one event:
-//! the rows behind the ⋯ at the head of the Conversation pane, and the same rows
-//! under the pointer on a card in the sidebar.
+//! the rows behind the status button at the head of the Conversation pane, and
+//! the same rows under the pointer on a card in the sidebar.
 //!
 //! A menu rather than three buttons, because the last of them throws a worktree
 //! away and a pane header is somewhere the human's cursor passes on the way to
@@ -31,7 +31,7 @@
 //! drawn. What is left for whoever is debugging is a `console.error`, which is
 //! where a thing nobody is meant to see belongs.
 //!
-//! Two menus and one set of rows. The pane's ⋯ is about the Conversation that is
+//! Two menus and one set of rows. The pane's is about the Conversation that is
 //! open, and the sidebar's right-click is about the card under the pointer,
 //! which is very often a different one — but *what there is to do about a
 //! Conversation* does not depend on which of the two asked. So the presses live
@@ -41,8 +41,8 @@
 //!
 //! The sidebar's is a pointer affordance and nothing else. A touch device has no
 //! right-click, and a long press on a card there already picks it up to be
-//! dragged — so on a phone this menu simply is not there, and the ⋯ on the
-//! Conversation is the way to all of it.
+//! dragged — so on a phone this menu simply is not there, and the status button
+//! on the Conversation is the way to all of it.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
@@ -448,19 +448,35 @@ function actions(): {
   };
 }
 
-/// The ⋯ at the head of the Conversation pane: what there is to do about the
+/// The menu at the head of the Conversation pane: what there is to do about the
 /// Conversation that is open.
-export function Actions(props: { conversation: ConversationView }): JSX.Element {
+///
+/// The trigger is the caller's, which is the one thing that makes this menu
+/// different from every other one at the head of a pane. What drops it is the
+/// StatusButton — a two-line button saying where the work stands — so the mark
+/// and the paint that the menu draws for a ⋯ would both be in the way, and the
+/// caller hands in what its trigger reads as and a class to paint it by.
+///
+/// The class is handed to the anchor *beside* this menu's own, rather than in
+/// place of it: what the card the rows come down as looks like belongs with the
+/// rows, and it is the same card the sidebar's right-click drops.
+export function Actions(props: {
+  conversation: ConversationView;
+  /// What the button reads as, which is the whole of the caller's half.
+  trigger: JSX.Element;
+  /// And the caller's class on the anchor, for painting that button. Styled by
+  /// whoever passes it, never here.
+  class: string;
+}): JSX.Element {
   const acts = actions();
 
   return (
     <>
       <Menu
-        class={styles.conversationActions!}
-        label="Conversation actions"
+        class={`${styles.conversationActions!} ${props.class}`}
         name="Conversation actions"
         closer={acts.closes}
-        mark
+        trigger={props.trigger}
       >
         {() => acts.rows(() => props.conversation)}
       </Menu>

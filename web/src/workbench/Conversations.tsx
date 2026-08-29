@@ -27,8 +27,8 @@
 //! restart and a second device without any of the three being a case.
 //!
 //! A card also answers a right-click with what there is to do about the
-//! Conversation it stands for — the same rows the ⋯ at the head of the
-//! Conversation pane would offer it, drawn by the same component and acting on
+//! Conversation it stands for — the same rows the status button at the head of
+//! the Conversation pane offers, drawn by the same component and acting on
 //! the card that was pressed rather than on whatever is open. Both menus are
 //! `Actions.tsx`, which is where the rows and everything behind them live.
 //!

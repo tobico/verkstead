@@ -119,7 +119,6 @@ import { followBottom } from "../scrolling";
 // from the page that draws the whole record rather than kept a second time
 // here: the row and the page are one record read at two distances.
 import unreadable from "../set/Unreadable.module.css";
-import { Actions } from "./Actions";
 import { Adoption } from "./Adoption";
 import { Checks } from "./Checks";
 import { Mark } from "./Mark";
@@ -129,11 +128,11 @@ import { Mark } from "./Mark";
 import marks from "./Mark.module.css";
 import { PaneHead } from "./PaneHead";
 import { Setup } from "./Setup";
+import { StatusButton, running } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import shell from "../Panes.module.css";
-import { WAITING_ON_CHECKS } from "./conditions";
 import { titled } from "./naming";
-import { ENDED, STATE } from "./states";
+import { STATE } from "./states";
 import { opensRoadmap, type Opening } from "./openings";
 import { keeping } from "./settling";
 import { windowed } from "./windowing";
@@ -359,19 +358,10 @@ export function Timeline(props: {
   selected: Opening | null;
   select: (opening: Opening) => void;
 }): JSX.Element {
-  /// The session running now, where there is one: the last output on the record
-  /// that is still being written to. The last, because a Conversation runs one
-  /// session at a time — a record is a column of finished sessions with at most
-  /// one live one at the end of it.
-  const live = createMemo(() =>
-    props.conversation.timeline
-      .flatMap((event) =>
-        "AgentOutput" in event && event.AgentOutput.running
-          ? [event.AgentOutput]
-          : [],
-      )
-      .at(-1),
-  );
+  /// The session running now, where there is one — folded in
+  /// `StatusButton.tsx`, which is the other place on this pane that says what
+  /// is running and the one that says it first.
+  const live = createMemo(() => running(props.conversation));
 
   /// The record itself, which is what says which box this pane scrolls in: a
   /// column of the page below the first breakpoint, and the pane above it.
@@ -416,81 +406,6 @@ export function Timeline(props: {
           back={{ to: "Conversations", go: props.back }}
           title={titled(props.conversation)}
         >
-          {/* Where the work got to, for the two states it stops at: a Done
-              conversation says *Done* and a closed one says *Closed*, beside
-              the branch they are named for.
-
-              Only those two. A state on the way up the ladder is what a
-              conversation is doing right now, and the record under the header
-              is that answer at length — a word repeating it would be chrome
-              earning nothing. An ended one has no record still being written,
-              so the last move is the bottom of a long scroll and the one glance
-              that answers *is this finished?* has nowhere else to land.
-
-              A plain word and nothing to press: unlike the marks below it there
-              is no one event this stands for, and nowhere it could send
-              anybody. */}
-          <Show when={ENDED.has(props.conversation.state)}>
-            <span class={styles.ended}>
-              {STATE[props.conversation.state]}
-            </span>
-          </Show>
-          {/* What the work has stopped on, said where the conversation is named
-              rather than only down in the list: a timeline is long by the time a
-              run gets far enough to stop, and a mark the human had to go
-              hunting behind would not be one. It points at the event that
-              stopped it, which is what makes it worth pressing.
-
-              Which is one kind of event now: whatever stopped a run — a session
-              that fell over, a press, an account out of window — the mark goes
-              to the notice saying so, where it stands in the record. There is
-              nothing behind a pane for it, so a narrow window stays on the
-              record rather than being sent away from the very thing there is to
-              read.
-
-              Two marks over the one event, and which it is comes off the wire
-              rather than being weighed here. A stop that happened without the
-              human is loud: `Blocked on you`, in the accent, because it is the
-              one they have to go and look at. A stop they pressed themselves is
-              quiet: `Stopped`, drawn as the condition beside it is, because
-              they were there — the word is worth reading and there is nothing
-              to shout about. Both go to the same place. */}
-          <Show when={props.conversation.blocked_on}>
-            {(event) => (
-              <button
-                type="button"
-                class={
-                  props.conversation.stopped_by_hand
-                    ? styles.stopped
-                    : styles.blocked
-                }
-                // Whatever stopped it, the badge goes to the whole of it: a
-                // held session opens its screen, and the notice that says what
-                // stopped a run opens the notice. There was a case here for
-                // the one event that had no pane behind it, and a notice has
-                // one now.
-                onClick={() => {
-                  props.select(event());
-                  props.details();
-                }}
-              >
-                {props.conversation.stopped_by_hand
-                  ? "Stopped"
-                  : "Blocked on you"}
-              </button>
-            )}
-          </Show>
-          {/* And what a wrap-up has narrowed to, in the same place and drawn
-              far more quietly: the review is answered, nothing said on the pull
-              request is left unaddressed, and the checks going green is all
-              that is left. A label rather than a control — there is nothing to
-              press and nowhere to go, the checks being GitHub's to finish — and
-              a condition of Wrapping rather than a state, which is why it is
-              drawn beside the branch and never in place of it. */}
-          <Show when={props.conversation.waiting_on_checks}>
-            <span class={styles.waitingOnChecks}>{WAITING_ON_CHECKS}</span>
-          </Show>
-          <Actions conversation={props.conversation} />
           {/* And the way on to the next level, drawn only where there is a next
               level to reach: the details pane holds the selected Event and
               nothing else, so with nothing selected it is bare paper and a
@@ -506,6 +421,13 @@ export function Timeline(props: {
             </button>
           </Show>
         </PaneHead>
+
+        {/* And under the title, where the eye lands: where the work stands,
+            what is running in it, and behind its press everything there is to
+            do about it. Above the pinned cards because it is about the
+            Conversation rather than about anything the work is against, and
+            inside the same block so that it stays in view with them. */}
+        <StatusButton conversation={props.conversation} />
 
         <Pinned
           conversation={props.conversation}
@@ -1556,11 +1478,11 @@ function Handoff(props: {
 /// prose around it. Which is also why it is an `Openable`: a link inside a
 /// button is not something a browser will have.
 ///
-/// Marked while it is what the conversation is blocked on, which is the whole of
-/// what the badge above does: a timeline is long by the time a run stops, and
-/// the badge is how the notice that stopped it is found. Read off `blocked_on`
-/// rather than off being the open one, because the two say different things
-/// now — a notice being read is not a notice the work stopped at.
+/// Marked while it is what the conversation is blocked on, which is now the
+/// whole of how a stop is found on the record: the status button says the work
+/// has stopped and the mark says where. Read off `blocked_on` rather than off
+/// being the open one, because the two say different things — a notice being
+/// read is not a notice the work stopped at.
 function Notice(props: {
   notice: NoticeEvent;
   blocked: boolean;

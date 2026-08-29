@@ -141,11 +141,19 @@ import screenCss from "../src/workbench/Screen.module.css?raw";
 // What a Conversation is called where nobody has named its branch, which the
 // sidebar and the pane header are both drawn with.
 import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
+// The words a lifecycle state is said in, which the status button draws beside
+// the status and the sidebar's row reads aloud.
+import { STATE } from "../src/workbench/states";
 // And the timeline, both ways again: it is the biggest of these, and a good
 // deal of what it says about a card is a rule rather than an element.
 // What is still the human's to settle on the brief card.
 import setup from "../src/workbench/Setup.module.css";
 import steerModal from "../src/workbench/Steer.module.css";
+// The status button at the head of the Conversation pane, both ways: the hashed
+// names its two lines are queried by, and the source of the paint that says
+// which of them is in the accent.
+import statusButton from "../src/workbench/StatusButton.module.css";
+import statusButtonCss from "../src/workbench/StatusButton.module.css?raw";
 import timeline from "../src/workbench/Timeline.module.css";
 import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // And the frame the three panes stand in, both ways: it holds the layout rules
@@ -315,6 +323,37 @@ function unopened(conversation: { id: number }): string {
 async function openActions(container: ParentNode): Promise<HTMLElement> {
   fireEvent.click(await drawn(container, `.${actions.conversationActions} > .${dropdown.trigger}`));
   return drawn(container, `.${actions.conversationActions} > .${dropdown.drop}`);
+}
+
+/// The status button's first line, in its two parts: the status word and the
+/// state understated beside it.
+///
+/// Where there is no status word to say — a Draft, a Done or a Closed
+/// conversation — the state takes the bold and stands alone, so `word` is the
+/// state and `state` is `null`. Which is a fact worth reading off the two
+/// elements rather than off one string: they are drawn differently on purpose.
+async function standing(container: ParentNode): Promise<{
+  word: string | null;
+  state: string | null;
+  attention: boolean;
+}> {
+  const line = await drawn(
+    container,
+    `.${statusButton.status} .${statusButton.standing}`,
+  );
+
+  return {
+    word: line.querySelector(`.${statusButton.title}`)?.textContent ?? null,
+    state: line.querySelector(`.${statusButton.state}`)?.textContent ?? null,
+    attention: line.classList.contains(statusButton.attention!),
+  };
+}
+
+/// And its second line: what is running, or what there is instead of one.
+async function saidRunning(container: ParentNode): Promise<string | null> {
+  return (
+    await drawn(container, `.${statusButton.status} .${statusButton.agent}`)
+  ).textContent;
 }
 
 /// The gear at the head of the sidebar, which is what the rest of Verkstead is
@@ -6118,14 +6157,16 @@ describe("putting something into a live session's screen", () => {
 
     expect(container.querySelector('[class*="handBack"]')).toBeNull();
     expect(
-      container.querySelector(`.${shell.middlePane} .${timeline.blocked}`),
-    ).toBeNull();
+      (await drawn(container, `.${shell.middlePane} .${statusButton.standing}`))
+        .textContent,
+    ).not.toContain("Blocked");
   });
 });
 
 describe("closing a conversation", () => {
-  /// Behind a menu on the header, because it throws a worktree away and the
-  /// header is somewhere the cursor passes on the way to everything else.
+  /// Behind a menu at the head of the pane, because it throws a worktree away
+  /// and the head of the pane is somewhere the cursor passes on the way to
+  /// everything else.
   it("is not one click away", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -6138,9 +6179,9 @@ describe("closing a conversation", () => {
 
     const menu = await openActions(container);
     expect(menu.querySelector(`.${actions.close}`)).toBeTruthy();
-    expect(container.querySelector(`.${paneHead.head} .${actions.close}`)).toBe(
-      menu.querySelector(`.${actions.close}`),
-    );
+    expect(
+      container.querySelector(`.${statusButton.status} .${actions.close}`),
+    ).toBe(menu.querySelector(`.${actions.close}`));
   });
 
   it("posts to the conversation's own close route", async () => {
@@ -10286,10 +10327,11 @@ function thePaused(
 }
 
 describe("a run stopped because an account ran out of window", () => {
-  /// One stopped shape: the notice saying what stopped and why, the badge
-  /// pointing at it, and the one Resume at the foot of the timeline. The same
-  /// three things a run stopped by a press draws — see the stop above.
-  it("draws the card, the badge and the button every stop draws", async () => {
+  /// One stopped shape: the notice saying what stopped and why, the status
+  /// button saying the work is waiting on the human, and the one Resume at the
+  /// foot of the timeline. The same three things a run stopped by a press
+  /// draws — see the stop above.
+  it("draws the card, the status and the button every stop draws", async () => {
     thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);
 
@@ -10304,9 +10346,9 @@ describe("a run stopped because an account ran out of window", () => {
     expect(notice!.textContent).toContain("is out of window");
 
 
-    expect((await drawn(container, `.${timeline.blocked}`)).textContent).toBe(
-      "Blocked on you",
-    );
+    expect(
+      (await drawn(container, `.${statusButton.standing}`)).textContent,
+    ).toContain("Waiting on you");
     expect(
       (await drawn(container, `.${timeline.resume} .${timeline.resumeConversation}`)).textContent,
     ).toBe("Resume");
@@ -10373,7 +10415,9 @@ describe("a run stopped because an account ran out of window", () => {
       expect(notice.querySelector("button")).toBeNull();
     }
 
-    fireEvent.click(await drawn(container, `.${timeline.blocked}`));
+    fireEvent.click(
+      await drawn(container, `.${statusButton.status} > .${dropdown.trigger}`),
+    );
 
     await waitFor(() =>
       expect(
@@ -10384,26 +10428,23 @@ describe("a run stopped because an account ran out of window", () => {
     );
   });
 
-  /// The badge opens the notice, as it opens whatever else a run stopped at:
-  /// a notice has a details pane behind it now, and the whole of what a stop
-  /// had to say is in it.
-  it("opens the notice it is blocked on", async () => {
+  /// The badge that pointed at the notice used to be the way to it, and the
+  /// press that took over its place does something else: the status button
+  /// opens what there is to *do* about the stop. The jump was dropped rather
+  /// than moved — the notice is on the record, the record opens at its end, and
+  /// a stop wrote nothing after the notice saying so.
+  it("says the stop without sending anybody anywhere", async () => {
     thePaused();
-    const { container } = mount(`/conversations/${WAITING.id}`);
+    const { container } = mount(unopened(WAITING));
 
-    fireEvent.click(await drawn(container, `.${timeline.blocked}`));
-
-    const marked = await drawn(
-      container,
-      `.${timeline.timeline} .${timeline.notice}.${pressable.open}`,
+    fireEvent.click(
+      await drawn(container, `.${statusButton.status} > .${dropdown.trigger}`),
     );
 
-    expect(marked.textContent).toContain("Implementing the work");
-    await waitFor(() => expect(frame(container).dataset.pane).toBe("details"));
+    await drawn(container, `.${statusButton.status} > .${dropdown.drop}`);
     expect(
-      (await drawn(container, `.${shell.detailsPane} .${paneHead.head} h1`))
-        .textContent,
-    ).toBe("Notice");
+      container.querySelector(`.${timeline.notice}.${pressable.open}`),
+    ).toBeNull();
   });
 
   /// And it is marked where it stands as well, whether or not it is the one
@@ -10430,69 +10471,180 @@ describe("a run stopped because an account ran out of window", () => {
   });
 });
 
-describe("a conversation blocked on the human", () => {
-  it("says so where the conversation is named", async () => {
+/// The one place the Conversation pane says where the work stands: a two-line
+/// button in the sticky block under the title, and behind its press everything
+/// there is to do about the Conversation.
+///
+/// It replaced five pieces of chrome that had each been put where there was
+/// room for it — a Done/Closed word, a *Blocked on you* badge, a *Waiting on
+/// checks* label and the ⋯ that hid the actions — so what is asked here is that
+/// there is one of it, that it is where the eye lands, and that the press that
+/// used to be a mark at the end of the header row is the whole button now.
+describe("the status button", () => {
+  it("stands in the sticky chrome, under the title and over the pinned cards", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const button = await drawn(container, `.${statusButton.status}`);
+    const chrome = button.parentElement!;
+
+    expect(chrome.classList).toContain(shell.paneChrome);
+
+    const inside = [...chrome.children];
+    expect(inside.indexOf(chrome.querySelector(`.${paneHead.head}`)!)).toBeLessThan(
+      inside.indexOf(button),
+    );
+    expect(inside.indexOf(button)).toBeLessThan(
+      inside.indexOf(chrome.querySelector(`.${timeline.pinned}`)!),
+    );
+  });
+
+  /// The press is the whole button rather than a mark at the end of a row,
+  /// which is the point of the move: what there is to do about a Conversation
+  /// is reached from the thing that says what it is doing.
+  it("opens the conversation's actions when it is pressed", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${statusButton.status} > .${dropdown.trigger}`),
+    );
+
+    const menu = await drawn(
+      container,
+      `.${statusButton.status} > .${dropdown.drop}`,
+    );
+
+    expect(menu.querySelector(`.${actions.steer}`)).toBeTruthy();
+  });
+
+  /// And says so, in the mark every other thing that drops a menu says it in.
+  it("carries the chevron that says it opens", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const mark = await drawn(
+      container,
+      `.${statusButton.status} > .${dropdown.trigger} .${statusButton.mark}`,
+    );
+
+    expect(mark.tagName).toBe("svg");
+    // A mark rather than a word, and no part of what the button says.
+    expect(mark.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("leaves the pane no ⋯ of its own", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${statusButton.status}`);
+
+    expect(
+      container.querySelector(`.${shell.middlePane} .${dropdown.mark}`),
+    ).toBeNull();
+  });
+
+  /// The second line: the Profile and the model the session was launched under,
+  /// off the record rather than off the Pairing the Conversation is configured
+  /// with — what is running is what was launched.
+  it("names the agent running, as the human would say it", async () => {
+    theGrillingOutput({
+      running: true,
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    expect(await saidRunning(container)).toBe("Work Fable 5");
+  });
+
+  /// And on the one stop that waits for something a press cannot supply, when
+  /// the account it was spending comes back — in the words the session printed
+  /// them in.
+  it("says when the account comes back on a stop a window made", async () => {
+    thePaused();
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    expect(await saidRunning(container)).toBe("Out of window until 3pm");
+  });
+
+  it("says nothing is running in every other quiet moment", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    expect(await saidRunning(container)).toBe("No agent running");
+  });
+});
+
+/// What the head of the pane says about a stop, which is one line of the status
+/// button now rather than the two badges it used to be.
+///
+/// A stop that happened without the human is loud: something is waiting on
+/// them, and the line is drawn in the accent because they are the only one who
+/// can move it. A stop they pressed themselves is quiet — they were there, and
+/// Verkstead reading them their own news in the accent would be shouting about
+/// nothing.
+describe("a conversation that has stopped", () => {
+  it("says it is waiting on the human where the stop was not theirs", async () => {
     theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
-    const badge = await drawn(container, `.${paneHead.head} .${timeline.blocked}`);
+    const line = await standing(container);
 
-    expect(badge.textContent).toBe("Blocked on you");
+    expect(line.word).toBe("Waiting on you");
+    expect(line.state).toBe("Implementing");
+    expect(line.attention).toBe(true);
+
     expect(STOPPED.blocked_on).toBe(SAID.id);
     expect(STOPPED.stopped_by_hand).toBe(false);
   });
 
-  it("draws no badge where nothing is stopping the work", async () => {
-    expect(OPEN.blocked_on).toBeNull();
-
-    theWorkbench();
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    await drawn(container, `.${timeline.timeline}`);
-
-    expect(container.querySelector(`.${timeline.blocked}`)).toBeNull();
-  });
-});
-
-/// And the other half of the same fact: a stop the human pressed themselves.
-///
-/// Still a stop, still waiting for their Resume — what changes is that nothing
-/// shouts about it. They pressed it; a badge in the accent telling them so is
-/// Verkstead reading them their own news, and the marks are worth reading only
-/// while they mean something happened without them.
-describe("a conversation the human stopped themselves", () => {
-  it("says stopped quietly where the badge would have been", async () => {
-    theStopped({ stopped_by_hand: true });
+  it("says stopped, and quietly, where the press was their own", async () => {
+    theStopped({ stopped_by_hand: true, waiting: false });
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
-    const label = await drawn(container, `.${paneHead.head} .${timeline.stopped}`);
+    const line = await standing(container);
 
-    expect(label.textContent).toBe("Stopped");
-    expect(container.querySelector(`.${timeline.blocked}`)).toBeNull();
+    expect(line.word).toBe("Stopped");
+    expect(line.state).toBe("Implementing");
+    expect(line.attention).toBe(false);
 
-    // Drawn as the condition beside it is — the outline in the edge grey rather
-    // than a filled red — which is the whole of what *quietly* means here.
-    expect(timelineCss).toContain(".waitingOnChecks,\n.stopped,\n.ended {");
+    // Which is a colour and not a second word: the accent is spent on the two
+    // statuses that need somebody, and every other one is the text it is read
+    // in.
+    expect(statusButtonCss).toContain(
+      ".status .attention .title,\n.status .attention .state {",
+    );
   });
 
-  /// Quiet is not the same as inert. There is one notice saying what stopped
-  /// and where it stands in a long record, and the human pressing Stop is no
-  /// reason to make them go and find it.
-  it("still goes to the notice that says what stopped", async () => {
-    theStopped({ stopped_by_hand: true });
-    const { container } = mount(`/conversations/${STOPPED.id}`);
-
-    fireEvent.click(await drawn(container, `.${paneHead.head} .${timeline.stopped}`));
+  /// Quiet is not the same as inert. There is one notice saying what stopped,
+  /// and it is marked where it stands so that a long record still says where
+  /// the run got to — the status button says *that* it stopped, and the mark
+  /// says where.
+  it("marks the notice that says what stopped, where it stands", async () => {
+    theStopped({ stopped_by_hand: true, waiting: false });
+    const { container } = mount(unopened(STOPPED));
 
     const marked = await drawn(
       container,
-      `.${timeline.timeline} .${timeline.notice}.${pressable.open}`,
+      `.${timeline.timeline} .${timeline.notice}.${timeline.blocking}`,
     );
 
     expect(marked.textContent).toContain(
       "The task in .tasks/03-commit-events.md",
     );
-    await waitFor(() => expect(frame(container).dataset.pane).toBe("details"));
+  });
+
+  it("says nothing about a stop where nothing has stopped", async () => {
+    expect(OPEN.blocked_on).toBeNull();
+
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const line = await standing(container);
+
+    expect(line.word).toBe("Draft");
+    expect(line.attention).toBe(false);
   });
 });
 
@@ -11243,18 +11395,21 @@ describe("the pinned carousel", () => {
 /// label and not a control: the checks are GitHub's to finish, so there is
 /// nothing to press and nowhere to go.
 describe("a wrap-up waiting on its checks", () => {
+  /// Nothing to resume alongside it: a wrap-up down to its checks is not a run
+  /// that has stopped, and the status the button draws for one is what stands
+  /// above this condition in the order.
   it("says so where the conversation is named", async () => {
-    theWrapping({ waiting_on_checks: true });
+    theWrapping({ waiting_on_checks: true, ready_to_resume: false });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    const label = await drawn(
-      container,
-      `.${paneHead.head} .${timeline.waitingOnChecks}`,
-    );
+    const line = await standing(container);
 
-    expect(label.textContent).toBe("Waiting on checks");
-    expect(label.tagName).toBe("SPAN");
-    expect(label.closest("button")).toBeNull();
+    expect(line.word).toBe("Waiting on checks");
+    expect(line.state).toBe("Wrapping");
+
+    // A condition to read rather than one to do something about, so it is not
+    // in the accent: the checks are GitHub's to finish.
+    expect(line.attention).toBe(false);
   });
 
   it("says nothing where the wrap-up is still waiting on more than that", async () => {
@@ -11263,9 +11418,7 @@ describe("a wrap-up waiting on its checks", () => {
     theWrapping();
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    await drawn(container, `.${timeline.timeline}`);
-
-    expect(container.querySelector(`.${timeline.waitingOnChecks}`)).toBeNull();
+    expect((await standing(container)).word).not.toBe("Waiting on checks");
   });
 
   /// The sidebar draws no state in words at all — see the card's own marks — so
@@ -11295,74 +11448,71 @@ describe("a wrap-up waiting on its checks", () => {
 /// And the other end of the ladder, where the word is the state itself rather
 /// than a condition of one.
 ///
-/// Done and Closed are where a conversation stops. Neither has a record still
-/// being written, so the move that says so is the bottom of a scroll that may
-/// be long — and *is this finished?* is a question worth answering above the
-/// fold. The states on the way answer themselves in the record under the
-/// header and say nothing here.
+/// Done and Closed are where a conversation stops, and neither is somewhere a
+/// status applies: nothing is supposed to be driving one, and the word for
+/// where it got to *is* the state. So the line collapses to that word on its
+/// own — a status and a state saying the same thing twice, with a colour
+/// between them, would be the button reading itself out.
 describe("a conversation that has ended", () => {
   it("says Done where the work reached the end of the ladder", async () => {
     theWorkbenchWith({ state: "Done" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const label = await drawn(container, `.${paneHead.head} .${timeline.ended}`);
+    const line = await standing(container);
 
-    expect(label.textContent).toBe("Done");
-
-    // A word and nothing to press: unlike the marks beside it there is no one
-    // event it stands for and nowhere it could send anybody.
-    expect(label.tagName).toBe("SPAN");
-    expect(label.closest("button")).toBeNull();
-
-    // Drawn as the quiet labels beside it are — the outline in the edge grey
-    // rather than a filled red.
-    expect(timelineCss).toContain(".waitingOnChecks,\n.stopped,\n.ended {");
+    expect(line.word).toBe("Done");
+    expect(line.state).toBeNull();
+    expect(line.attention).toBe(false);
   });
 
   it("says Closed where the work stopped wherever it was", async () => {
     theWorkbenchWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const label = await drawn(container, `.${paneHead.head} .${timeline.ended}`);
-
-    expect(label.textContent).toBe("Closed");
+    expect((await standing(container)).word).toBe("Closed");
   });
 
-  /// The states on the way up carry their own answer in the record, and the two
-  /// conditions worth a word — a stop and a wrap-up down to its checks — have
-  /// their own marks already.
-  it("says no state word while the work is still going", async () => {
-    for (const state of [
-      "Draft",
-      "Grilling",
-      "Implementing",
-      "Wrapping",
-      "FollowUp",
-    ] as const) {
-      theWorkbenchWith({ state });
+  /// And a Draft is the third of them, for the other half of the same reason:
+  /// nothing is supposed to be driving one either, so there is no status to
+  /// say beside the word.
+  it("says Draft on one nothing has started", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const line = await standing(container);
+
+    expect(line.word).toBe("Draft");
+    expect(line.state).toBeNull();
+  });
+
+  /// The states on the way up are where a status is worth saying, and they say
+  /// it beside the state rather than instead of it.
+  it("says the state beside a status while the work is still going", async () => {
+    for (const state of ["Grilling", "Implementing", "Wrapping", "FollowUp"] as const) {
+      theWorkbenchWith({ state, ready_to_resume: true });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
 
-      await drawn(container, `.${timeline.timeline}`);
-      expect(container.querySelector(`.${timeline.ended}`)).toBeNull();
+      const line = await standing(container);
+
+      expect(line.word).toBe("Stopped");
+      expect(line.state).toBe(STATE[state]);
 
       unmount();
     }
   });
 
-  /// Beside the branch rather than in place of it, and beside what was already
-  /// there: an ended conversation may still be holding a stop worth pointing
-  /// at, and the word for where it got to does not take that mark's place.
-  it("stands beside the marks that were already there", async () => {
+  /// An ended conversation may still be holding a stop, and the word for where
+  /// it got to is what the line says about it: there is nothing left for
+  /// anybody to resume, so nothing is waiting on them.
+  it("says where the work got to over anything it stopped on", async () => {
     theStopped({ state: "Done" });
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
-    const word = await drawn(container, `.${paneHead.head} .${timeline.ended}`);
-    const head = word.closest(`.${paneHead.head}`)!;
+    const line = await standing(container);
 
-    expect(word.textContent).toBe("Done");
-    expect(head.querySelector(`.${timeline.blocked}`)!.textContent).toBe(
-      "Blocked on you",
-    );
+    expect(line.word).toBe("Done");
+    expect(line.state).toBeNull();
+    expect(line.attention).toBe(false);
   });
 });
 

@@ -1,6 +1,6 @@
 /* What can be done to a Conversation as a whole — see `Actions.tsx`, which
-   draws these rows in two menus: the ⋯ at the head of the Conversation pane,
-   and the right-click on a card in the sidebar.
+   draws these rows in two menus: the status button at the head of the
+   Conversation pane, and the right-click on a card in the sidebar.
 
    One module for both, which is the point of there being one component: the
    rows are the same rows wherever they are opened from, so the card they come
@@ -65,10 +65,11 @@
   color: #b3382c;
 }
 
-/* The ⋯ at the head of the pane is drawn by the menu itself — see `mark` in
-   `Menu.module.css` — so nothing of the button is here, and the right-click has
-   no button at all. What is left of this menu's own paint is the card it comes
-   down as, which is the same card either way it was opened.
+/* The button at the head of the pane is the StatusButton's — it is a button
+   about the Conversation before it is a trigger, so it is painted where it is
+   built, in `StatusButton.module.css` — and the right-click has no button at
+   all. What is left of this menu's own paint is the card it comes down as,
+   which is the same card either way it was opened.
 
    Wider than a menu of bare words needs, because every row of this one carries
    a sentence. */
