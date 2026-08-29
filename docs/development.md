@@ -313,7 +313,7 @@ $ pnpm dev                # the viewer on :5173, /api proxied to the server
 $ pnpm test               # the vitest suite
 $ pnpm typecheck          # tsc, which the tests do not run
 $ pnpm lint               # the wall around the query hook, and nothing else
-$ pnpm build              # static assets, into web/dist
+$ pnpm build              # static assets into web/dist, and the share into web/dist-share
 ```
 
 `pnpm dev` serves the viewer alone and proxies everything under `/api` to a
@@ -326,6 +326,18 @@ it in; a debug build reads it off disk per request, so a `cargo run -p
 verkstead-cli -- serve` serves whatever `pnpm build` last wrote without a
 recompile — and a checkout that has never built the viewer still builds the
 server, which then says so on every page instead of serving one.
+
+`pnpm build` writes twice, because there are two builds of the same sources. The
+site goes to `web/dist` as it always did; the **share** goes to `web/dist-share`
+as one HTML file with its script and its stylesheets inlined
+([`vite.share.config.ts`](../web/vite.share.config.ts)), which is the template
+the server writes a Conversation into and hands over as a download — see
+[`crates/server/src/sharing.rs`](../crates/server/src/sharing.rs). Both are
+embedded the same way and both are `allow_missing`, so a checkout that has built
+neither still builds the server; ask it for a share and it says the build is not
+in the binary. That config refuses to write a document that still points at a
+file beside it, which is what makes *no external requests* a property of the
+build rather than something to remember.
 
 `cargo test` covers the round trip in-process. `nix flake check` runs the
 viewer's vitest suite from the pinned pnpm and node, and boots a VM with the

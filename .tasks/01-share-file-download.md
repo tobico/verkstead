@@ -28,9 +28,9 @@ Name the downloaded file for the Conversation's branch and the export date.
 
 ## Acceptance criteria
 
-- [ ] The downloaded file opens from local disk with the server stopped and no
+- [x] The downloaded file opens from local disk with the server stopped and no
       network, and draws the two-pane timeline.
-- [ ] Only the included event kinds appear; excluded kinds leave no trace, and
+- [x] Only the included event kinds appear; excluded kinds leave no trace, and
       no actionable control renders anywhere.
-- [ ] The file is one `.html` with no external requests (verifiable from the
+- [x] The file is one `.html` with no external requests (verifiable from the
       browser's network panel), and the live workbench is unaffected.

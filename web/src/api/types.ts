@@ -2233,6 +2233,30 @@ github_token: TokenSaved | null,
 rust_build_cache: BuildCacheView, };
 
 /**
+ * One Conversation as a share carries it, which is what the shared file boots
+ * from.
+ *
+ * The Conversation whole rather than a shape of its own: the share is drawn by
+ * the workbench's own components, so what they are handed has to be what they
+ * are always handed. What differs is that this one has been through
+ * [`shared`].
+ */
+export type SharedConversation = { 
+/**
+ * The record, curated — see [`shared`].
+ */
+conversation: ConversationView, 
+/**
+ * When the share was taken, RFC 3339.
+ *
+ * A share is a snapshot of a moment rather than a window onto a
+ * Conversation that goes on moving, so the moment is on the file: the
+ * reader is owed the date of the thing in their hands, and sharing again
+ * makes another one rather than freshening this.
+ */
+exported_at: string, };
+
+/**
  * Whether the sidebar is drawing what the human has archived.
  *
  * Their standing choice rather than this device's: it is read back off the

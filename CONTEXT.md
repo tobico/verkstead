@@ -315,6 +315,23 @@ Timeline and its full self in the details pane. Task lists, stage lists and PRs
 are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
 
+**Share**:
+A read-only copy of one Conversation as a single HTML file, for showing
+somebody what was asked, answered and built without giving them the workbench.
+It is the viewer built to one document with every byte it needs inside it, and
+the record written into it on the way out, so it opens off a disk with no
+network and nothing to install. Taken from the **Share** row in the
+Conversation's actions, and named for the branch and the day.
+**A curated record rather than the whole one**: the Brief, the Question Sets,
+the commits, the Steers and the lifecycle lines board; a session's output, the
+Notices, the Handoff and the pinned cards do not, and nothing marks where they
+would have been.
+**A snapshot as of the moment it was taken**, never a window onto a Conversation
+that goes on moving — sharing again makes another file. And privacy is
+possession: whoever holds the file can read it.
+_Avoid_: export, snapshot (the file is the Share; a snapshot is what it is *of*),
+report, publish
+
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose
 first, a delta Diagram after it — kept by the sweep of whichever repository it

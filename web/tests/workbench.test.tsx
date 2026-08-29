@@ -6649,9 +6649,13 @@ describe("stopping a conversation", () => {
     }
 
     // Nothing loose in the card: every element the menu holds is a row or
-    // something inside one.
+    // something inside one. Two shapes of row, because one of them is a file to
+    // take away rather than a press — Share is a link, and reads as the rows
+    // around it.
     expect(
-      [...menu.children].every((row) => row.tagName === "BUTTON"),
+      [...menu.children].every((row) =>
+        ["BUTTON", "A"].includes(row.tagName),
+      ),
     ).toBe(true);
   });
 

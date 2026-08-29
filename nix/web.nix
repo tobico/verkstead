@@ -33,11 +33,16 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     root = ../.;
     fileset = lib.fileset.unions [
       ../web/index.html
+      # And the share build's own document, which is the second thing `pnpm
+      # build` writes: the viewer as one self-contained file, for a Conversation
+      # sent to somebody who has no Verkstead.
+      ../web/share.html
       ../web/package.json
       ../web/pnpm-lock.yaml
       ../web/eslint.config.js
       ../web/tsconfig.json
       ../web/vite.config.ts
+      ../web/vite.share.config.ts
       ../web/src
       ../web/tests
       # The service worker, the manifest and the icons — vite's `publicDir`.
@@ -96,7 +101,13 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       ''
     else
       ''
-        cp -r dist $out
+        # Both builds, each under the name rust-embed knows it by — see
+        # `crates/server/src/viewer.rs`. Two directories rather than one because
+        # they are two things: the site the server serves, and the one-file
+        # template it fills a Conversation into and hands over as a download.
+        mkdir -p $out
+        cp -r dist $out/dist
+        cp -r dist-share $out/dist-share
       ''
   )
   + ''

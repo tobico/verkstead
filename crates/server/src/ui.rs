@@ -23,6 +23,7 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{get, post};
 use time::OffsetDateTime;
@@ -35,9 +36,9 @@ use verkstead_render::{
     ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
     Lifecycle, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
     ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed, RoleChoice, SetReading,
-    SetView, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Standing, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    SetView, SettingsEdit, SettingsSaved, SettingsView, SharedConversation, ShowingArchived,
+    Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TokenEdit,
+    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -100,6 +101,17 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // it starts is a Conversation with no Brief to write.
         .route("/api/ui/adoptions", post(start_adoption))
         .route("/api/ui/conversations/{id}", get(conversation))
+        // And the same Conversation as one file to send somebody: the share
+        // build of the viewer with this record inside it, answered as a
+        // download — see [`crate::sharing`]. What the Share row on the pane
+        // links to, which is the whole of the press.
+        .route("/api/ui/conversations/{id}/share", get(share_file))
+        // With the record that goes in it beside it, for the reason the two are
+        // written apart: the file is a composition and this is what it is a
+        // composition *of*, so the curation can be read — by a test, or by
+        // anybody asking what a share would carry — without a viewer having
+        // been built.
+        .route("/api/ui/conversations/{id}/share.json", get(share_bundle))
         // One Event's full self, fetched by the pane that shows it rather than
         // carried by the Conversation — see [`capture`].
         .route("/api/ui/conversations/{id}/capture/{event}", get(capture))
@@ -754,19 +766,36 @@ async fn start_adoption(
 /// the middle pane *is*, and a Conversation whose Timeline arrived a moment
 /// later would draw an empty pane first every time one is opened.
 async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    match conversation_view(&state, &id).await {
+        Ok(view) => Json(view).into_response(),
+        Err(refusal) => refusal,
+    }
+}
+
+/// The reading behind that endpoint, as a value rather than as an answer.
+///
+/// Its own function because a share is the same reading: what a shared file
+/// carries is this Conversation put through [`verkstead_render::shared`], and a
+/// share composed from a second reading of its own would be a second opinion
+/// about what a Conversation is. A refusal comes back already worded, because
+/// every one of them is a sentence this endpoint has always said.
+pub(crate) async fn conversation_view(
+    state: &AppState,
+    id: &str,
+) -> Result<ConversationView, HttpResponse> {
     // An id that is not a number cannot name a Conversation, so it gets the same
     // answer as one that names none — the id comes out of a URL the human may
     // have typed.
     let Ok(id) = id.parse::<i64>() else {
-        return no_such_conversation(&id);
+        return Err(no_such_conversation(id));
     };
 
     let conversation = match store::load_conversation(&state.pool, id).await {
         Ok(Some(conversation)) => conversation,
-        Ok(None) => return no_such_conversation(&id.to_string()),
+        Ok(None) => return Err(no_such_conversation(&id.to_string())),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
-            return unavailable("the Conversation could not be read");
+            return Err(unavailable("the Conversation could not be read"));
         }
     };
 
@@ -799,7 +828,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         Ok(timeline) => timeline,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Timeline failed");
-            return unavailable("the Conversation could not be read");
+            return Err(unavailable("the Conversation could not be read"));
         }
     };
 
@@ -815,7 +844,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
-            return unavailable("the Conversation could not be read");
+            return Err(unavailable("the Conversation could not be read"));
         }
     };
 
@@ -828,7 +857,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading an implementation Pairing failed");
-            return unavailable("the Conversation could not be read");
+            return Err(unavailable("the Conversation could not be read"));
         }
     };
 
@@ -838,7 +867,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a review Pairing failed");
-            return unavailable("the Conversation could not be read");
+            return Err(unavailable("the Conversation could not be read"));
         }
     };
 
@@ -930,7 +959,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         Ok(worktree) => worktree,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a worktree failed");
-            return unavailable("the Conversation could not be read");
+            return Err(unavailable("the Conversation could not be read"));
         }
     };
 
@@ -944,7 +973,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
             Ok(companion) => companions.push(companion),
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id = id, "reading a companion worktree failed");
-                return unavailable("the Conversation could not be read");
+                return Err(unavailable("the Conversation could not be read"));
             }
         }
     }
@@ -1035,7 +1064,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // fact about the other end of the ladder: the Conversation says it is being
     // worked on and nothing is working on it. Asked of the running server as
     // much as of the record — see [`crate::resume::ready`].
-    let ready_to_resume = crate::resume::ready(&state, id, conversation.state, stopped.is_some());
+    let ready_to_resume = crate::resume::ready(state, id, conversation.state, stopped.is_some());
 
     // And whether there is driving to stop, which is the same fact read the
     // other way: a Conversation that says it is being worked on and has not
@@ -1226,7 +1255,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     store::Event::QuestionSet(asked) => match &asked.set {
                         store::Asked::Set(set) => {
                             let standing = standing(
-                                &state,
+                                state,
                                 asked.set_id,
                                 asked.settlement,
                                 asked.deferred,
@@ -1359,7 +1388,84 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
             .collect(),
     };
 
-    Json(view).into_response()
+    Ok(view)
+}
+
+/// `GET /api/ui/conversations/{id}/share.json` — the record a share carries.
+///
+/// The same reading the pane is drawn from, curated — see
+/// [`verkstead_render::shared`]. Its own endpoint beside the file below because
+/// the two are one composition served two ways: this is the payload, and the
+/// file is that payload inside the viewer built to travel. Which also makes the
+/// curation something the tests can read without a viewer having been built.
+async fn share_bundle(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    match shared(&state, &id).await {
+        Ok(bundle) => Json(bundle).into_response(),
+        Err(refusal) => refusal,
+    }
+}
+
+/// `GET /api/ui/conversations/{id}/share` — the same record as the one file a
+/// colleague opens.
+///
+/// An attachment rather than a page, because that is what it is for: the human
+/// presses Share and gets a file to send. What it is called is the branch and
+/// the day — see [`crate::sharing::filename`].
+async fn share_file(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let bundle = match shared(&state, &id).await {
+        Ok(bundle) => bundle,
+        Err(refusal) => return refusal,
+    };
+
+    // Only reachable in a checkout where the share build was never made — the
+    // same `allow_missing` the viewer itself is embedded under, and the same
+    // answer: the server runs, and what it cannot do it says.
+    let Some(template) = crate::viewer::Shareable::get(crate::viewer::SHARE) else {
+        return unavailable(
+            "the share build of the viewer was not built into this binary: run `pnpm build` in web/",
+        );
+    };
+
+    let Ok(template) = std::str::from_utf8(&template.data) else {
+        return unavailable("the share build of the viewer could not be read");
+    };
+
+    let Some(file) = crate::sharing::file(template, &bundle) else {
+        return unavailable("the share build of the viewer has nowhere to put a conversation");
+    };
+
+    let name = crate::sharing::filename(
+        &bundle.conversation.branch,
+        crate::sharing::settled(&bundle.conversation),
+        OffsetDateTime::now_utc(),
+    );
+
+    (
+        [
+            (CONTENT_TYPE, "text/html; charset=utf-8".to_owned()),
+            (
+                CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{name}\""),
+            ),
+        ],
+        file,
+    )
+        .into_response()
+}
+
+/// The composition behind both: the Conversation as the pane reads it, put
+/// through the curation a share is.
+///
+/// The clock is read here rather than in either handler, so the file and the
+/// payload behind it carry the one moment however they were asked for.
+async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpResponse> {
+    let view = conversation_view(state, id).await?;
+
+    let taken = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_default();
+
+    Ok(verkstead_render::shared(view, taken))
 }
 
 /// `GET /api/ui/conversations/{id}/capture/{event}` — what one session

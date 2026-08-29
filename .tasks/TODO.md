@@ -16,7 +16,7 @@ moment it was made; sharing again makes a new one.
 
 ## Tasks
 
-- [ ] 01: Share file download — [details](01-share-file-download.md)
+- [x] 01: Share file download — [details](01-share-file-download.md)
 - [ ] 02: Question Sets readable in the share — [details](02-sets-in-the-share.md)
 - [ ] 03: Commits readable in the share — [details](03-commits-in-the-share.md)
 - [ ] 04: Publish a share as a secret gist — [details](04-publish-as-gist.md)

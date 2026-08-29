@@ -1,0 +1,196 @@
+{
+  "conversation": {
+    "adopting": null,
+    "archived": false,
+    "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+    "blocked_on": null,
+    "branch": "usage-limits",
+    "branch_named": true,
+    "companions": [
+      {
+        "base_commit": "1f0b6d2e94a7c3518d0f2b6a4e9c7d31b5a08f4e",
+        "base_ref": null,
+        "branch": "",
+        "mode": "ReadWrite",
+        "repo": {
+          "default_branch": "trunk",
+          "id": 2,
+          "name": "askance",
+          "path": "/srv/repos/askance"
+        },
+        "worktree": {
+          "missing": true,
+          "path": "/var/lib/verkstead/worktrees/askance-usage-limits"
+        }
+      }
+    ],
+    "compiles_uncached": false,
+    "direction": "inline",
+    "driven": false,
+    "grilling_pairing": {
+      "Under": {
+        "model": "claude-fable-5",
+        "profile": {
+          "agent_type": "Claude",
+          "broken": null,
+          "claude_dir": "/srv/accounts/fable/.claude",
+          "config_file": "/srv/accounts/fable/.claude.json",
+          "id": 1,
+          "models": [
+            "claude-fable-5"
+          ],
+          "name": "fable"
+        }
+      }
+    },
+    "id": 4,
+    "implementation_pairing": {
+      "model": "claude-opus-5",
+      "profile": {
+        "agent_type": "Claude",
+        "broken": null,
+        "claude_dir": "/srv/accounts/opus/.claude",
+        "config_file": "/srv/accounts/opus/.claude.json",
+        "id": 2,
+        "models": [
+          "claude-opus-5",
+          "claude-haiku-4-5-20251001"
+        ],
+        "name": "opus"
+      }
+    },
+    "naming": false,
+    "pinned": [],
+    "ready_to_continue": false,
+    "ready_to_grill": false,
+    "ready_to_resume": false,
+    "ready_to_stop": false,
+    "repo": {
+      "default_branch": "main",
+      "id": 1,
+      "name": "verkstead",
+      "path": "/srv/repos/verkstead"
+    },
+    "resets": null,
+    "review_pairing": {
+      "Under": {
+        "model": "claude-sonnet-5",
+        "profile": {
+          "agent_type": "Claude",
+          "broken": "DirMissing",
+          "claude_dir": "/srv/accounts/sonnet/.claude",
+          "config_file": "/srv/accounts/sonnet/.claude.json",
+          "id": 3,
+          "models": [
+            "claude-sonnet-5"
+          ],
+          "name": "sonnet"
+        }
+      }
+    },
+    "state": "Implementing",
+    "stop_asked": false,
+    "stopped_by_hand": false,
+    "timeline": [
+      {
+        "Brief": {
+          "at": "2026-08-03T09:07:11.000Z",
+          "frozen": true,
+          "html": "<h1>Pausing when an account runs out of window</h1>\n<p>A session that hits its usage limit mid-run fails silently and the\nconversation looks stalled.</p>\n",
+          "id": 10,
+          "markdown": "# Pausing when an account runs out of window\n\nA session that hits its usage limit mid-run fails silently and the\nconversation looks stalled.\n"
+        }
+      },
+      {
+        "Moved": {
+          "at": "2026-08-03T09:07:11.000Z",
+          "id": 11,
+          "state": "Grilling"
+        }
+      },
+      {
+        "QuestionSet": {
+          "at": "2026-08-03T09:07:11.000Z",
+          "id": 12,
+          "rows": [
+            {
+              "answer": "",
+              "name": "Q9",
+              "nested": false,
+              "question": "Anything above you want changed before we build it?"
+            }
+          ],
+          "set_id": 5,
+          "standing": {
+            "Answered": {
+              "response": {
+                "answers": [
+                  {
+                    "label": "Q9",
+                    "unanswered": true
+                  }
+                ],
+                "direction": "inline"
+              },
+              "submitted_at": "2026-08-03T09:07:11.000Z"
+            }
+          },
+          "title": "Ready to build the usage-limit pause"
+        }
+      },
+      {
+        "Moved": {
+          "at": "2026-08-03T09:07:11.000Z",
+          "id": 14,
+          "state": "Implementing"
+        }
+      },
+      {
+        "Commit": {
+          "at": "2026-08-03T09:07:11.000Z",
+          "deletions": 3,
+          "files": 2,
+          "id": 15,
+          "insertions": 74,
+          "repo": null,
+          "sha": "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93",
+          "snippet": null,
+          "subject": "chore: plan the usage-limit pause"
+        }
+      },
+      {
+        "Commit": {
+          "at": "2026-08-03T09:07:11.000Z",
+          "deletions": 41,
+          "files": 5,
+          "id": 16,
+          "insertions": 213,
+          "repo": null,
+          "sha": "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d",
+          "snippet": "The relay reads the account's own limit error off stderr and hands the session's runner a time to wake at, instead of the fixed backoff it used to guess.",
+          "subject": "feat: read the account's own limit error"
+        }
+      },
+      {
+        "Commit": {
+          "at": "2026-08-03T09:07:11.000Z",
+          "deletions": 12,
+          "files": 3,
+          "id": 17,
+          "insertions": 46,
+          "repo": "askance",
+          "sha": "7d3a1c58e0b94f26a8d5c13f7b204e69a1c8d35f",
+          "snippet": null,
+          "subject": "feat: say which account a limit error was about"
+        }
+      }
+    ],
+    "waiting_on_checks": false,
+    "working": false,
+    "worktree": {
+      "missing": false,
+      "path": "/var/lib/verkstead/worktrees/verkstead-usage-limits"
+    }
+  },
+  "exported_at": "2026-08-03T09:07:11.000Z"
+}

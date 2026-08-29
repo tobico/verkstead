@@ -6,9 +6,11 @@
 //! away and a pane header is somewhere the human's cursor passes on the way to
 //! everything else.
 //!
-//! In order of what each costs: stop, which waits for the task the run is on;
-//! force stop, which does not; steer, which moves the work somewhere else; and
-//! the two closes, which are not a stop at all but the end of the Conversation
+//! In order of what each costs: share, which costs nothing and is a file to take
+//! away rather than a press at all; stop, which waits for the task the run is
+//! on; force stop, which does not; steer, which moves the work somewhere else;
+//! and the two closes, which are not a stop at all but the end of the
+//! Conversation
 //! — one of them taking it off the list on the way out. Each carries what it
 //! does *inside* it, under its own name — because *stop* and *force stop* are
 //! two words apart and hours of work apart, and because a row that is one press
@@ -54,6 +56,7 @@ import {
   closeConversation,
   forceStopConversation,
   loadConversation,
+  sharePath,
   steerConversation,
   stopConversation,
   unarchiveConversation,
@@ -153,6 +156,34 @@ export function Action(props: {
       <span class={styles.title}>{props.working ? props.pressing : props.label}</span>
       <span class={styles.says}>{props.says}</span>
     </button>
+  );
+}
+
+/// The one row of this menu that is not a press: a file to take away.
+///
+/// A link rather than a button that fetches, because that is what a browser is
+/// for. The server answers as an attachment and names the file, so the whole of
+/// this row is where it points — nothing to hold in memory, nothing to fail
+/// half-way with a megabyte in flight, and a right-click that offers *Save link
+/// as* like every other download the human has ever made.
+///
+/// Which is also why it draws no failure, where the presses around it at least
+/// log one: what goes wrong with a link is the browser's to say, in the place it
+/// already says it.
+export function Download(props: {
+  /// Which row this is, for the paint and for the tests that look for it.
+  class?: string;
+  /// What it reads as, and the sentence under the name — as every row here has.
+  label: string;
+  says: string;
+  /// Where the file is.
+  href: string;
+}): JSX.Element {
+  return (
+    <a role="menuitem" class={props.class} href={props.href} download="">
+      <span class={styles.title}>{props.label}</span>
+      <span class={styles.says}>{props.says}</span>
+    </a>
   );
 }
 
@@ -320,6 +351,18 @@ function actions(): {
 
     rows: (conversation) => (
       <>
+        {/* A copy of the record to send somebody, which is the one row here
+            that does nothing to the conversation — so it is first, above
+            everything that costs something. Offered in every state and on every
+            conversation there is: a share is the record as it stands, and a
+            record stands from the moment there is one. */}
+        <Download
+          class={styles.share}
+          label="Share"
+          says="Download the conversation as one file to send."
+          href={sharePath(conversation().id)}
+        />
+
         <Show when={conversation().ready_to_stop}>
           {/* Until the press has been made. A stop waits for the step the run
               is on to finish, and from then on the decision is recorded and the

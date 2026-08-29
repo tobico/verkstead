@@ -84,6 +84,7 @@ mod sets;
 /// a router up that runs sessions means saying where both are read from.
 pub mod settings;
 mod settling;
+mod sharing;
 /// What a session is grilled by: the skills Verkstead ships and installs into
 /// every sandbox.
 ///

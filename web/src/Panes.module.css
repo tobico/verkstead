@@ -387,3 +387,41 @@
     background: var(--accent);
   }
 }
+
+/* Two panes rather than three: the frame a share is drawn in, which has one
+   Conversation and no list of them to pick out of. `Panes.tsx` puts this name
+   on the frame when it is handed no conversations pane, and there is then no
+   such pane in the document and no divider anywhere — nothing can be dragged,
+   so nothing about widths is read.
+
+   After every rule it overrides, which is what it takes: the columns above are
+   set on `.panes` at two widths, and the rules that show a pane are the same
+   two classes deep as these. Written as its own block at the end so that the
+   three-pane frame reads as one thing and this reads as what it is — the same
+   frame with the first level taken off.
+
+   The two stand side by side from the width the sidebar used to arrive at,
+   rather than waiting for the third breakpoint: what that breakpoint is about is
+   room for three columns, and there are two. */
+.panes.two {
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 60rem) {
+  .panes.two {
+    grid-template-columns: 40% 1fr;
+  }
+
+  .panes.two > .middlePane,
+  .panes.two > .detailsPane {
+    display: block;
+  }
+
+  /* And the record's way back out to a list that is not there. The rule above
+     takes it off the middle pane once the sidebar is beside it; here there is
+     no sidebar to be beside, and the pane it would go back to has never
+     existed. */
+  .panes.two .middlePane .paneBack {
+    display: none;
+  }
+}

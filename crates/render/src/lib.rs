@@ -25,6 +25,7 @@ mod profiles;
 mod push;
 mod repos;
 mod settings;
+mod sharing;
 mod transcript;
 mod update;
 mod view;
@@ -61,6 +62,7 @@ pub use settings::{
     Author, BuildCacheEdit, BuildCacheView, SettingsEdit, SettingsSaved, SettingsView, TokenEdit,
     TokenSaved, Verified,
 };
+pub use sharing::{SharedConversation, shared};
 pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
     statements, transcript_after, transcript_view, turns,

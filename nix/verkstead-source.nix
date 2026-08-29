@@ -6,8 +6,10 @@
   rustPlatform,
   makeWrapper,
   git,
-  # The viewer, built by vite — see web.nix. It is copied to where rust-embed
-  # looks for it, and ends up inside the server binary rather than beside it.
+  # The viewer, built by vite — see web.nix. Two directories under it: the site
+  # itself, and the one-file share build beside it. Both are copied to where
+  # rust-embed looks for them, and end up inside the server binary rather than
+  # beside it.
   viewer,
 }:
 
@@ -36,8 +38,9 @@ rustPlatform.buildRustPackage {
   # would be reading through a read-only directory to no purpose.
   preBuild = ''
     mkdir -p web
-    cp -r ${viewer} web/dist
-    chmod -R u+w web/dist
+    cp -r ${viewer}/dist web/dist
+    cp -r ${viewer}/dist-share web/dist-share
+    chmod -R u+w web/dist web/dist-share
   '';
 
   # The binary's package by name rather than the whole workspace:

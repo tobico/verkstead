@@ -352,12 +352,32 @@ function Openable(props: {
 
 export function Timeline(props: {
   conversation: ConversationView;
-  back: () => void;
+
+  /// The way back out to the conversations, where there is a list to go back
+  /// to. A share has none — it is one Conversation and nothing around it — so
+  /// there is nothing to draw and nowhere to go.
+  back?: () => void;
+
   details: () => void;
 
   /// Which Event the details pane is showing, and how to change it.
   selected: Opening | null;
   select: (opening: Opening) => void;
+
+  /// Whether this is a record to read rather than a Conversation to work in,
+  /// which is what a share is.
+  ///
+  /// What it takes off is everything that is not a moment on the record: the ⋯
+  /// menu, the block that says what happens next, and the way to get a stopped
+  /// run going again. The cards themselves are untouched — a share is read by
+  /// opening them, exactly as the workbench is.
+  ///
+  /// Nothing about a *card* is decided here, and that is deliberate: a shared
+  /// Conversation arrives with every field a control is drawn from already
+  /// saying nothing — see `shared` in `crates/render/src/sharing.rs` — so the
+  /// record cannot express an action whatever draws it. This is the header and
+  /// the foot, which belong to the Conversation rather than to anything on it.
+  readOnly?: boolean;
 }): JSX.Element {
   /// The session running now, where there is one: the last output on the record
   /// that is still being written to. The last, because a Conversation runs one
@@ -406,14 +426,19 @@ export function Timeline(props: {
           block's own offset in step with. */}
       <div class={shell.paneChrome}>
         {/* The way back out of this level, which is the whole of what a narrow
-            window offers instead of the pane beside it. Drawn always and hidden
-            by the pane head where all three panes are on screen at once.
+            window offers instead of the pane beside it. Drawn wherever there is
+            a list to go back to, and hidden by the pane head where all three
+            panes are on screen at once.
 
             Titled for its branch, or a Draft where nobody has named one — the
             same rule the sidebar row it was opened from draws, so the card and
             the header are the one name. */}
         <PaneHead
-          back={{ to: "Conversations", go: props.back }}
+          back={
+            props.back === undefined
+              ? undefined
+              : { to: "Conversations", go: props.back }
+          }
           title={titled(props.conversation)}
         >
           {/* Where the work got to, for the two states it stops at: a Done
@@ -490,7 +515,13 @@ export function Timeline(props: {
           <Show when={props.conversation.waiting_on_checks}>
             <span class={styles.waitingOnChecks}>{WAITING_ON_CHECKS}</span>
           </Show>
-          <Actions conversation={props.conversation} />
+          {/* Everything there is to do about the Conversation as a whole, which
+              in a share is nothing: what a reader holds is the record, and the
+              menu is the one place on this pane that is about the work rather
+              than about a moment in it. */}
+          <Show when={!props.readOnly}>
+            <Actions conversation={props.conversation} />
+          </Show>
           {/* And the way on to the next level, drawn only where there is a next
               level to reach: the details pane holds the selected Event and
               nothing else, so with nothing selected it is bare paper and a
@@ -689,23 +720,29 @@ export function Timeline(props: {
           is for a different state — so they read as the one thing there is to do
           from here. What to do about a conversation that is finished is not
           here: a steer is the way back into one, and it is in the menu on the
-          header, drawn whatever state the conversation is in. */}
-      <Show
-        when={props.conversation.adopting}
-        fallback={<StartGrilling conversation={props.conversation} />}
-      >
-        {(adopting) => (
-          <Adoption conversation={props.conversation} adopting={adopting()} />
-        )}
-      </Show>
-      {/* And under that, the way to get a conversation moving again. It is
-          offered *whenever nothing is running*, which is a quiet moment between
-          steps as much as it is a run that has stopped, so it sits below
-          whichever of the two above is drawn rather than instead of it.
+          header, drawn whatever state the conversation is in.
 
-          What Verkstead was never going to do is not here: a steer is what says
-          that, and it is in the menu on the header. */}
-      <Resume conversation={props.conversation} />
+          And neither is drawn in a share, along with the resume under them: what
+          happens next is nothing a reader holding a file has any part in, and a
+          record that ended on a press would be asking them for one. */}
+      <Show when={!props.readOnly}>
+        <Show
+          when={props.conversation.adopting}
+          fallback={<StartGrilling conversation={props.conversation} />}
+        >
+          {(adopting) => (
+            <Adoption conversation={props.conversation} adopting={adopting()} />
+          )}
+        </Show>
+        {/* And under that, the way to get a conversation moving again. It is
+            offered *whenever nothing is running*, which is a quiet moment
+            between steps as much as it is a run that has stopped, so it sits
+            below whichever of the two above is drawn rather than instead of it.
+
+            What Verkstead was never going to do is not here: a steer is what
+            says that, and it is in the menu on the header. */}
+        <Resume conversation={props.conversation} />
+      </Show>
 
       {/* And the session running now, held against the foot of the pane so that
           it can be reached from however far down the record the human has read.

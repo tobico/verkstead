@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- What the tab says before the record is read. The share names itself
+         after the Conversation it carries the moment it has one — see
+         `src/share/Share.tsx`. -->
+    <title>Verkstead</title>
+    <meta name="theme-color" content="#21201e" />
+    <!-- An icon that is already here. A share is opened off a disk and out of
+         an email, and a browser left to itself asks the host it came from for a
+         favicon — which for this file is a request to somewhere, and there is to
+         be no such thing. An empty data URL is the whole of what stops it. -->
+    <link rel="icon" href="data:," />
+    <!-- Where the record goes. The server writes the Conversation between these
+         two tags on the way out — see `crates/server/src/sharing.rs`, which
+         matches this exactly. `null` rather than nothing so that the built
+         template is itself a page that opens: a share with no Conversation in it
+         says so in words. -->
+    <script id="share" type="application/json">null</script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/share/index.tsx"></script>
+  </body>
+</html>

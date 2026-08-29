@@ -28,6 +28,22 @@ use rust_embed::Embed;
 #[allow_missing = true]
 pub(crate) struct Built;
 
+/// And the share build beside it: the same sources built to one file with
+/// everything inlined, which is what a shared Conversation travels as — see
+/// [`crate::sharing`].
+///
+/// A folder of its own rather than a file under the one above, because nothing
+/// serves it: it is a template the server fills in and hands over as a
+/// download, and a megabyte of it sitting under `/assets/` would be a page
+/// anybody could open and find empty.
+#[derive(Embed)]
+#[folder = "$CARGO_MANIFEST_DIR/../../web/dist-share"]
+#[allow_missing = true]
+pub(crate) struct Shareable;
+
+/// The one file in it, as vite writes it.
+pub(crate) const SHARE: &str = "share.html";
+
 /// The document every path the viewer routes on is answered with.
 const DOCUMENT: &str = "index.html";
 

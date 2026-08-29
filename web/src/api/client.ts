@@ -268,6 +268,18 @@ export function loadConversation(id: string): Promise<ConversationView> {
   );
 }
 
+/// And where the same Conversation stands as a file to send somebody: the share
+/// build of the viewer with this record inside it.
+///
+/// A path rather than a fetch, which is the one thing in this module that is
+/// not a request. What the human asked for is a file in their downloads, and a
+/// link is the whole of how a browser does that: the server names it and says
+/// it is an attachment, so nothing here has to hold a megabyte of HTML in
+/// memory to hand it straight back to the page it came from.
+export function sharePath(id: number): string {
+  return `/api/ui/conversations/${id}/share`;
+}
+
 /// What one session printed, whole.
 ///
 /// Fetched by the pane that shows it rather than carried by the Conversation: a

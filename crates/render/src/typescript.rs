@@ -25,9 +25,9 @@ use crate::{
     GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
     ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
     PushKey, Registered, Registration, RepoEntry, RepoRemoved, RepoView, Resumed, RoadmapPane,
-    RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived,
-    Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
-    TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, SharedConversation,
+    ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -74,6 +74,12 @@ fn the_viewers_types_are_written_from_these() {
     AbandonedRepo::export_all(&config).unwrap();
     ConversationView::export_all(&config).unwrap();
     NewConversation::export_all(&config).unwrap();
+
+    // And the same Conversation as a share carries it: the curated record, and
+    // when the share was taken. The share is drawn by the workbench's own
+    // components, so what a shared file boots from is this around a
+    // `ConversationView` — see [`crate::shared`].
+    SharedConversation::export_all(&config).unwrap();
 
     // And the order the human dragged that sidebar into, which is the one thing
     // they say about the list itself rather than about anything on it.
