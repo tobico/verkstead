@@ -1501,6 +1501,24 @@ pub struct AgentOutputEvent {
     /// gone quiet — so a page opened onto a session that has been idle for an
     /// hour says so at once rather than waiting to be told.
     pub idle: bool,
+
+    /// The name of the Agent Profile this session was launched from.
+    ///
+    /// Off the record rather than off what is running: it is written down as
+    /// the session starts and stays true afterwards, so a Profile renamed or
+    /// deleted since — and a Verkstead restarted since — leaves this saying
+    /// what actually ran. `null` for a session started before Verkstead wrote
+    /// it down.
+    pub profile: Option<String>,
+
+    /// And the model it was launched on, as the raw id: `claude-opus-5` rather
+    /// than "Opus 5". Prettifying is the viewer's, so a model nothing here has
+    /// heard of still reaches the human as its id.
+    ///
+    /// `null` beside a `profile` that is there is a Pairing that named no model
+    /// at all; `null` beside a `profile` that is not is a session from before
+    /// either was recorded.
+    pub model: Option<String>,
 }
 
 /// A Question Set as the Timeline shows it: what it was called, the table of
@@ -1708,6 +1726,11 @@ pub fn proposal_view(proposal: &verkstead_schema::Proposal) -> ProposalView {
 
 /// A session's output as an Event. Nothing to render either — the summary was
 /// worked out as the output arrived — and here for the same reason as the move.
+///
+/// The arguments are the Event's own columns rather than a list somebody chose,
+/// which is what makes them many — gathering them into a struct would be a
+/// second shape to keep true beside the one it was read out of.
+#[allow(clippy::too_many_arguments)]
 pub fn agent_output_event(
     id: i64,
     at: String,
@@ -1716,6 +1739,8 @@ pub fn agent_output_event(
     latest: String,
     running: bool,
     idle: bool,
+    profile: Option<String>,
+    model: Option<String>,
 ) -> TimelineEvent {
     TimelineEvent::AgentOutput(AgentOutputEvent {
         id,
@@ -1724,6 +1749,8 @@ pub fn agent_output_event(
         turns,
         latest,
         running,
+        profile,
+        model,
         // Idle is a thing a running session is, and the caller reads the two
         // off different places — so the pair is made consistent here rather
         // than at each of them.

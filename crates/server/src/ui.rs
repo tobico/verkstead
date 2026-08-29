@@ -1226,15 +1226,28 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     // The summary and not the Capture: a Timeline is read every
                     // time an open page hears the world moved, and a session's
                     // output is megabytes the middle pane never shows.
-                    store::Event::AgentOutput(summary) => verkstead_render::agent_output_event(
-                        event.id,
-                        event.at,
-                        summary.lines,
-                        summary.turns,
-                        summary.latest,
-                        writing == Some(event.id),
-                        idling,
-                    ),
+                    // With what it ran under beside it, off the record rather
+                    // than off the Conversation's Pairing now: a Profile can be
+                    // renamed and a Pairing repicked, and what this Event is is
+                    // the account of one session that has already happened.
+                    store::Event::AgentOutput(summary, ran_under) => {
+                        let (profile, model) = match ran_under {
+                            Some(ran_under) => (Some(ran_under.profile), ran_under.model),
+                            None => (None, None),
+                        };
+
+                        verkstead_render::agent_output_event(
+                            event.id,
+                            event.at,
+                            summary.lines,
+                            summary.turns,
+                            summary.latest,
+                            writing == Some(event.id),
+                            idling,
+                            profile,
+                            model,
+                        )
+                    }
                     // The table of what was asked against what was decided, and no
                     // more: the whole document is what the details pane fetches,
                     // from the endpoint one Set has always been read through.

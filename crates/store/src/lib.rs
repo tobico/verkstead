@@ -44,6 +44,7 @@ mod pull_requests;
 mod push;
 mod repos;
 mod session_names;
+mod session_pairings;
 mod stops;
 mod transcripts;
 mod unseen;
@@ -95,6 +96,7 @@ pub use repos::{
     unregister_repo,
 };
 pub use session_names::session_id;
+pub use session_pairings::RanUnder;
 pub use stops::{
     Decision, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop,
     stop_as_asked, stopped,
@@ -669,6 +671,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // And what Verkstead called each of those sessions, which hangs off the
     // same Event for the same reason.
     session_names::apply_schema(pool).await?;
+
+    // And what each of them was launched under, which hangs off the same Event
+    // again — one session is one Event, and one Event is one Pairing.
+    session_pairings::apply_schema(pool).await?;
 
     // And the record those sessions kept of themselves, which hangs off the
     // same Event again — one session is one Event, and one Event is one

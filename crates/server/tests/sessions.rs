@@ -2209,6 +2209,19 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
         )),
         "a session works in its Conversation's worktree and nowhere else: {said:?}"
     );
+
+    // And the Event it printed into says what it ran under, stamped as the
+    // Capture was opened: the pairing is on the record rather than read off the
+    // Conversation afterwards, so a Profile renamed or repicked later leaves
+    // this saying what actually ran.
+    let stamped = output(&fixture.view().await)
+        .expect("the session printed into an Event")
+        .clone();
+    assert_eq!(
+        (stamped.profile.as_deref(), stamped.model.as_deref()),
+        (Some("grilling"), Some("claude-grilling-5")),
+        "the grilling Profile and the model it was launched on"
+    );
 }
 
 /// A Conversation is started on a branch name Verkstead invented, so its first

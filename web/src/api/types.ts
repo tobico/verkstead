@@ -182,7 +182,27 @@ running: boolean,
  * gone quiet — so a page opened onto a session that has been idle for an
  * hour says so at once rather than waiting to be told.
  */
-idle: boolean, };
+idle: boolean, 
+/**
+ * The name of the Agent Profile this session was launched from.
+ *
+ * Off the record rather than off what is running: it is written down as
+ * the session starts and stays true afterwards, so a Profile renamed or
+ * deleted since — and a Verkstead restarted since — leaves this saying
+ * what actually ran. `null` for a session started before Verkstead wrote
+ * it down.
+ */
+profile: string | null, 
+/**
+ * And the model it was launched on, as the raw id: `claude-opus-5` rather
+ * than "Opus 5". Prettifying is the viewer's, so a model nothing here has
+ * heard of still reaches the human as its id.
+ *
+ * `null` beside a `profile` that is there is a Pairing that named no model
+ * at all; `null` beside a `profile` that is not is a session from before
+ * either was recorded.
+ */
+model: string | null, };
 
 /**
  * Which coding agent a Profile runs.

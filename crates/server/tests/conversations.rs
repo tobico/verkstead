@@ -4445,6 +4445,103 @@ async fn waits(app: &Router, id: i64) -> bool {
     waiting
 }
 
+/// What a session was launched under is stamped onto its Event as that Event is
+/// opened, so the record says what actually ran — see the store's `RanUnder`.
+///
+/// Written down rather than looked up afterwards: a Conversation's Pairing is a
+/// thing the human can repick and a Profile is a thing they can rename or
+/// delete, and none of that changes what a session that has already run was
+/// running. Nothing in the viewer draws it yet — the StatusButton is what will.
+///
+/// The Capture is opened through the store rather than by running an agent, for
+/// the reason the worktrees here are: whether a session starts at all is
+/// `sessions.rs`'s subject, and what an Event opened under a Pairing puts on the
+/// wire is this file's.
+#[tokio::test]
+async fn a_sessions_event_says_what_it_was_launched_under() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    // The Pairing this Conversation's grilling was settled under, which is what
+    // the server has in hand at the moment it starts a session.
+    let picked = opened(&app, id)
+        .await
+        .grilling_pairing
+        .pairing()
+        .expect("the grilling was paired before it started")
+        .clone();
+    let pairing = store::Pairing {
+        profile: store::load_profile(&pool, picked.profile.id)
+            .await
+            .unwrap()
+            .expect("the Profile is still there"),
+        model: picked.model,
+    };
+
+    store::start_capture(&pool, id, Some("a-session"), Some(&pairing))
+        .await
+        .unwrap();
+
+    let output = printed(&app, id).await;
+    assert_eq!(
+        output.profile.as_deref(),
+        Some("fable"),
+        "the name of the Profile the session was launched from",
+    );
+    assert_eq!(
+        output.model.as_deref(),
+        Some("claude-opus-5"),
+        "and the model id raw, prettifying being the viewer's alone",
+    );
+
+    pool.close().await;
+}
+
+/// And a session from before any of that was written down says nothing about
+/// it, which is every Event on every Timeline that is already there.
+///
+/// Absent rather than guessed at: the Conversation's Pairing now is what the
+/// *next* session would run under, and answering with it would be Verkstead
+/// making up a history it does not have. The rest of the Event is unchanged, so
+/// everything drawn from one goes on being drawn.
+#[tokio::test]
+async fn a_session_that_was_never_paired_says_nothing_about_it() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::start_capture(&pool, id, None, None).await.unwrap();
+
+    let output = printed(&app, id).await;
+    assert_eq!(output.profile, None, "nothing was paired with this one");
+    assert_eq!(output.model, None, "so there is no model to name either");
+    assert_eq!(
+        (output.lines, output.turns, output.latest.as_str()),
+        (0, None, ""),
+        "and the Event is otherwise the one it always was",
+    );
+
+    pool.close().await;
+}
+
+/// The one session's output on a Conversation's page.
+async fn printed(app: &Router, id: i64) -> verkstead_render::AgentOutputEvent {
+    opened(app, id)
+        .await
+        .timeline
+        .into_iter()
+        .find_map(|event| match event {
+            TimelineEvent::AgentOutput(output) => Some(output),
+            _ => None,
+        })
+        .expect("the Conversation has a session's output on its Timeline")
+}
+
 /// A server running no sessions at all — which is every one of these — has none
 /// to report. What a running one does to the row is `sessions.rs`'s to say, being
 /// the file with an agent in it.

@@ -97,6 +97,8 @@
         "idle": false,
         "latest": "What should happen to a delivery that has failed forty times?",
         "lines": 3,
+        "model": null,
+        "profile": null,
         "running": false,
         "turns": 6
       }
