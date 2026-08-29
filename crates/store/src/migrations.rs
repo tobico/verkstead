@@ -127,6 +127,12 @@ async fn conversations_whose_branch_name_had_no_owner(pool: &SqlitePool) -> Resu
 /// grilled before this existed was reviewed under the implementation Pairing,
 /// and writing that in would be inventing a choice nobody made.
 ///
+/// Which is still where such a Conversation's review runs. The column is empty
+/// and there is no way left to fill it — the pickers froze when its work
+/// started — so a review with none picked is launched under the Implementation
+/// Pairing, above the store. That is what keeps an empty column a choice nobody
+/// made rather than a wrap-up nothing can ever finish.
+///
 /// Safe to run twice: what says whether there is anything to do is the column
 /// being absent, and after the first run it is there.
 async fn conversations_that_had_no_review_profile(pool: &SqlitePool) -> Result<()> {

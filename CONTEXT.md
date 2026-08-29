@@ -367,6 +367,18 @@ carrying on and runs under the Implementation Pairing: the check fixes, the
 comment responses, the follow-ups, and the session sent for a missing pull
 request.
 
+**A review with no Pairing of its own runs under the Implementation Pairing**,
+which is the one place a role reaches past itself for an account. Not a default
+— the picker is answered before the work starts, and a Conversation started
+since has one — but the two ways of arriving at a wrap-up with the role never
+picked: a Conversation from before the role existed, whose pickers froze when
+its work started, and a Draft steered into a state that settles only what
+builds. Both were reviewed by whatever built them before there was a Review
+Pairing, and a wrap-up that would not review them at all is one waiting for ever
+on a review nothing can start. **No review** is not this and never falls back:
+it settles the review rather than leaving it unpicked, which is the whole
+difference between the row and an empty picker.
+
 Two of the pickers offer a row that is not an account: **No grilling** and **No
 review**. Picking one is a choice like picking a Pairing — it satisfies
 readiness, freezes when the work starts, is remembered per Repo and inherited by

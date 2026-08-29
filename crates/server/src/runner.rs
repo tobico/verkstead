@@ -3218,9 +3218,55 @@ async fn launch_in_turn(state: &AppState, conversation_id: i64, inside: Prompt) 
     launch(state, conversation_id, inside).await
 }
 
+/// The Pairing a session on `role` is launched under, of what the Conversation
+/// has settled — or `None` where there is no account to launch one under at
+/// all.
+///
+/// The Review role reads its own and **falls back to the Implementation Pairing
+/// where nothing was ever picked for it**. Not a default: the picker is
+/// answered before the work starts, and a Conversation started since the role
+/// existed always has one. What it is for is the two ways of reaching a wrap-up
+/// with the role never picked, neither of which the human can put right — the
+/// pickers freeze when the work starts, and there is no review picker anywhere
+/// else:
+///
+/// - a Conversation written before there was a Review role, whose column the
+///   migration deliberately leaves empty rather than inventing a choice nobody
+///   made — see the store's `migrations`; and
+/// - a Draft steered into a state that settles only what builds, which leaves
+///   the review role untouched because nothing reviews there — see
+///   [`crate::steering`].
+///
+/// Both of them were reviewed by whatever built them before there was a Review
+/// Pairing at all, so that is what reviews them now. Without it a wrap-up like
+/// theirs waits for ever on a review nothing can start: the launch would fail,
+/// the review would never settle, and what the human would see is a stall.
+///
+/// **A role picked away never falls back.** *No review* is a settled choice
+/// rather than an empty picker, and what it settles is that no session runs —
+/// so it is `None` here, and nothing reaches here for it anyway: such a wrap-up
+/// settles its review without launching anything. See [`crate::review`].
+///
+/// Every other role is the Implementation Pairing, which is what the work
+/// itself carrying on runs under — see [`Prompt::role`].
+fn under(
+    role: store::Role,
+    review: &store::Picked,
+    implementation: Option<&store::Pairing>,
+) -> Option<store::Pairing> {
+    match role {
+        store::Role::Review => match review {
+            store::Picked::Skipped => None,
+            picked => picked.pairing().cloned().or_else(|| implementation.cloned()),
+        },
+        _ => implementation.cloned(),
+    }
+}
+
 /// Start a fresh session on the next step, under the Profile the prompt's own
 /// role names — the review Pairing for the wrap-up's review, and the
-/// implementation one for everything else.
+/// implementation one for everything else. Which account that comes to is
+/// [`under`]'s to say.
 ///
 /// Which step it is is not said: the bundled fork reads `.tasks/` and picks the
 /// same one this did, by the same rule. Verkstead decides the step to know what
@@ -3250,10 +3296,11 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
 
     let role = inside.role();
 
-    let paired = match role {
-        store::Role::Review => conversation.review_pairing.pairing().cloned(),
-        _ => conversation.implementation_pairing.clone(),
-    };
+    let paired = under(
+        role,
+        &conversation.review_pairing,
+        conversation.implementation_pairing.as_ref(),
+    );
 
     let Some(pairing) = paired else {
         tracing::error!(
@@ -3933,5 +3980,83 @@ mod tests {
             "with the Worktree untouched throughout: the handoff is Verkstead's \
              document rather than the project's",
         );
+    }
+
+    /// One Pairing, named by its model so that a test can tell two apart.
+    fn pairing(model: &str) -> store::Pairing {
+        store::Pairing {
+            profile: store::Profile {
+                id: 1,
+                name: model.to_owned(),
+                claude_dir: PathBuf::from("/data/claude"),
+                config_file: PathBuf::from("/data/claude.json"),
+                models: vec![model.to_owned()],
+                agent_type: store::AgentType::Claude,
+            },
+            model: Some(model.to_owned()),
+        }
+    }
+
+    /// Each role runs under the account picked for it, which is the ordinary
+    /// Conversation: the review reads its own and everything else reads what
+    /// builds.
+    #[test]
+    fn a_session_runs_under_the_account_picked_for_its_role() {
+        let review = store::Picked::Under(pairing("reviewing"));
+        let building = pairing("building");
+
+        assert_eq!(
+            under(store::Role::Review, &review, Some(&building)),
+            Some(pairing("reviewing")),
+        );
+        assert_eq!(
+            under(store::Role::Implementation, &review, Some(&building)),
+            Some(pairing("building")),
+            "the work itself carrying on is the account that built it",
+        );
+    }
+
+    /// A review with nothing picked for it runs under what built the work,
+    /// which is what reviewed it before there was a role of its own.
+    ///
+    /// The two ways of getting here are a Conversation from before the Review
+    /// role existed and a Draft steered into a state that settles only what
+    /// builds, and neither can be put right by the human: the pickers froze
+    /// when the work started. Without this the launch fails, the review never
+    /// settles, and the wrap-up waits for ever.
+    #[test]
+    fn a_review_nobody_picked_an_account_for_runs_under_what_built_the_work() {
+        let building = pairing("building");
+
+        assert_eq!(
+            under(store::Role::Review, &store::Picked::Nothing, Some(&building)),
+            Some(pairing("building")),
+        );
+    }
+
+    /// And a review picked away runs under nothing at all.
+    ///
+    /// *No review* is a settled choice rather than an empty picker, so it is
+    /// the one thing here that must never reach for another account: falling
+    /// back would run the review the human turned off.
+    #[test]
+    fn a_review_picked_away_falls_back_to_nothing() {
+        assert_eq!(
+            under(
+                store::Role::Review,
+                &store::Picked::Skipped,
+                Some(&pairing("building")),
+            ),
+            None,
+        );
+    }
+
+    /// And with nothing to build under there is nothing to launch, whichever
+    /// role is asking.
+    #[test]
+    fn a_conversation_with_no_implementation_pairing_launches_nothing() {
+        for role in [store::Role::Review, store::Role::Implementation] {
+            assert_eq!(under(role, &store::Picked::Nothing, None), None, "{role:?}");
+        }
     }
 }
