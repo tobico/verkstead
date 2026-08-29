@@ -10,7 +10,7 @@
 
    What is *not* here is what a pane does with a Screen in it — the one pane in
    the workbench that ends where the window does. What that sets it sets on the
-   pane, and the pane is the frame's, so it is in `Workbench.module.css`; the
+   pane, and the pane is the frame's, so it is in `Panes.module.css`; the
    element below wears that file's `paneScreen` name, which is how the frame
    knows which pane to do it to. */
 
@@ -18,7 +18,7 @@
    what is in it. A column down the pane's whole height: the terminal takes the
    room left under the header and the switcher, and the note or the Hold bar
    under it keeps its own. What makes the pane a column to fill is the frame's,
-   in `Workbench.module.css`.
+   in `Panes.module.css`.
 
    The grid a session left behind cannot be redrawn at all — it is fixed at the
    size it was printed for — so it is shown at its own size and scrolls in the

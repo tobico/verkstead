@@ -1784,6 +1784,33 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
+    // And the same Repo opened, which is what its card in the settings leads to:
+    // the three facts the row already carries, every branch git has, how much
+    // work is on it, and the roadmaps above still waiting for somebody.
+    //
+    // Two more Conversations are put on it so the counts are something rather
+    // than nothing. The adoption above is the live one; these two are the
+    // finished pair, one that got there and one that stopped. Its path is the
+    // one thing here the filesystem decided, and it is pinned like every other.
+    for (branch, state) in [
+        ("rate-limiting", store::Lifecycle::Done),
+        ("pane-paths", store::Lifecycle::Closed),
+    ] {
+        let ended = store::start_conversation(&pool, registered.id, branch)
+            .await
+            .unwrap()
+            .unwrap();
+        store::set_state(&pool, ended, state).await.unwrap();
+    }
+
+    write(
+        "repo.json",
+        &pin_path(
+            &get(&app, &format!("/api/ui/repos/{}", registered.id)).await,
+            "/srv/repos/verkstead",
+        ),
+    );
+
     // The workbench: the sidebar, and one Conversation opened — a Brief written,
     // a branch named, and the base commit overridden, which is the whole of what
     // a drafting Conversation carries. Put in through the store for the reason
@@ -2945,6 +2972,20 @@ fn pin_repo(json: &str, at: &str) -> String {
         "no Repo here to pin:\n{payload}"
     );
     payload["repo"]["path"] = at.into();
+
+    serde_json::to_string(&payload).unwrap()
+}
+
+/// The same, for a payload that *is* the Repo: its path is a field of its own
+/// rather than one on a Repo hanging off something else.
+fn pin_path(json: &str, at: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    assert!(
+        payload.get("path").is_some(),
+        "no path here to pin:\n{payload}"
+    );
+    payload["path"] = at.into();
 
     serde_json::to_string(&payload).unwrap()
 }

@@ -1033,7 +1033,11 @@ async fn additions(
             return Ok(refused(&already.name, SteerCompanionRefusal::AlreadyAdded));
         }
 
-        let Some(repo) = store::load_repo(&state.pool, addition.repo_id).await? else {
+        // On the registry, not merely in the table: a steer may widen what a
+        // Conversation works alongside, and what it may widen to is what the
+        // human has registered. One that has been taken off it is refused by the
+        // same name as one that never existed.
+        let Some(repo) = store::registered_repo(&state.pool, addition.repo_id).await? else {
             return Ok(Additions::Refused(ConversationSteered::NoSuchCompanionRepo));
         };
 

@@ -51,14 +51,50 @@ export function App(): JSX.Element {
             record of which one is open rather than a document of its own — the
             same page draws both. */}
         <Route path="/" component={Workbench} />
-        <Route path="/conversations/:id" component={Workbench} />
+        {/* And each of that Conversation's details panes under it, so what is
+            open survives a reload and can be linked to. Nested rather than
+            written out as four routes of their own, because the workbench is
+            one page across all of them: a route the router swaps for another
+            takes its component down with it, and everything the middle pane was
+            holding — a Brief half typed into above all — would go every time a
+            card was pressed. A parent route stays up while the leaf under it
+            changes, and these leaves draw nothing: what they are is what the
+            path says, and the page reads that off the URL.
+
+            The `events/` segment keeps the ids apart from the panes named by a
+            word beside them — see `openings.ts`. */}
+        <Route path="/conversations/:id" component={Workbench}>
+          <Route path="/" />
+          <Route path="/events/:event" />
+          <Route path="/backlog" />
+          <Route path="/roadmaps/:name" />
+        </Route>
         {/* Everything the human configures, on one page: the GitHub token and
             the git author Verkstead was told, the Agent Profiles a session runs
             under, and the Repos a Conversation is started against. The Repos
             and the Profiles had routes of their own until they were folded in
             here; those paths are no such page now, rather than redirects to
-            this one. */}
-        <Route path="/settings" component={SettingsPage} />
+            this one.
+
+            With a details pane of its own for each thing on it that is opened
+            rather than read, nested for the reason the Conversation's are: the
+            settings are one page across all of them, and a route the router
+            swapped for another would take the middle pane down with it every
+            time a card was pressed. The leaves draw nothing — what they are is
+            what the path says, and the page reads that off the URL. */}
+        <Route path="/settings" component={SettingsPage}>
+          <Route path="/" />
+          <Route path="/github" />
+          {/* The blank form rides in the same segment an id does, as
+              `/settings/profiles/new` — it is the same pane asked about a
+              Profile that does not exist yet, and no id the server issues is
+              the word `new`. */}
+          <Route path="/profiles/:profile" />
+          {/* And the Repos the same way: a registered one opened by its id, and
+              the path another is registered by riding in the same segment as
+              `/settings/repos/new`. */}
+          <Route path="/repos/:repo" />
+        </Route>
         {/* One Set as a page of its own, which is what a push notification
             opens: a phone woken by one is being asked about that Set and
             nothing else, so it lands on the Set rather than on the workbench

@@ -1,5 +1,6 @@
-//! Registering a Repo over the viewer's namespace: what gets on the list, and
-//! everything that is refused before it can.
+//! Registering a Repo over the viewer's namespace: what gets on the list, what
+//! is refused before it can, what one of them says when it is opened, and what
+//! taking one off the registry does to the list it was on.
 //!
 //! Every refusal here is asked of the *server*, through the endpoint, rather
 //! than of the boundary type underneath it — which is the point of the Watched
@@ -14,12 +15,22 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
+use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Registered, RepoEntry};
-use verkstead_server::{WatchedPaths, open_database, router_watching};
+use verkstead_render::{Registered, RepoEntry, RepoRemoved, RepoView};
+use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
 /// A router watching `watched`, plus the directory holding its database alive.
 async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
+    let (dir, _pool, app) = app_and_pool_watching(watched).await;
+
+    (dir, app)
+}
+
+/// The same, with the pool beside it — for the tests that put Conversations on
+/// a Repo, which is the one thing they need that this namespace has no endpoint
+/// for.
+async fn app_and_pool_watching(watched: &Path) -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -28,7 +39,7 @@ async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
 
     let data_dir = dir.path().to_owned();
 
-    (dir, router_watching(pool, watched, data_dir))
+    (dir, pool.clone(), router_watching(pool, watched, data_dir))
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -76,6 +87,17 @@ async fn listed(app: &Router) -> Vec<RepoEntry> {
 /// The branches of one registered Repo, which is what the base dropdown offers.
 async fn branches(app: &Router, id: i64) -> Vec<String> {
     get(app, &format!("/api/ui/repos/{id}/branches")).await
+}
+
+/// Ask for one to be taken off the registry, and read back what the server made
+/// of that.
+async fn remove(app: &Router, id: i64) -> RepoRemoved {
+    post(
+        app,
+        &format!("/api/ui/repos/{id}/remove"),
+        &serde_json::Value::Null,
+    )
+    .await
 }
 
 async fn get<T: DeserializeOwned>(app: &Router, path: &str) -> T {
@@ -380,4 +402,200 @@ async fn the_branches_of_a_repo_that_is_not_there_are_refused() {
 
         assert_eq!(status, StatusCode::NOT_FOUND, "asking about {asked}");
     }
+}
+
+/// One Repo opened, which is what its card in the settings leads to: the row's
+/// own three facts, plus everything the card had no room for.
+///
+/// The roadmaps are the same reading the notice under the new-conversation box
+/// makes — `ui_content.rs` is where what that finds is pinned — so what is
+/// asserted here is that a repository holding none says so with an empty list
+/// rather than by leaving the field out.
+#[tokio::test]
+async fn a_repo_opened_carries_its_branches_its_work_and_its_roadmaps() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, pool, app) = app_and_pool_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+    git(&repo, &["branch", "release"]);
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    // Three Conversations on it: one still going, and two that are over each
+    // way there is to be over.
+    for (branch, state) in [
+        ("rate-limiting", None),
+        ("pane-paths", Some(store::Lifecycle::Done)),
+        ("dropped", Some(store::Lifecycle::Closed)),
+    ] {
+        let started = store::start_conversation(&pool, id, branch)
+            .await
+            .unwrap()
+            .unwrap();
+
+        if let Some(state) = state {
+            store::set_state(&pool, started, state).await.unwrap();
+        }
+    }
+
+    let opened: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
+
+    assert_eq!(opened.id, id);
+    assert_eq!(opened.name, "verkstead");
+    assert_eq!(opened.path, repo.canonicalize().unwrap().to_str().unwrap());
+    assert_eq!(opened.default_branch, "main");
+    assert_eq!(
+        opened.branches,
+        vec!["main".to_owned(), "release".to_owned()],
+        "the same list the base dropdown is filled from",
+    );
+    assert_eq!(opened.live, 1);
+    assert_eq!(opened.finished, 2, "Done and Closed counted together");
+    assert!(
+        opened.roadmaps.is_empty(),
+        "a repository with no roadmaps has none waiting: {:?}",
+        opened.roadmaps,
+    );
+}
+
+/// A Repo that is not registered has nothing to open, and saying so is a
+/// refusal: the pane reads it as the repo being gone — a link followed after
+/// somebody took it away — rather than as a Repo with nothing on it.
+#[tokio::test]
+async fn a_repo_that_is_not_there_cannot_be_opened() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+
+    for asked in ["404", "not-a-number"] {
+        let (status, _) = fetch(
+            &app,
+            Request::builder()
+                .uri(format!("/api/ui/repos/{asked}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND, "opening {asked}");
+    }
+}
+
+/// And a Repo that was taken off the registry has nothing to open either. It is
+/// still in the table — every Conversation ever worked in it names it — but
+/// nothing is registered under that id any more, and the pane reads that as the
+/// repo being gone rather than drawing one with a Remove button on it.
+#[tokio::test]
+async fn a_repo_that_was_removed_cannot_be_opened() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
+
+    let (status, _) = fetch(
+        &app,
+        Request::builder()
+            .uri(format!("/api/ui/repos/{id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// A Repo taken off the registry is off every list that offers Repos for new
+/// work — this one, the New conversation menu behind it, and the roadmap notice,
+/// all of which are the same read.
+#[tokio::test]
+async fn a_removed_repo_is_off_the_list() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
+    assert!(listed(&app).await.is_empty());
+
+    // And the roadmap notice, which is a read of its own over the same list.
+    let waiting: Vec<serde_json::Value> = get(&app, "/api/ui/abandoned-roadmaps").await;
+    assert!(waiting.is_empty(), "an unregistered Repo offers nothing");
+}
+
+/// Work still going on in a repository is the reason to keep it registered, so
+/// the removal is refused with the reason the pane says out loud — and the Repo
+/// is where it was.
+#[tokio::test]
+async fn a_repo_with_live_work_on_it_is_refused() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, pool, app) = app_and_pool_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    let going = store::start_conversation(&pool, id, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(remove(&app, id).await, RepoRemoved::InUse);
+    assert_eq!(listed(&app).await.len(), 1, "nothing was taken away");
+
+    // Closed is over, and what is over is no reason to hold the registration.
+    store::set_state(&pool, going, store::Lifecycle::Closed)
+        .await
+        .unwrap();
+
+    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
+}
+
+/// An id nothing is registered under is a named outcome rather than a status:
+/// one already taken away, one that never was, and one that is not a number at
+/// all are the same sentence.
+#[tokio::test]
+async fn there_is_nothing_to_remove_twice() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
+    assert_eq!(remove(&app, id).await, RepoRemoved::NoSuchRepo);
+    assert_eq!(remove(&app, 404).await, RepoRemoved::NoSuchRepo);
+
+    let refused: RepoRemoved = post(
+        &app,
+        "/api/ui/repos/not-a-number/remove",
+        &serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(refused, RepoRemoved::NoSuchRepo);
+}
+
+/// And registering the same repository again brings it back rather than being
+/// refused as registered already — which is what makes a removal something the
+/// human can undo.
+#[tokio::test]
+async fn registering_a_removed_repo_again_brings_it_back() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+
+    let back = listed(&app).await;
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].id, id, "the same Repo, under the id it always had");
 }

@@ -1,5 +1,6 @@
 //! The card that is pressed, wherever the app draws one: a Conversation in the
-//! sidebar, and every Event on a Timeline that opens into the details pane.
+//! sidebar, every Event on a Timeline that opens into the details pane, and
+//! what the settings pane opens into one of its own.
 //!
 //! The two were the same card and neither of them knew it. The sidebar's row
 //! carried its own paint and the record's cards carried theirs, in two sheets

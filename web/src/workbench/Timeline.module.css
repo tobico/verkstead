@@ -10,7 +10,7 @@
 
    The block the header and the pinned cards are wrapped in is the Workbench's:
    what a pane sticks to its top edge is the frame's business, so `Timeline.tsx`
-   wears `paneChrome` out of `Workbench.module.css` rather than naming a block of
+   wears `paneChrome` out of `Panes.module.css` rather than naming a block of
    its own. The ⋯ at the head of the pane is `Menu`'s chrome and this file's
    paint — its trigger and its drop are that component's own elements, so they
    are reached by what they are rather than by a class this module cannot spell.
@@ -770,7 +770,7 @@
 
    What holds it down there is the pane's rather than this card's, as what holds
    the header up there is: the strip wears `paneFoot` out of
-   `Workbench.module.css` and the frame says what a pane does about something
+   `Panes.module.css` and the frame says what a pane does about something
    stuck to its bottom edge. Here is the paint alone. */
 .session {
   display: flex;

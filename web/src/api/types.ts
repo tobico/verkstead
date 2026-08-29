@@ -1807,6 +1807,67 @@ repo: string | null, diff: DiffView, };
 export type RepoEntry = { id: number, name: string, path: string, default_branch: string, };
 
 /**
+ * What became of taking one off the registry.
+ *
+ * A removal rather than a deletion, which is why nothing here says anything
+ * about a Timeline: every Conversation ever started on a Repo goes on naming
+ * it, and what a removal changes is only what is offered for new work.
+ *
+ * Shaped like [`ProfileDeleted`](crate::ProfileDeleted), because it is the same
+ * sentence about the other thing the settings page configures — and refused for
+ * the same kind of reason.
+ */
+export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
+
+/**
+ * One registered Repo opened: everything the card cannot hold, read at the
+ * moment it is asked for.
+ *
+ * The card's own three facts come along with it rather than being left to the
+ * list behind the pane. The pane is a page of its own as far as a link is
+ * concerned — somebody reloads on it, or arrives from a message — and a pane
+ * that drew its own title out of another read would have nothing to say until
+ * that read landed.
+ *
+ * Nothing here is stored beyond those three. The branches are git's own answer,
+ * the counts are the store's, and the roadmaps are read off the repository the
+ * way the notice under the new-conversation box reads them — so a branch
+ * somebody pushed a minute ago is on this list, and a roadmap somebody has
+ * since picked up is not.
+ */
+export type RepoView = { id: number, name: string, 
+/**
+ * The resolved path, which is the directory Verkstead will work in.
+ */
+path: string, 
+/**
+ * And what a Conversation branches from unless it is told otherwise.
+ */
+default_branch: string, 
+/**
+ * Every branch the repository has, local and remote-tracking both — the
+ * same reading the base dropdown is filled from.
+ */
+branches: Array<string>, 
+/**
+ * How many Conversations are on this Repo and still going: everything that
+ * is neither Done nor Closed, a Draft included.
+ */
+live: number, 
+/**
+ * And how many are over, which is Done and Closed together. The two are
+ * counted apart because they are read for different reasons — what is on
+ * this Repo now, and what has been.
+ */
+finished: number, 
+/**
+ * The roadmaps in it that nothing is driving, as the notice under the
+ * new-conversation box finds them. Empty where there are none, which is
+ * most repositories most days.
+ */
+roadmaps: Array<AbandonedRoadmap>, };
+
+/**
  * The submitted collection of Answers and Unanswered markers for one Question
  * Set, plus an optional set-level comment — and, on a Set carrying a proposal,
  * the direction the human picked.

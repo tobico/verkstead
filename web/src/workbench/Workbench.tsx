@@ -1,15 +1,11 @@
 //! The workbench: the three panes everything about a piece of work is done in.
 //!
 //! Conversations down the left, the selected Conversation's Timeline in the
-//! middle, and the details of what the Timeline cannot show on the right. On a
-//! window wide enough they stand side by side; on a phone they are one pane at a
-//! time, and the same page answers both — this is a hierarchy the human walks
-//! into and back out of, and a phone simply shows one level of it.
-//!
-//! Which level is showing is `data-pane` on the frame, and the stylesheet is
-//! what makes it mean anything: a wide window ignores it and draws all three.
-//! The attribute rather than a rendered-or-not pane, because walking back out
-//! should not throw away what the pane it came from had drawn.
+//! middle, and the details of what the Timeline cannot show on the right. The
+//! frame they stand in is `Panes.tsx` — the grid, the dividers and the widths a
+//! device remembers, shared with the settings page — and what this page has to
+//! say about it is which level a narrow window is showing and what goes in each
+//! of the three.
 //!
 //! Which level it is follows the URL: naming a Conversation walks the page into
 //! it, and walking back out to the list takes the name off again. One account of
@@ -18,32 +14,40 @@
 //! was, so nothing changed and a phone could not get back into the Conversation
 //! it had only just left.
 //!
-//! How wide the panes stand is held here too, for the same reason: the widths
-//! are a property of the frame rather than of anything drawn in it. They are
-//! percentages of the workbench kept per device (`panes.ts`), and the dividers
-//! that set them exist only in the layouts that stand panes side by side —
-//! below that breakpoint the page is walked through one pane at a time, so
-//! there is no border to drag and nothing remembered is read.
-//!
-//! What is open is held here rather than in the Timeline, because it is what the
+//! What is open is the URL's rather than this page's, because it is what the
 //! third pane is *about*: the pane is that one thing's full self and nothing
 //! else, so with nothing open it is bare paper. Nearly always that is an Event;
 //! the backlog and the roadmap are the exceptions, being read off the worktree
 //! rather than recorded, and they name themselves by a word instead of an id.
+//! Each of the three has a path of its own under the Conversation — see
+//! `openings.ts` — so a details pane survives being navigated away from and
+//! back, and can be linked to.
+//!
+//! Opening a Conversation lands on the end of its record: the last Event with a
+//! pane behind it is selected and the URL is rewritten to its path, so the human
+//! arrives at where the work got to rather than at the beginning of it. It
+//! happens here rather than in the sidebar because the sidebar has no Timeline
+//! to pick from, and only where the path names no pane already — a cold load of
+//! a details pane keeps the selection it was opened at.
 //!
 //! What a Conversation *is* is not drawn there — the setup it needs is on the
 //! Brief card, where it is used — and the way on to an empty pane is not
 //! offered, so a narrow window can only walk into the pane by opening something.
-//! The selection is not in the URL — what is opened is a place in a page rather
-//! than a page, and a Conversation whose Timeline has moved on is not one to
-//! restore a scroll position into.
 //!
-//! What is *not* held here is the Conversation itself. Reading one, and drawing
-//! the two panes it is read in, is `Reading` below — keyed on the id, so that
-//! switching between Conversations builds those panes again rather than reading
-//! the second Conversation into the first one's page.
+//! Which navigations push and which replace is the difference between a page and
+//! a place in one. Entering a Conversation and leaving it push, because they are
+//! the page changing; opening a details pane and switching between them replace,
+//! because walking between the details of one Conversation is not a walk the
+//! history stack should be growing with. So Back from a details pane leaves the
+//! Conversation, which is where the human came in from.
+//!
+//! The Conversation itself is read once here and drawn in the two panes it is
+//! read in, each of them keyed on its id so that switching between Conversations
+//! builds those panes again rather than reading the second Conversation into the
+//! first one's page.
 
-import { useNavigate, useParams } from "@solidjs/router";
+import { useLocation, useNavigate, useParams } from "@solidjs/router";
+import type { UseQueryResult } from "@tanstack/solid-query";
 import {
   Match,
   Show,
@@ -52,11 +56,10 @@ import {
   createMemo,
   createSignal,
   on,
-  onCleanup,
-  type Accessor,
   type JSX,
 } from "solid-js";
 
+import { Panes, type Pane } from "../Panes";
 import { loadConversation, seeConversation } from "../api/client";
 import type {
   AgentOutputEvent,
@@ -82,25 +85,19 @@ import { Hatch } from "./Hatch";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
-import { Timeline, roadmapOpened, type Opening } from "./Timeline";
-import styles from "./Workbench.module.css";
+import { Timeline } from "./Timeline";
 import {
-  ALL_THREE,
-  BESIDE,
-  DEFAULTS,
-  clamped,
-  dragged,
-  nudged,
-  range,
-  remember,
-  restore,
-  widths as remembered,
-  type Divider,
-  type Widths,
-} from "./panes";
+  lastOpening,
+  openingAt,
+  pathOf,
+  pathTo,
+  roadmapOpened,
+  type Opening,
+} from "./openings";
 
-/// Which level of the hierarchy a narrow window is showing.
-export type Pane = "conversations" | "timeline" | "details";
+/// The read the two panes share, as each of them is handed it: one query behind
+/// both, because they are two views of the one Conversation.
+type Read = UseQueryResult<ConversationView, Error>;
 
 /// An Event with a full self, as the details pane holds it: which kind, and the
 /// Event itself.
@@ -183,157 +180,12 @@ function noticeIn(open: Opened): NoticeEvent | undefined {
   return "notice" in open ? open.notice : undefined;
 }
 
-/// Whether a media query holds, as something the page can be built out of.
-///
-/// The stylesheet answers the same question for itself; this is for the parts
-/// of the layout that are the page's rather than the rules' — which dividers
-/// exist, and whether this device's remembered widths are read at all. A
-/// browser with no `matchMedia` to ask answers no to everything, which is the
-/// narrow layout: one pane, no dividers, nothing read.
-function matching(query: string): Accessor<boolean> {
-  if (typeof window.matchMedia !== "function") {
-    return () => false;
-  }
-
-  const asked = window.matchMedia(query);
-  const [holds, setHolds] = createSignal(asked.matches);
-  const changed = () => setHolds(asked.matches);
-
-  asked.addEventListener?.("change", changed);
-  onCleanup(() => asked.removeEventListener?.("change", changed));
-
-  return holds;
-}
-
-/// The line between two panes, and the handle that moves it.
-///
-/// A separator rather than a button, because that is what it is: the thing it
-/// does to the page is not an action but a value, and the value is the share of
-/// the workbench the pane on its left is worth. Which is what the arrow keys
-/// move it by, for the pointer nobody dragging with a keyboard has.
-function Divider(props: {
-  divider: Divider;
-  label: string;
-  share: number;
-  travel: { least: number; most: number };
-  drag: (divider: Divider, event: PointerEvent) => void;
-  nudge: (divider: Divider, by: number) => void;
-  restore: () => void;
-}): JSX.Element {
-  return (
-    <div
-      class={styles.divider}
-      role="separator"
-      aria-orientation="vertical"
-      aria-label={props.label}
-      aria-valuenow={Math.round(props.share)}
-      aria-valuemin={Math.round(props.travel.least)}
-      aria-valuemax={Math.round(props.travel.most)}
-      tabindex="0"
-      onPointerDown={(event) => props.drag(props.divider, event)}
-      onDblClick={() => props.restore()}
-      onKeyDown={(event) => {
-        if (event.key === "ArrowLeft") {
-          event.preventDefault();
-          props.nudge(props.divider, -1);
-        }
-        if (event.key === "ArrowRight") {
-          event.preventDefault();
-          props.nudge(props.divider, 1);
-        }
-      }}
-    />
-  );
-}
-
 export function Workbench(): JSX.Element {
   const params = useParams();
   const navigate = useNavigate();
+  const where = useLocation();
 
   const [pane, setPane] = createSignal<Pane>("conversations");
-
-  /// What the details pane is showing, where anything is open: a Timeline
-  /// Event, or the backlog or a roadmap, neither of which has an Event to be
-  /// named by — see [`Opening`].
-  const [event, setEvent] = createSignal<Opening | null>(null);
-
-  /// Which layout is standing, which decides how many dividers there are and
-  /// how much room each pane is allowed to leave the others.
-  const beside = matching(BESIDE);
-  const allThree = matching(ALL_THREE);
-
-  /// How wide the panes stand. Read off this device once, and written back when
-  /// a drag is let go of rather than on the way — a width settled on is worth
-  /// remembering, and the hundred it passed through on the way there are not.
-  const [settled, setSettled] = createSignal<Widths>(remembered());
-
-  /// And as they may actually be drawn: a sidebar dragged wide in the two-pane
-  /// layout is not allowed to squeeze the timeline out of the three-pane one,
-  /// so the minimums are met against the layout in front of the human rather
-  /// than against the one the width was settled in.
-  const shown = () => clamped(settled(), allThree());
-
-  /// The frame the shares are shares *of* — a divider dropped at a point on the
-  /// screen means nothing until it is measured against this.
-  let frame!: HTMLDivElement;
-
-  /// Dragging one. The listeners go on the window rather than on the handle,
-  /// because a pointer that has outrun the handle — which every drag's does —
-  /// is still dragging it.
-  const drag = (divider: Divider, event: PointerEvent) => {
-    // Which stops the drag selecting the text of both panes on the way past.
-    event.preventDefault();
-
-    const frameRect = frame.getBoundingClientRect();
-    if (frameRect.width === 0) {
-      return;
-    }
-
-    const moved = (at: PointerEvent) => {
-      const share = ((at.clientX - frameRect.left) / frameRect.width) * 100;
-      setSettled((was) => dragged(was, divider, share, allThree()));
-    };
-
-    const dropped = () => {
-      window.removeEventListener("pointermove", moved);
-      window.removeEventListener("pointerup", dropped);
-      window.removeEventListener("pointercancel", dropped);
-      remember(settled());
-    };
-
-    window.addEventListener("pointermove", moved);
-    window.addEventListener("pointerup", dropped);
-    window.addEventListener("pointercancel", dropped);
-  };
-
-  /// Moving one with the keyboard, which settles at once: there is no letting
-  /// go of an arrow key.
-  const nudge = (divider: Divider, by: number) => {
-    setSettled((was) => nudged(was, divider, by, allThree()));
-    remember(settled());
-  };
-
-  /// And putting them back, which is what a double-click on either divider
-  /// does: both widths, because what it restores is the defaults rather than
-  /// one of them.
-  const defaults = () => {
-    restore();
-    setSettled(DEFAULTS);
-  };
-
-  /// What the frame carries the widths as. Only where a layout stands panes
-  /// side by side: below that the page is walked through one pane at a time,
-  /// and what this device remembers about a desktop's columns is nothing a
-  /// phone should be reading. The stylesheet has a default of its own behind
-  /// each name, so an absent pair is the untouched workbench rather than a
-  /// broken one.
-  const columns = () =>
-    beside()
-      ? {
-          "--pane-sidebar": `${shown().sidebar}%`,
-          "--pane-timeline": `${shown().timeline}%`,
-        }
-      : undefined;
 
   /// Which Conversation the URL names, or the empty string on the bare
   /// workbench. Unparsed, like a Set's id: the server decides what names
@@ -344,17 +196,38 @@ export function Workbench(): JSX.Element {
   /// not.
   const selected = createMemo(() => params.id ?? "");
 
+  /// And what the details pane is showing, where anything is open: a Timeline
+  /// Event, or the backlog or a roadmap, neither of which has an Event to be
+  /// named by — see [`Opening`].
+  ///
+  /// Derived from the path rather than held beside it, so there is one account
+  /// of what is open. Nothing has to be closed when the Conversation changes
+  /// either: a path names the Conversation and the detail together, so a new
+  /// Conversation's path names no detail of the old one's.
+  const event = createMemo(() => openingAt(where.pathname));
+
+  /// Opening a details pane, which is a navigation to where that pane stands.
+  ///
+  /// It replaces rather than pushes: the details of one Conversation are places
+  /// in a page rather than pages, so walking between them should not have to be
+  /// walked back out of one at a time. What Back leaves is the Conversation.
+  const select = (opening: Opening) =>
+    navigate(pathTo(selected(), opening), { replace: true });
+
   // Opening a Conversation is what walks a phone into the Timeline, and leaving
   // the workbench route walks it back out. Written as an effect on the URL
   // rather than done in the click handler, because Back is a way of changing the
   // selection too and it never goes through one.
   //
-  // Whatever Event was open closes with it: an Event belongs to one
-  // Conversation, and an id kept across the change would name nothing.
+  // Straight to the details where the path names one, which is what a cold load
+  // of a details pane is — a reload, or a link somebody kept. The URL says which
+  // pane it is about, so that is the pane it opens on; the walk back out of it
+  // is the pane's own "← Timeline".
   createEffect(
     on(selected, (id) => {
-      setPane(id === "" ? "conversations" : "timeline");
-      setEvent(null);
+      setPane(
+        id === "" ? "conversations" : event() === null ? "middle" : "details",
+      );
 
       // And opening one is the human having looked at it, which takes the news
       // mark off its sidebar row — on every device, the mark being the
@@ -373,111 +246,156 @@ export function Workbench(): JSX.Element {
     }),
   );
 
-  /// The selection as something to key on: a new object each time the id
-  /// really changes, and the same one for as long as it does not. What hangs
-  /// off it is the whole of the Conversation-reading half of the page, so a
-  /// switch tears that down and builds it again — which is what `Reading` is
-  /// for, and why it is a component at all.
+  /// The selection as something to key on: a new object each time the id really
+  /// changes, and the same one for as long as it does not.
+  ///
+  /// Both of the panes the Conversation is read in stand inside a `keyed` Show
+  /// over it, so a switch tears them down and builds them again from nothing.
+  /// The frame around them is not keyed and must not be: the conversations pane
+  /// is the same list whichever row is picked. Without the key the switch was
+  /// dropped, and dropped worst where it should have been cheapest: on a
+  /// Conversation already read once, answered out of the cache. The query
+  /// below has its payload merged into the store rather than put in its place,
+  /// and reconcile exempts the root of a store from the key it is told to match
+  /// by — so the second Conversation went into the first one's object, the
+  /// object stayed the object it had always been, and with nothing to fetch
+  /// there was not even a moment of loading to rebuild the page at. Everything
+  /// the middle pane was holding went on standing over a Conversation that was
+  /// no longer on screen: a Brief half typed into above all, which is the only
+  /// copy of itself there is.
+  ///
+  /// The merge itself is right and stays. What it is for is a re-read of the
+  /// Conversation already open, where keeping the rows is the whole point; it
+  /// is only across a change of Conversation that it has nothing to say, and
+  /// this is what says so.
   const open = createMemo(() => ({ id: selected() }));
 
+  /// The Conversation the URL names, read once for the two panes that draw it:
+  /// they are two views of the one thing, and a query apiece would be two reads
+  /// of it. Out here rather than inside either, so that neither pane being
+  /// built again is a re-read.
+  const conversation = useReading(() => ({
+    queryKey: ["conversation", selected()],
+    queryFn: () => loadConversation(selected()),
+    enabled: selected() !== "",
+
+    // Nothing polls this. What a Timeline keeps up with is the Nudges about its
+    // own Conversation — a Question Set arriving, a session's output growing,
+    // a commit landing — and what stands behind a Nudge that never arrived is
+    // the catch-up in `nudge.ts`: coming back to the page reads it whole
+    // (ADR-0009).
+
+    // Merge each read into the Conversation already drawn rather than replacing
+    // it, so that an Event which did not change stays the same Event and the row
+    // drawn for it is left alone.
+    //
+    // Solid Query turns the core's structural sharing off and offers this in its
+    // place, and off is not a setting this page can live with: a talking session
+    // has this re-read a second at a time over a Timeline that has mostly not
+    // moved, and without this each read is a new object for every Event on it,
+    // so `For` throws away every row and builds it again. What goes with the
+    // rows is everything they were holding — the Brief being typed into above
+    // all, which is a half-written document and the only copy of itself there
+    // is.
+    //
+    // What actually matches the rows up is position, not the key named here. A
+    // Timeline Event is `{"Brief": {…, "id": 4}}` on the wire, so its `id` sits
+    // a level down where reconcile — which reads the key off the array element
+    // itself — cannot see it, and elements without the key are matched by
+    // index. That is sound for this array: Events are only ever appended, so
+    // the prefix is stable and every row keeps its identity. The Transcript's
+    // turns carry their `id` flat for exactly this reason.
+    freshness: { reconcile: "id" },
+  }));
+
+  // Arriving at a Conversation with nothing open lands on the end of its record:
+  // the last Event that has a pane behind it, opened by rewriting the URL to its
+  // path with replace. What somebody pressing a Conversation asked for is where
+  // the work got to, and the end of the record is that answer — so it is shown
+  // rather than left one press away.
+  //
+  // Done here rather than by the card, because the sidebar has no Timeline to
+  // pick from: its list says a Conversation has moved and nothing about what
+  // moved. So the card navigates to the Conversation as it always did, and this
+  // finishes the walk once the record has arrived.
+  //
+  // Only where the path names no pane already. A URL that names one is a cold
+  // load of that pane — a reload, or a link somebody kept — and it keeps its own
+  // selection. Which is also what settles this: the navigation it makes names a
+  // pane, so the very next run has nothing left to do.
+  //
+  // A record with nothing openable on it selects nothing and the pane stays bare
+  // paper, which is a Draft with only the Brief being written.
+  //
+  // Which level a narrow window is showing is not touched, and that is the point:
+  // it follows the Conversation changing, and this changes no Conversation. So a
+  // phone lands on the Timeline with the newest thing marked open and the details
+  // one tap away, rather than being carried past the record it was opened to
+  // read.
+  createEffect(() => {
+    const id = selected();
+    const read = conversation.data;
+
+    if (id === "" || read === undefined || event() !== null) {
+      return;
+    }
+
+    const last = lastOpening(read.timeline);
+    if (last !== null) {
+      navigate(pathTo(id, last), { replace: true });
+    }
+  });
+
   return (
-    <div
-      class={styles.workbench}
-      data-pane={pane()}
-      ref={frame}
-      style={columns()}
-    >
-      <section
-        class={`${styles.pane} ${styles.conversationsPane}`}
-        aria-label="Conversations"
-      >
+    <Panes
+      pane={pane()}
+      middleLabel="Timeline"
+      conversations={
         <Conversations
           selected={selected()}
-          open={(id) => navigate(`/conversations/${id}`)}
+          open={(id) => navigate(pathOf(id))}
         />
-      </section>
-
-      {/* One divider per border there is: the sidebar's wherever the sidebar
-          stands beside something, and the timeline's only where all three panes
-          are up. Each sits between the two panes it parts, so the grid places
-          it without being told where. */}
-      <Show when={beside()}>
-        <Divider
-          divider="sidebar"
-          label="Resize the conversations pane"
-          share={shown().sidebar}
-          travel={range("sidebar", shown(), allThree())}
-          drag={drag}
-          nudge={nudge}
-          restore={defaults}
-        />
-      </Show>
-
-      {/* The Conversation the URL names, in the two panes it is read in.
-
-          Keyed on its id, so that switching to another one throws this away
-          and builds it again from nothing. Without that the switch was
-          dropped, and dropped worst where it should have been cheapest: on a
-          Conversation already read once, answered out of the cache. The query
-          has its payload merged into the store rather than put in its place
-          (see the query in `Reading`), and reconcile exempts the root of a
-          store from the key it is told to match by — so the second
-          Conversation went into the first one's object, the object stayed the
-          object it had always been, and with nothing to fetch there was not
-          even a moment of loading to rebuild the page at. Everything the
-          middle pane was holding went on standing over a Conversation that
-          was no longer on screen: a Brief half typed into above all, which is
-          the only copy of itself there is.
-
-          The merge itself is right and stays. What it is for is a re-read of
-          the Conversation already open, where keeping the rows is the whole
-          point; it is only across a change of Conversation that it has
-          nothing to say, and this is what says so. */}
-      <Show when={open()} keyed>
-        {(open) => (
-          <Reading
-            id={open.id}
+      }
+      middle={
+        <Show when={open()} keyed>
+          <TimelinePane
+            id={selected()}
+            conversation={conversation}
             event={event()}
-            select={setEvent}
+            select={select}
             pane={setPane}
             list={() => navigate("/")}
-            divider={
-              <Show when={allThree()}>
-                <Divider
-                  divider="timeline"
-                  label="Resize the timeline pane"
-                  share={shown().timeline}
-                  travel={range("timeline", shown(), allThree())}
-                  drag={drag}
-                  nudge={nudge}
-                  restore={defaults}
-                />
-              </Show>
-            }
           />
-        )}
-      </Show>
-    </div>
+        </Show>
+      }
+      details={
+        <Show when={open()} keyed>
+          <DetailsPane
+            conversation={conversation}
+            event={event()}
+            pane={setPane}
+          />
+        </Show>
+      }
+    />
   );
 }
 
-/// One Conversation, in the two panes it is read in: its Timeline in the
-/// middle, and the full self of whatever is open in it on the right.
-///
-/// Both panes and the query behind them are one component so that one
-/// `<Show keyed>` around it rebuilds all three together — the reason it
-/// exists is in the comment at the call site. It draws no frame of its own:
-/// the panes are grid children of the workbench, so what comes back is the
-/// two of them and the divider between them, loose.
-function Reading(props: {
+/// The middle pane: one Conversation's Timeline, or what is standing in the way
+/// of reading it.
+function TimelinePane(props: {
   /// The Conversation to read, or the empty string on the bare workbench.
   id: string;
+
+  /// The read of it, which is the page's rather than this pane's: one query
+  /// stands behind this pane and the details together.
+  conversation: Read;
 
   /// What the details pane is showing, and how to change it.
   event: Opening | null;
   select: (opening: Opening) => void;
 
-  /// Which level a narrow window is showing, which is the way back out of the
+  /// Which level a narrow window is showing, which is the way on into the
   /// details pane.
   pane: (pane: Pane) => void;
 
@@ -485,11 +403,56 @@ function Reading(props: {
   /// change of level: what is being let go of is the selection, and the URL is
   /// where the selection is kept.
   list: () => void;
+}): JSX.Element {
+  return (
+    <Switch>
+      <Match when={props.id === ""}>
+        {/* The resting state of the workbench, and what it says is the one
+            thing there is to do from here. */}
+        <Empty>Pick a conversation, or start one.</Empty>
+      </Match>
+      <Match when={props.conversation.isPending}>
+        <Empty>Loading…</Empty>
+      </Match>
+      <Match when={props.conversation.isError}>
+        {/* The reading failed, so there is no header to draw and no menu to
+            hang off one — and this is the Conversation the human is most
+            likely to want the end of. So the header is drawn anyway, in the
+            little that can be known without the reading, and what it carries
+            is the way out: see `Hatch.tsx`. */}
+        <Hatch id={props.id} back={props.list} />
+        <ErrorLine>
+          Could not read this conversation: {props.conversation.error?.message}
+        </ErrorLine>
+      </Match>
+      <Match when={props.conversation.data}>
+        {(conversation) => (
+          <Timeline
+            conversation={conversation()}
+            back={props.list}
+            details={() => props.pane("details")}
+            selected={props.event}
+            select={props.select}
+          />
+        )}
+      </Match>
+    </Switch>
+  );
+}
 
-  /// The line between the two panes, which is the frame's rather than this
-  /// component's: how wide the panes stand is a property of the workbench,
-  /// and the handle only stands here because that is where the grid puts it.
-  divider: JSX.Element;
+/// The details pane: the full self of whatever the Timeline has open, and bare
+/// paper where nothing is.
+function DetailsPane(props: {
+  /// The read of the Conversation, which is the one the pane beside this is
+  /// drawn from.
+  conversation: Read;
+
+  /// What is open in it, if anything.
+  event: Opening | null;
+
+  /// Which level a narrow window is showing, which is the way back out to the
+  /// Timeline.
+  pane: (pane: Pane) => void;
 }): JSX.Element {
   /// The Event the details pane is showing, where it is one that has a full
   /// self to show. An id whose Event has gone leaves the pane empty, which is
@@ -560,220 +523,139 @@ function Reading(props: {
     ].find((open) => open !== undefined && which(open).id === id);
   };
 
-  const conversation = useReading(() => ({
-    queryKey: ["conversation", props.id],
-    queryFn: () => loadConversation(props.id),
-    enabled: props.id !== "",
-
-    // Nothing polls this. What a Timeline keeps up with is the Nudges about its
-    // own Conversation — a Question Set arriving, a session's output growing,
-    // a commit landing — and what stands behind a Nudge that never arrived is
-    // the catch-up in `nudge.ts`: coming back to the page reads it whole
-    // (ADR-0009).
-
-    // Merge each read into the Conversation already drawn rather than replacing
-    // it, so that an Event which did not change stays the same Event and the row
-    // drawn for it is left alone.
-    //
-    // Solid Query turns the core's structural sharing off and offers this in its
-    // place, and off is not a setting this page can live with: a talking session
-    // has this re-read a second at a time over a Timeline that has mostly not
-    // moved, and without this each read is a new object for every Event on it,
-    // so `For` throws away every row and builds it again. What goes with the
-    // rows is everything they were holding — the Brief being typed into above
-    // all, which is a half-written document and the only copy of itself there
-    // is.
-    //
-    // What actually matches the rows up is position, not the key named here. A
-    // Timeline Event is `{"Brief": {…, "id": 4}}` on the wire, so its `id` sits
-    // a level down where reconcile — which reads the key off the array element
-    // itself — cannot see it, and elements without the key are matched by
-    // index. That is sound for this array: Events are only ever appended, so
-    // the prefix is stable and every row keeps its identity. The Transcript's
-    // turns carry their `id` flat for exactly this reason.
-    freshness: { reconcile: "id" },
-  }));
-
+  // Nothing at all where nothing is open, which on a wide window is a blank
+  // column beside the record and on a narrow one is a level there is no way in
+  // to.
   return (
-    <>
-      <section
-        class={`${styles.pane} ${styles.timelinePane}`}
-        aria-label="Timeline"
-      >
+    <Show when={props.conversation.data}>
+      {(conversation) => (
         <Switch>
-          <Match when={props.id === ""}>
-            {/* The resting state of the workbench, and what it says is the one
-                thing there is to do from here. */}
-            <Empty>Pick a conversation, or start one.</Empty>
+          {/* The backlog and the roadmap, which are the two things this
+              pane draws that are not Events: each is read off the worktree
+              every time the Conversation is, so there is nothing on the
+              record to name either by and the cards name them by a word
+              instead. Ahead of the Events because they are not among them —
+              [`opened`] looks for an id, and neither selection is one. */}
+          <Match when={props.event === "backlog"}>
+            <Backlog
+              conversation={conversation()}
+              back={() => props.pane("middle")}
+            />
           </Match>
-          <Match when={conversation.isPending}>
-            <Empty>Loading…</Empty>
-          </Match>
-          <Match when={conversation.isError}>
-            {/* The reading failed, so there is no header to draw and no menu to
-                hang off one — and this is the Conversation the human is most
-                likely to want the end of. So the header is drawn anyway, in the
-                little that can be known without the reading, and what it carries
-                is the way out: see `Hatch.tsx`. */}
-            <Hatch id={props.id} back={props.list} />
-            <ErrorLine>
-              Could not read this conversation: {conversation.error?.message}
-            </ErrorLine>
-          </Match>
-          <Match when={conversation.data}>
-            {(conversation) => (
-              <Timeline
+          {/* And which roadmap, a worktree being allowed any number of
+              them where it has one `.tasks/`. */}
+          <Match when={roadmapOpened(props.event)}>
+            {(name) => (
+              <Roadmap
                 conversation={conversation()}
-                back={props.list}
-                details={() => props.pane("details")}
-                selected={props.event}
-                select={props.select}
+                name={name()}
+                back={() => props.pane("middle")}
               />
             )}
           </Match>
+          <Match when={opened(conversation())}>
+            {(open) => (
+              <Switch>
+                <Match when={outputIn(open())}>
+                  {(output) => (
+                    <Output
+                      conversation={conversation()}
+                      output={output()}
+                      back={() => props.pane("middle")}
+                    />
+                  )}
+                </Match>
+                <Match when={setIn(open())}>
+                  {(asked) => (
+                    <Asked
+                      asked={asked()}
+                      back={() => props.pane("middle")}
+                    />
+                  )}
+                </Match>
+                <Match when={commitIn(open())}>
+                  {(commit) => (
+                    <Commit
+                      conversation={conversation()}
+                      commit={commit()}
+                      back={() => props.pane("middle")}
+                    />
+                  )}
+                </Match>
+                <Match when={pullRequestIn(open())}>
+                  {(opened) => (
+                    <PullRequest
+                      conversation={conversation()}
+                      opened={opened()}
+                      back={() => props.pane("middle")}
+                    />
+                  )}
+                </Match>
+                {/* And the three documents, each the whole of what its
+                    card showed five lines of. The handoff and the
+                    instruction are one pane — rendered markdown under the
+                    heading the card carries — and the Brief has one of its
+                    own, because it carries the summary of what the
+                    Conversation was configured with as well. */}
+                <Match when={briefIn(open())}>
+                  {(brief) => (
+                    <Brief
+                      conversation={conversation()}
+                      brief={brief()}
+                      back={() => props.pane("middle")}
+                    />
+                  )}
+                </Match>
+                <Match when={handoffIn(open())}>
+                  {(handoff) => (
+                    <Document
+                      heading="Handoff"
+                      html={handoff().html}
+                      empty="The grilling wrote nothing down."
+                      back={() => props.pane("middle")}
+                    />
+                  )}
+                </Match>
+                {/* What a steer sent a session off with, read the way every
+                    other document the human writes is read. Nothing opens a
+                    steer that carried none — and what it is called follows
+                    the target, an instruction being one session's whole job
+                    and a follow-up's brief being what a conversation was
+                    opened on. */}
+                <Match when={steerIn(open())}>
+                  {(steer) => (
+                    <Document
+                      heading={
+                        steer().target === "FollowUp"
+                          ? "Follow-up"
+                          : "Instruction"
+                      }
+                      html={steer().html ?? ""}
+                      empty="Nothing was asked for."
+                      back={() => props.pane("middle")}
+                    />
+                  )}
+                </Match>
+                {/* And what Verkstead said on its own account, which is a
+                    document like the rest of them: the card shows the one
+                    line that tells one notice from another, and the whole
+                    of what a stop had to say — the reason and the terminal
+                    output under it — is here. */}
+                <Match when={noticeIn(open())}>
+                  {(notice) => (
+                    <Document
+                      heading="Notice"
+                      html={notice().html}
+                      empty="Verkstead wrote nothing down."
+                      back={() => props.pane("middle")}
+                    />
+                  )}
+                </Match>
+              </Switch>
+            )}
+          </Match>
         </Switch>
-      </section>
-
-      {props.divider}
-
-      <section
-        class={`${styles.pane} ${styles.detailsPane}`}
-        aria-label="Details"
-      >
-        {/* Nothing at all where nothing is open, which on a wide window is a
-            blank column beside the record and on a narrow one is a level there
-            is no way in to. */}
-        <Show when={conversation.data}>
-          {(conversation) => (
-            <Switch>
-              {/* The backlog and the roadmap, which are the two things this
-                  pane draws that are not Events: each is read off the worktree
-                  every time the Conversation is, so there is nothing on the
-                  record to name either by and the cards name them by a word
-                  instead. Ahead of the Events because they are not among them —
-                  [`opened`] looks for an id, and neither selection is one. */}
-              <Match when={props.event === "backlog"}>
-                <Backlog
-                  conversation={conversation()}
-                  back={() => props.pane("timeline")}
-                />
-              </Match>
-              {/* And which roadmap, a worktree being allowed any number of
-                  them where it has one `.tasks/`. */}
-              <Match when={roadmapOpened(props.event)}>
-                {(name) => (
-                  <Roadmap
-                    conversation={conversation()}
-                    name={name()}
-                    back={() => props.pane("timeline")}
-                  />
-                )}
-              </Match>
-              <Match when={opened(conversation())}>
-                {(open) => (
-                  <Switch>
-                    <Match when={outputIn(open())}>
-                      {(output) => (
-                        <Output
-                          conversation={conversation()}
-                          output={output()}
-                          back={() => props.pane("timeline")}
-                        />
-                      )}
-                    </Match>
-                    <Match when={setIn(open())}>
-                      {(asked) => (
-                        <Asked
-                          asked={asked()}
-                          back={() => props.pane("timeline")}
-                        />
-                      )}
-                    </Match>
-                    <Match when={commitIn(open())}>
-                      {(commit) => (
-                        <Commit
-                          conversation={conversation()}
-                          commit={commit()}
-                          back={() => props.pane("timeline")}
-                        />
-                      )}
-                    </Match>
-                    <Match when={pullRequestIn(open())}>
-                      {(opened) => (
-                        <PullRequest
-                          conversation={conversation()}
-                          opened={opened()}
-                          back={() => props.pane("timeline")}
-                        />
-                      )}
-                    </Match>
-                    {/* And the three documents, each the whole of what its
-                        card showed five lines of. The handoff and the
-                        instruction are one pane — rendered markdown under the
-                        heading the card carries — and the Brief has one of its
-                        own, because it carries the summary of what the
-                        Conversation was configured with as well. */}
-                    <Match when={briefIn(open())}>
-                      {(brief) => (
-                        <Brief
-                          conversation={conversation()}
-                          brief={brief()}
-                          back={() => props.pane("timeline")}
-                        />
-                      )}
-                    </Match>
-                    <Match when={handoffIn(open())}>
-                      {(handoff) => (
-                        <Document
-                          heading="Handoff"
-                          html={handoff().html}
-                          empty="The grilling wrote nothing down."
-                          back={() => props.pane("timeline")}
-                        />
-                      )}
-                    </Match>
-                    {/* What a steer sent a session off with, read the way every
-                        other document the human writes is read. Nothing opens a
-                        steer that carried none — and what it is called follows
-                        the target, an instruction being one session's whole job
-                        and a follow-up's brief being what a conversation was
-                        opened on. */}
-                    <Match when={steerIn(open())}>
-                      {(steer) => (
-                        <Document
-                          heading={
-                            steer().target === "FollowUp"
-                              ? "Follow-up"
-                              : "Instruction"
-                          }
-                          html={steer().html ?? ""}
-                          empty="Nothing was asked for."
-                          back={() => props.pane("timeline")}
-                        />
-                      )}
-                    </Match>
-                    {/* And what Verkstead said on its own account, which is a
-                        document like the rest of them: the card shows the one
-                        line that tells one notice from another, and the whole
-                        of what a stop had to say — the reason and the terminal
-                        output under it — is here. */}
-                    <Match when={noticeIn(open())}>
-                      {(notice) => (
-                        <Document
-                          heading="Notice"
-                          html={notice().html}
-                          empty="Verkstead wrote nothing down."
-                          back={() => props.pane("timeline")}
-                        />
-                      )}
-                    </Match>
-                  </Switch>
-                )}
-              </Match>
-            </Switch>
-          )}
-        </Show>
-      </section>
-    </>
+      )}
+    </Show>
   );
 }

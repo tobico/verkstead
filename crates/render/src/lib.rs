@@ -56,7 +56,7 @@ pub use profiles::{
     ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
 };
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
-pub use repos::{Registered, Registration, RepoEntry};
+pub use repos::{Registered, Registration, RepoEntry, RepoRemoved, RepoView};
 pub use settings::{
     Author, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified,
 };

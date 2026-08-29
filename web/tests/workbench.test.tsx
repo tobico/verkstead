@@ -68,6 +68,9 @@ import cardCss from "../src/Card.module.css?raw";
 // read off.
 import pressable from "../src/CardButton.module.css";
 import pressableCss from "../src/CardButton.module.css?raw";
+// And the pressable icon, which is the other thing in a pane that opens into a
+// subpane: the gear at the head of the sidebar is one.
+import button from "../src/IconButton.module.css";
 import dropdown from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
 // The set page as it is drawn inside a details pane: its nav, its sections, and
@@ -147,8 +150,8 @@ import timeline from "../src/workbench/Timeline.module.css";
 import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // And the frame the three panes stand in, both ways: it holds the layout rules
 // jsdom lays nothing out for, and the pane names everything else is found by.
-import shell from "../src/workbench/Workbench.module.css";
-import shellCss from "../src/workbench/Workbench.module.css?raw";
+import shell from "../src/Panes.module.css";
+import shellCss from "../src/Panes.module.css?raw";
 import {
   ABBREVIATED,
   CLAMPED_LINES,
@@ -172,6 +175,7 @@ import {
   SIDEBAR,
   drawn,
   mount,
+  mountSidebar,
   nudged,
   theWorkbench,
 } from "./bench";
@@ -290,7 +294,20 @@ function readAgain(): void {
 
 /// The frame, which is what says which level a narrow window is showing.
 function frame(container: ParentNode): HTMLElement {
-  return container.querySelector(`.${shell.workbench}`)!;
+  return container.querySelector(`.${shell.panes}`)!;
+}
+
+/// Where a Conversation is opened for the tests that are about a card *before*
+/// anything has been pressed.
+///
+/// Its own path lands on the end of the record — the last openable card is
+/// selected and the pane opens on it — which is the point of it and no use at
+/// all to a test asking what an unpressed card looks like. A path that names a
+/// details pane is a cold load of that pane and the landing leaves it alone; a
+/// path naming an Event the record has not got leaves the pane empty, as a
+/// stale link does. There is no Event 0, so this is one.
+function unopened(conversation: { id: number }): string {
+  return `/conversations/${conversation.id}/events/0`;
 }
 
 /// Open the conversation's action menu: press the trigger, and wait for what it
@@ -300,13 +317,11 @@ async function openActions(container: ParentNode): Promise<HTMLElement> {
   return drawn(container, `.${actions.conversationActions} > .${dropdown.drop}`);
 }
 
-/// Open the sidebar's ⋯, which is what the rest of Verkstead is behind: press
-/// the trigger, and wait for what it drops.
-async function openWorkbenchActions(
-  container: ParentNode,
-): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, `.${sidebar.workbenchActions} > .${dropdown.trigger}`));
-  return drawn(container, `.${sidebar.workbenchActions} > .${dropdown.drop}`);
+/// The gear at the head of the sidebar, which is what the rest of Verkstead is
+/// behind. Found by the name it is read aloud by, an icon saying nothing for
+/// itself.
+async function gear(container: ParentNode): Promise<HTMLButtonElement> {
+  return drawn<HTMLButtonElement>(container, 'button[aria-label="Settings"]');
 }
 
 /// Drop the new-conversation menu, which is where both ways of starting one
@@ -458,44 +473,54 @@ describe("the workbench", () => {
 
   /// The sidebar is where the rest of Verkstead is reached from, now that the
   /// workbench has the root — and the rest of Verkstead is one page, since the
-  /// Repos and the Agent Profiles were folded onto the settings page. Behind the
-  /// ⋯ at the head of the pane, where the Conversation's own ⋯ is, rather than
-  /// under a list with no end to it.
-  it("reaches the rest of Verkstead from the sidebar's menu", async () => {
+  /// Repos and the Agent Profiles were folded onto the settings page. A gear at
+  /// the head of the pane, where the ⋯ that held it stood: one press rather than
+  /// the two a menu of one row was.
+  it("reaches the rest of Verkstead from the gear", async () => {
     theWorkbench();
     const { container, history } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
-    const drop = await openWorkbenchActions(container);
-    expect(
-      [...drop.querySelectorAll("a")].map((to) => to.getAttribute("href")),
-    ).toEqual(["/settings"]);
-
-    // A row that goes somewhere rather than one that does something, so pressing
-    // it takes the whole sidebar with it and nothing here has to shut the menu.
-    const settings = screen.getByText("Settings");
-    expect(settings.getAttribute("role")).toBe("menuitem");
-    fireEvent.click(settings);
+    fireEvent.click(await gear(container));
     await waitFor(() => expect(history.get()).toBe("/settings"));
   });
 
-  /// And it is the first thing in the menu, because it is what the ⋯ was put at
-  /// the head of the pane to hold: the switch under it is a setting that came to
-  /// sit beside the way out rather than the reason there is a menu.
-  it("puts settings above the switch", async () => {
+  /// And it is another thing in this pane that is selected and opened into the
+  /// pane beside it, which is what the cards under it are — so it says which of
+  /// the two it is the same way they do. Not open on the workbench, and open
+  /// wherever under the settings the human has got to.
+  it("reads the gear as open only under the settings", async () => {
+    theWorkbench();
+    const { container } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+    expect((await gear(container)).getAttribute("aria-pressed")).toBe("false");
+
+    for (const at of ["/settings", "/settings/repos/1"]) {
+      const page = mountSidebar(at);
+      const there = await gear(page.container);
+      expect(there.getAttribute("aria-pressed")).toBe("true");
+      expect(there.classList).toContain(button.open);
+      page.unmount();
+    }
+  });
+
+  /// The ⋯ that held both of them is gone with them: what it was for was the way
+  /// out of the workbench, and a menu that stood in front of one press is a
+  /// press in front of a press.
+  it("leaves no ⋯ at the head of the conversations", async () => {
     theWorkbench();
     const { container } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
-    const drop = await openWorkbenchActions(container);
-
-    expect(drop.firstElementChild!.tagName).toBe("A");
-    expect(drop.firstElementChild!.textContent).toBe("Settings");
-    expect(drop.lastElementChild!.className).toBe(sidebar.showArchived);
+    expect(
+      container.querySelector(
+        `.${shell.conversationsPane} .${dropdown.trigger}.${dropdown.mark}`,
+      ),
+    ).toBeNull();
   });
 
   /// Two words rather than the sentence it used to be, and never on two lines:
-  /// the menu is over the list of conversations, so what else it could be
+  /// the switch stands under the list of conversations, so what else it could be
   /// showing does not have to be said — and a label that wrapped would leave the
   /// switch on a line of its own with nothing beside it to say what it was for.
   it("keeps the archived switch on one line", () => {
@@ -506,8 +531,9 @@ describe("the workbench", () => {
     );
   });
 
-  /// And the one row of that menu that is about this list rather than about the
-  /// rest of Verkstead: whether the conversations put away are drawn in it.
+  /// And the one thing at the foot of the pane, which is about this list rather
+  /// than about the rest of Verkstead: whether the conversations put away are
+  /// drawn in it.
   ///
   /// The server's answer rather than this device's, which is what makes it the
   /// same list on a phone opened afterwards.
@@ -518,15 +544,15 @@ describe("the workbench", () => {
         json({ showing: true } satisfies ShowingArchived),
       ),
     );
-    const { container } = mount();
-    await waitFor(() => screen.getByText(DRAFTING.branch));
-
-    await openWorkbenchActions(container);
+    mount();
 
     const toggle = await waitFor(() =>
       screen.getByLabelText<HTMLInputElement>("Show archived"),
     );
-    expect(toggle.checked).toBe(true);
+    // Drawn where the server has it rather than where the server had it: the
+    // switch is on the page before its read has landed, and off is where one
+    // nobody has answered for stands.
+    await waitFor(() => expect(toggle.checked).toBe(true));
   });
 
   /// A switch says where it stands rather than asking for a flip, so what goes
@@ -539,10 +565,8 @@ describe("the workbench", () => {
         "POST",
       ),
     );
-    const { container } = mount();
-    await waitFor(() => screen.getByText(DRAFTING.branch));
+    mount();
 
-    await openWorkbenchActions(container);
     const toggle = await waitFor(() =>
       screen.getByLabelText<HTMLInputElement>("Show archived"),
     );
@@ -565,10 +589,9 @@ describe("the workbench", () => {
         "POST",
       ),
     );
-    const { container } = mount();
+    mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
-    await openWorkbenchActions(container);
     const read = askedFor(fetching, "/api/ui/conversations");
     fireEvent.click(
       await waitFor(() => screen.getByLabelText("Show archived")),
@@ -579,19 +602,41 @@ describe("the workbench", () => {
     );
   });
 
-  /// Nothing of it until it is pressed, which is the point of putting it there:
-  /// the head of the pane gives up a mark's worth of room and no more.
-  it("keeps the way out of the workbench behind that menu", async () => {
+  /// The switch is the foot of the pane rather than the last row of the list:
+  /// last in the column, with whatever room the conversations leave over taken
+  /// above it. So a short list stands it against the bottom of the screen and a
+  /// long one leaves it after the last card, behind the scroll — and neither
+  /// costs a card being covered, which is what a strip stuck across the list
+  /// would have cost for the life of the pane.
+  ///
+  /// Where a thing sits is the stylesheet's, and jsdom lays nothing out: what is
+  /// asked here is that it is last in the pane, that the room over it is what
+  /// puts it there, and that the pane is the column that gives it any.
+  it("stands the archived switch at the foot of the pane", async () => {
     theWorkbench();
     const { container } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
+    const pane = container.querySelector(`.${shell.conversationsPane}`)!;
+    expect(pane.lastElementChild!.className).toBe(sidebar.showArchived);
+
+    const at = sidebarCss.indexOf("\n.showArchived {");
+    expect(sidebarCss.slice(at, sidebarCss.indexOf("\n}", at))).toContain(
+      "margin-top: auto;",
+    );
     expect(
-      container.querySelector(`.${sidebar.workbenchActions} > .${dropdown.drop}`),
-    ).toBeNull();
-    // The way to the settings is in the menu and nowhere else, so with the menu
-    // shut there is no way out of this page on it at all.
-    expect(screen.queryByText("Settings")).toBeNull();
+      sidebarCss,
+      "the foot is the end of the pane rather than a strip laid over it",
+    ).not.toContain("position: sticky");
+
+    const column = shellCss.indexOf("\n.conversationsPane {");
+    expect(
+      column,
+      "expected the frame to make a column of the conversations pane",
+    ).toBeGreaterThan(-1);
+    expect(shellCss.slice(column, shellCss.indexOf("\n}", column))).toContain(
+      "flex-direction: column;",
+    );
   });
 
   /// The menu still opens with nothing to start a conversation in — and what is
@@ -2260,7 +2305,7 @@ describe("the escape hatch on a conversation that will not load", () => {
     theBrokenConversation();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const head = await drawn(container, `.${shell.timelinePane} .${paneHead.head}`);
+    const head = await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
     expect(head.querySelector("h1")?.textContent).toBe(DRAFTING.branch);
 
     await drawn(container, `.${actions.conversationActions} > .${dropdown.trigger}`);
@@ -2274,7 +2319,7 @@ describe("the escape hatch on a conversation that will not load", () => {
     theBrokenConversation();
     const { container, history } = mount(`/conversations/${OPEN.id}`);
 
-    fireEvent.click(await drawn(container, `.${shell.timelinePane} .${shell.paneBack}`));
+    fireEvent.click(await drawn(container, `.${shell.middlePane} .${shell.paneBack}`));
 
     await waitFor(() => expect(history.get()).toBe("/"));
   });
@@ -2820,7 +2865,7 @@ describe("a conversation's setup", () => {
 
     // The pane alone, the sidebar beside it being drawn from a list of its own
     // that this test did not touch.
-    const pane = container.querySelector(`.${shell.timelinePane}`)!;
+    const pane = container.querySelector(`.${shell.middlePane}`)!;
     expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(DRAFT);
     expect(pane.textContent).not.toContain(OPEN.branch);
   });
@@ -2836,7 +2881,7 @@ describe("a conversation's setup", () => {
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const pane = container.querySelector(`.${shell.timelinePane}`)!;
+    const pane = container.querySelector(`.${shell.middlePane}`)!;
     await waitFor(() =>
       expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(DRAFT),
     );
@@ -2853,7 +2898,7 @@ describe("a conversation's setup", () => {
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const pane = container.querySelector(`.${shell.timelinePane}`)!;
+    const pane = container.querySelector(`.${shell.middlePane}`)!;
     await waitFor(() =>
       expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(
         OPEN.branch,
@@ -3924,7 +3969,7 @@ describe("the panes on a narrow window", () => {
 
     fireEvent.click(screen.getByText(DRAFTING.branch));
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("timeline"),
+      expect(frame(container).dataset.pane).toBe("middle"),
     );
 
     // The third level is the open Event's own, and nothing is open: there is
@@ -3952,7 +3997,7 @@ describe("the panes on a narrow window", () => {
 
     fireEvent.click(screen.getByText(DRAFTING.branch));
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("timeline"),
+      expect(frame(container).dataset.pane).toBe("middle"),
     );
     expect(history.get()).toBe(`/conversations/${DRAFTING.id}`);
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
@@ -3965,25 +4010,40 @@ describe("the panes on a narrow window", () => {
 
     fireEvent.click(screen.getByText(DRAFTING.branch));
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("timeline"),
+      expect(frame(container).dataset.pane).toBe("middle"),
     );
   });
 
   /// So walking in to the third level is opening something, and the way forward
   /// is what stands afterwards: it is drawn for a selection rather than for a
   /// conversation.
+  ///
+  /// Waited on, because opening something is a navigation now — the pane the
+  /// path names is drawn once the router has moved to it.
   it("walks on to the details by opening an event, and back out again", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
-    expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
+
+    // The end of the record is open, the landing having picked it — and the
+    // phone is still on the Timeline all the same: what the level follows is
+    // the Conversation changing, and opening the newest thing changes none. So
+    // the way forward is offered rather than taken.
+    expect(frame(container).dataset.pane).toBe("middle");
+    await waitFor(() => screen.getByRole("button", { name: "Details →" }));
 
     fireEvent.click(output);
     expect(frame(container).dataset.pane).toBe("details");
 
+    // Waited for before its way back is taken: the landing had already opened a
+    // pane on the way in, so a "← Timeline" was there to be picked up before the
+    // router had moved to this one — and the button of a pane that has since
+    // been replaced is a button attached to nothing.
+    await drawn(container, `.${shell.detailsPane} .${outputPane.recordSwitch}`);
+
     fireEvent.click(screen.getByRole("button", { name: "← Timeline" }));
-    expect(frame(container).dataset.pane).toBe("timeline");
+    expect(frame(container).dataset.pane).toBe("middle");
 
     // Still open, so the way forward is there to be taken again.
     fireEvent.click(screen.getByRole("button", { name: "Details →" }));
@@ -3997,7 +4057,7 @@ describe("the panes on a narrow window", () => {
     const { container, history } = mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
 
-    expect(frame(container).dataset.pane).toBe("timeline");
+    expect(frame(container).dataset.pane).toBe("middle");
 
     history.set({ value: "/" });
     await waitFor(() =>
@@ -4008,11 +4068,11 @@ describe("the panes on a narrow window", () => {
   /// What `data-pane` means is the stylesheet's, and there is nothing to query
   /// it off: jsdom lays nothing out. So the rules themselves are what is read.
   it("is one pane at a time until the window is wide enough for more", () => {
-    expect(shellCss).toContain(".workbench > .pane {\n  display: none;\n}");
+    expect(shellCss).toContain(".panes > .pane {\n  display: none;\n}");
     expect(shellCss).toContain(
-      '.workbench[data-pane="conversations"] > .conversationsPane,\n' +
-        '.workbench[data-pane="timeline"] > .timelinePane,\n' +
-        '.workbench[data-pane="details"] > .detailsPane {\n' +
+      '.panes[data-pane="conversations"] > .conversationsPane,\n' +
+        '.panes[data-pane="middle"] > .middlePane,\n' +
+        '.panes[data-pane="details"] > .detailsPane {\n' +
         "  display: block;\n}",
     );
 
@@ -5548,10 +5608,16 @@ describe("a session's output on the timeline", () => {
     theSpeaking();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
+    // The Timeline's own following puts the record at its end on the way in,
+    // and that is the pane beside this one: what is asked here is what the
+    // output pane does once it is opened, so the count starts from there.
+    await drawn(container, `.${timeline.timeline}`);
+    const landed = scrolled.mock.calls.length;
+
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.prose}`);
 
-    expect(scrolled).not.toHaveBeenCalled();
+    expect(scrolled.mock.calls.length).toBe(landed);
   });
 });
 
@@ -5567,7 +5633,7 @@ describe("the strip for the session running now", () => {
   /// Where the strip is found, which is the pane rather than the record: it is
   /// no part of the list of what has happened.
   const strip = (container: HTMLElement) =>
-    container.querySelector(`.${shell.timelinePane} > .${timeline.session}`);
+    container.querySelector(`.${shell.middlePane} > .${timeline.session}`);
 
   it("holds the running session against the foot of the pane", async () => {
     theGrillingOutput({ running: true, idle: false });
@@ -5760,7 +5826,7 @@ describe("watching a live session's screen", () => {
   /// the stylesheet, because jsdom lays nothing out.
   it("gives the Screen the pane's height rather than the page's", () => {
     expect(shellCss).toContain(
-      ".workbench > .detailsPane:has(.paneScreen) {\n" +
+      ".panes > .detailsPane:has(.paneScreen) {\n" +
         "  flex-direction: column;\n" +
         "  height: 100dvh;\n" +
         "  padding-bottom: 1.25rem;\n" +
@@ -5770,7 +5836,7 @@ describe("watching a live session's screen", () => {
 
     // What is above the terminal keeps its size; the Screen takes the rest.
     expect(shellCss).toContain(
-      ".workbench > .detailsPane:has(.paneScreen) > :not(.paneScreen) {\n" +
+      ".panes > .detailsPane:has(.paneScreen) > :not(.paneScreen) {\n" +
         "  flex: none;\n" +
         "}",
     );
@@ -6020,7 +6086,7 @@ describe("putting something into a live session's screen", () => {
 
     expect(container.querySelector('[class*="handBack"]')).toBeNull();
     expect(
-      container.querySelector(`.${shell.timelinePane} .${timeline.blocked}`),
+      container.querySelector(`.${shell.middlePane} .${timeline.blocked}`),
     ).toBeNull();
   });
 });
@@ -8316,7 +8382,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
 
-    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("middle"));
   });
 
   it("shows that commit's diff in the details pane, as the server rendered it", async () => {
@@ -9101,7 +9167,7 @@ describe("the pinned task list", () => {
   /// documents its entries name, in the details pane.
   it("is one press and offers nothing else", async () => {
     theTasked();
-    const { container } = mount(`/conversations/${TASKED.id}`);
+    const { container } = mount(unopened(TASKED));
 
     const list = await drawn(container, `.${timeline.pinned} .${timeline.taskList}`);
 
@@ -9398,7 +9464,7 @@ describe("the task list opened", () => {
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
 
-    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("middle"));
   });
 
   /// The server refuses cleanly where the worktree or the backlog has gone, and
@@ -10018,9 +10084,17 @@ describe("the stage list opened", () => {
       await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
     );
 
-    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
+    // Waited for by its title rather than by being a pane head at all: this
+    // conversation opened on the end of its record, so a head was there before
+    // the card was ever pressed and the change is which one it is.
+    const head = await waitFor(() => {
+      const found = container.querySelector<HTMLElement>(
+        `.${shell.detailsPane} .${paneHead.head}`,
+      );
+      expect(found?.querySelector("h1")?.textContent).toBe("Roadmap");
+      return found!;
+    });
 
-    expect(head.querySelector("h1")!.textContent).toBe("Roadmap");
     expect(head.textContent).not.toContain("Close");
     expect(
       (await drawn(container, `.${shell.detailsPane} .${documents.feature}`)).textContent,
@@ -10028,7 +10102,7 @@ describe("the stage list opened", () => {
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
 
-    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("middle"));
   });
 
   /// The server refuses cleanly where the worktree or the roadmap has gone, and
@@ -10305,7 +10379,7 @@ describe("a run stopped because an account ran out of window", () => {
   /// finds it is the edge in the colour that means stopped.
   it("marks the notice the run stopped at, apart from the one being read", async () => {
     thePaused();
-    const { container } = mount(`/conversations/${WAITING.id}`);
+    const { container } = mount(unopened(WAITING));
 
     const marked = await drawn(
       container,
@@ -10313,7 +10387,7 @@ describe("a run stopped because an account ran out of window", () => {
     );
 
     expect(marked.textContent).toContain("Implementing the work");
-    // Nothing has been pressed, so the mark is not about being open.
+    // Nothing is open, so the mark is not about being open.
     expect(marked.classList.contains(pressable.open!)).toBe(false);
 
     // And it is the last card on the record, which is what the stylesheet
@@ -10546,7 +10620,7 @@ describe("the pinned pull request", () => {
   /// answers for the keyboard and for anything reading the page aloud.
   it("stays a button for the keyboard and the screen reader", async () => {
     theWrapping();
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
+    const { container } = mount(unopened(WRAPPING));
 
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
 
@@ -10774,7 +10848,7 @@ describe("the pinned pull request", () => {
   /// Nudge about it.
   it("asks GitHub nothing until it is opened", async () => {
     const fetching = theWrapping();
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
+    const { container } = mount(unopened(WRAPPING));
 
     await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
 
@@ -10822,7 +10896,7 @@ describe("the pinned pull request", () => {
         json(CARRIED),
       ),
     );
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
+    const { container } = mount(unopened(WRAPPING));
 
     const dots = await drawn(
       container,
@@ -11855,5 +11929,367 @@ describe("a clamped document", () => {
     // On `.cut` and nowhere else, which is what makes a short document show
     // whole with no fade over its last line.
     expect(timelineCss).not.toContain(".clamp::after");
+  });
+});
+
+/// Where a details pane stands, as a path of its own under the Conversation it
+/// belongs to.
+///
+/// The arithmetic behind these paths is `pathing.test.ts`, which holds it true
+/// as a value; what is asked here is what the page does with it — that a card
+/// press writes the path, that a path drawn cold opens the pane, and which of
+/// the two kinds of navigation grows the history stack.
+describe("the path a details pane stands at", () => {
+  /// A press on any of the three kinds of card — an Event, the backlog, a
+  /// roadmap — leaves the page at the path that pane stands at.
+  it("writes the path of whatever card is pressed", async () => {
+    theGrilling();
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${OUTPUT.id}`,
+      ),
+    );
+  });
+
+  it("writes the backlog's path by the word, there being one per conversation", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container, history } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${TASKED.id}/backlog`),
+    );
+  });
+
+  it("writes a roadmap's path by its own directory name", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${STAGED.id}/roadmaps/${ROADMAP.name}`,
+      ),
+    );
+  });
+
+  /// Which is the whole point of putting it there: the pane is drawn from the
+  /// path, so a reload or a link somebody kept opens what it names.
+  it("opens the event a path names on a cold load", async () => {
+    theSpeaking();
+    const { container } = mount(
+      `/conversations/${GRILLING.id}/events/${OUTPUT.id}`,
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${outputPane.turn}`);
+  });
+
+  it("opens the backlog a path names on a cold load", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}/backlog`);
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+  });
+
+  it("opens the roadmap a path names on a cold load", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(
+      `/conversations/${STAGED.id}/roadmaps/${ROADMAP.name}`,
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+  });
+
+  /// And a path naming something the Conversation has not got leaves the pane
+  /// empty, exactly as a stale selection did: the URL is a record of what was
+  /// picked rather than a promise that it is still there.
+  it("leaves the pane empty where the path names no such event", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}/events/99999`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${paneHead.head}`),
+    ).toBeNull();
+  });
+
+  /// A phone shows one level at a time, and the level a cold load lands on is
+  /// the one the path names — the details, rather than the Timeline the human
+  /// would have to walk forward from a second time.
+  it("lands a narrow window on the details pane it was opened at", async () => {
+    theSpeaking();
+    const { container } = mount(
+      `/conversations/${GRILLING.id}/events/${OUTPUT.id}`,
+    );
+
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("details"));
+
+    // And the walk back out of it is the pane's own, as it is from a pane
+    // opened by pressing a card.
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${paneHead.back}`),
+    );
+    expect(frame(container).dataset.pane).toBe("middle");
+  });
+
+  /// Entering a Conversation is the page changing, so it pushes: Back from
+  /// inside one leaves it for the list it was entered from.
+  it("pushes entering a conversation, so back leaves it", async () => {
+    theWorkbench();
+    const { container, history } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    fireEvent.click(screen.getByText(DRAFTING.branch));
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${DRAFTING.id}`),
+    );
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("conversations"),
+    );
+  });
+
+  /// Opening a details pane is a place in that page rather than a page, so it
+  /// replaces: however many the human walks between, Back leaves the
+  /// Conversation rather than retracing them one at a time.
+  it("replaces between details, so back leaves the conversation whole", async () => {
+    theGrilling();
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${OUTPUT.id}`,
+      ),
+    );
+
+    fireEvent.click(await drawn(container, `.${timeline.brief}`));
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${briefOf(GRILLING).id}`,
+      ),
+    );
+
+    // Two details walked between, and one step out of the Conversation: the
+    // entry the second press wrote is the entry the first one wrote.
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// What the nesting under the Conversation's route is for: the middle pane
+  /// stands through a change of detail, so nothing it is holding — a Brief half
+  /// typed into above all — goes when a card is pressed.
+  it("leaves the timeline pane standing while the detail changes", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const before = await drawn(container, `.${shell.middlePane} .${timeline.timeline}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+    await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
+
+    expect(container.querySelector(`.${shell.middlePane} .${timeline.timeline}`)).toBe(
+      before,
+    );
+  });
+});
+
+/// Opening a Conversation is asking where the work got to, so the page finishes
+/// the walk the sidebar started: the newest thing on the record that has a pane
+/// behind it is selected, and the URL is rewritten to its path.
+///
+/// The sidebar cannot do it itself — its list says a Conversation moved and
+/// nothing about what moved — so the card navigates to the Conversation as it
+/// always did and this lands once the Timeline has arrived.
+///
+/// Which thing on a record that is, is `pathing.test.ts`: the arithmetic over a
+/// Timeline, held true against these same golden fixtures. What is asked here is
+/// what the page does with the answer.
+describe("landing on the end of the record", () => {
+  it("opens the newest thing on the record a card is pressed on", async () => {
+    theThree();
+    const { container, history } = mount();
+    await waitFor(() => screen.getByText(GRILLING.branch));
+
+    fireEvent.click(screen.getByText(GRILLING.branch));
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${UNREADABLE_SET.id}`,
+      ),
+    );
+    // And the pane opens on it, rather than the path naming something the page
+    // has not got round to drawing.
+    await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
+  });
+
+  /// A record very often ends on something with nothing behind it — every step
+  /// of the ladder writes a move, and a wrap-up ends on a manual task — so what
+  /// is picked is the last *openable* thing rather than the last thing.
+  it("skips past the events with nothing to open", async () => {
+    theWrapping();
+    const { container, history } = mount(`/conversations/${WRAPPING.id}`);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${WRAPPING.id}/events/${OPENED.id}`,
+      ),
+    );
+    await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
+  });
+
+  /// And where the newest openable thing is one of the two lists, it is opened
+  /// by the word its card is named by: neither has an Event of its own.
+  it("opens a list by its word where that is the newest thing", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container, history } = mount(`/conversations/${TASKED.id}`);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${TASKED.id}/backlog`),
+    );
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+  });
+
+  /// A record with nothing openable on it selects nothing and the pane stays
+  /// bare paper — which is a Draft whose Brief is still being written, and the
+  /// state every Conversation starts in.
+  it("selects nothing on a record with nothing to open", async () => {
+    theWorkbench();
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${paneHead.head}`),
+    ).toBeNull();
+  });
+
+  /// And a path that already names a pane is a cold load of that pane — a
+  /// reload, or a link somebody kept — so it keeps the selection it was opened
+  /// at rather than being moved on to the end of the record.
+  it("leaves a cold load of a details pane where it was opened", async () => {
+    theGrilling();
+    const { container, history } = mount(
+      `/conversations/${GRILLING.id}/events/${briefOf(GRILLING).id}`,
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${briefPane.brief}`);
+
+    expect(history.get()).toBe(
+      `/conversations/${GRILLING.id}/events/${briefOf(GRILLING).id}`,
+    );
+  });
+
+  /// The landing replaces rather than pushes, as every other change of detail
+  /// does: entering the Conversation is the one entry it wrote, so Back leaves
+  /// it rather than stepping back through the pane it landed on.
+  it("lands by replacing, so back leaves the conversation", async () => {
+    theThree();
+    const { history } = mount();
+    await waitFor(() => screen.getByText(GRILLING.branch));
+
+    fireEvent.click(screen.getByText(GRILLING.branch));
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${UNREADABLE_SET.id}`,
+      ),
+    );
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// And a phone stays on the Timeline. What decides which level a narrow window
+  /// shows is the Conversation changing, and landing on the end of a record
+  /// changes none — so the newest thing is marked open with the details a tap
+  /// away, rather than the human being carried past the record they opened.
+  it("lands a phone on the timeline rather than in the details", async () => {
+    theGrilling();
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${UNREADABLE_SET.id}`,
+      ),
+    );
+
+    expect(frame(container).dataset.pane).toBe("middle");
+    await waitFor(() => screen.getByRole("button", { name: "Details →" }));
+  });
+});
+
+/// One more Event for a record to grow by, which is what a running session does
+/// to the Timeline being read. A notice, that being the shortest thing Verkstead
+/// ever puts on one.
+const LANDED: TimelineEvent = {
+  Notice: {
+    id: 99,
+    at: "2026-08-03T09:07:11.000Z",
+    html: "<p>The session stopped.</p>\n",
+  },
+};
+
+/// The Timeline read from the bottom, which is where the work got to.
+///
+/// The following itself is `following.test.ts` — landing at the end, the pause
+/// when the human scrolls up, the resume when they come back down — asked of a
+/// box whose height is a number, jsdom laying nothing out to measure. What is
+/// asked here is that this pane is following at all: it opens at the end of the
+/// record, and goes after each Event that lands on it.
+describe("the timeline following its bottom", () => {
+  it("opens the record at its end", async () => {
+    const scrolled = vi.fn();
+    vi.stubGlobal("scrollTo", scrolled);
+
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(scrolled).toHaveBeenCalled();
+  });
+
+  it("goes after each event that lands on the record", async () => {
+    const scrolled = vi.fn();
+    vi.stubGlobal("scrollTo", scrolled);
+
+    /// The record as the server has it, which grows under the page the way a
+    /// running session's does.
+    let record: TimelineEvent[] = GRILLING.timeline;
+
+    theGrilling(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, () =>
+        json({ ...GRILLING, timeline: record })(),
+      ),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+    const landed = scrolled.mock.calls.length;
+    expect(landed).toBeGreaterThan(0);
+
+    record = [...GRILLING.timeline, LANDED];
+    await nudged(client);
+
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll(`.${timeline.timelineEvent}`),
+      ).toHaveLength(record.length),
+    );
+    expect(scrolled.mock.calls.length).toBeGreaterThan(landed);
   });
 });

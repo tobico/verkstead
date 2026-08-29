@@ -1,10 +1,17 @@
-/* The Agent Profiles section of the settings page: the list of what is saved,
-   and the one form that both adds and rewrites — see `ProfileList.tsx`.
+/* The Agent Profiles section of the settings page: the cards for what is saved,
+   and the pane that both adds and rewrites — see `ProfileList.tsx`.
 
-   The Repos below are the same card read the same way, and their module
-   carries a copy of it rather than either of them sharing one: two lists that
-   look alike today are still two lists, and a rule they held in common would
-   make every change to one a decision about the other.
+   What a card *is* is `CardButton.module.css`'s, shared with every other
+   pressable card in the app: the surface, the fill it takes while its pane is
+   open, and what it does under the pointer. What is here is only what stands on
+   it. The boxed rows this section drew are gone, and their two inline controls
+   with them — the box was a second opinion about what a card looks like, and the
+   controls are the pane's now.
+
+   The Repos below are the same card read the same way, and their module carries
+   a copy of it rather than either of them sharing one: two lists that look alike
+   today are still two lists, and a rule they held in common would make every
+   change to one a decision about the other.
 
    The heading each section of this page is topped with is `sectionHead`, page
    vocabulary rather than this module's: it is defined once in `App.module.css`
@@ -19,41 +26,39 @@
   font-size: 1.1rem;
 }
 
+/* The plus that opens the blank form, on the heading's line. Centred on that
+   line rather than sitting on its baseline, which is what the heading beside it
+   is aligned by: the button is an icon with no text of its own, so a baseline
+   would hang it below the words rather than beside them. */
+.add {
+  align-self: center;
+}
+
 .list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  /* Close, because the cards are flat: what separates two of them is the
+     padding they each already carry, and a gap wide enough for boxes would leave
+     a list of them reading as scattered. */
+  gap: 0.25rem;
 }
 
-/* A saved profile is a list row with its two controls on the far end: nowhere
-   to go, but two things to do to it. */
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.85rem 1rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
-}
-
-.row > div:first-child {
+/* What stands on the card — the name, the models under it, and the warning
+   where the pair has gone. A column, because a card is read down. */
+.profile {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  min-width: 0;
 }
 
-.row .title {
+.profile .title {
   font-weight: 600;
 }
 
-.row .meta {
+.profile .meta {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem 0.75rem;
@@ -61,49 +66,32 @@
   color: var(--ink-soft);
 }
 
-/* What is quoted rather than said: the pair's two paths, and every model name
-   the account can launch. */
-.row .path,
-.row .model {
+/* What is quoted rather than said: every model name the account can launch, and
+   the pair's two paths where the pane shows them. */
+.profile .model,
+.standing code {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-/* Which one the modal over the page is about, said in the accent border — the
-   same mark the open conversation carries. */
-.row.editing {
-  border-color: var(--accent);
-}
-
-/* A profile whose pair has gone. Said in the row rather than only in the words
+/* A profile whose pair has gone. Said in the card's edge as well as in the words
    under it, because a list is scanned before it is read — and those words are
-   the same class one level down, which is what tells the two rules apart. */
-.row.broken {
+   the same class one level down, which is what tells the two rules apart.
+
+   The edge is the one the card reserves and never draws, so nothing moves when
+   this colours it in. */
+.profile.broken {
   border-color: var(--removed);
 }
 
-.row .broken {
+.profile .broken {
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
 }
 
-.actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.actions .remove {
-  color: var(--removed);
-}
-
-/* One form for both saving and rewriting — a profile is four fields with
-   nothing built from them yet, so editing one is filling the same form in with
-   what it already says — and it is drawn over the page as a modal, so the box
-   around it is the card the modal already draws. */
-.form h3 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-}
-
+/* One form for both saving and rewriting — a profile is four fields with nothing
+   built from them yet, so editing one is filling the same form in with what it
+   already says. It is the details pane now rather than a modal over the page, so
+   there is nothing around it but the pane's own head. */
 .form label {
   display: block;
   margin-bottom: 0.35rem;
@@ -141,7 +129,8 @@
   gap: 0.5rem;
 }
 
-.buttons button {
+.buttons button,
+.actions button {
   padding: 0.5rem 1rem;
   font: inherit;
   font-weight: 600;
@@ -152,21 +141,46 @@
   cursor: pointer;
 }
 
-.buttons button:disabled {
+.buttons button:disabled,
+.actions button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
 
-/* The one button that undoes rather than does, drawn as the outline of the one
-   beside it — as the brief editor's cancel is. */
-.buttons .cancel {
-  color: var(--accent);
-  background: none;
-}
-
-.form .failure {
+.form .failure,
+.standing .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
+}
+
+/* What is on the record about a saved Profile but not in the form: the agent
+   type, and the press that takes the whole thing away. Set well below the form
+   and behind a rule: a destructive press in among the fields, or beside the
+   button that saves them, is one waiting to be made by mistake. */
+.standing {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--edge);
+}
+
+.standing .agentType {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Drawn as the outline of the button that saves rather than as a filled one —
+   the way the credentials' Clear is, and for the same reason: it undoes rather
+   than does. */
+.actions .remove {
+  color: var(--removed);
+  background: none;
+  border-color: var(--edge);
 }
 
 /* The field being typed in, which is no pointer's doing: the border says which
@@ -177,25 +191,22 @@
 }
 
 /* And under the pointer: the fields darken their borders, the save deepens the
-   accent it is filled with, and the two outlines take the colour their own
-   words are in — the cancel's accent, and the remove's red. */
+   accent it is filled with, and the outline takes the colour its own words are
+   in — the remove's red. */
 @media (hover: hover) {
   .form input:hover,
   .form textarea:hover {
     border-color: var(--ink-soft);
   }
 
-  .buttons button:not(:disabled):hover {
+  .buttons button:not(:disabled):hover,
+  .actions button:not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }
 
-  .buttons .cancel:not(:disabled):hover {
-    background: none;
-    border-color: var(--accent);
-  }
-
   .actions .remove:not(:disabled):hover {
+    background: none;
     border-color: var(--removed);
   }
 }
