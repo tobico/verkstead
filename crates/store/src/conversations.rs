@@ -138,7 +138,7 @@ impl Lifecycle {
 /// back beside it — there is no Conversation without one, and everything done
 /// about a Conversation is done inside that repository.
 ///
-/// The two Pairings are read back the same way, because whether a Conversation
+/// The Pairings are read back the same way, because whether a Conversation
 /// is ready to grill turns on what they are rather than on which ids they hold:
 /// a Profile whose pair has gone is not something to launch a session under, and
 /// the id alone cannot say so.
@@ -648,10 +648,11 @@ pub enum Edited {
     NotDrafting,
 }
 
-/// What became of choosing one of a Conversation's two Pairings.
+/// What became of choosing one of a Conversation's Pairings — or of picking a
+/// role away from it altogether.
 ///
 /// A drafting refusal among them, like the Brief and the branch name and for
-/// the same reason: both Pairings are fixed when grilling starts. The
+/// the same reason: every Pairing is fixed when the work starts. The
 /// implementation one is used long after that, but what it is has to be settled
 /// before the work begins rather than swapped underneath it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -665,7 +666,7 @@ pub enum Chosen {
     /// There is no Profile with that id to choose.
     NoSuchProfile,
 
-    /// It is past drafting, so both Pairings are fixed.
+    /// It is past drafting, so every Pairing is fixed.
     NotDrafting,
 }
 
@@ -949,7 +950,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the stage branches table")?;
 
-    // The model half of a Conversation's two Pairings, one row per role. A
+    // The model half of a Conversation's Pairings, one row per role. A
     // table of its own for the reason the direction is one: there is no
     // migration machinery here and `conversations` is STRICT and left alone —
     // so the Profile half stays in the column it has always been in and the
@@ -1466,7 +1467,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
     }))
 }
 
-/// One of a Conversation's two Pairings: the Profile its column names, and the
+/// One of a Conversation's Pairings: the Profile its column names, and the
 /// model paired with it where one was.
 ///
 /// A role with no Profile has no Pairing at all, whatever `pairing_models`
@@ -1712,7 +1713,7 @@ async fn skip(pool: &SqlitePool, id: i64, role: Role) -> Result<Chosen> {
     Ok(Chosen::Chosen)
 }
 
-/// Record one of the two choices, both halves of it.
+/// Record one of the Pairings, both halves of it.
 ///
 /// Refused past drafting, which is what fixes a Pairing when grilling starts:
 /// what runs the work is settled before the work starts, alongside the branch,
@@ -2351,7 +2352,7 @@ pub async fn asked_from(pool: &SqlitePool, set_id: i64) -> Result<Option<i64>> {
 ///
 /// For the readers whose whole question is the state: whether the Set on the
 /// page in front of the human is a follow-up's, above all. The whole
-/// [`Conversation`] is a join across the Repo and both Pairings, which is more
+/// [`Conversation`] is a join across the Repo and every Pairing, which is more
 /// of the store read than one word is worth.
 pub async fn state(pool: &SqlitePool, id: i64) -> Result<Option<Lifecycle>> {
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")

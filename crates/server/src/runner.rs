@@ -3257,7 +3257,10 @@ fn under(
     match role {
         store::Role::Review => match review {
             store::Picked::Skipped => None,
-            picked => picked.pairing().cloned().or_else(|| implementation.cloned()),
+            picked => picked
+                .pairing()
+                .cloned()
+                .or_else(|| implementation.cloned()),
         },
         _ => implementation.cloned(),
     }
@@ -4029,7 +4032,11 @@ mod tests {
         let building = pairing("building");
 
         assert_eq!(
-            under(store::Role::Review, &store::Picked::Nothing, Some(&building)),
+            under(
+                store::Role::Review,
+                &store::Picked::Nothing,
+                Some(&building)
+            ),
             Some(pairing("building")),
         );
     }

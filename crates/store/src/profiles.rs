@@ -101,8 +101,8 @@ impl Profile {
     }
 }
 
-/// What a Conversation has settled about one of its two roles: a Profile, and
-/// the one of that Profile's models its sessions run on.
+/// What a Conversation has settled about one of its roles: a Profile, and the
+/// one of that Profile's models its sessions run on.
 ///
 /// The pair rather than the Profile alone, because a Profile's list says what
 /// its account *can* launch and a session runs one thing. Both halves are

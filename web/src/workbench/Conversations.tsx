@@ -615,7 +615,7 @@ function WorkbenchActions(): JSX.Element {
 ///
 /// Pressing a roadmap starts a Conversation to adopt it with — a draft, on a
 /// page shaped for adopting rather than for grilling. Nothing is adopted by
-/// pressing it: both pairings have to be fixed first, and there is a press on
+/// pressing it: every pairing has to be fixed first, and there is a press on
 /// that page for the adopting itself.
 function NewConversation(props: { open: (id: number) => void }): JSX.Element {
   const queries = useQueryClient();
@@ -717,7 +717,7 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
         return;
       }
 
-      // Straight onto its page, which is where the two pairings and the base
+      // Straight onto its page, which is where the pairings and the base
       // commit are fixed and where adopting is pressed.
       shut();
       void queries.invalidateQueries({ queryKey: ["conversations"] });

@@ -198,8 +198,8 @@ export function Setup(props: {
   );
 }
 
-/// The two pairings the work will run under, and whether everything grilling
-/// needs is settled.
+/// The three pairings the work will run under — two of which may be picked
+/// away instead — and whether everything the work needs is settled.
 ///
 /// The profile list is read here rather than passed down, so the pickers are
 /// whole wherever they are drawn — the sidebar does the same with the repos. The
@@ -236,8 +236,8 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
         </Match>
         <Match when={profiles.data}>
           {(saved) => (
-            /* Side by side wherever there is room for two, stacked where there
-               is not. The wrap is the pane's own width rather than the
+            /* Side by side wherever there is room for them, stacked where
+               there is not. The wrap is the pane's own width rather than the
                window's, because this card is drawn in a pane the human can
                narrow. */
             <div class={styles.pairings}>

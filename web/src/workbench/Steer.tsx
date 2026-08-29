@@ -32,9 +32,10 @@
 //! from what the conversation already runs the work under and what is picked is
 //! recorded as the conversation's own: steering re-settles what runs the work.
 //! A steered draft has none fixed yet, which is why the pick is part of the form
-//! rather than an error path. Which of the two pairings is shown follows the
-//! target: a grilling runs under the grilling one, and everything that builds
-//! runs under the other.
+//! rather than an error path. Which role the picker settles follows the target:
+//! a grilling runs under the grilling one, and everything that builds runs
+//! under the implementation one. Wrapping up settles the review role from the
+//! same pick, a wrap-up both building and reviewing.
 //!
 //! **Interrupt current task** is the one thing here that is about the world
 //! rather than about the move. The click left whatever was running exactly where
@@ -626,7 +627,8 @@ export function Steer(props: {
     () => offered().find((one) => one.target === target())?.runs ?? false,
   );
 
-  /// And which of the two pairings that picker is of.
+  /// And which role that picker settles — the one the target's sessions run
+  /// under, and for wrapping up the review role beside it.
   const role = createMemo(
     () => offered().find((one) => one.target === target())?.role,
   );

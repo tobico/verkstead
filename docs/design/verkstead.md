@@ -71,7 +71,11 @@ flowchart LR
   and there is no archive action on a conversation. Closing is what the teardown
   hangs off, and it leaves the branch alone.
 - **Lifecycle:** Draft → Grilling → Direction → Implementing → Wrapping →
-  Done. *Blocked on you* is a badge on any active state, not a state. Closing
+  Done — or straight from Draft to Implementing where the human picked **No
+  grilling**, the brief being the whole of the plan and an inline
+  implementation what it goes to (*refined 2026-08-29, building
+  optional-steps-and-auto-branch*).
+  *Blocked on you* is a badge on any active state, not a state. Closing
   is possible from any state, and **Closed** is a state of its own — off the
   ladder rather than on it, since every other state is somewhere the work has
   got to. A conversation that is closed or Done is got back into by steering
@@ -119,15 +123,22 @@ flowchart LR
 - **Pairings.** What runs a conversation's sessions is a profile *and* one of
   that profile's models, picked together. Each conversation fixes **two** of
   them before grilling starts: one for grilling, one for implementation work
-  (today's split: grill on fable, implement on opus). Every picker offers the
+  (today's split: grill on fable, implement on opus) — *refined 2026-08-29,
+  building optional-steps-and-auto-branch*: **three**, the wrap-up's review
+  having a pairing of its own, because reviewing is a fresh set of eyes on
+  what was built. Every other session a wrap-up dispatches is the work itself
+  carrying on and runs under the implementation one. Every picker offers the
   pairings as one flat list, a row per profile-and-model combination — a
   two-stage profile-then-model picker was considered and rejected, since it
-  costs a tap every time and the counts stay small. Both are fixed when
-  grilling starts, alongside the branch, the base commit and the brief: what
-  runs the work is settled before the work begins rather than swapped
-  underneath it. Each repo remembers the pair it was last grilled with, so the
-  next conversation on it arrives with both pickers filled — a prefill the
-  human may change, kept server-side so a phone and a desk share it.
+  costs a tap every time and the counts stay small. Two of the pickers carry a
+  row that is not an account at all, **No grilling** and **No review**: picking
+  one settles that role the way a pairing does and runs no session there (*same
+  refinement*). All of them are fixed when the work starts, alongside the
+  branch, the base commit and the brief: what runs the work is settled before
+  the work begins rather than swapped underneath it. Each repo remembers the
+  set it was last started with, so the next conversation on it arrives with
+  every picker filled — a prefill the human may change, kept server-side so a
+  phone and a desk share it.
 - **Sandbox configuration** (extra read-write binds such as build caches,
   network policy) lives in global defaults with per-repo overrides. *Settled
   2026-08-20, building stage 02*: it is configured where the watched paths are —
@@ -176,7 +187,11 @@ flowchart LR
 ## Workflow
 
 - **Grilling.** "Start grilling" creates the branch + worktree and launches a
-  grilling session under the conversation's grilling pairing. Question sets
+  grilling session under the conversation's grilling pairing — *refined
+  2026-08-29, building optional-steps-and-auto-branch*: the button reads
+  "Start work", one press covering both ways a conversation starts, and on
+  **No grilling** the same press lands it Implementing with an inline session
+  on the brief alone. Question sets
   and captured output stream into the timeline. The agent proposes wrap-up as
   a final question set, carrying the direction chooser.
 - **Direction.** The agent recommends inline / task list / staged roadmap with

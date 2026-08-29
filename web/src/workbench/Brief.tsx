@@ -7,7 +7,7 @@
 //! the pairings and the companions all settled at that moment — so from then on
 //! a read-only companion leaves no trace anywhere: a read-write one surfaces
 //! later through its commits and its pull request, and a read-only one never
-//! does. The worktree directories and the two Pairings are as unfindable, and
+//! does. The worktree directories and the Pairings are as unfindable, and
 //! they belong in the same place.
 //!
 //! Read where the frozen Brief is read, because that is where the human goes to

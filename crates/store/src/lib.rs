@@ -653,7 +653,7 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     companions::apply_schema(pool).await?;
 
     // And what each Repo was last grilled with, so a Conversation started on
-    // it arrives with both pickers filled. After the Conversations only for
+    // it arrives with every picker filled. After the Conversations only for
     // reading order — what it references is the Repos and the Profiles.
     pairings::apply_schema(pool).await?;
 
