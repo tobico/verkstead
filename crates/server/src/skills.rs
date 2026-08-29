@@ -238,6 +238,34 @@ pub(crate) fn implementing(brief: &str, handoff: Option<&str>) -> String {
     )
 }
 
+/// And what an inline session on a Conversation that was never grilled is
+/// started on: the Brief alone, under the same line, and the paragraph that says
+/// there was no grilling.
+///
+/// Said rather than left to be inferred from an absent handoff, because the two
+/// are different situations and only one of them is a plan. A grilling that died
+/// before writing its handoff leaves a session that should build what the
+/// interview settled and cannot read it; this is a human who chose not to be
+/// interviewed, and the Brief is the whole of what they decided.
+///
+/// Which is why the paragraph says what to do with what the Brief leaves open. A
+/// session that guesses at a real decision builds the wrong thing quietly; one
+/// that asks reaches the human on their phone and builds the right thing. There
+/// is nowhere else for the guidance to go — the skill is the same implementation
+/// skill an ordinary inline run reads, and it is written for work a grilling has
+/// already settled.
+pub(crate) fn ungrilled(brief: &str) -> String {
+    format!(
+        "{}\n# Nothing was grilled\n\nThis work was not put through a grilling: \
+         the Brief above is the whole of the plan, and there is no handoff \
+         because there was no interview to write one. Build what it describes. \
+         Where it leaves a real decision open — one that changes what gets built \
+         rather than how it is spelled — put that to me as a blocking ask rather \
+         than guessing at it.\n",
+        implementing(brief, None),
+    )
+}
+
 /// What a roadmap Conversation's own work is started on where Resume launches it:
 /// the Brief, under the line that sends the agent into the staging fork.
 ///
@@ -2273,6 +2301,36 @@ mod tests {
         assert!(
             !prompt.contains("What the grilling settled"),
             "nothing is said about a document that was never written: {prompt:?}"
+        );
+    }
+
+    /// And a Conversation whose human picked *No grilling* is told so, which is
+    /// a different thing from a handoff that failed to arrive: the Brief is the
+    /// plan, and what it leaves open is asked about rather than guessed at.
+    #[test]
+    fn an_ungrilled_implementation_is_told_the_brief_is_the_whole_plan() {
+        let prompt = ungrilled("# Rate limiting\n\nThe API has none.\n");
+
+        assert!(
+            prompt.contains(IMPLEMENTING),
+            "the same skill an ordinary inline run reads: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none."),
+            "primed with the Brief, whole: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("What the grilling settled"),
+            "and with no handoff, there having been no interview: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("Nothing was grilled") && prompt.contains("blocking ask"),
+            "said in words, along with what to do about what the Brief leaves \
+             open: {prompt:?}"
+        );
+        assert!(
+            prompt.find("The API has none.") < prompt.find("Nothing was grilled"),
+            "under the Brief, which is what it is about"
         );
     }
 

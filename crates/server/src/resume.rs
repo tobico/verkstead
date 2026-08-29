@@ -196,7 +196,7 @@ pub(crate) async fn resume(
         // asked and answered — the interview itself went with the process it ran
         // in. See [`crate::grillings::again`].
         Lifecycle::Grilling => {
-            if conversation.grilling_pairing.is_none() {
+            if conversation.grilling_pairing.pairing().is_none() {
                 return Ok(Resumed::NoGrillingPairing);
             }
 

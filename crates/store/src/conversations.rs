@@ -162,7 +162,11 @@ pub struct Conversation {
 
     /// The Profile and model the grilling session runs under, once they are
     /// chosen.
-    pub grilling_pairing: Option<super::Pairing>,
+    ///
+    /// One of the two roles that can be picked away altogether — see
+    /// [`super::Picked`]. A Conversation whose human picked *no grilling* is
+    /// never grilled: its Brief goes straight to an inline implementation.
+    pub grilling_pairing: super::Picked,
 
     /// And the ones the implementation runs under. A separate choice because it
     /// is genuinely a separate account and model — and because the
@@ -174,9 +178,10 @@ pub struct Conversation {
     /// what was built, so the account that looks at the work is picked apart
     /// from the account that built it.
     ///
-    /// The one role that can be picked away altogether — see [`super::Picked`].
-    /// A Conversation whose human picked *no review* wraps up without a review
-    /// session, which is a settled choice rather than a Pairing missing.
+    /// The other role that can be picked away altogether — see
+    /// [`super::Picked`]. A Conversation whose human picked *no review* wraps up
+    /// without a review session, which is a settled choice rather than a Pairing
+    /// missing.
     pub review_pairing: super::Picked,
 
     /// Where the Conversation's worktree was put, once grilling has made one.
@@ -1330,7 +1335,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         branch,
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
         state: Lifecycle::read(&state)?,
-        grilling_pairing: pairing(pool, id, Role::Grilling, grilling_profile_id).await?,
+        grilling_pairing: picked(pool, id, Role::Grilling, grilling_profile_id).await?,
         implementation_pairing: pairing(pool, id, Role::Implementation, implementation_profile_id)
             .await?,
         review_pairing: picked(pool, id, Role::Review, review_profile_id).await?,
@@ -1519,7 +1524,7 @@ pub async fn set_review_pairing(
 /// Or pick the row that says there is to be no review at all.
 ///
 /// A choice like the ones above it and refused on the same terms: made while the
-/// Conversation drafts, fixed when grilling starts, and a Conversation that has
+/// Conversation drafts, fixed when the work starts, and a Conversation that has
 /// picked it is as ready to start as one that picked a Pairing.
 ///
 /// The Profile column and the model row go with it, so what is left is the one
@@ -1527,6 +1532,16 @@ pub async fn set_review_pairing(
 /// will launch.
 pub async fn skip_review(pool: &SqlitePool, id: i64) -> Result<Chosen> {
     skip(pool, id, Role::Review).await
+}
+
+/// And the row that says there is to be no grilling at all.
+///
+/// The same choice one role along, and it says more than the review one does:
+/// what a Conversation that picked it starts is an inline implementation on the
+/// Brief, so the press that would have begun an interview begins the work — see
+/// [`start_building`].
+pub async fn skip_grilling(pool: &SqlitePool, id: i64) -> Result<Chosen> {
+    skip(pool, id, Role::Grilling).await
 }
 
 /// Record that a role runs no session at all.
@@ -2376,8 +2391,8 @@ pub(crate) async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// the moment that rule resolves to a commit, and after it there is a fact about
 /// what the work branched from rather than a rule about what it would have.
 ///
-/// It is also where the Repo remembers what it was grilled with — see
-/// [`super::pairings::remember`] — because this is the moment the two Pairings
+/// It is also where the Repo remembers what it was started with — see
+/// [`super::pairings::remember`] — because this is the moment the three roles
 /// stop being changeable and become what the work is actually running under.
 ///
 /// `companions` is where each of the Conversation's companion repos was checked
@@ -2393,9 +2408,63 @@ pub async fn start_grilling(
     worktree: &Path,
     companions: &[super::CompanionWorktree],
 ) -> Result<Grilling> {
+    start(pool, id, base_commit, worktree, companions, None).await
+}
+
+/// And the same start on a Conversation whose human picked *no grilling*: the
+/// branch, the worktree, the base commit and the memory exactly as above, and
+/// the Conversation lands Implementing rather than Grilling.
+///
+/// One press, two landings, and which of them is a fact about what was picked
+/// rather than a second kind of start — see [`skip_grilling`]. Everything the
+/// server did against git before calling either is the same work, so the record
+/// of it is the same record.
+///
+/// The direction goes down with the move, because there is no grilling left to
+/// propose one: what a Brief taken straight to the work is, is an inline
+/// implementation, and a Conversation implementing with no direction is a record
+/// nothing could resume — see [`pick_direction`], which is how the other way in
+/// writes the same row.
+pub async fn start_building(
+    pool: &SqlitePool,
+    id: i64,
+    base_commit: &str,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+) -> Result<Grilling> {
+    start(
+        pool,
+        id,
+        base_commit,
+        worktree,
+        companions,
+        Some(Direction::Inline),
+    )
+    .await
+}
+
+/// What the two of them do, which is the same thing but for where it leaves the
+/// Conversation.
+///
+/// `building` is the direction a start that skips the grilling records, and its
+/// being there is also what says which state to land in: a start with a
+/// direction has nothing to grill and is already building.
+async fn start(
+    pool: &SqlitePool,
+    id: i64,
+    base_commit: &str,
+    worktree: &Path,
+    companions: &[super::CompanionWorktree],
+    building: Option<Direction>,
+) -> Result<Grilling> {
     let worktree = super::repos::text(worktree)?;
 
-    let mut tx = super::writing(pool, "starting a grilling").await?;
+    let landing = match building {
+        Some(_) => Lifecycle::Implementing,
+        None => Lifecycle::Grilling,
+    };
+
+    let mut tx = super::writing(pool, "starting a Conversation's work").await?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
@@ -2417,11 +2486,23 @@ pub async fn start_grilling(
          WHERE id = ?",
     )
     .bind(base_commit)
-    .bind(Lifecycle::Grilling.stored())
+    .bind(landing.stored())
     .bind(id)
     .execute(&mut *tx)
     .await
-    .with_context(|| format!("moving Conversation {id} to grilling"))?;
+    .with_context(|| format!("moving Conversation {id} to {landing:?}"))?;
+
+    if let Some(direction) = building {
+        sqlx::query(
+            "INSERT INTO directions (conversation_id, direction) VALUES (?, ?)
+             ON CONFLICT (conversation_id) DO UPDATE SET direction = excluded.direction",
+        )
+        .bind(id)
+        .bind(direction_stored(direction))
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording how Conversation {id}'s work is being built"))?;
+    }
 
     // Written over whatever is there rather than inserted: a record that somehow
     // holds a worktree already is corrected to the one just made, where an
@@ -2438,15 +2519,17 @@ pub async fn start_grilling(
 
     super::companions::record_worktrees(&mut tx, id, companions).await?;
 
-    moved(&mut tx, id, Lifecycle::Grilling).await?;
+    moved(&mut tx, id, landing).await?;
 
-    // And what it is being grilled with, against its Repo, so the next
-    // Conversation started on that Repo arrives with both pickers filled. In
+    // And what it is being started with, against its Repo, so the next
+    // Conversation started on that Repo arrives with every picker filled. In
     // this transaction because this is the moment the Pairings are fixed: a
     // memory written a moment later could be of a choice that never ran.
     super::pairings::remember(&mut tx, id).await?;
 
-    tx.commit().await.context("starting a grilling")?;
+    tx.commit()
+        .await
+        .context("starting a Conversation's work")?;
 
     Ok(Grilling::Started)
 }

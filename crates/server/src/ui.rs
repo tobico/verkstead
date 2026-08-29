@@ -34,9 +34,9 @@ use verkstead_render::{
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
     ConversationView, Cursor, GrillingStarted, Lifecycle, Locked, NewAdoption, NewCompanion,
     NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RepoEntry, Resumed, ReviewChoice, SetReading, SetView, SettingsEdit, SettingsSaved,
-    SettingsView, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
-    Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    RepoEntry, Resumed, RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -747,7 +747,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
     // reading the Profile list gets.
-    let grilling_pairing = match crate::profiles::pairing(
+    let grilling_pairing = match crate::profiles::picked(
         &state.watched,
         conversation.grilling_pairing,
     )
@@ -905,7 +905,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
 
     let ready_to_grill = crate::conversations::ready_to_grill(
         conversation.state,
-        grilling_pairing.as_ref(),
+        &grilling_pairing,
         implementation_pairing.as_ref(),
         &review_pairing,
         brief,
@@ -2192,11 +2192,12 @@ async fn show_archived(
 }
 
 /// `POST /api/ui/conversations/{id}/grilling-pairing` — which account and model
-/// the grilling session runs under.
+/// the grilling session runs under, or the row that says there is to be no
+/// grilling at all.
 async fn choose_grilling_pairing(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(choice): Json<ProfileChoice>,
+    Json(choice): Json<RoleChoice>,
 ) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
@@ -2237,7 +2238,7 @@ async fn choose_implementation_pairing(
 async fn choose_review_pairing(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(choice): Json<ReviewChoice>,
+    Json(choice): Json<RoleChoice>,
 ) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();

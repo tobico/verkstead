@@ -651,8 +651,14 @@ export function Steer(props: {
   // different work, and a pick made for a grilling that followed the human over
   // to wrapping up would be the form answering a question they had not been
   // asked.
+  //
+  // The Pairing behind the grilling pick rather than the pick itself: a
+  // conversation whose human chose "No grilling" has no account to prefill this
+  // with, and steering into a grilling is asking for an interview — so that row
+  // is not one this picker offers, and the field opens empty for them to pick
+  // who runs it.
   const [grilling, setGrilling] = createSignal(
-    pairing.chosen(props.conversation.grilling_pairing),
+    pairing.chosen(pairing.under(props.conversation.grilling_pairing)),
   );
   const [implementation, setImplementation] = createSignal(
     pairing.chosen(props.conversation.implementation_pairing),

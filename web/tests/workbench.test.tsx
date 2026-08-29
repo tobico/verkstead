@@ -3125,7 +3125,7 @@ describe("a conversation's pairings", () => {
   /// looks like.
   const UNCHOSEN: ConversationView = {
     ...OPEN,
-    grilling_pairing: null,
+    grilling_pairing: "Nothing",
     implementation_pairing: null,
     review_pairing: "Nothing",
     ready_to_grill: false,
@@ -3162,8 +3162,13 @@ describe("a conversation's pairings", () => {
 
     // Separate choices, and in the fixture genuinely separate accounts: grill on
     // fable, implement on opus, review on sonnet.
+    //
+    // The fixture picks a Pairing for the grilling, which is one of that
+    // picker's rows; the other says there is to be no grilling at all.
+    const interviewing = under(OPEN.grilling_pairing)!;
+
     expect(grilling.value).toBe(
-      pairing(OPEN.grilling_pairing!.profile, OPEN.grilling_pairing!.model!),
+      pairing(interviewing.profile, interviewing.model!),
     );
     expect(implementing.value).toBe(
       pairing(
@@ -3171,8 +3176,7 @@ describe("a conversation's pairings", () => {
         OPEN.implementation_pairing!.model!,
       ),
     );
-    // The fixture picks a Pairing for the review, which is one of that
-    // picker's rows; the other says there is to be no review at all.
+    // And the same for the review.
     const reviewed = under(OPEN.review_pairing)!;
 
     expect(reviewing.value).toBe(pairing(reviewed.profile, reviewed.model!));
@@ -3190,7 +3194,7 @@ describe("a conversation's pairings", () => {
     await waitFor(() => screen.getByLabelText("Grilling"));
 
     const options = Array.from(
-      (screen.getByLabelText("Grilling") as HTMLSelectElement).options,
+      (screen.getByLabelText("Implementation") as HTMLSelectElement).options,
     ).map((option) => option.text);
 
     expect(options).toEqual(
@@ -3212,8 +3216,10 @@ describe("a conversation's pairings", () => {
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/grilling-pairing`),
       ).toEqual({
-        profile_id: PROFILES[0]!.id,
-        model: PROFILES[0]!.models[0],
+        pairing: {
+          profile_id: PROFILES[0]!.id,
+          model: PROFILES[0]!.models[0],
+        },
       }),
     );
 
@@ -3235,10 +3241,11 @@ describe("a conversation's pairings", () => {
     );
   });
 
-  /// The review picker has a row that is no account at all, and it is one of the
-  /// rows rather than a switch beside them: what runs this, and one of the
-  /// answers is nobody.
-  it("offers no review as a row of the review picker alone", async () => {
+  /// Two of the pickers have a row that is no account at all, and it is one of
+  /// the rows rather than a switch beside them: what runs this, and one of the
+  /// answers is nobody. The implementation picker has none, there being no work
+  /// without something building it.
+  it("offers the no-session row on the grilling and review pickers alone", async () => {
     withConversation(UNCHOSEN);
     mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByLabelText("Review"));
@@ -3259,7 +3266,42 @@ describe("a conversation's pairings", () => {
       "No review",
       ...combinations,
     ]);
-    expect(rows("Grilling")).toEqual(["Not chosen", ...combinations]);
+    expect(rows("Grilling")).toEqual([
+      "Not chosen",
+      "No grilling",
+      ...combinations,
+    ]);
+    expect(rows("Implementation")).toEqual(["Not chosen", ...combinations]);
+  });
+
+  /// And picking it sends a choice rather than the absence of one, exactly as
+  /// the review row does: the brief goes straight to the work.
+  it("sends no grilling as the choice it is", async () => {
+    const fetching = withConversation(UNCHOSEN, json("Chosen"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    fireEvent.change(screen.getByLabelText("Grilling"), {
+      target: { value: NONE },
+    });
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/grilling-pairing`),
+      ).toEqual({ pairing: null }),
+    );
+  });
+
+  /// And a picker already on it keeps it, the placeholder not being drawn over a
+  /// settled choice.
+  it("shows no grilling as what is chosen where it is", async () => {
+    withConversation({ ...UNCHOSEN, grilling_pairing: "Skipped" });
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    expect((screen.getByLabelText("Grilling") as HTMLSelectElement).value).toBe(
+      NONE,
+    );
   });
 
   /// And picking it sends a choice rather than the absence of one: an untouched
@@ -3321,7 +3363,7 @@ describe("a conversation's pairings", () => {
   it("reads a profile with no model beside it as nothing chosen", async () => {
     withConversation({
       ...OPEN,
-      grilling_pairing: { ...OPEN.grilling_pairing!, model: null },
+      grilling_pairing: { Under: { ...under(OPEN.grilling_pairing)!, model: null } },
       ready_to_grill: false,
     });
     mount(`/conversations/${OPEN.id}`);
@@ -3346,7 +3388,7 @@ describe("a conversation's pairings", () => {
 
     await waitFor(() =>
       screen.getByText(
-        "The grilling has started, so who runs this conversation is settled.",
+        "The work has started, so who runs this conversation is settled.",
       ),
     );
   });
@@ -4006,7 +4048,7 @@ describe("opening a conversation is looking at it", () => {
   });
 });
 
-describe("starting the grilling", () => {
+describe("starting the work", () => {
   it("offers the button under the timeline once the conversation is ready", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -4014,7 +4056,7 @@ describe("starting the grilling", () => {
     const start = await drawn(container, `.${timeline.startGrilling} .${timeline.start}`);
 
     expect(OPEN.ready_to_grill).toBe(true);
-    expect(start.textContent).toContain("Start grilling");
+    expect(start.textContent).toContain("Start work");
 
     // Under the timeline, which is where the reason to press it is: at the end
     // of everything that has happened, under the brief it will freeze.
@@ -4037,7 +4079,7 @@ describe("starting the grilling", () => {
       `.${timeline.startGrilling} .${timeline.start}`,
     );
 
-    expect(start.textContent).toContain("Start grilling");
+    expect(start.textContent).toContain("Start work");
     expect(start.classList).toContain(timeline.inert);
     expect(start.getAttribute("aria-disabled")).toBe("true");
     expect(start.disabled).toBe(false);
@@ -4104,8 +4146,9 @@ describe("starting the grilling", () => {
   /// Every refusal is its own sentence, because each of them is something
   /// different for the human to go and do.
   it.each([
-    ["NoGrillingProfile", /Choose a grilling profile/],
+    ["NoGrillingProfile", /Pick a grilling profile/],
     ["NoImplementationProfile", /Choose an implementation profile/],
+    ["NoReviewProfile", /Pick a review profile/],
     ["EmptyBrief", /Write the brief first/],
     ["NoBaseCommit", /nothing to branch from/],
     ["BranchExists", /branch already exists/],
@@ -6628,7 +6671,7 @@ describe("steering a conversation", () => {
     const modal = await openSteer(container);
 
     const picker = (await drawn(modal, "#steer-pairing")) as HTMLSelectElement;
-    const interviewing = GRILLING.grilling_pairing!;
+    const interviewing = under(GRILLING.grilling_pairing)!;
 
     await waitFor(() =>
       expect(picker.value).toBe(
@@ -6701,7 +6744,7 @@ describe("steering a conversation", () => {
     fireEvent.click(await drawn(modal, `.${steerModal.steerDigest} input`));
     fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
 
-    const own = GRILLING.grilling_pairing!;
+    const own = under(GRILLING.grilling_pairing)!;
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
@@ -11083,6 +11126,20 @@ describe("the configuration on the brief's pane", () => {
       configuration().Implementation,
       "and the roles beside it read as they always did",
     ).toBe("opus — claude-opus-5");
+  });
+
+  /// And the same one role along: a conversation whose brief went straight to
+  /// the work says so, rather than reading as one whose grilling pairing was
+  /// never picked.
+  it("says no grilling where that is what was picked", async () => {
+    theGrillingStanding({ grilling_pairing: "Skipped" });
+    await openBrief(GRILLING);
+
+    expect(configuration().Grilling).toBe("No grilling.");
+    expect(
+      configuration().Review,
+      "and the roles beside it read as they always did",
+    ).toBe("sonnet — claude-sonnet-5");
   });
 
   it("lists each companion with its mode, its branch and its directory", async () => {

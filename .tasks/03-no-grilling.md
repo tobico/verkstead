@@ -23,10 +23,10 @@ starts.
 
 ## Acceptance criteria
 
-- [ ] With "No grilling" picked and the other picks made, the press lands the
+- [x] With "No grilling" picked and the other picks made, the press lands the
       Conversation Implementing with a session primed on the Brief alone;
       no Grilling Pairing is required and blocking asks work from it.
-- [ ] The session's work is carried to a pull request and an ordinary
+- [x] The session's work is carried to a pull request and an ordinary
       wrap-up, like any inline implementation.
-- [ ] "No grilling" is remembered per Repo, and the start button reads
+- [x] "No grilling" is remembered per Repo, and the start button reads
       "Start work" in both modes.

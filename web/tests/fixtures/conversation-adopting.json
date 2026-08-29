@@ -16,7 +16,7 @@
   "companions": [],
   "direction": null,
   "driven": false,
-  "grilling_pairing": null,
+  "grilling_pairing": "Nothing",
   "id": 1,
   "implementation_pairing": null,
   "pinned": [],

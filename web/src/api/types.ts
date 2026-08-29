@@ -854,8 +854,13 @@ companions: Array<CompanionView>, state: Lifecycle,
  * The Profile and model the grilling session will run under, whole rather
  * than by id: the pane says what they are, and whether the Profile is
  * still runnable.
+ *
+ * One of the two roles the picker offers a row that runs no session for,
+ * so this says which of three the human picked rather than whether they
+ * picked at all. A Conversation that picked *no grilling* is not grilled:
+ * its Brief goes straight to an inline implementation.
  */
-grilling_pairing: PairingView | null, 
+grilling_pairing: PickedView, 
 /**
  * And the ones the implementation will run under. Chosen separately
  * because it is genuinely a separate account and model.
@@ -865,14 +870,16 @@ implementation_pairing: PairingView | null,
  * And what the wrap-up's review session will run under, chosen separately
  * again: reviewing is a fresh set of eyes on what was built.
  *
- * The one role the picker offers a *no review* row for, so this says which
- * of three the human picked rather than whether they picked at all.
+ * The other role the picker offers a row that runs no session for, so this
+ * says which of three the human picked rather than whether they picked at
+ * all.
  */
 review_pairing: PickedView, 
 /**
- * Whether everything needed before grilling will start is settled: every
- * Pairing complete and no Profile broken, a Brief with something in
- * it, and a Conversation still drafting.
+ * Whether everything needed before the work will start is settled: every
+ * role picked — a Pairing complete and no Profile broken, or the row that
+ * runs no session — a Brief with something in it, and a Conversation still
+ * drafting.
  *
  * The server's rule rather than something the page works out from the
  * fields around it. Every one of the refusals is checked again when the
@@ -1351,10 +1358,10 @@ model: string | null, };
  * it: the Pairing its sessions run under, that the role runs none, or nothing
  * picked yet.
  *
- * Three rather than a nullable Pairing, because the picker offers *no review*
- * as a row of its own: a Conversation that picked it is as ready to start as
- * one that picked a Pairing, and a page that could not tell it from an empty
- * picker would draw the placeholder over a settled choice.
+ * Three rather than a nullable Pairing, because a picker offers *no grilling*
+ * or *no review* as a row of its own: a Conversation that picked one is as
+ * ready to start as one that picked a Pairing, and a page that could not tell
+ * it from an empty picker would draw the placeholder over a settled choice.
  */
 export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
 
@@ -1818,14 +1825,6 @@ nothing_else?: boolean, };
 export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
 
 /**
- * Which Pairing a Conversation's review runs under, or that it runs none.
- *
- * `null` is the *no review* row: the picker offers it beside the Pairings, so
- * the one press that picks either sends the same body — see [`PickedView`].
- */
-export type ReviewChoice = { pairing: ProfileChoice | null, };
-
-/**
  * The roadmap opened: every stage brief of it, rendered.
  *
  * What the card cannot show, one level up from [`BacklogPane`] and built the
@@ -1862,6 +1861,15 @@ stages: Array<StageDocument>,
  * them, as [`BacklogPane::diagrams`] is.
  */
 diagrams: boolean, };
+
+/**
+ * Which Pairing one of a Conversation's roles runs under, or that it runs none.
+ *
+ * `null` is the row that runs no session: a picker that offers one offers it
+ * beside the Pairings, so the one press that picks either sends the same body
+ * — see [`PickedView`].
+ */
+export type RoleChoice = { pairing: ProfileChoice | null, };
 
 /**
  * One session's Screen: the grid its Capture leaves on a terminal.

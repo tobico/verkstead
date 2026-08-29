@@ -861,11 +861,12 @@ fn roles(target: SteerTarget) -> &'static [Role] {
 /// choice as one made now.
 ///
 /// And whether the role was picked away rather than paired, which is settled
-/// too: a Conversation that will not be reviewed is not one with a review
-/// Pairing missing, and the difference is what the two readers below turn on.
+/// too: a Conversation that will not be grilled or will not be reviewed is not
+/// one with a Pairing missing, and the difference is what the two readers below
+/// turn on.
 fn fixed(conversation: &Conversation, role: Role) -> store::Picked {
     match role {
-        Role::Grilling => carried(conversation.grilling_pairing.as_ref()),
+        Role::Grilling => conversation.grilling_pairing.clone(),
         Role::Implementation => carried(conversation.implementation_pairing.as_ref()),
         Role::Review => conversation.review_pairing.clone(),
     }

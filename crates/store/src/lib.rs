@@ -67,9 +67,9 @@ pub use conversations::{
     follow_up_over, implement_again, last_batch_proposal, last_proposal, load_conversation, note,
     open_set, pick_direction, record_backlog, record_handoff, record_roadmap, rename_branch,
     save_brief, set_asked_from, set_base_commit, set_grilling_pairing, set_implementation_pairing,
-    set_review_pairing, set_state, skip_review, stacks_on, start_adoption, start_conversation,
-    start_grilling, start_implementing, start_stage, state, steer_conversation, timeline,
-    unanswered_set_since,
+    set_review_pairing, set_state, skip_grilling, skip_review, stacks_on, start_adoption,
+    start_building, start_conversation, start_grilling, start_implementing, start_stage, state,
+    steer_conversation, timeline, unanswered_set_since,
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
 pub use endings::{ended_on, nothing_else};

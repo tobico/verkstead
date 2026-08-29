@@ -24,7 +24,7 @@ use crate::{
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
     GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
     ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RepoEntry, Resumed, ReviewChoice, RoadmapPane, Screen,
+    PushKey, Registered, Registration, RepoEntry, Resumed, RoadmapPane, RoleChoice, Screen,
     SetReading, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Shown, Started,
     SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
     UpdateNotice, Watching,
@@ -198,7 +198,7 @@ fn the_viewers_types_are_written_from_these() {
     ProfileDeleted::export_all(&config).unwrap();
     ProfileChoice::export_all(&config).unwrap();
     ProfileChosen::export_all(&config).unwrap();
-    ReviewChoice::export_all(&config).unwrap();
+    RoleChoice::export_all(&config).unwrap();
 
     // Telling one device about a Set, and stopping.
     PushKey::export_all(&config).unwrap();

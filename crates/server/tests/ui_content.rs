@@ -2873,9 +2873,24 @@ fn pin_health(json: &str) -> String {
             let mut ready = payload["state"] == "Draft";
 
             for role in ["grilling_pairing", "implementation_pairing"] {
-                match payload.get_mut(role).filter(|it| !it.is_null()) {
-                    Some(pairing) => mend(&mut pairing["profile"]),
-                    None => ready = false,
+                match payload.get_mut(role) {
+                    // The row that runs no session, which the grilling role has
+                    // one of: a choice made, so readiness stands, and nothing
+                    // the filesystem has an opinion of.
+                    Some(picked) if *picked == "Skipped" => {}
+
+                    // A Pairing under such a role, which arrives wrapped in
+                    // which of the three rows was picked.
+                    Some(picked) if picked.get("Under").is_some() => {
+                        mend(&mut picked["Under"]["profile"])
+                    }
+
+                    // And one under a role with no such row, which is the
+                    // Pairing on its own.
+                    Some(picked) if picked.is_object() => mend(&mut picked["profile"]),
+
+                    // Nothing picked, however it is spelled.
+                    _ => ready = false,
                 }
             }
 

@@ -1119,10 +1119,11 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
 async fn choose(app: &Router, id: i64, role: &str, profile_id: i64) {
     let pairing = serde_json::json!({ "profile_id": profile_id, "model": "claude-opus-5" });
 
-    // The review picker offers a row that is not an account, so what it sends
-    // is which row was picked rather than a Pairing outright — see [`no_review`].
+    // Two of the pickers offer a row that is not an account, so what they send
+    // is which row was picked rather than a Pairing outright — see
+    // [`no_grilling`] and [`no_review`].
     let picked = match role {
-        "review" => serde_json::json!({ "pairing": pairing }),
+        "grilling" | "review" => serde_json::json!({ "pairing": pairing }),
         _ => pairing,
     };
 
@@ -1133,6 +1134,17 @@ async fn choose(app: &Router, id: i64, role: &str, profile_id: i64) {
     )
     .await;
     assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+}
+
+/// Pick the Grilling picker's other row: this Conversation is not to be
+/// grilled, and its Brief goes straight to the work.
+async fn no_grilling(app: &Router, id: i64) -> verkstead_render::ProfileChosen {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/grilling-pairing"),
+        &serde_json::json!({ "pairing": null }),
+    )
+    .await
 }
 
 /// Pick the Review picker's other row: this Conversation is not to be reviewed.
@@ -2351,6 +2363,7 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
     let view = opened(&app, id).await;
     let interviewing = view
         .grilling_pairing
+        .pairing()
         .expect("the steer settled the role it was steered into");
 
     assert_eq!(interviewing.profile.id, picked);
@@ -2403,6 +2416,8 @@ async fn steering_into_wrapping_settles_the_building_and_the_review_pairings() {
     let interviewing = opened(&app, id)
         .await
         .grilling_pairing
+        .pairing()
+        .cloned()
         .expect("the fixture picks one per role");
 
     assert_eq!(
@@ -2439,7 +2454,9 @@ async fn steering_into_wrapping_settles_the_building_and_the_review_pairings() {
         "and what the review runs under, off the same pick",
     );
     assert_eq!(
-        view.grilling_pairing.map(|pairing| pairing.profile.id),
+        view.grilling_pairing
+            .pairing()
+            .map(|pairing| pairing.profile.id),
         Some(interviewing.profile.id),
         "and the role nothing wraps under is exactly where it was",
     );
@@ -6855,5 +6872,101 @@ async fn no_review_is_fixed_once_the_grilling_has_started() {
         opened(&app, id).await.review_pairing,
         PickedView::Skipped,
         "and what it started under is exactly where it was",
+    );
+}
+
+/// *No grilling* satisfies the same rule one role along, and an empty Grilling
+/// picker still refuses the start exactly as it always did.
+#[tokio::test]
+async fn no_grilling_makes_a_draft_as_ready_to_start_as_a_grilling_pairing_does() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    write_brief(&app, id, "# Rate limiting\n").await;
+
+    choose(
+        &app,
+        id,
+        "implementation",
+        profile(&app, watched.path(), "opus").await,
+    )
+    .await;
+    choose(
+        &app,
+        id,
+        "review",
+        profile(&app, watched.path(), "haiku").await,
+    )
+    .await;
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::NoGrillingProfile,
+        "the picker nobody has touched refuses the start",
+    );
+    assert!(!opened(&app, id).await.ready_to_grill);
+
+    assert_eq!(no_grilling(&app, id).await, ProfileChosen::Chosen);
+
+    let view = opened(&app, id).await;
+    assert_eq!(
+        view.grilling_pairing,
+        PickedView::Skipped,
+        "the row that runs nothing, read back as the choice it was",
+    );
+    assert!(
+        view.ready_to_grill,
+        "and a draft that will not be grilled is a draft that can start",
+    );
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
+/// And the press does everything a grill start does, but lands the Conversation
+/// Implementing: the branch, the worktree and the base commit are the same work,
+/// and what is different is where it leaves the Conversation and that there is
+/// nothing to interview.
+#[tokio::test]
+async fn starting_with_no_grilling_lands_the_conversation_implementing_inline() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(no_grilling(&app, id).await, ProfileChosen::Chosen);
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "the Brief goes straight to the work",
+    );
+    assert_eq!(
+        view.direction,
+        Some(verkstead_schema::Direction::Inline),
+        "which is an inline implementation, recorded as the start writes it",
+    );
+    assert!(
+        view.worktree.is_some(),
+        "and it was given somewhere to work, as any start is",
+    );
+    assert!(
+        view.base_commit.is_some(),
+        "off a base commit resolved against git",
+    );
+    assert!(
+        worktrees(&repo).len() > 1,
+        "which git knows about: {:?}",
+        worktrees(&repo),
+    );
+
+    assert_eq!(
+        no_grilling(&app, id).await,
+        ProfileChosen::NotDrafting,
+        "and there is no picking left once the work has started",
+    );
+    assert_eq!(
+        opened(&app, id).await.grilling_pairing,
+        PickedView::Skipped,
+        "so what it started under is exactly where it was",
     );
 }

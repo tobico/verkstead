@@ -50,7 +50,7 @@
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
 //! happened so far, which is exactly where the next thing to happen belongs.
-//! One lives there — `Start grilling` under the Brief it will freeze. What to
+//! One lives there — `Start work` under the Brief it will freeze. What to
 //! do about a conversation Verkstead has finished with is not there: a Steer is
 //! the way back into one, and it hangs off the header with everything else done
 //! to the conversation as a whole.
@@ -180,13 +180,15 @@ const GRILL_REFUSAL: Record<
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
-  NoGrillingProfile: "Choose a grilling profile and model first, on the brief.",
+  NoGrillingProfile:
+    "Pick a grilling profile and model — or No grilling — first, on the brief.",
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
-  NoReviewProfile: "Choose a review profile and model first, on the brief.",
+  NoReviewProfile:
+    "Pick a review profile and model — or No review — first, on the brief.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
-  EmptyBrief: "Write the brief first — it is what the grilling starts from.",
+  EmptyBrief: "Write the brief first — it is what the work starts from.",
   FetchFailed:
     "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
   NoBaseCommit: "The repo has nothing to branch from any more.",
@@ -1956,14 +1958,14 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
         >
-          {start.isPending ? "Starting…" : "Start grilling"}
+          {start.isPending ? "Starting…" : "Start work"}
         </button>
         <Show
           when={ready()}
           fallback={
             <Show when={missing()}>
               <Note>
-                This needs a brief, and every pairing chosen and working.
+                This needs a brief, and every role picked and working.
               </Note>
             </Show>
           }
@@ -1982,7 +1984,7 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
         </Show>
         <Show when={start.isError}>
           <ErrorLine class={styles.failure}>
-            The grilling could not be started: {start.error?.message}
+            The work could not be started: {start.error?.message}
           </ErrorLine>
         </Show>
       </div>

@@ -187,10 +187,10 @@ pub struct PairingView {
 /// it: the Pairing its sessions run under, that the role runs none, or nothing
 /// picked yet.
 ///
-/// Three rather than a nullable Pairing, because the picker offers *no review*
-/// as a row of its own: a Conversation that picked it is as ready to start as
-/// one that picked a Pairing, and a page that could not tell it from an empty
-/// picker would draw the placeholder over a settled choice.
+/// Three rather than a nullable Pairing, because a picker offers *no grilling*
+/// or *no review* as a row of its own: a Conversation that picked one is as
+/// ready to start as one that picked a Pairing, and a page that could not tell
+/// it from an empty picker would draw the placeholder over a settled choice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum PickedView {
@@ -214,15 +214,22 @@ impl PickedView {
             _ => None,
         }
     }
+
+    /// Whether the human picked the row that runs no session, which is what the
+    /// presses that behave differently for it turn on.
+    pub fn skipped(&self) -> bool {
+        matches!(self, Self::Skipped)
+    }
 }
 
-/// Which Pairing a Conversation's review runs under, or that it runs none.
+/// Which Pairing one of a Conversation's roles runs under, or that it runs none.
 ///
-/// `null` is the *no review* row: the picker offers it beside the Pairings, so
-/// the one press that picks either sends the same body — see [`PickedView`].
+/// `null` is the row that runs no session: a picker that offers one offers it
+/// beside the Pairings, so the one press that picks either sends the same body
+/// — see [`PickedView`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct ReviewChoice {
+pub struct RoleChoice {
     pub pairing: Option<ProfileChoice>,
 }
 

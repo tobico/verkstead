@@ -271,7 +271,7 @@ async fn a_steer_settles_the_pairing_the_human_picked() {
          with",
     );
     assert!(
-        conversation.grilling_pairing.is_none(),
+        !conversation.grilling_pairing.picked(),
         "and only the role steered into: the other is nobody's to re-settle here",
     );
 }

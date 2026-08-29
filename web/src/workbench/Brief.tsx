@@ -113,13 +113,16 @@ function Configuration(props: { conversation: ConversationView }): JSX.Element {
           <Where worktree={props.conversation.worktree} />
         </Fact>
         <Fact term="Grilling">
-          <Paired pairing={props.conversation.grilling_pairing} />
+          <Picked
+            picked={props.conversation.grilling_pairing}
+            away="No grilling."
+          />
         </Fact>
         <Fact term="Implementation">
           <Paired pairing={props.conversation.implementation_pairing} />
         </Fact>
         <Fact term="Review">
-          <Reviewed picked={props.conversation.review_pairing} />
+          <Picked picked={props.conversation.review_pairing} away="No review." />
         </Fact>
       </dl>
 
@@ -263,16 +266,17 @@ function Paired(props: { pairing: PairingView | null }): JSX.Element {
   );
 }
 
-/// And a role that could be picked away as well as paired, which is the review.
+/// And a role that could be picked away as well as paired, which is the grilling
+/// and the review.
 ///
-/// Said as the choice it was rather than as an absence: *no review* is what the
-/// human picked, and a pane that read it as "not chosen" would show a settled
-/// conversation as an unsettled one.
-function Reviewed(props: { picked: PickedView }): JSX.Element {
+/// Said as the choice it was rather than as an absence: *no grilling* and *no
+/// review* are what the human picked, and a pane that read either as "not
+/// chosen" would show a settled conversation as an unsettled one.
+function Picked(props: { picked: PickedView; away: string }): JSX.Element {
   return (
     <Show
       when={props.picked !== "Skipped"}
-      fallback={<span class={styles.rule}>No review.</span>}
+      fallback={<span class={styles.rule}>{props.away}</span>}
     >
       <Paired pairing={pairing.under(props.picked)} />
     </Show>

@@ -9,11 +9,12 @@
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
+use verkstead_schema::Direction;
 use verkstead_store::{
-    AgentType, Chosen, Deleting, Picked, Profile, ProfileFacts, Saving, create_profile,
+    AgentType, Chosen, Deleting, Lifecycle, Picked, Profile, ProfileFacts, Saving, create_profile,
     delete_profile, load_conversation, load_profile, open_database, profiles, register_repo,
-    set_grilling_pairing, set_implementation_pairing, set_review_pairing, skip_review,
-    start_conversation, start_grilling, update_profile,
+    set_grilling_pairing, set_implementation_pairing, set_review_pairing, skip_grilling,
+    skip_review, start_building, start_conversation, start_grilling, update_profile,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -338,7 +339,7 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     // grill from.
     let half = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        half.grilling_pairing.as_ref().map(|p| p.profile.id),
+        half.grilling_pairing.pairing().map(|p| p.profile.id),
         Some(fable.id)
     );
     assert_eq!(half.implementation_pairing, None);
@@ -352,7 +353,9 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
 
     let both = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        both.grilling_pairing.map(|p| p.profile.name),
+        both.grilling_pairing
+            .pairing()
+            .map(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
     assert_eq!(
@@ -383,12 +386,11 @@ async fn a_pairing_holds_the_model_it_was_chosen_with() {
         .await
         .unwrap();
 
-    let pairing = load_conversation(&pool, id)
-        .await
-        .unwrap()
-        .unwrap()
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    let pairing = conversation
         .grilling_pairing
-        .unwrap();
+        .pairing()
+        .expect("a Pairing was picked");
 
     assert_eq!(pairing.model.as_deref(), Some("claude-fable-5"));
     assert_eq!(pairing.runs_on(), Some("claude-fable-5"));
@@ -405,7 +407,8 @@ async fn a_pairing_holds_the_model_it_was_chosen_with() {
             .unwrap()
             .unwrap()
             .grilling_pairing
-            .and_then(|pairing| pairing.model),
+            .pairing()
+            .and_then(|pairing| pairing.model.clone()),
         Some("claude-opus-5".to_owned())
     );
 }
@@ -427,12 +430,11 @@ async fn a_profile_chosen_before_pairings_runs_on_the_model_it_carried() {
         .await
         .unwrap();
 
-    let pairing = load_conversation(&pool, id)
-        .await
-        .unwrap()
-        .unwrap()
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    let pairing = conversation
         .grilling_pairing
-        .unwrap();
+        .pairing()
+        .expect("a Pairing was picked");
 
     assert_eq!(pairing.model, None);
     assert_eq!(pairing.runs_on(), Some(MODEL));
@@ -480,7 +482,10 @@ async fn a_pairing_cannot_be_chosen_once_grilling_has_started() {
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        conversation.grilling_pairing.map(|p| p.profile.name),
+        conversation
+            .grilling_pairing
+            .pairing()
+            .map(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
     assert_eq!(
@@ -506,7 +511,10 @@ async fn one_profile_can_be_both_of_a_conversations_choices() {
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        conversation.grilling_pairing.map(|p| p.profile.id),
+        conversation
+            .grilling_pairing
+            .pairing()
+            .map(|p| p.profile.id),
         Some(only.id)
     );
     assert_eq!(
@@ -536,7 +544,7 @@ async fn a_profile_that_is_not_there_cannot_be_chosen() {
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.grilling_pairing, None);
+    assert_eq!(conversation.grilling_pairing, Picked::Nothing);
     assert_eq!(conversation.implementation_pairing, None);
 }
 
@@ -567,7 +575,7 @@ async fn a_started_conversation_has_chosen_neither_pairing() {
     let id = conversation(&pool).await;
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.grilling_pairing, None);
+    assert_eq!(conversation.grilling_pairing, Picked::Nothing);
     assert_eq!(conversation.implementation_pairing, None);
 }
 
@@ -595,7 +603,10 @@ async fn profiles_and_the_choices_made_of_them_survive_a_restart() {
     assert_eq!(profiles(&pool).await.unwrap().len(), 2);
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        conversation.grilling_pairing.map(|p| p.profile.name),
+        conversation
+            .grilling_pairing
+            .pairing()
+            .map(|p| p.profile.name.clone()),
         Some("fable".to_owned())
     );
     assert_eq!(
@@ -727,5 +738,168 @@ async fn no_review_cannot_be_picked_once_grilling_has_started() {
             .map(|pairing| pairing.profile.id),
         Some(fable.id),
         "and what it was grilled under is exactly where it was",
+    );
+}
+
+/// *No grilling* is a choice too, stored apart from having chosen nothing —
+/// exactly as *no review* is, one role along.
+#[tokio::test]
+async fn no_grilling_is_a_choice_rather_than_an_empty_picker() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .grilling_pairing,
+        Picked::Nothing,
+        "nothing has been picked yet",
+    );
+
+    assert_eq!(skip_grilling(&pool, id).await.unwrap(), Chosen::Chosen);
+
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .grilling_pairing,
+        Picked::Skipped,
+        "and now something has",
+    );
+}
+
+/// The two rows are rows of one list here as well, so picking either unpicks
+/// the other.
+#[tokio::test]
+async fn picking_a_grilling_pairing_and_picking_none_replace_each_other() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+    let fable = saved(&pool, "fable").await;
+
+    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+    skip_grilling(&pool, id).await.unwrap();
+
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .grilling_pairing,
+        Picked::Skipped,
+        "the account it was going to be interviewed by is off it",
+    );
+
+    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    let picked = load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .grilling_pairing;
+
+    assert_eq!(
+        picked.pairing().map(|pairing| pairing.profile.id),
+        Some(fable.id),
+        "and picking an account back takes the row that ran nothing away",
+    );
+}
+
+/// And it is fixed the moment the work starts, which for a Conversation that
+/// will not be grilled is [`start_building`] rather than [`start_grilling`].
+#[tokio::test]
+async fn no_grilling_cannot_be_picked_once_the_work_has_started() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+    let fable = saved(&pool, "fable").await;
+
+    skip_grilling(&pool, id).await.unwrap();
+    set_implementation_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    start_building(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+            .await
+            .unwrap(),
+        Chosen::NotDrafting,
+        "there is no picking left once the work has started",
+    );
+
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .grilling_pairing,
+        Picked::Skipped,
+        "and what it started under is exactly where it was",
+    );
+}
+
+/// What the press that skips the grilling leaves behind: a Conversation
+/// Implementing, on the branch and the base commit a grill start would have
+/// given it, with the Direction a Brief taken straight to the work is.
+#[tokio::test]
+async fn starting_without_a_grilling_lands_the_conversation_implementing_inline() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+    let fable = saved(&pool, "fable").await;
+
+    skip_grilling(&pool, id).await.unwrap();
+    set_implementation_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    start_building(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+
+    assert_eq!(conversation.state, Lifecycle::Implementing);
+    assert_eq!(
+        conversation.direction,
+        Some(Direction::Inline),
+        "a Brief taken straight to the work is an inline implementation",
+    );
+    assert_eq!(
+        conversation.base_commit.as_deref(),
+        Some("6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7"),
+        "and everything the press did against git is recorded as it always is",
+    );
+    assert_eq!(
+        conversation.worktree.as_deref(),
+        Some(Path::new(
+            "/var/lib/verkstead/worktrees/verkstead-amber-kestrel"
+        )),
     );
 }

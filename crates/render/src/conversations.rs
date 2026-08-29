@@ -250,7 +250,12 @@ pub struct ConversationView {
     /// The Profile and model the grilling session will run under, whole rather
     /// than by id: the pane says what they are, and whether the Profile is
     /// still runnable.
-    pub grilling_pairing: Option<PairingView>,
+    ///
+    /// One of the two roles the picker offers a row that runs no session for,
+    /// so this says which of three the human picked rather than whether they
+    /// picked at all. A Conversation that picked *no grilling* is not grilled:
+    /// its Brief goes straight to an inline implementation.
+    pub grilling_pairing: PickedView,
 
     /// And the ones the implementation will run under. Chosen separately
     /// because it is genuinely a separate account and model.
@@ -259,13 +264,15 @@ pub struct ConversationView {
     /// And what the wrap-up's review session will run under, chosen separately
     /// again: reviewing is a fresh set of eyes on what was built.
     ///
-    /// The one role the picker offers a *no review* row for, so this says which
-    /// of three the human picked rather than whether they picked at all.
+    /// The other role the picker offers a row that runs no session for, so this
+    /// says which of three the human picked rather than whether they picked at
+    /// all.
     pub review_pairing: PickedView,
 
-    /// Whether everything needed before grilling will start is settled: every
-    /// Pairing complete and no Profile broken, a Brief with something in
-    /// it, and a Conversation still drafting.
+    /// Whether everything needed before the work will start is settled: every
+    /// role picked — a Pairing complete and no Profile broken, or the row that
+    /// runs no session — a Brief with something in it, and a Conversation still
+    /// drafting.
     ///
     /// The server's rule rather than something the page works out from the
     /// fields around it. Every one of the refusals is checked again when the

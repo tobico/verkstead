@@ -326,13 +326,25 @@ carrying on and runs under the Implementation Pairing: the check fixes, the
 comment responses, the follow-ups, and the session sent for a missing pull
 request.
 
-The Review picker offers one row that is not an account: **No review**. Picking
-it is a choice like picking a Pairing — it satisfies readiness, freezes at grill
-start, is remembered per Repo and inherited by a stage — and what it settles is
-that the wrap-up runs no review session at all. An empty picker is not that: the
-two leave the same thing unchosen and only one of them lets the work start.
+Two of the pickers offer a row that is not an account: **No grilling** and **No
+review**. Picking one is a choice like picking a Pairing — it satisfies
+readiness, freezes when the work starts, is remembered per Repo and inherited by
+a stage — and what it settles is that the role runs no session at all. An empty
+picker is not that: the two leave the same thing unchosen and only one of them
+lets the work start.
 
-A wrap-up on such a Conversation settles its review the moment it looks, with no
+**No grilling** takes the Brief straight to the work. The one press does
+everything a grill start does — fetch, resolve the base, cut the branch, make
+the Worktree and every companion's, freeze the Brief and the Pairings — and
+lands the Conversation Implementing rather than Grilling, with an inline session
+under the Implementation Pairing primed on the Brief alone. Its prompt says
+there was no interview, so a real decision the Brief leaves open is put to the
+human as a Blocking Ask rather than guessed at. Inline only — no backlog and no
+roadmap — and watched out to a pull request and an ordinary wrap-up exactly as
+an inline implementation picked at the end of a grilling is. The button reads
+**Start work** whichever way the Conversation starts.
+
+**No review** settles the wrap-up's review the moment it looks, with no
 session and nothing on the Timeline, and everything else runs exactly as it
 always does: the checks with their two fix attempts apiece, what is said on the
 pull request answered in batches, Done once the suites are green. With no review

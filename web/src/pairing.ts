@@ -16,7 +16,7 @@ import type {
   PickedView,
   ProfileEntry,
   ProfileChoice,
-  ReviewChoice,
+  RoleChoice,
 } from "./api/types";
 
 /// One row of a pairing picker: an account, and one thing that account can run.
@@ -66,7 +66,7 @@ export function choice(picked: string): ProfileChoice {
 }
 
 /// The row that says a role runs no session at all, as it travels inside a
-/// `<select>`.
+/// `<select>` — "No grilling" on one picker and "No review" on the other.
 ///
 /// Not the empty string, which is the picker's own placeholder: nothing chosen
 /// and *chosen to run nothing* are different states, and one of them lets the
@@ -91,8 +91,8 @@ export function under(picked: PickedView): PairingView | null {
   return picked === "Nothing" || picked === "Skipped" ? null : picked.Under;
 }
 
-/// One picked string, back into the body the review picker sends: a pairing, or
-/// the row that runs nothing.
-export function reviewed(picked: string): ReviewChoice {
+/// One picked string, back into the body a picker that offers that row sends: a
+/// pairing, or the row that runs nothing.
+export function role(picked: string): RoleChoice {
   return { pairing: picked === NONE ? null : choice(picked) };
 }

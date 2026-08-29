@@ -17,8 +17,9 @@
 //! The three pairings are separate choices because they are genuinely separate
 //! accounts — grill on fable, implement on opus, review on whatever did not
 //! build it — and because the implementation session cannot simply carry the
-//! grilling one on. The review picker has one row that is not an account at
-//! all, because a conversation can be wrapped up without being reviewed.
+//! grilling one on. Two of the pickers carry one row that is not an account at
+//! all: a conversation can be built without being grilled and wrapped up
+//! without being reviewed.
 
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
@@ -143,8 +144,7 @@ export const CHOICE_REFUSAL: Record<ProfileChosen, string> = {
   NoSuchConversation: "This conversation is gone.",
   NoSuchProfile: "That profile has been removed.",
   NoSuchModel: "That profile no longer lists that model.",
-  NotDrafting:
-    "The grilling has started, so who runs this conversation is settled.",
+  NotDrafting: "The work has started, so who runs this conversation is settled.",
 };
 
 export function Setup(props: {
@@ -240,15 +240,19 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
                window's, because this card is drawn in a pane the human can
                narrow. */
             <div class={styles.pairings}>
+              {/* One of the two pickers with a row that is not an account: a
+                  brief can go straight to the work, with no interview between
+                  the two. */}
               <PairingPicker
                 conversation={props.conversation}
                 saved={saved()}
                 role="grilling"
                 label="Grilling"
-                chosen={pairing.chosen(props.conversation.grilling_pairing)}
-                pairing={props.conversation.grilling_pairing}
+                away="No grilling"
+                chosen={pairing.settled(props.conversation.grilling_pairing)}
+                pairing={pairing.under(props.conversation.grilling_pairing)}
                 choose={(id, picked) =>
-                  chooseGrillingPairing(id, pairing.choice(picked))
+                  chooseGrillingPairing(id, pairing.role(picked))
                 }
               />
               <PairingPicker
@@ -264,9 +268,9 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
                   chooseImplementationPairing(id, pairing.choice(picked))
                 }
               />
-              {/* The one picker with a row that is not an account: a
-                  conversation can be wrapped up without being reviewed at all,
-                  and that is picked here rather than anywhere else. */}
+              {/* And the other: a conversation can be wrapped up without being
+                  reviewed at all, and that is picked here rather than anywhere
+                  else. */}
               <PairingPicker
                 conversation={props.conversation}
                 saved={saved()}
@@ -276,7 +280,7 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
                 chosen={pairing.settled(props.conversation.review_pairing)}
                 pairing={pairing.under(props.conversation.review_pairing)}
                 choose={(id, picked) =>
-                  chooseReviewPairing(id, pairing.reviewed(picked))
+                  chooseReviewPairing(id, pairing.role(picked))
                 }
               />
             </div>

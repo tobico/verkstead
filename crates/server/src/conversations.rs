@@ -117,7 +117,14 @@ async fn prefill(state: &AppState, id: i64, repo_id: i64) {
 async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
     let remembered = store::remembered_pairings(&state.pool, repo_id).await?;
 
-    if let Some((profile_id, model)) = usable(&state.watched, remembered.grilling).await? {
+    // A Repo last started with no grilling is prefilled with no grilling, which
+    // is the memory doing exactly what it does for a Pairing: what the human
+    // last picked, ready to be changed. Nothing is judged about the row that
+    // runs nothing — there is no Profile to have gone — so it is applied
+    // wherever it was remembered.
+    if remembered.grilling.skipped() {
+        store::skip_grilling(&state.pool, id).await?;
+    } else if let Some((profile_id, model)) = usable(&state.watched, remembered.grilling).await? {
         store::set_grilling_pairing(&state.pool, id, profile_id, Some(&model)).await?;
     }
 
@@ -125,10 +132,8 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
         store::set_implementation_pairing(&state.pool, id, profile_id, Some(&model)).await?;
     }
 
-    // A Repo last grilled with no review is prefilled with no review, which is
-    // the memory doing exactly what it does for a Pairing: what the human last
-    // picked, ready to be changed. Nothing is judged about it — there is no
-    // Profile to have gone — so it is applied wherever it was remembered.
+    // And the same one role along: a Repo last started with no review opens its
+    // next Conversation on that row too.
     if remembered.review.skipped() {
         store::skip_review(&state.pool, id).await?;
     } else if let Some((profile_id, model)) = usable(&state.watched, remembered.review).await? {
@@ -698,6 +703,15 @@ pub(crate) async fn rename_companion_branch(
 /// Give a drafting Conversation somewhere to work: a branch off its base commit
 /// and a worktree of its Repo, and the move onto the Timeline that says so.
 ///
+/// **Two landings, and which of them is what the human picked.** A Conversation
+/// with a grilling Pairing is grilled: the session that starts is the interview,
+/// and what the work becomes is settled through it. One whose human picked *no
+/// grilling* has settled it already — the Brief is the whole plan — so the same
+/// branch, the same worktree, the same frozen Brief and the same fixed Pairings
+/// leave the Conversation Implementing, with an inline session building from the
+/// Brief alone. Everything above this line is the same work either way, which is
+/// why it is one press and one function rather than two.
+///
 /// Everything that has to be true is checked here, each refused by its own name,
 /// because each is something different for the human to go and do. They are
 /// checked in the order they can be: the record first, then the Profiles, then
@@ -771,14 +785,19 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
-    let grilling = crate::profiles::pairing(watched, conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::picked(watched, conversation.grilling_pairing.clone()).await?;
     let implementation =
         crate::profiles::pairing(watched, conversation.implementation_pairing.clone()).await?;
     let review = crate::profiles::picked(watched, conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), &review) {
+    if let Some(refusal) = unready(&grilling, implementation.as_ref(), &review) {
         return Ok(refusal.grilling());
     }
+
+    // Which of the two this press is, decided once and before anything is made:
+    // what it changes is where the Conversation lands and what is launched into
+    // the worktree, and neither of those is a question git has to be asked.
+    let grilled = !grilling.skipped();
 
     // Kept rather than only judged: it is what the session about to start is
     // primed with, and it is frozen from the moment the Conversation moves.
@@ -890,22 +909,39 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         Err(refusal) => return Ok(refusal),
     };
 
-    match store::start_grilling(pool, id, &commit, &path, &checkouts).await? {
+    let moved = match grilled {
+        true => store::start_grilling(pool, id, &commit, &path, &checkouts).await?,
+        false => store::start_building(pool, id, &commit, &path, &checkouts).await?,
+    };
+
+    match moved {
         store::Grilling::NoSuchConversation => return Ok(GrillingStarted::NoSuchConversation),
         store::Grilling::NotDrafting => return Ok(GrillingStarted::NotDrafting),
         store::Grilling::Started => {}
     }
 
-    // From here the Conversation says it is being grilled, and the thing that
+    // From here the Conversation says it is being worked on, and the thing that
     // will say so is a session that does not exist yet. So a registration stands
     // in for it across the launch, which is the slowest part of this: a sweep
-    // that looked in between would find a Conversation grilling with nothing
-    // grilling it, and stop the run under a press the human is still standing
+    // that looked in between would find a Conversation being worked with nothing
+    // working on it, and stop the run under a press the human is still standing
     // at. Held to the
     // end of this rather than handed on — what drives a grilling from there is
     // its session — and what it leaves behind where the launch fails is a stall
     // for the next sweep to find. See [`crate::drivers`] and [`crate::stalls`].
     let _driving = state.drivers.driving(id);
+
+    // A start with no grilling in it is a run rather than an interview, so what
+    // follows is the runner's: a session on the implementation skill, watched out
+    // to the pull request and the wrap-up exactly as an inline implementation
+    // picked at the end of a grilling is. It takes a registration of its own —
+    // see [`crate::runner::build_the_ungrilled`] — so the one above can go when
+    // this press does.
+    if !grilled {
+        crate::runner::build_the_ungrilled(state, id);
+
+        return Ok(GrillingStarted::Started);
+    }
 
     // Read back rather than assembled from what was just recorded: what the
     // session runs against is the Conversation as it now stands, worktree and
@@ -926,7 +962,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // What it is started on is the Brief under the line that sends it into the
     // bundled grilling skill: a sandbox has no global `CLAUDE.md` to say what a
     // session is for, so the prompt is where it is said — see [`crate::skills`].
-    if let Some(pairing) = conversation.grilling_pairing.clone()
+    if let Some(pairing) = conversation.grilling_pairing.pairing().cloned()
         && let Err(error) = state
             .sessions
             .start(
@@ -1254,12 +1290,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // All of them, rather than only the one the work runs under: a stage
     // inherits every one from its predecessor, so what this one is adopted with
     // is what every stage after it starts with.
-    let grilling = crate::profiles::pairing(watched, conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::picked(watched, conversation.grilling_pairing.clone()).await?;
     let implementation =
         crate::profiles::pairing(watched, conversation.implementation_pairing.clone()).await?;
     let review = crate::profiles::picked(watched, conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), &review) {
+    if let Some(refusal) = unready(&grilling, implementation.as_ref(), &review) {
         return Ok(refusal.adopting());
     }
 
@@ -1633,31 +1669,33 @@ async fn read(state: &AppState, id: i64) {
 /// Pairing, Profile and model together.
 ///
 /// The rule rather than either button's answer, because both buttons ask it:
-/// starting a grilling and adopting a stage each want every Pairing fixed
-/// before they will do anything, and each says so in its own words — see
+/// starting the work and adopting a stage each want every role settled before
+/// they will do anything, and each says so in its own words — see
 /// [`Unready::grilling`] and [`Unready::adopting`].
 fn unready(
-    grilling: Option<&PairingView>,
+    grilling: &PickedView,
     implementation: Option<&PairingView>,
     review: &PickedView,
 ) -> Option<Unready> {
-    let Some(grilling) = grilling.filter(|pairing| pairing.model.is_some()) else {
-        return Some(Unready::NoGrillingProfile);
+    // The row that runs no session is a choice made, so it passes here as a
+    // Pairing does — and leaves nothing to be broken, there being no Profile.
+    let grilling = match grilling {
+        PickedView::Skipped => None,
+        PickedView::Under(pairing) if pairing.model.is_some() => Some(pairing),
+        _ => return Some(Unready::NoGrillingProfile),
     };
 
     let Some(implementation) = implementation.filter(|pairing| pairing.model.is_some()) else {
         return Some(Unready::NoImplementationProfile);
     };
 
-    // The row that runs no review is a choice made, so it passes here as a
-    // Pairing does — and leaves nothing to be broken, there being no Profile.
     let review = match review {
         PickedView::Skipped => None,
         PickedView::Under(pairing) if pairing.model.is_some() => Some(pairing),
         _ => return Some(Unready::NoReviewProfile),
     };
 
-    [Some(grilling), Some(implementation), review]
+    [grilling, Some(implementation), review]
         .into_iter()
         .flatten()
         .any(|pairing| pairing.profile.broken.is_some())
@@ -1775,15 +1813,15 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
     }))
 }
 
-/// Whether everything needed before grilling starts is settled, as the pane
-/// reads it: the Pairings, and a Brief with something in it.
+/// Whether everything needed before the work starts is settled, as the pane
+/// reads it: the three roles, and a Brief with something in it.
 ///
 /// Answered against what the endpoint has already read rather than by loading
 /// the Conversation again — and it deliberately says nothing about the branch or
 /// the base commit, which are decided against git when the button is pressed.
 pub(crate) fn ready_to_grill(
     state: store::Lifecycle,
-    grilling: Option<&PairingView>,
+    grilling: &PickedView,
     implementation: Option<&PairingView>,
     review: &PickedView,
     brief: &str,

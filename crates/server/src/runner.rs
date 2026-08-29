@@ -933,6 +933,34 @@ pub(crate) fn build_the_split_out(state: &AppState, conversation_id: i64) {
     });
 }
 
+/// Build the work of a Conversation whose human picked *no grilling*, from the
+/// press that gave it a branch to the pull request it ends on.
+///
+/// [`build_the_split_out`]'s shape and the other entry into a run that is not a
+/// direction being followed — except that here the direction *is* recorded, the
+/// start having written it: a Brief taken straight to the work is an inline
+/// implementation, so what this launches and what it does with the session is
+/// [`follow_handoff`]'s second half exactly. What it skips is the first half,
+/// there being no grilling session to see out and no handoff for it to have
+/// written.
+///
+/// The registration is taken here rather than by the caller, because the caller
+/// is the press and is about to answer the human: a gap between the two would be
+/// a Conversation the stall sweep found with nothing driving it.
+pub(crate) fn build_the_ungrilled(state: &AppState, conversation_id: i64) {
+    let driving = state.drivers.driving(conversation_id);
+    let state = state.clone();
+
+    tokio::spawn(async move {
+        let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing).await
+        else {
+            return;
+        };
+
+        follow_inline(state, conversation_id, session, driving).await
+    });
+}
+
 /// Whether `worktree` holds a backlog, committed as it stands.
 ///
 /// What says the work a review split out has landed, asked by exactly the rule a
@@ -3246,6 +3274,16 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                 }
                 Prompt::Staging => skills::staging(&brief),
                 Prompt::NextTask => skills::next_task(&brief, handoff),
+                // The one prompt that reads a Pairing to decide what it says:
+                // a Conversation whose human picked *no grilling* has no
+                // handoff because there was no interview, which is a different
+                // thing from a grilling that ended without writing one. Asked
+                // of the record every launch rather than carried from the
+                // press, so a resumed run says it too — see
+                // [`skills::ungrilled`].
+                Prompt::Implementing if conversation.grilling_pairing.skipped() => {
+                    skills::ungrilled(&brief)
+                }
                 Prompt::Implementing => skills::implementing(&brief, handoff),
                 Prompt::Submitting => skills::submitting(&brief, handoff),
                 Prompt::Instruction(instruction) => {
