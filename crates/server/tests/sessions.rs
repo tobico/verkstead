@@ -5857,6 +5857,36 @@ async fn until_written_saying(path: &Path, said: &str) -> String {
     }
 }
 
+/// The same again, waiting until `sessions` of them have written — for the tests
+/// where several sessions write to the one file and finding some of them there
+/// says nothing about the rest.
+///
+/// What a test whose sessions are dispatched by more than one watcher needs. Two
+/// watchers reach their last session at their own pace, so anything that has
+/// already happened on the Timeline — the first Notice included — is a moment
+/// one of them may still be behind, and a read taken there counts the prompts of
+/// whichever got there first.
+async fn until_written_by(path: &Path, sessions: usize) -> String {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let written = std::fs::read_to_string(path).unwrap_or_default();
+
+        if prompts(&written).len() >= sessions {
+            return written;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "only {} of {sessions} sessions ever wrote to {}: {written}",
+            prompts(&written).len(),
+            path.display(),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
 /// How many sessions wrote to one of those files.
 fn prompts(written: &str) -> Vec<&str> {
     written
@@ -18420,12 +18450,13 @@ async fn the_same_check_red_on_two_pull_requests_gets_two_goes_each() {
 
     worked_to_empty(&fixture).await;
 
+    // Waited for by the count rather than read at the first Notice. Each pull
+    // request runs out of goes on its own watcher's schedule, so the Notice that
+    // arrives first is the first one's — and the other's last session may not
+    // have been dispatched yet, let alone written anything down.
+    let told = until_written_by(&dispatched, 4).await;
     let stopped = fixture.stopped().await;
-    let told = std::fs::read_to_string(&dispatched).expect("the fix sessions wrote their prompts");
-    let prompts: Vec<&str> = told
-        .split("=====")
-        .filter(|it| !it.trim().is_empty())
-        .collect();
+    let prompts = prompts(&told);
 
     let about = |number: &str| {
         prompts
