@@ -27,10 +27,10 @@
 //! what somebody typed. Whether they are inside a Watched Path is decided above
 //! the store, where the boundary lives.
 //!
-//! The agent type is a column with one value in it. Nothing branches on it and
-//! nothing this stage does would read differently without it — the point is that
-//! a second backend slots in beside `claude` rather than having to be migrated
-//! in underneath it.
+//! The agent type is a column with one value in it, and the discriminator a
+//! backend is chosen by above the store: the launch line's flags are keyed on
+//! it already. The point is that a second backend slots in beside `claude`
+//! rather than having to be migrated in underneath it.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

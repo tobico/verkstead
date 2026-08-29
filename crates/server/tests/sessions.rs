@@ -10,8 +10,10 @@
 //! model's patience.
 //!
 //! The stub is handed exactly what claude would be: `--model`, the Profile's
-//! model, and then the Brief. So `$1` is the model it was told to run and `$2`
-//! is the Brief it was primed with — which is how these read them back.
+//! model, and then the Brief, with the session name and the backend's own flags
+//! after it. So `$1` is the model it was told to run and `$2` is the Brief it
+//! was primed with — which is how these read them back, and why everything
+//! Verkstead adds to that line goes on the end of it.
 //!
 //! Watching a live session is here too, at the end, and is the one thing asked
 //! over a socket rather than of the Router: an upgrade is a connection rather
@@ -2208,6 +2210,49 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
             worktree.canonicalize().unwrap().display()
         )),
         "a session works in its Conversation's worktree and nowhere else: {said:?}"
+    );
+}
+
+/// Running unattended is Verkstead's own doing: the bypass flag is on the line
+/// it launches the session with, rather than something the Profile's account
+/// was hoped to have been configured to hold.
+///
+/// The stub reads its whole line back, which is how this is provable without an
+/// account: what a real claude does with the flag is claude's business, and what
+/// could be wrong here is Verkstead's end of it. It reads `$1` and `$2` in the
+/// same breath, because the flag going on the end is the half of the promise
+/// that keeps every other stub in this file reading what it reads today.
+#[tokio::test]
+async fn a_session_is_launched_with_the_bypass_flag_verkstead_passes_it() {
+    let fixture = grilling(
+        r#"
+        printf 'model=%s\n' "$1"
+        printf 'prompt=%s\n' "$2"
+        for arg in "$@"; do
+            if [ "$arg" = --dangerously-skip-permissions ]; then printf 'unattended\n'; fi
+        done
+        "#,
+    )
+    .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("unattended\n"),
+        "the agent should have been launched with the flag that stops it asking \
+         approval of nobody: {said:?}"
+    );
+    assert!(
+        said.contains("model=claude-grilling-5\n"),
+        "and the model is still the first thing after the program: {said:?}"
+    );
+    assert!(
+        said.contains(BRIEF),
+        "and the Brief is still the one after that: {said:?}"
     );
 }
 
