@@ -371,8 +371,8 @@ async fn once(
         // about anything else is not this branch's suite at all.
         //
         // Asked here rather than every poll, because this is the only poll whose
-        // answer it changes — and it is a fetch, which is a good deal more than
-        // the rest of a look costs.
+        // answer it changes — and it goes to the network, which the rest of a
+        // look does not.
         //
         // Both halves have to be known for the question to mean anything: a `gh`
         // that answered without a head, and a checkout with no origin to ask, are
@@ -381,7 +381,7 @@ async fn once(
         let pushed = {
             let worktree = watched.worktree.clone();
 
-            // Off the runtime's threads: a fetch is a process, and one that goes
+            // Off the runtime's threads: this is a process, and one that goes
             // to the network.
             tokio::task::spawn_blocking(move || pushed_head(&worktree))
                 .await
@@ -430,38 +430,37 @@ async fn once(
 
 /// What origin is holding `worktree`'s branch on, asked as part of the poll.
 ///
-/// The remote-tracking ref rather than the checkout's own HEAD, because those are
-/// different commits whenever a session has committed and not yet pushed — and
-/// the question a rollup has to be held against is which commit GitHub was given,
-/// not which one the Worktree has got to. A wrap-up that waited on checks for an
-/// unpushed commit would wait for a run nobody could ever have started.
+/// Origin rather than the checkout's own HEAD, because those are different
+/// commits whenever a session has committed and not yet pushed — and the question
+/// a rollup has to be held against is which commit GitHub was given, not which
+/// one the Worktree has got to. A wrap-up that waited on checks for an unpushed
+/// commit would wait for a run nobody could ever have started.
 ///
-/// Fetched first, because a remote-tracking ref is only ever as fresh as the last
-/// fetch and nothing else here does one. The whole remote rather than the one
-/// branch, so that what is read back is a ref this updated rather than one it
-/// might have.
+/// Asked of the remote rather than read off a remote-tracking ref, because a ref
+/// is only ever as fresh as the last fetch and fetching is not a free way to
+/// freshen one: it writes refs and pulls objects into a repository an agent is
+/// working in right now, which is what every git read here passes
+/// `--no-optional-locks` to stay out of the way of. This wants one commit id, so
+/// it asks for one commit id.
 ///
-/// `None` where there is no origin to ask, where the fetch failed, or where the
-/// branch is not on it yet — each of them *Verkstead cannot tell*, which the
-/// caller reads as nothing to hold the rollup against rather than as a reason to
-/// distrust it. A checkout with no remote is every one of this suite's own, and a
-/// branch origin has never heard of is one nothing has pushed.
+/// `None` where there is no origin to ask, where the remote could not be reached,
+/// or where the branch is not on it — each of them *Verkstead cannot tell*, which
+/// the caller reads as nothing to hold the rollup against rather than as a reason
+/// to distrust it. A checkout with no remote is every one of this suite's own,
+/// and a branch origin has never heard of is one nothing has pushed.
 fn pushed_head(worktree: &Path) -> Option<String> {
     let branch = git(worktree, &["symbolic-ref", "--short", "HEAD"])?;
     let branch = branch.trim();
 
-    git(worktree, &["fetch", "--quiet", "origin"])?;
-
-    let head = git(
+    // One line of `<commit>\trefs/heads/<branch>`, or nothing at all where origin
+    // is not holding that branch — which `ls-remote` reports by saying nothing
+    // rather than by failing.
+    let said = git(
         worktree,
-        &[
-            "rev-parse",
-            "--verify",
-            &format!("refs/remotes/origin/{branch}"),
-        ],
+        &["ls-remote", "origin", &format!("refs/heads/{branch}")],
     )?;
 
-    Some(head.trim().to_owned())
+    Some(said.split_whitespace().next()?.to_owned())
 }
 
 /// Write down how the suite is, and tell the open pages where that is news.
