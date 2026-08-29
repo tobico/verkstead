@@ -30,6 +30,45 @@
    stands on a card, and the events that are not one: the moves and steers drawn
    as lines between the cards, and the manual task nothing writes another of. */
 
+/* What the pane is called: the branch, and the Repo the work is in understated
+   beside it. The title/subtitle pattern the sidebar's card draws the same two
+   facts in — see `.conversationRow .title` and `.meta` in
+   `Conversations.module.css` — so the card and the header of the pane it opens
+   read as the one name said twice, and the status button under them says its
+   own two lines in the same voice.
+
+   Inside the `<h1>` rather than under it, because the Repo is part of what this
+   pane is called rather than a caption on it: on a Draft the title is the word
+   *Draft* and the Repo is the whole of what tells one draft from another.
+
+   Wrapping and baseline-aligned, since the header row is also where the way
+   back and the way on stand at phone widths: a long branch beside a long Repo
+   name puts the Repo on a line of its own rather than pushing either control
+   off the edge. `min-width: 0` so the wrapping happens inside the heading
+   instead of the heading growing past the row. */
+.paneName {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.5rem;
+  min-width: 0;
+}
+
+.paneName .paneTitle {
+  overflow-wrap: anywhere;
+}
+
+/* The step down the sidebar's card takes to say which Repo it is in, and the
+   one the status button's state takes beside its status word. Its weight is
+   said out loud because it is inside a heading, which would otherwise lend it
+   the title's bold. */
+.paneName .paneRepo {
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
 /* The way on to the next level, which only the timeline has one of: the details
    pane holds the selected Event, so this is the way into it on a window too
    narrow to stand it beside the record. It rejoins the way back — the same seven

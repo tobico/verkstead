@@ -2291,6 +2291,76 @@ describe("a conversation's timeline", () => {
     );
   });
 
+  /// The pane is titled by its branch, and says which Repo that branch is in
+  /// understated beside it — the same two facts in the same order the sidebar's
+  /// card says them, so the card and the header of the pane it opens read as
+  /// the one name said twice.
+  it("says the repo understated beside the branch it is titled by", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const head = await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
+    const name = head.querySelector("h1")!;
+
+    expect(name.querySelector(`.${timeline.paneTitle}`)!.textContent).toBe(
+      OPEN.branch,
+    );
+    expect(name.querySelector(`.${timeline.paneRepo}`)!.textContent).toBe(
+      OPEN.repo.name,
+    );
+
+    // And the two are told apart out loud as well as on screen: the heading is
+    // named by everything under it run together, so the space between them is
+    // written into the markup rather than left to the stylesheet's gap.
+    expect(
+      screen.getByRole("heading", {
+        name: `${OPEN.branch} ${OPEN.repo.name}`,
+      }),
+    ).toBe(name);
+  });
+
+  /// And on a Draft above all, where the title is the word *Draft* and the Repo
+  /// is the whole of what tells this header from the next draft's.
+  it("says it on a draft too, where the title is the word Draft", async () => {
+    theWorkbenchWith({ branch_named: false, state: "Draft" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const head = await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
+    const name = head.querySelector("h1")!;
+
+    await waitFor(() =>
+      expect(name.querySelector(`.${timeline.paneTitle}`)!.textContent).toBe(
+        DRAFT,
+      ),
+    );
+    expect(name.querySelector(`.${timeline.paneRepo}`)!.textContent).toBe(
+      OPEN.repo.name,
+    );
+  });
+
+  /// The subtitle is understated rather than a second title, and it wraps: the
+  /// header row also carries the way back and the way on at phone widths, so a
+  /// long branch beside a long Repo name goes onto a second line rather than
+  /// pushing either control off the edge. The stylesheet's, jsdom laying
+  /// nothing out.
+  it("draws the repo quietly and wraps rather than overflowing", () => {
+    expect(timelineCss).toContain(
+      ".paneName {\n" +
+        "  display: flex;\n" +
+        "  flex-wrap: wrap;\n" +
+        "  align-items: baseline;\n" +
+        "  gap: 0 0.5rem;\n" +
+        "  min-width: 0;\n" +
+        "}",
+    );
+    expect(timelineCss).toContain(
+      ".paneName .paneRepo {\n" +
+        "  font-size: 0.9rem;\n" +
+        "  font-weight: 400;\n" +
+        "  color: var(--ink-soft);\n",
+    );
+  });
+
   it("says what to do with a conversation nobody has picked", async () => {
     theWorkbench();
     mount();
@@ -2802,7 +2872,13 @@ describe("writing the brief", () => {
 
     standing = RENAMED;
     readAgain();
-    await waitFor(() => screen.getByRole("heading", { name: RENAMED.branch }));
+    // The header is called by both of the things it says — the branch and the
+    // Repo understated beside it — so waiting on the new name waits on both.
+    await waitFor(() =>
+      screen.getByRole("heading", {
+        name: `${RENAMED.branch} ${OPEN.repo.name}`,
+      }),
+    );
 
     // The read landed, and what was typed is still in the field.
     expect(field().value).toBe("# Half a thought");
@@ -2902,8 +2978,10 @@ describe("a conversation's setup", () => {
 
   /// What the conversation is attached to and where it has got to were three
   /// read-only lines in a pane that no longer exists. The record tells that
-  /// story, so they are drawn nowhere at all.
-  it("shows the repo, the worktree path and the state nowhere", async () => {
+  /// story, so they are drawn nowhere at all — the Repo's *name*, which is the
+  /// header's subtitle, being the one of the three that came back and a
+  /// different fact from the path it is checked out at.
+  it("shows the repo path, the worktree path and the state nowhere", async () => {
     theWorkbenchWith({
       state: "Grilling",
       worktree: { path: "/var/lib/verkstead/worktrees/verkstead-open", missing: false },
@@ -2955,7 +3033,7 @@ describe("a conversation's setup", () => {
     // The pane alone, the sidebar beside it being drawn from a list of its own
     // that this test did not touch.
     const pane = container.querySelector(`.${shell.middlePane}`)!;
-    expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(DRAFT);
+    expect(pane.querySelector(`.${paneHead.head} .${timeline.paneTitle}`)!.textContent).toBe(DRAFT);
     expect(pane.textContent).not.toContain(OPEN.branch);
   });
 
@@ -2972,7 +3050,7 @@ describe("a conversation's setup", () => {
 
     const pane = container.querySelector(`.${shell.middlePane}`)!;
     await waitFor(() =>
-      expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(DRAFT),
+      expect(pane.querySelector(`.${paneHead.head} .${timeline.paneTitle}`)!.textContent).toBe(DRAFT),
     );
     expect(pane.textContent).not.toContain(OPEN.branch);
   });
@@ -2989,7 +3067,7 @@ describe("a conversation's setup", () => {
 
     const pane = container.querySelector(`.${shell.middlePane}`)!;
     await waitFor(() =>
-      expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(
+      expect(pane.querySelector(`.${paneHead.head} .${timeline.paneTitle}`)!.textContent).toBe(
         OPEN.branch,
       ),
     );

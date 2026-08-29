@@ -627,6 +627,11 @@ Timeline events:
   beside it. The ⋯ at the head of a Conversation's timeline went the same way in
   the end, into the status button under the title: what there is to do about a
   Conversation is reached from the thing that says what it is doing (*settled
+  2026-08-30, building status-button*). **And the timeline's own header says
+  the Repo understated beside the branch it is titled by**, in the pattern the
+  card that opened it draws its name and its Repo in — so the card and the
+  header read as the one name said twice, and two drafts, both titled *Draft*,
+  are told apart on the header by the only thing that differs (*settled
   2026-08-30, building status-button*).
 - **Push notifications** for needs-you — a blocking question set, a stop
   Verkstead decided on, an exhausted usage window among them — **and

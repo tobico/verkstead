@@ -321,6 +321,32 @@ function Openable(props: {
   );
 }
 
+/// What this pane is called: the branch it is titled by, and the Repo that
+/// branch is in understated beside it.
+///
+/// The two facts the sidebar's card says in the same order and the same voice,
+/// so the card and the header of the pane it opens read as the one name said
+/// twice — and the status button under them goes on in that voice with its own
+/// two lines.
+///
+/// Drawn in every state, a Draft's included. A Conversation nobody has named is
+/// called *Draft* on both, which is what it is; the Repo beside it is then the
+/// only thing on the header that tells one draft from the next.
+///
+/// The space between the two is written out, and is the whole of what a screen
+/// reader has to tell them apart: the heading is named by everything under it
+/// run together, and two spans with nothing between them are read as one word.
+/// It is not drawn — a run of white space makes no flex item — so the gap
+/// between them on screen is still the stylesheet's.
+function PaneName(props: { conversation: ConversationView }): JSX.Element {
+  return (
+    <>
+      <span class={styles.paneTitle}>{titled(props.conversation)}</span>{" "}
+      <span class={styles.paneRepo}>{props.conversation.repo.name}</span>
+    </>
+  );
+}
+
 export function Timeline(props: {
   conversation: ConversationView;
   back: () => void;
@@ -368,10 +394,17 @@ export function Timeline(props: {
 
             Titled for its branch, or a Draft where nobody has named one — the
             same rule the sidebar row it was opened from draws, so the card and
-            the header are the one name. */}
+            the header are the one name.
+
+            And the Repo understated beside it, as the card says the same two
+            facts: the header and the card are then the one name said twice.
+            Drawn in every state, a Draft's included — two drafts against two
+            repositories are both called Draft, and the Repo is the only thing
+            on either header that tells them apart. */}
         <PaneHead
           back={{ to: "Conversations", go: props.back }}
-          title={titled(props.conversation)}
+          heading={styles.paneName}
+          title={<PaneName conversation={props.conversation} />}
         >
           {/* And the way on to the next level, drawn only where there is a next
               level to reach: the details pane holds the selected Event and
