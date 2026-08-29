@@ -2247,6 +2247,23 @@ export type SharedConversation = {
  */
 conversation: ConversationView, 
 /**
+ * The sheet of every Question Set on that Timeline, in its order.
+ *
+ * Carried rather than fetched, which is the difference between a share and
+ * the workbench: the live viewer asks for a Set when somebody opens one,
+ * and a share has nothing to ask. So the whole of every Set the record
+ * holds — the Preface, every Option of every Question, the Diff it was
+ * asked over and what was decided — rides in the file, rendered by the
+ * endpoint the workbench reads a Set through, so that a colleague's sheet
+ * and the human's are one rendering of one decision.
+ *
+ * Read-only regardless of how a Set stood when the share was taken: what
+ * makes it so is the sheet being drawn as a record — see the share's
+ * details pane — because a Set still waiting on somebody is part of the
+ * record too, and a reader with no server behind them cannot answer it.
+ */
+sets: Array<SetView>, 
+/**
  * When the share was taken, RFC 3339.
  *
  * A share is a snapshot of a moment rather than a window onto a

@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::conversations::{ConversationView, TimelineEvent};
+use crate::view::SetView;
 
 /// One Conversation as a share carries it, which is what the shared file boots
 /// from.
@@ -43,6 +44,22 @@ pub struct SharedConversation {
     /// The record, curated — see [`shared`].
     pub conversation: ConversationView,
 
+    /// The sheet of every Question Set on that Timeline, in its order.
+    ///
+    /// Carried rather than fetched, which is the difference between a share and
+    /// the workbench: the live viewer asks for a Set when somebody opens one,
+    /// and a share has nothing to ask. So the whole of every Set the record
+    /// holds — the Preface, every Option of every Question, the Diff it was
+    /// asked over and what was decided — rides in the file, rendered by the
+    /// endpoint the workbench reads a Set through, so that a colleague's sheet
+    /// and the human's are one rendering of one decision.
+    ///
+    /// Read-only regardless of how a Set stood when the share was taken: what
+    /// makes it so is the sheet being drawn as a record — see the share's
+    /// details pane — because a Set still waiting on somebody is part of the
+    /// record too, and a reader with no server behind them cannot answer it.
+    pub sets: Vec<SetView>,
+
     /// When the share was taken, RFC 3339.
     ///
     /// A share is a snapshot of a moment rather than a window onto a
@@ -52,17 +69,34 @@ pub struct SharedConversation {
     pub exported_at: String,
 }
 
-/// Curate a Conversation for sharing: the Events that board, and a record with
-/// nothing left on it to act on.
-pub fn shared(conversation: ConversationView, exported_at: String) -> SharedConversation {
+/// Curate a Conversation for sharing: the Events that board, the sheets behind
+/// the ones that open, and a record with nothing left on it to act on.
+///
+/// `sets` is every Question Set the caller rendered. What comes back holds the
+/// ones still on the curated Timeline and no others: which Events board is this
+/// module's rule, and a bundle carrying the sheet of a Set whose row was taken
+/// off would be carrying what the reader was not meant to have.
+pub fn shared(
+    conversation: ConversationView,
+    sets: Vec<SetView>,
+    exported_at: String,
+) -> SharedConversation {
+    let timeline: Vec<TimelineEvent> = conversation
+        .timeline
+        .into_iter()
+        .filter(boards)
+        .map(frozen)
+        .collect();
+
+    let boarded: Vec<i64> = timeline.iter().filter_map(asked).collect();
+
     SharedConversation {
+        sets: sets
+            .into_iter()
+            .filter(|set| boarded.contains(&set.id))
+            .collect(),
         conversation: ConversationView {
-            timeline: conversation
-                .timeline
-                .into_iter()
-                .filter(boards)
-                .map(frozen)
-                .collect(),
+            timeline,
 
             // Nothing is pinned in a share. Each pinned card is the current
             // state of something the work is against — a backlog read off a
@@ -130,6 +164,15 @@ fn boards(event: &TimelineEvent) -> bool {
         | TimelineEvent::PullRequest(_)
         | TimelineEvent::TaskList(_)
         | TimelineEvent::StageList(_) => false,
+    }
+}
+
+/// Which Set an Event on the curated Timeline is about, on the one kind that is
+/// about one.
+fn asked(event: &TimelineEvent) -> Option<i64> {
+    match event {
+        TimelineEvent::QuestionSet(asked) => Some(asked.set_id),
+        _ => None,
     }
 }
 

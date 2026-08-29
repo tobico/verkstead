@@ -37,8 +37,8 @@ use verkstead_render::{
     Lifecycle, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
     ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed, RoleChoice, SetReading,
     SetView, SettingsEdit, SettingsSaved, SettingsView, SharedConversation, ShowingArchived,
-    Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TokenEdit,
-    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TimelineEvent,
+    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -300,12 +300,26 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         return no_such_set(&id);
     };
 
+    match set_reading(&state, id).await {
+        Ok(reading) => Json(reading).into_response(),
+        Err(refusal) => refusal,
+    }
+}
+
+/// The reading behind that endpoint, as a value rather than as an answer.
+///
+/// Its own function because a share carries the same one: what a shared file
+/// draws a Set's sheet from is this, rendered on the way out and inlined beside
+/// the Timeline — see [`share_bundle`]. A share composed from a second rendering
+/// of its own would be a second reading of one decision, which is the whole
+/// reason the sheet is one component in the viewer too.
+pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading, HttpResponse> {
     let stored = match store::load_set(&state.pool, id).await {
         Ok(Some(stored)) => stored,
-        Ok(None) => return no_such_set(&id.to_string()),
+        Ok(None) => return Err(no_such_set(&id.to_string())),
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "loading a Question Set failed");
-            return unavailable("the Question Set could not be read");
+            return Err(unavailable("the Question Set could not be read"));
         }
     };
 
@@ -313,7 +327,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         Ok(settlement) => settlement,
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "reading how a Set stands failed");
-            return unavailable("the Question Set could not be read");
+            return Err(unavailable("the Question Set could not be read"));
         }
     };
 
@@ -325,11 +339,11 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         Ok(Some(conversation)) => conversation,
         Ok(None) => {
             tracing::error!(set_id = id, "a stored Question Set is on no Timeline");
-            return unavailable("the Question Set could not be read");
+            return Err(unavailable("the Question Set could not be read"));
         }
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "reading which Conversation a Set was asked from failed");
-            return unavailable("the Question Set could not be read");
+            return Err(unavailable("the Question Set could not be read"));
         }
     };
 
@@ -346,18 +360,17 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
                 "a stored Question Set cannot be read"
             );
 
-            return Json(SetReading::Unreadable(UnreadableSet {
+            return Ok(SetReading::Unreadable(UnreadableSet {
                 id: stored.id,
                 conversation,
                 body: unreadable.body,
                 why: unreadable.why,
-            }))
-            .into_response();
+            }));
         }
     };
 
     let standing = standing(
-        &state,
+        state,
         id,
         settlement,
         stored.deferred,
@@ -398,11 +411,11 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         Ok(view) => view,
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "rendering a Question Set failed");
-            return unavailable("the Question Set could not be read");
+            return Err(unavailable("the Question Set could not be read"));
         }
     };
 
-    Json(SetReading::Set(Box::new(view))).into_response()
+    Ok(SetReading::Set(Box::new(view)))
 }
 
 /// Where a Set stands, as both its own page and its row on a Timeline read it.
@@ -1430,7 +1443,31 @@ async fn share_file(State(state): State<AppState>, Path(id): Path<String>) -> Ht
         return unavailable("the share build of the viewer could not be read");
     };
 
-    let Some(file) = crate::sharing::file(template, &bundle) else {
+    // And the diagram renderer, on the one kind of share that needs one. It is
+    // read here rather than embedded in the document because it is three
+    // megabytes: a share of a Conversation nobody drew a picture in carries
+    // none of it.
+    let mermaid = if crate::sharing::diagrammed(&bundle) {
+        match crate::viewer::Shareable::get(crate::viewer::MERMAID) {
+            Some(built) => match String::from_utf8(built.data.into_owned()) {
+                Ok(code) => Some(code),
+                Err(_) => return unavailable("the diagram renderer could not be read"),
+            },
+            // Built by something that is not this build. A share drawn without
+            // it is the record with its Diagrams left as the source the agent
+            // wrote, which is readable — but a colleague would be reading a
+            // page the human never saw, so it is refused instead.
+            None => {
+                return unavailable(
+                    "the diagram renderer was not built into this binary: run `pnpm build` in web/",
+                );
+            }
+        }
+    } else {
+        None
+    };
+
+    let Some(file) = crate::sharing::file(template, &bundle, mermaid.as_deref()) else {
         return unavailable("the share build of the viewer has nowhere to put a conversation");
     };
 
@@ -1461,11 +1498,37 @@ async fn share_file(State(state): State<AppState>, Path(id): Path<String>) -> Ht
 async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpResponse> {
     let view = conversation_view(state, id).await?;
 
+    // And every Set the Timeline holds, rendered as the sheet the workbench
+    // fetches when somebody opens one. A share fetches nothing, so what the
+    // live viewer asks for a Set at a time has to travel with the record —
+    // rendered here, through the endpoint's own reading, so that a shared sheet
+    // and a workbench sheet are the same rendering of the same decision.
+    //
+    // In Timeline order, and only the readable ones: an unreadable Set is a row
+    // this build cannot draw a sheet for, and its row does not board a share
+    // anyway.
+    let mut sets = Vec::new();
+
+    for asked in view.timeline.iter().filter_map(question_set) {
+        match set_reading(state, asked).await? {
+            SetReading::Set(view) => sets.push(*view),
+            SetReading::Unreadable(_) => {}
+        }
+    }
+
     let taken = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_default();
 
-    Ok(verkstead_render::shared(view, taken))
+    Ok(verkstead_render::shared(view, sets, taken))
+}
+
+/// Which Set a Timeline Event is about, on the Events that are about one.
+fn question_set(event: &TimelineEvent) -> Option<i64> {
+    match event {
+        TimelineEvent::QuestionSet(asked) => Some(asked.set_id),
+        _ => None,
+    }
 }
 
 /// `GET /api/ui/conversations/{id}/capture/{event}` — what one session

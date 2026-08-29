@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import { defineConfig, type Plugin } from "vite";
 import solid from "vite-plugin-solid";
 
@@ -19,6 +21,21 @@ import solid from "vite-plugin-solid";
 /// path data compiled into the bundle rather than a sheet to load.
 export default defineConfig({
   plugins: [solid(), oneFile()],
+
+  // Mermaid is the one import the share build does not take at its word. The
+  // renderer is three megabytes and one chunk is all there is, so an
+  // `import("mermaid")` left as itself would ride in every share ever made,
+  // whether or not the Conversation has a picture in it. What goes in the chunk
+  // instead is a stub that reaches for the library the *document* is carrying,
+  // which is there only on the shares that need one — see `src/share/mermaid.ts`
+  // and `vite.mermaid.config.ts`.
+  resolve: {
+    alias: {
+      mermaid: fileURLToPath(
+        new URL("./src/share/mermaid.ts", import.meta.url),
+      ),
+    },
+  },
 
   // The service worker, the manifest and the icons are the *app's*, and a share
   // is not one. Nothing here is copied in beside the document, because a

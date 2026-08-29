@@ -103,6 +103,7 @@ function Record(props: { shared: SharedConversation }): JSX.Element {
       details={
         <Details
           conversation={conversation()}
+          sets={props.shared.sets}
           event={selected()}
           back={() => setPane("middle")}
         />

@@ -4,7 +4,8 @@
 //! Asked of `/api/ui/conversations/{id}/share.json`, which is the payload the
 //! shared file is built around. The two are one composition — see
 //! `crates/server/src/sharing.rs` — and this is the half that says what is in
-//! it: which Events board, and that nothing arrives with an action still on it.
+//! it: which Events board, the sheet of every Set that did, and that nothing
+//! arrives with an action still on it.
 //!
 //! The file itself is not fetched here, and that is deliberate rather than a
 //! gap. It is the share build of the viewer with this payload written into a
@@ -392,4 +393,242 @@ async fn a_conversation_that_is_gone_has_no_share() {
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "GET {path}");
     }
+}
+
+/// A Set with something of every part a sheet is drawn from: a Preface, a
+/// Question with Options and a recommendation, a Diff, and a Postscript. Enough
+/// that a share carrying the whole sheet can be told from one carrying the
+/// Timeline's table of it.
+fn whole_set(preface: &str) -> QuestionSet {
+    let mut set = asked("Where should the counter live?");
+
+    set.preface = Some(preface.to_owned());
+    set.postscript = Some("Happy to talk any of this through.".to_owned());
+    set.questions = vec![verkstead_schema::Question {
+        label: "Q1".to_owned(),
+        text: "Where should the counter live?".to_owned(),
+        columns: Vec::new(),
+        options: vec![
+            verkstead_schema::QuestionOption {
+                n: 1,
+                text: "In the process, as it is now.".to_owned(),
+                recommended: false,
+                cells: Vec::new(),
+            },
+            verkstead_schema::QuestionOption {
+                n: 2,
+                text: "In **Redis**, shared across instances.".to_owned(),
+                recommended: true,
+                cells: Vec::new(),
+            },
+        ],
+        subquestions: Vec::new(),
+    }];
+    set.diffs = vec![verkstead_schema::RepoDiff {
+        repo: "verkstead".to_owned(),
+        own: true,
+        diff: "diff --git a/limiter.rs b/limiter.rs\n\
+               --- a/limiter.rs\n\
+               +++ b/limiter.rs\n\
+               @@ -1,2 +1,2 @@\n\
+               -let count = 0;\n\
+               +let count = redis.get(key);\n"
+            .to_owned(),
+    }];
+
+    set
+}
+
+/// A Conversation with one Set on it, asked and unanswered.
+async fn asking(pool: &SqlitePool, repo: i64, branch: &str, set: &QuestionSet) -> (i64, i64) {
+    let id = store::start_conversation(pool, repo, branch)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let asked = store::ask(pool, id, set, store::Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+
+    (id, asked.id)
+}
+
+#[tokio::test]
+async fn a_share_carries_the_whole_sheet_of_every_set_on_it() {
+    let (_dir, pool, app) = app().await;
+    let repo = repo(&pool).await;
+    let (id, set_id) = asking(
+        &pool,
+        repo,
+        "sharing",
+        &whole_set("What the counter is for."),
+    )
+    .await;
+
+    let shared = share(&app, id).await;
+
+    assert_eq!(
+        shared.sets.len(),
+        1,
+        "a share should carry one sheet per Set on its Timeline"
+    );
+
+    let sheet = &shared.sets[0];
+    assert_eq!(sheet.id, set_id, "the sheet is the Set the row opens");
+
+    // Everything the workbench draws a Set from, rendered the same way — this is
+    // the endpoint's own reading rather than a second one.
+    assert!(
+        sheet
+            .preface_html
+            .as_deref()
+            .is_some_and(|html| html.contains("What the counter is for.")),
+        "the preface: {:?}",
+        sheet.preface_html
+    );
+    assert!(
+        sheet
+            .postscript_html
+            .as_deref()
+            .is_some_and(|html| html.contains("talk any of this through")),
+        "the postscript: {:?}",
+        sheet.postscript_html
+    );
+
+    // The Questions with their Options, and which one the agent recommended —
+    // what was turned down is half of what a decision was.
+    let question = &sheet.questions[0];
+    assert_eq!(question.ask.options.len(), 2);
+    assert!(question.ask.options[1].recommended);
+    assert!(question.ask.options[1].text_html.contains("<strong>Redis"));
+
+    // And the worktree Diff the Set was decided against, which is what the
+    // human approved over.
+    assert_eq!(sheet.diff.len(), 1, "the Set's Diff should board with it");
+    assert!(
+        sheet.diff[0]
+            .diff
+            .paths
+            .iter()
+            .any(|path| path.contains("limiter"))
+    );
+}
+
+#[tokio::test]
+async fn a_set_still_waiting_boards_as_the_record_it_was() {
+    let (_dir, pool, app) = app().await;
+    let repo = repo(&pool).await;
+    let (id, _) = asking(&pool, repo, "sharing", &whole_set("Still out.")).await;
+
+    // Nothing has answered it, and the share is taken anyway: a Conversation is
+    // shared while it is going on as often as after it.
+    let shared = share(&app, id).await;
+
+    assert!(
+        matches!(
+            shared.sets[0].standing,
+            verkstead_render::Standing::Waiting(_)
+        ),
+        "how a Set stood is part of the record: {:?}",
+        shared.sets[0].standing
+    );
+}
+
+#[tokio::test]
+async fn a_share_says_whether_it_needs_the_diagram_renderer() {
+    let (_dir, pool, app) = app().await;
+
+    // A Conversation whose Set has a Diagram in its Preface, and one whose Set
+    // has only prose. Mermaid is three megabytes, so which of the two this is
+    // decides whether it rides in the file at all.
+    let repo = repo(&pool).await;
+    let (drawn, _) = asking(
+        &pool,
+        repo,
+        "drawn",
+        &whole_set("What it does:\n\n```mermaid\nflowchart LR\n  a --> b\n```\n"),
+    )
+    .await;
+    let (written, _) = asking(
+        &pool,
+        repo,
+        "written",
+        &whole_set("What it does, in words."),
+    )
+    .await;
+
+    assert!(
+        share(&app, drawn).await.sets[0].diagrams,
+        "a Set with a Diagram should say so"
+    );
+    assert!(
+        !share(&app, written).await.sets[0].diagrams,
+        "a Set with no Diagram should not"
+    );
+}
+
+#[tokio::test]
+async fn a_set_this_build_cannot_read_boards_neither_row_nor_sheet() {
+    let (_dir, pool, app) = app().await;
+    let repo = repo(&pool).await;
+
+    let id = store::start_conversation(&pool, repo, "sharing")
+        .await
+        .unwrap()
+        .unwrap();
+
+    store::ask(&pool, id, &asked("Readable"), store::Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // A stored body of a shape this build's schema will not take, which is what
+    // an older Verkstead's Set looks like to a newer one.
+    let unreadable = store::ask(&pool, id, &asked("Unreadable"), store::Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+    // The real shape of one, rather than a made-up field: the `proposal` block
+    // shrank when the direction chooser moved onto the Set, and
+    // `deny_unknown_fields` means every Set stored before that is a body this
+    // build will not take.
+    sqlx::query("UPDATE question_sets SET body = ? WHERE id = ?")
+        .bind(
+            "{\"title\": \"Unreadable\", \"questions\": [], \"proposal\": \n\
+             {\"direction\": \"task-list\", \"rationale\": \"Six changes.\", \n\
+             \"accepted_by\": \"Q1.1\"}}",
+        )
+        .bind(unreadable.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // It is on the workbench's Timeline as a row of its own — the ask happened.
+    let whole: verkstead_render::ConversationView =
+        get(&app, &format!("/api/ui/conversations/{id}")).await;
+    assert!(
+        whole
+            .timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::UnreadableSet(_))),
+        "the unreadable Set should be on the workbench's Timeline"
+    );
+
+    // And in a share it is neither a row nor a sheet: a share carries the record
+    // its reader can read, and there is nothing here to draw.
+    let shared = share(&app, id).await;
+    assert_eq!(
+        shared.sets.len(),
+        1,
+        "only the readable Set should have a sheet"
+    );
+    assert!(
+        !shared
+            .conversation
+            .timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::UnreadableSet(_))),
+        "an unreadable Set should not board"
+    );
 }

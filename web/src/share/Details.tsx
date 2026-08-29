@@ -13,10 +13,15 @@
 //! session off with — and the two that a share carries payloads for, the
 //! Question Sets and the commits.
 //!
-//! Those two are stubs for now. The record boards them and the cards open, and
-//! what the pane draws is a sentence saying the material is not in this build's
-//! share; the tasks after this one put the sheet and the diff in the bundle and
-//! draw them here with the live components.
+//! The Question Sets are drawn from the sheets the bundle carries — the same
+//! [`Sheet`] the workbench opens one with, asked for its read-only shape: the
+//! answering surface goes, and what is left is the record however the Set stood
+//! when the share was taken.
+//!
+//! The commits are a stub for now. The record boards them and the cards open,
+//! and what the pane draws is a sentence saying the material is not in this
+//! build's share; the task after this one puts the diff in the bundle and draws
+//! it here the same way.
 
 import { Match, Show, Switch, type JSX } from "solid-js";
 
@@ -25,9 +30,11 @@ import type {
   CommitEvent,
   ConversationView,
   QuestionSetEvent,
+  SetView,
   SteerEvent,
 } from "../api/types";
 import { Empty } from "../notices";
+import { Sheet } from "../set/Sheet";
 import { Brief } from "../workbench/Brief";
 import { Document } from "../workbench/Document";
 import { PaneHead } from "../workbench/PaneHead";
@@ -42,6 +49,8 @@ type Opened =
 
 export function Details(props: {
   conversation: ConversationView;
+  /// The sheets the share is carrying, one per Question Set on that Timeline.
+  sets: SetView[];
   /// What the record has open, if anything.
   event: Opening | null;
   /// And the way back to it, which is what a narrow window walks out through.
@@ -103,11 +112,33 @@ export function Details(props: {
               />
             )}
           </Match>
+          {/* The whole sheet, drawn by the component the workbench opens a
+              Set with and asked for its read-only shape: the Preface, the
+              Diff it was asked over, every Question with its Options and what
+              was decided, and the Postscript. With its table of contents from
+              the pane's own width, exactly as the workbench draws one. */}
           <Match when={setIn(open())}>
-            <Missing heading="Question set" back={props.back}>
-              This build's shares carry the record of a question set rather than
-              the document it was asked as.
-            </Missing>
+            {(asked) => (
+              <Show
+                when={sheet(props.sets, asked().set_id)}
+                fallback={
+                  <Missing heading="Question set" back={props.back}>
+                    This share is not carrying the sheet this set was asked as.
+                  </Missing>
+                }
+              >
+                {(set) => (
+                  <Sheet
+                    set={set()}
+                    lead={
+                      <PaneHead back={{ to: "Timeline", go: props.back }} />
+                    }
+                    contents="pane"
+                    readOnly
+                  />
+                )}
+              </Show>
+            )}
           </Match>
           <Match when={commitIn(open())}>
             <Missing heading="Commit" back={props.back}>
@@ -139,6 +170,16 @@ function Missing(props: {
       <Empty>{props.children}</Empty>
     </>
   );
+}
+
+/// The sheet the share carries for one Set, and nothing where it carries none.
+///
+/// A miss should be unreachable — every Question Set that boards is rendered
+/// into the bundle beside it — so what it means is a share written by something
+/// that disagrees with this build, and the pane says so rather than drawing an
+/// empty document.
+function sheet(sets: SetView[], id: number): SetView | undefined {
+  return sets.find((set) => set.id === id);
 }
 
 /// The id an opened Event is reached by, whichever kind it turned out to be.

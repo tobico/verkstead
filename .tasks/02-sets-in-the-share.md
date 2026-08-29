@@ -22,9 +22,9 @@ library.
 
 ## Acceptance criteria
 
-- [ ] A Set card opens to the complete sheet — preface, questions, answers,
+- [x] A Set card opens to the complete sheet — preface, questions, answers,
       comment, diffs, postscript — with nothing pressable.
-- [ ] A share containing a mermaid diagram renders it with no network; a share
+- [x] A share containing a mermaid diagram renders it with no network; a share
       containing none is measurably free of the mermaid library.
-- [ ] An answered, an unanswered-but-open, and a locked Set all draw as
+- [x] An answered, an unanswered-but-open, and a locked Set all draw as
       read-only records without flashing a form.

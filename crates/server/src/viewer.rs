@@ -30,9 +30,10 @@ pub(crate) struct Built;
 
 /// And the share build beside it: the same sources built to one file with
 /// everything inlined, which is what a shared Conversation travels as — see
-/// [`crate::sharing`].
+/// [`crate::sharing`]. Two files in it, the document and the renderer beside
+/// it.
 ///
-/// A folder of its own rather than a file under the one above, because nothing
+/// A folder of its own rather than files under the one above, because nothing
 /// serves it: it is a template the server fills in and hands over as a
 /// download, and a megabyte of it sitting under `/assets/` would be a page
 /// anybody could open and find empty.
@@ -41,8 +42,17 @@ pub(crate) struct Built;
 #[allow_missing = true]
 pub(crate) struct Shareable;
 
-/// The one file in it, as vite writes it.
+/// The document in it, as vite writes it.
 pub(crate) const SHARE: &str = "share.html";
+
+/// And the diagram renderer beside it, built on its own
+/// (`web/vite.mermaid.config.ts`) so that it can be left out.
+///
+/// The one thing a share carries that is not in the document to begin with:
+/// mermaid is three megabytes, and most Conversations have no picture in them
+/// — so the server writes it into a share only where a Set in the record has a
+/// Diagram. See [`crate::sharing`].
+pub(crate) const MERMAID: &str = "mermaid.js";
 
 /// The document every path the viewer routes on is answered with.
 const DOCUMENT: &str = "index.html";

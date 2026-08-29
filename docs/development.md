@@ -327,9 +327,9 @@ verkstead-cli -- serve` serves whatever `pnpm build` last wrote without a
 recompile — and a checkout that has never built the viewer still builds the
 server, which then says so on every page instead of serving one.
 
-`pnpm build` writes twice, because there are two builds of the same sources. The
-site goes to `web/dist` as it always did; the **share** goes to `web/dist-share`
-as one HTML file with its script and its stylesheets inlined
+`pnpm build` writes three times, out of the same sources. The site goes to
+`web/dist` as it always did; the **share** goes to `web/dist-share` as one HTML
+file with its script and its stylesheets inlined
 ([`vite.share.config.ts`](../web/vite.share.config.ts)), which is the template
 the server writes a Conversation into and hands over as a download — see
 [`crates/server/src/sharing.rs`](../crates/server/src/sharing.rs). Both are
@@ -338,6 +338,15 @@ neither still builds the server; ask it for a share and it says the build is not
 in the binary. That config refuses to write a document that still points at a
 file beside it, which is what makes *no external requests* a property of the
 build rather than something to remember.
+
+The third is mermaid, on its own, into `web/dist-share/mermaid.js`
+([`vite.mermaid.config.ts`](../web/vite.mermaid.config.ts)). It is the one thing
+a Set's page draws for itself and it is three megabytes, so it is the one thing
+a share does not carry as a matter of course: the share build aliases the
+package to a stub that reaches for whatever the *document* is holding, and the
+server writes the library into a second slot only where a Set in the record has
+a Diagram on it. A Conversation nobody drew a picture in stays the size of its
+own record.
 
 `cargo test` covers the round trip in-process. `nix flake check` runs the
 viewer's vitest suite from the pinned pnpm and node, and boots a VM with the

@@ -43,6 +43,9 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       ../web/tsconfig.json
       ../web/vite.config.ts
       ../web/vite.share.config.ts
+      # And the diagram renderer's, which is the third: mermaid on its own, for
+      # the shares that carry a Diagram and no others.
+      ../web/vite.mermaid.config.ts
       ../web/src
       ../web/tests
       # The service worker, the manifest and the icons — vite's `publicDir`.
@@ -104,7 +107,9 @@ stdenvNoCC.mkDerivation (finalAttrs: {
         # Both builds, each under the name rust-embed knows it by — see
         # `crates/server/src/viewer.rs`. Two directories rather than one because
         # they are two things: the site the server serves, and the one-file
-        # template it fills a Conversation into and hands over as a download.
+        # template it fills a Conversation into and hands over as a download —
+        # with the diagram renderer beside that template, for the shares that
+        # need one.
         mkdir -p $out
         cp -r dist $out/dist
         cp -r dist-share $out/dist-share

@@ -19,6 +19,13 @@
          template is itself a page that opens: a share with no Conversation in it
          says so in words. -->
     <script id="share" type="application/json">null</script>
+    <!-- And where the diagram renderer goes, on the one kind of share that
+         needs one. Mermaid is megabytes, so the server writes it in here only
+         when a Set in the record carries a Diagram and leaves the tag empty
+         otherwise — see `crates/server/src/sharing.rs` and
+         `src/share/mermaid.ts`. Empty rather than absent so that both sides are
+         looking at the same document. -->
+    <script id="diagrams"></script>
   </head>
   <body>
     <div id="app"></div>
