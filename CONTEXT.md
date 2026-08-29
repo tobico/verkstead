@@ -129,7 +129,9 @@ the Verkstead executable read-only, and nothing else of the machine at all
 — not even the checkout the Worktree was made from. Each Companion Repo the
 Conversation was configured with is inside as well: its Worktree and the git
 directory behind it, both at that companion's own mode, so a read-only one is
-read-only through both. The filesystem is the boundary and the network is not:
+read-only through both. The **Build Cache** is inside as well, writable, with
+the `sccache` it compiles through read-only beside the executable. The
+filesystem is the boundary and the network is not:
 inside, it is the host's own, whole and unfiltered, because what stops a
 session doing harm is that there is nothing within reach to harm. The
 `verkstead` a session asks with is the running server's own image, first on the
@@ -138,12 +140,29 @@ build and cannot disagree about a schema.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
-The extra writable binds a Sandbox gets beyond that surface — a build cache, a
-package registry's — as one global set every Sandbox gets plus a per-Repo set
-composed over it. Configured where the Watched Paths are rather than anywhere
-the workbench can reach: every one of them is a hole in the boundary, and
-widening a boundary is the installer's to do.
+The extra writable binds a Sandbox gets beyond that surface — a package
+registry's, a cache Verkstead does not provide — as one global set every Sandbox
+gets plus a per-Repo set composed over it. Configured where the Watched Paths
+are rather than anywhere the workbench can reach: every one of them is a
+directory of somebody else's and a hole in the boundary, and widening a boundary
+is the installer's to do. The **Build Cache** is not one of these and is not
+configured here.
 _Avoid_: sandbox settings, mounts, extra paths
+
+**Build Cache**:
+One directory of Verkstead's own that every Sandbox gets writable, so a Rust
+dependency is downloaded and compiled once for the machine rather than once per
+Conversation. The server's own feature rather than Sandbox Configuration: it
+makes the directory, it resolves the `sccache` it compiles through off its own
+environment, and it is **on with nothing configured** — a human should never
+have a worse experience for not having checked the settings. Where it is is the
+installer's (`--build-cache-dir`, else the XDG cache directory; the packaged
+unit says `/var/cache/verkstead`); whether a Sandbox gets one at all, and how
+big its compiled half may grow, is the human's, in the workbench settings. The
+one control there that reaches inside a Sandbox, and it only ever closes the
+hole. Without an sccache it is still a cache — the crate downloads are shared —
+and the setup card says so on a repository that builds Rust.
+_Avoid_: sccache, cargo cache, artifact cache, shared target dir
 
 **Companion Repo**:
 Another registered Repo a Conversation is given to work alongside its own,
