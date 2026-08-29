@@ -18884,10 +18884,12 @@ async fn a_wrap_up_waits_for_every_pull_requests_checks() {
 /// check alone would have cut to two sessions altogether, with one of the two
 /// pull requests never looked at.
 ///
-/// The four alternate, because the Worktree is what they queue for: a watcher
-/// that could not take the Turn tries again a poll later, and a poll later is
-/// always sooner than the watcher whose session has just ended and has a whole
-/// interval to sleep off.
+/// All four go, whatever order they go in. Which watcher takes the Turn next is
+/// nobody's to say — both poll on the same interval, and the one whose session
+/// has just ended is as likely to take it again as the one that has been waiting
+/// — so what makes each pull request spend its own two is the stop waiting for
+/// the other: a watcher out of goes does not stop a run that still has somewhere
+/// to go.
 #[tokio::test]
 async fn the_same_check_red_on_two_pull_requests_gets_two_goes_each() {
     let spill = tempfile::tempdir().unwrap();
@@ -18906,10 +18908,11 @@ async fn the_same_check_red_on_two_pull_requests_gets_two_goes_each() {
 
     worked_to_empty(&fixture).await;
 
-    // Waited for by the count rather than read at the first Notice. Each pull
-    // request runs out of goes on its own watcher's schedule, so the Notice that
-    // arrives first is the first one's — and the other's last session may not
-    // have been dispatched yet, let alone written anything down.
+    // Waited for by the count rather than read at the first Notice. The stop is
+    // written once both pull requests have run out of goes, so a Notice is
+    // evidence that all four were dispatched — but a session that has been
+    // dispatched is not yet a session that has written anything down, and the
+    // last of them is still starting up as the stop lands.
     let told = until_written_by(&dispatched, 4).await;
     let stopped = fixture.stopped().await;
     let prompts = prompts(&told);
