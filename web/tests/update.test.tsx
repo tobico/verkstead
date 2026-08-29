@@ -67,7 +67,7 @@ const banner = () => document.querySelector(`.${styles.notice}`);
 const loaded = () =>
   waitFor(() =>
     expect(
-      document.querySelector(`.${repoList.repos} .${repoList.row}`),
+      document.querySelector(`.${repoList.repos} .${repoList.repo}`),
     ).not.toBeNull(),
   );
 

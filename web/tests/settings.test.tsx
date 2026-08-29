@@ -55,6 +55,7 @@ import { GithubCard, GithubPane } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
 import {
+  ADDING_REPO,
   openingAt,
   opensProfile,
   pathTo,
@@ -598,6 +599,10 @@ function thePage(at = "/settings") {
     whenever("/api/ui/settings", json(TOLD)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever("/api/ui/repos", json(REPOS)),
+    // The one write this page can make that is not the credentials' own: a
+    // registration, which the pane sends to the same path it read the list
+    // from.
+    whenever("/api/ui/repos", json("Added"), "POST"),
     whenever("/api/ui/update", json("Current")),
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
@@ -618,6 +623,7 @@ function thePage(at = "/settings") {
             <Route path="/" />
             <Route path="/github" />
             <Route path="/profiles/:profile" />
+            <Route path="/repos/new" />
           </Route>
           <Route path="*" component={() => <p>somewhere else</p>} />
         </MemoryRouter>
@@ -666,11 +672,11 @@ describe("the settings page", () => {
     // so each list is waited for inside the pane it belongs to.
     await drawn(settings, `.${styles.githubCard}`);
     await drawn(settings, `.${profileList.profiles} .${profileList.profile}`);
-    await drawn(settings, `.${repoList.repos} .${repoList.row}`);
+    await drawn(settings, `.${repoList.repos} .${repoList.repo}`);
 
     expect(settings.querySelectorAll("h1")).toHaveLength(1);
     expect(
-      settings.querySelectorAll(`.${repoList.repos} .${repoList.row}`),
+      settings.querySelectorAll(`.${repoList.repos} .${repoList.repo}`),
     ).toHaveLength(REPOS.length);
     expect(
       settings.querySelectorAll(`.${profileList.profiles} .${profileList.profile}`),
@@ -733,16 +739,19 @@ describe("the settings page", () => {
     ).not.toBeNull();
   });
 
-  /// Every form on this page is a pane or a modal of its own, so what the middle
-  /// pane carries is the way into each of them and none of the credentials'
-  /// fields. The Profiles' and the Repos' modals go in tasks 06 and 07.
-  it("carries none of the credentials' fields until the pane is opened", async () => {
+  /// Every form on this page is a pane of its own now, so what the middle pane
+  /// carries is the way into each of them and none of their fields. There is no
+  /// modal left anywhere on it.
+  it("carries no form at all until a pane is opened", async () => {
     const { container } = thePage();
 
-    await drawn(container, `.${repoList.repos} .${repoList.row}`);
+    await drawn(container, `.${repoList.repos} .${repoList.repo}`);
 
-    expect(panes(container)[1]!.querySelector("dialog")).toBeNull();
+    const settings = panes(container)[1]!;
+    expect(settings.querySelector("dialog")).toBeNull();
+    expect(settings.querySelector("form")).toBeNull();
     expect(screen.queryByLabelText("Name")).toBeNull();
+    expect(screen.queryByLabelText(/absolute path/i)).toBeNull();
     expect(panes(container)[2]!.textContent).toBe("");
   });
 });
@@ -894,6 +903,57 @@ describe("the path a details pane stands at", () => {
     expect(container.querySelector("dialog")).toBeNull();
   });
 
+  /// The Repos' one pane: the path another is registered by. It stands behind
+  /// the `repos/` segment for the reason a Profile's stands behind `profiles/`,
+  /// against ids the Repos have not been given yet.
+  it("opens the repo form at /settings/repos/new, replacing", async () => {
+    const { container, history } = thePage();
+
+    const plus = await drawn<HTMLButtonElement>(
+      panes(container)[1]!,
+      'button[aria-label="Add a repo"]',
+    );
+    fireEvent.click(plus);
+
+    await waitFor(() => expect(history.get()).toBe("/settings/repos/new"));
+
+    // Replaced rather than pushed, as every detail of the settings is: Back
+    // leaves the settings rather than walking out of the pane just opened.
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("draws the repo form in the details pane, and reads the plus as open", async () => {
+    const { container } = thePage("/settings/repos/new");
+
+    await waitFor(() => screen.getByLabelText(/absolute path/i));
+
+    const plus = await drawn<HTMLButtonElement>(
+      panes(container)[1]!,
+      'button[aria-label="Add a repo"]',
+    );
+    expect(plus.getAttribute("aria-pressed")).toBe("true");
+    expect(plus.classList).toContain(button.open);
+
+    // In the third pane rather than over the page: the modal is gone.
+    expect(panes(container)[2]!.querySelector("form")).not.toBeNull();
+    expect(container.querySelector("dialog")).toBeNull();
+  });
+
+  /// A registration that was taken spends the pane, and the repo lands on the
+  /// list behind it: that card is the whole of the confirmation.
+  it("puts the human back on the settings once a repo is registered", async () => {
+    const { container, history } = thePage("/settings/repos/new");
+
+    const field = await waitFor(() => screen.getByLabelText(/absolute path/i));
+    fireEvent.input(field, { target: { value: "/srv/repos/verkstead" } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    await waitFor(() => expect(history.get()).toBe("/settings"));
+    expect(panes(container)[2]!.textContent).toBe("");
+    await drawn(container, `.${repoList.repos} .${repoList.repo}`);
+  });
+
   /// A cold load of a profile's pane — a reload, or a link somebody kept —
   /// opens on that pane, which is the level a narrow window shows.
   it("opens on the details when the path names a profile", async () => {
@@ -924,10 +984,16 @@ describe("where a settings details pane stands", () => {
     expect(pathTo("github")).toBe("/settings/github");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
+    expect(pathTo(ADDING_REPO)).toBe("/settings/repos/new");
   });
 
   it("reads back everything it writes", () => {
-    for (const opening of ["github", opensProfile(7), opensProfile("new")] as const) {
+    for (const opening of [
+      "github",
+      opensProfile(7),
+      opensProfile("new"),
+      ADDING_REPO,
+    ] as const) {
       expect(openingAt(pathTo(opening))).toBe(opening);
     }
   });
@@ -938,6 +1004,7 @@ describe("where a settings details pane stands", () => {
     expect(profileOpened(opensProfile(7))).toBe(7);
     expect(profileOpened(opensProfile("new"))).toBe("new");
     expect(profileOpened("github")).toBeNull();
+    expect(profileOpened(ADDING_REPO)).toBeNull();
     expect(profileOpened(null)).toBeNull();
   });
 
@@ -952,6 +1019,9 @@ describe("where a settings details pane stands", () => {
     ["/settings/profiles/nonsense"],
     ["/settings/profiles/7/extra"],
     ["/settings/profiles/7.5"],
+    ["/settings/repos"],
+    ["/settings/repos/7"],
+    ["/settings/repos/new/extra"],
     ["/conversations/3/events/7"],
     ["/"],
   ])("opens nothing at %s", (path) => {

@@ -43,13 +43,14 @@ import { Match, Switch, createMemo, createSignal, type JSX } from "solid-js";
 import { Panes, type Pane } from "../Panes";
 import { ProfileList, ProfilePane } from "../profiles/ProfileList";
 import { Notifications } from "../push/Notifications";
-import { RepoList } from "../repos/RepoList";
+import { RepoList, RepoPane } from "../repos/RepoList";
 import { UpdateNotice } from "../update/UpdateNotice";
 import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
 import { GithubCard, GithubPane } from "./Credentials";
 import {
+  ADDING_REPO,
   SETTINGS,
   openingAt,
   opensProfile,
@@ -92,9 +93,9 @@ export function SettingsPage(): JSX.Element {
   };
 
   /// And a details pane spending itself, which is what a Profile saved or
-  /// removed leaves behind: the pane was asked about something that is settled
-  /// now, so the settings are what stands after it and the cards there are what
-  /// say the work landed.
+  /// removed, or a Repo registered, leaves behind: the pane was asked about
+  /// something that is settled now, so the settings are what stands after it and
+  /// the cards there are what say the work landed.
   ///
   /// Replacing for the reason opening one does, and over the entry opening one
   /// already wrote: the settings keep the single history entry they were entered
@@ -172,7 +173,13 @@ function Settings(props: {
           open={(id) => props.select(opensProfile(id))}
           add={() => props.select(opensProfile("new"))}
         />
-        <RepoList />
+        {/* Told whether its own pane is open rather than the whole opening, for
+            the reason the Profiles are: where the form stands is this page's
+            arithmetic. */}
+        <RepoList
+          adding={props.opening === ADDING_REPO}
+          add={() => props.select(ADDING_REPO)}
+        />
       </div>
     </>
   );
@@ -210,6 +217,9 @@ function Details(props: {
     <Switch>
       <Match when={props.opening === "github"}>
         <GithubPane back={props.back} />
+      </Match>
+      <Match when={props.opening === ADDING_REPO}>
+        <RepoPane back={props.back} done={props.done} />
       </Match>
       <Match when={profile()} keyed>
         {(open) => (

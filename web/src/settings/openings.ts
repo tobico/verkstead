@@ -6,23 +6,28 @@
 //! selection held beside the URL is lost the moment the page is navigated away
 //! from and back, and a link to a pane is a link to nothing.
 //!
-//! Two shapes under the settings, because there are two kinds of thing the pane
-//! draws:
+//! Three shapes under the settings, because there are three kinds of thing the
+//! pane draws:
 //!
 //! - `github` — the credentials, named by a word. There is one of what
 //!   Verkstead itself was told, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
+//! - `repos/new` — the path a Repo is registered by. The Repos have no
+//!   `repos/:id` yet: a registered one is a card with nothing behind it, so the
+//!   only pane they open is the one that adds another.
 //!
-//! The `profiles/` segment is what keeps the ids and the word-named panes
-//! apart, as the workbench's `events/` does: a bare id segment would have read
-//! the same as `github` the moment anything was named by a word, so the ids go
-//! behind a segment of their own and can never collide with one.
+//! The `profiles/` and `repos/` segments are what keep the ids and the
+//! word-named panes apart, as the workbench's `events/` does: a bare id segment
+//! would have read the same as `github` the moment anything was named by a
+//! word, so the ids go behind a segment of their own and can never collide with
+//! one.
 //!
 //! `new` stands where an id stands rather than beside it, because the blank
 //! form and the filled one are one pane asked about a Profile that does not
 //! exist yet — and no id the server issues is the word `new`, so the two cannot
-//! be confused for each other.
+//! be confused for each other. The Repos' form stands in the same place for the
+//! same reason, against the ids they have not been given yet.
 //!
 //! A path naming a pane this build does not have leaves the details bare, which
 //! is what they are when nothing is open at all: the URL is a record of what was
@@ -34,7 +39,19 @@
 /// thing. A string for the reason the workbench's is: what is open is compared
 /// against what a card would open, and two of the same selection have to be the
 /// same value.
-export type Opening = "github" | "profile:new" | `profile:${number}`;
+export type Opening =
+  | "github"
+  | "repo:new"
+  | "profile:new"
+  | `profile:${number}`;
+
+/// What opens the form that registers a Repo, which is the whole of what the
+/// Repos open.
+///
+/// A value rather than a function, which is what every other opening is reached
+/// through: there is one of it, and a function taking a single literal is a
+/// question with one answer.
+export const ADDING_REPO: Opening = "repo:new";
 
 /// What opens a Profile's form: its id, or `"new"` for the blank one.
 export function opensProfile(which: number | "new"): Opening {
@@ -65,6 +82,10 @@ export function pathTo(opening: Opening): string {
     return `${SETTINGS}/profiles/${profile}`;
   }
 
+  if (opening === ADDING_REPO) {
+    return `${SETTINGS}/repos/new`;
+  }
+
   return `${SETTINGS}/${opening}`;
 }
 
@@ -85,6 +106,10 @@ export function openingAt(pathname: string): Opening | null {
 
   if (what === "github" && which === undefined) {
     return "github";
+  }
+
+  if (what === "repos" && which === "new") {
+    return ADDING_REPO;
   }
 
   if (what === "profiles" && which !== undefined) {

@@ -1,10 +1,15 @@
-/* The Repos section of the settings page: the list of what is registered, and
-   the form that adds to it — see `RepoList.tsx`.
+/* The Repos section of the settings page: the cards for what is registered, and
+   the pane that adds another — see `RepoList.tsx`.
 
-   The Agent Profiles above are the same card read the same way, and their
-   module carries a copy of it rather than either of them sharing one: two
-   lists that look alike today are still two lists, and a rule they held in
-   common would make every change to one a decision about the other.
+   What a card *is* is `CardButton.module.css`'s, shared with every other card in
+   the app: the surface, and what it does under the pointer where anything is
+   behind it. What is here is only what stands on it. The boxed rows this section
+   drew are gone — the box was a second opinion about what a card looks like.
+
+   The Agent Profiles above are the same card read the same way, and their module
+   carries a copy of it rather than either of them sharing one: two lists that
+   look alike today are still two lists, and a rule they held in common would
+   make every change to one a decision about the other.
 
    The heading each section of this page is topped with is `sectionHead`, page
    vocabulary rather than this module's: it is defined once in `App.module.css`
@@ -19,32 +24,39 @@
   font-size: 1.1rem;
 }
 
+/* The plus that opens the form, on the heading's line. Centred on that line
+   rather than sitting on its baseline, which is what the heading beside it is
+   aligned by: the button is an icon with no text of its own, so a baseline would
+   hang it below the words rather than beside them. */
+.add {
+  align-self: center;
+}
+
 .list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  /* Close, because the cards are flat: what separates two of them is the
+     padding they each already carry, and a gap wide enough for boxes would leave
+     a list of them reading as scattered. */
+  gap: 0.25rem;
 }
 
-/* A registered repo is a list row with nowhere to go yet, so the card is the
-   row's own rather than a link's. */
-.row > div {
+/* What stands on the card — the name, and under it the two things a repo is
+   checked by. A column, because a card is read down. */
+.repo {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  padding: 0.85rem 1rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
 }
 
-.row .title {
+.repo .title {
   font-weight: 600;
 }
 
-.row .meta {
+.repo .meta {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem 0.75rem;
@@ -54,20 +66,15 @@
 
 /* The two things on the meta line that are quoted rather than said: a path the
    filesystem knows by, and the branch name git does. */
-.row .path,
-.row .branch {
+.repo .path,
+.repo .branch {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
 /* Registering a repo: a path typed, and the button that sends it. The label
-   stands over the field, because what has to be understood before typing is
-   that the path is an absolute one — and the whole of it is drawn over the page
-   as a modal, so the box around it is the card the modal already draws. */
-.form h3 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-}
-
+   stands over the field, because what has to be understood before typing is that
+   the path is an absolute one. It is the details pane now rather than a modal
+   over the page, so there is nothing around it but the pane's own head. */
 .form label {
   display: block;
   margin-bottom: 0.35rem;
@@ -109,13 +116,6 @@
   opacity: 0.65;
 }
 
-/* The one button that undoes rather than does, drawn as the outline of the one
-   beside it — as the profile form's cancel is. */
-.buttons .cancel {
-  color: var(--accent);
-  background: none;
-}
-
 .form .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
@@ -127,9 +127,8 @@
   border-color: var(--accent);
 }
 
-/* And under the pointer: the field darkens its border, the add deepens the
-   accent it is filled with, and the cancel's outline takes the accent its words
-   are already in. */
+/* And under the pointer: the field darkens its border, and the register deepens
+   the accent it is filled with. */
 @media (hover: hover) {
   .form input:hover {
     border-color: var(--ink-soft);
@@ -138,10 +137,5 @@
   .buttons button:not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
-  }
-
-  .buttons .cancel:not(:disabled):hover {
-    background: none;
-    border-color: var(--accent);
   }
 }
