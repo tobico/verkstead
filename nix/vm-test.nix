@@ -33,6 +33,11 @@ let
   # any more — the git identity and the gh login are settings files now — so what
   # it holds here is what has to stay outside a sandbox.
   home = "/var/lib/verkstead/home";
+
+  # And the shared Rust build cache the module passes, which is what a session's
+  # cargo and sccache write into. The module's own, said again here for the same
+  # reason the home is: the probe looks for it by path.
+  cacheDir = "/var/cache/verkstead";
 in
 
 testers.runNixOSTest {
@@ -101,6 +106,19 @@ testers.runNixOSTest {
         file "$HOME/.gitconfig" gitconfig
         file "$HOME/.config/gh/hosts.yml" gh
         say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+
+        # The shared Rust build cache, which on a module install is under
+        # `/var/cache` rather than in the home above — so what a session's cargo
+        # and sccache write goes somewhere the unit made and kept, and the
+        # listing of HOME stays the two files it has always been.
+        dir ${cacheDir} build-cache
+        say cargo-home "''${CARGO_HOME-unset}"
+        say wrapper "''${RUSTC_WRAPPER-unset}"
+        say sccache-size "''${SCCACHE_CACHE_SIZE-unset}"
+        # And the sccache the server resolved off this unit's own path, which is
+        # the whole of what makes the compiling cached rather than only the
+        # downloading.
+        file "''${RUSTC_WRAPPER-/nowhere}" sccache
 
         # Out of the sandbox's own `/proc`, which is a fresh procfs in a pid
         # namespace of its own — so this says the mount happened as well as
@@ -825,6 +843,29 @@ testers.runNixOSTest {
         )
         assert reported["home"] == ".claude .claude.json", (
             f"everything else in the service's home is absent inside: {reported['home']!r}"
+        )
+
+        # The shared build cache, which is the whole of what the module has to
+        # arrange for it: a directory systemd made and the unit's hardening
+        # leaves writable, and an sccache on the service's path for the server
+        # to resolve and bind in. No installer action for either.
+        assert reported["build-cache"] == "write", (
+            "a cache a session cannot write to is no cache — `CacheDirectory` "
+            "makes it and `BindPaths` says the sandbox has to see it"
+        )
+        assert reported["cargo-home"] == "${cacheDir}/cargo", (
+            f"cargo downloads into the shared cache: {reported['cargo-home']!r}"
+        )
+        assert reported["wrapper"] == "/verkstead/bin/sccache", (
+            "the module puts sccache on the service's path so the server "
+            f"resolves one without being told: {reported['wrapper']!r}"
+        )
+        assert reported["sccache"] == "read", (
+            "and it is bound in read-only, like the `verkstead` beside it"
+        )
+        assert reported["sccache-size"] == "30G", (
+            f"the default nobody has been to the settings page to change: "
+            f"{reported['sccache-size']!r}"
         )
 
         # And the operations the hardening is what would forbid: a UTS namespace
