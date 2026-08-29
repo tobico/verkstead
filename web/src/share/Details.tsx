@@ -18,10 +18,13 @@
 //! answering surface goes, and what is left is the record however the Set stood
 //! when the share was taken.
 //!
-//! The commits are a stub for now. The record boards them and the cards open,
-//! and what the pane draws is a sentence saying the material is not in this
-//! build's share; the task after this one puts the diff in the bundle and draws
-//! it here the same way.
+//! The commits are the same arrangement one level along: the bundle carries the
+//! pane the workbench would have fetched — the Message, and the whole diff with
+//! its folds and its colours already in it — and `Opened` draws it, which is the
+//! component the workbench's own commit pane is. A commit the repository had
+//! already lost when the share was taken travels as what the store kept, and
+//! says where its diff went rather than reading as a commit that changed
+//! nothing.
 
 import { Match, Show, Switch, type JSX } from "solid-js";
 
@@ -31,17 +34,19 @@ import type {
   ConversationView,
   QuestionSetEvent,
   SetView,
+  SharedCommit,
   SteerEvent,
 } from "../api/types";
 import { Empty } from "../notices";
 import { Sheet } from "../set/Sheet";
 import { Brief } from "../workbench/Brief";
+import { Opened } from "../workbench/Commit";
 import { Document } from "../workbench/Document";
 import { PaneHead } from "../workbench/PaneHead";
 import type { Opening } from "../workbench/openings";
 
 /// An Event a share opens, and which kind it turned out to be.
-type Opened =
+type Open =
   | { brief: BriefEvent }
   | { steer: SteerEvent }
   | { asked: QuestionSetEvent }
@@ -51,6 +56,8 @@ export function Details(props: {
   conversation: ConversationView;
   /// The sheets the share is carrying, one per Question Set on that Timeline.
   sets: SetView[];
+  /// And the panes behind the commits, one per commit on it.
+  commits: SharedCommit[];
   /// What the record has open, if anything.
   event: Opening | null;
   /// And the way back to it, which is what a narrow window walks out through.
@@ -62,9 +69,9 @@ export function Details(props: {
   /// nothing is open at all — the same answer the workbench gives, and for the
   /// same reason: what is open is a record of what was picked rather than a
   /// promise that it is still there.
-  const opened = (): Opened | undefined =>
+  const opened = (): Open | undefined =>
     props.conversation.timeline
-      .map((event): Opened | undefined => {
+      .map((event): Open | undefined => {
         if ("Brief" in event) {
           return { brief: event.Brief };
         }
@@ -140,11 +147,40 @@ export function Details(props: {
               </Show>
             )}
           </Match>
+          {/* The commit's own pane, drawn by the component the workbench opens
+              one with: what it was called and how much it moved, the Message it
+              wrote about itself, and the whole diff folded per file. Read out
+              of the file rather than fetched — the export read it out of git,
+              and there is nothing here to read anything with. */}
           <Match when={commitIn(open())}>
-            <Missing heading="Commit" back={props.back}>
-              This build's shares carry what a commit changed rather than its
-              diff.
-            </Missing>
+            {(commit) => (
+              <Show
+                when={carried(props.commits, commit().id)}
+                fallback={
+                  <Missing heading="Commit" back={props.back}>
+                    This share is not carrying the pane this commit opens.
+                  </Missing>
+                }
+              >
+                {(shared) => (
+                  <Opened
+                    commit={commit()}
+                    pane={shared().pane}
+                    back={props.back}
+                    instead={
+                      shared().held ? (
+                        <Empty>This commit changed no files.</Empty>
+                      ) : (
+                        <Empty>
+                          The repository no longer had this commit when the
+                          share was taken, so its diff could not travel with it.
+                        </Empty>
+                      )
+                    }
+                  />
+                )}
+              </Show>
+            )}
           </Match>
         </Switch>
       )}
@@ -182,8 +218,18 @@ function sheet(sets: SetView[], id: number): SetView | undefined {
   return sets.find((set) => set.id === id);
 }
 
+/// The pane the share carries for one commit, and nothing where it carries
+/// none.
+///
+/// A miss should be unreachable for the reason a missing sheet is: every commit
+/// that boards is rendered into the bundle beside it. A commit git had lost is
+/// not this — it is carried, with the flag beside it saying the diff is not.
+function carried(commits: SharedCommit[], id: number): SharedCommit | undefined {
+  return commits.find((commit) => commit.id === id);
+}
+
 /// The id an opened Event is reached by, whichever kind it turned out to be.
-function which(open: Opened): number {
+function which(open: Open): number {
   if ("brief" in open) {
     return open.brief.id;
   }
@@ -194,18 +240,18 @@ function which(open: Opened): number {
 }
 
 /// And each kind on its own, for the pane that draws it.
-function briefIn(open: Opened): BriefEvent | undefined {
+function briefIn(open: Open): BriefEvent | undefined {
   return "brief" in open ? open.brief : undefined;
 }
 
-function steerIn(open: Opened): SteerEvent | undefined {
+function steerIn(open: Open): SteerEvent | undefined {
   return "steer" in open ? open.steer : undefined;
 }
 
-function setIn(open: Opened): QuestionSetEvent | undefined {
+function setIn(open: Open): QuestionSetEvent | undefined {
   return "asked" in open ? open.asked : undefined;
 }
 
-function commitIn(open: Opened): CommitEvent | undefined {
+function commitIn(open: Open): CommitEvent | undefined {
   return "commit" in open ? open.commit : undefined;
 }

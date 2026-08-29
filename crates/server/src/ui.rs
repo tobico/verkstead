@@ -36,9 +36,9 @@ use verkstead_render::{
     ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
     Lifecycle, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
     ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed, RoleChoice, SetReading,
-    SetView, SettingsEdit, SettingsSaved, SettingsView, SharedConversation, ShowingArchived,
-    Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TimelineEvent,
-    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    SetView, SettingsEdit, SettingsSaved, SettingsView, SharedCommit, SharedConversation,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -1516,17 +1516,99 @@ async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpRe
         }
     }
 
+    let commits = shared_commits(state, &view).await?;
+
     let taken = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_default();
 
-    Ok(verkstead_render::shared(view, sets, taken))
+    Ok(verkstead_render::shared(view, sets, commits, taken))
+}
+
+/// And every commit the Timeline holds, rendered as the pane the workbench
+/// fetches when somebody opens one.
+///
+/// The whole of each: the Commit Summary the sweep kept, and the diff read out
+/// of git and rendered with its folds and its colours in it. No cap and nothing
+/// left out — a share is read the way the workbench is read, and a patch cut
+/// off at a size is not the patch the human reviewed.
+///
+/// Read out of the repository the commit was recorded against rather than the
+/// Conversation's own, exactly as [`commit_pane`] does it: a companion's commit
+/// is in the companion's repository, and the Conversation's knows nothing about
+/// it.
+///
+/// The reading and the rendering happen off the request thread for the reason
+/// one commit's pane does, only more so: this is every commit on a branch, and
+/// parsing and colouring that many patches on an async worker would hold up
+/// every other request sharing the thread.
+async fn shared_commits(
+    state: &AppState,
+    view: &ConversationView,
+) -> Result<Vec<SharedCommit>, HttpResponse> {
+    let id = view.id;
+
+    // What has to be asked of the database, gathered first: the blocking half
+    // below touches git alone, and a pool is not a thing to reach into from
+    // there.
+    let mut landed = Vec::new();
+
+    for event in view.timeline.iter().filter_map(committed) {
+        let commit = match store::commit(&state.pool, id, event).await {
+            Ok(commit) => commit,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a commit for a share failed");
+                return Err(unavailable("the conversation's commits could not be read"));
+            }
+        };
+
+        // The repository it landed in, where the registry still holds one. A
+        // commit whose Repo has been taken off it is one nothing can say
+        // anything about, which is the same nothing a collected commit is —
+        // see [`SharedCommit::held`].
+        let repo = match store::commit_repo(&state.pool, id, event).await {
+            Ok(repo) => repo.map(|repo| repo.path),
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a commit for a share failed");
+                return Err(unavailable("the conversation's commits could not be read"));
+            }
+        };
+
+        if let Some(commit) = commit {
+            landed.push((event, repo, commit));
+        }
+    }
+
+    let rendered = tokio::task::spawn_blocking(move || {
+        landed
+            .into_iter()
+            .map(|(event, repo, commit)| {
+                let patch = repo.and_then(|repo| crate::commits::patch(&repo, &commit.sha));
+
+                verkstead_render::shared_commit(event, commit.summary.as_deref(), patch.as_deref())
+            })
+            .collect()
+    })
+    .await;
+
+    rendered.map_err(|error| {
+        tracing::error!(error = ?error, conversation_id = id, "rendering the commits of a share failed");
+        unavailable("the conversation's commits could not be read")
+    })
 }
 
 /// Which Set a Timeline Event is about, on the Events that are about one.
 fn question_set(event: &TimelineEvent) -> Option<i64> {
     match event {
         TimelineEvent::QuestionSet(asked) => Some(asked.set_id),
+        _ => None,
+    }
+}
+
+/// And which Event a commit landed as, which is what its pane is fetched by.
+fn committed(event: &TimelineEvent) -> Option<i64> {
+    match event {
+        TimelineEvent::Commit(commit) => Some(commit.id),
         _ => None,
     }
 }

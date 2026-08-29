@@ -2233,6 +2233,41 @@ github_token: TokenSaved | null,
 rust_build_cache: BuildCacheView, };
 
 /**
+ * One commit as a share carries it: the pane the workbench would have fetched,
+ * beside the Event whose card opens it.
+ */
+export type SharedCommit = { 
+/**
+ * Which Timeline Event this is the pane of.
+ *
+ * The Event rather than the hash, because that is what the card opening it
+ * is known by — and a Conversation works in more than one repository, so a
+ * hash is not a name for one commit here either.
+ */
+id: number, 
+/**
+ * What the workbench's details pane draws: the Commit Summary rendered,
+ * and the diff with every fold and every colour already in it.
+ *
+ * The endpoint's own rendering rather than a second one, so that a
+ * colleague reading a patch and the human who reviewed it are reading one
+ * drawing of it.
+ */
+pane: CommitPane, 
+/**
+ * Whether the repository still had the commit when the share was taken.
+ *
+ * `false` is a commit git can no longer show — rebased away, collected, or
+ * in a repository that has moved out from under Verkstead — and the pane
+ * says the diff is not in the file rather than that the commit changed
+ * nothing. The workbench answers that case with a 404, which a share
+ * cannot: one commit nobody can read is no reason to refuse the export of
+ * everything around it, and what the Timeline says about it — the subject,
+ * the hash, how much it moved — is on the card either way.
+ */
+held: boolean, };
+
+/**
  * One Conversation as a share carries it, which is what the shared file boots
  * from.
  *
@@ -2263,6 +2298,19 @@ conversation: ConversationView,
  * record too, and a reader with no server behind them cannot answer it.
  */
 sets: Array<SetView>, 
+/**
+ * The pane behind every commit on that Timeline, in its order.
+ *
+ * Carried for the reason the sheets are: the workbench fetches a commit
+ * when somebody opens one, and a share has nothing to fetch with. So the
+ * whole of every one of them rides in the file — the Commit Summary
+ * rendered, and the diff parsed, highlighted and folded per file.
+ *
+ * No cap on any of it, and nothing summarised on the way out. What a
+ * colleague is being shown is the work, and a patch cut off at a size is
+ * a different document from the one the human reviewed.
+ */
+commits: Array<SharedCommit>, 
 /**
  * When the share was taken, RFC 3339.
  *

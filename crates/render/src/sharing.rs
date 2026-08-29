@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::conversations::{ConversationView, TimelineEvent};
+use crate::conversations::{CommitPane, ConversationView, TimelineEvent};
 use crate::view::SetView;
 
 /// One Conversation as a share carries it, which is what the shared file boots
@@ -60,6 +60,18 @@ pub struct SharedConversation {
     /// record too, and a reader with no server behind them cannot answer it.
     pub sets: Vec<SetView>,
 
+    /// The pane behind every commit on that Timeline, in its order.
+    ///
+    /// Carried for the reason the sheets are: the workbench fetches a commit
+    /// when somebody opens one, and a share has nothing to fetch with. So the
+    /// whole of every one of them rides in the file — the Commit Summary
+    /// rendered, and the diff parsed, highlighted and folded per file.
+    ///
+    /// No cap on any of it, and nothing summarised on the way out. What a
+    /// colleague is being shown is the work, and a patch cut off at a size is
+    /// a different document from the one the human reviewed.
+    pub commits: Vec<SharedCommit>,
+
     /// When the share was taken, RFC 3339.
     ///
     /// A share is a snapshot of a moment rather than a window onto a
@@ -69,16 +81,71 @@ pub struct SharedConversation {
     pub exported_at: String,
 }
 
-/// Curate a Conversation for sharing: the Events that board, the sheets behind
-/// the ones that open, and a record with nothing left on it to act on.
+/// One commit as a share carries it: the pane the workbench would have fetched,
+/// beside the Event whose card opens it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SharedCommit {
+    /// Which Timeline Event this is the pane of.
+    ///
+    /// The Event rather than the hash, because that is what the card opening it
+    /// is known by — and a Conversation works in more than one repository, so a
+    /// hash is not a name for one commit here either.
+    pub id: i64,
+
+    /// What the workbench's details pane draws: the Commit Summary rendered,
+    /// and the diff with every fold and every colour already in it.
+    ///
+    /// The endpoint's own rendering rather than a second one, so that a
+    /// colleague reading a patch and the human who reviewed it are reading one
+    /// drawing of it.
+    pub pane: CommitPane,
+
+    /// Whether the repository still had the commit when the share was taken.
+    ///
+    /// `false` is a commit git can no longer show — rebased away, collected, or
+    /// in a repository that has moved out from under Verkstead — and the pane
+    /// says the diff is not in the file rather than that the commit changed
+    /// nothing. The workbench answers that case with a 404, which a share
+    /// cannot: one commit nobody can read is no reason to refuse the export of
+    /// everything around it, and what the Timeline says about it — the subject,
+    /// the hash, how much it moved — is on the card either way.
+    pub held: bool,
+}
+
+/// One commit as a share carries it, rendered.
 ///
-/// `sets` is every Question Set the caller rendered. What comes back holds the
-/// ones still on the curated Timeline and no others: which Events board is this
-/// module's rule, and a bundle carrying the sheet of a Set whose row was taken
-/// off would be carrying what the reader was not meant to have.
+/// `patch` is what the repository said when it was asked for one, and `None` is
+/// a repository that would not say — which is the whole of what
+/// [`SharedCommit::held`] records.
+///
+/// The summary is rendered either way. It was kept by the sweep that recorded
+/// the commit rather than read back out of git, so a commit that has gone still
+/// has its own account of itself to read.
+pub fn shared_commit(id: i64, summary: Option<&str>, patch: Option<&str>) -> SharedCommit {
+    SharedCommit {
+        id,
+        // No patch renders as no diff, which is also what a merge or an empty
+        // commit renders as — the flag beside it is what tells the reader which
+        // of the two kinds of nothing they are looking at.
+        pane: crate::conversations::commit_pane(summary, patch.unwrap_or_default()),
+        held: patch.is_some(),
+    }
+}
+
+/// Curate a Conversation for sharing: the Events that board, the sheets and the
+/// diffs behind the ones that open, and a record with nothing left on it to act
+/// on.
+///
+/// `sets` and `commits` are every Question Set and every commit the caller
+/// rendered. What comes back holds the ones still on the curated Timeline and
+/// no others: which Events board is this module's rule, and a bundle carrying
+/// the sheet of a Set whose row was taken off would be carrying what the reader
+/// was not meant to have.
 pub fn shared(
     conversation: ConversationView,
     sets: Vec<SetView>,
+    commits: Vec<SharedCommit>,
     exported_at: String,
 ) -> SharedConversation {
     let timeline: Vec<TimelineEvent> = conversation
@@ -89,11 +156,16 @@ pub fn shared(
         .collect();
 
     let boarded: Vec<i64> = timeline.iter().filter_map(asked).collect();
+    let landed: Vec<i64> = timeline.iter().filter_map(committed).collect();
 
     SharedConversation {
         sets: sets
             .into_iter()
             .filter(|set| boarded.contains(&set.id))
+            .collect(),
+        commits: commits
+            .into_iter()
+            .filter(|commit| landed.contains(&commit.id))
             .collect(),
         conversation: ConversationView {
             timeline,
@@ -172,6 +244,14 @@ fn boards(event: &TimelineEvent) -> bool {
 fn asked(event: &TimelineEvent) -> Option<i64> {
     match event {
         TimelineEvent::QuestionSet(asked) => Some(asked.set_id),
+        _ => None,
+    }
+}
+
+/// And which Event a commit's pane belongs to, on the one kind that has one.
+fn committed(event: &TimelineEvent) -> Option<i64> {
+    match event {
+        TimelineEvent::Commit(commit) => Some(commit.id),
         _ => None,
     }
 }

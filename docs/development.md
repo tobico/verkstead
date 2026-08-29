@@ -344,9 +344,9 @@ The third is mermaid, on its own, into `web/dist-share/mermaid.js`
 a Set's page draws for itself and it is three megabytes, so it is the one thing
 a share does not carry as a matter of course: the share build aliases the
 package to a stub that reaches for whatever the *document* is holding, and the
-server writes the library into a second slot only where a Set in the record has
-a Diagram on it. A Conversation nobody drew a picture in stays the size of its
-own record.
+server writes the library into a second slot only where something in the record
+has a Diagram on it — a Set's Preface or a Commit Summary alike. A Conversation
+nobody drew a picture in stays the size of its own record.
 
 `cargo test` covers the round trip in-process. `nix flake check` runs the
 viewer's vitest suite from the pinned pnpm and node, and boots a VM with the

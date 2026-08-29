@@ -12,17 +12,30 @@
 //! the environment has it, so a component that reached for the network would
 //! fail here the way it would fail in the recipient's browser.
 
-import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type {
+  CommitEvent,
   SetReading,
   SetView,
+  SharedCommit,
   SharedConversation,
   TimelineEvent,
 } from "../src/api/types";
 import { drawDiagrams } from "../src/set/diagrams";
 import { Share } from "../src/share/Share";
+// The header a commit's pane draws itself with: the subject, the repository it
+// landed in where that is worth saying, and how much it moved.
+import commitStyles from "../src/workbench/Commit.module.css";
+// And the cards the record is walked by.
+import timeline from "../src/workbench/Timeline.module.css";
 import alongside from "./fixtures/set-alongside.json" with { type: "json" };
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
@@ -161,8 +174,7 @@ describe("a shared conversation", () => {
     render(() => <Share shared={SHARED} />);
 
     const details = await screen.findByLabelText("Details");
-    // The fixture ends on its companion's commit, and a commit's pane is the
-    // one this build's share does not carry the diff for yet.
+    // The fixture ends on its companion's commit.
     await waitFor(() =>
       expect(details.querySelector("h1")?.textContent).toBe("Commit"),
     );
@@ -314,6 +326,198 @@ describe("a question set in a share", () => {
     const locked = await opened(showing(LOCKED));
     expect(locked.textContent).toContain("This Set was locked unanswered");
     expect(locked.textContent).not.toContain("still open when this record");
+  });
+});
+
+/// The commits the fixture's record carries, in its own order.
+const COMMITS: CommitEvent[] = SHARED.conversation.timeline.flatMap((event) =>
+  "Commit" in event ? [event.Commit] : [],
+);
+
+/// One commit's pane as the server renders one: the Message, and a diff with a
+/// fold per file.
+///
+/// Built out of a Set's own attached Diff rather than written by hand, exactly
+/// as the workbench's own commit tests build one: it is the same `DiffView` off
+/// the same server-side renderer, which is the whole reason a commit needs no
+/// diff machinery of its own. The fixture's commits carry no diff — the Repos
+/// behind them are paths nothing is at, so git had nothing to say — and what a
+/// read one draws is what these are for.
+const PANE: SharedCommit["pane"] = {
+  summary: "<p>A bucket per account.</p>\n",
+  diagrams: false,
+  diff: ALONGSIDE.diff[0]!.diff,
+};
+
+/// A share opened on one of its commits, carrying `carried` as that commit's
+/// pane.
+///
+/// The record cut down to the one commit, so that what the share opens on is
+/// the commit under test — a share opens at the end of its own record, which is
+/// how the workbench opens a Conversation.
+function showingCommit(
+  carried: Omit<SharedCommit, "id">,
+  which = 0,
+): SharedConversation {
+  const landed = COMMITS[which]!;
+  const event = SHARED.conversation.timeline.find(
+    (event): event is Extract<TimelineEvent, { Commit: unknown }> =>
+      "Commit" in event && event.Commit.id === landed.id,
+  );
+  expect(event).toBeTruthy();
+
+  return { ...holding([event!]), commits: [{ ...carried, id: landed.id }] };
+}
+
+describe("a commit in a share", () => {
+  /// The whole pane out of the file, drawn by the component the workbench opens
+  /// a commit with — there is nothing to fetch and nothing that tries.
+  it("opens as the message and the whole diff it landed", async () => {
+    const details = await opened(showingCommit({ pane: PANE, held: true }));
+    const commit = COMMITS[0]!;
+
+    expect(details.querySelector("h1")?.textContent).toBe("Commit");
+
+    // What the commit was, off the record's own card: the subject, the hash
+    // shortened for reading, and how much of the repository it moved.
+    expect(details.querySelector(`.${commitStyles.subject}`)?.textContent).toBe(
+      commit.subject,
+    );
+    expect(details.querySelector(`.${commitStyles.sha}`)?.textContent).toBe(
+      commit.sha.slice(0, 7),
+    );
+    expect(details.querySelector(`.${commitStyles.added}`)?.textContent).toBe(
+      `+${commit.insertions}`,
+    );
+
+    // The Message it wrote about itself, above the diff.
+    expect(details.querySelector("#commit-message")).toBeTruthy();
+    expect(details.textContent).toContain("A bucket per account.");
+
+    // And the diff itself, folded per file, with the way through it down the
+    // margin.
+    expect(details.querySelector("section#commit-diff")).toBeTruthy();
+    expect(
+      details.querySelectorAll("section#commit-diff [id^='diff-']").length,
+    ).toBe(PANE.diff!.paths.length);
+    expect(details.textContent).toContain("Diff");
+  });
+
+  /// Which repository a commit landed in, where that is not the conversation's
+  /// own — the same label the card carries, drawn by the same pane. The
+  /// fixture's last commit is the companion's and its first is not.
+  it("labels a commit out of a companion repo, and only that one", async () => {
+    const companion = COMMITS.findIndex((commit) => commit.repo !== null);
+    expect(companion).toBeGreaterThan(-1);
+
+    const labelled = await opened(
+      showingCommit({ pane: PANE, held: true }, companion),
+    );
+    expect(labelled.querySelector(`.${commitStyles.repo}`)?.textContent).toBe(
+      COMMITS[companion]!.repo,
+    );
+
+    cleanup();
+
+    const own = COMMITS.findIndex((commit) => commit.repo === null);
+    const unlabelled = await opened(showingCommit({ pane: PANE, held: true }, own));
+    expect(unlabelled.querySelector(`.${commitStyles.repo}`)).toBeNull();
+  });
+
+  /// A commit git no longer had when the share was taken. What the store kept
+  /// still reads — the card, and the commit's own account of itself — and the
+  /// pane says where the diff went rather than leaving the reader to wonder.
+  it("says where the diff went for a commit the repository had lost", async () => {
+    const details = await opened(
+      showingCommit({ pane: { ...PANE, diff: null }, held: false }),
+    );
+
+    expect(details.textContent).toContain("no longer had this commit");
+    expect(details.textContent).toContain("A bucket per account.");
+
+    // And it is not confused with the other thing an absent diff can mean.
+    expect(details.textContent).not.toContain("changed no files");
+    expect(details.querySelector("section#commit-diff")).toBeNull();
+  });
+
+  /// The other thing an absent diff can mean: a merge, or an empty commit. The
+  /// pane says what the workbench's says, because it is the same pane.
+  it("says a commit that changed nothing changed nothing", async () => {
+    const details = await opened(
+      showingCommit({ pane: { ...PANE, diff: null }, held: true }),
+    );
+
+    expect(details.textContent).toContain("changed no files");
+    expect(details.textContent).not.toContain("no longer had this commit");
+  });
+
+  /// A record whose commit has no pane beside it, which is a file written by
+  /// something that disagrees with this build: the pane says so rather than
+  /// drawing an empty document.
+  it("says so where the file is carrying no pane for it", async () => {
+    const landed = COMMITS[0]!;
+    const event = SHARED.conversation.timeline.find(
+      (event): event is Extract<TimelineEvent, { Commit: unknown }> =>
+        "Commit" in event && event.Commit.id === landed.id,
+    );
+
+    const details = await opened({ ...holding([event!]), commits: [] });
+
+    expect(details.textContent).toContain("not carrying the pane");
+  });
+
+  /// A branch of any length is read by walking it, which is the thing a file
+  /// carrying every diff at once exists for: each card opens its own pane, and
+  /// the one before it goes.
+  ///
+  /// Worth its own test because nothing here is keyed — opening a second commit
+  /// assigns into the component the first one built, message, diff and all.
+  it("walks from one commit on the record to the next", async () => {
+    const { container } = render(() => (
+      <Share
+        shared={{
+          ...SHARED,
+          commits: COMMITS.map((commit, n) => ({
+            id: commit.id,
+            pane: { ...PANE, summary: `<p>What step ${n} did.</p>\n` },
+            held: true,
+          })),
+        }}
+      />
+    ));
+
+    const details = await screen.findByLabelText("Details");
+    const cards = container.querySelectorAll(
+      `.${timeline.timelineEvent} > .${timeline.commit}`,
+    );
+    expect(cards.length).toBe(COMMITS.length);
+
+    for (const [n, commit] of COMMITS.entries()) {
+      fireEvent.click(cards[n]!);
+
+      await waitFor(() =>
+        expect(
+          details.querySelector(`.${commitStyles.subject}`)?.textContent,
+        ).toBe(commit.subject),
+      );
+
+      // The whole pane follows, not just the header: this commit's own account
+      // of itself, and a diff to read under it.
+      expect(details.textContent).toContain(`What step ${n} did.`);
+      expect(details.querySelector("section#commit-diff")).toBeTruthy();
+    }
+  });
+
+  /// A patch is read, not answered. The word-wrap switch beside the Diff
+  /// heading stays — it is how this reader wants a diff drawn on their own
+  /// device — and there is nothing else to press.
+  it("offers the way back and the wrap switch, and nothing else", async () => {
+    const details = await opened(showingCommit({ pane: PANE, held: true }));
+
+    expect(screen.getByLabelText("Word wrap")).toBeTruthy();
+    expect(details.querySelector('[role="menuitem"]')).toBeNull();
+    expect(details.querySelector("textarea")).toBeNull();
+    expect(details.textContent).not.toContain("Close");
   });
 });
 

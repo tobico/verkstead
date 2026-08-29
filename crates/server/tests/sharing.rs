@@ -4,8 +4,8 @@
 //! Asked of `/api/ui/conversations/{id}/share.json`, which is the payload the
 //! shared file is built around. The two are one composition — see
 //! `crates/server/src/sharing.rs` — and this is the half that says what is in
-//! it: which Events board, the sheet of every Set that did, and that nothing
-//! arrives with an action still on it.
+//! it: which Events board, the sheet of every Set and the pane of every commit
+//! that did, and that nothing arrives with an action still on it.
 //!
 //! The file itself is not fetched here, and that is deliberate rather than a
 //! gap. It is the share build of the viewer with this payload written into a
@@ -15,6 +15,9 @@
 //! shape, and what proves the built document has nothing outside it is the build
 //! itself: `web/vite.share.config.ts` refuses to write one that still points at
 //! a file beside it.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use axum::Router;
 use axum::body::Body;
@@ -569,6 +572,58 @@ async fn a_share_says_whether_it_needs_the_diagram_renderer() {
 }
 
 #[tokio::test]
+async fn a_commit_that_drew_the_delta_says_the_share_needs_the_renderer_too() {
+    let (dir, pool, app) = app().await;
+
+    let path = repository(dir.path().join("verkstead"));
+    let repo = store::register_repo(&pool, &path, "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = store::start_conversation(&pool, repo, "sharing")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Nothing was asked here, so nothing but the commit can be what puts the
+    // renderer in the file — which is the case worth having, agents drawing the
+    // delta in a Commit Summary as often as in a Preface.
+    let sha = commit(
+        &path,
+        "feat: draw it",
+        &[("limiter.rs", "fn window() {}\n")],
+    );
+
+    store::record_commit(
+        &pool,
+        id,
+        repo,
+        &store::Commit {
+            sha,
+            subject: "feat: draw it".to_owned(),
+            files: 1,
+            insertions: 1,
+            deletions: 0,
+            summary: Some("What it does:\n\n```mermaid\nflowchart LR\n  a --> b\n```\n".to_owned()),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let shared = share(&app, id).await;
+
+    assert!(shared.sets.is_empty(), "nothing was asked on this one");
+    assert!(
+        shared.commits[0].pane.diagrams,
+        "a Commit Summary with a Diagram should say so"
+    );
+}
+
+#[tokio::test]
 async fn a_set_this_build_cannot_read_boards_neither_row_nor_sheet() {
     let (_dir, pool, app) = app().await;
     let repo = repo(&pool).await;
@@ -630,5 +685,348 @@ async fn a_set_this_build_cannot_read_boards_neither_row_nor_sheet() {
             .iter()
             .any(|event| matches!(event, TimelineEvent::UnreadableSet(_))),
         "an unreadable Set should not board"
+    );
+}
+
+/// A git repository at `path` with one commit on `main`, and the tools to put
+/// more on it.
+///
+/// A real one, because a commit's diff is not in the store: it is read out of
+/// git at export time, which is the thing under test below.
+fn repository(path: PathBuf) -> PathBuf {
+    std::fs::create_dir_all(&path).unwrap();
+    git(&path, &["init", "--initial-branch", "main"]);
+    git(&path, &["config", "user.email", "tests@verkstead.invalid"]);
+    git(&path, &["config", "user.name", "Verkstead Tests"]);
+    git(&path, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
+    git(&path, &["add", "README.md"]);
+    git(&path, &["commit", "-m", "first"]);
+
+    path
+}
+
+/// One commit on top of whatever is there: the files written, and the hash git
+/// gave it.
+fn commit(path: &Path, subject: &str, files: &[(&str, &str)]) -> String {
+    for (name, contents) in files {
+        let file = path.join(name);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, contents).unwrap();
+    }
+
+    git(path, &["add", "-A"]);
+    git(path, &["commit", "-m", subject]);
+    git(path, &["rev-parse", "HEAD"]).trim().to_owned()
+}
+
+/// Run git in `dir`, insisting it worked. Scaffolding rather than the code under
+/// test, so a failure here is a broken test.
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .expect("git should be on the PATH for these tests");
+
+    assert!(
+        output.status.success(),
+        "git {args:?} failed in {}",
+        dir.display()
+    );
+
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// The pane a share carries for one commit.
+fn pane<'a>(shared: &'a SharedConversation, subject: &str) -> &'a verkstead_render::SharedCommit {
+    let event = shared
+        .conversation
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Commit(commit) if commit.subject == subject => Some(commit.id),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no commit called {subject} on the Timeline"));
+
+    shared
+        .commits
+        .iter()
+        .find(|commit| commit.id == event)
+        .unwrap_or_else(|| panic!("no pane for the commit called {subject}"))
+}
+
+#[tokio::test]
+async fn a_share_carries_the_whole_diff_of_every_commit_on_it() {
+    let (dir, pool, app) = app().await;
+
+    let path = repository(dir.path().join("verkstead"));
+    let repo = store::register_repo(&pool, &path, "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = store::start_conversation(&pool, repo, "sharing")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // A branch of some size, because that is where a share is asked to do
+    // something a page never is: every commit's diff at once. Twelve commits of
+    // four files each is enough that a cap anybody was tempted to put in would
+    // show up as something missing below.
+    let mut written = Vec::new();
+
+    for n in 1..=12 {
+        let files: Vec<(String, String)> = (1..=4)
+            .map(|file| {
+                (
+                    format!("crates/limiter/step-{n}/file-{file}.rs"),
+                    format!("// commit {n}, file {file}\nfn counted() -> usize {{ {n} }}\n"),
+                )
+            })
+            .collect();
+
+        let subject = format!("feat: step {n} of the limiter");
+        let sha = commit(
+            &path,
+            &subject,
+            &files
+                .iter()
+                .map(|(name, contents)| (name.as_str(), contents.as_str()))
+                .collect::<Vec<_>>(),
+        );
+
+        store::record_commit(
+            &pool,
+            id,
+            repo,
+            &store::Commit {
+                sha: sha.clone(),
+                subject: subject.clone(),
+                files: 4,
+                insertions: 8,
+                deletions: 0,
+                summary: Some(format!(
+                    "Step {n}.\n\n```mermaid\nflowchart LR\n  a --> b\n```\n"
+                )),
+                repo: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        written.push(subject);
+    }
+
+    let shared = share(&app, id).await;
+
+    assert_eq!(
+        shared.commits.len(),
+        written.len(),
+        "every commit on the Timeline should have a pane"
+    );
+
+    for subject in &written {
+        let carried = pane(&shared, subject);
+
+        assert!(carried.held, "{subject} should have been read out of git");
+
+        // The Commit Summary, rendered as the workbench renders one — and the
+        // Diagram in it flagged, which is what says the file needs the renderer.
+        let summary = carried.pane.summary.as_deref().unwrap_or_default();
+        assert!(
+            summary.contains("<p>"),
+            "the summary of {subject}: {summary}"
+        );
+        assert!(
+            carried.pane.diagrams,
+            "the Diagram in {subject} should be flagged"
+        );
+
+        // And the whole diff: four files, each with its own fold, and nothing
+        // cut off at a size.
+        let diff = carried
+            .pane
+            .diff
+            .as_ref()
+            .unwrap_or_else(|| panic!("{subject} carried no diff"));
+
+        assert_eq!(
+            diff.paths.len(),
+            4,
+            "every file of {subject} should be in it"
+        );
+
+        // The lines themselves, which is what "no cap" means — asked for by a
+        // word rather than by a line, because the highlighter has been through
+        // it and every token in a line is inside a span of its own.
+        assert!(
+            diff.html.contains("counted"),
+            "the lines of {subject} should be in it"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_companions_commit_carries_its_own_repositorys_diff() {
+    let (dir, pool, app) = app().await;
+
+    let own = repository(dir.path().join("verkstead"));
+    let alongside = repository(dir.path().join("askance"));
+
+    let repo = store::register_repo(&pool, &own, "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    let companion = store::register_repo(&pool, &alongside, "askance", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = store::start_conversation(&pool, repo, "sharing")
+        .await
+        .unwrap()
+        .unwrap();
+    store::add_companion(&pool, id, companion).await.unwrap();
+
+    let here = commit(
+        &own,
+        "feat: count the window",
+        &[("limiter.rs", "fn window() {}\n")],
+    );
+    let there = commit(
+        &alongside,
+        "feat: name the account",
+        &[("account.rs", "fn named() {}\n")],
+    );
+
+    for (repo, sha, subject) in [
+        (repo, &here, "feat: count the window"),
+        (companion, &there, "feat: name the account"),
+    ] {
+        store::record_commit(
+            &pool,
+            id,
+            repo,
+            &store::Commit {
+                sha: sha.clone(),
+                subject: subject.to_owned(),
+                files: 1,
+                insertions: 1,
+                deletions: 0,
+                summary: None,
+                repo: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    let shared = share(&app, id).await;
+
+    // Each diff comes out of the repository its commit landed in, which is the
+    // whole of why a companion's is worth carrying: the Conversation's own
+    // repository knows nothing about it.
+    let ours = pane(&shared, "feat: count the window");
+    assert_eq!(ours.pane.diff.as_ref().unwrap().paths, vec!["limiter.rs"]);
+
+    let theirs = pane(&shared, "feat: name the account");
+    assert_eq!(theirs.pane.diff.as_ref().unwrap().paths, vec!["account.rs"]);
+
+    // And which of the two a card is labelled by, which is the Timeline's own
+    // answer and unchanged by any of this: the companion's is named and the
+    // work's own is not.
+    let labels: Vec<Option<String>> = shared
+        .conversation
+        .timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Commit(commit) => Some(commit.repo.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(labels, vec![None, Some("askance".to_owned())]);
+}
+
+#[tokio::test]
+async fn a_commit_the_repository_has_lost_says_so_rather_than_stopping_the_export() {
+    let (dir, pool, app) = app().await;
+
+    let path = repository(dir.path().join("verkstead"));
+    let repo = store::register_repo(&pool, &path, "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = store::start_conversation(&pool, repo, "sharing")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let held = commit(&path, "feat: still here", &[("here.rs", "fn here() {}\n")]);
+
+    for (sha, subject, summary) in [
+        (held, "feat: still here", None),
+        (
+            // A hash the repository has never held, which is what a commit
+            // rebased away or collected looks like by the time somebody shares.
+            "0123456789abcdef0123456789abcdef01234567".to_owned(),
+            "feat: rebased away",
+            Some("What it did before somebody rewrote the branch."),
+        ),
+    ] {
+        store::record_commit(
+            &pool,
+            id,
+            repo,
+            &store::Commit {
+                sha,
+                subject: subject.to_owned(),
+                files: 1,
+                insertions: 1,
+                deletions: 0,
+                summary: summary.map(ToOwned::to_owned),
+                repo: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    // The export happens: one commit nobody can read is no reason to refuse the
+    // record it is part of.
+    let shared = share(&app, id).await;
+    assert_eq!(shared.commits.len(), 2);
+
+    let here = pane(&shared, "feat: still here");
+    assert!(here.held);
+    assert!(here.pane.diff.is_some());
+
+    let gone = pane(&shared, "feat: rebased away");
+    assert!(!gone.held, "a commit git has lost should say so");
+    assert!(gone.pane.diff.is_none());
+
+    // And what the store kept about it travels regardless: the Commit Summary
+    // was written down when the commit was recorded rather than read back out
+    // of git, so its own account of itself is still there to read.
+    assert!(
+        gone.pane
+            .summary
+            .as_deref()
+            .is_some_and(|html| html.contains("somebody rewrote the branch")),
+        "the summary of a lost commit: {:?}",
+        gone.pane.summary
     );
 }

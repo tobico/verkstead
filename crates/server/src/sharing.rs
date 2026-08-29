@@ -19,10 +19,10 @@
 //! made once, over there.
 //!
 //! The second holds mermaid, and is empty on almost every share. The renderer is
-//! the one thing on a Set's page the browser draws for itself, and it is three
-//! megabytes — so it rides in the file only where a Set in the record carries a
-//! Diagram, and a Conversation nobody drew a picture in stays the size of its own
-//! record.
+//! the one thing on these pages the browser draws for itself, and it is three
+//! megabytes — so it rides in the file only where something in the record carries
+//! a Diagram, a Set or a Commit Summary alike, and a Conversation nobody drew a
+//! picture in stays the size of its own record.
 
 use serde::Serialize;
 use time::OffsetDateTime;
@@ -43,8 +43,8 @@ const RECORD: &str = r#"<script id="share" type="application/json">"#;
 /// Empty in the template and empty in most shares. Mermaid is three megabytes,
 /// and a Conversation nobody drew a picture in would be twenty times the size of
 /// its own record if the library rode along regardless — so what fills this is
-/// decided per share, from the Sets in the bundle. See `web/src/share/mermaid.ts`
-/// for the other side of it.
+/// decided per share, from what the bundle is carrying. See
+/// `web/src/share/mermaid.ts` for the other side of it.
 const DIAGRAMS: &str = r#"<script id="diagrams">"#;
 
 /// And where either ends, which is what the contents are written between.
@@ -90,14 +90,20 @@ fn fill(document: &str, opens: &str, contents: &str) -> Option<String> {
 }
 
 /// Whether a share carries the diagram renderer, which is a fact about what is
-/// in it: any Set with a Diagram on it, and none if there is none.
+/// in it: any Set or any commit with a Diagram on it, and none if there is
+/// none.
 ///
-/// Asked of the rendered Sets rather than of their markup, because the rendering
-/// already answered it — `SetView::diagrams` is what tells the live page whether
-/// to fetch mermaid at all, and this is the same question asked of a page that
-/// cannot fetch.
+/// Asked of the rendered documents rather than of their markup, because the
+/// rendering already answered it — `SetView::diagrams` and `CommitPane::diagrams`
+/// are what tell the live page whether to fetch mermaid at all, and this is the
+/// same question asked of a page that cannot fetch.
+///
+/// Both, because a Commit Summary is a document an agent wrote like any other
+/// and agents draw the delta in them: a share of a branch whose commits are
+/// drawn and whose Sets are not still needs the renderer.
 pub(crate) fn diagrammed(bundle: &SharedConversation) -> bool {
     bundle.sets.iter().any(|set| set.diagrams)
+        || bundle.commits.iter().any(|commit| commit.pane.diagrams)
 }
 
 /// The bundle as it may be written inside a `<script>`.

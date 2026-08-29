@@ -50,8 +50,8 @@ pub(crate) const SHARE: &str = "share.html";
 ///
 /// The one thing a share carries that is not in the document to begin with:
 /// mermaid is three megabytes, and most Conversations have no picture in them
-/// — so the server writes it into a share only where a Set in the record has a
-/// Diagram. See [`crate::sharing`].
+/// — so the server writes it into a share only where something in the record has
+/// a Diagram, a Set or a Commit Summary alike. See [`crate::sharing`].
 pub(crate) const MERMAID: &str = "mermaid.js";
 
 /// The document every path the viewer routes on is answered with.

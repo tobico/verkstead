@@ -1,4 +1,33 @@
 {
+  "commits": [
+    {
+      "held": false,
+      "id": 15,
+      "pane": {
+        "diagrams": false,
+        "diff": null,
+        "summary": null
+      }
+    },
+    {
+      "held": false,
+      "id": 16,
+      "pane": {
+        "diagrams": true,
+        "diff": null,
+        "summary": "<div class=\"wide\"><pre class=\"mermaid\">flowchart LR\n  stderr --&gt; reader --&gt; pause\n</pre></div>\n<p>The relay reads the account's own limit error off stderr and hands the session's runner a time to wake at, instead of the fixed backoff it used to guess.</p>\n"
+      }
+    },
+    {
+      "held": false,
+      "id": 17,
+      "pane": {
+        "diagrams": false,
+        "diff": null,
+        "summary": null
+      }
+    }
+  ],
   "conversation": {
     "adopting": null,
     "archived": false,

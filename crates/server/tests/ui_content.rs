@@ -2341,6 +2341,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // and, on the way out, the handoff and the session output a share leaves
     // behind. What the payload holds is `crates/server/tests/sharing.rs`'s
     // subject; this is the file the viewer's own share is drawn from.
+    //
+    // Its commits carry their Summaries and no diffs, and that is the fixture
+    // being honest rather than a gap: the Repos here are paths nothing is at,
+    // so git has nothing to say about any of those hashes, and what a share
+    // does with a commit it cannot read is exactly what this record shows —
+    // the pane, with the flag beside it saying where the diff went. What a
+    // read diff draws is the viewer's own tests' to say, from a pane of their
+    // own.
     write(
         "share.json",
         &pin_share(

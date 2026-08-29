@@ -62,7 +62,7 @@ pub use settings::{
     Author, BuildCacheEdit, BuildCacheView, SettingsEdit, SettingsSaved, SettingsView, TokenEdit,
     TokenSaved, Verified,
 };
-pub use sharing::{SharedConversation, shared};
+pub use sharing::{SharedCommit, SharedConversation, shared, shared_commit};
 pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
     statements, transcript_after, transcript_view, turns,

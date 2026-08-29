@@ -20,9 +20,9 @@ still be a file a browser opens and scrolls.
 
 ## Acceptance criteria
 
-- [ ] A commit card opens to message plus full highlighted diff, folded per
+- [x] A commit card opens to message plus full highlighted diff, folded per
       file, matching the live pane's rendering.
-- [ ] Companion-repo commits are labelled by repo; the work's own repo's stay
+- [x] Companion-repo commits are labelled by repo; the work's own repo's stay
       unlabelled, as in the workbench.
-- [ ] A conversation with a many-commit, many-file branch exports without
+- [x] A conversation with a many-commit, many-file branch exports without
       truncation and the file still opens and navigates.
