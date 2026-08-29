@@ -480,6 +480,33 @@ async fn a_repo_that_is_not_there_cannot_be_opened() {
     }
 }
 
+/// And a Repo that was taken off the registry has nothing to open either. It is
+/// still in the table — every Conversation ever worked in it names it — but
+/// nothing is registered under that id any more, and the pane reads that as the
+/// repo being gone rather than drawing one with a Remove button on it.
+#[tokio::test]
+async fn a_repo_that_was_removed_cannot_be_opened() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
+
+    let (status, _) = fetch(
+        &app,
+        Request::builder()
+            .uri(format!("/api/ui/repos/{id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 /// A Repo taken off the registry is off every list that offers Repos for new
 /// work — this one, the New conversation menu behind it, and the roadmap notice,
 /// all of which are the same read.

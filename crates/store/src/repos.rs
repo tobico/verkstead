@@ -178,16 +178,10 @@ pub enum Unregistering {
 /// — so what refuses the removal is the same reading the human is looking at
 /// when they press it, rather than a second opinion about what "finished" means.
 pub async fn unregister_repo(pool: &SqlitePool, id: i64) -> Result<Unregistering> {
-    let registered: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM repos
-         WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await
-    .with_context(|| format!("reading the Repo {id}"))?;
-
-    if registered.is_none() {
+    // Through the same read the pane behind the press is drawn from, so that
+    // what counts as being on the registry is said in one place rather than
+    // spelled again here.
+    if registered_repo(pool, id).await?.is_none() {
         return Ok(Unregistering::NoSuchRepo);
     }
 
@@ -241,7 +235,7 @@ pub async fn registered_repos(pool: &SqlitePool) -> Result<Vec<Repo>> {
         .collect())
 }
 
-/// One registered Repo, by id.
+/// One Repo, by id, whether or not it is still on the registry.
 ///
 /// For the reads that are about a Repo rather than about the list of them —
 /// which branches it has, say — where the id came off a row the page was
@@ -251,6 +245,9 @@ pub async fn registered_repos(pool: &SqlitePool) -> Result<Vec<Repo>> {
 /// A Repo somebody took away is still found here, because this is how everything
 /// already on one resolves it: a Conversation's Timeline goes on saying which
 /// repository its work was done in, whatever the settings list is offering now.
+/// Which is why this is the wrong read for anything that is about to *use* a
+/// Repo — that question is [`registered_repo`]'s, and the two stand apart so
+/// that neither has to guess which of them a caller meant.
 pub async fn load_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>> {
     let row: Option<(i64, String, String, String)> = sqlx::query_as(
         "SELECT id, path, name, default_branch
@@ -261,6 +258,37 @@ pub async fn load_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>> {
     .fetch_optional(pool)
     .await
     .with_context(|| format!("reading the Repo {id}"))?;
+
+    Ok(row.map(|(id, path, name, default_branch)| Repo {
+        id,
+        path: PathBuf::from(path),
+        name,
+        default_branch,
+    }))
+}
+
+/// One Repo that is on the registry, by id.
+///
+/// The read for everything about to *use* a Repo rather than to say which one
+/// some work was already done in: opening its pane, and the questions asked in
+/// front of the writes that put new work on it. `None` is a Repo nothing is
+/// registered under — one that never was, and one somebody has taken away,
+/// which are one answer here because neither is on offer.
+///
+/// Beside [`load_repo`] rather than a flag on it. The two are asked for opposite
+/// reasons, and a caller made to pass a boolean would sooner or later pass the
+/// wrong one — which is exactly how a Repo that had been taken away came to open
+/// its own pane and be started on.
+pub async fn registered_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>> {
+    let row: Option<(i64, String, String, String)> = sqlx::query_as(
+        "SELECT id, path, name, default_branch
+         FROM repos
+         WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading the registered Repo {id}"))?;
 
     Ok(row.map(|(id, path, name, default_branch)| Repo {
         id,

@@ -113,8 +113,12 @@ pub(crate) async fn branches(pool: &SqlitePool, id: i64) -> Result<Option<Vec<St
 
 /// One registered Repo opened: everything its card cannot hold.
 ///
-/// `None` is a Repo that is not registered, which the pane reads as the repo
-/// being gone — a link followed after somebody took it away.
+/// `None` is a Repo that is not on the registry, which the pane reads as the
+/// repo being gone — a link followed after somebody took it away, or a pane left
+/// open in another tab while they did. Read through
+/// [`store::registered_repo`] for that reason rather than through `load_repo`,
+/// which goes on finding a Repo that was taken away because a Timeline still has
+/// to name it.
 ///
 /// The two filesystem reads go together in one blocking task rather than one
 /// apiece: they are both git against the same directory, and a pane is one thing
@@ -127,7 +131,7 @@ pub(crate) async fn branches(pool: &SqlitePool, id: i64) -> Result<Option<Vec<St
 /// time the pane is opened — a kept copy would be a second opinion that went
 /// wrong on somebody else's push.
 pub(crate) async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView>> {
-    let Some(repo) = store::load_repo(pool, id).await? else {
+    let Some(repo) = store::registered_repo(pool, id).await? else {
         return Ok(None);
     };
 
