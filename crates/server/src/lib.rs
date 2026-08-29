@@ -272,11 +272,17 @@ pub struct Config {
     /// the Repo registered under that name gets. Repeat the flag, or separate
     /// several with `:` in the environment variable.
     ///
-    /// This is the Sandbox Configuration: the build caches and the like a
-    /// session needs beyond its own worktree. Each is a hole in the boundary a
-    /// sandbox is, which is why they are configured here beside the Watched
-    /// Paths rather than anywhere a session or a browser could reach — and why a
-    /// bind that is not there refuses startup rather than being skipped.
+    /// This is the Sandbox Configuration: the package registries and the caches
+    /// a session needs beyond its own worktree that Verkstead does not provide
+    /// itself. Each names a directory of somebody else's and is a hole in the
+    /// boundary a sandbox is, which is why they are configured here beside the
+    /// Watched Paths rather than anywhere a session or a browser could reach —
+    /// and why a bind that is not there refuses startup rather than being
+    /// skipped.
+    ///
+    /// A Rust build cache is not one of them: the server provides that one — see
+    /// `--build-cache-dir` — and the switch that turns it off is in the
+    /// workbench settings.
     #[arg(
         long = "sandbox-bind",
         env = "VERKSTEAD_SANDBOX_BINDS",
