@@ -64,13 +64,31 @@
 //! does not unsettle, and it dispatches nothing. That is the only honest reading
 //! of it: Verkstead does not know how the checks are, and neither *green* nor
 //! *red* is a thing to conclude from not knowing.
+//!
+//! **And a green suite is only ever green about one commit.** GitHub answers a
+//! pull request as its own record stands, and that record runs behind the branch
+//! for a while after a push: a rollup read in that window is the suite of the
+//! commit before it, reported green, and a wrap-up that took it for the branch's
+//! would reach Done over work nothing has ever checked. So the one answer that
+//! ends something is the one that has to earn it. Green settles the wrap-up only
+//! where the head GitHub named beside it is what origin is holding, and only
+//! where a pull request that has reported a suite before is still reporting one —
+//! GitHub takes a commit a moment before it creates the runs for it, and in
+//! between it names the new commit and reports nothing against it, which is the
+//! same answer a repository with no CI gives. Both are readings of the same fact:
+//! *the run for what was pushed has not been reported yet* is not *there is
+//! nothing to wait for*. Neither holds anything up where it cannot be told —
+//! a `gh` that answered without a head and a checkout with no origin to ask are
+//! the third thing again, and the rollup stands on its own.
 
+use std::path::Path;
 use std::time::Duration;
 
 use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::github::{Check, Checked};
+use crate::repos::git;
 use crate::store;
 use crate::wrapping::{Watched, named};
 
@@ -135,8 +153,13 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64, repo_id: i64) {
     // it could not fix the check is usually written down.
     let mut writing = None;
 
+    // Whether this pull request has ever reported a check, which is what tells a
+    // repository with no CI from a run that has not been created yet — see
+    // [`once`].
+    let mut reported = false;
+
     loop {
-        match once(&state, conversation_id, repo_id, writing).await {
+        match once(&state, conversation_id, repo_id, writing, &mut reported).await {
             Watching::Again(said) => writing = said,
             Watching::Done(why) => {
                 tracing::info!(
@@ -199,6 +222,7 @@ async fn once(
     conversation_id: i64,
     repo_id: i64,
     writing: Option<i64>,
+    reported: &mut bool,
 ) -> Watching {
     let conversation = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation,
@@ -255,8 +279,8 @@ async fn once(
         tokio::task::spawn_blocking(move || crate::github::checks(&gh, &repo, number)).await
     };
 
-    let checks = match asked {
-        Ok(Ok(checks)) => checks,
+    let suite = match asked {
+        Ok(Ok(suite)) => suite,
         // GitHub could not be asked. Nothing is concluded from that and nothing is
         // touched — not the settlement either way, and certainly not a fix
         // session: *Verkstead does not know* is a third thing beside green and
@@ -284,21 +308,105 @@ async fn once(
     // it and the card outlives the watching: this is the one place anything asks
     // GitHub how the checks are while a wrap-up is running, and what it learned
     // would otherwise go no further than the settle below.
-    remember(state, conversation_id, &checks).await;
+    remember(state, conversation_id, &suite.checks).await;
 
-    let failed: Vec<Check> = checks
+    // Whether anything has ever run against this pull request, which is the one
+    // thing that tells a repository with no CI from a run that has not been
+    // created yet — see the green branch below.
+    *reported |= !suite.checks.is_empty();
+
+    let failed: Vec<Check> = suite
+        .checks
         .iter()
         .filter(|check| check.how == Checked::Failed)
         .cloned()
         .collect();
 
-    let running = checks.iter().any(|check| check.how == Checked::Running);
+    let running = suite
+        .checks
+        .iter()
+        .any(|check| check.how == Checked::Running);
 
     // Green, which includes a pull request with no checks on it at all: a
     // repository with no CI is nothing for a wrap-up to wait on, and waiting for
     // a check that is never coming would be a Conversation that never finished.
+    //
+    // Which is the one answer here that ends anything, so it is the one that is
+    // held to what the two below ask. A red suite and one still running each
+    // leave the wrap-up where it was, and a poll that read either of them of the
+    // wrong commit costs a look rather than a Conversation.
     if failed.is_empty() && !running {
-        settle(state, conversation_id, &watched, checks.len()).await;
+        // A pull request that has reported a check does not go back to reporting
+        // none. GitHub creates the runs for a commit a moment after it takes the
+        // commit itself, so *nothing is running against this* is also what the
+        // gap between the two looks like — and it is the one gap the head below
+        // cannot catch, both sides naming the same commit throughout it. What
+        // tells them apart is whether anything has ever run here: a repository
+        // with no CI has reported nothing from the first poll to the last, and
+        // this one reported a suite a moment ago.
+        //
+        // Remembered for as long as this watcher runs rather than written down.
+        // A server that came back up mid-wrap-up reads the gap as no CI again,
+        // which is the trade the rest of a wrap-up makes about a restart too:
+        // the record says what was settled rather than what was seen on the way.
+        if suite.checks.is_empty() && *reported {
+            tracing::debug!(
+                conversation_id,
+                repo = watched.repo.name,
+                number = watched.number,
+                "the checks have gone from a pull request that had them, so the \
+                 run for the last push has not been created yet",
+            );
+
+            unsettle(state, conversation_id, &watched).await;
+            return Watching::Again(writing);
+        }
+
+        // And a rollup is a fact about one commit, which is not always the one
+        // that was pushed. GitHub answers this pull request as its own record
+        // stands, and that record runs behind the branch for a while after a push
+        // — long enough for a green suite belonging to the commit before the last
+        // one to carry a wrap-up to Done over work nothing has ever checked. So
+        // the head it named is held against what origin is holding, and a rollup
+        // about anything else is not this branch's suite at all.
+        //
+        // Asked here rather than every poll, because this is the only poll whose
+        // answer it changes — and it is a fetch, which is a good deal more than
+        // the rest of a look costs.
+        //
+        // Both halves have to be known for the question to mean anything: a `gh`
+        // that answered without a head, and a checkout with no origin to ask, are
+        // each *Verkstead cannot tell*. Neither is a reason to distrust a rollup
+        // that is very probably the right one, so neither holds a wrap-up up.
+        let pushed = {
+            let worktree = watched.worktree.clone();
+
+            // Off the runtime's threads: a fetch is a process, and one that goes
+            // to the network.
+            tokio::task::spawn_blocking(move || pushed_head(&worktree))
+                .await
+                .unwrap_or_default()
+        };
+
+        if let (false, Some(pushed)) = (suite.head.is_empty(), pushed.as_deref()) {
+            if pushed != suite.head {
+                tracing::debug!(
+                    conversation_id,
+                    repo = watched.repo.name,
+                    number = watched.number,
+                    reported = suite.head,
+                    pushed,
+                    "the checks GitHub reported are about a commit that is not \
+                     what origin is holding, so the run for what was pushed has \
+                     not been reported yet",
+                );
+
+                unsettle(state, conversation_id, &watched).await;
+                return Watching::Again(writing);
+            }
+        }
+
+        settle(state, conversation_id, &watched, suite.checks.len()).await;
         return Watching::Again(writing);
     }
 
@@ -318,6 +426,42 @@ async fn once(
     }
 
     fix(state, conversation_id, &watched, &failed, writing).await
+}
+
+/// What origin is holding `worktree`'s branch on, asked as part of the poll.
+///
+/// The remote-tracking ref rather than the checkout's own HEAD, because those are
+/// different commits whenever a session has committed and not yet pushed — and
+/// the question a rollup has to be held against is which commit GitHub was given,
+/// not which one the Worktree has got to. A wrap-up that waited on checks for an
+/// unpushed commit would wait for a run nobody could ever have started.
+///
+/// Fetched first, because a remote-tracking ref is only ever as fresh as the last
+/// fetch and nothing else here does one. The whole remote rather than the one
+/// branch, so that what is read back is a ref this updated rather than one it
+/// might have.
+///
+/// `None` where there is no origin to ask, where the fetch failed, or where the
+/// branch is not on it yet — each of them *Verkstead cannot tell*, which the
+/// caller reads as nothing to hold the rollup against rather than as a reason to
+/// distrust it. A checkout with no remote is every one of this suite's own, and a
+/// branch origin has never heard of is one nothing has pushed.
+fn pushed_head(worktree: &Path) -> Option<String> {
+    let branch = git(worktree, &["symbolic-ref", "--short", "HEAD"])?;
+    let branch = branch.trim();
+
+    git(worktree, &["fetch", "--quiet", "origin"])?;
+
+    let head = git(
+        worktree,
+        &[
+            "rev-parse",
+            "--verify",
+            &format!("refs/remotes/origin/{branch}"),
+        ],
+    )?;
+
+    Some(head.trim().to_owned())
 }
 
 /// Write down how the suite is, and tell the open pages where that is news.

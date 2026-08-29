@@ -1068,6 +1068,41 @@ esac
 /// A green suite, as [`gh_about`]'s answer about the checks.
 const GREEN: &str = r#"    printf '{"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
 
+/// A rollup that says its suite is still running until `head` is there, and then
+/// a green one belonging to whichever commit that file names.
+///
+/// Which is how a test says *what commit GitHub thinks it is talking about*. The
+/// checks and the head come back together because they are one answer, and a
+/// wrap-up holds one against the other — see the tests below.
+fn green_for(head: &Path) -> String {
+    format!(
+        r#"    if [ -s {head} ]; then
+        printf '{{"headRefOid":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$(cat {head})"
+    else
+        printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"IN_PROGRESS","conclusion":"","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}'
+    fi"#,
+        head = quoted(head),
+    )
+}
+
+/// A suite that is green until `landed` is there, and a pull request reporting
+/// no checks at all afterwards.
+///
+/// GitHub takes a commit before it creates the runs for it, so a pull request
+/// that had a suite a moment ago and has none now is a push whose run has not
+/// appeared — the same answer a repository with no CI gives, and not the same
+/// fact.
+fn green_until_nothing_is_reported(landed: &Path) -> String {
+    format!(
+        r#"    if [ -e {landed} ]; then
+        printf '{{"statusCheckRollup":[]}}'
+    else
+{GREEN}
+    fi"#,
+        landed = quoted(landed),
+    )
+}
+
 /// One that has gone back to running once `landed` is there — which is what a
 /// commit pushed to the pull request does to it, GitHub starting a whole new run
 /// against the new head.
@@ -1367,14 +1402,32 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
 /// And the same with the Review picker moved off its Pairing and onto the row
 /// that runs nothing, which is the Conversation that wraps up without a review.
 async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    grilling_however_started(spill, stub, gh, *BRISKLY, &[], Skipping::Unreviewed).await
+    grilling_however_started(
+        spill,
+        stub,
+        gh,
+        *BRISKLY,
+        &[],
+        Skipping::Unreviewed,
+        Origin::None,
+    )
+    .await
 }
 
 /// And the same with the *Grilling* picker moved onto its own such row, which is
 /// the Conversation whose press starts the work rather than an interview: it
 /// lands Implementing with a session on the Brief alone.
 async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    grilling_however_started(spill, stub, gh, *BRISKLY, &[], Skipping::Ungrilled).await
+    grilling_however_started(
+        spill,
+        stub,
+        gh,
+        *BRISKLY,
+        &[],
+        Skipping::Ungrilled,
+        Origin::None,
+    )
+    .await
 }
 
 /// Which of its two pickers' *no session* rows the Conversation a fixture builds
@@ -1431,8 +1484,42 @@ async fn grilling_at_pace(
         pace,
         companions,
         Skipping::UnderEveryPairing,
+        Origin::None,
     )
     .await
+}
+
+/// And the same with somewhere to push to, for the tests about a wrap-up holding
+/// a rollup against the commit that was pushed.
+///
+/// Every other fixture here is a checkout with no remote at all, which is one of
+/// the two ways [`checks`](verkstead_server) has of not being able to tell — so
+/// none of them asks the question these are about.
+async fn grilling_pushing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    grilling_however_started(
+        spill,
+        stub,
+        gh,
+        *BRISKLY,
+        &[],
+        Skipping::UnderEveryPairing,
+        Origin::Cloned,
+    )
+    .await
+}
+
+/// Whether the repository a fixture builds has a remote.
+///
+/// A bare clone inside the spill directory, so that a session in a sandbox can
+/// reach it: the spill is the one path outside the worktrees every sandbox here
+/// is given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Origin {
+    /// No remote at all, which is what a checkout made for a test is.
+    None,
+
+    /// A bare clone to push to, at `upstream` inside the spill directory.
+    Cloned,
 }
 
 /// And the whole of it, `skipping` included — which is the setup card pressed
@@ -1444,9 +1531,34 @@ async fn grilling_however_started(
     pace: Pace,
     companions: &[(&str, CompanionMode)],
     skipping: Skipping,
+    origin: Origin,
 ) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace).await;
     let app = &bench.app;
+
+    // Before the Conversation is started, so that every worktree cut from this
+    // repository has the remote — a worktree shares the repository's `.git`, and
+    // what it shares is where a remote lives.
+    if origin == Origin::Cloned {
+        let upstream = bench.spill.path().join("upstream");
+
+        git(
+            bench.spill.path(),
+            &[
+                "clone",
+                "--no-local",
+                "--bare",
+                "--quiet",
+                &bench.repo.to_string_lossy(),
+                &upstream.to_string_lossy(),
+            ],
+        );
+        git(
+            &bench.repo,
+            &["remote", "add", "origin", &upstream.to_string_lossy()],
+        );
+        git(&bench.repo, &["fetch", "--quiet", "origin"]);
+    }
 
     let started: Started = post(
         app,
@@ -8099,6 +8211,139 @@ async fn a_comment_left_while_the_review_runs_is_answered_rather_than_settled_ov
     assert!(
         told.contains("Rename the window field."),
         "and it was sent what was written while the review ran: {told}",
+    );
+}
+
+/// A green rollup about a commit that is not the one origin is holding settles
+/// nothing: it is the suite of the commit before the push rather than of the
+/// work.
+///
+/// GitHub answers a pull request as its own record stands, and that record runs
+/// behind the branch for a while after a push. So *green* on its own is not a
+/// fact about the branch — it is a fact about whichever commit GitHub named
+/// beside it, and a wrap-up that took the one for the other would reach Done
+/// over work nothing has ever checked. This was watched happening on Verkstead's
+/// own pull request on 2026-08-29, three commits behind and green.
+#[tokio::test]
+async fn a_rollup_about_a_commit_that_is_not_what_was_pushed_settles_nothing() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let head = spill.path().join("reported-head");
+
+    let fixture = grilling_pushing(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(&green_for(&head), "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("the work has a worktree")
+            .path,
+    );
+
+    // The branch as origin holds it — and then GitHub asked about, and answering
+    // for the commit before it. Nothing is said about the checks at all until
+    // this is written, so there is no window in which the wrap-up could have
+    // settled on something else.
+    git(&worktree, &["push", "--quiet", "origin", "HEAD"]);
+    std::fs::write(&head, git(&worktree, &["rev-parse", "HEAD~1"])).unwrap();
+
+    // Long enough for many polls of a pull request answering green every time.
+    pause(Duration::from_millis(1500)).await;
+
+    assert!(
+        !checks_settled(&fixture).await,
+        "a suite belonging to another commit is not this branch's suite",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "so the wrap-up waits for the run for what was pushed",
+    );
+
+    // And the moment GitHub catches up, it is the same green suite and it counts.
+    std::fs::write(&head, git(&worktree, &["rev-parse", "HEAD"])).unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+}
+
+/// And a pull request that had a suite and now reports none has a run that has
+/// not been created, rather than no CI.
+///
+/// The gap the head above cannot catch: GitHub takes a commit before it makes
+/// the runs for it, and in between it names the new commit and reports nothing
+/// against it. *Nothing is running against this* is read as green on purpose —
+/// a repository with no CI is nothing for a wrap-up to wait on — so the only
+/// thing that tells the two apart is that this one was reporting a suite a
+/// moment ago.
+#[tokio::test]
+async fn checks_that_have_gone_from_a_pull_request_that_had_them_settle_nothing() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let landed = spill.path().join("landed");
+
+    let review = format!(
+        "{REVIEW_THEN_FIX}\n    printf 'x' > {landed}",
+        landed = quoted(&landed),
+    );
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, &review),
+        &gh_about(&green_until_nothing_is_reported(&landed), "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    // Which is what the review session was waiting on: it lands the fix, pushes
+    // it, and the pull request goes back to reporting nothing.
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !landed.exists() {
+        assert!(Instant::now() < deadline, "the review never landed its fix");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Long enough for many polls of a pull request reporting nothing.
+    pause(Duration::from_millis(1500)).await;
+
+    assert!(
+        !checks_settled(&fixture).await,
+        "a pull request that had a suite and now has none has a run still coming",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "so the wrap-up waits for it rather than finishing over the fix",
     );
 }
 
