@@ -111,10 +111,14 @@ async fn sweep(state: &AppState) {
     let working = state.sessions.working();
 
     for conversation in conversations {
-        if state
-            .drivers
-            .driven(&working, conversation.id, conversation.state)
-        {
+        // As the resume sweep does: a state word nobody can read is not one to
+        // weigh a stall against. The sidebar carries the row so it can be
+        // ended, and nothing unattended acts on it.
+        let Some(lifecycle) = conversation.state.known() else {
+            continue;
+        };
+
+        if state.drivers.driven(&working, conversation.id, lifecycle) {
             continue;
         }
 
@@ -149,7 +153,7 @@ async fn sweep(state: &AppState) {
             continue;
         }
 
-        stalled(state, conversation.id, conversation.state).await;
+        stalled(state, conversation.id, lifecycle).await;
     }
 }
 

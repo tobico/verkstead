@@ -62,8 +62,8 @@ pub use companions::{
 };
 pub use conversations::{
     Chosen, Closing, Conversation, ConversationRow, Directing, Edited, Ending, Event, Grilling,
-    Implementing, Landed, Lifecycle, Rebuilding, Role, SetOnTimeline, Settling, Staged, Steer,
-    Steering, TimelineEvent, adopting, ask, asked_from, close_conversation, conversations,
+    Implementing, Landed, Lifecycle, Rebuilding, Role, RowState, SetOnTimeline, Settling, Staged,
+    Steer, Steering, TimelineEvent, adopting, ask, asked_from, close_conversation, conversations,
     follow_up_over, implement_again, last_batch_proposal, last_proposal, load_conversation, note,
     open_set, pick_direction, record_backlog, record_handoff, record_roadmap, rename_branch,
     save_brief, set_asked_from, set_base_commit, set_grilling_pairing, set_implementation_pairing,
