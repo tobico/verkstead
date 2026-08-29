@@ -1,14 +1,16 @@
-//! How wide the workbench's panes stand, and where that is remembered.
+//! How wide the three panes stand, and where that is remembered.
 //!
-//! Widths are shares of the workbench rather than lengths: a column fixed in
-//! `rem` is the same column on a laptop and on a thirty-inch screen, and the
-//! whole reason for dragging one is that those are not the same window. So
-//! everything here is a percentage, and the pane that is not named — the
-//! details — takes what the named two leave.
+//! Widths are shares of the frame rather than lengths: a column fixed in `rem`
+//! is the same column on a laptop and on a thirty-inch screen, and the whole
+//! reason for dragging one is that those are not the same window. So everything
+//! here is a percentage, and the pane that is not named — the details — takes
+//! what the named two leave.
 //!
 //! Kept per device, beside the wrap setting and the answer sheets' drafts, and
 //! never sent to the server: how wide a phone draws a list has nothing to say
-//! about how wide a desktop should.
+//! about how wide a desktop should. One pair for the device rather than one per
+//! page: the frame is the same frame wherever it stands, and a human who has
+//! dragged the conversations narrower has said how wide they want it.
 //!
 //! None of this knows what a pane holds or how many of them are drawn. It is
 //! arithmetic over two numbers, and the layout it is arithmetic *for* arrives
@@ -17,11 +19,11 @@
 //! so that the page and the rules cannot come to disagree about which layout is
 //! standing.
 
-import { forget, read, write } from "../device";
+import { forget, read, write } from "./device";
 
 /// From here the sidebar stands beside the level being read, and the divider
-/// between the two can be dragged. Below it the workbench pages one pane at a
-/// time: nothing stands beside anything, so there are no dividers to drag and
+/// between the two can be dragged. Below it the frame pages one pane at a time:
+/// nothing stands beside anything, so there are no dividers to drag and
 /// whatever this device remembers is left where it is.
 export const BESIDE = "(min-width: 60rem)";
 
@@ -31,39 +33,44 @@ export const ALL_THREE = "(min-width: 80rem)";
 
 /// Which divider a drag is of — named for the pane on its left, which is the
 /// one whose width the drag decides.
-export type Divider = "sidebar" | "timeline";
+export type Divider = "sidebar" | "middle";
 
 /// Where each width lives. Namespaced like everything else this app leaves in a
 /// browser.
+///
+/// The middle one is still under the name it was written under, when the only
+/// frame there was was the workbench's and the pane between the two dividers
+/// was the Timeline. A device that has dragged it has the width under that key
+/// and nothing else; renaming it here would be a width quietly forgotten.
 const KEYS: Record<Divider, string> = {
   sidebar: "verkstead.pane-sidebar",
-  timeline: "verkstead.pane-timeline",
+  middle: "verkstead.pane-timeline",
 };
 
-/// The two widths together: the conversations pane and the timeline pane, each
-/// as a percentage of the workbench.
+/// The two widths together: the conversations pane and the middle pane, each as
+/// a percentage of the frame.
 export type Widths = Record<Divider, number>;
 
 /// What they are worth with nobody having said otherwise — the 15rem and 25rem
 /// the columns used to be fixed at, as shares of the 80rem window the third
 /// pane arrives at, rounded to numbers a person could have chosen.
-export const DEFAULTS: Widths = { sidebar: 20, timeline: 30 };
+export const DEFAULTS: Widths = { sidebar: 20, middle: 30 };
 
 /// And the least each pane may be left with. A divider dragged to the end of
 /// its travel leaves the pane beyond it narrow rather than gone: a pane with no
 /// width is a pane the human cannot find the divider of again.
-export const MINIMUMS = { sidebar: 10, timeline: 15, details: 20 } as const;
+export const MINIMUMS = { sidebar: 10, middle: 15, details: 20 } as const;
 
 /// The widths this device last settled on, or the defaults where it has settled
 /// on nothing.
 ///
-/// Anything that is not a number strictly between nothing and the whole
-/// workbench reads as unset — a storage somebody has edited by hand, or one
-/// written by a version of this page that meant something else by the key.
-/// Unclamped, deliberately: what a width is allowed to be depends on how many
-/// panes are standing, which is [`clamped`]'s question rather than this one's.
+/// Anything that is not a number strictly between nothing and the whole frame
+/// reads as unset — a storage somebody has edited by hand, or one written by a
+/// version of this page that meant something else by the key. Unclamped,
+/// deliberately: what a width is allowed to be depends on how many panes are
+/// standing, which is [`clamped`]'s question rather than this one's.
 export function widths(): Widths {
-  return { sidebar: held("sidebar"), timeline: held("timeline") };
+  return { sidebar: held("sidebar"), middle: held("middle") };
 }
 
 function held(divider: Divider): number {
@@ -77,7 +84,7 @@ function held(divider: Divider): number {
 /// Remember what a drag settled on.
 export function remember(settled: Widths): void {
   write(KEYS.sidebar, String(settled.sidebar));
-  write(KEYS.timeline, String(settled.timeline));
+  write(KEYS.middle, String(settled.middle));
 }
 
 /// And take it all away again, which is what a double-click on a divider does:
@@ -85,15 +92,15 @@ export function remember(settled: Widths): void {
 /// one of them.
 export function restore(): void {
   forget(KEYS.sidebar);
-  forget(KEYS.timeline);
+  forget(KEYS.middle);
 }
 
 /// How far a divider may travel: the least the pane on its left may be left
 /// with, and the most it may take.
 ///
 /// With all three panes up, every minimum has to fit beside every other, so the
-/// sidebar may not eat the room the timeline and the details are owed and the
-/// timeline may not eat the details'. With two, there is no timeline to leave
+/// sidebar may not eat the room the middle and the details are owed and the
+/// middle may not eat the details'. With two, there is no middle pane to leave
 /// room for: the second column is whichever pane is being read, and it takes
 /// whatever the sidebar does not.
 ///
@@ -108,20 +115,20 @@ export function range(
     return {
       least: MINIMUMS.sidebar,
       most: three
-        ? 100 - MINIMUMS.timeline - MINIMUMS.details
+        ? 100 - MINIMUMS.middle - MINIMUMS.details
         : 100 - MINIMUMS.details,
     };
   }
 
   return {
-    least: MINIMUMS.timeline,
+    least: MINIMUMS.middle,
     most: 100 - settled.sidebar - MINIMUMS.details,
   };
 }
 
 /// The widths as they may actually be drawn, given how many panes are standing.
 ///
-/// With two, the timeline's width decides nothing, so it is passed through
+/// With two, the middle pane's width decides nothing, so it is passed through
 /// untouched rather than squeezed against a minimum it has no business meeting
 /// yet. That is what keeps a wide sidebar dragged in the two-pane layout from
 /// quietly rewriting the three-pane one.
@@ -131,20 +138,20 @@ export function clamped(settled: Widths, three: boolean): Widths {
   return three
     ? {
         sidebar,
-        timeline: between(
-          settled.timeline,
-          range("timeline", { ...settled, sidebar }, true),
+        middle: between(
+          settled.middle,
+          range("middle", { ...settled, sidebar }, true),
         ),
       }
     : { ...settled, sidebar };
 }
 
-/// Where a divider dropped at `share` of the way across the workbench leaves the
-/// two widths.
+/// Where a divider dropped at `share` of the way across the frame leaves the two
+/// widths.
 ///
 /// The sidebar's divider says where the sidebar ends, so its share *is* the
-/// width. The timeline's says where the timeline ends, which is a share of the
-/// workbench and not of what is left of it, so the sidebar comes off it first.
+/// width. The middle one says where the middle pane ends, which is a share of
+/// the frame and not of what is left of it, so the sidebar comes off it first.
 export function dragged(
   settled: Widths,
   divider: Divider,
@@ -154,7 +161,7 @@ export function dragged(
   const moved: Widths =
     divider === "sidebar"
       ? { ...settled, sidebar: share }
-      : { ...settled, timeline: share - settled.sidebar };
+      : { ...settled, middle: share - settled.sidebar };
 
   return clamped(moved, three);
 }

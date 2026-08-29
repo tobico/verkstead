@@ -48,7 +48,7 @@
    Verkstead, at the foot of the pane under the conversations it is about.
 
    `margin-top: auto` is the whole of what puts it there. The pane is a column —
-   see `.conversationsPane` in `Workbench.module.css` — so the room the list
+   see `.conversationsPane` in `Panes.module.css` — so the room the list
    leaves over is taken above this rather than below it: a short list stands the
    switch against the bottom of the screen, and a long one leaves it after the
    last card, behind the scroll. Nothing is stuck and nothing is laid over the

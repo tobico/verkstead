@@ -123,7 +123,7 @@ import marks from "./Mark.module.css";
 import { PaneHead } from "./PaneHead";
 import { Setup } from "./Setup";
 import styles from "./Timeline.module.css";
-import shell from "./Workbench.module.css";
+import shell from "../Panes.module.css";
 import { WAITING_ON_CHECKS } from "./conditions";
 import { ENDED, STATE } from "./states";
 import { keeping } from "./settling";

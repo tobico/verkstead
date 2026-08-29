@@ -86,7 +86,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import styles from "./Screen.module.css";
-import shell from "./Workbench.module.css";
+import shell from "../Panes.module.css";
 
 export function Screen(props: {
   conversation: ConversationView;

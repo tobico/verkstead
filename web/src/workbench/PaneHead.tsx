@@ -18,7 +18,7 @@
 import { Show, type JSX } from "solid-js";
 
 import styles from "./PaneHead.module.css";
-import shell from "./Workbench.module.css";
+import shell from "../Panes.module.css";
 
 export function PaneHead(props: {
   /// The pane this one was entered from, named as the way back reads it — "←

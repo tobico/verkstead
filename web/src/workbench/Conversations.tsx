@@ -552,7 +552,7 @@ function Settings(): JSX.Element {
 ///
 /// At the foot of the pane, under the list it is about. Pushed there by the
 /// room left over rather than stuck over the cards — see `.showArchived`, and
-/// the column the pane is made into in `Workbench.module.css` — so a list that
+/// the column the pane is made into in `Panes.module.css` — so a list that
 /// does not fill the screen leaves this against the bottom of it, and a list
 /// that does leaves it after the last card, behind the scroll. A strip laid
 /// across the list would have covered a card for the whole life of the pane to

@@ -4,7 +4,7 @@
 
    What is *not* here is the panes themselves — the grid they stand in, which of
    them is drawn at which width, the divider between two of them, and what a pane
-   does with the block stuck to the top of it. That is `Workbench.module.css`,
+   does with the block stuck to the top of it. That is `Panes.module.css`,
    and what a header is to a pane is said there in one rule rather than in the
    two halves this file and the one stylesheet used to hold: the header wears the
    frame's `paneChrome` name — see `PaneHead.tsx` — and the way back out of a
@@ -47,7 +47,7 @@
 /* From 80rem all three panes stand together, so there is nowhere left to go
    back to. The width before it takes the timeline's away on its own — the
    conversations are on screen by then — and that one is said in
-   `Workbench.module.css`, where the pane it names is. */
+   `Panes.module.css`, where the pane it names is. */
 @media (min-width: 80rem) {
   .back {
     display: none;

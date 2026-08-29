@@ -41,7 +41,7 @@ import outputPane from "../src/workbench/Output.module.css";
 import prPane from "../src/workbench/PullRequest.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
 // The panes themselves, for the one an Event is opened into.
-import shell from "../src/workbench/Workbench.module.css";
+import shell from "../src/Panes.module.css";
 import { drawn } from "./bench";
 import {
   askedFor,

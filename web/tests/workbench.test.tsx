@@ -138,8 +138,8 @@ import timeline from "../src/workbench/Timeline.module.css";
 import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // And the frame the three panes stand in, both ways: it holds the layout rules
 // jsdom lays nothing out for, and the pane names everything else is found by.
-import shell from "../src/workbench/Workbench.module.css";
-import shellCss from "../src/workbench/Workbench.module.css?raw";
+import shell from "../src/Panes.module.css";
+import shellCss from "../src/Panes.module.css?raw";
 import {
   ABBREVIATED,
   CLAMPED_LINES,
@@ -281,7 +281,7 @@ function readAgain(): void {
 
 /// The frame, which is what says which level a narrow window is showing.
 function frame(container: ParentNode): HTMLElement {
-  return container.querySelector(`.${shell.workbench}`)!;
+  return container.querySelector(`.${shell.panes}`)!;
 }
 
 /// Open the conversation's action menu: press the trigger, and wait for what it
@@ -3397,7 +3397,7 @@ describe("the panes on a narrow window", () => {
 
     fireEvent.click(screen.getByText(DRAFTING.branch));
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("timeline"),
+      expect(frame(container).dataset.pane).toBe("middle"),
     );
 
     // The third level is the open Event's own, and nothing is open: there is
@@ -3425,7 +3425,7 @@ describe("the panes on a narrow window", () => {
 
     fireEvent.click(screen.getByText(DRAFTING.branch));
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("timeline"),
+      expect(frame(container).dataset.pane).toBe("middle"),
     );
     expect(history.get()).toBe(`/conversations/${DRAFTING.id}`);
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
@@ -3438,7 +3438,7 @@ describe("the panes on a narrow window", () => {
 
     fireEvent.click(screen.getByText(DRAFTING.branch));
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("timeline"),
+      expect(frame(container).dataset.pane).toBe("middle"),
     );
   });
 
@@ -3456,7 +3456,7 @@ describe("the panes on a narrow window", () => {
     expect(frame(container).dataset.pane).toBe("details");
 
     fireEvent.click(screen.getByRole("button", { name: "← Timeline" }));
-    expect(frame(container).dataset.pane).toBe("timeline");
+    expect(frame(container).dataset.pane).toBe("middle");
 
     // Still open, so the way forward is there to be taken again.
     fireEvent.click(screen.getByRole("button", { name: "Details →" }));
@@ -3470,7 +3470,7 @@ describe("the panes on a narrow window", () => {
     const { container, history } = mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
 
-    expect(frame(container).dataset.pane).toBe("timeline");
+    expect(frame(container).dataset.pane).toBe("middle");
 
     history.set({ value: "/" });
     await waitFor(() =>
@@ -3481,11 +3481,11 @@ describe("the panes on a narrow window", () => {
   /// What `data-pane` means is the stylesheet's, and there is nothing to query
   /// it off: jsdom lays nothing out. So the rules themselves are what is read.
   it("is one pane at a time until the window is wide enough for more", () => {
-    expect(shellCss).toContain(".workbench > .pane {\n  display: none;\n}");
+    expect(shellCss).toContain(".panes > .pane {\n  display: none;\n}");
     expect(shellCss).toContain(
-      '.workbench[data-pane="conversations"] > .conversationsPane,\n' +
-        '.workbench[data-pane="timeline"] > .timelinePane,\n' +
-        '.workbench[data-pane="details"] > .detailsPane {\n' +
+      '.panes[data-pane="conversations"] > .conversationsPane,\n' +
+        '.panes[data-pane="middle"] > .middlePane,\n' +
+        '.panes[data-pane="details"] > .detailsPane {\n' +
         "  display: block;\n}",
     );
 
@@ -5039,7 +5039,7 @@ describe("the strip for the session running now", () => {
   /// Where the strip is found, which is the pane rather than the record: it is
   /// no part of the list of what has happened.
   const strip = (container: HTMLElement) =>
-    container.querySelector(`.${shell.timelinePane} > .${timeline.session}`);
+    container.querySelector(`.${shell.middlePane} > .${timeline.session}`);
 
   it("holds the running session against the foot of the pane", async () => {
     theGrillingOutput({ running: true, idle: false });
@@ -5232,7 +5232,7 @@ describe("watching a live session's screen", () => {
   /// the stylesheet, because jsdom lays nothing out.
   it("gives the Screen the pane's height rather than the page's", () => {
     expect(shellCss).toContain(
-      ".workbench > .detailsPane:has(.paneScreen) {\n" +
+      ".panes > .detailsPane:has(.paneScreen) {\n" +
         "  flex-direction: column;\n" +
         "  height: 100dvh;\n" +
         "  padding-bottom: 1.25rem;\n" +
@@ -5242,7 +5242,7 @@ describe("watching a live session's screen", () => {
 
     // What is above the terminal keeps its size; the Screen takes the rest.
     expect(shellCss).toContain(
-      ".workbench > .detailsPane:has(.paneScreen) > :not(.paneScreen) {\n" +
+      ".panes > .detailsPane:has(.paneScreen) > :not(.paneScreen) {\n" +
         "  flex: none;\n" +
         "}",
     );
@@ -5492,7 +5492,7 @@ describe("putting something into a live session's screen", () => {
 
     expect(container.querySelector('[class*="handBack"]')).toBeNull();
     expect(
-      container.querySelector(`.${shell.timelinePane} .${timeline.blocked}`),
+      container.querySelector(`.${shell.middlePane} .${timeline.blocked}`),
     ).toBeNull();
   });
 });
@@ -7788,7 +7788,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
 
-    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("middle"));
   });
 
   it("shows that commit's diff in the details pane, as the server rendered it", async () => {
@@ -8870,7 +8870,7 @@ describe("the task list opened", () => {
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
 
-    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("middle"));
   });
 
   /// The server refuses cleanly where the worktree or the backlog has gone, and
@@ -9500,7 +9500,7 @@ describe("the stage list opened", () => {
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
 
-    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("middle"));
   });
 
   /// The server refuses cleanly where the worktree or the roadmap has gone, and

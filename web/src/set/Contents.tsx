@@ -27,7 +27,7 @@ import app from "../App.module.css";
 import { Icon } from "../Icon";
 import { BY_HAND, scroller } from "../scrolling";
 import { Switch } from "../Switch";
-import shell from "../workbench/Workbench.module.css";
+import shell from "../Panes.module.css";
 import contents from "./Contents.module.css";
 import type { Entry, Section, Stands, Watched } from "./outline";
 import {
