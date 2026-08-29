@@ -19,7 +19,7 @@ use verkstead_schema::Direction;
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::{DiffView, PairingView, ProfileChoice, RepoEntry, Standing};
+use crate::{DiffView, PairingView, PickedView, ProfileChoice, RepoEntry, Standing};
 
 /// Where a Conversation has got to.
 ///
@@ -49,8 +49,10 @@ pub enum Lifecycle {
 
 /// One row of the conversations sidebar.
 ///
-/// The branch is the row's name: a Conversation has no title of its own, and of
-/// what it does have the branch is the short line the human chose.
+/// The branch is the row's name where somebody has settled on one: a
+/// Conversation has no title of its own, and of what it does have the branch is
+/// the short line a human chose. A draft nobody has named carries a name
+/// Verkstead invented instead, and reads *Draft* — see [`Self::branch_named`].
 ///
 /// Where it has got to is drawn rather than worded — a turning ring for a
 /// session getting on with it, the same ring empty for one that has gone quiet,
@@ -64,6 +66,30 @@ pub enum Lifecycle {
 pub struct ConversationEntry {
     pub id: i64,
     pub branch: String,
+
+    /// Whether that name is one somebody settled on, rather than the one
+    /// Verkstead prefilled the record with.
+    ///
+    /// A name nobody chose says nothing about the work, so a draft carrying one
+    /// is drawn as *Draft* and the name itself is drawn nowhere — in the title
+    /// and in what is read aloud alike. Two drafts against one Repo reading the
+    /// same is what two drafts are. Once the work has started the branch is a
+    /// fact rather than a plan, and a fact is named wherever it is reported.
+    pub branch_named: bool,
+
+    /// And whether the name it is carrying is still the first session's to
+    /// replace.
+    ///
+    /// The work starting is not what makes an invented name worth drawing: the
+    /// first session is told to switch the branch to something the Brief is
+    /// about, and until it has the name says no more than it did while this was
+    /// a draft. So the row goes on reading *Draft* while this is true, and reads
+    /// the branch the moment it is not — the session renamed it, or the session
+    /// ended and the name it left is the one this is called by.
+    ///
+    /// Always `false` where the human typed a name: there was never anything to
+    /// wait for.
+    pub naming: bool,
 
     /// What the Repo this Conversation is against is called.
     pub repo: String,
@@ -232,6 +258,25 @@ pub struct ConversationView {
 
     pub branch: String,
 
+    /// Whether that name is one somebody settled on, rather than the one
+    /// Verkstead prefilled the record with — see
+    /// [`ConversationEntry::branch_named`], which is the same fact drawn as a
+    /// title.
+    ///
+    /// What the pane does about a draft that says no: the header reads *Draft*,
+    /// and the setup card's branch field stands empty under the placeholder
+    /// saying what leaving it empty means. The name itself is drawn nowhere.
+    pub branch_named: bool,
+
+    /// And whether the name it is carrying is still the first session's to
+    /// replace — see [`ConversationEntry::naming`], which is the same fact drawn
+    /// as a title.
+    ///
+    /// The header keeps reading *Draft* through it, the setup card having gone
+    /// by then. What the card would have shown is settled: the branch is cut and
+    /// the field is frozen, whatever the name on it turns out to be.
+    pub naming: bool,
+
     /// The commit the work will branch from, where the human overrode the rule.
     /// `null` is the rule itself: the default branch's tip, as it stands when
     /// grilling starts — which is why there is no value here to show instead.
@@ -250,15 +295,29 @@ pub struct ConversationView {
     /// The Profile and model the grilling session will run under, whole rather
     /// than by id: the pane says what they are, and whether the Profile is
     /// still runnable.
-    pub grilling_pairing: Option<PairingView>,
+    ///
+    /// One of the two roles the picker offers a row that runs no session for,
+    /// so this says which of three the human picked rather than whether they
+    /// picked at all. A Conversation that picked *no grilling* is not grilled:
+    /// its Brief goes straight to an inline implementation.
+    pub grilling_pairing: PickedView,
 
     /// And the ones the implementation will run under. Chosen separately
     /// because it is genuinely a separate account and model.
     pub implementation_pairing: Option<PairingView>,
 
-    /// Whether everything needed before grilling will start is settled: both
-    /// Pairings complete and neither Profile broken, a Brief with something in
-    /// it, and a Conversation still drafting.
+    /// And what the wrap-up's review session will run under, chosen separately
+    /// again: reviewing is a fresh set of eyes on what was built.
+    ///
+    /// The other role the picker offers a row that runs no session for, so this
+    /// says which of three the human picked rather than whether they picked at
+    /// all.
+    pub review_pairing: PickedView,
+
+    /// Whether everything needed before the work will start is settled: every
+    /// role picked — a Pairing complete and no Profile broken, or the row that
+    /// runs no session — a Brief with something in it, and a Conversation still
+    /// drafting.
     ///
     /// The server's rule rather than something the page works out from the
     /// fields around it. Every one of the refusals is checked again when the
@@ -2398,6 +2457,11 @@ pub enum GrillingStarted {
     /// rather than after, because the grilling ends by handing over to it.
     NoImplementationProfile,
 
+    /// Nor for the review the wrap-up runs. Fixed before starting for the same
+    /// reason: what the work is looked at by is settled before the work begins
+    /// rather than swapped underneath it.
+    NoReviewProfile,
+
     /// A chosen Profile's pair is not where it was left, so there is no account
     /// to run the session under.
     ProfileBroken,
@@ -3026,6 +3090,10 @@ pub enum Adopted {
     /// And none is chosen for the implementation, which is what the stage's own
     /// work runs under.
     NoImplementationProfile,
+
+    /// Nor for the review, which is what looks at what the stage built — and
+    /// which every stage after this one inherits along with the other two.
+    NoReviewProfile,
 
     /// A chosen Profile's pair is not where it was left, so there is no account
     /// to run the session under.

@@ -4,21 +4,24 @@
   "base_commit": "9e6cb584eeb157fd49f0c36e00bf87783fa2bfab",
   "blocked_on": 28,
   "branch": "deferred-asks",
+  "branch_named": true,
   "companions": [],
   "direction": null,
   "driven": false,
   "grilling_pairing": {
-    "model": null,
-    "profile": {
-      "agent_type": "Claude",
-      "broken": null,
-      "claude_dir": "/srv/accounts/fable/.claude",
-      "config_file": "/srv/accounts/fable/.claude.json",
-      "id": 1,
-      "models": [
-        "claude-fable-5"
-      ],
-      "name": "fable"
+    "Under": {
+      "model": null,
+      "profile": {
+        "agent_type": "Claude",
+        "broken": null,
+        "claude_dir": "/srv/accounts/fable/.claude",
+        "config_file": "/srv/accounts/fable/.claude.json",
+        "id": 1,
+        "models": [
+          "claude-fable-5"
+        ],
+        "name": "fable"
+      }
     }
   },
   "id": 6,
@@ -37,6 +40,7 @@
       "name": "opus"
     }
   },
+  "naming": false,
   "pinned": [],
   "ready_to_continue": false,
   "ready_to_grill": false,
@@ -49,6 +53,7 @@
     "path": "/srv/repos/verkstead"
   },
   "resets": "3pm",
+  "review_pairing": "Nothing",
   "state": "Implementing",
   "stop_asked": false,
   "stopped_by_hand": false,

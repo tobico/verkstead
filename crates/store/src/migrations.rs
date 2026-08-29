@@ -12,6 +12,12 @@
 //! about, and which pull request a comment somebody was sent to deal with was
 //! left on, are all a pull request's rather than a Conversation's now.
 //!
+//! Three of them are a column arriving rather than rows moving between tables —
+//! the Review role's Profile, the branch name somebody settled on, and whether a
+//! branch is still waiting to be named — which is the same kind of one-time
+//! rewrite: the rows already there are given the value that says what was true
+//! of them before the column existed.
+//!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
 //! rewrites rather than a version number kept somewhere. So a database opened
@@ -31,7 +37,125 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     pull_requests_that_named_no_repo(pool).await?;
     fix_attempts_that_named_no_repo(pool).await?;
     settlements_that_named_no_pull_request(pool).await?;
-    addressed_comments_that_named_no_pull_request(pool).await
+    addressed_comments_that_named_no_pull_request(pool).await?;
+    conversations_that_had_no_review_profile(pool).await?;
+    conversations_whose_branch_name_had_no_owner(pool).await?;
+    conversations_whose_branch_nobody_was_naming(pool).await
+}
+
+/// Give every Conversation written before a branch could be left to its first
+/// session to name the column that says whether one is.
+///
+/// Nobody is: the naming instruction goes out with the start press, and every
+/// row this reaches was started before there was one to go out — see
+/// [`super::Conversation::naming`]. So the column's own default is the whole of
+/// the rewrite, and there is no `UPDATE` under it.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn conversations_whose_branch_nobody_was_naming(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('conversations') WHERE name = ?")
+            .bind("naming")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the branch a Conversation is still having named")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE conversations ADD COLUMN naming INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await
+        .context("settling the branch names the Conversations written before this carry")?;
+
+    Ok(())
+}
+
+/// Give every Conversation written before a branch name had an owner the column
+/// that says whose it is, and record the name each of them is carrying as one
+/// somebody settled on.
+///
+/// A branch name used to be one thing — prefilled randomly, typed over or not,
+/// and drawn either way. It is two now: the name Verkstead invented at creation
+/// and the name somebody settled on, and only the second is ever shown — see
+/// [`super::Conversation::branch_named`]. So every row written before this takes
+/// the name it has as settled, whichever of the two it really was: it is the
+/// name the human has been reading in the sidebar all along, and a Conversation
+/// that started reading *Draft* on account of an upgrade would be one they could
+/// no longer find.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn conversations_whose_branch_name_had_no_owner(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('conversations') WHERE name = ?")
+            .bind("named_branch")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the settled branch name of a Conversation")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE conversations ADD COLUMN named_branch TEXT")
+        .execute(pool)
+        .await
+        .context("giving the Conversations written before this a settled branch name")?;
+
+    sqlx::query("UPDATE conversations SET named_branch = branch")
+        .execute(pool)
+        .await
+        .context("settling the branch names the Conversations written before this carry")?;
+
+    Ok(())
+}
+
+/// Give every Conversation written before there was a Review role the column
+/// that holds it.
+///
+/// A Conversation used to fix two Pairings and now fixes three — one for the
+/// grilling, one for what builds, one for the wrap-up's review — and the third
+/// goes in a column beside the other two rather than in a table of its own,
+/// because [`super::conversations::Role`] names a column per role and a role
+/// whose Profile half lived somewhere else would be two ways of storing the one
+/// choice.
+///
+/// Empty for every row it adds, which is what an unchosen picker is: what was
+/// grilled before this existed was reviewed under the implementation Pairing,
+/// and writing that in would be inventing a choice nobody made.
+///
+/// Which is still where such a Conversation's review runs. The column is empty
+/// and there is no way left to fill it — the pickers froze when its work
+/// started — so a review with none picked is launched under the Implementation
+/// Pairing, above the store. That is what keeps an empty column a choice nobody
+/// made rather than a wrap-up nothing can ever finish.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn conversations_that_had_no_review_profile(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('conversations') WHERE name = ?")
+            .bind("review_profile_id")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the review Profile of a Conversation")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query(
+        "ALTER TABLE conversations
+         ADD COLUMN review_profile_id INTEGER REFERENCES profiles(id)",
+    )
+    .execute(pool)
+    .await
+    .context("giving the Conversations written before this a review Profile")?;
+
+    Ok(())
 }
 
 /// Attribute every commit recorded before Verkstead swept more than one

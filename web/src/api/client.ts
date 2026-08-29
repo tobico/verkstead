@@ -42,6 +42,7 @@ import type {
   RepoEntry,
   Response as Decided,
   Resumed,
+  RoleChoice,
   RoadmapPane,
   Screen,
   SetReading,
@@ -647,13 +648,17 @@ export function deleteProfile(id: number): Promise<ProfileDeleted> {
 }
 
 /// Choose which account and model a conversation's grilling session runs under.
+///
+/// `null` is the picker's own "No grilling" row, which is a choice like any
+/// other rather than the absence of one: the brief goes straight to an inline
+/// implementation.
 export function chooseGrillingPairing(
   id: number,
-  pairing: ProfileChoice,
+  choice: RoleChoice,
 ): Promise<ProfileChosen> {
   return post<ProfileChosen>(
     `/api/ui/conversations/${id}/grilling-pairing`,
-    pairing,
+    choice,
   );
 }
 
@@ -666,6 +671,21 @@ export function chooseImplementationPairing(
   return post<ProfileChosen>(
     `/api/ui/conversations/${id}/implementation-pairing`,
     pairing,
+  );
+}
+
+/// And the one the wrap-up's review runs under, which is a third separate
+/// choice: reviewing is a fresh set of eyes on what was built.
+///
+/// `null` is the picker's own "No review" row, which is a choice like any
+/// other rather than the absence of one.
+export function chooseReviewPairing(
+  id: number,
+  choice: RoleChoice,
+): Promise<ProfileChosen> {
+  return post<ProfileChosen>(
+    `/api/ui/conversations/${id}/review-pairing`,
+    choice,
   );
 }
 

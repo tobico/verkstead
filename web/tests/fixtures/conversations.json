@@ -1,8 +1,10 @@
 [
   {
     "branch": "task-runner",
+    "branch_named": true,
     "id": 5,
     "idle": false,
+    "naming": false,
     "repo": "verkstead",
     "state": "Implementing",
     "unseen": false,
@@ -12,8 +14,10 @@
   },
   {
     "branch": "usage-limits",
+    "branch_named": true,
     "id": 4,
     "idle": false,
+    "naming": false,
     "repo": "verkstead",
     "state": "Implementing",
     "unseen": false,
@@ -23,8 +27,10 @@
   },
   {
     "branch": "outbound-retries",
+    "branch_named": true,
     "id": 3,
     "idle": false,
+    "naming": false,
     "repo": "verkstead",
     "state": "Grilling",
     "unseen": false,
@@ -34,8 +40,10 @@
   },
   {
     "branch": "amber-kestrel",
+    "branch_named": false,
     "id": 2,
     "idle": false,
+    "naming": false,
     "repo": "askance",
     "state": "Draft",
     "unseen": false,
@@ -45,8 +53,10 @@
   },
   {
     "branch": "rate-limiting",
+    "branch_named": true,
     "id": 1,
     "idle": false,
+    "naming": false,
     "repo": "verkstead",
     "state": "Draft",
     "unseen": false,

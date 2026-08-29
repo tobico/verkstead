@@ -749,6 +749,17 @@ impl Sessions {
         // — the grilling one included, which is built nowhere near the rest —
         // so a prompt builder added later cannot forget it.
         let prompt = skills::alongside(prompt, &conversation.branch, &conversation.companions);
+
+        // And, where the branch is still on the name Verkstead invented for it,
+        // the instruction to pick a better one. Here for the reason the listing
+        // above is here — it is not any one prompt's, and the three starts that
+        // can be a Conversation's first session are built in three different
+        // modules — and asked of the record rather than of the press, which is
+        // what makes it the first session's alone: nothing sets that but the
+        // work starting, and the first session to end puts it down. See
+        // [`skills::naming`].
+        let prompt = skills::naming(&prompt, conversation.naming);
+
         let argv = agents.argv(pairing, &prompt, session.as_deref());
         let conversation_id = conversation.id;
 
@@ -971,6 +982,18 @@ impl Sessions {
                         if let Err(error) = watcher.await {
                             tracing::error!(error = ?error, conversation_id, "a branch watcher ended badly");
                         }
+                    }
+
+                    // And the branch name is the Conversation's from here,
+                    // whatever this session did about it. After the sweeps
+                    // rather than before them, because the last of those is
+                    // what follows a rename the session made on its way out —
+                    // and a settle written over a followed rename would say
+                    // nothing anyway. Only the first session of a Conversation
+                    // nobody named ever finds anything to put down; see
+                    // [`store::settle_naming`].
+                    if let Err(error) = store::settle_naming(&pool, conversation_id).await {
+                        tracing::error!(error = ?error, conversation_id, "settling for a branch name failed");
                     }
 
                     // Off the register before the last Nudge, so that a page

@@ -52,7 +52,7 @@
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
 //! happened so far, which is exactly where the next thing to happen belongs.
-//! One lives there — `Start grilling` under the Brief it will freeze. What to
+//! One lives there — `Start work` under the Brief it will freeze. What to
 //! do about a conversation Verkstead has finished with is not there: a Steer is
 //! the way back into one, and it hangs off the header with everything else done
 //! to the conversation as a whole.
@@ -125,6 +125,7 @@ import { Setup } from "./Setup";
 import styles from "./Timeline.module.css";
 import shell from "./Workbench.module.css";
 import { WAITING_ON_CHECKS } from "./conditions";
+import { titled } from "./naming";
 import { ENDED, STATE } from "./states";
 import { keeping } from "./settling";
 import { windowed } from "./windowing";
@@ -187,12 +188,15 @@ const GRILL_REFUSAL: Record<
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
-  NoGrillingProfile: "Choose a grilling profile and model first, on the brief.",
+  NoGrillingProfile:
+    "Pick a grilling profile and model — or No grilling — first, on the brief.",
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
+  NoReviewProfile:
+    "Pick a review profile and model — or No review — first, on the brief.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
-  EmptyBrief: "Write the brief first — it is what the grilling starts from.",
+  EmptyBrief: "Write the brief first — it is what the work starts from.",
   FetchFailed:
     "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
   NoBaseCommit: "The repo has nothing to branch from any more.",
@@ -398,10 +402,14 @@ export function Timeline(props: {
       <div class={shell.paneChrome}>
         {/* The way back out of this level, which is the whole of what a narrow
             window offers instead of the pane beside it. Drawn always and hidden
-            by the pane head where all three panes are on screen at once. */}
+            by the pane head where all three panes are on screen at once.
+
+            Titled for its branch, or a Draft where nobody has named one — the
+            same rule the sidebar row it was opened from draws, so the card and
+            the header are the one name. */}
         <PaneHead
           back={{ to: "Conversations", go: props.back }}
-          title={props.conversation.branch}
+          title={titled(props.conversation)}
         >
           {/* Where the work got to, for the two states it stops at: a Done
               conversation says *Done* and a closed one says *Closed*, beside
@@ -1979,14 +1987,14 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
         >
-          {start.isPending ? "Starting…" : "Start grilling"}
+          {start.isPending ? "Starting…" : "Start work"}
         </button>
         <Show
           when={ready()}
           fallback={
             <Show when={missing()}>
               <Note>
-                This needs a brief, and both pairings chosen and working.
+                This needs a brief, and every role picked and working.
               </Note>
             </Show>
           }
@@ -2005,7 +2013,7 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
         </Show>
         <Show when={start.isError}>
           <ErrorLine class={styles.failure}>
-            The grilling could not be started: {start.error?.message}
+            The work could not be started: {start.error?.message}
           </ErrorLine>
         </Show>
       </div>
@@ -2032,7 +2040,7 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 /// that reason.
 ///
 /// The setup rides under it while the Conversation is still drafting — the
-/// branch, the base commit and the two pairings — because setting the work up
+/// branch, the base commit and the pairings — because setting the work up
 /// and kicking it off are one act, and this is where it is kicked off. Once
 /// grilling starts the card is the Brief alone: everything under it froze at
 /// that moment, so there is nothing there to draw.
@@ -2202,7 +2210,7 @@ function Brief(props: {
       </Show>
 
       {/* Under the brief, and only while the conversation is drafting: the
-          branch, the base commit and the two pairings all freeze when grilling
+          branch, the base commit and the pairings all freeze when grilling
           starts, so past that moment there is nothing here that could be
           changed.
 

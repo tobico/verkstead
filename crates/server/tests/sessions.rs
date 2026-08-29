@@ -46,10 +46,10 @@ use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, CompanionAdded,
     CompanionMode, CompanionModeChosen, CompanionView, ConversationClosed, ConversationSteered,
-    ConversationStopped, ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PinnedEvent,
-    ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size, StageListReached, Started,
-    SteerOpened, Submitted, TaskListEvent, TaskListReached, TimelineEvent, TranscriptView, Turn,
-    Watching,
+    ConversationStopped, ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PickedView,
+    PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size,
+    StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
+    TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::handoffs::Handoffs;
@@ -1360,6 +1360,37 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
     grilling_at_pace(spill, stub, gh, *BRISKLY, &[]).await
 }
 
+/// And the same with the Review picker moved off its Pairing and onto the row
+/// that runs nothing, which is the Conversation that wraps up without a review.
+async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    grilling_however_started(spill, stub, gh, *BRISKLY, &[], Skipping::Unreviewed).await
+}
+
+/// And the same with the *Grilling* picker moved onto its own such row, which is
+/// the Conversation whose press starts the work rather than an interview: it
+/// lands Implementing with a session on the Brief alone.
+async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    grilling_however_started(spill, stub, gh, *BRISKLY, &[], Skipping::Ungrilled).await
+}
+
+/// Which of its two pickers' *no session* rows the Conversation a fixture builds
+/// was moved onto, neither being every fixture but the ones about picking one.
+///
+/// The one thing the builders below differ over, and it is settled on the setup
+/// card while the Brief drafts — which is why it is a parameter of the build
+/// rather than something a test does afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Skipping {
+    /// Every role under a Pairing of its own.
+    UnderEveryPairing,
+
+    /// The human picked *No grilling*, so the press starts the work.
+    Ungrilled,
+
+    /// The human picked *No review*, so the wrap-up runs none.
+    Unreviewed,
+}
+
 /// The same with a read-write companion beside it, for the tests about a
 /// Conversation that ends on a pull request in each: the sessions spill what they
 /// were told somewhere that outlives their worktrees, and `gh` answers for both
@@ -1389,6 +1420,27 @@ async fn grilling_at_pace(
     pace: Pace,
     companions: &[(&str, CompanionMode)],
 ) -> Grilling {
+    grilling_however_started(
+        spill,
+        stub,
+        gh,
+        pace,
+        companions,
+        Skipping::UnderEveryPairing,
+    )
+    .await
+}
+
+/// And the whole of it, `skipping` included — which is the setup card pressed
+/// the way the human presses it, every picker filled and then one of them moved.
+async fn grilling_however_started(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    pace: Pace,
+    companions: &[(&str, CompanionMode)],
+    skipping: Skipping,
+) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace).await;
     let app = &bench.app;
 
@@ -1402,7 +1454,13 @@ async fn grilling_at_pace(
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    bench.under_both_pairings(id).await;
+    bench.under_every_pairing(id).await;
+
+    match skipping {
+        Skipping::UnderEveryPairing => {}
+        Skipping::Ungrilled => bench.ungrilled(id).await,
+        Skipping::Unreviewed => bench.unreviewed(id).await,
+    }
 
     // While it is still drafting, which is the only time a companion can be
     // added or configured — and off the same endpoints the setup card presses.
@@ -1474,26 +1532,68 @@ struct Bench {
 }
 
 impl Bench {
-    /// Fix both Pairings on a Conversation, which is what every one of these
+    /// Fix every Pairing on a Conversation, which is what every one of these
     /// has to have settled before anything will start in it.
     ///
     /// Each role gets a Profile of its own, paired with the first of the models
     /// that Profile lists — see [`profile`], which lists two so that a pick can
     /// move off this one without moving off the Profile.
-    async fn under_both_pairings(&self, id: i64) {
-        for role in ["grilling", "implementation"] {
+    async fn under_every_pairing(&self, id: i64) {
+        for role in ["grilling", "implementation", "review"] {
             let profile = profile(&self.app, self.watched.path(), role).await;
+            let pairing = serde_json::json!({
+                "profile_id": profile,
+                "model": format!("claude-{role}-5"),
+            });
+
+            // Two of the pickers offer a row that is no account at all, so what
+            // they send is which of their rows was picked — see
+            // [`Bench::ungrilled`] and [`Bench::unreviewed`].
+            let picked = match role {
+                "grilling" | "review" => serde_json::json!({ "pairing": pairing }),
+                _ => pairing,
+            };
+
             let chosen: verkstead_render::ProfileChosen = post(
                 &self.app,
                 &format!("/api/ui/conversations/{id}/{role}-pairing"),
-                &serde_json::json!({
-                    "profile_id": profile,
-                    "model": format!("claude-{role}-5"),
-                }),
+                &picked,
             )
             .await;
             assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
         }
+    }
+
+    /// And pick the Grilling picker's other row instead: this Conversation is
+    /// not to be grilled at all, so the press starts the work rather than an
+    /// interview.
+    ///
+    /// Pressed after [`Bench::under_every_pairing`] for the reason
+    /// [`Bench::unreviewed`] is.
+    async fn ungrilled(&self, id: i64) {
+        let chosen: verkstead_render::ProfileChosen = post(
+            &self.app,
+            &format!("/api/ui/conversations/{id}/grilling-pairing"),
+            &serde_json::json!({ "pairing": null }),
+        )
+        .await;
+        assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+    }
+
+    /// And pick the Review picker's other row instead: this Conversation is not
+    /// to be reviewed at all.
+    ///
+    /// Pressed after [`Bench::under_every_pairing`] rather than instead of it,
+    /// which is how the card is used: the picker arrives filled and the human
+    /// moves it to the row that runs nothing.
+    async fn unreviewed(&self, id: i64) {
+        let chosen: verkstead_render::ProfileChosen = post(
+            &self.app,
+            &format!("/api/ui/conversations/{id}/review-pairing"),
+            &serde_json::json!({ "pairing": null }),
+        )
+        .await;
+        assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
     }
 
     /// Register a second repository under the watched directory, and hand back
@@ -1988,6 +2088,77 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
         )),
         "a session works in its Conversation's worktree and nowhere else: {said:?}"
     );
+}
+
+/// A Conversation is started on a branch name Verkstead invented, so its first
+/// session is told to pick a real one — and the record follows the name it
+/// picks, which is what stops it being called a Draft.
+///
+/// The whole of the loop in one press: the instruction goes out under the Brief,
+/// the session renames the branch in its own worktree, and Verkstead reads the
+/// rename off the checkout rather than being told about it.
+#[tokio::test]
+async fn a_first_session_is_told_to_name_the_branch_and_is_followed_to_the_name() {
+    let fixture = grilling(
+        r#"
+        printf 'prompt=%s' "$2"
+        git branch -m rate-limiting
+        "#,
+    )
+    .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(BRIEF),
+        "the Brief is still what the grilling starts from: {said:?}"
+    );
+    assert!(
+        said.contains("# This branch has no name yet"),
+        "and under it, the one thing to do before anything lands on the branch: {said:?}"
+    );
+
+    let branch = fixture
+        .until(|view| (!view.naming).then(|| view.branch.clone()))
+        .await;
+
+    assert_eq!(
+        branch, "rate-limiting",
+        "the record follows the session to the name it picked",
+    );
+}
+
+/// And a first session that reads the instruction and leaves the name alone
+/// settles it: the name it was given is the Conversation's from then on.
+///
+/// Otherwise the Conversation would read *Draft* for the rest of its life, on
+/// the strength of a session that has been and gone.
+#[tokio::test]
+async fn a_first_session_that_renames_nothing_settles_for_the_name_it_was_given() {
+    let fixture = grilling(r#"printf 'prompt=%s' "$2""#).await;
+
+    let prefilled = fixture.view().await.branch;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("# This branch has no name yet"),
+        "the instruction went out all the same: {said:?}"
+    );
+
+    let branch = fixture
+        .until(|view| (!view.naming).then(|| view.branch.clone()))
+        .await;
+
+    assert_eq!(branch, prefilled, "settling for a name is not changing it",);
 }
 
 /// The terminal a session is on, asked from inside the sandbox.
@@ -5728,8 +5899,9 @@ async fn the_review_proposes_its_findings_and_then_fixes_what_was_accepted() {
         "inside the bundled reviewing skill: {told}",
     );
     assert!(
-        started[0].contains("model=claude-implementation-5"),
-        "under the implementation Profile, as every session about the code is: {told}",
+        started[0].contains("model=claude-review-5"),
+        "under the review Profile rather than the one that built it, reviewing \
+         being a fresh set of eyes: {told}",
     );
     assert!(
         started[0].contains("The API has none."),
@@ -6838,6 +7010,13 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
         2,
         "one review per wrap, and the second wrap ran its own: {read_again}",
     );
+    assert!(
+        prompts(&read_again)
+            .iter()
+            .all(|prompt| prompt.contains("model=claude-review-5")),
+        "each of them under the review Pairing, the fresh eyes being what a \
+         review is however many times the branch is looked at: {read_again}",
+    );
 
     let pool = open_database(&fixture.database).await.unwrap();
     let events = verkstead_server::store::timeline(&pool, fixture.id)
@@ -7024,6 +7203,13 @@ async fn a_review_that_split_a_finding_out_sends_the_work_back_to_be_built() {
         prompts(&read_again).len(),
         2,
         "one review per wrap, and the second wrap ran its own: {read_again}",
+    );
+    assert!(
+        prompts(&read_again)
+            .iter()
+            .all(|prompt| prompt.contains("model=claude-review-5")),
+        "each of them under the review Pairing, the fresh eyes being what a \
+         review is however many times the branch is looked at: {read_again}",
     );
 
     let view = fixture.view().await;
@@ -9755,8 +9941,14 @@ async fn nothing_moves_a_stopped_conversation_onto_another_profile() {
     let after = fixture.view().await;
 
     assert_eq!(
-        after.grilling_pairing.map(|pairing| pairing.profile.id),
-        before.grilling_pairing.map(|pairing| pairing.profile.id),
+        after
+            .grilling_pairing
+            .pairing()
+            .map(|pairing| pairing.profile.id),
+        before
+            .grilling_pairing
+            .pairing()
+            .map(|pairing| pairing.profile.id),
     );
     assert_eq!(
         after
@@ -11580,7 +11772,7 @@ async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gril
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    bench.under_both_pairings(id).await;
+    bench.under_every_pairing(id).await;
 
     let adopted: Adopted = post(
         &bench.app,
@@ -18878,5 +19070,364 @@ async fn a_wrap_up_waits_for_every_pull_requests_comments() {
         !batches.exists(),
         "nothing was ever dispatched: nobody said anything on either of them — {:?}",
         std::fs::read_to_string(&batches).ok(),
+    );
+}
+
+/// A Conversation the human picked *No review* for wraps up without a review
+/// session and goes Done on its checks alone.
+///
+/// The review is not skipped over, it is settled: what the rest of a wrap-up
+/// waits on is *the review is over*, and a review that was never to happen is
+/// over the moment the wrap-up looks. Which is what leaves everything else
+/// exactly as it is — nothing further down has to know.
+///
+/// Green all the way through and nothing said, so a review session is the one
+/// thing that could stand between this wrap-up and Done. It never runs, and it
+/// still gets there.
+#[tokio::test]
+async fn a_conversation_with_no_review_wraps_up_without_one_and_reaches_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_unreviewed(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        !reviews.exists(),
+        "no session was ever put inside the reviewing skill: {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+    );
+    assert!(
+        review_settled(&fixture).await,
+        "and the review is settled all the same, which is what carries the rest",
+    );
+    assert_eq!(
+        sets(&view).len(),
+        1,
+        "the only Set on the Timeline is the proposal that ended the grilling",
+    );
+    assert_eq!(fixes(&view), 0, "nothing was dispatched to fix anything");
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// And what is said on its pull request is still answered, by the batch session
+/// that always answers it.
+///
+/// With no review there is nothing to fold the comments into, so every one of
+/// them is a batch's from the moment it lands. The wrap-up then narrows to
+/// waiting on its checks, which here can never be asked about — the same
+/// condition a reviewed wrap-up down to its suite is in.
+#[tokio::test]
+async fn a_wrap_up_with_no_review_answers_what_was_said_and_narrows_to_its_checks() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = grilling_unreviewed(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh_about(CHECKS_UNANSWERABLE, THREE_COMMENTS, ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let said = until_written(&batches).await;
+
+    assert!(
+        said.contains("Rename the window field."),
+        "the batch session was sent what was written on the pull request: {said}",
+    );
+    assert!(
+        !reviews.exists(),
+        "and no review read it first: {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+    );
+
+    let view = fixture
+        .until(|view| view.waiting_on_checks.then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "which is a condition of Wrapping rather than a state of its own",
+    );
+    assert!(
+        comments_settled(&fixture).await,
+        "nothing said is left for anybody to be sent about",
+    );
+    assert!(
+        !checks_settled(&fixture).await,
+        "and the checks are the one thing left, which nothing can even ask about",
+    );
+}
+
+/// And a red check costs it exactly what it costs any other wrap-up: a fix
+/// session, dispatched under the Implementation Pairing.
+///
+/// Reviewing is a fresh set of eyes and fixing is building, so picking the eyes
+/// away leaves the building where it was.
+#[tokio::test]
+async fn a_wrap_up_with_no_review_still_dispatches_a_fix_session_at_a_red_check() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("fix-prompts");
+
+    let fixture = grilling_unreviewed(
+        spill,
+        &a_backlog_then_fixes(&written),
+        &gh_checking("FAILURE"),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let sent = until_written(&written).await;
+
+    assert!(
+        sent.contains("addressing/SKILL.md"),
+        "a fix session, inside the addressing skill as ever: {sent}",
+    );
+    assert!(
+        sent.contains("model=claude-implementation-5"),
+        "and under the Implementation Pairing, which is what builds: {sent}",
+    );
+}
+
+/// And a stage inherits *No review* the way it inherits the Pairings beside it:
+/// through the one act that gives it all three.
+///
+/// A stage has no draft moment of its own, so the inheritance funnel is the only
+/// place the pick could come from — and one that arrived reviewed would be a
+/// roadmap the human turned reviewing off for reviewing every stage of it.
+#[tokio::test]
+async fn a_stage_inherits_the_no_review_its_roadmap_was_grilled_with() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_unreviewed(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+
+    assert_eq!(
+        stage.review_pairing,
+        PickedView::Skipped,
+        "the row its roadmap was grilled on, and so the row its stages run on",
+    );
+    assert_eq!(
+        stage
+            .implementation_pairing
+            .as_ref()
+            .map(|pairing| pairing.profile.name.clone()),
+        Some("implementation".to_owned()),
+        "with the roles beside it inherited as they always were",
+    );
+}
+
+/// The stub a Conversation started with *No grilling* runs: one session, on the
+/// implementation skill, which writes down what it was told and does the work.
+///
+/// Cased on the skill for the sake of what comes after it — the wrap-up's review
+/// session runs on this stub too, and a second `git commit` with nothing to
+/// commit would be a failure inside the thing under test.
+fn an_ungrilled_run(prompts: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*implementing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {prompts}
+    printf 'building it\n'
+    printf 'a limiter\n' > limiter.md
+    git add limiter.md
+    git commit --quiet -m 'feat: rate limiting'
+    ;;
+*)
+    printf 'nothing to do\n'
+    sleep 300
+    ;;
+esac
+"#,
+        prompts = quoted(prompts),
+    )
+}
+
+/// A Conversation whose human picked *No grilling*, end to end: the press makes
+/// the branch and the worktree as it always does and lands the Conversation
+/// Implementing, and what runs is one session under the Implementation Pairing,
+/// inside the implementation skill, primed with the Brief and told there was no
+/// interview.
+///
+/// The run from there is an inline implementation and nothing else: the session
+/// commits, carries the branch to a pull request on its way out, and the
+/// Conversation wraps that up exactly as a run the human picked *inline* on at
+/// the end of a grilling does.
+#[tokio::test]
+async fn no_grilling_builds_from_the_brief_alone_and_carries_it_to_a_pull_request() {
+    let spill = tempfile::tempdir().unwrap();
+    let prompts = spill.path().join("implementing-prompts");
+
+    let fixture = building_ungrilled(spill, &an_ungrilled_run(&prompts), PULL_REQUEST).await;
+
+    let worktree = PathBuf::from(fixture.until(|view| view.worktree.clone()).await.path);
+
+    let sent = until_written(&prompts).await;
+
+    assert!(
+        sent.contains("model=claude-implementation-5"),
+        "the work runs under the Implementation Pairing, there being no other: {sent}",
+    );
+    assert!(
+        sent.contains("implementing/SKILL.md"),
+        "and inside the bundled implementation skill: {sent}",
+    );
+    assert!(
+        sent.contains(BRIEF),
+        "primed with the Brief, which is the whole of the plan: {sent}",
+    );
+    assert!(
+        sent.contains("Nothing was grilled"),
+        "and told so, rather than left to infer it from a handoff that is not \
+         there: {sent}",
+    );
+    assert!(
+        sent.contains("blocking ask"),
+        "with what to do about what the Brief leaves open: {sent}",
+    );
+
+    let opened = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(opened.number, 41);
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.timeline
+            .iter()
+            .filter_map(|event| match event {
+                TimelineEvent::Moved(moved) => Some(moved.state),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        [Lifecycle::Implementing, Lifecycle::Wrapping],
+        "with no Grilling on the way at all: the press that would have started \
+         an interview started the work",
+    );
+    assert!(
+        git(&worktree, &["log", "--oneline"]).contains("feat: rate limiting"),
+        "which committed what it built",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped on the way: {:?}",
+        notices(&view),
+    );
+}
+
+/// The stub for the ask: a session that builds, then waits on the human the way
+/// one holding a Blocking Ask does.
+fn an_ungrilled_run_that_asks(prompts: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*implementing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {prompts}
+    printf 'reading the brief\n'
+    while [ ! -f /tmp/verkstead/asked ]; do sleep 0.1; done
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        prompts = quoted(prompts),
+    )
+}
+
+/// And a Blocking Ask works from such a session, which is what the prompt tells
+/// it to do with a decision the Brief left open.
+///
+/// The Set lands on this Conversation's Timeline and waits there, and the
+/// session holding it is left alone for as long as it takes — the same condition
+/// a step session's ask puts a run in, which is the point: nothing downstream of
+/// the press knows the interview was skipped.
+#[tokio::test]
+async fn a_blocking_ask_from_an_ungrilled_session_waits_on_the_human() {
+    let spill = tempfile::tempdir().unwrap();
+    let prompts = spill.path().join("implementing-prompts");
+
+    let fixture =
+        building_ungrilled(spill, &an_ungrilled_run_that_asks(&prompts), PULL_REQUEST).await;
+
+    until_written(&prompts).await;
+
+    let set = fixture.ask(A_STEP_QUESTION).await;
+
+    fixture
+        .until(|view| (!sets(view).is_empty()).then_some(()))
+        .await;
+
+    // Several graces of silence, which is what waiting on a human looks like
+    // from outside — and the session is not ended on it.
+    tokio::time::sleep(BRISKLY.proposing * 4).await;
+
+    assert!(
+        anything_told(&fixture).is_empty(),
+        "nothing was typed into a session waiting on the human: {:?}",
+        anything_told(&fixture),
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "the run is where the press left it, with the ask open on it",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped over it: {:?}",
+        notices(&view),
+    );
+
+    assert_eq!(
+        fixture
+            .respond(set, serde_json::json!([{ "label": "Q1", "selected": 1 }]))
+            .await,
+        Submitted::Accepted,
+        "and the human answers it the way they answer any other",
     );
 }

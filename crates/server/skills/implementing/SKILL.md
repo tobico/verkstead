@@ -1,16 +1,26 @@
 ---
 name: implementing
-description: Build work that has already been grilled and settled. Use when a Conversation's direction is to implement inline, and the session is primed with a Brief and the handoff document the grilling wrote.
+description: Build work that has already been settled. Use when a Conversation's direction is to implement inline — primed with a Brief and the handoff document the grilling wrote, or with the Brief alone where there was no grilling.
 ---
 
-Build the work described in the prompt: the Brief it started from, and the
-handoff document the grilling session wrote on its way out.
+Build the work described in the prompt: the Brief it started from, and — where
+there was a grilling — the handoff document that session wrote on its way out.
 
 The handoff is the agreement. Everything in it was settled with the human over a
 whole grilling, so it is the design you are implementing rather than a first
 draft of one — read it as decided. Where it is silent, decide as the codebase
 would: match what is around the change, and prefer the smallest thing that does
 the job.
+
+**A Conversation can be started with no grilling at all**, and one that was says
+so under its Brief. There is no handoff then because there was no interview to
+write one: nothing is missing, and the Brief is the whole of the agreement.
+Which makes it thinner than a handoff by design, so what it leaves genuinely
+open is put to the human as a blocking ask rather than guessed at — a session
+that guesses builds the wrong thing quietly, and one that asks reaches them on
+their phone. That instruction is the prompt's own, under the Brief. Everything
+else here is the same either way: the committing, the pull request and the
+finish below do not care how the work came to be settled.
 
 You start in a worktree of the repository, on a branch of its own. Nothing else
 of the machine is reachable, so there is nothing here to be careful of but the

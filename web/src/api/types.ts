@@ -64,7 +64,7 @@ stage_title: string, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -712,8 +712,10 @@ export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversatio
 /**
  * One row of the conversations sidebar.
  *
- * The branch is the row's name: a Conversation has no title of its own, and of
- * what it does have the branch is the short line the human chose.
+ * The branch is the row's name where somebody has settled on one: a
+ * Conversation has no title of its own, and of what it does have the branch is
+ * the short line a human chose. A draft nobody has named carries a name
+ * Verkstead invented instead, and reads *Draft* — see [`Self::branch_named`].
  *
  * Where it has got to is drawn rather than worded — a turning ring for a
  * session getting on with it, the same ring empty for one that has gone quiet,
@@ -724,6 +726,32 @@ export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversatio
  * the viewer keeps.
  */
 export type ConversationEntry = { id: number, branch: string, 
+/**
+ * Whether that name is one somebody settled on, rather than the one
+ * Verkstead prefilled the record with.
+ *
+ * A name nobody chose says nothing about the work, so a draft carrying one
+ * is drawn as *Draft* and the name itself is drawn nowhere — in the title
+ * and in what is read aloud alike. Two drafts against one Repo reading the
+ * same is what two drafts are. Once the work has started the branch is a
+ * fact rather than a plan, and a fact is named wherever it is reported.
+ */
+branch_named: boolean, 
+/**
+ * And whether the name it is carrying is still the first session's to
+ * replace.
+ *
+ * The work starting is not what makes an invented name worth drawing: the
+ * first session is told to switch the branch to something the Brief is
+ * about, and until it has the name says no more than it did while this was
+ * a draft. So the row goes on reading *Draft* while this is true, and reads
+ * the branch the moment it is not — the session renamed it, or the session
+ * ended and the name it left is the one this is called by.
+ *
+ * Always `false` where the human typed a name: there was never anything to
+ * wait for.
+ */
+naming: boolean, 
 /**
  * What the Repo this Conversation is against is called.
  */
@@ -836,6 +864,27 @@ export type ConversationView = { id: number,
  */
 repo: RepoEntry, branch: string, 
 /**
+ * Whether that name is one somebody settled on, rather than the one
+ * Verkstead prefilled the record with — see
+ * [`ConversationEntry::branch_named`], which is the same fact drawn as a
+ * title.
+ *
+ * What the pane does about a draft that says no: the header reads *Draft*,
+ * and the setup card's branch field stands empty under the placeholder
+ * saying what leaving it empty means. The name itself is drawn nowhere.
+ */
+branch_named: boolean, 
+/**
+ * And whether the name it is carrying is still the first session's to
+ * replace — see [`ConversationEntry::naming`], which is the same fact drawn
+ * as a title.
+ *
+ * The header keeps reading *Draft* through it, the setup card having gone
+ * by then. What the card would have shown is settled: the branch is cut and
+ * the field is frozen, whatever the name on it turns out to be.
+ */
+naming: boolean, 
+/**
  * The commit the work will branch from, where the human overrode the rule.
  * `null` is the rule itself: the default branch's tip, as it stands when
  * grilling starts — which is why there is no value here to show instead.
@@ -854,17 +903,32 @@ companions: Array<CompanionView>, state: Lifecycle,
  * The Profile and model the grilling session will run under, whole rather
  * than by id: the pane says what they are, and whether the Profile is
  * still runnable.
+ *
+ * One of the two roles the picker offers a row that runs no session for,
+ * so this says which of three the human picked rather than whether they
+ * picked at all. A Conversation that picked *no grilling* is not grilled:
+ * its Brief goes straight to an inline implementation.
  */
-grilling_pairing: PairingView | null, 
+grilling_pairing: PickedView, 
 /**
  * And the ones the implementation will run under. Chosen separately
  * because it is genuinely a separate account and model.
  */
 implementation_pairing: PairingView | null, 
 /**
- * Whether everything needed before grilling will start is settled: both
- * Pairings complete and neither Profile broken, a Brief with something in
- * it, and a Conversation still drafting.
+ * And what the wrap-up's review session will run under, chosen separately
+ * again: reviewing is a fresh set of eyes on what was built.
+ *
+ * The other role the picker offers a row that runs no session for, so this
+ * says which of three the human picked rather than whether they picked at
+ * all.
+ */
+review_pairing: PickedView, 
+/**
+ * Whether everything needed before the work will start is settled: every
+ * role picked — a Pairing complete and no Profile broken, or the row that
+ * runs no session — a Brief with something in it, and a Conversation still
+ * drafting.
  *
  * The server's rule rather than something the page works out from the
  * fields around it. Every one of the refusals is checked again when the
@@ -1140,7 +1204,7 @@ export type Direction = "inline" | "task-list" | "roadmap";
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -1318,7 +1382,7 @@ text_html: string, recommended: boolean,
 cells: Array<string>, };
 
 /**
- * One of a Conversation's two Pairings, as the page shows it: the Profile
+ * One of a Conversation's Pairings, as the page shows it: the Profile
  * whole, and the model paired with it.
  *
  * The Profile whole rather than by id because the pane says what it is and
@@ -1339,6 +1403,18 @@ export type PairingView = { profile: ProfileEntry,
 model: string | null, };
 
 /**
+ * What a Conversation has settled about one of its roles, as the page shows
+ * it: the Pairing its sessions run under, that the role runs none, or nothing
+ * picked yet.
+ *
+ * Three rather than a nullable Pairing, because a picker offers *no grilling*
+ * or *no review* as a row of its own: a Conversation that picked one is as
+ * ready to start as one that picked a Pairing, and a page that could not tell
+ * it from an empty picker would draw the placeholder over a settled choice.
+ */
+export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
+
+/**
  * An Event the Timeline keeps in view rather than letting scroll past.
  *
  * A fixed set — a task list, a stage list and a PR — and no manual pin or
@@ -1352,7 +1428,7 @@ model: string | null, };
 export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
 /**
- * Which Profile and model a Conversation is pairing for one of its two roles.
+ * Which Profile and model a Conversation is pairing for one of its roles.
  */
 export type ProfileChoice = { profile_id: number, 
 /**
@@ -1834,6 +1910,15 @@ stages: Array<StageDocument>,
  * them, as [`BacklogPane::diagrams`] is.
  */
 diagrams: boolean, };
+
+/**
+ * Which Pairing one of a Conversation's roles runs under, or that it runs none.
+ *
+ * `null` is the row that runs no session: a picker that offers one offers it
+ * beside the Pairings, so the one press that picks either sends the same body
+ * — see [`PickedView`].
+ */
+export type RoleChoice = { pairing: ProfileChoice | null, };
 
 /**
  * One session's Screen: the grid its Capture leaves on a terminal.

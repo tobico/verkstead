@@ -510,7 +510,7 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
             id,
             Steer {
                 target: Lifecycle::Grilling,
-                pairing: None,
+                pairings: &[],
                 brief: Some("# Rate limiting, per account\n"),
                 instruction: None,
                 direction: None,
