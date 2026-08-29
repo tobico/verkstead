@@ -1,5 +1,8 @@
 # Agent backends beyond Claude Code
 
+Amends [ADR-0001](0001-blocking-cli-for-agent-integration.md): the blocking
+CLI is no longer every backend's channel.
+
 Verkstead runs its sessions on one coding agent, and the `AgentType`
 discriminator has sat in the Profile with one value in it since the store was
 written — "so a second backend slots in beside `claude` rather than having to
