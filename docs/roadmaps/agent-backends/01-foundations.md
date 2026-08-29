@@ -22,6 +22,13 @@ stage:
   bundled skills themselves — and the skills' Claude-specific wording is
   generalised as part of it, since stage 02's Guide tailoring is where
   per-backend advice will live instead.
+- **The account's own skills stay hidden.** The old mount covered
+  `~/.claude/skills`, and `skills.rs` says why in as many words: a Profile is
+  an account to run as rather than a second opinion about how to work. A mount
+  that has moved covers nothing, so an empty directory is bound read-only over
+  `~/.claude/skills` beside the new one — otherwise a Claude session
+  rediscovers whatever the Profile's account directory keeps, an older fork of
+  Verkstead's own skills included.
 - **Verkstead passes the bypass flags itself.** Claude's launch line gains
   `--dangerously-skip-permissions` here; the per-type argv mapping this
   stage shapes is where each later backend adds its own. Unattended is the
@@ -39,10 +46,13 @@ stage:
 ## Proposed tasks (provisional)
 
 1. **Move the skills mount and every path that names it.** `/verkstead/
-   skills` in the sandbox, the prompt constants, the skills' own
-   cross-references, and the generalised wording sweep.
+   skills` in the sandbox, the empty directory bound over `~/.claude/skills`
+   in its place, the prompt constants, the skills' own cross-references, and
+   the generalised wording sweep.
    - A Claude session reads the grilling skill from the new path; no bundled
-     skill nor prompt says `~/.claude/skills` anywhere.
+     skill nor prompt names `~/.claude/skills` as somewhere to read a skill
+     from; a skill the Profile's account directory keeps is not visible to the
+     session.
 2. **Pass Claude's bypass flag from the launch line.** Extend the argv
    builder so flags are the backend's to say, and say Claude's.
    - The test suite's stub agents see the flag in the position the mapping
@@ -63,6 +73,9 @@ stage:
 - The skills' cross-reference sweep: grep the bundled skills afresh for
   `~/.claude` — the skill set moves with the product and the list above will
   be stale.
+- How the skills bind is written in `sandbox.rs` (`skills::INSIDE_HOME`, and
+  the ordering comment about landing over whatever `~/.claude/skills` holds) —
+  the empty bind takes that place, and the order still decides.
 - That `/verkstead/bin` is still how the executable reaches the sandbox
   (`Executable`, `sandbox.rs`) — the skills path is chosen to sit beside it.
 - Whether the launch argv is still built in `Agents::argv`

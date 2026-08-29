@@ -108,6 +108,17 @@ never needed to be Claude's, only *a* path the prompt could say.) The skills'
 own Claude-specific wording — background-shell advice and the like — is
 generalised per backend as part of the move.
 
+**The hiding the old mount did is kept, deliberately.** Landing at
+`~/.claude/skills` covered whatever the account had there, and that was the
+point of the path as much as the mounting was: an account's own skills are
+hidden rather than merged with, because a Profile is an account to run as
+rather than a second opinion about how to work. A mount that has moved away
+covers nothing, and a Claude session would find the human's own skills again
+— including an older fork of the ones Verkstead ships, which is the case the
+hiding was for. So an **empty directory is bound read-only over
+`~/.claude/skills`** beside the new mount, and each new backend's own
+discovery path is covered the same way as its stage lands.
+
 ## A Profile is one home directory, except Claude's pair
 
 Each new backend keeps its whole account under one relocatable home — Codex
