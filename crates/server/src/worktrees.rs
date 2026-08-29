@@ -508,6 +508,74 @@ pub(crate) fn healthy(repo: &Path, path: &Path, branch: &str) -> bool {
     head(path).is_some_and(|head| head == format!("refs/heads/{branch}"))
 }
 
+/// The name `branch` has been renamed to in the worktree at `path`, or `None`
+/// where nothing there is a rename.
+///
+/// A session may rename the branch it is working on — the work turning out to
+/// be about something other than the name it was started under — and Verkstead
+/// follows that rather than repairing it. What tells a rename from a breakage
+/// is one reading with two halves: the recorded branch is **gone** from the
+/// repository, and the worktree's HEAD is on another branch. Both, because
+/// either alone is something else entirely. A recorded branch still standing
+/// while HEAD is elsewhere is a checkout that has wandered off the work, and a
+/// detached HEAD holds no name to follow to; each of those is broken and
+/// rebuilds the way it always has — see [`healthy`], which is the reading that
+/// says so.
+///
+/// The mistake to avoid is the mirror of [`healthy`]'s: what follows a yes here
+/// is the record moving to a name read out of a directory, so anything short of
+/// a clear rename is a no. Which is why the recorded branch is asked about with
+/// [`branch_taken`] rather than [`branch_exists`] — a reading that failed says
+/// it may well still be standing, and a branch that is still standing is not
+/// one that has been renamed.
+///
+/// HEAD is read first and on its own, because it settles the ordinary case in
+/// one call: a worktree still on the branch it was made for is every sweep but
+/// the one after a rename.
+pub(crate) fn renamed(repo: &Path, path: &Path, branch: &str) -> Option<String> {
+    let head = head(path)?;
+    let head = head.strip_prefix("refs/heads/")?;
+
+    if head == branch {
+        return None;
+    }
+
+    // The same two questions [`healthy`] asks about the directory: git answers
+    // inside it, and what answers is this Repo. A worktree of somebody else's
+    // repository is no place to read this Conversation's branch name off.
+    let inside = common_git_dir(path)?;
+
+    if common_git_dir(repo).is_some_and(|ours| ours != inside) {
+        return None;
+    }
+
+    if branch_taken(repo, branch) {
+        return None;
+    }
+
+    Some(head.to_owned())
+}
+
+/// Rename whatever branch is checked out at `path` to `branch`, and say whether
+/// it took.
+///
+/// Run in the worktree rather than in the repository, and given one name rather
+/// than two: what is being renamed is whatever that checkout is on. This is how
+/// a mirroring companion's branch is made to match the Conversation's after the
+/// Conversation's own has moved, and a companion checkout is the only thing that
+/// knows what name it is currently under.
+pub(crate) fn rename(path: &Path, branch: &str) -> bool {
+    // Already there is already done, and said here rather than left to git:
+    // this is asked again wherever the act it is part of did not finish, and
+    // what git makes of being asked to rename a branch to the name it already
+    // has is not something to have an opinion about.
+    if head(path).is_some_and(|head| head == format!("refs/heads/{branch}")) {
+        return true;
+    }
+
+    git(path, &["branch", "-m", "--end-of-options", branch]).is_some()
+}
+
 /// Make the worktree at `path` again, checked out on `branch`.
 ///
 /// A worktree is derived state: the branch holds everything that was committed,
@@ -767,6 +835,126 @@ mod tests {
         std::fs::write(&path, "not a worktree\n").unwrap();
 
         assert!(!rebuild(&repo, &path, "rate-limiting"));
+    }
+
+    /// A branch renamed in the worktree reads as a rename, and the reading says
+    /// what it was renamed to.
+    ///
+    /// Which is what a session is asked to do with a name Verkstead invented,
+    /// so this is the ordinary end of the first session of most Conversations
+    /// rather than an edge of anything.
+    #[test]
+    fn a_branch_renamed_in_its_worktree_reads_as_a_rename() {
+        let (dir, repo) = repository();
+        let path = dir.path().join("worktrees/verkstead-verkstead-7f3a");
+
+        assert!(add(&repo, &path, "verkstead-7f3a", "HEAD"));
+        assert_eq!(renamed(&repo, &path, "verkstead-7f3a"), None, "nothing yet");
+
+        run(&path, &["branch", "-m", "rate-limiting"]);
+
+        assert_eq!(
+            renamed(&repo, &path, "verkstead-7f3a").as_deref(),
+            Some("rate-limiting"),
+        );
+        assert!(
+            !healthy(&repo, &path, "verkstead-7f3a"),
+            "which is a checkout the record can no longer describe",
+        );
+        assert!(
+            healthy(&repo, &path, "rate-limiting"),
+            "and one the followed record describes exactly",
+        );
+        assert!(
+            path.exists(),
+            "the directory keeps the name it was made with: it is cosmetic, and \
+             moving a live worktree is another way to fail",
+        );
+    }
+
+    /// The two mismatches that are not renames, and the one thing they have in
+    /// common: there is no name to follow to.
+    ///
+    /// A recorded branch still standing while HEAD is elsewhere is a checkout
+    /// that wandered off the work rather than a branch that moved, and a
+    /// detached HEAD holds no branch name at all. Both are what they always
+    /// were — broken, and rebuilt from the branch the record names.
+    #[test]
+    fn a_mismatch_that_is_not_a_rename_is_still_broken() {
+        for wandered in ["another branch", "a detached HEAD"] {
+            let (dir, repo) = repository();
+            let path = dir.path().join("worktrees/verkstead-rate-limiting");
+
+            assert!(add(&repo, &path, "rate-limiting", "HEAD"));
+
+            match wandered {
+                "another branch" => run(&path, &["checkout", "-b", "elsewhere"]),
+                _ => run(&path, &["checkout", "--detach"]),
+            }
+
+            assert_eq!(
+                renamed(&repo, &path, "rate-limiting"),
+                None,
+                "{wandered} is not a rename",
+            );
+            assert!(
+                !healthy(&repo, &path, "rate-limiting"),
+                "so it reads as broken: {wandered}",
+            );
+            assert!(
+                rebuild(&repo, &path, "rate-limiting"),
+                "and it rebuilds on the branch the record names: {wandered}",
+            );
+            assert!(healthy(&repo, &path, "rate-limiting"), "{wandered}");
+            assert_eq!(
+                path.file_name().unwrap(),
+                "verkstead-rate-limiting",
+                "with the directory still called what it was called: {wandered}",
+            );
+        }
+    }
+
+    /// A worktree of somebody else's repository is no place to read this
+    /// Conversation's branch name off, whatever it says about itself.
+    #[test]
+    fn a_worktree_of_another_repository_is_not_a_rename_of_this_one() {
+        let (dir, repo) = repository();
+        let (elsewhere, other) = repository();
+
+        let path = elsewhere.path().join("worktrees/verkstead-rate-limiting");
+
+        assert!(add(&other, &path, "rate-limiting", "HEAD"));
+        run(&path, &["branch", "-m", "renamed-over-there"]);
+
+        assert_eq!(renamed(&repo, &path, "rate-limiting"), None);
+        assert_eq!(
+            renamed(&other, &path, "rate-limiting").as_deref(),
+            Some("renamed-over-there"),
+            "which is the whole of the difference: the same directory, asked \
+             about by the repository it belongs to",
+        );
+
+        drop(dir);
+    }
+
+    /// A rename is what a checkout is on rather than a pair of names, so one
+    /// already on the name it is being renamed to is one there is nothing to do
+    /// about — and git, asked to rename a branch to its own name, refuses.
+    #[test]
+    fn renaming_a_checkout_to_the_name_it_already_has_is_done_already() {
+        let (dir, repo) = repository();
+        let path = dir.path().join("worktrees/verkstead-companion");
+
+        assert!(add(&repo, &path, "verkstead-7f3a", "HEAD"));
+
+        assert!(rename(&path, "rate-limiting"));
+        assert!(branch_exists(&repo, "rate-limiting"));
+        assert!(!branch_exists(&repo, "verkstead-7f3a"));
+
+        assert!(
+            rename(&path, "rate-limiting"),
+            "asked again, it is still yes"
+        );
     }
 
     /// A repository with one commit on it and a branch to check out, and the

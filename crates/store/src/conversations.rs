@@ -2384,6 +2384,56 @@ pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: Option<&str>) -> 
     Ok(Edited::Saved)
 }
 
+/// The branch a Conversation's work is on right now, and nothing else about it.
+///
+/// [`load_conversation`] answers this too, along with everything else a
+/// Conversation is. This is for the readers that ask over and over — the commit
+/// sweep looks every couple of seconds while a session runs, and the one thing
+/// that can have moved under it is this name.
+///
+/// `None` is no such Conversation.
+pub async fn conversation_branch(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    let branch: Option<(String,)> =
+        sqlx::query_as("SELECT COALESCE(named_branch, branch) FROM conversations WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading the branch of Conversation {id}"))?;
+
+    Ok(branch.map(|(branch,)| branch))
+}
+
+/// Follow the Conversation's branch to the name a session renamed it to.
+///
+/// Not [`rename_branch`]: that is the human naming a branch that has not been
+/// cut yet, and it is refused from the moment there is one. This is the other
+/// direction — the branch has been cut, worked on and renamed in git, and the
+/// record is catching up with what the repository now says. So it is refused
+/// for nothing: whether this is a rename or a broken checkout is decided by
+/// reading git, above the store, and by the time it gets here the branch has
+/// already moved.
+///
+/// Whose the name is does not change with it. A Conversation that started on a
+/// name Verkstead invented is still on one Verkstead is responsible for after a
+/// session picked a better one, and one the human typed is still theirs; what
+/// moves is the name itself, in whichever of the two columns is holding it.
+pub async fn follow_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<()> {
+    sqlx::query(
+        "UPDATE conversations
+         SET branch = ?,
+             named_branch = CASE WHEN named_branch IS NULL THEN NULL ELSE ? END
+         WHERE id = ?",
+    )
+    .bind(branch)
+    .bind(branch)
+    .bind(id)
+    .execute(pool)
+    .await
+    .with_context(|| format!("following the renamed branch of Conversation {id}"))?;
+
+    Ok(())
+}
+
 /// Record the commit a drafting Conversation branches from, or `None` to put it
 /// back on the default-branch rule.
 ///

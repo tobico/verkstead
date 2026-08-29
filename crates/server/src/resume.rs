@@ -163,6 +163,23 @@ pub(crate) async fn resume(
         return Ok(Resumed::NowhereToWork);
     };
 
+    // The branch first, which may not be called what the record says: a session
+    // renames the branch it is working on where the name it was given was
+    // Verkstead's own, and the sweep that ordinarily follows the rename runs
+    // only while a session does. So a server that came up over a rename it never
+    // saw would read the checkout below as broken and try to rebuild it from a
+    // branch that is not there. See [`crate::renames`], which does nothing at
+    // all where nothing was renamed — which is nearly every press.
+    let branch = crate::renames::follow(
+        &state.pool,
+        conversation_id,
+        &conversation.repo.path,
+        &worktree,
+        &conversation.branch,
+    )
+    .await
+    .unwrap_or_else(|| conversation.branch.clone());
+
     // What the record names, though, may be nowhere: a directory deleted,
     // hollowed out, or dropped from the repository's list of worktrees. Which is
     // a Conversation stuck for good under a button whose whole job is to unstick
@@ -177,7 +194,6 @@ pub(crate) async fn resume(
     // sweep that found it undriven meanwhile would stop it all over again.
     let usable = tokio::task::spawn_blocking({
         let repo = conversation.repo.path.clone();
-        let branch = conversation.branch.clone();
         let worktree = worktree.clone();
 
         move || {

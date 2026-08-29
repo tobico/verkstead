@@ -80,6 +80,14 @@ were trying to escape.
 Named for the Repo and what the checkout holds — the branch, or the base a
 detached one stands at — and it lives in the Data Directory rather than inside
 a Watched Path: Verkstead made it, so it goes among Verkstead's own things.
+**A session may rename the branch in its Worktree, and Verkstead follows it.**
+A recorded branch that is gone from the Repo while the checkout sits on another
+branch is a rename: the record moves to the new name, and every mirroring
+Companion Repo's branch is renamed to match in the same act. A recorded branch
+still standing while the checkout is elsewhere, or a checkout on a detached
+HEAD, is a Worktree that has come adrift and rebuilds as it always did. The
+directory keeps the name it was made with either way — it is cosmetic, and
+moving a live Worktree is another way to fail.
 _Avoid_: checkout, working copy, sandbox (that's what runs *in* it), clone
 
 **Data Directory**:

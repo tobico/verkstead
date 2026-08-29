@@ -21,11 +21,11 @@ cosmetic, and moving a live worktree is another way to fail.
 
 ## Acceptance criteria
 
-- [ ] After `git branch -m` in a live Worktree, the record follows: commits
+- [x] After `git branch -m` in a live Worktree, the record follows: commits
       on the new name reach the Timeline and the health check does not
       rebuild the checkout.
-- [ ] Mirroring companion branches are renamed along; a companion branch the
+- [x] Mirroring companion branches are renamed along; a companion branch the
       human named keeps its name.
-- [ ] A mismatch with the recorded branch still standing, or a detached HEAD,
+- [x] A mismatch with the recorded branch still standing, or a detached HEAD,
       still reads as broken and rebuilds; the Worktree directory name is
       unchanged either way.

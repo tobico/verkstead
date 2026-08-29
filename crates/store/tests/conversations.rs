@@ -6,10 +6,11 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{
     Archiving, Closing, Edited, Event, Grilling, Lifecycle, Unarchiving, adopting,
-    archive_conversation, archived, close_conversation, conversations, load_conversation,
-    open_database, register_repo, rename_branch, save_brief, set_base_commit, set_state,
-    show_archived, showing_archived, start_adoption, start_conversation, start_grilling,
-    start_unnamed_conversation, timeline, unarchive_conversation,
+    archive_conversation, archived, close_conversation, conversation_branch, conversations,
+    follow_branch, load_conversation, open_database, register_repo, rename_branch, save_brief,
+    set_base_commit, set_state, show_archived, showing_archived, start_adoption,
+    start_conversation, start_grilling, start_unnamed_conversation, timeline,
+    unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -230,6 +231,80 @@ async fn a_conversation_can_be_started_on_a_name_nobody_has_settled_on() {
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(conversation.branch, "amber-kestrel");
+    assert!(!conversation.branch_named);
+}
+
+/// Following a session's rename moves the name and leaves whose it is where it
+/// was — in either of the two columns a Conversation's branch lives in.
+///
+/// The name Verkstead invented is still Verkstead's after a session picked a
+/// better one; the name the human typed is still theirs. What moves is the
+/// branch, because the branch has moved.
+#[tokio::test]
+async fn following_a_rename_moves_the_name_and_not_whose_it_is() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let verksteads = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+    let theirs = start_conversation(&pool, repo_id, "throttling")
+        .await
+        .unwrap()
+        .unwrap();
+
+    follow_branch(&pool, verksteads, "rate-limiting")
+        .await
+        .unwrap();
+    follow_branch(&pool, theirs, "rate-limiting-too")
+        .await
+        .unwrap();
+
+    let conversation = load_conversation(&pool, verksteads).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "rate-limiting");
+    assert!(!conversation.branch_named);
+
+    let conversation = load_conversation(&pool, theirs).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "rate-limiting-too");
+    assert!(conversation.branch_named);
+
+    assert_eq!(
+        conversation_branch(&pool, theirs).await.unwrap().as_deref(),
+        Some("rate-limiting-too"),
+        "which is the reading everything that only wants the name takes",
+    );
+    assert_eq!(
+        conversation_branch(&pool, theirs + 1000).await.unwrap(),
+        None,
+        "and no such Conversation is no such branch",
+    );
+}
+
+/// Handing a followed name back is still the name the Conversation started on,
+/// rather than the one the session renamed the branch to.
+///
+/// The prefill is what stands when the field is cleared, and following a rename
+/// is not the human typing in it — but it does move the prefill, because the
+/// branch it named is not there any more. So what stands is where the branch
+/// actually is.
+#[tokio::test]
+async fn handing_back_a_name_after_a_rename_leaves_the_branch_that_exists() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    rename_branch(&pool, id, Some("rate-limiting"))
+        .await
+        .unwrap();
+    follow_branch(&pool, id, "throttling").await.unwrap();
+    rename_branch(&pool, id, None).await.unwrap();
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "throttling");
     assert!(!conversation.branch_named);
 }
 
