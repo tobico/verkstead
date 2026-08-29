@@ -38,8 +38,11 @@ project moves fast, re-check everything):
   lines/records verbatim, parsed at render time, Capture the record when
   the store cannot be read.
 - **Usage limits are provider-shaped and retried internally** before
-  anything surfaces; the phrase constant ships empty until observed, and
-  such a stop lands as an ordinary stall meanwhile.
+  anything surfaces; this backend ships with no phrase at all until one is
+  observed, and such a stop lands as an ordinary stall meanwhile. No phrase
+  means the matcher skips the backend, not that it matches an empty string —
+  see stage 04's note on `limits::says_so`, which would otherwise read the
+  first line of anything as a limit.
 
 ## Proposed tasks (provisional)
 

@@ -31,8 +31,13 @@ re-checking):
   directories natively and reads arbitrary paths; the prompt naming
   `/verkstead/skills/...` is enough.
 - **Usage-limit phrase as observed.** The free-tier wording is known, a paid
-  account's is not, and the mechanism ships with the constant empty until a
-  real stop is seen — until then it lands as an ordinary stall.
+  account's is not, and the mechanism ships with **no phrase for this
+  backend** until a real stop is seen — until then it lands as an ordinary
+  stall. No phrase means no match, and the matcher has to say so itself:
+  `limits::says_so` compares the first `EXHAUSTED.len()` characters of a line
+  against the phrase, so an *empty* constant matches the opening of every line
+  and would stop every session on this backend at its first flush. A backend
+  without a phrase is skipped rather than matched against nothing.
 - **Ask and idle are stage 02's mechanisms**; this stage contributes Grok
   Build's idle signature and the proof against the real thing.
 
