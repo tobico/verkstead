@@ -66,8 +66,18 @@ export function App(): JSX.Element {
             under, and the Repos a Conversation is started against. The Repos
             and the Profiles had routes of their own until they were folded in
             here; those paths are no such page now, rather than redirects to
-            this one. */}
-        <Route path="/settings" component={SettingsPage} />
+            this one.
+
+            With a details pane of its own for each thing on it that is opened
+            rather than read, nested for the reason the Conversation's are: the
+            settings are one page across all of them, and a route the router
+            swapped for another would take the middle pane down with it every
+            time a card was pressed. The leaves draw nothing — what they are is
+            what the path says, and the page reads that off the URL. */}
+        <Route path="/settings" component={SettingsPage}>
+          <Route path="/" />
+          <Route path="/github" />
+        </Route>
         {/* One Set as a page of its own, which is what a push notification
             opens: a phone woken by one is being asked about that Set and
             nothing else, so it lands on the Set rather than on the workbench

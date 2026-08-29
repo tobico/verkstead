@@ -34,11 +34,11 @@ task; their conversion to cards and panes is tasks 06–09.
 
 ## Acceptance criteria
 
-- [ ] `/settings` draws all three panes on a wide window, with the shared
+- [x] `/settings` draws all three panes on a wide window, with the shared
       widths and dividers, and walks one pane at a time on a phone with
       "← Conversations" as the way back
-- [ ] The gear in the conversations pane reads as open, and opening a
+- [x] The gear in the conversations pane reads as open, and opening a
       conversation from that pane still works from the settings page
-- [ ] The github card opens the credentials form at `/settings/github` in
+- [x] The github card opens the credentials form at `/settings/github` in
       the details pane — the modal is gone, every refusal still said — and
       the card reads as open while it is

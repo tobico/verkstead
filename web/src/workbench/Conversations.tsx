@@ -35,6 +35,13 @@
 //! and the Repos and the Agent Profiles are in there rather than being a page
 //! each to find.
 //!
+//! And it is drawn on that page as well as on this one, this being the app's
+//! navigation rather than the workbench's furniture: the settings stand on the
+//! same three panes with this pane down the left of them, so the list rides
+//! along while a machine is being set up instead of being left behind by the
+//! trip out to configure it. One component in both places, which is why the
+//! gear asks the URL whether the settings are open rather than being told.
+//!
 //! And at the foot of the pane, under the list rather than over it, the one
 //! setting that is about these conversations rather than about anything else:
 //! whether the ones put away are drawn among them.
