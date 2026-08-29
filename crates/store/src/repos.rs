@@ -11,6 +11,22 @@
 //! filesystem actually means rather than the one somebody typed. That is also
 //! what makes the uniqueness real — two spellings of one directory are one
 //! Repo.
+//!
+//! Taking a Repo away is an **unregistering** rather than a delete: every
+//! Conversation ever started on one names it by id, and a row deleted out from
+//! under them would be a Timeline that could no longer say which repository its
+//! work was done in. So the row stays and is flagged, in a table of its own
+//! beside the registrations — the reason an archiving is a row rather than a
+//! column, said again: there is no migration machinery here and `repos` is
+//! STRICT and left alone. Every read that offers Repos for *new* work goes
+//! through [`registered_repos`], which does not show a flagged one; every read
+//! that resolves a Repo something is already on goes by id, and finds it where
+//! it was.
+//!
+//! Which is also why registering a path a flagged row already holds revives
+//! that row rather than being refused as registered already: the path is still
+//! unique and the Repo is still the same Repo, so a second registration of it
+//! is the human asking for it back.
 
 use std::path::{Path, PathBuf};
 
@@ -34,7 +50,7 @@ pub struct Repo {
     pub default_branch: String,
 }
 
-/// The table the registrations live in.
+/// The tables the registrations live in.
 ///
 /// `path` is unique, which is what makes registering the same repository twice
 /// something the insert refuses rather than something a read-then-write has to
@@ -52,6 +68,21 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the repos table")?;
 
+    // And which of them have been taken away, one row apiece. The row being
+    // there is the whole of the flag, and taking it away again is what reviving
+    // a Repo is — the shape an archived Conversation is kept in, and for the
+    // same reason: `repos` is STRICT and there is no migration machinery here to
+    // add a column with.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS unregistered_repos (
+             repo_id         INTEGER PRIMARY KEY REFERENCES repos(id),
+             unregistered_at TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the unregistered_repos table")?;
+
     Ok(())
 }
 
@@ -61,6 +92,14 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 ///
 /// `None` means this path is registered already. Refused by the unique index
 /// rather than by looking first, so two tabs cannot both get past the look.
+///
+/// A path a Repo that was taken away still holds is the one registration that
+/// is neither of those: the row is revived rather than refused, and it comes
+/// back with the name and the default branch this registration read off the
+/// repository just now — it is the same Repo, and what it has been called since
+/// somebody took it away is a fact about the repository rather than about the
+/// row. The upsert's `WHERE` is what tells the two apart: a row nobody flagged
+/// falls through to doing nothing, which is the refusal above.
 pub async fn register_repo(
     pool: &SqlitePool,
     path: &Path,
@@ -69,25 +108,104 @@ pub async fn register_repo(
 ) -> Result<Option<Repo>> {
     let stored = text(path)?;
 
+    let mut tx = super::writing(pool, "registering a Repo").await?;
+
     let row: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO repos (path, name, default_branch)
          VALUES (?, ?, ?)
-         ON CONFLICT (path) DO NOTHING
+         ON CONFLICT (path) DO UPDATE
+             SET name = excluded.name, default_branch = excluded.default_branch
+             WHERE repos.id IN (SELECT repo_id FROM unregistered_repos)
          RETURNING id",
     )
     .bind(stored)
     .bind(name)
     .bind(default_branch)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("registering the Repo at {}", path.display()))?;
 
-    Ok(row.map(|(id,)| Repo {
+    let Some((id,)) = row else {
+        return Ok(None);
+    };
+
+    // Whichever of the two it was, this Repo is registered now — and for a fresh
+    // one there is no flag to take away, so the delete is what says "registered"
+    // in both cases rather than a branch on which of them happened.
+    sqlx::query("DELETE FROM unregistered_repos WHERE repo_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("reviving the Repo at {}", path.display()))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("registering the Repo at {}", path.display()))?;
+
+    Ok(Some(Repo {
         id,
         path: path.to_owned(),
         name: name.to_owned(),
         default_branch: default_branch.to_owned(),
     }))
+}
+
+/// What became of taking one away.
+///
+/// Named the way [`super::Deleting`] is, because it is the same sentence about
+/// the other thing the settings page configures — and refused for the same kind
+/// of reason: what is being worked on now is not something to take out from
+/// under the work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unregistering {
+    /// Taken off the registry. Every list stops offering it, and every
+    /// Conversation on it goes on saying which repository it was worked in.
+    Unregistered,
+
+    /// There is no registered Repo with that id — including one somebody has
+    /// already taken away, which is a link followed twice rather than a Repo.
+    NoSuchRepo,
+
+    /// A Conversation that is neither Done nor Closed is on it. Work still going
+    /// on in a repository is the reason to keep it registered, so the removal is
+    /// refused rather than the work being left on a Repo nothing offers.
+    InUse,
+}
+
+/// Take a Repo off the registry, if nothing live is being worked in it.
+///
+/// The live count is the one the Repo's own pane shows — [`super::work_on_repo`]
+/// — so what refuses the removal is the same reading the human is looking at
+/// when they press it, rather than a second opinion about what "finished" means.
+pub async fn unregister_repo(pool: &SqlitePool, id: i64) -> Result<Unregistering> {
+    let registered: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM repos
+         WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading the Repo {id}"))?;
+
+    if registered.is_none() {
+        return Ok(Unregistering::NoSuchRepo);
+    }
+
+    if super::work_on_repo(pool, id).await?.live > 0 {
+        return Ok(Unregistering::InUse);
+    }
+
+    sqlx::query(
+        "INSERT INTO unregistered_repos (repo_id, unregistered_at)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (repo_id) DO NOTHING",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .with_context(|| format!("unregistering the Repo {id}"))?;
+
+    Ok(Unregistering::Unregistered)
 }
 
 /// Every registered Repo, by name.
@@ -96,10 +214,16 @@ pub async fn register_repo(
 /// news, it is something to pick out of a list that barely changes, and the
 /// name is what it is looked for by. The id breaks a tie between two
 /// directories of the same name in different places.
+///
+/// One that has been taken away is not on it — this is the read everything
+/// offering Repos for new work goes through, and what was taken away is not on
+/// offer. What is already on one resolves it by id and finds it; see
+/// [`load_repo`].
 pub async fn registered_repos(pool: &SqlitePool) -> Result<Vec<Repo>> {
     let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
         "SELECT id, path, name, default_branch
          FROM repos
+         WHERE id NOT IN (SELECT repo_id FROM unregistered_repos)
          ORDER BY name, id",
     )
     .fetch_all(pool)
@@ -121,8 +245,12 @@ pub async fn registered_repos(pool: &SqlitePool) -> Result<Vec<Repo>> {
 ///
 /// For the reads that are about a Repo rather than about the list of them —
 /// which branches it has, say — where the id came off a row the page was
-/// already holding. `None` is a Repo that is not registered, which is a link
-/// followed after somebody took it away.
+/// already holding. `None` is a Repo that was never registered, which is a link
+/// followed for one that never existed.
+///
+/// A Repo somebody took away is still found here, because this is how everything
+/// already on one resolves it: a Conversation's Timeline goes on saying which
+/// repository its work was done in, whatever the settings list is offering now.
 pub async fn load_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>> {
     let row: Option<(i64, String, String, String)> = sqlx::query_as(
         "SELECT id, path, name, default_branch

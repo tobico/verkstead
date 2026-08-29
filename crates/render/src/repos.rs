@@ -1,5 +1,5 @@
-//! Registering a Repo, the list of the ones that are, and one of them opened:
-//! what the viewer sends and what it is handed back.
+//! Registering a Repo, the list of the ones that are, one of them opened, and
+//! taking one away again: what the viewer sends and what it is handed back.
 //!
 //! Every way registering can be refused is a named outcome rather than a status
 //! code, as answering and locking are — because each of them is a different
@@ -74,7 +74,35 @@ pub enum Registered {
 
     /// That repository is registered already, under this path or another
     /// spelling of it.
+    ///
+    /// A path a Repo that was taken away still holds is not this: registering it
+    /// again revives that Repo, and the answer is [`Registered::Added`].
     AlreadyRegistered,
+}
+
+/// What became of taking one off the registry.
+///
+/// A removal rather than a deletion, which is why nothing here says anything
+/// about a Timeline: every Conversation ever started on a Repo goes on naming
+/// it, and what a removal changes is only what is offered for new work.
+///
+/// Shaped like [`ProfileDeleted`](crate::ProfileDeleted), because it is the same
+/// sentence about the other thing the settings page configures — and refused for
+/// the same kind of reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum RepoRemoved {
+    /// Taken off the registry. Every list stops offering it, and the pane it was
+    /// removed from is spent.
+    Removed,
+
+    /// There is no registered Repo with that id — one somebody has already taken
+    /// away included, which is a pane left open in another tab.
+    NoSuchRepo,
+
+    /// A Conversation that is neither Done nor Closed is on it. Work still going
+    /// on in a repository is the reason to keep it registered.
+    InUse,
 }
 
 /// One registered Repo opened: everything the card cannot hold, read at the

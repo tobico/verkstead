@@ -87,7 +87,7 @@ pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
     store_subscription, vapid_keys,
 };
-pub use repos::{Repo, load_repo, register_repo, registered_repos};
+pub use repos::{Repo, Unregistering, load_repo, register_repo, registered_repos, unregister_repo};
 pub use session_names::session_id;
 pub use stops::{
     Decision, Stopped, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop, stopped,

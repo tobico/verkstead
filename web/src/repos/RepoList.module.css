@@ -232,3 +232,59 @@
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
+
+/* The one press there is to make about a Repo, under everything the pane says
+   about it. Set well below the facts and behind a rule, the way the Profile
+   pane's Remove is: a press that undoes something, standing in among the things
+   it would undo, is one waiting to be made by mistake. */
+.standing {
+  margin-top: 0.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--edge);
+}
+
+/* What removing one actually does, said before it is done: an unregistering
+   rather than a delete, which is the difference between a list getting shorter
+   and work going missing. */
+.standing .note {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Drawn as an outline rather than as the filled button the register is — the
+   way the Profile pane's Remove is, and for the same reason: it undoes rather
+   than does. */
+.actions .remove {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--removed);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.actions .remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.standing .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* And under the pointer, which is the only thing it says before it is pressed:
+   the edge takes the colour the words already have. */
+@media (hover: hover) {
+  .actions .remove:not(:disabled):hover {
+    border-color: var(--removed);
+  }
+}

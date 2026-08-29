@@ -40,6 +40,7 @@ import type {
   PushKey,
   Registered,
   RepoEntry,
+  RepoRemoved,
   RepoView,
   Response as Decided,
   Resumed,
@@ -140,6 +141,17 @@ export function listBranches(repoId: number): Promise<string[]> {
 /// the human.
 export function registerRepo(path: string): Promise<Registered> {
   return post<Registered>("/api/ui/repos", { path });
+}
+
+/// Take one off the registry, which is an unregistering rather than a delete:
+/// every Conversation ever started on it goes on naming it, and what changes is
+/// what is offered for new work. There is nothing to send but its own id, which
+/// is in the path.
+///
+/// The outcome is the answer's body for the reason a registration's is: a Repo
+/// with live work on it is refused for a reason worth saying, and not a failure.
+export function removeRepo(id: number): Promise<RepoRemoved> {
+  return post<RepoRemoved>(`/api/ui/repos/${id}/remove`);
 }
 
 /// The registered Repos holding roadmaps nothing is driving.

@@ -65,6 +65,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // git call or a count, and the list is read on every visit to the
         // settings while a pane is read when somebody opens one.
         .route("/api/ui/repos/{id}", get(repo))
+        // And taking one off the registry, which is the one thing there is to do
+        // to a Repo that is not reading it. Its own path under the Repo rather
+        // than a DELETE on the one above, the way a Profile's removal is a POST
+        // under the Profile: what comes back is a named outcome, and a refusal
+        // is an answer rather than a status.
+        .route("/api/ui/repos/{id}/remove", post(remove_repo))
         .route(
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
@@ -563,6 +569,28 @@ async fn register_repo(
         Err(error) => {
             tracing::error!(error = ?error, "registering a Repo failed");
             unavailable("the Repo could not be registered")
+        }
+    }
+}
+
+/// `POST /api/ui/repos/{id}/remove` — take one off the registry.
+///
+/// Every refusal is a named outcome in the body rather than a status, the way a
+/// Profile's removal answers: a Repo with live work on it is the server saying
+/// no for a reason the pane can put in words, and not a failure.
+///
+/// An id that is not a number is the same answer as an id nothing is registered
+/// under, for the reason the reads above give it a 404: neither names a Repo.
+async fn remove_repo(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(verkstead_render::RepoRemoved::NoSuchRepo).into_response();
+    };
+
+    match crate::repos::remove(&state.pool, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, repo_id = id, "removing a Repo failed");
+            unavailable("the Repo could not be removed")
         }
     }
 }

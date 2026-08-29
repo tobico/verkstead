@@ -94,9 +94,9 @@ export function SettingsPage(): JSX.Element {
   };
 
   /// And a details pane spending itself, which is what a Profile saved or
-  /// removed, or a Repo registered, leaves behind: the pane was asked about
-  /// something that is settled now, so the settings are what stands after it and
-  /// the cards there are what say the work landed.
+  /// removed, or a Repo registered or taken off the registry, leaves behind: the
+  /// pane was asked about something that is settled now, so the settings are what
+  /// stands after it and the cards there are what say the work landed.
   ///
   /// Replacing for the reason opening one does, and over the entry opening one
   /// already wrote: the settings keep the single history entry they were entered
@@ -234,7 +234,13 @@ function Details(props: {
         <RepoPane back={props.back} done={props.done} />
       </Match>
       <Match when={repo()} keyed>
-        {(open) => <RepoDetails repo={open.which} back={props.back} />}
+        {(open) => (
+          <RepoDetails
+            repo={open.which}
+            back={props.back}
+            done={props.done}
+          />
+        )}
       </Match>
       <Match when={profile()} keyed>
         {(open) => (

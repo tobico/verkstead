@@ -1,5 +1,6 @@
 //! Registering a Repo over the viewer's namespace: what gets on the list, what
-//! is refused before it can, and what one of them says when it is opened.
+//! is refused before it can, what one of them says when it is opened, and what
+//! taking one off the registry does to the list it was on.
 //!
 //! Every refusal here is asked of the *server*, through the endpoint, rather
 //! than of the boundary type underneath it — which is the point of the Watched
@@ -16,7 +17,7 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Registered, RepoEntry, RepoView};
+use verkstead_render::{Registered, RepoEntry, RepoRemoved, RepoView};
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
 /// A router watching `watched`, plus the directory holding its database alive.
@@ -86,6 +87,17 @@ async fn listed(app: &Router) -> Vec<RepoEntry> {
 /// The branches of one registered Repo, which is what the base dropdown offers.
 async fn branches(app: &Router, id: i64) -> Vec<String> {
     get(app, &format!("/api/ui/repos/{id}/branches")).await
+}
+
+/// Ask for one to be taken off the registry, and read back what the server made
+/// of that.
+async fn remove(app: &Router, id: i64) -> RepoRemoved {
+    post(
+        app,
+        &format!("/api/ui/repos/{id}/remove"),
+        &serde_json::Value::Null,
+    )
+    .await
 }
 
 async fn get<T: DeserializeOwned>(app: &Router, path: &str) -> T {
@@ -466,4 +478,97 @@ async fn a_repo_that_is_not_there_cannot_be_opened() {
 
         assert_eq!(status, StatusCode::NOT_FOUND, "opening {asked}");
     }
+}
+
+/// A Repo taken off the registry is off every list that offers Repos for new
+/// work — this one, the New conversation menu behind it, and the roadmap notice,
+/// all of which are the same read.
+#[tokio::test]
+async fn a_removed_repo_is_off_the_list() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
+    assert!(listed(&app).await.is_empty());
+
+    // And the roadmap notice, which is a read of its own over the same list.
+    let waiting: Vec<serde_json::Value> = get(&app, "/api/ui/abandoned-roadmaps").await;
+    assert!(waiting.is_empty(), "an unregistered Repo offers nothing");
+}
+
+/// Work still going on in a repository is the reason to keep it registered, so
+/// the removal is refused with the reason the pane says out loud — and the Repo
+/// is where it was.
+#[tokio::test]
+async fn a_repo_with_live_work_on_it_is_refused() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, pool, app) = app_and_pool_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    let going = store::start_conversation(&pool, id, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(remove(&app, id).await, RepoRemoved::InUse);
+    assert_eq!(listed(&app).await.len(), 1, "nothing was taken away");
+
+    // Closed is over, and what is over is no reason to hold the registration.
+    store::set_state(&pool, going, store::Lifecycle::Closed)
+        .await
+        .unwrap();
+
+    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
+}
+
+/// An id nothing is registered under is a named outcome rather than a status:
+/// one already taken away, one that never was, and one that is not a number at
+/// all are the same sentence.
+#[tokio::test]
+async fn there_is_nothing_to_remove_twice() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
+    assert_eq!(remove(&app, id).await, RepoRemoved::NoSuchRepo);
+    assert_eq!(remove(&app, 404).await, RepoRemoved::NoSuchRepo);
+
+    let refused: RepoRemoved = post(
+        &app,
+        "/api/ui/repos/not-a-number/remove",
+        &serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(refused, RepoRemoved::NoSuchRepo);
+}
+
+/// And registering the same repository again brings it back rather than being
+/// refused as registered already — which is what makes a removal something the
+/// human can undo.
+#[tokio::test]
+async fn registering_a_removed_repo_again_brings_it_back() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+
+    let back = listed(&app).await;
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].id, id, "the same Repo, under the id it always had");
 }

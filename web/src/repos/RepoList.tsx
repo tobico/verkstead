@@ -30,6 +30,12 @@
 //! git read or a count, and a list that carried them would pay for all of them
 //! on every visit to this page.
 //!
+//! Taking one away is in the pane that opened it, and it is an unregistering
+//! rather than a delete: Verkstead stops offering the repository and leaves the
+//! directory where it is, so every Conversation ever worked in it goes on saying
+//! which repository that was. Refused while live work is on it, in words, beside
+//! the press — the same way a Profile a Conversation is set to run under is.
+//!
 //! The list and the form read the one query. They are two views of the same
 //! list, and a read apiece would be two reads of it — the cache is what makes
 //! the second caller free. The opened Repo is a read of its own, keyed by the
@@ -45,8 +51,14 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { IconButton } from "../IconButton";
-import { RefusedError, listRepos, loadRepo, registerRepo } from "../api/client";
-import type { Registered, RepoEntry } from "../api/types";
+import {
+  RefusedError,
+  listRepos,
+  loadRepo,
+  registerRepo,
+  removeRepo,
+} from "../api/client";
+import type { Registered, RepoEntry, RepoRemoved } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
@@ -69,6 +81,18 @@ export const REFUSAL: Record<Registered, string> = {
   NoDefaultBranch:
     "That repository has no branch to call its default. Check one out first.",
   AlreadyRegistered: "That repo is registered already.",
+};
+
+/// And what each way of being refused a removal says.
+///
+/// `Removed` is here for completeness of the mapping and never drawn: the pane
+/// is spent by then, and the repo leaving the list behind it is what says the
+/// removal landed.
+export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
+  Removed: "",
+  NoSuchRepo: "That repo is off the registry already.",
+  InUse:
+    "A conversation that is still going is on it. Finish or close that conversation first.",
 };
 
 /// The Repos as they stand, read once for the two panes that draw them.
@@ -188,10 +212,16 @@ function RepoCard(props: {
 
 /// One registered Repo opened, which is the details pane a card leads to.
 ///
-/// Read-only: everything here is the repository's own answer or the store's
-/// count of what has been done in it, and nothing on this pane changes any of
-/// them. Taking a Repo away is the one thing there will be to do to one, and it
-/// arrives here in task 09.
+/// Everything on it but one press is the repository's own answer or the store's
+/// count of what has been done in it. The press is Remove, which is the one
+/// thing there is to *do* to a Repo — and it is an unregistering rather than a
+/// delete: Verkstead stops offering it, the directory is left where it is, and
+/// every Conversation ever worked in it goes on saying so.
+///
+/// That press stands under the facts and behind a rule, the way the Profile
+/// pane's does: a press that undoes something, set among the things it would
+/// undo, is one waiting to be made by mistake. It is refused while live work is
+/// on the Repo, and the refusal is said here, because here is where it was made.
 ///
 /// Its own read rather than the list's row, because none of what it shows is on
 /// that row: the branches are a git call, the counts are a query, and the
@@ -210,7 +240,20 @@ export function RepoDetails(props: {
   /// The way back to the settings, which is a change of level rather than a
   /// navigation: what is open stays open, and the URL goes on saying so.
   back: () => void;
+  /// And what a Repo taken off the registry does, which is a navigation: the
+  /// pane is about something that is not registered any more, and the cards it
+  /// goes back to are what say the removal landed.
+  done: () => void;
 }): JSX.Element {
+  const queries = useQueryClient();
+
+  // What the server said about the last removal asked for, or `null` while none
+  // has been. Nothing clears it: there is one press on this pane, and what
+  // answers a refusal is doing something about the conversation it named.
+  const [refusedRemoval, setRefusedRemoval] = createSignal<RepoRemoved | null>(
+    null,
+  );
+
   const opened = useReading(() => ({
     // The Repo is in the key, so opening another is another query rather than
     // the same one showing the wrong repository for a moment.
@@ -219,6 +262,26 @@ export function RepoDetails(props: {
     // Merged rather than frozen: none of this is the store's alone, and a Nudge
     // is as good a moment as any to hear that a branch was pushed.
     freshness: { reconcile: "id" },
+  }));
+
+  const remove = useMutation(() => ({
+    mutationFn: (id: number) => removeRepo(id),
+    onSuccess: (outcome: RepoRemoved) => {
+      // Whichever it was, this page's account of the Repo is older than the
+      // server's now: a refusal is about work that has moved on, and a removal
+      // is the list changing. The roadmaps waiting go with the Repos, because
+      // they are read off whatever is registered.
+      void queries.invalidateQueries({ queryKey: ["repos"] });
+      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+      void queries.invalidateQueries({ queryKey: ["repo", props.repo] });
+
+      if (outcome !== "Removed") {
+        setRefusedRemoval(outcome);
+        return;
+      }
+
+      props.done();
+    },
   }));
 
   /// Whether there is simply no such Repo, which the server says with a 404 —
@@ -316,6 +379,45 @@ export function RepoDetails(props: {
                       )}
                     </For>
                   </ul>
+                </Show>
+              </section>
+
+              {/* And the one press there is to make about a Repo, under
+                  everything it is about. What the line says is what the press
+                  does: Verkstead stops offering the repository, and nothing on
+                  any Timeline moves. */}
+              <section class={styles.standing}>
+                <p class={styles.note}>
+                  Removing it takes it off the registry. The directory is left
+                  where it is, and every conversation worked in it goes on
+                  saying so.
+                </p>
+
+                <div class={styles.actions}>
+                  <button
+                    type="button"
+                    class={styles.remove}
+                    disabled={remove.isPending}
+                    onClick={() => remove.mutate(repo().id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                {/* Refused rather than taken out from under the work going on
+                    in it, and said here because here is where the press was
+                    made. */}
+                <Show when={refusedRemoval()}>
+                  {(outcome) => (
+                    <ErrorLine class={styles.failure}>
+                      {REPO_REMOVAL_REFUSAL[outcome()]}
+                    </ErrorLine>
+                  )}
+                </Show>
+                <Show when={remove.isError}>
+                  <ErrorLine class={styles.failure}>
+                    The repo could not be removed: {remove.error?.message}
+                  </ErrorLine>
                 </Show>
               </section>
             </div>

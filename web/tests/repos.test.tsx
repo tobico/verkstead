@@ -77,11 +77,16 @@ function mountCards(opening: number | "new" | null = null) {
   };
 }
 
-/// The pane one of those cards opens, and what its way back asked for.
+/// The pane one of those cards opens, and what its two ways out asked for.
 function mountOpened(id = FIRST.id) {
   const back = vi.fn();
+  const done = vi.fn();
 
-  return { ...mounting(() => <RepoDetails repo={id} back={back} />), back };
+  return {
+    ...mounting(() => <RepoDetails repo={id} back={back} done={done} />),
+    back,
+    done,
+  };
 }
 
 /// The form in the details pane, and what its two ways out asked for.
@@ -98,9 +103,24 @@ function theRepos(...answers: Array<() => Promise<Response>>) {
 }
 
 /// And one Repo opened, which is a read of its own rather than a row of that
-/// list.
-function theOpened(view: RepoView = OPENED) {
-  return serving(whenever(`/api/ui/repos/${view.id}`, json(view)));
+/// list — with whatever the removal on it is answered by.
+function theOpened(
+  view: RepoView = OPENED,
+  removal?: () => Promise<Response>,
+) {
+  return serving(
+    whenever(`/api/ui/repos/${view.id}`, json(view)),
+    ...(removal
+      ? [whenever(`/api/ui/repos/${view.id}/remove`, removal, "POST")]
+      : []),
+  );
+}
+
+/// Press the Remove in the opened pane, once the read behind it has landed.
+async function removePressed() {
+  fireEvent.click(
+    await waitFor(() => screen.getByRole("button", { name: "Remove" })),
+  );
 }
 
 /// One repo's card, by the name on it.
@@ -408,6 +428,74 @@ describe("the pane a card opens", () => {
 
     fireEvent.click(out);
     expect(back).toHaveBeenCalled();
+  });
+});
+
+describe("removing a repo", () => {
+  /// In the pane rather than on the card: a destructive press beside a list
+  /// somebody is only reading is one waiting to be made by mistake — the reason
+  /// a Profile's Remove moved into its pane too.
+  it("asks the server to take the repo it is about off the registry", async () => {
+    const fetching = theOpened(OPENED, json("Removed"));
+    const { done } = mountOpened();
+
+    await removePressed();
+
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        `/api/ui/repos/${FIRST.id}/remove`,
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    // The pane is spent: it was about something that is not registered any
+    // more, and the cards behind it are what say the removal landed.
+    await waitFor(() => expect(done).toHaveBeenCalled());
+  });
+
+  /// What removing one means, said before it is done: Verkstead stops offering
+  /// the repository, and nothing that was worked in it moves.
+  it("says that removing it is an unregistering rather than a delete", async () => {
+    theOpened();
+    mountOpened();
+
+    await waitFor(() => screen.getByText(/takes it off the registry/));
+  });
+
+  /// Refused rather than taken out from under the work going on in it, and said
+  /// in the pane, because that is where the press was made.
+  it("says why a repo with live work on it could not be removed", async () => {
+    theOpened(OPENED, json("InUse"));
+    const { done } = mountOpened();
+
+    await removePressed();
+
+    await waitFor(() =>
+      screen.getByText(/A conversation that is still going is on it/),
+    );
+    expect(done).not.toHaveBeenCalled();
+  });
+
+  /// A pane left open in another tab, whose repo somebody has already taken
+  /// away: a refusal in words rather than a failure.
+  it("says so where the repo is off the registry already", async () => {
+    theOpened(OPENED, json("NoSuchRepo"));
+    const { done } = mountOpened();
+
+    await removePressed();
+
+    await waitFor(() => screen.getByText(/off the registry already/));
+    expect(done).not.toHaveBeenCalled();
+  });
+
+  /// And a server that could not answer at all, which is the one thing here
+  /// that is an error rather than an outcome.
+  it("says so when the server could not answer", async () => {
+    theOpened(OPENED, json({ error: "the Repo could not be removed" }, 500));
+    mountOpened();
+
+    await removePressed();
+
+    await waitFor(() => screen.getByText(/could not be removed/));
   });
 });
 

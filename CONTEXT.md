@@ -23,6 +23,15 @@ A git repository registered with Verkstead from inside a Watched Path.
 Conversations attach to one. Its files stay the source of truth for task lists
 (`.tasks/`) and roadmaps (`docs/roadmaps/`) — Verkstead parses and renders
 them, and never owns them.
+**Registering one can be taken back, and that is an unregistering rather than a
+delete**: Verkstead stops offering it for new work — the settings list, the New
+conversation menu, the roadmaps waiting to be adopted — while every Conversation
+ever worked in it goes on naming it, because a record that could not say which
+repository its work was done in would be no record. The directory is untouched
+either way. Refused while a Conversation that is neither Done nor Closed is on
+it, the way removing an Agent Profile a Conversation is set to run under is; and
+registering the same path again brings the same Repo back rather than making a
+second one.
 _Avoid_: project, codebase, checkout
 
 **Conversation**:

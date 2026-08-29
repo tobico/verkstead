@@ -1731,6 +1731,19 @@ repo: string | null, diff: DiffView, };
 export type RepoEntry = { id: number, name: string, path: string, default_branch: string, };
 
 /**
+ * What became of taking one off the registry.
+ *
+ * A removal rather than a deletion, which is why nothing here says anything
+ * about a Timeline: every Conversation ever started on a Repo goes on naming
+ * it, and what a removal changes is only what is offered for new work.
+ *
+ * Shaped like [`ProfileDeleted`](crate::ProfileDeleted), because it is the same
+ * sentence about the other thing the settings page configures — and refused for
+ * the same kind of reason.
+ */
+export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
+
+/**
  * One registered Repo opened: everything the card cannot hold, read at the
  * moment it is asked for.
  *
