@@ -51,6 +51,7 @@ import type {
   SettingsEdit,
   SettingsSaved,
   SettingsView,
+  ShareCommented,
   SharePublished,
   ShowingArchived,
   Started,
@@ -289,6 +290,18 @@ export function sharePath(id: number): string {
 /// somebody's account, and every way that can be refused has a name.
 export function publishShare(id: number): Promise<SharePublished> {
   return post<SharePublished>(`/api/ui/conversations/${id}/share/publish`, {});
+}
+
+/// And the whole of it in one press: the same publish, and a comment carrying
+/// the link on every pull request the conversation is on.
+///
+/// One request rather than a publish followed by a comment per pull request,
+/// because it is one intention — the human is handing the record to whoever is
+/// reviewing the work, and where that is is the server's to know. What comes
+/// back says how far it got: where each comment landed, and which pull request
+/// missed out.
+export function shareToPullRequests(id: number): Promise<ShareCommented> {
+  return post<ShareCommented>(`/api/ui/conversations/${id}/share/comment`, {});
 }
 
 /// What one session printed, whole.

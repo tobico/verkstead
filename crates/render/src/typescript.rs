@@ -25,9 +25,10 @@ use crate::{
     GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
     ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
     PushKey, Registered, Registration, RepoEntry, RepoRemoved, RepoView, Resumed, RoadmapPane,
-    RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, SharePublished,
-    SharedConversation, ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted,
-    Subscribed, Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedConversation, ShowingArchived, Shown, Started, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -85,6 +86,12 @@ fn the_viewers_types_are_written_from_these() {
     // [`crate::SharePublished`], which is the one press on this page that writes
     // to GitHub and so the one with refusals about a token.
     SharePublished::export_all(&config).unwrap();
+
+    // And what became of the press that does the lot: publishes one and leaves the
+    // link on every pull request the Conversation holds — see
+    // [`crate::ShareCommented`], which carries the publish's own refusals rather
+    // than saying them over again.
+    ShareCommented::export_all(&config).unwrap();
 
     // And the order the human dragged that sidebar into, which is the one thing
     // they say about the list itself rather than about anything on it.

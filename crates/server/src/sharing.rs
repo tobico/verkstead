@@ -231,6 +231,50 @@ pub(crate) fn titled(conversation: &ConversationView) -> &str {
     }
 }
 
+/// Where a reader is sent for a Published Share: through the share viewer where
+/// the human has hosted one, and at the gist itself where they have not.
+///
+/// The viewer takes the gist's id in its **fragment** — `…/viewer.html#9f1` —
+/// which is the whole of why the page learns nothing about what is read through
+/// it: a fragment is never sent to the server that served the page. What goes
+/// after the `#` is the last segment of the published URL, which is GitHub's id
+/// for the gist.
+///
+/// Nothing configured is a link to the gist itself, which draws source rather
+/// than a share: a worse read rather than a failure, and the settings page is
+/// where it is put right. Which is also the answer for a published URL with no
+/// segment to take an id from — a link that pointed a reader at a viewer with no
+/// gist named would draw nothing at all.
+pub(crate) fn link(published: &str, viewer: Option<&str>) -> String {
+    let Some(viewer) = viewer.map(str::trim).filter(|viewer| !viewer.is_empty()) else {
+        return published.to_owned();
+    };
+
+    let Some(gist) = identified(published) else {
+        return published.to_owned();
+    };
+
+    // The `#` and whatever the human left on the end of what they typed: a URL
+    // pasted with its own fragment already on it is one `#` too many, and the
+    // one they meant is the one this is about to write.
+    format!("{}#{gist}", viewer.split('#').next().unwrap_or(viewer))
+}
+
+/// GitHub's id for a gist, out of the URL it gave for it.
+///
+/// The last segment with anything in it, which is what a gist URL ends with —
+/// `https://gist.github.com/tobico/9f1`. Read off the URL rather than kept
+/// beside it because the URL is what a publish records: the id is a fact about
+/// the link rather than a second thing to remember, and the viewer reads it back
+/// out of a fragment exactly this way.
+fn identified(published: &str) -> Option<&str> {
+    published
+        .trim()
+        .trim_end_matches('/')
+        .rsplit(['/', '#'])
+        .find(|segment| !segment.is_empty())
+}
+
 /// A branch name as a filename may hold it: letters, digits and the three marks
 /// that read as part of a word, with everything else — the slashes above all —
 /// standing as a hyphen.
@@ -389,6 +433,44 @@ mod tests {
         assert_eq!(
             filename("verkstead-4821", false, stamp()),
             "draft-2026-08-30.html"
+        );
+    }
+
+    /// A comment links through the viewer where the human has hosted one, with
+    /// the gist's id in the fragment — which is what keeps that host from
+    /// learning which share was read through it.
+    #[test]
+    fn a_published_share_is_linked_through_the_viewer() {
+        assert_eq!(
+            link(
+                "https://gist.github.com/tobico/9f1",
+                Some("https://tobico.github.io/shares/"),
+            ),
+            "https://tobico.github.io/shares/#9f1",
+        );
+    }
+
+    /// And at the gist itself where they have not, which is a worse read rather
+    /// than a failure: GitHub draws it as source, and the settings page is where
+    /// that is put right.
+    #[test]
+    fn a_verkstead_with_no_viewer_links_the_gist() {
+        const GIST: &str = "https://gist.github.com/tobico/9f1";
+
+        assert_eq!(link(GIST, None), GIST);
+        assert_eq!(link(GIST, Some("   ")), GIST);
+    }
+
+    /// A viewer URL somebody pasted with a fragment already on it is one `#` too
+    /// many: the one that matters is the gist's.
+    #[test]
+    fn the_fragment_written_is_the_only_one() {
+        assert_eq!(
+            link(
+                "https://gist.github.com/tobico/9f1",
+                Some("https://tobico.github.io/shares/#anything"),
+            ),
+            "https://tobico.github.io/shares/#9f1",
         );
     }
 

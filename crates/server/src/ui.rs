@@ -30,16 +30,16 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup,
-    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
+    CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
-    Lifecycle, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
-    ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed, RoleChoice, SetReading,
-    SetView, SettingsEdit, SettingsSaved, SettingsView, SharePublished, SharedCommit,
-    SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted,
-    Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe,
-    UpdateNotice, Verified,
+    Lifecycle, Locked, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed,
+    RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -119,6 +119,13 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/conversations/{id}/share/publish",
             post(publish_share),
+        )
+        // And the press that does the lot: the same publish, and a comment on
+        // every pull request the Conversation holds, carrying the link and what
+        // is in the file behind it — see [`crate::commenting`].
+        .route(
+            "/api/ui/conversations/{id}/share/comment",
+            post(comment_share),
         )
         // One Event's full self, fetched by the pane that shows it rather than
         // carried by the Conversation — see [`capture`].
@@ -1495,20 +1502,165 @@ async fn share_file(State(state): State<AppState>, Path(id): Path<String>) -> Ht
 /// token on the settings page, which is where they are fixed, and none of them
 /// is an error dump: this is Verkstead's own write to GitHub, and a write that
 /// did not happen should say which thing to go and do.
+///
+/// The publishing itself is [`publishing`], which is where the press below
+/// goes too: this row stops at the link, and that one carries it to every pull
+/// request the Conversation is on.
 async fn publish_share(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let bundle = match shared(&state, &id).await {
         Ok(bundle) => bundle,
         Err(refusal) => return refusal,
     };
 
-    // Off the record rather than out of the URL: the reading above refused an id
-    // that named no Conversation, so this is the one the share was composed of.
-    let conversation_id = bundle.conversation.id;
+    match publishing(&state, &bundle).await {
+        Ok(published) => Json(SharePublished::Published {
+            share: published.share,
+        })
+        .into_response(),
+        Err(Unpublished::Refused(why)) => Json(why).into_response(),
+        Err(Unpublished::Broken(refusal)) => refusal,
+    }
+}
 
-    let (name, file) = match document(&bundle) {
-        Ok(share) => share,
+/// `POST /api/ui/conversations/{id}/share/comment` — the whole one-click share:
+/// the file, the publish, and a comment on every pull request the Conversation
+/// holds.
+///
+/// One press because it is one intention. The human sharing work with a
+/// colleague is not choosing between a gist and a comment — they are handing
+/// over the record, and where it goes is wherever the work is being reviewed.
+///
+/// **The pull requests are read before anything is made.** A Conversation on
+/// none has nowhere for this to say anything, and publishing a share nobody
+/// would be sent to would leave a gist in somebody's account for nothing. The
+/// row is offered only where the record holds one, so the refusal is a page
+/// drawn against a Conversation that has since moved.
+///
+/// **A comment on each rather than an edit of any.** A description is whoever
+/// opened the pull request writing about the work; a share is a copy of the
+/// record handed to somebody. Sharing again is a fresh snapshot, published
+/// afresh and said afresh, and nothing said before is touched — see
+/// [`crate::commenting`].
+///
+/// What could not be reached is named against what worked. The share is up
+/// either way, and a human told which pull request missed out can paste the
+/// link there themselves.
+async fn comment_share(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let bundle = match shared(&state, &id).await {
+        Ok(bundle) => bundle,
         Err(refusal) => return refusal,
     };
+
+    // Off the record rather than out of the URL, exactly as the publish's is:
+    // the reading above refused an id that named no Conversation.
+    let conversation_id = bundle.conversation.id;
+
+    let pulls = match store::pull_requests(&state.pool, conversation_id).await {
+        Ok(pulls) => pulls,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the pull requests to comment a share on failed");
+            return unavailable("the pull requests of this conversation could not be read");
+        }
+    };
+
+    if pulls.is_empty() {
+        return Json(ShareCommented::NoPullRequest).into_response();
+    }
+
+    let published = match publishing(&state, &bundle).await {
+        Ok(published) => published,
+        Err(Unpublished::Refused(why)) => {
+            return Json(ShareCommented::NotPublished { why }).into_response();
+        }
+        Err(Unpublished::Broken(refusal)) => return refusal,
+    };
+
+    // What the comment says: where to read the share, and what is in the file
+    // behind that link. Itemized off the bundle rather than off the Conversation
+    // — see [`verkstead_render::itemized`] — so that what is listed is what a
+    // reader will actually find in it.
+    let body = verkstead_render::itemized(
+        &bundle,
+        crate::sharing::titled(&bundle.conversation),
+        &crate::sharing::link(&published.share.url, published.viewer.as_deref()),
+    );
+
+    let gh = state.github.clone();
+    let token = published.token;
+
+    // One blocking hop for the lot: a `gh` per pull request, and a Conversation
+    // ends on one per repository it was worked in.
+    let landings =
+        tokio::task::spawn_blocking(move || crate::commenting::on_each(&gh, &token, &pulls, &body))
+            .await;
+
+    let landings = match landings {
+        Ok(landings) => landings,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "commenting a published share on its pull requests failed");
+            return unavailable("the share was published but could not be commented anywhere");
+        }
+    };
+
+    let mut on = Vec::new();
+    let mut missed = Vec::new();
+
+    for landing in landings {
+        match landing.landed {
+            Ok(url) => on.push(CommentedOn {
+                number: landing.number,
+                repo: landing.repo,
+                url,
+            }),
+            Err(why) => {
+                // Logged as well as answered: the row says which pull request
+                // missed out, and whoever is reading the server's own account of
+                // the afternoon should find `gh`'s words about it here.
+                tracing::warn!(
+                    conversation_id,
+                    pull_request = landing.number,
+                    why,
+                    "a published share could not be commented on a pull request",
+                );
+
+                missed.push(MissedOut {
+                    number: landing.number,
+                    repo: landing.repo,
+                    why,
+                });
+            }
+        }
+    }
+
+    Json(ShareCommented::Commented {
+        share: published.share,
+        on,
+        missed,
+    })
+    .into_response()
+}
+
+/// One composed share published: the gist made, the file pushed into it and the
+/// link written down beside the Conversation.
+///
+/// Its own function because both presses that publish do exactly this — the
+/// **Publish** row, which stops here, and the one-click share, which goes on to
+/// comment the link. A second copy of it would be a second opinion about what
+/// publishing a share is.
+///
+/// What comes back beside the recorded share is what the comment after it needs:
+/// the token it was published as, and where the human has hosted the share
+/// viewer. Both are read on the blocking thread the publish already needed, and
+/// read once — a token read a second time could be a different token, and a
+/// comment left as somebody other than whoever the gist belongs to would be the
+/// two halves of one press disagreeing about who made it.
+async fn publishing(
+    state: &AppState,
+    bundle: &SharedConversation,
+) -> Result<Published, Unpublished> {
+    let conversation_id = bundle.conversation.id;
+
+    let (name, file) = document(bundle).map_err(Unpublished::Broken)?;
 
     // What the gist is called on GitHub's own pages. Readable by whoever holds
     // the link, which is the same people the file is — so it says what the file
@@ -1525,54 +1677,102 @@ async fn publish_share(State(state): State<AppState>, Path(id): Path<String>) ->
     // push. Every one of them is a process, and none of them belongs on the
     // runtime's threads.
     let published = tokio::task::spawn_blocking(move || {
-        crate::publishing::publish(
+        let secrets = settings.secrets();
+        let config = settings.config();
+
+        let published = crate::publishing::publish(
             &gh,
-            settings.secrets().github_token(),
-            settings.config().git_author(),
+            secrets.github_token(),
+            config.git_author(),
             &description,
             &name,
             &file,
+        );
+
+        (
+            published,
+            secrets.github_token().map(str::to_owned),
+            config.share_viewer_url().map(str::to_owned),
         )
     })
     .await;
 
-    let published = match published {
+    let (published, token, viewer) = match published {
         Ok(published) => published,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "publishing a share failed");
-            return unavailable("the share could not be published");
+            return Err(Unpublished::Broken(unavailable(
+                "the share could not be published",
+            )));
         }
     };
 
     let url = match published {
         crate::publishing::Publishing::At(url) => url,
         crate::publishing::Publishing::NoToken => {
-            return Json(SharePublished::NoToken).into_response();
+            return Err(Unpublished::Refused(SharePublished::NoToken));
         }
         crate::publishing::Publishing::NoGistScope => {
-            return Json(SharePublished::NoGistScope).into_response();
+            return Err(Unpublished::Refused(SharePublished::NoGistScope));
         }
         crate::publishing::Publishing::Refused(why) => {
-            return Json(SharePublished::Refused { why }).into_response();
+            return Err(Unpublished::Refused(SharePublished::Refused { why }));
         }
     };
 
     // Written down after it is up, and the row is what says when: a share is a
     // snapshot, and the moment on it should be the moment the record was taken
     // rather than a second reading of the clock.
-    match store::record_share(&state.pool, conversation_id, &url).await {
-        Ok(share) => Json(SharePublished::Published {
-            share: verkstead_render::ShareView {
-                url: share.url,
-                at: share.at,
-            },
-        })
-        .into_response(),
+    let share = match store::record_share(&state.pool, conversation_id, &url).await {
+        Ok(share) => verkstead_render::ShareView {
+            url: share.url,
+            at: share.at,
+        },
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "recording where a share was published failed");
-            unavailable("the share was published but could not be written down")
+            return Err(Unpublished::Broken(unavailable(
+                "the share was published but could not be written down",
+            )));
         }
-    }
+    };
+
+    Ok(Published {
+        share,
+        // There is one: a publish with nothing configured refuses above rather
+        // than falling back to the host's login.
+        token: token.unwrap_or_default(),
+        viewer,
+    })
+}
+
+/// A share that is up: where it is, and what whatever happens next needs.
+struct Published {
+    /// The link and the moment, as the record now holds them.
+    share: verkstead_render::ShareView,
+
+    /// The token it was published as, which is the one a comment about it is
+    /// left as.
+    token: String,
+
+    /// And where the share viewer is hosted, where the human has hosted one —
+    /// what turns a gist's id into a link that draws — see
+    /// [`crate::sharing::link`].
+    viewer: Option<String>,
+}
+
+/// And a share that is not: GitHub's own answer, or something the server could
+/// not do.
+///
+/// Two, because they reach the human differently. A refusal is about a token or
+/// about GitHub, which is a sentence and a settings page to go to; a break is
+/// the server failing at its own end, which is a status code.
+#[allow(clippy::large_enum_variant)]
+enum Unpublished {
+    /// Why the publish did not happen, in the words the workbench reads.
+    Refused(SharePublished),
+
+    /// Or what the server could not do about it, as the response saying so.
+    Broken(HttpResponse),
 }
 
 /// The share of one bundle as the two of them hand it over: what the file is

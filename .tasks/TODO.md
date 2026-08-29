@@ -21,4 +21,4 @@ moment it was made; sharing again makes a new one.
 - [x] 03: Commits readable in the share — [details](03-commits-in-the-share.md)
 - [x] 04: Publish a share as a secret gist — [details](04-publish-as-gist.md)
 - [x] 05: The viewer page and its setting — [details](05-viewer-page.md)
-- [ ] 06: One click to every pull request — [details](06-comment-on-every-pr.md)
+- [x] 06: One click to every pull request — [details](06-comment-on-every-pr.md)

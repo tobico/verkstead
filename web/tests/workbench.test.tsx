@@ -39,6 +39,7 @@ import type {
   Resumed,
   RoadmapPane,
   Screen,
+  ShareCommented,
   SharePublished,
   Shown,
   ShowingArchived,
@@ -6923,6 +6924,144 @@ describe("publishing a share", () => {
         exact: false,
       }),
     );
+  });
+});
+
+/// And where the whole of it is done in one press: the same publish, and a
+/// comment on every pull request the conversation holds.
+const SHARING_TO_PRS = `/api/ui/conversations/${GRILLING.id}/share/comment`;
+
+/// One pull request the comment landed on, and one it did not — a conversation
+/// that was worked in a companion repository ends on one each.
+const ON_ITS_OWN = {
+  number: 41,
+  repo: null,
+  url: "https://github.com/tobico/verkstead/pull/41#issuecomment-1",
+};
+
+const MISSED = {
+  number: 7,
+  repo: "verkstead-site",
+  why: "`gh` said: Not Found (HTTP 404)",
+};
+
+describe("sharing a conversation to its pull requests", () => {
+  /// The press that says something in front of other people, offered only where
+  /// there is somewhere to say it: a conversation whose work is on no pull
+  /// request has nowhere for this to go, and the pinned cards are what say so.
+  it("is offered only where the work is on a pull request", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+
+    expect(menu.querySelector(`.${actions.comment}`)).toBeNull();
+  });
+
+  it("publishes and comments the link on every one of them", async () => {
+    const fetching = theGrillingStanding(
+      { pinned: WRAPPING.pinned },
+      whenever(
+        SHARING_TO_PRS,
+        json({
+          Commented: {
+            share: {
+              url: "https://gist.github.com/tobico/9f1",
+              at: "2026-08-30T01:02:03Z",
+            },
+            on: [ON_ITS_OWN, { ...MISSED, url: "https://github.com/x#1" }],
+            missed: [],
+          },
+        } satisfies ShareCommented),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    expect(
+      screen.getByText("Publish it and comment the link on every pull request."),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
+    );
+
+    await waitFor(() => expect(sent(fetching, SHARING_TO_PRS)).toEqual({}));
+
+    // And where each of them went, named the way its card is: an unlabeled
+    // number means the conversation's own repository.
+    await waitFor(() =>
+      screen.getByText("Commented on #41, #7 in verkstead-site."),
+    );
+  });
+
+  /// A pull request the comment could not land on is named against the ones
+  /// that worked. The share is published either way, so what the human needs is
+  /// to be told where to paste the link themselves.
+  it("names the pull request that missed out", async () => {
+    theGrillingStanding(
+      { pinned: WRAPPING.pinned },
+      whenever(
+        SHARING_TO_PRS,
+        json({
+          Commented: {
+            share: {
+              url: "https://gist.github.com/tobico/9f1",
+              at: "2026-08-30T01:02:03Z",
+            },
+            on: [ON_ITS_OWN],
+            missed: [MISSED],
+          },
+        } satisfies ShareCommented),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
+    );
+
+    await waitFor(() =>
+      screen.getByText(
+        "Commented on #41. Nothing could be said on #7 in verkstead-site: " +
+          "`gh` said: Not Found (HTTP 404)",
+      ),
+    );
+  });
+
+  /// A share that was never published says what the publish would have said:
+  /// it is the same write to GitHub under the same token, and the settings page
+  /// is where two of the three refusals are fixed.
+  it("says which token trouble stopped it before anything was said", async () => {
+    theGrillingStanding(
+      { pinned: WRAPPING.pinned },
+      whenever(
+        SHARING_TO_PRS,
+        json({
+          NotPublished: { why: "NoGistScope" },
+        } satisfies ShareCommented),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
+    );
+
+    const said = await waitFor(() =>
+      screen.getByText("The saved GitHub token may not write gists.", {
+        exact: false,
+      }),
+    );
+
+    expect(
+      said.querySelector<HTMLAnchorElement>('a[href="/settings/github"]'),
+    ).toBeTruthy();
   });
 });
 

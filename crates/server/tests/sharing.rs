@@ -28,7 +28,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{SharedConversation, TimelineEvent};
 use verkstead_schema::QuestionSet;
-use verkstead_server::{open_database, router, store};
+use verkstead_server::{Gh, open_database, router, router_asking_github, store};
 
 /// A router over a database with nothing in it, plus the pool and the directory
 /// keeping it alive.
@@ -39,6 +39,74 @@ async fn app() -> (tempfile::TempDir, SqlitePool, Router) {
         .unwrap();
 
     (dir, pool.clone(), router(pool))
+}
+
+/// The same, reaching GitHub through a `gh` that answers nothing and writes down
+/// every call it was asked to make.
+///
+/// For the presses that write: what they are being asked here is whether GitHub
+/// was reached at all, and a script that records what it was asked is what can
+/// say so. The directory it writes in is the one the router keeps its settings
+/// in, which holds no token — so nothing here could publish even if it tried.
+async fn app_asking_github() -> (tempfile::TempDir, SqlitePool, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let gh = Gh::running(vec![
+        "/bin/sh".to_owned(),
+        "-c".to_owned(),
+        format!(
+            r#"printf '%s\n' "$*" >> "{}/asked"; exit 1"#,
+            dir.path().display(),
+        ),
+        // `sh -c` gives `$0` the script's own name, so what Verkstead passes
+        // lands in `$1` onwards.
+        "gh".to_owned(),
+    ]);
+
+    let data_dir = dir.path().to_owned();
+
+    (dir, pool.clone(), router_asking_github(pool, data_dir, gh))
+}
+
+/// A Conversation with a Brief and nothing else: no pull request, which is what
+/// the press that comments on them has to have nothing to do about.
+async fn drafting(pool: &SqlitePool) -> i64 {
+    let repo = repo(pool).await;
+
+    let id = store::start_conversation(pool, repo, "sharing")
+        .await
+        .unwrap()
+        .unwrap();
+
+    store::save_brief(pool, id, "# Sharing\n\nA file to send.\n")
+        .await
+        .unwrap();
+
+    id
+}
+
+/// Press something, and read what came back.
+async fn post<T: DeserializeOwned>(app: &Router, path: &str) -> T {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK, "POST {path}");
+
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
 }
 
 /// A registered Repo to attach Conversations to. A path nothing is at, because
@@ -1100,4 +1168,50 @@ async fn a_share_does_not_carry_the_link_to_a_share() {
         .unwrap();
 
     assert_eq!(share(&app, id).await.conversation.shared, None);
+}
+
+/// The one-click share, asked of a Conversation whose work is on no pull
+/// request.
+///
+/// Nothing happens, and *nothing* is the point: the press is offered only where
+/// the record holds a pull request, so reaching this is a page drawn against a
+/// Conversation that has since moved — and a share published for nobody would
+/// be a gist left in somebody's account for nothing. The pull requests are read
+/// before the file is built, which is what makes that true.
+#[tokio::test]
+async fn a_conversation_on_no_pull_request_is_not_published_at_all() {
+    let (dir, pool, app) = app_asking_github().await;
+    let id = drafting(&pool).await;
+
+    let outcome: verkstead_render::ShareCommented =
+        post(&app, &format!("/api/ui/conversations/{id}/share/comment")).await;
+
+    assert_eq!(outcome, verkstead_render::ShareCommented::NoPullRequest);
+
+    assert!(
+        !dir.path().join("asked").exists(),
+        "GitHub was asked something: {:?}",
+        std::fs::read_to_string(dir.path().join("asked")).ok(),
+    );
+}
+
+/// And an id that names no Conversation is the same 404 every other reading of
+/// one is: there is nothing to compose a share of, let alone comment.
+#[tokio::test]
+async fn a_conversation_that_is_not_there_is_a_miss() {
+    let (_dir, _pool, app) = app_asking_github().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/conversations/4821/share/comment")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }

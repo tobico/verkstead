@@ -7,7 +7,9 @@
 //! everything else.
 //!
 //! In order of what each costs: share, which costs nothing and is a file to take
-//! away rather than a press at all; stop, which waits for the task the run is
+//! away rather than a press at all; publish, which puts that file in a gist;
+//! share to pull request, which publishes it and says so in front of whoever is
+//! reviewing the work; stop, which waits for the task the run is
 //! on; force stop, which does not; steer, which moves the work somewhere else;
 //! and the two closes, which are not a stop at all but the end of the
 //! Conversation
@@ -59,16 +61,20 @@ import {
   loadConversation,
   publishShare,
   sharePath,
+  shareToPullRequests,
   steerConversation,
   stopConversation,
   unarchiveConversation,
 } from "../api/client";
 import type {
+  CommentedOn,
   ConversationArchived,
   ConversationClosed,
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  MissedOut,
+  ShareCommented,
   SharePublished,
   SteerOpened,
 } from "../api/types";
@@ -76,7 +82,7 @@ import { useReading } from "../freshness";
 import { utcStamp } from "../set/when";
 import { Empty, ErrorLine } from "../notices";
 import styles from "./Actions.module.css";
-import { Steer } from "./Steer";
+import { Steer, onAPullRequest } from "./Steer";
 
 /// Each way of being refused a stop, whichever of the two was pressed, in the
 /// words the console is told them in.
@@ -168,6 +174,56 @@ function refusal(published: SharePublished | null): JSX.Element | null {
   }
 
   return null;
+}
+
+/// What became of the one-click share, said to the human in the row they
+/// pressed.
+///
+/// Three shapes and one sentence each. A share that was never published says
+/// what the publish would have said — it is the same write to GitHub under the
+/// same token, and the settings page is where two of the three are fixed. A
+/// conversation on no pull request is a page drawn against one that has since
+/// moved. And a share that went says where it went, naming whatever missed out
+/// beside what worked: the file is up either way, and a human told which pull
+/// request it never reached can paste the link there themselves.
+///
+/// `null` where there is nothing to say: no press has been made from this menu.
+/// Which is what the row goes back to saying.
+function landing(commented: ShareCommented | null): JSX.Element | null {
+  if (commented === null) {
+    return null;
+  }
+
+  if (commented === "NoPullRequest") {
+    return <>This conversation is on no pull request.</>;
+  }
+
+  if ("NotPublished" in commented) {
+    return refusal(commented.NotPublished.why);
+  }
+
+  const { on, missed } = commented.Commented;
+  const said: string[] = [];
+
+  if (on.length > 0) {
+    said.push(`Commented on ${on.map(named).join(", ")}.`);
+  }
+
+  for (const miss of missed) {
+    said.push(`Nothing could be said on ${named(miss)}: ${miss.why}`);
+  }
+
+  return <>{said.join(" ")}</>;
+}
+
+/// What one pull request is called in that sentence: its number, and the
+/// repository it is in where that is not the conversation's own.
+///
+/// The same rule its card draws by — an unlabeled number means the repo the
+/// work is in — because a conversation ends on one pull request per repository
+/// it was worked in, and `#7` means something else in each of them.
+function named(pull: CommentedOn | MissedOut): string {
+  return pull.repo ? `#${pull.number} in ${pull.repo}` : `#${pull.number}`;
 }
 
 /// One row of this menu: what the press is called, and under it the sentence
@@ -329,6 +385,34 @@ function actions(): {
     },
   }));
 
+  /// And what the one-click share came back with, held for the same reason:
+  /// where the comment went is the human's to read, and so is a pull request it
+  /// never reached. Cleared by the next press, so a row that said something once
+  /// does not go on saying it.
+  const [commented, setCommented] = createSignal<ShareCommented | null>(null);
+
+  /// Sharing to the pull requests: the publish above and a comment on every one
+  /// of them, which is the press that says something in front of other people.
+  ///
+  /// The menu stays open for the publish's reason and one more: what comes back
+  /// names the pull requests it reached, and a menu that shut on success would
+  /// take that away as it arrived.
+  const comment = useMutation(() => ({
+    mutationFn: (id: number) => shareToPullRequests(id),
+    onSuccess: (outcome: ShareCommented) => {
+      setCommented(outcome);
+      reread();
+    },
+    onError: (error: Error) => {
+      // The transport rather than the answer, exactly as the publish's is: a
+      // request that never landed has no named outcome, and the publish is what
+      // it would have failed at.
+      setCommented({
+        NotPublished: { why: { Refused: { why: error.message } } },
+      });
+    },
+  }));
+
   /// Clicking Steer, which is a press before it is a modal: it stops the drive,
   /// so that nothing new is launched while the human composes and the world the
   /// modal is drawn against is the world the submit arrives in.
@@ -474,6 +558,32 @@ function actions(): {
               </span>
             </a>
           )}
+        </Show>
+
+        {/* And the whole of it in one press, on a conversation whose work is on
+            a pull request: the same publish, and a comment carrying the link
+            and what is in the file on every pull request it holds. Under the
+            two rows above rather than instead of them — it is the same share,
+            and this is the one that says something in front of other people.
+
+            Offered only where there is a pull request to say it on, which is
+            what the pinned cards already say: a conversation with none has
+            nowhere for this press to go. */}
+        <Show when={onAPullRequest(conversation())}>
+          <Action
+            class={styles.comment}
+            label="Share to pull request"
+            pressing="Sharing…"
+            says={
+              landing(commented()) ??
+              "Publish it and comment the link on every pull request."
+            }
+            working={comment.isPending}
+            press={() => {
+              setCommented(null);
+              comment.mutate(conversation().id);
+            }}
+          />
         </Show>
 
         <Show when={conversation().ready_to_stop}>

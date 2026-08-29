@@ -22,6 +22,7 @@ pub mod build_cache;
 mod capture;
 mod checklist;
 mod checks;
+mod commenting;
 mod comments;
 mod commits;
 mod continuing;

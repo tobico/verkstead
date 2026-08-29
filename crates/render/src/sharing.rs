@@ -311,3 +311,430 @@ pub enum SharePublished {
     /// Something else, in `gh`'s or git's own words.
     Refused { why: String },
 }
+
+/// What became of sharing a Conversation to the pull requests its work is on.
+///
+/// One press is three acts — the file, the publish, and a comment on every pull
+/// request the Conversation holds — so what comes back has to say how far it
+/// got. The two ways it stops before saying anything anywhere are the publish's
+/// own, carried in [`SharePublished`]'s words rather than said again here: a
+/// share nobody could publish is a comment with no link in it, and there is
+/// nothing to leave on a pull request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ShareCommented {
+    /// It is published, and this is where the comments went.
+    ///
+    /// `missed` is empty on the ordinary press, and what it holds when it is not
+    /// is named rather than swallowed: a pull request that has gone, or one the
+    /// token may not write on, is reported beside the ones that worked. The
+    /// share is up either way — the link is on the record, and the human can
+    /// paste it themselves wherever a comment could not go.
+    Commented {
+        share: crate::conversations::ShareView,
+        on: Vec<CommentedOn>,
+        missed: Vec<MissedOut>,
+    },
+
+    /// The publish never happened, in the publish's own words, so nothing was
+    /// said on any pull request either.
+    ///
+    /// Every refusal a publish has is a refusal this press has — it is the same
+    /// write to GitHub under the same token — and the workbench reads it with
+    /// the same sentences. [`SharePublished::Published`] never arrives here:
+    /// this is the shape of a press that got no further than the publish.
+    NotPublished { why: SharePublished },
+
+    /// This Conversation is on no pull request, so there was nowhere to comment
+    /// and nothing was published.
+    ///
+    /// The press is offered only where the record holds one, so this is a page
+    /// drawn against a Conversation that has since moved — and a share made for
+    /// nobody would be a gist in somebody's account for nothing.
+    NoPullRequest,
+}
+
+/// One pull request the comment landed on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CommentedOn {
+    /// The number GitHub gave it, which is what a human calls it by.
+    pub number: i64,
+
+    /// Which repository that number is in, where it is not the Conversation's
+    /// own — the same label a pull request's card draws, and `null` for the
+    /// same reason: an unlabeled one means the repo the work is in.
+    pub repo: Option<String>,
+
+    /// The comment itself, as GitHub gave it back, so the human can go and read
+    /// what was left in their name.
+    pub url: String,
+}
+
+/// And one it did not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct MissedOut {
+    pub number: i64,
+
+    pub repo: Option<String>,
+
+    /// What `gh` said about it, in its own words. A pull request that has gone
+    /// and one the token may not write on are two afternoons apart, and neither
+    /// is anything Verkstead can put right on the human's behalf.
+    pub why: String,
+}
+
+/// The comment a share leaves on a pull request: the link, and what is in the
+/// file behind it.
+///
+/// Markdown, because that is what a comment is. `link` is composed by whoever
+/// is posting — the share viewer with the gist's id after it where the human has
+/// hosted one, and the gist itself where they have not — so nothing here has an
+/// opinion about which of the two a reader is being sent to.
+///
+/// **Itemized off the share rather than off the Conversation.** What the comment
+/// lists is what the file actually carries, which is the curated Timeline and
+/// not the whole one: a summary naming a Question Set that was left out of the
+/// share would be an invitation to open a file that has no such thing in it.
+///
+/// `title` is what the Conversation is called wherever it is named — the branch,
+/// or *Draft* where nobody has settled one — said by the caller because a share
+/// is named the same way in three places and this is not where that rule lives.
+pub fn itemized(share: &SharedConversation, title: &str, link: &str) -> String {
+    listed(
+        &share.conversation.timeline,
+        &share.exported_at,
+        title,
+        link,
+    )
+}
+
+/// The same, off the parts of the share it reads: the curated Timeline and the
+/// day the snapshot was taken.
+fn listed(timeline: &[TimelineEvent], taken: &str, title: &str, link: &str) -> String {
+    let mut said = format!(
+        "[Read this conversation]({link}) — a read-only copy of {}, taken {}.\n",
+        coded(title),
+        day(taken),
+    );
+
+    // What the work was asked for, which is the one line of the Brief a reader
+    // deciding whether to open the link needs. As prose rather than as it was
+    // written: a first line that is a heading would be a heading in the comment.
+    if let Some(brief) = timeline.iter().find_map(opening) {
+        said.push_str(&format!("\n{brief}\n"));
+    }
+
+    let sets: Vec<String> = timeline.iter().filter_map(titled).collect();
+
+    if !sets.is_empty() {
+        said.push_str("\n**Question Sets**\n\n");
+
+        for set in sets {
+            said.push_str(&format!("- {set}\n"));
+        }
+    }
+
+    let commits: Vec<String> = timeline.iter().filter_map(landed).collect();
+
+    if !commits.is_empty() {
+        said.push_str("\n**Commits**\n\n");
+
+        for commit in commits {
+            said.push_str(&format!("- {commit}\n"));
+        }
+    }
+
+    said
+}
+
+/// The Brief's first line, as words.
+///
+/// The first line with anything on it, put through the plain rendering every
+/// card uses: the marks come off, so a Brief opening with a heading or a bullet
+/// reads as a sentence in among the rest of the comment rather than as markup
+/// of its own.
+fn opening(event: &TimelineEvent) -> Option<String> {
+    let TimelineEvent::Brief(brief) = event else {
+        return None;
+    };
+
+    let line = brief
+        .markdown
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
+
+    let said = crate::markdown::to_plain(line);
+
+    (!said.trim().is_empty()).then_some(said)
+}
+
+/// One Question Set, by the title the agent gave it.
+fn titled(event: &TimelineEvent) -> Option<String> {
+    match event {
+        TimelineEvent::QuestionSet(asked) => Some(asked.title.clone()),
+        _ => None,
+    }
+}
+
+/// And one commit, by its subject and how much it moved — the same three counts
+/// the Timeline's own card draws, in the same words and with the signs on the
+/// numbers.
+fn landed(event: &TimelineEvent) -> Option<String> {
+    let TimelineEvent::Commit(commit) = event else {
+        return None;
+    };
+
+    // The repository, where it is not the Conversation's own. Exactly the card's
+    // rule: an unlabeled line means the repo the work is in, and the label earns
+    // its place when a Timeline carries more than one repository's commits.
+    let repo = match &commit.repo {
+        Some(repo) => format!(" ({repo})"),
+        None => String::new(),
+    };
+
+    Some(format!(
+        "{}{repo} — {} {}, +{} −{}",
+        coded(&commit.subject),
+        commit.files,
+        if commit.files == 1 { "file" } else { "files" },
+        commit.insertions,
+        commit.deletions,
+    ))
+}
+
+/// The day out of an RFC 3339 stamp, which is all a comment has room to say
+/// about when a snapshot was taken.
+///
+/// Whatever it was handed where that is not what it is looking at: a stamp this
+/// cannot read is still worth printing, and a comment saying nothing about when
+/// the share was taken would be the worse of the two.
+fn day(taken: &str) -> &str {
+    const DAY: usize = "2026-08-30".len();
+
+    match taken.split_once('T') {
+        Some((day, _)) if day.len() == DAY => day,
+        _ => taken,
+    }
+}
+
+/// A line of somebody else's words as markdown may hold it: inline code, fenced
+/// with one backtick more than the longest run inside it.
+///
+/// A commit subject is prose an agent wrote, and prose has asterisks and
+/// underscores in it — so it goes in a comment as code rather than as markup to
+/// be interpreted. The fence is counted rather than assumed because a subject
+/// may itself carry a backtick, which is markdown's own rule for this: `` `a` ``
+/// inside a longer fence is the code it looks like.
+fn coded(text: &str) -> String {
+    let longest = text
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+
+    let fence = "`".repeat(longest + 1);
+
+    // The spaces are markdown's own escape for code that begins or ends with a
+    // backtick, and they are eaten by the renderer rather than drawn.
+    match text.starts_with('`') || text.ends_with('`') {
+        true => format!("{fence} {text} {fence}"),
+        false => format!("{fence}{text}{fence}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::conversations::{CommitEvent, QuestionSetEvent};
+    use crate::view::Standing;
+
+    use super::*;
+
+    /// A Timeline of the three kinds a comment itemizes, in the order a
+    /// Conversation reaches them: what was asked for, what was put to the human,
+    /// and what was built.
+    fn timeline() -> Vec<TimelineEvent> {
+        vec![
+            crate::conversations::brief_event(
+                1,
+                "2026-08-29T09:00:00Z".to_owned(),
+                "# Sharing\n\nA read-only copy of a conversation to send somebody.\n".to_owned(),
+                true,
+            ),
+            asked(2, "What a share carries"),
+            committed(
+                3,
+                "feat: share a conversation as one file to send",
+                9,
+                742,
+                11,
+            ),
+        ]
+    }
+
+    fn asked(id: i64, title: &str) -> TimelineEvent {
+        TimelineEvent::QuestionSet(QuestionSetEvent {
+            id,
+            at: "2026-08-29T10:00:00Z".to_owned(),
+            set_id: id,
+            title: title.to_owned(),
+            rows: Vec::new(),
+            standing: Standing::LockedUnanswered("2026-08-29T11:00:00Z".to_owned()),
+        })
+    }
+
+    fn committed(
+        id: i64,
+        subject: &str,
+        files: i64,
+        insertions: i64,
+        deletions: i64,
+    ) -> TimelineEvent {
+        TimelineEvent::Commit(CommitEvent {
+            id,
+            at: "2026-08-29T12:00:00Z".to_owned(),
+            sha: "9f1c0de".to_owned(),
+            subject: subject.to_owned(),
+            files,
+            insertions,
+            deletions,
+            snippet: None,
+            repo: None,
+        })
+    }
+
+    #[test]
+    fn a_comment_leads_with_the_link_and_what_it_is() {
+        let said = listed(
+            &timeline(),
+            "2026-08-30T01:02:03.456Z",
+            "sharing",
+            "https://tobico.github.io/shares/#9f1",
+        );
+
+        assert!(
+            said.starts_with(
+                "[Read this conversation](https://tobico.github.io/shares/#9f1) \
+                 — a read-only copy of `sharing`, taken 2026-08-30.\n"
+            ),
+            "the first line of: {said}",
+        );
+    }
+
+    /// The Brief's first line, which is what a reader deciding whether to open
+    /// the link is going on — as words rather than as it was written, so a Brief
+    /// that opens with a heading does not open the comment with one.
+    #[test]
+    fn what_the_work_was_asked_for_is_under_it() {
+        let said = listed(
+            &timeline(),
+            "2026-08-30T01:02:03Z",
+            "sharing",
+            "https://x/#9f1",
+        );
+
+        assert!(said.contains("\nSharing\n"), "the Brief's line in: {said}");
+    }
+
+    #[test]
+    fn the_sets_are_listed_by_title_and_the_commits_by_subject() {
+        let said = listed(
+            &timeline(),
+            "2026-08-30T01:02:03Z",
+            "sharing",
+            "https://x/#9f1",
+        );
+
+        assert!(
+            said.contains("**Question Sets**\n\n- What a share carries\n"),
+            "{said}"
+        );
+        assert!(
+            said.contains(
+                "**Commits**\n\n\
+                 - `feat: share a conversation as one file to send` — 9 files, +742 −11\n"
+            ),
+            "{said}",
+        );
+    }
+
+    /// One file is one file. The same words the Timeline's own card draws, in
+    /// the same order and with the signs on the numbers.
+    #[test]
+    fn a_commit_that_moved_one_file_says_so() {
+        let said = listed(
+            &[committed(3, "fix: a typo", 1, 1, 1)],
+            "2026-08-30T01:02:03Z",
+            "sharing",
+            "https://x/#9f1",
+        );
+
+        assert!(said.contains("- `fix: a typo` — 1 file, +1 −1\n"), "{said}");
+    }
+
+    /// A commit in a companion repository carries its name, exactly as its card
+    /// does: an unlabeled line means the repository the work is in.
+    #[test]
+    fn a_companions_commit_says_which_repository_it_landed_in() {
+        let TimelineEvent::Commit(commit) = committed(3, "fix: the footer", 1, 3, 3) else {
+            unreachable!("that is what `committed` makes");
+        };
+
+        let said = listed(
+            &[TimelineEvent::Commit(CommitEvent {
+                repo: Some("verkstead-site".to_owned()),
+                ..commit
+            })],
+            "2026-08-30T01:02:03Z",
+            "sharing",
+            "https://x/#9f1",
+        );
+
+        assert!(
+            said.contains("- `fix: the footer` (verkstead-site) — 1 file, +3 −3\n"),
+            "{said}",
+        );
+    }
+
+    /// A Conversation with nothing built yet is a comment with no commits in it,
+    /// rather than a heading over an empty list.
+    #[test]
+    fn a_section_with_nothing_in_it_is_not_drawn() {
+        let said = listed(
+            &timeline()[..2],
+            "2026-08-30T01:02:03Z",
+            "sharing",
+            "https://x/#9f1",
+        );
+
+        assert!(said.contains("**Question Sets**"), "{said}");
+        assert!(!said.contains("**Commits**"), "{said}");
+    }
+
+    /// Nothing an agent wrote can turn into markup. A subject is prose, and
+    /// prose has asterisks, underscores and backticks in it.
+    #[test]
+    fn a_subject_is_code_rather_than_markup() {
+        let said = listed(
+            &[committed(3, "fix: draw `*` as a *mark*", 1, 1, 0)],
+            "2026-08-30T01:02:03Z",
+            "sharing",
+            "https://x/#9f1",
+        );
+
+        assert!(
+            said.contains("- ``fix: draw `*` as a *mark*`` — 1 file, +1 −0\n"),
+            "{said}",
+        );
+    }
+
+    /// And a stamp this cannot read is still worth printing: a comment saying
+    /// nothing about when the snapshot was taken is the worse of the two.
+    #[test]
+    fn a_moment_that_is_not_a_stamp_is_said_as_it_was_given() {
+        assert_eq!(day("2026-08-30T01:02:03Z"), "2026-08-30");
+        assert_eq!(day("whenever"), "whenever");
+    }
+}

@@ -147,6 +147,14 @@ it was written for, and save its address here. A published share is then read at
 gist itself. Nothing about it is secret: the page is public, and the id after the
 `#` is never sent to the host that serves it.
 
+That link is what **Share to pull request** leaves behind. One press on a
+conversation whose work is on a pull request publishes a share and comments on
+every pull request the conversation holds — its own repository's and each
+companion's — carrying the link and an itemized summary of what is in the file.
+Comments only: nothing edits a description, and sharing again leaves another
+comment rather than rewriting the one before it. A pull request the comment
+could not land on is named beside the ones that worked.
+
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory
 on first run. Leave it running; check it in a third terminal if you like:

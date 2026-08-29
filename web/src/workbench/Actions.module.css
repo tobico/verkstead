@@ -46,6 +46,13 @@
 .published {
 }
 
+/* And the same publish with a comment on every pull request the conversation is
+   on, which is the one row here that says something in front of other people.
+   Drawn like every other row — what it costs is in the sentence under its name
+   rather than in its paint — and named here so the row can be found. */
+.comment {
+}
+
 /* Stopping after the current task, and stopping now. Drawn like every other row
    and named here so each can be found. */
 .stop {

@@ -372,6 +372,27 @@ the Share's own scripts off that host's origin.
 _Avoid_: proxy, server, renderer, gateway (nothing passes through it — the
 reader's browser fetches from GitHub itself)
 
+**Share to Pull Request**:
+The one press that hands the record to whoever is reviewing the work: it takes a
+Share, publishes it, and leaves **one comment on every pull request the
+Conversation holds** — its own Repo's and every Companion Repo's alike. Offered
+only where the record holds a pull request, because a Conversation on none has
+nowhere for it to go.
+The comment carries **the link** — through the Share Viewer where one is
+configured, at the gist itself where none is — and the **itemized summary** of
+what is in the file: the Brief's first line, the Question Sets by title, and the
+commits by subject with how much each moved. Itemized off the Share rather than
+off the Conversation, so what is listed is what a reader will find in it.
+**Comments only, and nothing is ever rewritten**: a pull request's description is
+not touched, and sharing again is a fresh snapshot, a fresh publish and a fresh
+comment on each — what was said before goes on standing where it was said.
+A pull request the comment could not land on — one that has gone, one the token
+may not write on — is **named against the ones that worked** rather than
+swallowed: the Share is published either way, so the human can paste the link
+there themselves.
+_Avoid_: announce, notify, post, broadcast (a comment is left, once, by a press
+the human made)
+
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose
 first, a delta Diagram after it — kept by the sweep of whichever repository it

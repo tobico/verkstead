@@ -489,6 +489,26 @@ export type CheckRollup = "Passed" | "Running" | "Failed";
 export type Checked = "Passed" | "Running" | "Failed";
 
 /**
+ * One pull request the comment landed on.
+ */
+export type CommentedOn = { 
+/**
+ * The number GitHub gave it, which is what a human calls it by.
+ */
+number: number, 
+/**
+ * Which repository that number is in, where it is not the Conversation's
+ * own — the same label a pull request's card draws, and `null` for the
+ * same reason: an unlabeled one means the repo the work is in.
+ */
+repo: string | null, 
+/**
+ * The comment itself, as GitHub gave it back, so the human can go and read
+ * what was left in their name.
+ */
+url: string, };
+
+/**
  * A commit as the Timeline shows it: what it was called, and how much of the
  * repository it moved.
  *
@@ -1353,6 +1373,17 @@ at: string,
  * markdown on this wire is.
  */
 html: string, };
+
+/**
+ * And one it did not.
+ */
+export type MissedOut = { number: number, repo: string | null, 
+/**
+ * What `gh` said about it, in its own words. A pull request that has gone
+ * and one the token may not write on are two afternoons apart, and neither
+ * is anything Verkstead can put right on the human's behalf.
+ */
+why: string, };
 
 /**
  * A move as the page receives it: when, and to what.
@@ -2263,6 +2294,18 @@ rust_build_cache: BuildCacheView,
  * exactly as it was written.
  */
 share_viewer_url: string, };
+
+/**
+ * What became of sharing a Conversation to the pull requests its work is on.
+ *
+ * One press is three acts — the file, the publish, and a comment on every pull
+ * request the Conversation holds — so what comes back has to say how far it
+ * got. The two ways it stops before saying anything anywhere are the publish's
+ * own, carried in [`SharePublished`]'s words rather than said again here: a
+ * share nobody could publish is a comment with no link in it, and there is
+ * nothing to leave on a pull request.
+ */
+export type ShareCommented = { "Commented": { share: ShareView, on: Array<CommentedOn>, missed: Array<MissedOut>, } } | { "NotPublished": { why: SharePublished, } } | "NoPullRequest";
 
 /**
  * What became of publishing a share: where it went, or why it did not go.

@@ -122,7 +122,20 @@ impl Gh {
         self.written(None, Some(token.to_owned()), args, Some(body))
     }
 
-    /// What the three above are: `gh`, run somewhere or nowhere, as somebody or
+    /// And the same inside a repository, which is what a write about one has to
+    /// be: a pull request's number means something else in another repository, or
+    /// nothing. See [`comment`], which is the one caller.
+    fn tell_in(
+        &self,
+        repo: &Path,
+        token: &str,
+        args: &[&str],
+        body: &str,
+    ) -> Result<String, Trouble> {
+        self.written(Some(repo), Some(token.to_owned()), args, Some(body))
+    }
+
+    /// What the four above are: `gh`, run somewhere or nowhere, as somebody or
     /// as whoever the host is logged in as, read for its stdout or for why there
     /// is none.
     fn run(
@@ -515,6 +528,61 @@ pub(crate) fn delete_gist(gh: &Gh, token: &str, id: &str) -> Result<(), Trouble>
     gh.ask_as(token, &["api", "-X", "DELETE", &format!("/gists/{id}")])?;
 
     Ok(())
+}
+
+/// Say something on a pull request, and answer where it was said.
+///
+/// What the one-click share leaves behind: the link to a Published Share and an
+/// itemization of what is in it — see [`crate::commenting`], which puts one on
+/// every pull request a Conversation holds.
+///
+/// **As the configured token rather than as whoever the host is logged in as.**
+/// A write is a write, and the rule [`create_gist`] follows holds here for the
+/// same reason: a comment left under a login nobody chose is a comment in
+/// somebody else's name on somebody else's pull request. The token comes from
+/// the caller, which has already read it to publish with.
+///
+/// `gh api` in the repository rather than `gh pr comment`, so what comes back is
+/// the comment as a resource — the human is owed a link to what was left in
+/// their name — and `--input -` for [`create_gist`]'s reason: a comment is a
+/// document, and a body on the command line would be one every shell has an
+/// opinion about.
+///
+/// The number is a fact about a repository, so this is run inside the one the
+/// pull request was opened in: `#7` in another repository is something else, or
+/// nothing.
+pub(crate) fn comment(
+    gh: &Gh,
+    repo: &Path,
+    token: &str,
+    number: i64,
+    body: &str,
+) -> Result<String, Trouble> {
+    /// The one field of the comment GitHub makes that is worth keeping: where a
+    /// human goes to read it.
+    #[derive(Deserialize)]
+    struct Said {
+        html_url: String,
+    }
+
+    let said = gh.tell_in(
+        repo,
+        token,
+        &[
+            "api",
+            "-X",
+            "POST",
+            &format!("repos/{{owner}}/{{repo}}/issues/{number}/comments"),
+            "--input",
+            "-",
+        ],
+        &serde_json::json!({ "body": body }).to_string(),
+    )?;
+
+    let said: Said = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    Ok(said.html_url)
 }
 
 /// The pull request on `branch`, as the host's `gh` finds it.
