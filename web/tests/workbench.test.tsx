@@ -826,9 +826,12 @@ describe("how a card says where its conversation has got to", () => {
 
     // What "draft" means is the stylesheet's, and jsdom lays nothing out. The
     // name rather than the card: a card is a `CardButton` now and is flat, so
-    // there is no outline left to draw one as the outline of.
+    // there is no outline left to draw one as the outline of. Both halves of
+    // what the name is drawn as, because the rule says both: leant over, and
+    // dimmed to the soft ink a card that has nothing settled on it is written
+    // in.
     expect(sidebarCss).toContain(
-      ".conversationRow.draft .title {\n  font-style: italic;\n}",
+      ".conversationRow.draft .title {\n  font-style: italic;\n  color: var(--ink-soft);\n}",
     );
   });
 
