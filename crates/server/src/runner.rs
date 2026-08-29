@@ -145,6 +145,19 @@ pub struct Pace {
     /// long one that never will is left before Verkstead says so.
     pub waking: Duration,
 
+    /// And how long a wrap-up's review waits before it takes the Worktree.
+    ///
+    /// Zero in a server, where nothing is waiting for anything: this is a seam
+    /// the suite reaches for, and the one span here that is not a choice about
+    /// how fast to work. A wrap-up starts its review and its watchers together,
+    /// and the poll that runs before the review has the Worktree is the poll
+    /// that can read a pull request nobody has written on yet — the window a
+    /// comment left during the review used to be settled away in. Nothing can
+    /// land in that window on purpose, so a test that covers it holds it open
+    /// instead. See [`crate::comments::once`], which settles nothing before the
+    /// review for exactly that reason.
+    pub reviewing: Duration,
+
     /// And how often every Conversation is looked over for one that has
     /// Stalled — see [`crate::stalls`].
     ///
@@ -164,6 +177,7 @@ impl Default for Pace {
             proposing: Duration::from_secs(60),
             waking: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
+            reviewing: Duration::ZERO,
         }
     }
 }

@@ -250,7 +250,28 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
     };
 
     if fresh.is_empty() {
-        // Not while something is working in the Worktree. A batch is written down
+        // Not until the review is over. *Nothing is unaddressed* is a reading of
+        // a moment, and one taken before the review started outlives it: a
+        // comment that lands while it runs puts nothing back to waiting, because
+        // nothing was waiting to be put back — so the wrap-up can reach Done on
+        // the older reading before the next poll has seen what was said, and what
+        // was written goes unanswered on a Conversation that is over. So the
+        // settling waits for the review exactly as the dispatching below does,
+        // and the first poll after it is the one that decides. Which is the same
+        // rule read twice: until the review has settled, nothing said on any of
+        // the pull requests is anybody else's to act on — settling it away
+        // included.
+        if !reviewed(state, conversation_id).await {
+            tracing::debug!(
+                conversation_id,
+                repo = watched.repo.name,
+                "the review has not finished, so nothing said is settled yet",
+            );
+
+            return Watching::Again;
+        }
+
+        // Nor while something is working in the Worktree. A batch is written down
         // as addressed the moment it is dispatched and before its session has said
         // a word, so *nothing is unaddressed* is also what a batch that has only
         // just started looks like from a second watcher — and a wrap-up has more

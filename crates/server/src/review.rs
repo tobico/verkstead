@@ -166,6 +166,10 @@ use crate::store;
 /// Nothing is refused for. This runs unattended with nobody watching, and what it
 /// has to say it says on the Timeline or in the log.
 pub(crate) async fn run(state: AppState, conversation_id: i64) {
+    // Zero in a server, and a window a test holds open — see
+    // [`crate::runner::Pace::reviewing`].
+    tokio::time::sleep(state.sessions.pace().reviewing).await;
+
     match wanted(&state, conversation_id).await {
         Wanted::Nothing => return,
         // Nothing is launched and no Worktree is wanted, so this settles where
