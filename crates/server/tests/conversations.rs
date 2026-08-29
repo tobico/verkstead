@@ -5123,8 +5123,8 @@ async fn adopting_a_roadmap_starts_a_draft_naming_it_and_its_next_stage() {
     assert_eq!(stage.title, "Implementation");
     assert_eq!(stage.brief_path, "docs/roadmaps/mvp/03-implementation.md");
     assert_eq!(
-        stage.branch, "implementation",
-        "the stage's own slug, which the press names the branch by",
+        stage.branch, "mvp/03-implementation",
+        "the stage's own name, which the press names the branch by",
     );
 
     // And nothing has been adopted by starting it: the Brief is still empty,
@@ -6095,9 +6095,9 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
 
     let view = opened(&app, id).await;
 
-    // The stage's own slug, rather than the name the server invented for the
-    // row: `03-implementation.md` without its number.
-    assert_eq!(view.branch, "implementation");
+    // The stage's own name, rather than the one the server invented for the
+    // row: its brief under the roadmap it belongs to.
+    assert_eq!(view.branch, "mvp/03-implementation");
     assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(
         moves(&view),
@@ -6112,7 +6112,7 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
     // The branch is in the Repo's own git directory, standing on that commit
     // and nothing else — adoption never stacks.
     assert_eq!(
-        git(&repo, &["rev-parse", "refs/heads/implementation"]).trim(),
+        git(&repo, &["rev-parse", "refs/heads/mvp/03-implementation"]).trim(),
         tip,
     );
 
@@ -6166,7 +6166,7 @@ async fn adopting_checks_out_the_companions_it_was_configured_with() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.branch, "implementation");
+    assert_eq!(view.branch, "mvp/03-implementation");
     assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(companions(&app, id).await, ["askance", "granit"]);
 
@@ -6193,9 +6193,9 @@ async fn adopting_checks_out_the_companions_it_was_configured_with() {
 
     assert_eq!(
         git(&worked, &["symbolic-ref", "--short", "HEAD"]).trim(),
-        "implementation",
+        "mvp/03-implementation",
     );
-    assert!(has_branch(&granit, "implementation"));
+    assert!(has_branch(&granit, "mvp/03-implementation"));
 
     // Both under the data directory, and both registered with git — which is
     // what makes them worktrees rather than copies.
@@ -6233,9 +6233,9 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
     companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
 
     // Somebody else's branch, by the name the companion's would take: the
-    // stage's own slug, which is what mirroring comes to here.
+    // stage's own name, which is what mirroring comes to here.
     let askance = watched.path().join("askance");
-    git(&askance, &["branch", "implementation"]);
+    git(&askance, &["branch", "mvp/03-implementation"]);
 
     assert_eq!(
         press_adopt(&app, id).await,
@@ -6253,7 +6253,7 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
     assert_eq!(view.state, Lifecycle::Draft);
     assert!(view.worktree.is_none());
     assert!(companion(&view, "askance").worktree.is_none());
-    assert!(!has_branch(&repo, "implementation"));
+    assert!(!has_branch(&repo, "mvp/03-implementation"));
     assert_eq!(
         worktrees(&askance).len(),
         1,
@@ -6347,7 +6347,7 @@ async fn an_adopted_stage_carries_its_brief_and_says_what_it_adopted() {
         "and which brief it was adopted from: {said:?}",
     );
     assert!(
-        said.contains("<code>implementation</code>") && said.contains("<code>main</code>"),
+        said.contains("<code>mvp/03-implementation</code>") && said.contains("<code>main</code>"),
         "and where its branch came off: {said:?}",
     );
 }
@@ -6380,7 +6380,7 @@ async fn the_stage_adopted_is_the_one_the_base_commit_has_open() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.branch, "implementation");
+    assert_eq!(view.branch, "mvp/03-implementation");
     assert_eq!(view.base_commit.as_deref(), Some(before.as_str()));
 }
 
@@ -6426,7 +6426,7 @@ async fn nothing_adopted(app: &Router, id: i64, repo: &Path) {
         "only the repository itself is checked out anywhere",
     );
     assert!(
-        git(repo, &["branch", "--list", "implementation"])
+        git(repo, &["branch", "--list", "mvp/03-implementation"])
             .trim()
             .is_empty(),
         "and the stage's own branch was never made",
@@ -6688,7 +6688,7 @@ async fn adopting_is_refused_when_the_stages_own_branch_is_taken() {
     );
 
     let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
-    git(&repo, &["branch", "implementation"]);
+    git(&repo, &["branch", "mvp/03-implementation"]);
 
     assert_eq!(press_adopt(&app, id).await, Adopted::BranchExists);
 
@@ -6697,7 +6697,7 @@ async fn adopting_is_refused_when_the_stages_own_branch_is_taken() {
     assert_eq!(view.worktree, None);
     assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
     assert_eq!(
-        git(&repo, &["rev-parse", "refs/heads/implementation"]).trim(),
+        git(&repo, &["rev-parse", "refs/heads/mvp/03-implementation"]).trim(),
         git(&repo, &["rev-parse", "HEAD"]).trim(),
         "and the branch that was there is where it was",
     );
@@ -6728,7 +6728,7 @@ async fn adopting_is_refused_when_no_such_roadmap_is_at_the_base() {
 async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
     let (_watched, _dir, app, repo, repo_id) = workbench().await;
     roadmap(&repo, ALL_DONE, &["03-implementation.md"]);
-    git(&repo, &["branch", "implementation"]);
+    git(&repo, &["branch", "mvp/03-implementation"]);
 
     let id = adopting(&app, repo_id, "mvp").await;
 

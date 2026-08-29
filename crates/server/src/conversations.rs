@@ -64,7 +64,7 @@ pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
 /// The same start as any other, with the roadmap written beside it: that mark
 /// is what draws the adoption-shaped page, and it is the only thing about the
 /// roadmap Verkstead keeps. The branch name is the server's here too, and it is
-/// discarded at the press — a stage is worked on its own slug — so what it does
+/// discarded at the press — a stage is worked on its own name — so what it does
 /// until then is stand in the record for a branch nobody has named. The row
 /// reads *Draft* the whole time, which is what it is.
 ///
@@ -1381,10 +1381,11 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         Err(refusal) => return Ok(refusal),
     };
 
-    // The stage's own slug, as the unattended start names one — the brief's
-    // filename without its number. The name the Conversation was started under
-    // was the server's invention for a row in the sidebar, and it is discarded
-    // here: a stage is worked on the branch its roadmap will annotate it with.
+    // The stage's own name, as the unattended start names one — its brief's
+    // filename under the roadmap it belongs to. The name the Conversation was
+    // started under was the server's invention for a row in the sidebar, and it
+    // is discarded here: a stage is worked on the branch its roadmap will
+    // annotate it with.
     let branch = stage.branch();
     let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch);
 

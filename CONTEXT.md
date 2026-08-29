@@ -581,6 +581,16 @@ first moment, because the grilling that would have settled the work wrote the
 brief. Its branch stacks on the unmerged predecessor where the target
 repository records how, and comes off the default branch where it does not.
 
+**Its branch is named for where the stage lives**: the roadmap's own directory
+name, then the stage brief's filename — `docs/roadmaps/mvp/04-wrap-up.md` is
+worked on `mvp/04-wrap-up`. Under the roadmap rather than at the bare slug,
+because a repository is full of branches somebody named for whatever they were
+doing and one of them reading like a stage brief says nothing about that stage —
+and a name already taken is one Verkstead will not start on, in a run nobody is
+watching. Qualified this way the only thing it can collide with is another
+attempt at the same Stage of the same roadmap, which is the collision the
+refusal is for.
+
 Done when its box in `ROADMAP.md` is ticked, which is the roadmap's own score
 and is kept one Stage behind: the tick rides in the plan commit of the Stage
 after it, so a Stage whose work has settled is still the box that says *in
@@ -606,7 +616,7 @@ What a roadmap in a registered Repo is when it has a Stage startable right now
 and nothing driving it — the one state Adopt is offered for. Four things
 together, read at the Repo's default branch tip: an unchecked box, a readable
 brief for the lowest of them, no in-progress annotation naming a branch that
-still exists, and the Stage's own slug branch not taken. A roadmap that is
+still exists, and the Stage's own branch not taken. A roadmap that is
 finished, one already in flight and one whose next brief is missing are each not
 abandoned and each draw nothing, because what the human can do something about
 is the only thing worth saying. Read from the repositories every time it is

@@ -11172,7 +11172,7 @@ case "$2" in
     mkdir -p .tasks
     printf '# Count the requests\n\nRoadmap stage: [01: Count the requests](docs/roadmaps/rate-limiting/01-counter.md)\n\n## Tasks\n\n- [ ] 01: count them — [details](01-count.md)\n' > .tasks/TODO.md
     printf '# 01. count them\n' > .tasks/01-count.md
-    sed -i 's|\[brief\](01-counter.md)|[brief](01-counter.md) *(in progress: `counter`)*|' docs/roadmaps/rate-limiting/ROADMAP.md 2>/dev/null || true
+    sed -i 's|\[brief\](01-counter.md)|[brief](01-counter.md) *(in progress: `rate-limiting/01-counter`)*|' docs/roadmaps/rate-limiting/ROADMAP.md 2>/dev/null || true
     git add -A
     git commit --quiet -m 'chore: plan counter tasks'
     sleep 300
@@ -11349,8 +11349,8 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     let stage = stage_of(&fixture).await;
 
     assert_eq!(
-        stage.branch, "counter",
-        "the branch is the stage brief's own name, without its number",
+        stage.branch, "rate-limiting/01-counter",
+        "the branch is the stage brief's own name, under the roadmap it belongs to",
     );
     assert_eq!(
         stage.state,
@@ -11424,7 +11424,8 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     let carried_on = said_by(&fixture).await;
 
     assert!(
-        carried_on.contains("Stage 01") && carried_on.contains("<code>counter</code>"),
+        carried_on.contains("Stage 01")
+            && carried_on.contains("<code>rate-limiting/01-counter</code>"),
         "the settled Conversation says which stage started and on what: {carried_on:?}",
     );
 
@@ -11505,7 +11506,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         .expect("the roadmap is on the stage's branch too");
 
     assert!(
-        index.contains("*(in progress: `counter`)*"),
+        index.contains("*(in progress: `rate-limiting/01-counter`)*"),
         "the roadmap says which branch stage 01 is being worked on: {index:?}",
     );
 }
@@ -12035,10 +12036,10 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
     .await;
 
     // Somebody else's branch, by the name this stage's companion branch would
-    // take: `counter` is the first stage brief's own name, which is what the
-    // stage's branch and so its companion branch are called.
+    // take: `rate-limiting/01-counter` is the first stage's own name, which is
+    // what the stage's branch and so its companion branch are called.
     let companion = PathBuf::from(&alongside(&fixture.view().await, "askance").repo.path);
-    git(&companion, &["branch", "counter"]);
+    git(&companion, &["branch", "rate-limiting/01-counter"]);
 
     staged_and_settled(&fixture).await;
 
@@ -12092,9 +12093,12 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
         "so no session was launched inside the next-stage fork either",
     );
     assert!(
-        !git(&fixture.repo(), &["branch", "--list", "counter"])
-            .trim()
-            .contains("counter"),
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "rate-limiting/01-counter"]
+        )
+        .trim()
+        .contains("counter"),
         "and the stage's own branch was never cut, every question being asked \
          before any of them is answered",
     );
@@ -12289,8 +12293,8 @@ async fn adopting_a_roadmap_starts_its_next_stage_with_a_planning_session() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.branch, "counter",
-        "the branch is the stage brief's own name, without its number",
+        view.branch, "rate-limiting/01-counter",
+        "the branch is the stage brief's own name, under the roadmap it belongs to",
     );
     assert_eq!(
         view.state,
@@ -12527,7 +12531,8 @@ case "$2" in
     mkdir -p .tasks
     printf '# The stage\n\n## Tasks\n\n- [ ] 01: do the work — [details](01-do-the-work.md)\n' > .tasks/TODO.md
     printf '# 01. do the work\n' > .tasks/01-do-the-work.md
-    sed -i "/-$branch.md)/s|\$| *(in progress: \`$branch\`)*|" docs/roadmaps/rate-limiting/ROADMAP.md
+    stage=$(basename "$branch")
+    sed -i "/($stage.md)/s|\$| *(in progress: \`$branch\`)*|" docs/roadmaps/rate-limiting/ROADMAP.md
     git add -A
     git commit --quiet -m "chore: plan the $branch stage"
     sleep 300
@@ -12589,16 +12594,16 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         .await;
 
     assert!(
-        until_written_saying(&planning, "planned=counter")
+        until_written_saying(&planning, "planned=rate-limiting/01-counter")
             .await
-            .contains("planned=counter"),
+            .contains("planned=rate-limiting/01-counter"),
         "the adopted stage is the one that was planned",
     );
 
     let next = stage_of(&fixture).await;
 
     assert_eq!(
-        next.branch, "refusing",
+        next.branch, "rate-limiting/02-refusing",
         "the stage after the adopted one, on a branch of its own",
     );
     assert_eq!(
@@ -12650,13 +12655,13 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         .await;
 
     assert!(
-        carried_on.contains("<code>refusing</code>"),
+        carried_on.contains("<code>rate-limiting/02-refusing</code>"),
         "the adopted Conversation says which stage started and on what: {carried_on:?}",
     );
 
     // And the session it started is the same fork of next-stage the adopted stage
     // itself was planned by, this time with nobody at the workbench at all.
-    let planned = until_written_saying(&planning, "planned=refusing").await;
+    let planned = until_written_saying(&planning, "planned=rate-limiting/02-refusing").await;
 
     assert_eq!(
         planned.matches("planned=").count(),

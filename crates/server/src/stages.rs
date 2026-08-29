@@ -34,9 +34,9 @@
 //! with no Worktree anywhere in it. That is what adoption needs: a roadmap the
 //! old tools or a human wrote is committed on the default branch and was
 //! touched by no branch Verkstead knows, so the reading above sees nothing of
-//! it. The entries, the stage and the branch-slug rule are the same ones; only
-//! the way the bytes are fetched differs — `ls-tree` and `show` against the
-//! Repo's own git directory rather than files off a checkout.
+//! it. The entries, the stage and the branch-naming rule are the same ones;
+//! only the way the bytes are fetched differs — `ls-tree` and `show` against
+//! the Repo's own git directory rather than files off a checkout.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -232,13 +232,28 @@ pub(crate) struct Stage {
 }
 
 impl Stage {
-    /// What to call the branch this stage is worked on: its brief's name
-    /// without the number in front of it — `04-wrap-up.md` becomes `wrap-up`.
+    /// What to call the branch this stage is worked on: the roadmap it belongs
+    /// to, then its brief's name as the brief is named — `docs/roadmaps/mvp/
+    /// 04-wrap-up.md` becomes `mvp/04-wrap-up`.
+    ///
+    /// Under the roadmap's own name rather than the bare slug, because the bare
+    /// slug is a name the repository may already be using for something that has
+    /// nothing to do with any roadmap. A stage whose branch name is taken is one
+    /// Verkstead will not start — and that refusal happens at the end of an
+    /// unattended run, where a roadmap that stops advancing is a roadmap nobody
+    /// is told about until they come and look. Qualified this way the only thing
+    /// it can collide with is another attempt at the same stage of the same
+    /// roadmap, which is exactly the collision the refusal is for.
+    ///
+    /// The number kept in front of the slug for the same reason it is in the
+    /// brief's name: it is what puts the stages of one roadmap in their order,
+    /// wherever they are listed — and `git branch` lists them together, the
+    /// roadmap being a path component of each.
     ///
     /// The brief's name rather than the title, because it is already a slug
     /// somebody chose and it is what the roadmap's own annotation will name.
-    /// A brief with nothing usable in its name falls back to the number, which
-    /// is the one thing every entry has.
+    /// A brief with nothing usable in its name falls back to the number alone,
+    /// which is the one thing every entry has.
     pub(crate) fn branch(&self) -> String {
         let stem = self
             .brief_path
@@ -253,8 +268,8 @@ impl Stage {
             .trim_start_matches(['-', '_']);
 
         match slug.is_empty() {
-            true => format!("stage-{}", self.label),
-            false => slug.to_owned(),
+            true => format!("{}/{}", self.roadmap, self.label),
+            false => format!("{}/{}-{}", self.roadmap, self.label, slug),
         }
     }
 }
@@ -566,7 +581,7 @@ pub(crate) enum Startable {
     /// names none at all.
     NoBrief,
 
-    /// The stage's own slug branch is taken in the Repo, which is a stage
+    /// The stage's own branch is taken in the Repo, which is a stage
     /// already under way whatever the boxes say.
     BranchTaken,
 }
@@ -1470,8 +1485,8 @@ Turns this askance clone into Verkstead.
         assert_eq!(stage.brief, "# 03. Implementation\n");
         assert_eq!(
             stage.branch(),
-            "implementation",
-            "the branch is the brief's own name, without the number in front of it",
+            "mvp/03-implementation",
+            "the branch is the brief's own name, under the roadmap it belongs to",
         );
     }
 
@@ -1640,8 +1655,8 @@ Turns this askance clone into Verkstead.
         assert_eq!(abandoned[0].stage.brief, "# 03. Implementation\n");
         assert_eq!(
             abandoned[0].stage.branch(),
-            "implementation",
-            "adopting it takes the stage's own slug, as the unattended start does",
+            "mvp/03-implementation",
+            "adopting it takes the stage's own name, as the unattended start does",
         );
     }
 
@@ -1745,18 +1760,44 @@ Turns this askance clone into Verkstead.
     /// same rule the unattended start refuses by, applied before anything is
     /// offered.
     #[test]
-    fn a_stage_whose_slug_branch_is_taken_is_not_abandoned() {
+    fn a_stage_whose_own_branch_is_taken_is_not_abandoned() {
         let repo = Repo::with(&[("mvp", MVP)]);
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
         repo.commit();
 
         assert_eq!(repo.abandoned().len(), 1, "nothing is on it yet");
 
-        repo.branch("implementation");
+        repo.branch("mvp/03-implementation");
 
         assert!(
             repo.abandoned().is_empty(),
-            "`implementation` is taken, so stage 03 is under way somewhere",
+            "`mvp/03-implementation` is taken, so stage 03 is under way somewhere",
+        );
+    }
+
+    /// And what the roadmap's own name is in front of it for. A repository is
+    /// full of branches somebody named for whatever they were doing, and one of
+    /// them reading like a stage's brief says nothing whatever about that stage.
+    /// Clause 4 turning on it would take the roadmap out of the notice and the
+    /// unattended start would refuse it too — leaving a roadmap that could only
+    /// be got going again by renaming a branch by hand.
+    #[test]
+    fn a_branch_that_merely_reads_like_a_stage_is_nothing_to_do_with_it() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.commit();
+
+        repo.branch("implementation");
+
+        assert_eq!(
+            repo.abandoned().len(),
+            1,
+            "`implementation` is somebody's own branch, not stage 03 of the mvp roadmap",
+        );
+        assert!(
+            matches!(repo.startable("mvp"), Startable::Stage(_)),
+            "so the press has a stage to start: {:?}",
+            repo.startable("mvp"),
         );
     }
 
@@ -1827,7 +1868,7 @@ Turns this askance clone into Verkstead.
         assert_eq!(repo.startable("in-flight"), Startable::NoBrief);
 
         // And clause 4, which is the one the roadmap says nothing about at all.
-        repo.branch("implementation");
+        repo.branch("mvp/03-implementation");
 
         assert_eq!(repo.startable("mvp"), Startable::BranchTaken);
     }
@@ -1843,7 +1884,7 @@ Turns this askance clone into Verkstead.
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
         repo.commit();
 
-        // The stage starts: a branch at its own slug, and a plan commit on it
+        // The stage starts: a branch at its own name, and a plan commit on it
         // ticking the box and saying whose it is.
         repo.write(
             "mvp",
@@ -1853,7 +1894,10 @@ Turns this askance clone into Verkstead.
                  *(in progress: `implementation`)*",
             ),
         );
-        repo.commit_on("implementation", "chore: plan the implementation stage");
+        repo.commit_on(
+            "mvp/03-implementation",
+            "chore: plan the implementation stage",
+        );
 
         assert_eq!(
             at(repo.path(), &repo.tip(), "docs/roadmaps/mvp/ROADMAP.md",),
@@ -1867,7 +1911,7 @@ Turns this askance clone into Verkstead.
 
         // The branch goes and nothing is running it, which is exactly the state
         // adoption is for.
-        run(repo.path(), &["branch", "-D", "implementation"]);
+        run(repo.path(), &["branch", "-D", "mvp/03-implementation"]);
 
         assert_eq!(repo.abandoned().len(), 1);
     }
@@ -2077,8 +2121,8 @@ Turns this askance clone into Verkstead.
         assert_eq!(stage.title, "Implementation");
         assert_eq!(stage.brief_path, "docs/roadmaps/mvp/03-implementation.md");
         assert_eq!(
-            stage.branch, "implementation",
-            "the stage's own slug, as the unattended start names one",
+            stage.branch, "mvp/03-implementation",
+            "the stage's own name, as the unattended start names one",
         );
     }
 
@@ -2160,7 +2204,7 @@ Turns this askance clone into Verkstead.
         let repo = Repo::with(&[("mvp", MVP)]);
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
         repo.commit();
-        repo.branch("implementation");
+        repo.branch("mvp/03-implementation");
 
         let view = adopting(repo.registered(), None, "mvp".to_owned()).await;
 

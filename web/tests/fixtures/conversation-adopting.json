@@ -2,7 +2,7 @@
   "adopting": {
     "roadmap": "mvp",
     "stage": {
-      "branch": "wrap-up",
+      "branch": "mvp/04-wrap-up",
       "brief_path": "docs/roadmaps/mvp/04-wrap-up.md",
       "label": "04",
       "title": "Wrap-up"
