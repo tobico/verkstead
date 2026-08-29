@@ -183,6 +183,49 @@ pub struct PairingView {
     pub model: Option<String>,
 }
 
+/// What a Conversation has settled about one of its roles, as the page shows
+/// it: the Pairing its sessions run under, that the role runs none, or nothing
+/// picked yet.
+///
+/// Three rather than a nullable Pairing, because the picker offers *no review*
+/// as a row of its own: a Conversation that picked it is as ready to start as
+/// one that picked a Pairing, and a page that could not tell it from an empty
+/// picker would draw the placeholder over a settled choice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum PickedView {
+    /// Nothing picked — which includes a Profile chosen before pairings
+    /// existed, that being half a choice and so a choice to make again.
+    Nothing,
+
+    /// The row that runs no session at all.
+    Skipped,
+
+    /// The Profile and model this role's sessions run under.
+    Under(PairingView),
+}
+
+impl PickedView {
+    /// The Pairing where one was picked, for the readers that want the account
+    /// rather than which of the three this is.
+    pub fn pairing(&self) -> Option<&PairingView> {
+        match self {
+            Self::Under(pairing) => Some(pairing),
+            _ => None,
+        }
+    }
+}
+
+/// Which Pairing a Conversation's review runs under, or that it runs none.
+///
+/// `null` is the *no review* row: the picker offers it beside the Pairings, so
+/// the one press that picks either sends the same body — see [`PickedView`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ReviewChoice {
+    pub pairing: Option<ProfileChoice>,
+}
+
 /// Which Profile and model a Conversation is pairing for one of its roles.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]

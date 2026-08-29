@@ -1464,7 +1464,7 @@ async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
         .expect("it opens, which is most of what this is about");
 
     assert!(
-        conversation.review_pairing.is_none(),
+        !conversation.review_pairing.picked(),
         "and the picker it arrives with is the one a Conversation with no memory gets",
     );
 
@@ -1477,11 +1477,11 @@ async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
         .unwrap();
 
     assert!(
-        load_conversation(&pool, id)
+        !load_conversation(&pool, id)
             .await
             .unwrap()
             .expect("it opens again")
             .review_pairing
-            .is_none()
+            .picked()
     );
 }

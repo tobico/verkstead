@@ -19,7 +19,7 @@ use verkstead_schema::Direction;
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::{DiffView, PairingView, ProfileChoice, RepoEntry, Standing};
+use crate::{DiffView, PairingView, PickedView, ProfileChoice, RepoEntry, Standing};
 
 /// Where a Conversation has got to.
 ///
@@ -256,9 +256,12 @@ pub struct ConversationView {
     /// because it is genuinely a separate account and model.
     pub implementation_pairing: Option<PairingView>,
 
-    /// And the ones the wrap-up's review session will run under, chosen
-    /// separately again: reviewing is a fresh set of eyes on what was built.
-    pub review_pairing: Option<PairingView>,
+    /// And what the wrap-up's review session will run under, chosen separately
+    /// again: reviewing is a fresh set of eyes on what was built.
+    ///
+    /// The one role the picker offers a *no review* row for, so this says which
+    /// of three the human picked rather than whether they picked at all.
+    pub review_pairing: PickedView,
 
     /// Whether everything needed before grilling will start is settled: every
     /// Pairing complete and no Profile broken, a Brief with something in

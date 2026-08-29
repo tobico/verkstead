@@ -533,9 +533,12 @@ async fn refusal(
     // launched under a Pairing, so a state something runs in with none settled is
     // a move into work nothing could start. Every role the target runs under,
     // because any one of them missing is a session the wrap-up could not start.
+    //
+    // A role picked away is settled: what it says is that the state runs no
+    // session there, which is not a session that could not be started.
     Ok(roles
         .iter()
-        .any(|role| fixed(conversation, *role).is_none())
+        .any(|role| !fixed(conversation, *role).picked())
         .then_some(ConversationSteered::NoPairing))
 }
 
@@ -637,6 +640,10 @@ fn directing(conversation: &Conversation, instruction: Option<&str>) -> Option<D
 /// Empty twice over: a target nothing runs in settles nothing, and a human who
 /// left the picker alone has changed nothing — [`refusal`] has already made sure
 /// that the Conversation's own is there in that case.
+///
+/// And a role the human picked away is left picked away. The modal's one pick is
+/// what the sessions run under, and a role that runs none is not among them:
+/// writing a Pairing over it would turn a review back on that nobody asked for.
 fn settling<'a>(conversation: &Conversation, submission: &'a SteerSubmission) -> Vec<Settling<'a>> {
     let Some(choice) = submission.pairing.as_ref() else {
         return Vec::new();
@@ -655,10 +662,13 @@ fn settling<'a>(conversation: &Conversation, submission: &'a SteerSubmission) ->
         // Profile alone would answer *Steered* to a change of model and write
         // none of it.
         .filter(|role| {
-            !fixed(conversation, *role).is_some_and(|pairing| {
-                pairing.profile.id == choice.profile_id
-                    && pairing.model.as_deref() == Some(&choice.model)
-            })
+            let fixed = fixed(conversation, *role);
+
+            !fixed.skipped()
+                && !fixed.pairing().is_some_and(|pairing| {
+                    pairing.profile.id == choice.profile_id
+                        && pairing.model.as_deref() == Some(&choice.model)
+                })
         })
         .map(|role| Settling {
             role,
@@ -849,12 +859,24 @@ fn roles(target: SteerTarget) -> &'static [Role] {
 /// held against — see [`settling`]. A Pairing carrying no model is a Profile
 /// chosen before pairings existed, which is half a choice and so never the same
 /// choice as one made now.
-fn fixed(conversation: &Conversation, role: Role) -> Option<&store::Pairing> {
+///
+/// And whether the role was picked away rather than paired, which is settled
+/// too: a Conversation that will not be reviewed is not one with a review
+/// Pairing missing, and the difference is what the two readers below turn on.
+fn fixed(conversation: &Conversation, role: Role) -> store::Picked {
     match role {
-        Role::Grilling => conversation.grilling_pairing.as_ref(),
-        Role::Implementation => conversation.implementation_pairing.as_ref(),
-        Role::Review => conversation.review_pairing.as_ref(),
+        Role::Grilling => carried(conversation.grilling_pairing.as_ref()),
+        Role::Implementation => carried(conversation.implementation_pairing.as_ref()),
+        Role::Review => conversation.review_pairing.clone(),
     }
+}
+
+/// A role that can only be paired or unpicked, read the same way as one that
+/// can be picked away.
+fn carried(pairing: Option<&store::Pairing>) -> store::Picked {
+    pairing
+        .cloned()
+        .map_or(store::Picked::Nothing, store::Picked::Under)
 }
 
 /// The line that goes under the Steer, naming every companion the steer put in

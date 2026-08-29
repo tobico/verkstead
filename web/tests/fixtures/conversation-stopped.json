@@ -78,17 +78,19 @@
   },
   "resets": null,
   "review_pairing": {
-    "model": "claude-sonnet-5",
-    "profile": {
-      "agent_type": "Claude",
-      "broken": "DirMissing",
-      "claude_dir": "/srv/accounts/sonnet/.claude",
-      "config_file": "/srv/accounts/sonnet/.claude.json",
-      "id": 3,
-      "models": [
-        "claude-sonnet-5"
-      ],
-      "name": "sonnet"
+    "Under": {
+      "model": "claude-sonnet-5",
+      "profile": {
+        "agent_type": "Claude",
+        "broken": "DirMissing",
+        "claude_dir": "/srv/accounts/sonnet/.claude",
+        "config_file": "/srv/accounts/sonnet/.claude.json",
+        "id": 3,
+        "models": [
+          "claude-sonnet-5"
+        ],
+        "name": "sonnet"
+      }
     }
   },
   "state": "Implementing",

@@ -63,6 +63,7 @@ import notices from "../src/notices.module.css";
 import contents from "../src/set/Contents.module.css";
 import sheet from "../src/set/Sheet.module.css";
 import illegible from "../src/set/Unreadable.module.css";
+import { NONE, under } from "../src/pairing";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
 // What can be done to a Conversation as a whole, both ways: the hashed names
@@ -3126,6 +3127,7 @@ describe("a conversation's pairings", () => {
     ...OPEN,
     grilling_pairing: null,
     implementation_pairing: null,
+    review_pairing: "Nothing",
     ready_to_grill: false,
   };
 
@@ -3169,9 +3171,11 @@ describe("a conversation's pairings", () => {
         OPEN.implementation_pairing!.model!,
       ),
     );
-    expect(reviewing.value).toBe(
-      pairing(OPEN.review_pairing!.profile, OPEN.review_pairing!.model!),
-    );
+    // The fixture picks a Pairing for the review, which is one of that
+    // picker's rows; the other says there is to be no review at all.
+    const reviewed = under(OPEN.review_pairing)!;
+
+    expect(reviewing.value).toBe(pairing(reviewed.profile, reviewed.model!));
     expect(
       new Set([grilling.value, implementing.value, reviewing.value]).size,
     ).toBe(3);
@@ -3228,6 +3232,87 @@ describe("a conversation's pairings", () => {
         profile_id: PROFILES[1]!.id,
         model: PROFILES[1]!.models[1],
       }),
+    );
+  });
+
+  /// The review picker has a row that is no account at all, and it is one of the
+  /// rows rather than a switch beside them: what runs this, and one of the
+  /// answers is nobody.
+  it("offers no review as a row of the review picker alone", async () => {
+    withConversation(UNCHOSEN);
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Review"));
+
+    const rows = (label: string) =>
+      Array.from(
+        (screen.getByLabelText(label) as HTMLSelectElement).options,
+      ).map((option) => option.text);
+
+    const combinations = PROFILES.flatMap((profile) =>
+      profile.models.map((model) => `${profile.name} — ${model}`),
+    );
+
+    expect(rows("Review")).toEqual([
+      // The placeholder, because nothing has been picked yet — and above the
+      // accounts, the row that says none of them will read this branch.
+      "Not chosen",
+      "No review",
+      ...combinations,
+    ]);
+    expect(rows("Grilling")).toEqual(["Not chosen", ...combinations]);
+  });
+
+  /// And picking it sends a choice rather than the absence of one: an untouched
+  /// picker and a picker moved to that row leave the same column empty, and only
+  /// one of them lets the work start.
+  it("sends no review as the choice it is", async () => {
+    const fetching = withConversation(UNCHOSEN, json("Chosen"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Review"));
+
+    fireEvent.change(screen.getByLabelText("Review"), {
+      target: { value: NONE },
+    });
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+      ).toEqual({ pairing: null }),
+    );
+  });
+
+  /// And picking an account sends the pairing under the same key, because it is
+  /// the same press on the same picker.
+  it("sends a review pairing under the same key", async () => {
+    const fetching = withConversation(UNCHOSEN, json("Chosen"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Review"));
+
+    fireEvent.change(screen.getByLabelText("Review"), {
+      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
+    });
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+      ).toEqual({
+        pairing: {
+          profile_id: PROFILES[0]!.id,
+          model: PROFILES[0]!.models[0],
+        },
+      }),
+    );
+  });
+
+  /// A picker already on that row keeps it: it is a settled choice, so the
+  /// placeholder is not drawn over it the way it is over an empty one.
+  it("shows no review as what is chosen where it is", async () => {
+    withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Review"));
+
+    expect((screen.getByLabelText("Review") as HTMLSelectElement).value).toBe(
+      NONE,
     );
   });
 
@@ -10984,6 +11069,20 @@ describe("the configuration on the brief's pane", () => {
       Implementation: "opus — claude-opus-5",
       Review: "sonnet — claude-sonnet-5",
     });
+  });
+
+  /// A conversation nobody is to review says so, rather than reading as one
+  /// whose review pairing was never picked: what the human picked is a choice,
+  /// and the pane says what it was.
+  it("says no review where that is what was picked", async () => {
+    theGrillingStanding({ review_pairing: "Skipped" });
+    await openBrief(GRILLING);
+
+    expect(configuration().Review).toBe("No review.");
+    expect(
+      configuration().Implementation,
+      "and the roles beside it read as they always did",
+    ).toBe("opus — claude-opus-5");
   });
 
   it("lists each companion with its mode, its branch and its directory", async () => {

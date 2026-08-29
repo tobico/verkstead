@@ -3223,7 +3223,7 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
     let role = inside.role();
 
     let paired = match role {
-        store::Role::Review => conversation.review_pairing.clone(),
+        store::Role::Review => conversation.review_pairing.pairing().cloned(),
         _ => conversation.implementation_pairing.clone(),
     };
 

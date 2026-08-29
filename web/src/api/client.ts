@@ -42,6 +42,7 @@ import type {
   RepoEntry,
   Response as Decided,
   Resumed,
+  ReviewChoice,
   RoadmapPane,
   Screen,
   SetReading,
@@ -630,13 +631,16 @@ export function chooseImplementationPairing(
 
 /// And the one the wrap-up's review runs under, which is a third separate
 /// choice: reviewing is a fresh set of eyes on what was built.
+///
+/// `null` is the picker's own "No review" row, which is a choice like any
+/// other rather than the absence of one.
 export function chooseReviewPairing(
   id: number,
-  pairing: ProfileChoice,
+  choice: ReviewChoice,
 ): Promise<ProfileChosen> {
   return post<ProfileChosen>(
     `/api/ui/conversations/${id}/review-pairing`,
-    pairing,
+    choice,
   );
 }
 

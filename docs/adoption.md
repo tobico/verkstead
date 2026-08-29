@@ -86,8 +86,9 @@ Pairing** and a **Review Pairing** before it starts — a Profile and one of its
 models, picked together as one row. The same Profile may fill all three, and
 separate ones are how the parts bill to separate accounts. The review one runs
 the wrap-up's review and nothing else, reviewing being a fresh set of eyes on
-what was built. All of them are settled while the Conversation is drafting, and
-grilling starting is what fixes them.
+what was built — and its picker offers **No review** beside the accounts, for
+work you would rather have wrapped up without one. All of them are settled while
+the Conversation is drafting, and grilling starting is what fixes them.
 
 **Then, per piece of work:**
 

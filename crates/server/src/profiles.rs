@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Broken, PairingView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
-    ProfileSaved,
+    Broken, PairingView, PickedView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, ReviewChoice,
 };
 
 use crate::store;
@@ -93,6 +93,24 @@ pub(crate) async fn pairing(
         .map(|profile| PairingView { profile, model }))
 }
 
+/// And the same reading for a whole choice, for the one role that can be picked
+/// away as well as paired.
+///
+/// The three states come across unchanged: a Pairing is read as one, the row
+/// that runs no session stays what it is, and a Profile whose row has gone
+/// reads as nothing picked — which is what it is, since there is no account
+/// left to launch under.
+pub(crate) async fn picked(watched: &WatchedPaths, picked: store::Picked) -> Result<PickedView> {
+    Ok(match picked {
+        store::Picked::Nothing => PickedView::Nothing,
+        store::Picked::Skipped => PickedView::Skipped,
+        store::Picked::Under(under) => match pairing(watched, Some(under)).await? {
+            Some(pairing) => PickedView::Under(pairing),
+            None => PickedView::Nothing,
+        },
+    })
+}
+
 /// Read a batch of Profiles into rows, looking at the filesystem once for the
 /// lot of them.
 ///
@@ -136,17 +154,27 @@ async fn entries(
 /// which is what this says. Nothing asks it of a Conversation past drafting —
 /// there is no grilling left to be ready for — so the carried model this would
 /// refuse is never the one that runs anything.
+///
+/// **A review picked away is settled**, and settles this: there is no session
+/// to fail to start, so a Conversation that will not be reviewed is as ready as
+/// one that will. What it is not is an empty picker — see
+/// [`verkstead_render::PickedView`].
 pub(crate) fn ready_to_grill(
     grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
-    review: Option<&PairingView>,
+    review: &PickedView,
 ) -> bool {
-    [grilling, implementation, review]
-        .into_iter()
-        .all(|chosen| {
-            chosen
-                .is_some_and(|pairing| pairing.model.is_some() && pairing.profile.broken.is_none())
-        })
+    [grilling, implementation].into_iter().all(runnable)
+        && match review {
+            PickedView::Nothing => false,
+            PickedView::Skipped => true,
+            PickedView::Under(pairing) => runnable(Some(pairing)),
+        }
+}
+
+/// Whether one picked Pairing is something a session could be launched under.
+fn runnable(pairing: Option<&PairingView>) -> bool {
+    pairing.is_some_and(|pairing| pairing.model.is_some() && pairing.profile.broken.is_none())
 }
 
 /// Why this Profile cannot be run under as things stand, or `None` while its
@@ -283,12 +311,21 @@ pub(crate) async fn choose_implementation(
     ))
 }
 
-/// And the one the wrap-up's review session will run under.
+/// And the one the wrap-up's review session will run under — or the row that
+/// says there is to be no review session at all.
+///
+/// One press either way, because the picker offers them as one list: nothing is
+/// judged about a review that runs nothing, there being no Profile to have gone
+/// and no model to have been retyped.
 pub(crate) async fn choose_review(
     pool: &SqlitePool,
     id: i64,
-    choice: &ProfileChoice,
+    choice: &ReviewChoice,
 ) -> Result<ProfileChosen> {
+    let Some(choice) = &choice.pairing else {
+        return Ok(chosen(store::skip_review(pool, id).await?));
+    };
+
     if let Some(refusal) = unlisted(pool, choice).await? {
         return Ok(refused(refusal));
     }

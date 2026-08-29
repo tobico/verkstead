@@ -24,8 +24,9 @@ use verkstead_render::{
     CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChosen,
     CompanionRefusal, CompanionRemoved, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationUnarchived, ConversationView,
-    GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered, RoadmapPane,
-    ShowingArchived, Standing, Started, SteerCompanionRefusal, SteerOpened, TimelineEvent,
+    GrillingStarted, Lifecycle, PickedView, PinnedEvent, ProfileChosen, ProfileSaved, Registered,
+    RoadmapPane, ShowingArchived, Standing, Started, SteerCompanionRefusal, SteerOpened,
+    TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
@@ -1116,13 +1117,32 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
 /// Pair a Profile with the one model [`profile`] gives every Profile here, for
 /// one of a Conversation's roles.
 async fn choose(app: &Router, id: i64, role: &str, profile_id: i64) {
+    let pairing = serde_json::json!({ "profile_id": profile_id, "model": "claude-opus-5" });
+
+    // The review picker offers a row that is not an account, so what it sends
+    // is which row was picked rather than a Pairing outright — see [`no_review`].
+    let picked = match role {
+        "review" => serde_json::json!({ "pairing": pairing }),
+        _ => pairing,
+    };
+
     let chosen: verkstead_render::ProfileChosen = post(
         app,
         &format!("/api/ui/conversations/{id}/{role}-pairing"),
-        &serde_json::json!({ "profile_id": profile_id, "model": "claude-opus-5" }),
+        &picked,
     )
     .await;
     assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+}
+
+/// Pick the Review picker's other row: this Conversation is not to be reviewed.
+async fn no_review(app: &Router, id: i64) -> verkstead_render::ProfileChosen {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/review-pairing"),
+        &serde_json::json!({ "pairing": null }),
+    )
+    .await
 }
 
 async fn grill(app: &Router, id: i64) -> GrillingStarted {
@@ -2412,7 +2432,9 @@ async fn steering_into_wrapping_settles_the_building_and_the_review_pairings() {
         "what the fixes run under",
     );
     assert_eq!(
-        view.review_pairing.map(|pairing| pairing.profile.id),
+        view.review_pairing
+            .pairing()
+            .map(|pairing| pairing.profile.id),
         Some(picked),
         "and what the review runs under, off the same pick",
     );
@@ -2420,6 +2442,78 @@ async fn steering_into_wrapping_settles_the_building_and_the_review_pairings() {
         view.grilling_pairing.map(|pairing| pairing.profile.id),
         Some(interviewing.profile.id),
         "and the role nothing wraps under is exactly where it was",
+    );
+}
+
+/// And a Conversation whose human picked *No review* keeps that through a steer
+/// into Wrapping: the modal's one pick is what the sessions run under, and a
+/// role that runs none is not among them.
+///
+/// It is also settled, so the steer is not refused for a Pairing that is missing
+/// — there is nothing missing.
+#[tokio::test]
+async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::record_pull_request(
+            &pool,
+            id,
+            repo_id,
+            &store::PullRequest {
+                number: 41,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                repo: None,
+            },
+        )
+        .await
+        .unwrap(),
+        store::Wrapping::Started,
+    );
+
+    pool.close().await;
+
+    let picked = profile(&app, watched.path(), "steering").await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+
+    let steered: ConversationSteered = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Wrapping",
+            "interrupt": false,
+            "pairing": { "profile_id": picked, "model": "claude-opus-5" },
+        }),
+    )
+    .await;
+
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(
+        view.implementation_pairing
+            .map(|pairing| pairing.profile.id),
+        Some(picked),
+        "what the fixes run under, settled off the pick as ever",
+    );
+    assert_eq!(
+        view.review_pairing,
+        PickedView::Skipped,
+        "and the review the human turned off stays off",
     );
 }
 
@@ -6694,4 +6788,72 @@ async fn row(app: &Router, id: i64) -> ConversationEntry {
 /// And whether that row says there is news on it.
 async fn unseen(app: &Router, id: i64) -> bool {
     row(app, id).await.unseen
+}
+
+/// *No review* satisfies the same rule a Pairing does, and an empty picker
+/// still refuses: the two look alike on the record and only one of them is a
+/// choice the human made.
+#[tokio::test]
+async fn no_review_makes_a_draft_as_ready_to_start_as_a_review_pairing_does() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    write_brief(&app, id, "# Rate limiting\n").await;
+
+    choose(
+        &app,
+        id,
+        "grilling",
+        profile(&app, watched.path(), "fable").await,
+    )
+    .await;
+    choose(
+        &app,
+        id,
+        "implementation",
+        profile(&app, watched.path(), "opus").await,
+    )
+    .await;
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::NoReviewProfile,
+        "the picker nobody has touched refuses the start",
+    );
+    assert!(!opened(&app, id).await.ready_to_grill);
+
+    assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
+
+    let view = opened(&app, id).await;
+    assert_eq!(
+        view.review_pairing,
+        PickedView::Skipped,
+        "the row that runs nothing, read back as the choice it was",
+    );
+    assert!(
+        view.ready_to_grill,
+        "and a draft that will not be reviewed is a draft that can start",
+    );
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
+/// And it is fixed when grilling starts, exactly as the Pairings beside it are.
+#[tokio::test]
+async fn no_review_is_fixed_once_the_grilling_has_started() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        no_review(&app, id).await,
+        ProfileChosen::NotDrafting,
+        "there is no picking left once the work has started",
+    );
+    assert_eq!(
+        opened(&app, id).await.review_pairing,
+        PickedView::Skipped,
+        "and what it started under is exactly where it was",
+    );
 }

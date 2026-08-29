@@ -10,9 +10,10 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    AgentType, Chosen, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,
-    load_conversation, load_profile, open_database, profiles, register_repo, set_grilling_pairing,
-    set_implementation_pairing, start_conversation, start_grilling, update_profile,
+    AgentType, Chosen, Deleting, Picked, Profile, ProfileFacts, Saving, create_profile,
+    delete_profile, load_conversation, load_profile, open_database, profiles, register_repo,
+    set_grilling_pairing, set_implementation_pairing, set_review_pairing, skip_review,
+    start_conversation, start_grilling, update_profile,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -613,4 +614,118 @@ async fn nothing_saved_means_nothing_listed() {
     let (_dir, pool) = fresh_pool().await;
 
     assert!(profiles(&pool).await.unwrap().is_empty());
+}
+
+/// *No review* is a choice, stored apart from having chosen nothing.
+///
+/// Which is the whole of why it is not simply the absence of a Pairing: a
+/// picker nobody has touched and a picker moved to the row that runs nothing
+/// leave the same column empty, and only one of them lets the work start.
+#[tokio::test]
+async fn no_review_is_a_choice_rather_than_an_empty_picker() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .review_pairing,
+        Picked::Nothing,
+        "nothing has been picked yet",
+    );
+
+    assert_eq!(skip_review(&pool, id).await.unwrap(), Chosen::Chosen);
+
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .review_pairing,
+        Picked::Skipped,
+        "and now something has",
+    );
+}
+
+/// The two rows are rows of one list, so picking either unpicks the other.
+#[tokio::test]
+async fn picking_a_review_pairing_and_picking_none_replace_each_other() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+    let fable = saved(&pool, "fable").await;
+
+    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+    skip_review(&pool, id).await.unwrap();
+
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .review_pairing,
+        Picked::Skipped,
+        "the account it was going to be reviewed under is off it",
+    );
+
+    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    let picked = load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .review_pairing;
+
+    assert_eq!(
+        picked.pairing().map(|pairing| pairing.profile.id),
+        Some(fable.id),
+        "and picking an account back takes the row that ran nothing away",
+    );
+}
+
+/// And it is fixed when grilling starts, exactly as the Pairings beside it are.
+#[tokio::test]
+async fn no_review_cannot_be_picked_once_grilling_has_started() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+    let fable = saved(&pool, "fable").await;
+
+    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(skip_review(&pool, id).await.unwrap(), Chosen::NotDrafting);
+
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .review_pairing
+            .pairing()
+            .map(|pairing| pairing.profile.id),
+        Some(fable.id),
+        "and what it was grilled under is exactly where it was",
+    );
 }

@@ -34,9 +34,9 @@ use verkstead_render::{
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
     ConversationView, Cursor, GrillingStarted, Lifecycle, Locked, NewAdoption, NewCompanion,
     NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
-    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    RepoEntry, Resumed, ReviewChoice, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -773,7 +773,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
-    let review_pairing = match crate::profiles::pairing(&state.watched, conversation.review_pairing)
+    let review_pairing = match crate::profiles::picked(&state.watched, conversation.review_pairing)
         .await
     {
         Ok(pairing) => pairing,
@@ -907,7 +907,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         conversation.state,
         grilling_pairing.as_ref(),
         implementation_pairing.as_ref(),
-        review_pairing.as_ref(),
+        &review_pairing,
         brief,
     );
 
@@ -2232,11 +2232,12 @@ async fn choose_implementation_pairing(
 }
 
 /// `POST /api/ui/conversations/{id}/review-pairing` — and the one the wrap-up's
-/// review runs under, which is a third separate choice.
+/// review runs under, which is a third separate choice: a Pairing, or the row
+/// that says there is to be no review at all.
 async fn choose_review_pairing(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(choice): Json<ProfileChoice>,
+    Json(choice): Json<ReviewChoice>,
 ) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();

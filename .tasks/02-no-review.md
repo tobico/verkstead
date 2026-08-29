@@ -18,10 +18,10 @@ back-to-Implementing path simply never arises from a wrap-up like this.
 
 ## Acceptance criteria
 
-- [ ] "No review" satisfies readiness, freezes at start, is remembered per
+- [x] "No review" satisfies readiness, freezes at start, is remembered per
       Repo and inherited by stages; an unchosen review picker still refuses
       the start.
-- [ ] A wrap-up on such a Conversation dispatches no review session, narrows
+- [x] A wrap-up on such a Conversation dispatches no review session, narrows
       to waiting-on-checks once comments are addressed, and carries the work
       to Done when the checks are green.
-- [ ] Check fixes and comment responses run exactly as they do today.
+- [x] Check fixes and comment responses run exactly as they do today.

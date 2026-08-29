@@ -22,7 +22,7 @@ use sqlx::SqlitePool;
 use verkstead_render::{
     Adopted, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved,
-    ConversationClosed, GrillingStarted, PairingView, Started, Worktree,
+    ConversationClosed, GrillingStarted, PairingView, PickedView, Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -125,7 +125,13 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
         store::set_implementation_pairing(&state.pool, id, profile_id, Some(&model)).await?;
     }
 
-    if let Some((profile_id, model)) = usable(&state.watched, remembered.review).await? {
+    // A Repo last grilled with no review is prefilled with no review, which is
+    // the memory doing exactly what it does for a Pairing: what the human last
+    // picked, ready to be changed. Nothing is judged about it — there is no
+    // Profile to have gone — so it is applied wherever it was remembered.
+    if remembered.review.skipped() {
+        store::skip_review(&state.pool, id).await?;
+    } else if let Some((profile_id, model)) = usable(&state.watched, remembered.review).await? {
         store::set_review_pairing(&state.pool, id, profile_id, Some(&model)).await?;
     }
 
@@ -140,18 +146,22 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
 /// the Profile's pair is still where it was left is a question for the Watched
 /// Paths, and whether it still lists the model is a question for the Profile's
 /// own list.
+///
+/// A remembered role that was picked away is `None` here too — it is nothing to
+/// prefill a *Pairing* with, and its caller applies it on its own account.
 async fn usable(
     watched: &crate::watched::WatchedPaths,
-    remembered: Option<store::Pairing>,
+    remembered: store::Picked,
 ) -> Result<Option<(i64, String)>> {
     let Some(model) = remembered
-        .as_ref()
+        .pairing()
         .and_then(|pairing| pairing.model.clone())
     else {
         return Ok(None);
     };
 
-    let Some(pairing) = crate::profiles::pairing(watched, remembered).await? else {
+    let Some(pairing) = crate::profiles::pairing(watched, remembered.pairing().cloned()).await?
+    else {
         return Ok(None);
     };
 
@@ -160,6 +170,7 @@ async fn usable(
             .then_some((pairing.profile.id, model)),
     )
 }
+
 /// Finish what answering a Question Set started, and say what it did to the
 /// Conversation it was asked from.
 ///
@@ -763,9 +774,9 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     let grilling = crate::profiles::pairing(watched, conversation.grilling_pairing.clone()).await?;
     let implementation =
         crate::profiles::pairing(watched, conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::pairing(watched, conversation.review_pairing.clone()).await?;
+    let review = crate::profiles::picked(watched, conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), review.as_ref()) {
+    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), &review) {
         return Ok(refusal.grilling());
     }
 
@@ -1246,9 +1257,9 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     let grilling = crate::profiles::pairing(watched, conversation.grilling_pairing.clone()).await?;
     let implementation =
         crate::profiles::pairing(watched, conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::pairing(watched, conversation.review_pairing.clone()).await?;
+    let review = crate::profiles::picked(watched, conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), review.as_ref()) {
+    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), &review) {
         return Ok(refusal.adopting());
     }
 
@@ -1628,7 +1639,7 @@ async fn read(state: &AppState, id: i64) {
 fn unready(
     grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
-    review: Option<&PairingView>,
+    review: &PickedView,
 ) -> Option<Unready> {
     let Some(grilling) = grilling.filter(|pairing| pairing.model.is_some()) else {
         return Some(Unready::NoGrillingProfile);
@@ -1638,12 +1649,17 @@ fn unready(
         return Some(Unready::NoImplementationProfile);
     };
 
-    let Some(review) = review.filter(|pairing| pairing.model.is_some()) else {
-        return Some(Unready::NoReviewProfile);
+    // The row that runs no review is a choice made, so it passes here as a
+    // Pairing does — and leaves nothing to be broken, there being no Profile.
+    let review = match review {
+        PickedView::Skipped => None,
+        PickedView::Under(pairing) if pairing.model.is_some() => Some(pairing),
+        _ => return Some(Unready::NoReviewProfile),
     };
 
-    [grilling, implementation, review]
+    [Some(grilling), Some(implementation), review]
         .into_iter()
+        .flatten()
         .any(|pairing| pairing.profile.broken.is_some())
         .then_some(Unready::ProfileBroken)
 }
@@ -1769,7 +1785,7 @@ pub(crate) fn ready_to_grill(
     state: store::Lifecycle,
     grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
-    review: Option<&PairingView>,
+    review: &PickedView,
     brief: &str,
 ) -> bool {
     state == store::Lifecycle::Draft

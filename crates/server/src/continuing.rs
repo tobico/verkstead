@@ -802,9 +802,18 @@ async fn settle(
         .await?;
     }
 
-    if let Some(review) = &conversation.review_pairing {
-        store::set_review_pairing(&state.pool, id, review.profile.id, review.model.as_deref())
-            .await?;
+    // Whichever of the three the predecessor picked, the row that runs no
+    // review included: a stage inherits what its roadmap was settled with, and
+    // *not reviewed* is as much a settled choice as an account.
+    match &conversation.review_pairing {
+        store::Picked::Nothing => {}
+        store::Picked::Skipped => {
+            store::skip_review(&state.pool, id).await?;
+        }
+        store::Picked::Under(review) => {
+            store::set_review_pairing(&state.pool, id, review.profile.id, review.model.as_deref())
+                .await?;
+        }
     }
 
     store::save_brief(&state.pool, id, &stage.brief).await?;

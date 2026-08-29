@@ -49,7 +49,7 @@
     "path": "/srv/repos/verkstead"
   },
   "resets": "3pm",
-  "review_pairing": null,
+  "review_pairing": "Nothing",
   "state": "Implementing",
   "stop_asked": false,
   "stopped_by_hand": false,

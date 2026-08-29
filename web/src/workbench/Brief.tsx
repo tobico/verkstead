@@ -30,6 +30,7 @@ import type {
   CompanionView,
   ConversationView,
   PairingView,
+  PickedView,
   Worktree,
 } from "../api/types";
 import { Empty } from "../notices";
@@ -118,7 +119,7 @@ function Configuration(props: { conversation: ConversationView }): JSX.Element {
           <Paired pairing={props.conversation.implementation_pairing} />
         </Fact>
         <Fact term="Review">
-          <Paired pairing={props.conversation.review_pairing} />
+          <Reviewed picked={props.conversation.review_pairing} />
         </Fact>
       </dl>
 
@@ -239,8 +240,8 @@ function Where(props: { worktree: Worktree | null }): JSX.Element {
   );
 }
 
-/// One of the two Pairings, said the way every picker of one says it: the
-/// account, and the model that account runs on.
+/// One of the Pairings, said the way every picker of one says it: the account,
+/// and the model that account runs on.
 ///
 /// A Profile chosen before models were paired beside them is half a choice, and
 /// the pane says the half there is rather than inventing the other — there is no
@@ -258,6 +259,22 @@ function Paired(props: { pairing: PairingView | null }): JSX.Element {
             : paired().profile.name}
         </>
       )}
+    </Show>
+  );
+}
+
+/// And a role that could be picked away as well as paired, which is the review.
+///
+/// Said as the choice it was rather than as an absence: *no review* is what the
+/// human picked, and a pane that read it as "not chosen" would show a settled
+/// conversation as an unsettled one.
+function Reviewed(props: { picked: PickedView }): JSX.Element {
+  return (
+    <Show
+      when={props.picked !== "Skipped"}
+      fallback={<span class={styles.rule}>No review.</span>}
+    >
+      <Paired pairing={pairing.under(props.picked)} />
     </Show>
   );
 }

@@ -46,10 +46,10 @@ use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, CompanionAdded,
     CompanionMode, CompanionModeChosen, CompanionView, ConversationClosed, ConversationSteered,
-    ConversationStopped, ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PinnedEvent,
-    ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size, StageListReached, Started,
-    SteerOpened, Submitted, TaskListEvent, TaskListReached, TimelineEvent, TranscriptView, Turn,
-    Watching,
+    ConversationStopped, ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PickedView,
+    PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size,
+    StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
+    TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::handoffs::Handoffs;
@@ -1354,6 +1354,27 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
     grilling_at_pace(spill, stub, gh, *BRISKLY, &[]).await
 }
 
+/// And the same with the Review picker moved off its Pairing and onto the row
+/// that runs nothing, which is the Conversation that wraps up without a review.
+async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    grilling_however_reviewed(spill, stub, gh, *BRISKLY, &[], Reviewed::Never).await
+}
+
+/// Whether the Conversation a fixture builds is one that will be reviewed.
+///
+/// The one thing the two builders below differ over, and it is settled on the
+/// setup card while the Brief drafts — which is why it is a parameter of the
+/// build rather than something a test does afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reviewed {
+    /// Under a Pairing of its own, which is every fixture but the ones about
+    /// picking that away.
+    UnderAPairing,
+
+    /// Not at all: the human picked *No review*.
+    Never,
+}
+
 /// The same with a read-write companion beside it, for the tests about a
 /// Conversation that ends on a pull request in each: the sessions spill what they
 /// were told somewhere that outlives their worktrees, and `gh` answers for both
@@ -1383,6 +1404,19 @@ async fn grilling_at_pace(
     pace: Pace,
     companions: &[(&str, CompanionMode)],
 ) -> Grilling {
+    grilling_however_reviewed(spill, stub, gh, pace, companions, Reviewed::UnderAPairing).await
+}
+
+/// And the whole of it, `reviewed` included — which is the setup card pressed
+/// the way the human presses it, every picker filled and then one of them moved.
+async fn grilling_however_reviewed(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    pace: Pace,
+    companions: &[(&str, CompanionMode)],
+    reviewed: Reviewed,
+) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace).await;
     let app = &bench.app;
 
@@ -1397,6 +1431,10 @@ async fn grilling_at_pace(
     };
 
     bench.under_every_pairing(id).await;
+
+    if reviewed == Reviewed::Never {
+        bench.unreviewed(id).await;
+    }
 
     // While it is still drafting, which is the only time a companion can be
     // added or configured — and off the same endpoints the setup card presses.
@@ -1477,17 +1515,42 @@ impl Bench {
     async fn under_every_pairing(&self, id: i64) {
         for role in ["grilling", "implementation", "review"] {
             let profile = profile(&self.app, self.watched.path(), role).await;
+            let pairing = serde_json::json!({
+                "profile_id": profile,
+                "model": format!("claude-{role}-5"),
+            });
+
+            // The review picker offers a row that is no account at all, so what
+            // it sends is which of its rows was picked — see [`Bench::unreviewed`].
+            let picked = match role {
+                "review" => serde_json::json!({ "pairing": pairing }),
+                _ => pairing,
+            };
+
             let chosen: verkstead_render::ProfileChosen = post(
                 &self.app,
                 &format!("/api/ui/conversations/{id}/{role}-pairing"),
-                &serde_json::json!({
-                    "profile_id": profile,
-                    "model": format!("claude-{role}-5"),
-                }),
+                &picked,
             )
             .await;
             assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
         }
+    }
+
+    /// And pick the Review picker's other row instead: this Conversation is not
+    /// to be reviewed at all.
+    ///
+    /// Pressed after [`Bench::under_every_pairing`] rather than instead of it,
+    /// which is how the card is used: the picker arrives filled and the human
+    /// moves it to the row that runs nothing.
+    async fn unreviewed(&self, id: i64) {
+        let chosen: verkstead_render::ProfileChosen = post(
+            &self.app,
+            &format!("/api/ui/conversations/{id}/review-pairing"),
+            &serde_json::json!({ "pairing": null }),
+        )
+        .await;
+        assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
     }
 
     /// Register a second repository under the watched directory, and hand back
@@ -18643,5 +18706,182 @@ async fn a_wrap_up_waits_for_every_pull_requests_comments() {
         !batches.exists(),
         "nothing was ever dispatched: nobody said anything on either of them — {:?}",
         std::fs::read_to_string(&batches).ok(),
+    );
+}
+
+/// A Conversation the human picked *No review* for wraps up without a review
+/// session and goes Done on its checks alone.
+///
+/// The review is not skipped over, it is settled: what the rest of a wrap-up
+/// waits on is *the review is over*, and a review that was never to happen is
+/// over the moment the wrap-up looks. Which is what leaves everything else
+/// exactly as it is — nothing further down has to know.
+///
+/// Green all the way through and nothing said, so a review session is the one
+/// thing that could stand between this wrap-up and Done. It never runs, and it
+/// still gets there.
+#[tokio::test]
+async fn a_conversation_with_no_review_wraps_up_without_one_and_reaches_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_unreviewed(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        !reviews.exists(),
+        "no session was ever put inside the reviewing skill: {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+    );
+    assert!(
+        review_settled(&fixture).await,
+        "and the review is settled all the same, which is what carries the rest",
+    );
+    assert_eq!(
+        sets(&view).len(),
+        1,
+        "the only Set on the Timeline is the proposal that ended the grilling",
+    );
+    assert_eq!(fixes(&view), 0, "nothing was dispatched to fix anything");
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// And what is said on its pull request is still answered, by the batch session
+/// that always answers it.
+///
+/// With no review there is nothing to fold the comments into, so every one of
+/// them is a batch's from the moment it lands. The wrap-up then narrows to
+/// waiting on its checks, which here can never be asked about — the same
+/// condition a reviewed wrap-up down to its suite is in.
+#[tokio::test]
+async fn a_wrap_up_with_no_review_answers_what_was_said_and_narrows_to_its_checks() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = grilling_unreviewed(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh_about(CHECKS_UNANSWERABLE, THREE_COMMENTS, ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let said = until_written(&batches).await;
+
+    assert!(
+        said.contains("Rename the window field."),
+        "the batch session was sent what was written on the pull request: {said}",
+    );
+    assert!(
+        !reviews.exists(),
+        "and no review read it first: {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+    );
+
+    let view = fixture
+        .until(|view| view.waiting_on_checks.then(|| view.clone()))
+        .await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "which is a condition of Wrapping rather than a state of its own",
+    );
+    assert!(
+        comments_settled(&fixture).await,
+        "nothing said is left for anybody to be sent about",
+    );
+    assert!(
+        !checks_settled(&fixture).await,
+        "and the checks are the one thing left, which nothing can even ask about",
+    );
+}
+
+/// And a red check costs it exactly what it costs any other wrap-up: a fix
+/// session, dispatched under the Implementation Pairing.
+///
+/// Reviewing is a fresh set of eyes and fixing is building, so picking the eyes
+/// away leaves the building where it was.
+#[tokio::test]
+async fn a_wrap_up_with_no_review_still_dispatches_a_fix_session_at_a_red_check() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("fix-prompts");
+
+    let fixture = grilling_unreviewed(
+        spill,
+        &a_backlog_then_fixes(&written),
+        &gh_checking("FAILURE"),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let sent = until_written(&written).await;
+
+    assert!(
+        sent.contains("addressing/SKILL.md"),
+        "a fix session, inside the addressing skill as ever: {sent}",
+    );
+    assert!(
+        sent.contains("model=claude-implementation-5"),
+        "and under the Implementation Pairing, which is what builds: {sent}",
+    );
+}
+
+/// And a stage inherits *No review* the way it inherits the Pairings beside it:
+/// through the one act that gives it all three.
+///
+/// A stage has no draft moment of its own, so the inheritance funnel is the only
+/// place the pick could come from — and one that arrived reviewed would be a
+/// roadmap the human turned reviewing off for reviewing every stage of it.
+#[tokio::test]
+async fn a_stage_inherits_the_no_review_its_roadmap_was_grilled_with() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_unreviewed(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+
+    assert_eq!(
+        stage.review_pairing,
+        PickedView::Skipped,
+        "the row its roadmap was grilled on, and so the row its stages run on",
+    );
+    assert_eq!(
+        stage
+            .implementation_pairing
+            .as_ref()
+            .map(|pairing| pairing.profile.name.clone()),
+        Some("implementation".to_owned()),
+        "with the roles beside it inherited as they always were",
     );
 }

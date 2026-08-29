@@ -11,7 +11,7 @@ and Verkstead follows the rename instead of repairing it.
 ## Tasks
 
 - [x] 01: The Review Pairing, end to end — [details](01-review-pairing.md)
-- [ ] 02: "No review" — [details](02-no-review.md)
+- [x] 02: "No review" — [details](02-no-review.md)
 - [ ] 03: "No grilling" — [details](03-no-grilling.md)
 - [ ] 04: Auto-named drafts — [details](04-auto-named-drafts.md)
 - [ ] 05: Following a rename — [details](05-following-a-rename.md)

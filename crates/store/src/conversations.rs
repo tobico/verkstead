@@ -169,11 +169,15 @@ pub struct Conversation {
     /// implementation session cannot simply carry the grilling one on.
     pub implementation_pairing: Option<super::Pairing>,
 
-    /// And the ones the wrap-up's review session runs under. A third choice of
-    /// its own for the reason the second is one: reviewing is a fresh set of
-    /// eyes on what was built, so the account that looks at the work is picked
-    /// apart from the account that built it.
-    pub review_pairing: Option<super::Pairing>,
+    /// And what the wrap-up's review session runs under. A third choice of its
+    /// own for the reason the second is one: reviewing is a fresh set of eyes on
+    /// what was built, so the account that looks at the work is picked apart
+    /// from the account that built it.
+    ///
+    /// The one role that can be picked away altogether — see [`super::Picked`].
+    /// A Conversation whose human picked *no review* wraps up without a review
+    /// session, which is a settled choice rather than a Pairing missing.
+    pub review_pairing: super::Picked,
 
     /// Where the Conversation's worktree was put, once grilling has made one.
     ///
@@ -909,6 +913,29 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the pairing models table")?;
 
+    // Which of a Conversation's roles the human picked away: one row per role
+    // that runs no session at all. A table of its own for the reason the model
+    // half is in one — there is no migration machinery here and `conversations`
+    // is STRICT and left alone — and it needs none besides: a database written
+    // before this arrives with the table empty, which is every Conversation
+    // having picked no such thing, and that is exactly what they had.
+    //
+    // Apart from the Profile column rather than a value inside it, because a
+    // skip is not a Profile: the column says which account a role runs under and
+    // this says the role runs nothing. A role with a row here has no Profile —
+    // picking one takes the row away and picking the row takes the Profile away,
+    // in the one write — so the two cannot disagree about what was picked.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS skipped_roles (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             role            TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, role)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the skipped roles table")?;
+
     // Which roadmap a drafting Conversation is adopting, where it is adopting
     // one. A table of its own for the reason the direction is one: there is no
     // migration machinery here and `conversations` is STRICT and left alone.
@@ -1306,7 +1333,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         grilling_pairing: pairing(pool, id, Role::Grilling, grilling_profile_id).await?,
         implementation_pairing: pairing(pool, id, Role::Implementation, implementation_profile_id)
             .await?,
-        review_pairing: pairing(pool, id, Role::Review, review_profile_id).await?,
+        review_pairing: picked(pool, id, Role::Review, review_profile_id).await?,
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
         adopting: adopting(pool, id).await?,
@@ -1345,6 +1372,43 @@ async fn pairing(
         profile,
         model: row.map(|(model,)| model),
     }))
+}
+
+/// The whole of what a Conversation has settled about one of its roles: a
+/// Pairing, the row that runs no session, or nothing yet.
+///
+/// The skip is read first because it is the stronger fact: picking it takes the
+/// Profile away in the same write, so a row here is what the human last picked
+/// whatever the column says.
+async fn picked(
+    pool: &SqlitePool,
+    conversation: i64,
+    role: Role,
+    profile_id: Option<i64>,
+) -> Result<super::Picked> {
+    if skipped(pool, conversation, role).await? {
+        return Ok(super::Picked::Skipped);
+    }
+
+    Ok(match pairing(pool, conversation, role, profile_id).await? {
+        Some(pairing) => super::Picked::Under(pairing),
+        None => super::Picked::Nothing,
+    })
+}
+
+/// Whether the human picked this role away.
+async fn skipped(pool: &SqlitePool, conversation: i64, role: Role) -> Result<bool> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM skipped_roles WHERE conversation_id = ? AND role = ?")
+            .bind(conversation)
+            .bind(role.stored())
+            .fetch_optional(pool)
+            .await
+            .with_context(|| {
+                format!("reading whether Conversation {conversation} skipped a role")
+            })?;
+
+    Ok(row.is_some())
 }
 
 /// Where a Conversation's worktree was put, if it has one.
@@ -1452,6 +1516,67 @@ pub async fn set_review_pairing(
     choose(pool, id, Role::Review, profile_id, model).await
 }
 
+/// Or pick the row that says there is to be no review at all.
+///
+/// A choice like the ones above it and refused on the same terms: made while the
+/// Conversation drafts, fixed when grilling starts, and a Conversation that has
+/// picked it is as ready to start as one that picked a Pairing.
+///
+/// The Profile column and the model row go with it, so what is left is the one
+/// fact — this role runs nothing — rather than that beside an account nobody
+/// will launch.
+pub async fn skip_review(pool: &SqlitePool, id: i64) -> Result<Chosen> {
+    skip(pool, id, Role::Review).await
+}
+
+/// Record that a role runs no session at all.
+///
+/// [`choose`]'s shape and [`choose`]'s refusals, because it is the same act:
+/// the human picking one row of the one list, on a Conversation that is still
+/// drafting.
+async fn skip(pool: &SqlitePool, id: i64, role: Role) -> Result<Chosen> {
+    if let Some(refusal) = not_drafting(pool, id).await? {
+        return Ok(match refusal {
+            Edited::NoSuchConversation => Chosen::NoSuchConversation,
+            _ => Chosen::NotDrafting,
+        });
+    }
+
+    let mut tx = super::writing(pool, "picking a role away from a Conversation").await?;
+
+    sqlx::query(&format!(
+        "UPDATE conversations SET {} = NULL WHERE id = ?",
+        role.column()
+    ))
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("clearing the Profile Conversation {id} had chosen"))?;
+
+    sqlx::query("DELETE FROM pairing_models WHERE conversation_id = ? AND role = ?")
+        .bind(id)
+        .bind(role.stored())
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("clearing the model Conversation {id} had paired"))?;
+
+    sqlx::query(
+        "INSERT INTO skipped_roles (conversation_id, role) VALUES (?, ?)
+         ON CONFLICT (conversation_id, role) DO NOTHING",
+    )
+    .bind(id)
+    .bind(role.stored())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("picking a role away from Conversation {id}"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("picking a role away from Conversation {id}"))?;
+
+    Ok(Chosen::Chosen)
+}
+
 /// Record one of the two choices, both halves of it.
 ///
 /// Refused past drafting, which is what fixes a Pairing when grilling starts:
@@ -1541,6 +1666,16 @@ pub(crate) async fn settle(
         .execute(&mut **tx)
         .await
         .with_context(|| format!("clearing the model Conversation {id} had paired"))?;
+
+    // And the skip, because a Pairing picked is the row that runs no session
+    // unpicked: the two are rows of one list, and a role left holding both would
+    // be a Conversation that had picked twice.
+    sqlx::query("DELETE FROM skipped_roles WHERE conversation_id = ? AND role = ?")
+        .bind(id)
+        .bind(role.stored())
+        .execute(&mut **tx)
+        .await
+        .with_context(|| format!("clearing the role Conversation {id} had picked away"))?;
 
     if let Some(model) = model {
         sqlx::query("INSERT INTO pairing_models (conversation_id, role, model) VALUES (?, ?, ?)")

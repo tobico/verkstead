@@ -326,6 +326,19 @@ carrying on and runs under the Implementation Pairing: the check fixes, the
 comment responses, the follow-ups, and the session sent for a missing pull
 request.
 
+The Review picker offers one row that is not an account: **No review**. Picking
+it is a choice like picking a Pairing — it satisfies readiness, freezes at grill
+start, is remembered per Repo and inherited by a stage — and what it settles is
+that the wrap-up runs no review session at all. An empty picker is not that: the
+two leave the same thing unchosen and only one of them lets the work start.
+
+A wrap-up on such a Conversation settles its review the moment it looks, with no
+session and nothing on the Timeline, and everything else runs exactly as it
+always does: the checks with their two fix attempts apiece, what is said on the
+pull request answered in batches, Done once the suites are green. With no review
+there is nothing to split findings out of, so the one path back down the ladder
+never opens from a wrap-up like this.
+
 Every one of them is **fixed when grilling starts**, alongside the branch, the
 base commit and the Brief: what runs the work is settled before the work begins
 rather than swapped underneath it — and the implementation and review ones are

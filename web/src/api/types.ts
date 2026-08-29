@@ -862,10 +862,13 @@ grilling_pairing: PairingView | null,
  */
 implementation_pairing: PairingView | null, 
 /**
- * And the ones the wrap-up's review session will run under, chosen
- * separately again: reviewing is a fresh set of eyes on what was built.
+ * And what the wrap-up's review session will run under, chosen separately
+ * again: reviewing is a fresh set of eyes on what was built.
+ *
+ * The one role the picker offers a *no review* row for, so this says which
+ * of three the human picked rather than whether they picked at all.
  */
-review_pairing: PairingView | null, 
+review_pairing: PickedView, 
 /**
  * Whether everything needed before grilling will start is settled: every
  * Pairing complete and no Profile broken, a Brief with something in
@@ -1344,6 +1347,18 @@ export type PairingView = { profile: ProfileEntry,
 model: string | null, };
 
 /**
+ * What a Conversation has settled about one of its roles, as the page shows
+ * it: the Pairing its sessions run under, that the role runs none, or nothing
+ * picked yet.
+ *
+ * Three rather than a nullable Pairing, because the picker offers *no review*
+ * as a row of its own: a Conversation that picked it is as ready to start as
+ * one that picked a Pairing, and a page that could not tell it from an empty
+ * picker would draw the placeholder over a settled choice.
+ */
+export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
+
+/**
  * An Event the Timeline keeps in view rather than letting scroll past.
  *
  * A fixed set — a task list, a stage list and a PR — and no manual pin or
@@ -1801,6 +1816,14 @@ nothing_else?: boolean, };
  * whole feature is replacing.
  */
 export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
+
+/**
+ * Which Pairing a Conversation's review runs under, or that it runs none.
+ *
+ * `null` is the *no review* row: the picker offers it beside the Pairings, so
+ * the one press that picks either sends the same body — see [`PickedView`].
+ */
+export type ReviewChoice = { pairing: ProfileChoice | null, };
 
 /**
  * The roadmap opened: every stage brief of it, rendered.

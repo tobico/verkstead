@@ -19,8 +19,8 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    AgentType, BriefSaved, Broken, ConversationView, ProfileChosen, ProfileDeleted, ProfileEntry,
-    ProfileSaved, Registered, Started,
+    AgentType, BriefSaved, Broken, ConversationView, PickedView, ProfileChosen, ProfileDeleted,
+    ProfileEntry, ProfileSaved, Registered, Started,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
@@ -198,7 +198,19 @@ async fn choose_review(app: &Router, id: i64, profile_id: i64, model: &str) -> P
     post(
         app,
         &format!("/api/ui/conversations/{id}/review-pairing"),
-        &serde_json::json!({ "profile_id": profile_id, "model": model }),
+        &serde_json::json!({
+            "pairing": { "profile_id": profile_id, "model": model },
+        }),
+    )
+    .await
+}
+
+/// And the picker's other row: no review at all.
+async fn no_review(app: &Router, id: i64) -> ProfileChosen {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/review-pairing"),
+        &serde_json::json!({ "pairing": null }),
     )
     .await
 }
@@ -755,7 +767,10 @@ async fn one_profile_can_be_every_one_of_a_conversations_choices() {
         view.implementation_pairing.map(|p| p.profile.id),
         Some(only.id)
     );
-    assert_eq!(view.review_pairing.map(|p| p.profile.id), Some(only.id));
+    assert_eq!(
+        view.review_pairing.pairing().map(|p| p.profile.id),
+        Some(only.id)
+    );
     assert!(view.ready_to_grill);
 }
 
@@ -909,7 +924,10 @@ async fn a_new_conversation_arrives_with_what_its_repo_was_last_grilled_with() {
     assert_eq!(implementation.profile.id, opus.id);
     assert_eq!(implementation.model.as_deref(), Some(MODEL));
 
-    let review = view.review_pairing.expect("and so is the review one");
+    let review = view
+        .review_pairing
+        .pairing()
+        .expect("and so is the review one");
     assert_eq!(review.profile.id, haiku.id);
     assert_eq!(review.model.as_deref(), Some(MODEL));
 
@@ -1007,4 +1025,24 @@ async fn a_remembered_model_a_profile_no_longer_lists_is_not_prefilled() {
     let view = opened(&app, another(&app).await).await;
     assert_eq!(view.grilling_pairing, None);
     assert_eq!(view.implementation_pairing, None);
+}
+
+/// And the row that runs no session is remembered the same way, because it is a
+/// pick like any other: the next draft on that Repo arrives on it.
+#[tokio::test]
+async fn a_new_conversation_arrives_with_no_review_where_that_is_what_was_grilled() {
+    let (watched, dir, app) = workbench().await;
+    let id = conversation(&app, watched.path()).await;
+    let fable = saved(&app, watched.path(), "fable").await;
+
+    choose_grilling(&app, id, fable.id, MODEL).await;
+    choose_implementation(&app, id, fable.id, MODEL).await;
+    assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
+    grill(dir.path(), id).await;
+
+    assert_eq!(
+        opened(&app, another(&app).await).await.review_pairing,
+        PickedView::Skipped,
+        "what the human last picked, ready for them to change",
+    );
 }

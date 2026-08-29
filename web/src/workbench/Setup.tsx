@@ -17,7 +17,8 @@
 //! The three pairings are separate choices because they are genuinely separate
 //! accounts — grill on fable, implement on opus, review on whatever did not
 //! build it — and because the implementation session cannot simply carry the
-//! grilling one on.
+//! grilling one on. The review picker has one row that is not an account at
+//! all, because a conversation can be wrapped up without being reviewed.
 
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
@@ -59,7 +60,6 @@ import type {
   CompanionView,
   ConversationView,
   PairingView,
-  ProfileChoice,
   ProfileChosen,
   ProfileEntry,
   RepoEntry,
@@ -245,24 +245,39 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
                 saved={saved()}
                 role="grilling"
                 label="Grilling"
-                chosen={props.conversation.grilling_pairing}
-                choose={chooseGrillingPairing}
+                chosen={pairing.chosen(props.conversation.grilling_pairing)}
+                pairing={props.conversation.grilling_pairing}
+                choose={(id, picked) =>
+                  chooseGrillingPairing(id, pairing.choice(picked))
+                }
               />
               <PairingPicker
                 conversation={props.conversation}
                 saved={saved()}
                 role="implementation"
                 label="Implementation"
-                chosen={props.conversation.implementation_pairing}
-                choose={chooseImplementationPairing}
+                chosen={pairing.chosen(
+                  props.conversation.implementation_pairing,
+                )}
+                pairing={props.conversation.implementation_pairing}
+                choose={(id, picked) =>
+                  chooseImplementationPairing(id, pairing.choice(picked))
+                }
               />
+              {/* The one picker with a row that is not an account: a
+                  conversation can be wrapped up without being reviewed at all,
+                  and that is picked here rather than anywhere else. */}
               <PairingPicker
                 conversation={props.conversation}
                 saved={saved()}
                 role="review"
                 label="Review"
-                chosen={props.conversation.review_pairing}
-                choose={chooseReviewPairing}
+                away="No review"
+                chosen={pairing.settled(props.conversation.review_pairing)}
+                pairing={pairing.under(props.conversation.review_pairing)}
+                choose={(id, picked) =>
+                  chooseReviewPairing(id, pairing.reviewed(picked))
+                }
               />
             </div>
           )}
@@ -288,28 +303,46 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// One of the three choices: which profile-and-model pairing fills this role.
+/// One of the three choices: which profile-and-model pairing fills this role —
+/// or, where the role can be picked away, that it runs nothing.
 ///
 /// A select rather than a list of buttons, because the pairings are a short list
 /// that barely changes and the choice is one of them — the same control the
 /// sidebar picks a repo with. One flat row per pairing rather than a profile
 /// picker with a model picker after it: the counts stay small, and two stages
 /// would cost a tap every time.
+///
+/// `away` is the row a role that can run nothing offers above the pairings,
+/// where it offers one. In the same flat list rather than beside it as a switch,
+/// because it is the same decision: what runs this, and one of the answers is
+/// nobody.
 function PairingPicker(props: {
   conversation: ConversationView;
   saved: ProfileEntry[];
   role: string;
   label: string;
-  chosen: PairingView | null;
-  choose: (id: number, choice: ProfileChoice) => Promise<ProfileChosen>;
+  away?: string;
+  chosen: string;
+  pairing: PairingView | null;
+  choose: (id: number, picked: string) => Promise<ProfileChosen>;
 }): JSX.Element {
   const queries = useQueryClient();
 
   const [refused, setRefused] = createSignal<ProfileChosen | null>(null);
 
+  /// Every row the control offers: the pairings, and the row that runs nothing
+  /// above them where this role has one. Above rather than below, because it is
+  /// the choice that says *skip this* and a reader scanning accounts should meet
+  /// it before the accounts.
+  const rows = (): Row[] => [
+    ...(props.away ? [{ value: pairing.NONE, label: props.away }] : []),
+    ...pairing
+      .pairings(props.saved)
+      .map((row) => ({ value: pairing.value(row), label: pairing.label(row) })),
+  ];
+
   const choose = useMutation(() => ({
-    mutationFn: (choice: ProfileChoice) =>
-      props.choose(props.conversation.id, choice),
+    mutationFn: (picked: string) => props.choose(props.conversation.id, picked),
     onSuccess: (outcome: ProfileChosen) => {
       if (outcome !== "Chosen") {
         setRefused(outcome);
@@ -337,29 +370,33 @@ function PairingPicker(props: {
           comes back if the profile that was picked is deleted, or if it stopped
           listing the model it was paired with, which is the honest reading of
           it — and nothing is said upwards about that, the choice being the
-          server's record rather than this card's to clear. */}
+          server's record rather than this card's to clear.
+
+          The row that runs nothing is not that state and never sends the empty
+          string: it is a choice like the pairings, and the placeholder stands
+          above it until one of them is made. */}
       <Picker
         id={`${props.role}-pairing`}
-        options={pairing.pairings(props.saved)}
-        value={pairing.value}
-        label={pairing.label}
-        chosen={pairing.chosen(props.chosen)}
-        pick={(picked) => choose.mutate(pairing.choice(picked))}
+        options={rows()}
+        value={(row) => row.value}
+        label={(row) => row.label}
+        chosen={props.chosen}
+        pick={(picked) => choose.mutate(picked)}
         disabled={choose.isPending}
       />
 
       {/* A profile chosen before models were paired with them: half a choice,
           which the picker draws as none. Said in words rather than left as a
           bare placeholder, because the conversation does have a profile. */}
-      <Show when={props.chosen && !props.chosen.model}>
+      <Show when={props.pairing && !props.pairing.model}>
         <Note class={styles.unpaired}>
-          {props.chosen?.profile.name} was chosen before models were picked
+          {props.pairing?.profile.name} was chosen before models were picked
           beside them. Pick one to pair.
         </Note>
       </Show>
 
       {/* What is wrong with the one that is chosen, said where it is chosen. */}
-      <Show when={props.chosen?.profile.broken}>
+      <Show when={props.pairing?.profile.broken}>
         {(broken) => <ErrorLine class={styles.broken}>{BROKEN[broken()]}</ErrorLine>}
       </Show>
       <Show when={refused()}>
@@ -375,6 +412,13 @@ function PairingPicker(props: {
     </div>
   );
 }
+
+/// One row of a picker, as the control reads it: what it sends and what it
+/// says.
+///
+/// Made here rather than taken from the pairings, because the review picker's
+/// list is not only pairings — see [`PairingPicker`].
+type Row = { value: string; label: string };
 
 /// The branch the work will be done on: prefilled with a random name when the
 /// Conversation was started, and the human's to change until grilling begins.
