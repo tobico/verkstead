@@ -2729,10 +2729,20 @@ async fn a_running_sessions_row_says_when_it_has_stopped_talking() {
 
     // Then it speaks again, and the row says so without anything having had to
     // remember to put it back.
+    //
+    // Read back until the line is on the row as well, rather than asserting it
+    // off the first view that had come out of idle: idle is computed live off
+    // the clock the terminal moved, and what a session printed reaches the
+    // store on the flush after it — so the crossing is readable a moment
+    // before the statement that caused it is.
     let woken = fixture
         .until(|view| {
             output(view)
-                .filter(|output| output.running && !output.idle)
+                .filter(|output| {
+                    output.running
+                        && !output.idle
+                        && output.latest == "What should happen when the queue is full?"
+                })
                 .cloned()
         })
         .await;
