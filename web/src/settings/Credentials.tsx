@@ -156,10 +156,22 @@ export function Credentials(): JSX.Element {
   }));
 
   /// Save, with whatever is to become of the token.
+  ///
+  /// The build cache rides along as it stands, because the endpoint writes the
+  /// whole of `config.yaml` in one request and this form has no business
+  /// changing it — the section below is where it is set. Its own defaults
+  /// where the read has not landed, which is what the server would write
+  /// anyway.
   const write = (github_token: TokenEdit) =>
     save.mutate({
       git_author: { name: authorName(), email: authorEmail() },
       github_token,
+      rust_build_cache: {
+        enabled: told()?.rust_build_cache.enabled ?? true,
+        size: told()?.rust_build_cache.size_configured
+          ? (told()?.rust_build_cache.size ?? "")
+          : "",
+      },
     });
 
   const submit = (ev: SubmitEvent) => {

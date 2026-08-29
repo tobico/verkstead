@@ -1,6 +1,7 @@
 //! Everything the human configures, on one page: the GitHub token and the git
-//! author Verkstead itself was told, the Agent Profiles a session runs under,
-//! and the Repos a Conversation can be started against.
+//! author Verkstead itself was told, the shared Rust build cache its sessions
+//! build into, the Agent Profiles a session runs under, and the Repos a
+//! Conversation can be started against.
 //!
 //! One page rather than three, because all of it is the same kind of thing —
 //! settled once, and then left alone for weeks. Three pages meant three trips
@@ -21,6 +22,7 @@ import { ProfileList } from "../profiles/ProfileList";
 import { Notifications } from "../push/Notifications";
 import { RepoList } from "../repos/RepoList";
 import { UpdateNotice } from "../update/UpdateNotice";
+import { BuildCache } from "./BuildCache";
 import { Credentials } from "./Credentials";
 import styles from "./SettingsPage.module.css";
 
@@ -49,6 +51,11 @@ export function SettingsPage(): JSX.Element {
       <UpdateNotice />
 
       <Credentials />
+      {/* Under the credentials and above the lists: it is the other thing
+          Verkstead itself was told, rather than anything a Conversation is
+          settled against — and it is the one setting here about what a session
+          runs inside. */}
+      <BuildCache />
       <ProfileList />
       <RepoList />
     </div>

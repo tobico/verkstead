@@ -194,7 +194,37 @@ export function Setup(props: {
       </Show>
 
       <Profiles conversation={props.conversation} />
+
+      {/* And the last thing read before the work is started, because it is
+          about what the work will be like rather than about anything above:
+          this repository builds Rust, and its dependencies will be compiled
+          from scratch every session. */}
+      <UncachedCompiles conversation={props.conversation} />
     </section>
+  );
+}
+
+/// What a Rust repository loses on a server with no sccache: the compiling.
+///
+/// Drawn only where all three hold — the repository is a Cargo workspace, the
+/// shared build cache is switched on, and the server found no sccache — which
+/// is the one boolean the server sends rather than three for this to combine.
+///
+/// A note rather than a refusal, and it gates nothing. The work runs perfectly
+/// well: the crate downloads are still shared, and what is lost is time. It is
+/// here because this is where somebody is about to spend that time, and because
+/// what fixes it is on the server rather than in this browser.
+function UncachedCompiles(props: {
+  conversation: ConversationView;
+}): JSX.Element {
+  return (
+    <Show when={props.conversation.compiles_uncached}>
+      <p class={styles.uncached}>
+        No sccache is installed where the server can see it, so this
+        repository's dependency compiles will not be cached — only its crate
+        downloads. Install sccache on the server to cache the compiling too.
+      </p>
+    </Show>
   );
 }
 

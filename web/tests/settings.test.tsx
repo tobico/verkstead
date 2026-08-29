@@ -40,6 +40,7 @@ import app from "../src/App.module.css";
 import profileList from "../src/profiles/ProfileList.module.css";
 import notifications from "../src/push/Notifications.module.css";
 import repoList from "../src/repos/RepoList.module.css";
+import buildCache from "../src/settings/BuildCache.module.css";
 import { Credentials } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
@@ -347,6 +348,13 @@ describe("saving", () => {
           email: "ada@analytical.engine",
         },
         github_token: "Keep",
+        // The build cache rides along as it stands, because the endpoint
+        // writes the whole of `config.yaml` and this form only means to
+        // change the author.
+        rust_build_cache: {
+          enabled: TOLD.rust_build_cache.enabled,
+          size: TOLD.rust_build_cache.size,
+        },
       }),
     );
   });
@@ -527,7 +535,13 @@ describe("replacing and clearing the token", () => {
   /// server writes both files in one request.
   it("clears the token without taking the author with it", async () => {
     const cleared: SettingsSaved = {
-      settings: { git_author: TOLD.git_author, github_token: null },
+      settings: {
+        git_author: TOLD.git_author,
+        github_token: null,
+        // Untouched by this form, and so untouched in what the save answers
+        // with — see the section below it for what does change these.
+        rust_build_cache: TOLD.rust_build_cache,
+      },
       verified: null,
     };
     const fetching = theSettings(TOLD, json(cleared));
@@ -541,6 +555,10 @@ describe("replacing and clearing the token", () => {
       expect(sent(fetching)).toEqual({
         git_author: TOLD.git_author,
         github_token: "Clear",
+        rust_build_cache: {
+          enabled: TOLD.rust_build_cache.enabled,
+          size: TOLD.rust_build_cache.size,
+        },
       }),
     );
 
@@ -624,11 +642,13 @@ describe("the settings page", () => {
       container.querySelectorAll(`.${profileList.profiles} .${profileList.row}`),
     ).toHaveLength(PROFILES.length);
 
-    // And nothing of any of the three forms until one is asked for.
+    // And nothing of any of the three forms until one is asked for. The two
+    // switches are not forms: one is about this device and one is the build
+    // cache, and a switch is its own save.
     expect(container.querySelector("dialog")).toBeNull();
     expect(container.querySelectorAll("input")).toHaveLength(
-      // The notifications switch on the heading's line, which is not a form.
-      container.querySelectorAll(`.${page.pageHead} input`).length,
+      container.querySelectorAll(`.${page.pageHead} input`).length +
+        container.querySelectorAll(`.${buildCache.buildCache} input`).length,
     );
   });
 

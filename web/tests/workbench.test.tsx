@@ -2751,6 +2751,38 @@ describe("a conversation's setup", () => {
     ).toBeTruthy();
   });
 
+  /// A Rust repository on a server with no sccache: the work will run, and
+  /// every dependency in it will be compiled again. Said at the foot of the
+  /// card, which is the last thing read before the work is started — and said
+  /// as a note, because nothing here is broken and nothing is gated on it.
+  it("warns at the foot of the card where compiles will not be cached", async () => {
+    theWorkbenchWith({ compiles_uncached: true });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const card = await drawn(container, `.${setup.conversationSetup}`);
+    const warning = card.querySelector(`.${setup.uncached}`)!;
+
+    expect(warning.textContent).toMatch(/No sccache is installed/);
+    expect(
+      card
+        .querySelector(`.${setup.conversationProfiles}`)!
+        .compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING,
+      "the last thing on the card, under everything there is to settle",
+    ).toBeTruthy();
+  });
+
+  /// And nothing at all where the server has one — which is every conversation
+  /// on a machine that is set up, so it must not be a line the card always
+  /// carries.
+  it("says nothing about sccache where the server has one", async () => {
+    theWorkbenchWith({ compiles_uncached: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${setup.conversationSetup}`);
+
+    expect(container.querySelector(`.${setup.uncached}`)).toBeNull();
+  });
+
   /// Branch, base and both pairings freeze server-side when grilling starts, so
   /// past that moment there is nothing here that could be changed — and nothing
   /// is drawn rather than drawn disabled.

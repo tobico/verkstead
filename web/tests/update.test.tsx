@@ -20,6 +20,7 @@ import type {
 import profileList from "../src/profiles/ProfileList.module.css";
 import notifications from "../src/push/Notifications.module.css";
 import repoList from "../src/repos/RepoList.module.css";
+import buildCache from "../src/settings/BuildCache.module.css";
 import credentials from "../src/settings/Credentials.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
 import page from "../src/settings/SettingsPage.module.css";
@@ -90,14 +91,15 @@ describe("the Update Notice", () => {
     expect(links.map((link) => link.getAttribute("href"))).toEqual([UPDATING]);
     expect(banner()!.querySelectorAll("button, input, form")).toHaveLength(0);
     // And it added nothing outside itself either: what the page can be pressed
-    // and typed into is what it configures — the credentials, the profiles, the
-    // repos and the notifications switch — all of which were there before the
-    // banner and are not the banner's.
+    // and typed into is what it configures — the credentials, the build cache,
+    // the profiles, the repos and the notifications switch — all of which were
+    // there before the banner and are not the banner's.
     const pressable = [...container.querySelectorAll("button, input, form")];
     expect(
       pressable.filter(
         (found) =>
           !found.closest(`.${credentials.credentials}`) &&
+          !found.closest(`.${buildCache.buildCache}`) &&
           !found.closest(`.${profileList.profiles}`) &&
           !found.closest(`.${repoList.repos}`) &&
           !found.closest(`.${notifications.notifications}`),

@@ -1,0 +1,94 @@
+/* The build cache section of the settings page — see `BuildCache.tsx`. Laid out
+   like the credentials above it, because it is the same kind of section: a
+   heading, what stands now, and the controls that change it.
+
+   `sectionHead` is the page's own vocabulary rather than this module's: it is
+   defined once in `App.module.css` and written beside these classes. */
+
+.buildCache {
+  margin-bottom: 1.5rem;
+}
+
+.buildCache h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+/* Something the human would have to leave the browser to fix. The same notice
+   the credentials draw a missing token with — nothing has failed, and what it
+   says is what will be slower until somebody acts on it. */
+.buildCache .warning {
+  margin: 0.85rem 0 0;
+  padding: 0.7rem 0.9rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--stopped);
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.size {
+  margin-top: 0.85rem;
+}
+
+.size label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* The box and its press on one line: the value is short — `30G` — so a field
+   the width of the page would say it was expecting prose. */
+.field {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.field input {
+  width: 7rem;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.field button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.field button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+.field input:focus-visible {
+  border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .field input:hover {
+    border-color: var(--ink-soft);
+  }
+
+  .field button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

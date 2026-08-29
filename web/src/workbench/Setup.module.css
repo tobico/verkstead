@@ -331,3 +331,18 @@
   border-color: var(--accent);
   color: var(--ink);
 }
+
+/* The build cache a Rust repository will not get, said at the foot of the setup
+   card — the last thing read before the work is started. Drawn as the settings
+   page draws a missing credential: the stopped red down one edge, because it is
+   the same "this is waiting on you" and not a failure. */
+.conversationSetup .uncached {
+  margin: 1rem 0 0;
+  padding: 0.7rem 0.9rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--stopped);
+  border-radius: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
