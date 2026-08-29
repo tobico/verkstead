@@ -56,6 +56,12 @@ import app from "../src/App.module.css";
 // own rules off, jsdom laying nothing out to read them from.
 import card from "../src/Card.module.css";
 import cardCss from "../src/Card.module.css?raw";
+// And the pressable card every one of those two panes is reached from — a
+// Conversation in the sidebar, an Event on the record — both ways again: the
+// hashed names a card is queried by, and the source the card's own paint is
+// read off.
+import pressable from "../src/CardButton.module.css";
+import pressableCss from "../src/CardButton.module.css?raw";
 import dropdown from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
 // The set page as it is drawn inside a details pane: its nav, its sections, and
@@ -106,7 +112,11 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The pause card, which is one of the record's and draws itself.
 import prPane from "../src/workbench/PullRequest.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
-// query the card by, and the words the icon is read aloud in.
+// query the card by, and the words the icon is read aloud in. The three shapes
+// themselves come straight from Font Awesome, so that a test naming one and the
+// component drawing it are two independent statements about the same icon.
+import { faCircle } from "@fortawesome/free-regular-svg-icons";
+import { faCheck, faXmark } from "@fortawesome/free-solid-svg-icons";
 import {
   SAID as CHECKS_SAID,
   SPOKEN as CHECKS_SPOKEN,
@@ -801,9 +811,11 @@ describe("how a card says where its conversation has got to", () => {
     expect(card!.classList.contains(sidebar.draft!)).toBe(true);
     expect(card!.querySelector(`.${marks.mark}`)).toBeNull();
 
-    // What "draft" means is the stylesheet's, and jsdom lays nothing out.
+    // What "draft" means is the stylesheet's, and jsdom lays nothing out. The
+    // name rather than the card: a card is a `CardButton` now and is flat, so
+    // there is no outline left to draw one as the outline of.
     expect(sidebarCss).toContain(
-      ".conversationRow.draft .open {\n  border-style: dotted;\n}",
+      ".conversationRow.draft .title {\n  font-style: italic;\n}",
     );
   });
 
@@ -822,34 +834,37 @@ describe("how a card says where its conversation has got to", () => {
 
   /// How far down is the stylesheet's, and jsdom lays nothing out: what these
   /// two say is that a closed card recedes far enough to read as closed, and
-  /// that being the open one is the accent border and nothing beside it.
-  it("takes a closed card well down, and marks the open one with a border", () => {
+  /// that being the open one is the fill every pressable card in the app says
+  /// it with — `CardButton.module.css`'s, rather than a second answer this
+  /// sheet gives to the same question.
+  it("takes a closed card well down, and marks the open one with a fill", () => {
     expect(sidebarCss).toContain(
       ".conversationRow.ended .open {\n  opacity: 0.45;\n}",
     );
-    expect(sidebarCss).toContain(
-      ".conversationRow.selected .open {\n" +
-        "  border-color: var(--accent);\n" +
-        "  border-style: solid;\n" +
-        "  opacity: 1;\n" +
-        "}",
+    expect(pressableCss).toContain(
+      ".open {\n  --ground: var(--card);\n\n  background: var(--card);\n}",
     );
+    expect(
+      sidebarCss,
+      "the sidebar says nothing of its own about which card is open",
+    ).not.toContain("background-color");
     expect(
       sidebarCss,
       "the inset stripe is retired everywhere it was drawn",
     ).not.toContain("box-shadow: inset 0.2rem");
   });
 
-  /// Being the open one is the strongest thing a card's edge has to say, so it
-  /// is written last of the border rules and takes back what the two above it
-  /// did: the draft's dotted line, and the finished card's fade. What is dimmed
-  /// on a finished card that is open is what is inside it.
-  it("lets the open card's border outrank every other treatment", () => {
-    expect(sidebarCss.indexOf(".conversationRow.selected .open")).toBeGreaterThan(
-      sidebarCss.indexOf(".conversationRow.draft .open"),
-    );
+  /// The fade a finished card takes is the one thing this sheet still says
+  /// about the open one, and it says it by taking it back: a card being read is
+  /// read at full strength whatever state the work is in. Written after the
+  /// fade, which is what makes it outrank it. What is dimmed on a finished card
+  /// that is open is what is inside it.
+  it("lifts the finished card's fade off the one that is open", () => {
     expect(sidebarCss.indexOf(".conversationRow.selected .open")).toBeGreaterThan(
       sidebarCss.indexOf(".conversationRow.ended .open"),
+    );
+    expect(sidebarCss).toContain(
+      ".conversationRow.selected .open {\n  opacity: 1;\n}",
     );
     expect(sidebarCss).toContain(
       ".conversationRow.selected.ended .open > * {\n  opacity: 0.45;\n}",
@@ -4071,9 +4086,19 @@ describe("a move on the timeline", () => {
 
     await waitFor(() => screen.getByText("Draft → Grilling"));
 
+    // Read as which of the kinds the card is wearing rather than as its first
+    // class: a pressable card is a `CardButton`, and what every card has is
+    // written before the class the caller handed down.
+    const KINDS = [
+      timeline.brief,
+      timeline.moved,
+      timeline.agentOutput,
+      timeline.questionSet,
+    ];
+
     expect(
       [...container.querySelectorAll(`.${timeline.timelineEvent} > *`)].map(
-        (event) => event.className.split(" ")[0],
+        (event) => KINDS.find((kind) => event.classList.contains(kind!)),
       ),
     ).toEqual([
       timeline.brief,
@@ -4907,11 +4932,11 @@ describe("a session's output on the timeline", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const output = await drawn(container, `.${timeline.agentOutput}`);
-    expect(output.classList).not.toContain(timeline.selected);
+    expect(output.classList).not.toContain(pressable.open);
 
     fireEvent.click(output);
 
-    await waitFor(() => expect(output.classList).toContain(timeline.selected));
+    await waitFor(() => expect(output.classList).toContain(pressable.open));
     expect(output.getAttribute("aria-pressed")).toBe("true");
   });
 
@@ -4990,7 +5015,7 @@ describe("the strip for the session running now", () => {
 
     const pinned = await drawn(container, `.${timeline.session}`);
 
-    expect(pinned.textContent).toContain("Agent output");
+    expect(pinned.textContent).toContain("Agent run");
     expect(pinned.querySelector(`.${marks.mark}.${marks.working}`)).toBeTruthy();
 
     // Outside the record, and inside the pane: the strip is a second appearance
@@ -5039,7 +5064,7 @@ describe("the strip for the session running now", () => {
     await drawn(container, `.${shell.detailsPane} .${outputPane.captureSummary}`);
 
     const card = container.querySelector(`.${timeline.agentOutput}`)!;
-    expect(card.classList).toContain(timeline.selected);
+    expect(card.classList).toContain(pressable.open);
   });
 
   /// And nothing at all where nothing is running, which is every conversation
@@ -5243,16 +5268,11 @@ describe("watching a live session's screen", () => {
     const screen = await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
     expect(screen.classList).toContain(screenPane.live!);
 
-    // The badge asks for its type where badges are, and in sentence case:
-    // nothing in the viewer is set in capitals any more.
-    expect(timelineCss).toContain(
-      ".eventHead .live {\n" +
-        "  font-size: 0.8rem;\n" +
-        "  font-weight: 600;\n",
-    );
-
-    // And nothing asks for them by the word alone, here or anywhere else: a
-    // state class standing on its own matches every element that carries it.
+    // And nothing asks for the state class by the word alone, here or anywhere
+    // else: one standing on its own matches every element that carries it. The
+    // record had a `.live` badge of its own — the words a waiting Question Set
+    // said before the disc said it instead — and this is what kept the two
+    // apart while both existed.
     expect(timelineCss).not.toMatch(/(^|\n)\.live[\s,{]/);
     expect(screenCss).not.toMatch(/(^|\n)\.live[\s,{]/);
   });
@@ -7192,7 +7212,7 @@ describe("a question set on the timeline", () => {
   });
 
   /// The one thing on a timeline that is asking for something rather than
-  /// recording it.
+  /// recording it, said in the disc the sidebar's waiting card says it in.
   it("marks the one still waiting on the human", async () => {
     theGrillingSets();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -7204,13 +7224,40 @@ describe("a question set on the timeline", () => {
     // waiting too, the human being the one who has not answered either — and
     // the unreadable one, which is waiting on nobody, whatever the record says
     // about it, because nothing here can put its questions in front of anybody.
-    expect(cards.map((card) => card.classList.contains(timeline.waiting!))).toEqual([
-      false,
-      true,
-      true,
-      false,
-    ]);
-    expect(screen.getAllByText("waiting on you")).toHaveLength(2);
+    expect(
+      cards.map(
+        (card) => card.querySelector(`.${marks.mark}.${marks.waiting}`) !== null,
+      ),
+    ).toEqual([false, true, true, false]);
+
+    // The words are the disc's now rather than a badge's beside it, the card
+    // having no label of its own to carry them.
+    expect(screen.queryAllByText("waiting on you")).toHaveLength(0);
+    expect(
+      cards.map((card) =>
+        card.querySelector(`.${marks.waiting}`)?.getAttribute("aria-label"),
+      ),
+    ).toEqual([undefined, "waiting on you", "waiting on you", undefined]);
+  });
+
+  /// At the right edge of the title's line, which is where every other mark on
+  /// this page stands: the same class the session's ring is handed, so the two
+  /// cannot drift apart. jsdom lays nothing out, so where that puts it is read
+  /// off the rules.
+  it("stands the disc at the edge of the head, centred on the line", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.questionSet}`);
+    const disc = container.querySelector(
+      `.${timeline.questionSet} .${timeline.eventHead} .${marks.waiting}`,
+    )!;
+
+    expect(disc.classList.contains(timeline.rowMark!)).toBe(true);
+    expect(timelineCss).toContain(".rowMark {\n  margin-left: auto;\n}");
+    // Against the head's own baseline alignment, so the disc sits on the middle
+    // of the line rather than on the feet of the words.
+    expect(marksCss).toContain("align-self: center;");
   });
 
   /// Both are something to answer, so both say so. What the second word adds is
@@ -8059,11 +8106,11 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     const row = await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`);
-    expect(row.classList).not.toContain(timeline.selected);
+    expect(row.classList).not.toContain(pressable.open);
 
     fireEvent.click(row);
 
-    await waitFor(() => expect(row.classList).toContain(timeline.selected));
+    await waitFor(() => expect(row.classList).toContain(pressable.open));
     expect(row.getAttribute("aria-pressed")).toBe("true");
   });
 });
@@ -8515,19 +8562,26 @@ describe("the pinned task list", () => {
 
     const list = await drawn(container, `.${timeline.pinned} .${timeline.taskList}`);
 
-    // The classes are on both copies already — what had to change is that the
-    // stylesheet says something about them off the record too.
-    expect(list.classList.contains(timeline.openable!)).toBe(true);
+    // The card carries what every pressable card in the app carries, and the
+    // rules are that component's: unscoped by construction, so the pinned copy
+    // and the copy on the record cannot come apart.
+    expect(list.classList.contains(pressable.pressable!)).toBe(true);
 
     for (const rule of [
-      ".openable {\n  cursor: pointer;\n}",
-      ".openable.selected {\n  border-color: var(--accent);\n}",
-      "  .openable:hover,",
+      ".pressable {\n  cursor: pointer;\n}",
+      ".open {\n  --ground: var(--card);\n\n  background: var(--card);\n}",
+      "  .pressable:hover {",
     ]) {
-      expect(timelineCss).toContain(rule);
+      expect(pressableCss).toContain(rule);
     }
 
-    expect(timelineCss).not.toContain(".timelineEvent > .openable");
+    // And the record's own sheet has given up saying any of it a second time,
+    // which is what would have split the two copies again.
+    expect(timelineCss).not.toContain(".openable");
+    for (const kind of ["agentOutput", "questionSet", "commit"]) {
+      expect(timelineCss).not.toContain(`.timelineEvent > .${kind} {`);
+      expect(timelineCss).not.toContain(`.timelineEvent > .${kind}.selected`);
+    }
   });
 
   /// Pressing it marks it — both copies of it, because the two are one backlog
@@ -8543,7 +8597,7 @@ describe("the pinned task list", () => {
     await waitFor(() =>
       expect(
         container.querySelectorAll(
-          `.${timeline.taskList}.${timeline.selected}`,
+          `.${timeline.taskList}.${pressable.open}`,
         ),
       ).toHaveLength(2),
     );
@@ -8760,7 +8814,7 @@ describe("the task list opened", () => {
     const both = [...container.querySelectorAll(`.${timeline.taskList}`)];
 
     expect(both).toHaveLength(2);
-    expect(both.every((card) => card.classList.contains(timeline.selected!))).toBe(true);
+    expect(both.every((card) => card.classList.contains(pressable.open!))).toBe(true);
     expect(both.every((card) => card.getAttribute("aria-pressed") === "true")).toBe(true);
   });
 
@@ -9001,13 +9055,14 @@ describe("the pinned stage list", () => {
     expect(notice.closest(`.${timeline.timeline}`)).not.toBeNull();
     expect(notice.querySelectorAll("button")).toHaveLength(0);
 
-    // The card surface is the one every timeline event is given, so the notice
-    // asks for nothing that would take it back out of the run of them.
+    // Titled as every other card on the record is, so a column of them reads
+    // down the same left edge.
+    expect(notice.querySelector("h2")!.textContent).toBe("Notice");
+
+    // And quiet among them: the dim ink a size down is what keeps a fact about
+    // the work from reading as loudly as the work.
     expect(timelineCss).toContain(
-      ".timelineEvent > .notice {\n" +
-        "  font-size: 0.9rem;\n" +
-        "  color: var(--ink-soft);\n" +
-        "}",
+      "  font-size: 0.9rem;\n  color: var(--ink-soft);\n}",
     );
   });
 
@@ -9389,7 +9444,7 @@ describe("the stage list opened", () => {
     const both = [...container.querySelectorAll(`.${timeline.stageList}`)];
 
     expect(both).toHaveLength(2);
-    expect(both.every((card) => card.classList.contains(timeline.selected!))).toBe(true);
+    expect(both.every((card) => card.classList.contains(pressable.open!))).toBe(true);
     expect(both.every((card) => card.getAttribute("aria-pressed") === "true")).toBe(true);
   });
 
@@ -9501,16 +9556,41 @@ describe("the notice of a stop", () => {
     ).toEqual([]);
   });
 
-  /// A line and not a card: there is nothing to open and nothing to answer.
-  /// What gets the work going again is Resume, at the foot of the timeline.
-  it("holds nothing to press", async () => {
+  /// The card is the press and holds no control of its own, which is what it
+  /// has in common with every other card on the record: what gets the work
+  /// going again is Resume, at the foot of the timeline.
+  it("is the press itself, and holds nothing else to press", async () => {
     theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
     const notice = await drawn(container, `.${timeline.timeline} .${timeline.notice}`);
 
     expect(notice.querySelector("button")).toBeNull();
-    expect(notice.classList.contains(timeline.openable!)).toBe(false);
+    expect(notice.classList.contains(pressable.pressable!)).toBe(true);
+    expect(notice.getAttribute("role")).toBe("button");
+  });
+
+  /// And what it opens is the whole of what the card cut off at a line: the
+  /// reason the run stopped, and the terminal output under it.
+  it("opens the whole of what it said in the details pane", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timeline} .${timeline.notice}`),
+    );
+
+    const pane = await drawn(
+      container,
+      `.${shell.detailsPane} .${documentPane.document}`,
+    );
+
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${paneHead.head} h1`)!
+        .textContent,
+    ).toBe("Notice");
+    expect(pane.textContent).toContain("the session exited with status 1");
+    expect(pane.querySelectorAll("pre").length).toBe(2);
   });
 });
 
@@ -9638,25 +9718,49 @@ describe("a run stopped because an account ran out of window", () => {
     );
   });
 
-  /// The badge marks the notice where it stands in the record rather than
-  /// paging a narrow window away to a details level a notice has nothing to
-  /// show in.
-  it("marks the notice it is blocked on where the notice stands", async () => {
+  /// The badge opens the notice, as it opens whatever else a run stopped at:
+  /// a notice has a details pane behind it now, and the whole of what a stop
+  /// had to say is in it.
+  it("opens the notice it is blocked on", async () => {
     thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.blocked}`));
 
-    const marked = await drawn(container, `.${timeline.timeline} .${timeline.notice}.${timeline.selected}`);
+    const marked = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.notice}.${pressable.open}`,
+    );
 
     expect(marked.textContent).toContain("Implementing the work");
-    expect(frame(container).dataset.pane).toBe("timeline");
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("details"));
+    expect(
+      (await drawn(container, `.${shell.detailsPane} .${paneHead.head} h1`))
+        .textContent,
+    ).toBe("Notice");
+  });
 
-    // Said by the card's own border, the way every other selected card says it
-    // — in the colour that means stopped, because that is what this one is.
-    expect(timelineCss).toContain(
-      ".timelineEvent > .notice.selected {\n  border-color: var(--stopped);\n}",
+  /// And it is marked where it stands as well, whether or not it is the one
+  /// being read: the badge is how a stop is found on a long record, and what
+  /// finds it is the edge in the colour that means stopped.
+  it("marks the notice the run stopped at, apart from the one being read", async () => {
+    thePaused();
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const marked = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.notice}.${timeline.blocking}`,
     );
+
+    expect(marked.textContent).toContain("Implementing the work");
+    // Nothing has been pressed, so the mark is not about being open.
+    expect(marked.classList.contains(pressable.open!)).toBe(false);
+
+    // And it is the last card on the record, which is what the stylesheet
+    // leans on: a run that stopped wrote nothing after the notice saying so,
+    // so the notice is found by being at the end rather than by any paint.
+    const cards = [...container.querySelectorAll(`.${timeline.timelineEvent} > *`)];
+    expect(cards.at(-1)).toBe(marked);
   });
 });
 
@@ -9716,13 +9820,13 @@ describe("a conversation the human stopped themselves", () => {
 
     const marked = await drawn(
       container,
-      `.${timeline.timeline} .${timeline.notice}.${timeline.selected}`,
+      `.${timeline.timeline} .${timeline.notice}.${pressable.open}`,
     );
 
     expect(marked.textContent).toContain(
       "The task in .tasks/03-commit-events.md",
     );
-    expect(frame(container).dataset.pane).toBe("timeline");
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("details"));
   });
 });
 
@@ -9830,6 +9934,16 @@ const LOWERCASED = {
   Failed: "failed",
 } as const;
 
+/// And the shape each is drawn as, named here rather than read off the
+/// component: which Font Awesome icon means *passed* is a decision, and a test
+/// that asked `Checks.tsx` which one it had chosen would agree with whatever it
+/// answered.
+const SHAPED = {
+  Passed: faCheck,
+  Running: faCircle,
+  Failed: faXmark,
+} as const;
+
 describe("the pinned pull request", () => {
   it("says what it is called and what number it answers to", async () => {
     theWrapping();
@@ -9891,9 +10005,14 @@ describe("the pinned pull request", () => {
     ).toBe("true");
   });
 
-  /// GitHub's own three, echoed here: a green tick, a red cross, and a dot for
-  /// a suite that has not finished. Drawn rather than worded, so the icon is
-  /// what carries the words for anything reading the page aloud.
+  /// GitHub's own three, echoed here: a green tick, a red cross, and an empty
+  /// ring for a suite that has not finished. Drawn rather than worded, so the
+  /// icon is what carries the words for anything reading the page aloud.
+  ///
+  /// The shape is asserted as well as the rule that colours it, because the
+  /// shape is Font Awesome's data now rather than something this repository
+  /// draws: an icon swapped for the wrong one is a mark that says the opposite
+  /// of what happened, and no rule anywhere would have changed.
   it("marks how the checks are, in the icon GitHub uses for it", async () => {
     for (const rollup of ["Passed", "Running", "Failed"] as const) {
       theWrapping(whoseChecks(rollup));
@@ -9907,6 +10026,13 @@ describe("the pinned pull request", () => {
       expect(mark.classList.contains(checkMarks[LOWERCASED[rollup]]!)).toBe(true);
       expect(mark.getAttribute("role")).toBe("img");
       expect(mark.getAttribute("aria-label")).toBe(CHECKS_SPOKEN[rollup]);
+
+      const shape = SHAPED[rollup];
+      expect(mark.tagName.toLowerCase()).toBe("svg");
+      expect(mark.getAttribute("viewBox")).toBe(
+        `0 0 ${shape.icon[0]} ${shape.icon[1]}`,
+      );
+      expect(mark.querySelector("path")!.getAttribute("d")).toBe(shape.icon[4]);
     }
   });
 
@@ -9968,7 +10094,7 @@ describe("the pinned pull request", () => {
 
     expect(
       [...container.querySelectorAll(`.${timeline.pullRequest}`)].map((card) =>
-        card.classList.contains(timeline.selected!),
+        card.classList.contains(pressable.open!),
       ),
     ).toEqual([true, true]);
   });
@@ -10787,14 +10913,14 @@ describe("the documents on a timeline", () => {
     expect(handoff.getAttribute("role")).toBe("button");
     expect(handoff.getAttribute("tabindex")).toBe("0");
     expect(handoff.getAttribute("aria-pressed")).toBe("false");
-    expect(handoff.classList.contains(timeline.openable!)).toBe(true);
+    expect(handoff.classList.contains(pressable.pressable!)).toBe(true);
 
     fireEvent.keyDown(handoff, { key: "Enter" });
 
     await drawn(details(), `.${documentPane.document}`);
 
     await waitFor(() =>
-      expect(handoff.classList.contains(timeline.selected!)).toBe(true),
+      expect(handoff.classList.contains(pressable.open!)).toBe(true),
     );
     expect(handoff.getAttribute("aria-pressed")).toBe("true");
   });
@@ -10843,23 +10969,28 @@ describe("the documents on a timeline", () => {
     expect(brief.querySelector(`.${timeline.clamp}`)).toBeNull();
     expect(brief.getAttribute("role")).toBeNull();
     expect(brief.getAttribute("tabindex")).toBeNull();
-    expect(brief.classList.contains(timeline.openable!)).toBe(false);
+    expect(brief.classList.contains(pressable.pressable!)).toBe(false);
 
     fireEvent.click(brief);
 
     expect(details().querySelector(`.${documentPane.document}`)).toBeNull();
   });
 
-  /// A notice is a sentence rather than a document: one line already, with
-  /// nothing to cut off and nothing to open.
-  it("leaves a notice line whole", async () => {
+  /// A notice is a sentence rather than a document, so its card is cut at one
+  /// line with an ellipsis rather than clamped at five under a fade. The whole
+  /// of it is still a press away — see the notice's own pane below.
+  it("cuts a notice off at a line rather than clamping it", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
 
     const notice = await drawn(container, `.${timeline.timelineEvent} > .${timeline.notice}`);
 
     expect(notice.querySelector(`.${timeline.clamp}`)).toBeNull();
-    expect(notice.getAttribute("role")).toBeNull();
+    expect(notice.querySelector(`.${timeline.noticeBody}`)).toBeTruthy();
+
+    // How far it is cut is the stylesheet's, and jsdom lays nothing out.
+    expect(timelineCss).toContain("-webkit-line-clamp: 1;");
+    expect(timelineCss).toContain("line-clamp: 1;");
   });
 });
 
@@ -11106,7 +11237,13 @@ describe("a clamped document", () => {
   it("fades the cut into the card, and only where there is a cut", () => {
     const cut = block(".clamp.cut::after");
 
-    expect(cut).toContain("linear-gradient(to bottom, transparent, var(--card))");
+    // Into whatever the card is standing in rather than into a colour named
+    // here: a flat card is the paper and a card pointed at or opened is the
+    // fill, and `CardButton` is what hands the difference down.
+    expect(cut).toContain(
+      "linear-gradient(to bottom, transparent, var(--ground, var(--card)))",
+    );
+    expect(pressableCss).toContain("--ground: var(--paper);");
     // The fade must not swallow the press: the whole card opens the pane.
     expect(cut).toContain("pointer-events: none");
 

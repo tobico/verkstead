@@ -8,10 +8,12 @@
 //! thumb's width from the questions. It is confirmed besides: it is the only
 //! thing on this page that cannot be taken back.
 
+import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { Show, createMemo, createSignal } from "solid-js";
 
+import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { Modal } from "../Modal";
 import { lockSet } from "../api/client";
@@ -110,9 +112,7 @@ export function Standing(props: {
             </span>
             {/* Which way the menu will go, and no part of what the badge
                 says. */}
-            <span class={styles.standingMark} aria-hidden="true">
-              ▾
-            </span>
+            <Icon of={faChevronDown} class={styles.standingMark} />
           </>
         }
       >

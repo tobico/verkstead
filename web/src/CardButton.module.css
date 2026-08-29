@@ -1,0 +1,58 @@
+/* The pressable card, wherever the app draws one — see `CardButton.tsx`.
+
+   Flat until something happens to it. A page of cards each drawn as a box is a
+   page of boxes, and what the eye is being asked for is the one card that
+   matters: the one under the pointer, and the one whose pane is open. So the
+   card at rest is the paper it sits on, and the two moments that are worth
+   saying are the two that take a fill. */
+
+.card {
+  /* The colour the card is drawn in, for whatever inside it has to match: a
+     clamped document fades its cut into this rather than into a colour of its
+     own guessing. It is the paper the card sits on until the card is filled,
+     and the fill afterwards. */
+  --ground: var(--paper);
+
+  display: block;
+  width: 100%;
+  padding: 1rem;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  /* An edge that is there and cannot be seen. The card is flat, so nothing is
+     drawn here — but a card that reserved no edge could not be given one
+     either, and the two cards on a Timeline that mark themselves in the border
+     would each have grown by a pixel the moment they did it. */
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+}
+
+/* A card with something behind it. Not every card has: a Brief still being
+   written is a field to type in rather than a way into anything, and it is
+   drawn as the same surface without ever becoming a target on it. */
+.pressable {
+  cursor: pointer;
+}
+
+/* And the one whose pane is open, said in the fill. The fill rather than an
+   accent border, because a card's edge is worth keeping for the things that are
+   about the work — a Question Set waiting on the human, a Set this build cannot
+   read — and being the one being looked at is not one of them. */
+.open {
+  --ground: var(--card);
+
+  background: var(--card);
+}
+
+/* Under the pointer, the same fill the open one takes: the card is a surface
+   and a surface shifts one step of the paper it is drawn on, which is what
+   every other pressable thing in the viewer does. The open card is already
+   there and does not move under the hand. */
+@media (hover: hover) {
+  .pressable:hover {
+    --ground: var(--card);
+
+    background: var(--card);
+  }
+}

@@ -220,7 +220,7 @@ export function Output(props: {
 
   return (
     <>
-      <PaneHead back={{ to: "Timeline", go: props.back }} title="Agent output">
+      <PaneHead back={{ to: "Timeline", go: props.back }} title="Agent run">
         {/* The two ways of reading the one session, beside the title rather than
             across the pane under it: two words is all the width it ever needs,
             and the header is where a pane's own controls belong. Buttons that

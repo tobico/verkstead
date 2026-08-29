@@ -88,9 +88,9 @@
   width: 100%;
   padding: 0.5rem 1rem;
   font-weight: 600;
-  color: var(--paper);
-  background: var(--accent);
-  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: var(--card);
+  border: 1px solid var(--edge);
   border-radius: 0.4rem;
 }
 
@@ -175,21 +175,22 @@
 }
 
 /* A row rather than a column: the name and the repo it is in stack down the
-   left, and whatever mark the Conversation carries sits at the right edge. */
+   left, and whatever mark the Conversation carries sits at the right edge.
+
+   The card itself is `CardButton.module.css`'s — the surface, the pointer, the
+   fill under the hand and the fill while its pane is open are what every
+   pressable card in the app has, and this list is one of the places one is
+   drawn. What is here is how this one is laid out inside, and the one habit a
+   card that can be dragged has to break. */
 .conversationRow .open {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   flex: 1;
   min-width: 0;
+  /* Tighter down the page than a card on the record, because a sidebar is a
+     list to run an eye down rather than a column to read. */
   padding: 0.85rem 1rem;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
-  cursor: pointer;
 
   /* A card dragged the length of the sidebar would otherwise paint every name
      it passed in the selection blue. There is nothing on a card worth selecting
@@ -197,14 +198,10 @@
   user-select: none;
 }
 
-/* A draft: nothing about it has been settled, so the card is drawn as the
-   outline of one rather than as one.
-
-   The dotted edge is the draft's alone, and being the open one takes it back:
-   see the selected rule below, which is written after this one so that it
-   does. */
-.conversationRow.draft .open {
-  border-style: dotted;
+/* A draft: nothing about it has been settled */
+.conversationRow.draft .title {
+  font-style: italic;
+  color: var(--ink-soft);
 }
 
 /* Work that has stopped, finished and aborted alike — which of the two is the
@@ -224,27 +221,22 @@
   color: var(--ink);
 }
 
-/* Which one is open, said in the accent border alone: the border is the mark
-   everywhere something is selected, and a card that also carried a stripe down
-   its near edge read as heavier than the rest of the list rather than as the one
-   being looked at. A fill is no better — the row is read, and a wash behind it
-   would fight the words.
+/* Which one is open is the fill, and the fill is `CardButton.module.css`'s: it
+   is what says *this one* on a Timeline card too, and a sidebar that said it
+   some other way would be the app saying one thing in two voices. What is left
+   here is the fade this list puts on a finished card, taken back off the one
+   that is open — the card being read is read at full strength whatever state
+   the work is in.
 
-   Last of the card's border rules, and written to outrank the two above it
-   rather than to sit beside them: being the open one is the strongest thing a
-   card's edge has to say, so the draft's dotted line goes back to solid under
-   it and the finished card's fade is lifted off it. Nothing is left for a
-   waiting card to fight over — the disc at the right edge is the whole of that
-   mark now, and `Mark.module.css` draws it. */
+   Written after the fade above rather than beside it, because that is what
+   takes it back. */
 .conversationRow.selected .open {
-  border-color: var(--accent);
-  border-style: solid;
   opacity: 1;
 }
 
 /* What a finished card that is also the open one dims: its contents, taken the
    same distance down the whole card goes when it is not open. The children
-   rather than the card, so the accent border above reads at full strength. */
+   rather than the card, so the fill behind them reads at full strength. */
 .conversationRow.selected.ended .open > * {
   opacity: 0.45;
 }
@@ -254,7 +246,6 @@
    closed hand says the card is held rather than merely pressed, which is the
    whole of what the grip's own cursor was for. */
 .conversationRow.held .open {
-  border-color: var(--accent);
   opacity: 0.9;
   cursor: grabbing;
 }
@@ -281,20 +272,19 @@
   color: var(--ink-soft);
 }
 
-/* Under the pointer: the card is a surface and shifts one step of the paper the
-   list is drawn on, and the one action above it is filled and deepens its
-   accent.
+/* What a card does under the pointer is `CardButton.module.css`'s, and this is
+   the one card in the app that has to be told not to.
 
    Never the card in the hand. A card being dragged is already marked as held,
    the pointer is on it the whole way, and a second thing happening to it at the
    same moment would say the drag had ended. */
 @media (hover: hover) {
-  .conversationRow:not(.held) .open:hover {
-    background: var(--paper);
+  .conversationRow.held:not(.selected) .open:hover {
+    background: transparent;
   }
 
   .newConversation > button:not(:disabled):hover {
-    background: var(--accent-deep);
+    color: var(--accent-deep);
     border-color: var(--accent-deep);
   }
 }

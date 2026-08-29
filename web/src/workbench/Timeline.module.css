@@ -17,7 +17,18 @@
 
    Two components draw into this vocabulary from their own files: `Pause`, whose
    card is one of the record's, and `Mark`, which is handed the class that says
-   where in a row its ring stands. */
+   where in a row its ring stands.
+
+   And a third the other way round: every event that opens into the details pane
+   is a `CardButton`, so what a card *is* — the surface, the pointer, the fill
+   under the hand and the fill while its pane is open — is
+   `CardButton.module.css`'s and is not written here. That it is the component's
+   is also what keeps the pinned copies of the two lists and the pull request in
+   step with the copies on the record: each of those three is drawn twice, and a
+   rule here that reached one copy would have the human press the card held above
+   the pane and watch a different one light up. What is left in this file is what
+   stands on a card, and the events that are not one: the moves and steers drawn
+   as lines between the cards, and the manual task nothing writes another of. */
 
 /* The way on to the next level, which only the timeline has one of: the details
    pane holds the selected Event, so this is the way into it on a window too
@@ -327,17 +338,10 @@
 
 /* The backlog and the roadmap: the whole list either way, because the whole
    list is short and it is what a conversation being built from one is about.
-   The same card the events are, so each reads as one of them held still rather
-   than as furniture — and the same rules for both, because a roadmap is the
-   same kind of thing one level up. */
-.taskList,
-.stageList {
-  padding: 1rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
-}
-
+   The same card the events are — a `CardButton`, drawn wherever it is drawn, so
+   the pinned copy is the copy on the record and not a second thing that looks
+   like it — and the same rules for both, because a roadmap is the same kind of
+   thing one level up. */
 .taskList .eventHead,
 .stageList .eventHead {
   margin-bottom: 0.5rem;
@@ -449,13 +453,6 @@
 
 /* The pull request: the same card as the backlog above it, because it is the
    same kind of thing — the current state of something the work is against. */
-.pullRequest {
-  padding: 1rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
-}
-
 .pullRequest .eventHead {
   margin-bottom: 0.4rem;
   justify-content: flex-start;
@@ -499,7 +496,6 @@
    nothing here to press on its own. */
 .pullRequestTitle {
   margin: 0;
-  font-weight: 600;
 }
 
 /* The timeline: everything that has happened, in order, each event a card of its
@@ -513,11 +509,22 @@
   gap: 1rem;
 }
 
+/* Every event is drawn at the same measure and turns the same corner, whatever
+   kind of thing it is. What fills one is not here: a card that opens into the
+   details pane is a `CardButton` and takes its fill from being pointed at or
+   from being the open one, so what is left to paint is the two that are neither
+   — see the rule under this. */
 .timelineEvent > * {
   padding: 1rem;
+  border-radius: 0.6rem;
+}
+
+/* The one event that is a fact rather than a way into anything: a task somebody
+   set going by hand, on a record nothing writes another of. Nothing opens under
+   it, so nothing ever fills it, and the box is what says it is a card at all. */
+.timelineEvent > .manualTask {
   background: var(--card);
   border: 1px solid var(--edge);
-  border-radius: 0.6rem;
 }
 
 /* An event's own heading with its one control on the other end of the line.
@@ -534,21 +541,6 @@
 .eventHead h2 {
   margin: 0;
   font-size: 1.1rem;
-}
-
-/* A liveness said in words, which is the unanswered Set's badge alone: a
-   session's own is the mark at the row's edge, because a Timeline of rows
-   each saying `running` is a Timeline nobody reads. The colour the accent
-   already is, because what a badge like this says is that something is waiting
-   on the human here rather than that something is wrong.
-
-   Said inside the head it is a badge in, rather than by the word alone: a live
-   Screen marks itself `live` too, and a bare rule would put this badge's type
-   through the whole of xterm's grid. */
-.eventHead .live {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--accent);
 }
 
 /* The documents on a timeline — the frozen brief, the handoff the grilling
@@ -579,7 +571,13 @@
 /* The cut, drawn only where the document goes on under it — `Clamped` in
    `Timeline.tsx` is what measures. The last line fades into the card rather than
    stopping at a straight edge, so what is missing reads as missing rather than
-   as the end of the document. */
+   as the end of the document.
+
+   Into whatever colour the card is standing in, which is the card's own to say:
+   `--ground` comes down from `CardButton.module.css` and is the paper until the
+   card is pointed at or opened and the fill until it is let go. A fade that
+   named a colour itself would be a strip of the wrong one across every card
+   nobody was pointing at. */
 .clamp.cut::after {
   content: "";
   position: absolute;
@@ -587,26 +585,8 @@
   bottom: 0;
   left: 0;
   height: 2.5em;
-  background: linear-gradient(to bottom, transparent, var(--card));
+  background: linear-gradient(to bottom, transparent, var(--ground, var(--card)));
   pointer-events: none;
-}
-
-/* And what says the card can be pressed. The events that are buttons carry this
-   for nothing; the documents and the two lists are articles, because rendered
-   markdown cannot live inside a button, so the same two things a pressable card
-   has — a pointer and a border in the accent while it is the one open — are
-   said here instead.
-
-   Wherever the card is drawn rather than only on the record, which is what the
-   two lists and the pull request made matter: each of the three is drawn twice,
-   pinned and listed, and a rule that reached one copy would have the human
-   press the card held above the pane and watch a different one light up. */
-.openable {
-  cursor: pointer;
-}
-
-.openable.selected {
-  border-color: var(--accent);
 }
 
 /* What a save cannot do, said under the field it happened in. */
@@ -629,9 +609,6 @@
   font-size: 0.85rem;
   color: var(--ink-soft);
   text-align: center;
-  background: none;
-  border: 0;
-  border-radius: 0;
 }
 
 /* Every state the work can be moved into carries its own class, because the
@@ -672,9 +649,6 @@
   font-weight: 600;
   color: var(--ink);
   text-align: center;
-  background: none;
-  border: 0;
-  border-radius: 0;
 }
 
 /* Except where it carried an instruction, which makes it a card rather than a
@@ -706,47 +680,55 @@
 
 /* And something Verkstead did on its own account, which reads as the same kind
    of thing again — a fact about the work, said by the one voice on a Timeline
-   that is neither the human's nor an agent's. A card like everything else in
-   the record, because it is one of the things that happened; the dim ink is
-   what keeps it quiet among them, rather than a rule at its left. */
-.timelineEvent > .notice {
+   that is neither the human's nor an agent's. A `CardButton` like every other
+   event with a full self: the whole of what it says is a press away, and the
+   dim ink is what keeps it quiet among them meanwhile. */
+.notice .eventHead {
+  margin-bottom: 0.35rem;
+}
+
+/* One line of what it says, cut with an ellipsis where there is more.
+
+   One rather than the five a document's card shows, because these are not
+   documents: what a notice has to say is a sentence, and the sentence is what
+   tells one from another down a column of them. A stop is the exception that
+   makes the case — a paragraph and two blocks of terminal output, which is a
+   card to be scrolled past rather than read.
+
+   The ellipsis rather than the fade the documents take, and for the same
+   reason: a fade says *this document goes on*, and a line that ends in an
+   ellipsis says *this line was cut*. `line-clamp` counts line boxes wherever
+   they are, so the markdown inside keeps its own blocks and the first line of
+   the first of them is what shows. */
+.notice .noticeBody {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
   font-size: 0.9rem;
   color: var(--ink-soft);
 }
 
-.timelineEvent > .notice > :first-child {
+.notice .noticeBody > :first-child {
   margin-top: 0;
 }
 
-.timelineEvent > .notice > :last-child {
+.notice .noticeBody > :last-child {
   margin-bottom: 0;
 }
 
 /* And the one of them a conversation is blocked on, which the badge in the
-   header marks: its border takes the colour that means stopped, so a long
-   record says where the stop is at a glance — the card's own border, the way
-   every other selected card says it is the one being pointed at. The one thing
-   that ever selects a notice; there is no pane behind it to open. */
-.timelineEvent > .notice.selected {
-  border-color: var(--stopped);
+   header marks. No additional styles are needed here since it will always
+  be the last item. */
+.notice.blocking {
 }
 
-/* What a session has printed, summarised. A button, because the whole of it is
-   in the details pane and this is how it is opened — so it is a card that says
-   it can be pressed rather than one with a control in it. */
-.timelineEvent > .agentOutput {
-  display: block;
-  width: 100%;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.timelineEvent > .agentOutput.selected {
-  border-color: var(--accent);
-}
-
+/* What a session has printed, summarised. A `CardButton`, because the whole of
+   it is in the details pane and this is how it is opened — so it is a card that
+   says it can be pressed rather than one with a control in it. That it can be
+   pressed, and that it is the one open, are that component's to draw; what is
+   left here is the line inside it. */
 .agentOutput .eventHead {
   margin-bottom: 0.35rem;
   justify-content: flex-start;
@@ -808,30 +790,17 @@
 }
 
 /* A Question Set the session put to the human, read as the interview it was: a
-   question line and its answer under it, pair after pair. A button, as a
+   question line and its answer under it, pair after pair. A `CardButton`, as a
    session's output is, and for the same reason — the whole document is in the
-   details pane and this is how it is opened. */
-.timelineEvent > .questionSet {
-  display: block;
-  width: 100%;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
+   details pane and this is how it is opened.
 
-.timelineEvent > .questionSet.selected {
-  border-color: var(--accent);
-}
-
-/* One still waiting on the human is the one thing on a timeline that is asking
-   for something, so it says so rather than sitting among the record. The accent
-   border and the badge in the head, which is the mark twice over — the stripe
-   that used to run down its near edge has gone with every other one. */
-.timelineEvent > .questionSet.waiting {
-  border-color: var(--accent);
-}
-
+   One still waiting on the human is the one thing on a timeline that is asking
+   for something, and nothing here draws that: the disc at the right edge of the
+   head is `Mark.module.css`'s, and it is the whole of the mark. It was three
+   things at once — an accent border round the card, the words in the head, and
+   the stripe down the near edge before them — which is what a card ends up
+   saying when nobody takes the old mark off before adding the new one. The
+   sidebar's card went through the same and came out with the disc alone. */
 .questionSet .eventHead {
   margin-bottom: 0.5rem;
   justify-content: flex-start;
@@ -848,8 +817,8 @@
 }
 
 /* And which kind of ask it was, beside the fact that it is waiting. Quiet where
-   "waiting on you" is the accent: both want answering, and this says only that
-   no session is standing still until it is. */
+   the disc at the edge of the line is the accent: both want answering, and this
+   says only that no session is standing still until it is. */
 .questionSet .deferred {
   font-size: 0.8rem;
   font-weight: 600;
@@ -939,27 +908,16 @@
 /* A Set whose stored body this build cannot read. Dashed rather than coloured:
    nothing has gone wrong with the work and there is nothing here to answer — the
    record is intact and this build cannot render it, which is a gap in the
-   drawing rather than a state of the Conversation. */
+   drawing rather than a state of the Conversation. The edge is the card's own
+   reserved one, taken up here as the waiting Set above takes it up. */
 .timelineEvent > .questionSet.unreadable {
+  border-color: var(--edge);
   border-style: dashed;
 }
 
-/* A commit a session landed on the branch. A button, as the two events above
-   are, because the whole of it — the diff — is in the details pane and this is
-   how it is opened. */
-.timelineEvent > .commit {
-  display: block;
-  width: 100%;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.timelineEvent > .commit.selected {
-  border-color: var(--accent);
-}
-
+/* A commit a session landed on the branch. A `CardButton`, as the two events
+   above are, because the whole of it — the diff — is in the details pane and
+   this is how it is opened. */
 .commit .eventHead {
   margin-bottom: 0.35rem;
   justify-content: flex-start;
@@ -1171,16 +1129,6 @@
 
   .dots button:not([aria-current]):hover::before {
     background: var(--ink-soft);
-  }
-
-  /* The pressable card, wherever it is drawn — the pinned copies of the two
-     lists and the pull request included, for the reason `.openable` itself is
-     unscoped. */
-  .openable:hover,
-  .timelineEvent > .agentOutput:hover,
-  .timelineEvent > .questionSet:hover,
-  .timelineEvent > .commit:hover {
-    background: var(--paper);
   }
 
   /* The running session held against the foot of the pane, which is the one card

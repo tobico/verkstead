@@ -1,77 +1,33 @@
-/* The three marks a pull request's checks are said in. See `Checks.tsx` for
-   what each means and why they are drawn rather than written.
+/* The three marks a pull request's checks are said in. See `Checks.tsx` for what
+   each means, and `Icon.module.css` for how any icon in the viewer is drawn.
 
-   Two of them are a disc with a glyph cut out of it in the card's own colour,
-   which is how GitHub draws them and how they stay legible at this size: a tick
-   and a cross are told apart by their shape rather than by their colour alone,
-   so the mark still says which it is where the two colours do not. */
+   The shapes are Font Awesome's now and are not here at all: what was a disc
+   with a tick built out of two rotated borders is `fa-check`, and the file that
+   used to hold that arithmetic holds the size and the colour instead. Which is
+   the whole of what this module ever had to say — a tick and a cross are told
+   apart by their shape rather than by their colour, so the mark still says which
+   it is where the two colours do not. */
 .checks {
-  flex: none;
   align-self: center;
-  position: relative;
-  width: 1rem;
-  height: 1rem;
-  border-radius: 50%;
+  /* A shade over the `1em` an icon takes from the line it is on: these three sit
+     at the end of a row rather than in a sentence, and a mark that is glanced at
+     wants to be found without being read. */
+  height: 1.1em;
 }
 
-/* Green, and every check on it finished. The tick is two sides of a box turned
-   onto its corner — a right border and a bottom one, and nothing else — drawn
-   in the card's colour so it reads as cut out of the disc. */
+/* Green, and every check on it finished. */
 .checks.passed {
-  background: var(--added);
+  color: var(--added);
 }
 
-.checks.passed::before {
-  content: "";
-  position: absolute;
-  left: 0.375rem;
-  top: 0.125rem;
-  width: 0.25rem;
-  height: 0.5rem;
-  border-right: 2px solid var(--card);
-  border-bottom: 2px solid var(--card);
-  transform: rotate(45deg);
-}
-
-/* Red, and something on it is not going to pass on its own. The cross is two
-   bars through the middle, drawn the same way and in the same colour. */
+/* Red, and something on it is not going to pass on its own. */
 .checks.failed {
-  background: var(--stopped);
+  color: var(--stopped);
 }
 
-.checks.failed::before,
-.checks.failed::after {
-  content: "";
-  position: absolute;
-  left: calc(50% - 1px);
-  top: 0.2rem;
-  width: 2px;
-  height: 0.6rem;
-  background: var(--card);
-}
-
-.checks.failed::before {
-  transform: rotate(45deg);
-}
-
-.checks.failed::after {
-  transform: rotate(-45deg);
-}
-
-/* And a suite that has not finished: a ring with a dot in it, which is what
-   GitHub draws while it waits and the quietest of the three — nothing has gone
-   wrong and nothing is settled either. In the accent, this palette's amber. */
+/* And a suite that has not finished: the empty ring, which is the quietest of
+   the three — nothing has gone wrong and nothing is settled either. In the
+   accent, this palette's amber. */
 .checks.running {
-  border: 2px solid var(--accent);
-}
-
-.checks.running::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 0.3rem;
-  height: 0.3rem;
-  border-radius: 50%;
-  background: var(--accent);
+  color: var(--accent);
 }

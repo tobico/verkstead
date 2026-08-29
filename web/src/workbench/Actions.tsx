@@ -146,7 +146,7 @@ function Action(props: {
       disabled={props.working}
       onClick={() => props.press()}
     >
-      <span>{props.working ? props.pressing : props.label}</span>
+      <span class={styles.title}>{props.working ? props.pressing : props.label}</span>
       <span class={styles.says}>{props.says}</span>
     </button>
   );

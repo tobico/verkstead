@@ -1,0 +1,22 @@
+/* One Font Awesome icon — see `Icon.tsx`.
+
+   Everything here is about fitting into a line of text rather than about any
+   one icon, because the file that knows which icon this is is the caller's.
+
+   Sized in `em` so it follows whatever it was put beside: a caret on a button
+   is the button's size and a mark in a heading is the heading's, without either
+   caller saying so. The width comes from the path rather than from a rule —
+   Font Awesome's icons are not all one shape, and a chevron squeezed into a
+   square would be a chevron drawn wrong. */
+.icon {
+  flex: none;
+  height: 1em;
+  width: auto;
+  /* The ink of the line it is on. An icon that named its own colour would need
+     saying again in the dark palette, and again wherever a caller wanted it
+     quiet. */
+  fill: currentColor;
+  /* A glyph sits on the baseline and an `svg` sits under it, which puts an icon
+     a couple of pixels low beside the words it belongs to. */
+  vertical-align: -0.125em;
+}
