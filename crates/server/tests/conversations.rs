@@ -4348,6 +4348,103 @@ async fn a_done_conversation_with_an_open_set_is_still_waiting() {
     );
 }
 
+/// The Conversation's own page carries the same fact its row does, folded by the
+/// same rule in the same place — see the store's `waits_on_the_human`.
+///
+/// A grilling nobody has asked anything on waits on nothing: it is being worked,
+/// and being worked is not wanting the human. The ask is what turns it on, and
+/// the answer is what turns it off again.
+#[tokio::test]
+async fn the_conversation_view_says_when_an_open_ask_is_waiting_on_the_human() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    assert!(
+        !waits(&app, id).await,
+        "a grilling with nothing outstanding wants nobody",
+    );
+
+    let set = ask(&app, id, ORDINARY).await;
+    assert!(waits(&app, id).await, "there is something answerable now");
+
+    answer_ordinary(&app, set).await;
+    assert!(
+        !waits(&app, id).await,
+        "and the answer is the end of it: nothing is left to come back for",
+    );
+}
+
+/// And a stop is the other source, read the same way on the page as on the row:
+/// what happened without the human draws them, and their own press does not.
+///
+/// Beside `stopped_by_hand`, which is the same stop asked a narrower question —
+/// *which* mark the head draws. This is whether there is one at all.
+#[tokio::test]
+async fn the_conversation_view_says_when_a_stop_is_waiting_on_the_human() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::stop(
+        &pool,
+        id,
+        store::Decision::Human,
+        "You pressed Stop.\n",
+        None,
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation was running");
+
+    assert!(
+        opened(&app, id).await.blocked_on.is_some(),
+        "the drive has stopped, and the head says so",
+    );
+    assert!(
+        !waits(&app, id).await,
+        "but they pressed it themselves, so there is nothing here they have not heard",
+    );
+
+    store::clear_stop(&pool, id).await.unwrap();
+    store::stop(
+        &pool,
+        id,
+        store::Decision::Verkstead,
+        "The checks would not go green.\n",
+        None,
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation is running again");
+
+    assert!(
+        waits(&app, id).await,
+        "Verkstead's own brake stopped it, and nobody has been told but the page",
+    );
+
+    pool.close().await;
+}
+
+/// Whether a Conversation waits on the human, asked of its page and of its row
+/// together.
+///
+/// The two are one fold in the store rather than two readings that happen to
+/// agree — see the store's `waits_on_the_human` — so a test of either is a test
+/// of both, and this asserts as much on every read.
+async fn waits(app: &Router, id: i64) -> bool {
+    let waiting = opened(app, id).await.waiting;
+
+    assert_eq!(
+        waiting,
+        row(app, id).await.waiting,
+        "the page and the sidebar row disagreed about the same Conversation",
+    );
+
+    waiting
+}
+
 /// A server running no sessions at all — which is every one of these — has none
 /// to report. What a running one does to the row is `sessions.rs`'s to say, being
 /// the file with an agent in it.

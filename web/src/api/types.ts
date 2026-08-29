@@ -1139,6 +1139,20 @@ blocked_on: number | null,
  */
 stopped_by_hand: boolean, 
 /**
+ * Whether something about this Conversation is waiting on the human: an ask
+ * left open, or driving that has stopped without them.
+ *
+ * The same fact the sidebar row carries — see [`ConversationEntry::waiting`]
+ * — folded by the same rule in the same place, so the row and the page it
+ * opens can never come to disagree about the one Conversation. What the
+ * page does with it is its own: the row draws a disc, and the head of the
+ * Timeline draws the status word in the accent colour.
+ *
+ * A Draft is never one of them, and neither is a Closed Conversation: the
+ * first is drawn as a draft and the second has nothing left to want.
+ */
+waiting: boolean, 
+/**
  * Whether the wrap-up has narrowed to its checks: the review answered, the
  * comments dealt with, the checks alone outstanding, and nothing running in
  * the Worktree.

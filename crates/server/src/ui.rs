@@ -1107,6 +1107,24 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // on — no stop resumes itself, so every one of them waits for the same press.
     let resets = stopped.and_then(|stopped| stopped.resets);
 
+    // And whether anything about this Conversation is waiting on the human at
+    // all, which is the fold the sidebar's own row is drawn by, asked here of
+    // this one Conversation — see [`store::waiting`]. The rule is the store's
+    // and it is one piece of code, so the row and the page it opens cannot come
+    // to disagree about the same Conversation: the head of the Timeline says
+    // *waiting on you* exactly where the sidebar draws its disc.
+    //
+    // A read that fails reads as *not waiting*, the way round that leaves the
+    // page quiet: a status word drawn in the accent colour because a query went
+    // wrong is Verkstead inventing something for the human to chase.
+    let waiting = match store::waiting(&state.pool, id).await {
+        Ok(waiting) => waiting,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation waits on the human failed");
+            false
+        }
+    };
+
     // And whether the wrap-up has narrowed to its checks, which is a label
     // beside the state rather than a state of its own: the review and the
     // comments settled, the checks not. Half of the condition — the other half
@@ -1167,6 +1185,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         pinned,
         blocked_on,
         stopped_by_hand,
+        waiting,
         // A fix session actively working a red check is a wrap-up getting on
         // with it, so the label is drawn only where nothing is running — the
         // same reading `working` below is.

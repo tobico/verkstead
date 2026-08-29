@@ -337,7 +337,9 @@ pub struct ConversationRow {
     /// One fact folded from every source there is, rather than a list the row's
     /// reader is left to weigh: what the sidebar says is *this one wants you*,
     /// and which source said so is the Conversation's own page to show. The
-    /// sources are [`conversations`]'s, all of them in the one query.
+    /// sources are [`waits_on_the_human`]'s, all of them in the one query — the
+    /// same fold that page reads through [`waiting`], so the two cannot come to
+    /// disagree.
     pub waiting: bool,
 
     /// Whether its wrap-up has narrowed to its checks — see
@@ -1292,26 +1294,17 @@ async fn started(
     Ok(Some(id))
 }
 
-/// Every Conversation in the order the human put them in, and whether each is
-/// waiting on the human.
+/// Whether anything about a Conversation is waiting on the human, said as SQL
+/// about a Conversation row aliased `c`.
 ///
-/// The order is theirs: this is one person's working set, and which piece of
-/// work sits at the top is something they say by dragging a row rather than
-/// something a sort decides — see [`super::place_conversations`], which is where
-/// what they said is kept.
+/// The rule itself, in one place. Two readings of it draw from it: the sidebar's
+/// list folds it per row inside [`conversations`]'s own query, and [`waiting`]
+/// asks it of the one Conversation a page is drawn for. Written twice they would
+/// be two rules the day one of them was edited, and a Conversation whose row
+/// said it wanted the human while its own page said it wanted nobody is a
+/// Verkstead that cannot be believed about either.
 ///
-/// What has never been placed goes above what has, newest first among itself.
-/// A Conversation started a minute ago is the one thing on this list nobody has
-/// had the chance to place, and putting it at the top is both the predictable
-/// answer and the useful one: it arrives where it will be seen, and the hand-made
-/// order underneath it is left exactly as it was.
-///
-/// `waiting` is an `OR` over the sources, computed here rather than by the
-/// caller, because every one of them is a read of this database and the sidebar
-/// is one list: a caller folding them itself would be issuing a query per row
-/// for facts a subselect already has.
-///
-/// The sources, in the order they appear below:
+/// An `OR` over the sources, in the order they appear below:
 ///
 /// - A **Question Set with no Response and no lock** — an ask left open.
 ///   Blocking and Deferred alike: what draws the human is that there is
@@ -1330,17 +1323,6 @@ async fn started(
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
 /// is already an ask left open.
 ///
-/// `narrowed_to_checks` rides along in the same query for the same reason: it is
-/// a reading of the wrap-up's settle facts — see [`super::narrowed_to_checks`],
-/// which asks it of one Conversation — and a caller folding it itself would be
-/// issuing a query per row for something a subselect already has.
-///
-/// And `unseen` rides along for the same reason a third time: whether Verkstead
-/// has told the human something about this Conversation that they have not
-/// looked at yet — see [`super::stamp_unseen`]. Not one of the waiting sources
-/// above, because the two say different things and the row says which in words:
-/// *something wants you* against *there is news here*.
-///
 /// A **Draft** is none of them, whatever else is true of it: it is waiting on
 /// the human in the ordinary sense, and the sidebar says so by drawing it as a
 /// draft rather than by marking it as an ask.
@@ -1351,6 +1333,80 @@ async fn started(
 /// stop the Conversation carried, which stays on the record as history. A
 /// **Done** Conversation is not excluded: its Sets are still answerable, and an
 /// answerable ask is still an ask.
+fn waits_on_the_human() -> String {
+    format!(
+        "c.state NOT IN ('{draft}', '{closed}') AND (
+             EXISTS (
+                 SELECT 1 FROM set_events s
+                 JOIN timeline_events e ON e.id = s.event_id
+                 WHERE e.conversation_id = c.id
+                   AND NOT EXISTS (
+                       SELECT 1 FROM responses p WHERE p.set_id = s.set_id
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1 FROM archivings a WHERE a.set_id = s.set_id
+                   )
+             )
+             OR ({stopped})
+         )",
+        draft = Lifecycle::Draft.stored(),
+        closed = Lifecycle::Closed.stored(),
+        stopped = super::stops::waited_on(),
+    )
+}
+
+/// The same question about one Conversation, which is what its own page asks.
+///
+/// [`waits_on_the_human`] said of a single row, so the page and the sidebar row
+/// can only ever agree. A Conversation that is not there waits on nobody: the
+/// page has nothing to draw either way, and an error where a `false` will do
+/// would be a read failing over a Conversation that has gone.
+pub async fn waiting(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
+    let waiting: Option<bool> = sqlx::query_scalar(&format!(
+        "SELECT ({waiting}) FROM conversations c WHERE c.id = ?",
+        waiting = waits_on_the_human(),
+    ))
+    .bind(conversation_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("reading whether Conversation {conversation_id} waits on the human")
+    })?;
+
+    Ok(waiting.unwrap_or(false))
+}
+
+/// Every Conversation in the order the human put them in, and whether each is
+/// waiting on the human.
+///
+/// The order is theirs: this is one person's working set, and which piece of
+/// work sits at the top is something they say by dragging a row rather than
+/// something a sort decides — see [`super::place_conversations`], which is where
+/// what they said is kept.
+///
+/// What has never been placed goes above what has, newest first among itself.
+/// A Conversation started a minute ago is the one thing on this list nobody has
+/// had the chance to place, and putting it at the top is both the predictable
+/// answer and the useful one: it arrives where it will be seen, and the hand-made
+/// order underneath it is left exactly as it was.
+///
+/// `waiting` is folded inside the query rather than by the caller, because
+/// every source of it is a read of this database and the sidebar is one list: a
+/// caller folding them itself would be issuing a query per row for facts a
+/// subselect already has. The rule is [`waits_on_the_human`], which is where the
+/// sources are set out and which the Conversation's own page reads through
+/// [`waiting`].
+///
+/// `narrowed_to_checks` rides along in the same query for the same reason: it is
+/// a reading of the wrap-up's settle facts — see [`super::narrowed_to_checks`],
+/// which asks it of one Conversation — and a caller folding it itself would be
+/// issuing a query per row for something a subselect already has.
+///
+/// And `unseen` rides along for the same reason a third time: whether Verkstead
+/// has told the human something about this Conversation that they have not
+/// looked at yet — see [`super::stamp_unseen`]. Not one of the waiting sources
+/// above, because the two say different things and the row says which in words:
+/// *something wants you* against *there is news here*.
 ///
 /// What the human has archived is not here at all, unless they have asked to be
 /// shown it — see [`super::archive_conversation`] and
@@ -1377,20 +1433,7 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                 c.named_branch IS NOT NULL AS branch_named,
                 c.naming,
                 r.name, c.state,
-                c.state NOT IN ('draft', 'closed') AND (
-                    EXISTS (
-                        SELECT 1 FROM set_events s
-                        JOIN timeline_events e ON e.id = s.event_id
-                        WHERE e.conversation_id = c.id
-                          AND NOT EXISTS (
-                              SELECT 1 FROM responses p WHERE p.set_id = s.set_id
-                          )
-                          AND NOT EXISTS (
-                              SELECT 1 FROM archivings a WHERE a.set_id = s.set_id
-                          )
-                    )
-                    OR ({stopped})
-                ) AS waiting,
+                ({waiting}) AS waiting,
                 c.state = 'wrapping'
                   AND EXISTS (
                       SELECT 1 FROM wrap_up_settled w
@@ -1416,7 +1459,7 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                    SELECT 1 FROM archived_conversations a WHERE a.conversation_id = c.id
                )
          ORDER BY m.place IS NULL DESC, m.place, c.id DESC",
-        stopped = super::stops::waited_on(),
+        waiting = waits_on_the_human(),
     ))
     .fetch_all(pool)
     .await
