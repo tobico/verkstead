@@ -8214,6 +8214,128 @@ async fn a_comment_left_while_the_review_runs_is_answered_rather_than_settled_ov
     );
 }
 
+/// A wrap-up waits for the run the review's own fix pushed, rather than reaching
+/// Done on the green it read before it.
+///
+/// The checks are settled by a poll and the wrap-up is finished by a loop of its
+/// own, so what stands between them is which of the two looks first. This holds
+/// the ordering that makes it safe: the push lands while the review still has the
+/// Worktree, and finishing needs a poll after that in any case, so the watcher
+/// always gets its look in — and a change to either cadence that broke it would
+/// break this.
+#[tokio::test]
+async fn a_wrap_up_waits_for_the_run_the_review_pushed() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let landed = spill.path().join("landed");
+
+    let review = format!(
+        "{REVIEW_THEN_FIX}\n    printf 'x' > {landed}",
+        landed = quoted(&landed),
+    );
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, &review),
+        &gh_about(&green_until(&landed), "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !landed.exists() {
+        assert!(Instant::now() < deadline, "the review never landed its fix");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Long enough for many polls of a wrap-up with everything else settled.
+    pause(Duration::from_millis(1500)).await;
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "the wrap-up waits for the run the fix started",
+    );
+    assert!(
+        !checks_settled(&fixture).await,
+        "and nothing settled the suite the push replaced",
+    );
+}
+
+/// The same for the push a batch session makes, which is the other way a commit
+/// lands during a wrap-up.
+///
+/// Its ordering is looser than the review's — what was said settles on a poll of
+/// its own after the session ends, so there is a whole interval in there — and it
+/// is held here for the same reason: nothing in the code says so, and a cadence
+/// that changed would take it away quietly.
+#[tokio::test]
+async fn a_wrap_up_waits_for_the_run_a_batch_session_pushed() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+    let landed = spill.path().join("landed");
+
+    let responding = format!(
+        "    printf 'a fix\\n' >> fixes.md\n    \
+         git add -A\n    \
+         git commit --quiet -m 'fix: what was asked'\n    \
+         printf 'x' > {landed}\n    \
+         printf 'did what was accepted\\n'",
+        landed = quoted(&landed),
+    );
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, &responding),
+        &gh_about_once(&green_until(&landed), &reviews, THREE_COMMENTS, ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&batches).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !landed.exists() {
+        assert!(Instant::now() < deadline, "the batch never landed its fix");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Long enough for many polls of a wrap-up with what was said settled.
+    pause(Duration::from_millis(1500)).await;
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "the wrap-up waits for the run the batch's fix started",
+    );
+    assert!(
+        !checks_settled(&fixture).await,
+        "and nothing settled the suite the push replaced",
+    );
+}
+
 /// A green rollup about a commit that is not the one origin is holding settles
 /// nothing: it is the suite of the commit before the push rather than of the
 /// work.
