@@ -25,8 +25,7 @@ use crate::{
     GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
     ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
     PushKey, Registered, Registration, RepoEntry, RepoRemoved, RepoView, Resumed, RoadmapPane,
-    Screen,
-    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Shown, Started,
+    Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Shown, Started,
     SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
     UpdateNotice, Watching,
 };

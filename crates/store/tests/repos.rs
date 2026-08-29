@@ -6,8 +6,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Lifecycle, Unregistering, load_repo, open_database, register_repo, registered_repos,
-    set_state, start_conversation, unregister_repo,
+    Lifecycle, Unregistering, load_repo, open_database, register_repo, registered_repos, set_state,
+    start_conversation, unregister_repo,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
