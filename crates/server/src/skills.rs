@@ -799,6 +799,62 @@ mod tests {
         skill(name).split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
+    /// Every path a session is sent to, which is every skill this binary ships.
+    ///
+    /// The constants spell the mount out rather than being built from [`INSIDE`]
+    /// — a `const` cannot be concatenated from another at compile time — so the
+    /// prefix is typed once per skill and this is the only thing holding the
+    /// twelve of them to the one directory a sandbox binds.
+    const NAMED: [&str; 12] = [
+        GRILLING,
+        BREAKING_DOWN,
+        IMPLEMENTING,
+        STAGING,
+        NEXT_STAGE,
+        NEXT_TASK,
+        SUBMITTING,
+        ADDRESSING,
+        REVIEWING,
+        RESPONDING,
+        INSTRUCTION,
+        FOLLOWING_UP,
+    ];
+
+    /// Each of those paths is a skill this binary carries, under the mount.
+    ///
+    /// A prompt naming a path nothing is mounted at is a session told to read a
+    /// file that is not there — every Conversation of that kind failing at the
+    /// far end of the button, and failing for a typo nothing else would catch.
+    #[test]
+    fn every_skill_a_session_is_sent_to_is_one_this_binary_ships_at_the_mount() {
+        let under = format!("{INSIDE}/");
+
+        for path in NAMED {
+            let named = path
+                .strip_prefix(&under)
+                .unwrap_or_else(|| panic!("{path} is not under the mount at {INSIDE}"));
+
+            assert!(
+                Bundled::get(named).is_some(),
+                "{path} names a skill this binary does not carry, so a session \
+                 sent there is one handed a path to nothing"
+            );
+        }
+    }
+
+    /// And the list above is the whole of them, so a skill that lands without a
+    /// path to reach it by is a skill nothing can be sent into.
+    #[test]
+    fn every_skill_this_binary_ships_has_a_path_a_session_reaches_it_by() {
+        for name in Bundled::iter() {
+            assert!(
+                NAMED.iter().any(|path| path.ends_with(&format!("/{name}"))),
+                "{name} is shipped and nothing names it, so no session can be \
+                 sent into it and nothing holds its path to the mount"
+            );
+        }
+    }
+
     /// Where the shared commit-summary block starts, and the last line of it.
     /// Every skill that commits work carries the block word for word; what
     /// follows it differs from skill to skill, so the end is found by its own
