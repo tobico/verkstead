@@ -26,7 +26,7 @@ use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{
     Bind, Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell,
 };
-use verkstead_server::settings::Settings;
+use verkstead_server::settings::{RustBuildCache, Settings};
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
 
@@ -48,7 +48,17 @@ const SAYS_WHICH_BUILD: &str = "#!/bin/sh\nprintf 'verkstead 0.0.0-the-servers-o
 /// And what stands in for the sccache the server resolved, for the same reason:
 /// what has to be shown is that the binary a session compiles through is the
 /// one the server found, which a real sccache could not say.
-const SAYS_WHICH_SCCACHE: &str = "#!/bin/sh\nprintf 'sccache 0.0.0-the-one-resolved\\n'\n";
+///
+/// That is the half a *session* runs, as a client. The stub answers as the
+/// other half too — see [`Grilling::sccache`] — because an sccache is a client
+/// and a server, and which sandbox the server is in is the whole of what
+/// [`the_compile_server_holds_the_worktrees_and_none_of_the_data_directory`]
+/// has to settle.
+const SAYS_WHICH_SCCACHE: &str = "printf 'sccache 0.0.0-the-one-resolved\\n'\n";
+
+/// What the compile server's report is called inside the build cache, which is
+/// the one directory both it and this test can write to and read.
+const COMPILE_SERVER_REPORT: &str = "compile-server-report";
 
 /// A Conversation part-way through its first grilling: a Repo inside a Watched
 /// Path, a Profile to run as, and a worktree under Verkstead's own state
@@ -133,14 +143,61 @@ impl Grilling {
         let dir = self.cache_dir();
         std::fs::create_dir_all(&dir).unwrap();
 
-        BuildCache::at(dir, compiling.then(|| self.sccache()))
+        BuildCache::at(dir, compiling.then(|| self.sccache()), self.worktrees_dir())
+    }
+
+    /// The Worktrees directory the compile server is given, which is where this
+    /// fixture's own worktree already is.
+    fn worktrees_dir(&self) -> PathBuf {
+        self.state.path().join("worktrees")
     }
 
     /// The stub sccache, written where the server would have found a real one.
+    ///
+    /// Both halves of one. Asked to be the **compile server** it writes down
+    /// what its own sandbox can reach and then sits there holding it, which is
+    /// what a real sccache does and the only thing about it worth asserting:
+    /// the paths it is checked against are this fixture's, so they are written
+    /// into the script rather than looked for in an environment that is closed
+    /// by the time it runs. Asked anything else it is a session's client, and
+    /// says which build it is — see [`SAYS_WHICH_SCCACHE`].
     fn sccache(&self) -> PathBuf {
         let path = self.state.path().join("sccache");
+        let settings = Settings::in_data_dir(self.state.path());
 
-        std::fs::write(&path, SAYS_WHICH_SCCACHE).unwrap();
+        let script = format!(
+            r#"#!/bin/sh
+{PROBE}
+if [ "${{SCCACHE_START_SERVER-}}" = "1" ]; then
+    {{
+        say home "$HOME"
+        say no-daemon "${{SCCACHE_NO_DAEMON-unset}}"
+        say idle "${{SCCACHE_IDLE_TIMEOUT-unset}}"
+        say size "${{SCCACHE_CACHE_SIZE-unset}}"
+        say sccache-dir "${{SCCACHE_DIR-unset}}"
+        dir {worktrees} worktrees
+        dir {cache} cache
+        dir {handoffs} handoffs
+        file {database} database
+        file {config} config
+        file {secrets} secrets
+    }} > {report}
+    # Held open, because what is being asserted is a server that is *there* —
+    # and bounded, because nothing in the test stops it.
+    sleep 30
+    exit 0
+fi
+{SAYS_WHICH_SCCACHE}"#,
+            worktrees = quoted(&self.worktrees_dir()),
+            cache = quoted(&self.cache_dir()),
+            handoffs = quoted(&self.state.path().join("handoffs")),
+            database = quoted(&self.state.path().join("verkstead.db")),
+            config = quoted(&settings.config_path()),
+            secrets = quoted(&settings.secrets_path()),
+            report = quoted(&self.cache_dir().join(COMPILE_SERVER_REPORT)),
+        );
+
+        std::fs::write(&path, script).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         path
@@ -1565,6 +1622,169 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     assert_eq!(
         reported["binary"], "absent",
         "and the sccache goes with it: there is nothing left for it to compile into"
+    );
+}
+
+/// The compile server: Verkstead's own, in a sandbox holding the Worktrees
+/// directory and the cache and nothing else Verkstead keeps.
+///
+/// This is what stops two Conversations building Rust at once from breaking
+/// each other. An sccache server is what executes `rustc` — the client in a
+/// sandbox only hands it a command line — and every sandbox shares the host's
+/// network, so clients left to start their own all reach for one port and the
+/// session that lost the race has its compiles run inside the winner's sandbox,
+/// where its Worktree is not bound and the build fails outright.
+///
+/// So the server has to see **every** Worktree, which is why it gets the
+/// directory rather than any one of them — a Conversation grilled after it
+/// started is one it can already compile for. And it must not see the rest of
+/// the Data Directory: `rustc` runs proc macros while it compiles, so a server
+/// with the database and the settings files in reach would be every Rust
+/// dependency on the machine holding the GitHub token.
+#[tokio::test]
+async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory() {
+    let fixture = grilling().await;
+
+    // The three things it must not reach, really on disk so that their absence
+    // inside is the bind rather than the fixture.
+    fixture.configure("git_author:\n  name: Tobias Cohen\n");
+    fixture.configure_github_token("github_token: ghp_thetoken\n");
+    std::fs::write(fixture.state.path().join("verkstead.db"), "the database\n").unwrap();
+
+    let cache = fixture.cache(true);
+    cache.compiling(&RustBuildCache::default());
+
+    let reported = compile_server_report(&fixture);
+
+    assert_eq!(
+        reported["worktrees"], "write",
+        "every Conversation's checkout, writable, because a compile writes its \
+         output into the Worktree's own target/"
+    );
+    assert_eq!(
+        reported["cache"], "write",
+        "and the cache it reads its dependency sources out of and writes its \
+         objects into"
+    );
+
+    assert_eq!(
+        reported["database"], "absent",
+        "the database is not the compile server's, and a proc macro compiles as \
+         whoever Verkstead runs as"
+    );
+    assert_eq!(reported["config"], "absent");
+    assert_eq!(
+        reported["secrets"], "absent",
+        "least of all the file the GitHub token is in"
+    );
+    assert_eq!(
+        reported["handoffs"], "absent",
+        "and nothing else of the Data Directory either — the Worktrees are the \
+         whole of the bind"
+    );
+
+    assert_eq!(
+        reported["size"], "30G",
+        "started with the size the human left, which sccache reads once"
+    );
+    assert_eq!(
+        reported["no-daemon"], "1",
+        "in the foreground, so it is a child Verkstead holds rather than a \
+         daemon nothing can ask about"
+    );
+    assert_eq!(
+        reported["idle"], "0",
+        "and it does not time out: an unattended Conversation may go a long \
+         while between builds"
+    );
+    assert_eq!(
+        reported["sccache-dir"],
+        fixture.cache_dir().join("sccache").display().to_string(),
+        "writing into the same objects a session's own fallback server would"
+    );
+    assert_eq!(reported["home"], "/verkstead/home");
+}
+
+/// One compile server and no more, however many sessions ask for one — which is
+/// the whole of the arrangement: two servers would be two ports and one of them
+/// unreachable.
+#[tokio::test]
+async fn a_second_session_asking_for_a_compile_server_gets_the_one_already_up() {
+    let fixture = grilling().await;
+    let cache = fixture.cache(true);
+
+    cache.compiling(&RustBuildCache::default());
+
+    let first = compile_server_report(&fixture);
+    let started = std::fs::metadata(fixture.cache_dir().join(COMPILE_SERVER_REPORT))
+        .unwrap()
+        .modified()
+        .unwrap();
+
+    // The clone a session's spawn is handed, which is the one that would start a
+    // second server if this were held per session rather than per machine.
+    cache.clone().compiling(&RustBuildCache::default());
+
+    assert_eq!(
+        std::fs::metadata(fixture.cache_dir().join(COMPILE_SERVER_REPORT))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        started,
+        "nothing wrote the report again, so nothing started a second server: {first:?}",
+    );
+}
+
+/// The size sccache is told is read once, when its server starts — so changing
+/// it in the workbench starts the server again rather than saving a number
+/// nothing ever reads.
+#[tokio::test]
+async fn a_size_the_human_changed_starts_the_compile_server_again() {
+    let fixture = grilling().await;
+    let cache = fixture.cache(true);
+
+    cache.compiling(&RustBuildCache::default());
+    assert_eq!(compile_server_report(&fixture)["size"], "30G");
+
+    std::fs::remove_file(fixture.cache_dir().join(COMPILE_SERVER_REPORT)).unwrap();
+    cache.compiling(&RustBuildCache::of(true, Some("5G".to_owned())));
+
+    assert_eq!(
+        compile_server_report(&fixture)["size"],
+        "5G",
+        "the server that is up is the one told the size the human just typed"
+    );
+}
+
+/// What the compile server wrote down about its own sandbox, waited for.
+///
+/// Waited rather than read, because starting it is a `spawn` and what is being
+/// read is a file the child writes: the alternative is a test that passes or
+/// fails on how busy the machine was.
+fn compile_server_report(fixture: &Grilling) -> BTreeMap<String, String> {
+    let report = fixture.cache_dir().join(COMPILE_SERVER_REPORT);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+
+    while std::time::Instant::now() < until {
+        // Written whole and then read, so a report caught half-written is one
+        // more go round rather than a missing key: the last line is the one
+        // every caller asserts on.
+        if let Ok(said) = std::fs::read_to_string(&report)
+            && said.contains("secrets=")
+        {
+            return said
+                .lines()
+                .filter_map(|line| line.split_once('='))
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                .collect();
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    panic!(
+        "the compile server never wrote its report to {}",
+        report.display()
     );
 }
 

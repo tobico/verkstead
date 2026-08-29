@@ -23,6 +23,16 @@ use std::time::Duration;
 
 use crate::repos::git;
 
+/// The directory every Worktree goes under, inside `data`.
+///
+/// Named in one place because two things want it whole rather than one path
+/// inside it: this module, choosing where a checkout goes, and
+/// [`crate::build_cache`], which binds the lot of it into the compile server so
+/// that a Worktree made later is one that server can already see.
+pub(crate) fn directory(data: &Path) -> PathBuf {
+    data.join("worktrees")
+}
+
 /// The directory a worktree goes in, under `data`.
 ///
 /// Named for the Repo and the branch, which is what the human calls the work —

@@ -53,6 +53,15 @@ compiling is cached too. The dev shell carries one, so a checkout run gets the
 whole thing. It is on with nothing configured, and the settings page is where
 it is switched off or given a size.
 
+The sccache **server** is Verkstead's own, not the sessions'. It comes up as a
+`bwrap` child of the running server the first time a session starts on a repo
+with a root `Cargo.toml`, in a sandbox holding `<data-dir>/worktrees` and the
+build cache and nothing else — so `ps` shows a `bwrap … verkstead-compiling`
+beside each session's, and it goes when the server does. Every session's
+`sccache` is only the client half reaching it. Sessions starting their own is
+what this replaces: they all bind one port, and the loser's compiles then run
+in the winner's sandbox where its worktree is not mounted.
+
 A session's GitHub auth and the author of its commits are two of those settings
 rather than anything found in a home directory. Put a token in `secrets.yaml`
 beside the database, and who you are in `config.yaml`:

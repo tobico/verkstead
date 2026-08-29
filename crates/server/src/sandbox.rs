@@ -23,6 +23,12 @@
 //!   `verkstead` binary, so a crate is downloaded and compiled once for the
 //!   machine rather than once per Conversation — see [`crate::build_cache`]
 //!
+//! That last one has a process outside every sandbox to go with it: the sccache
+//! *server*, which is what actually runs `rustc`, and which Verkstead runs in a
+//! sandbox of its own rather than leaving each session to start one. What the
+//! sandbox composed here holds is only the client's half. See
+//! [`crate::build_cache::BuildCache::compiling`].
+//!
 //! Credentials are on none of those lists, and neither is who a session commits
 //! as. Both arrive in the environment out of the settings files the human filled
 //! in — see [`crate::settings`] — GitHub auth as `GH_TOKEN`, and the whole of
@@ -71,7 +77,11 @@ use crate::terminal;
 /// bound above, so this reaches the same files by their other name. It is on
 /// NixOS that they are nothing, which is why their absence went unnoticed —
 /// there, `/nix` is the whole answer.
-const SYSTEM: [&str; 7] = [
+///
+/// The compile server gets the same list, because what makes a machine usable
+/// is the same whichever of the two is reading it — see
+/// [`crate::build_cache::BuildCache::compiling`].
+pub(crate) const SYSTEM: [&str; 7] = [
     "/nix",
     "/usr",
     "/bin",
@@ -97,7 +107,7 @@ const VERKSTEAD_INSIDE: &str = "/verkstead/bin/verkstead";
 /// choose, the directory is made by the bind and holds nothing the host put
 /// there, and an absolute `RUSTC_WRAPPER` is one that works whatever a project's
 /// dev shell does to `PATH`. See [`crate::build_cache`].
-const SCCACHE_INSIDE: &str = "/verkstead/bin/sccache";
+pub(crate) const SCCACHE_INSIDE: &str = "/verkstead/bin/sccache";
 
 /// What a session's `PATH` is inside.
 ///
@@ -108,7 +118,10 @@ const SCCACHE_INSIDE: &str = "/verkstead/bin/sccache";
 /// own environment: what a session can run should be a fact about the sandbox
 /// rather than about however the unit that started the orchestrator happened to
 /// be launched.
-const PATH: &str =
+///
+/// And what the compile server has, for the same reason: it is a fact about
+/// what a sandbox holds rather than about either process.
+pub(crate) const PATH: &str =
     "/verkstead/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
 
 /// And what a session's `SHELL` is: the one path the system bind is certain to
@@ -788,6 +801,15 @@ impl Sandbox {
             // — and a `RUSTC_WRAPPER` naming a path that is not mounted would
             // be every Rust build inside failing rather than one running
             // uncached.
+            //
+            // What this reaches is the compile server Verkstead is running
+            // outside, over the host's network — see
+            // [`crate::build_cache::BuildCache::compiling`], which is what puts
+            // one up before a session that builds Rust starts. `SCCACHE_DIR` is
+            // said here all the same, and it is not redundant: it is what the
+            // client would start a server of its own into if Verkstead's were
+            // somehow missing, and that server should write into the machine's
+            // one cache like every other.
             if cache.sccache().is_some() {
                 bwrap
                     .arg("--setenv")

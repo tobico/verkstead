@@ -922,7 +922,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // something to warn about.
     let compiles_uncached = !state.sessions.caches_compiles()
         && state.settings.config().rust_build_cache().enabled()
-        && conversation.repo.path.join("Cargo.toml").is_file();
+        && crate::build_cache::builds_rust(&conversation.repo.path);
 
     // Which Brief is still being written, where one is. A Brief freezes when its
     // round's grilling starts, so the one open is the newest — and only while the

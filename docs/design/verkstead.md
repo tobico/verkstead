@@ -370,7 +370,25 @@ flowchart LR
     `PATH` — which the module arranges by putting it on the service's path —
     that binary is bound read-only at `/verkstead/bin/sccache` and named
     absolutely as `RUSTC_WRAPPER`, with `SCCACHE_DIR` and `SCCACHE_CACHE_SIZE`
-    beside it, so the compiling is cached too. Without one it degrades rather
+    beside it, so the compiling is cached too.
+
+    **Verkstead runs the sccache server itself** (*settled 2026-08-29, reviewing
+    shared-rust-build-cache*), in a sandbox of its own holding the worktrees
+    directory and the cache and nothing else it keeps. An sccache server is
+    what executes `rustc` — the client in a sandbox only hands it a command
+    line — and every sandbox shares the host's network, so clients left to
+    start their own all reach for one port: the session that lost the race has
+    its compiles run inside the winner's sandbox, where its worktree is not
+    bound, and the build **fails** rather than merely missing the cache
+    (reproduced in a pair of sandboxes; `error: could not compile`). The
+    worktrees directory whole rather than one worktree, so a conversation
+    grilled later is one the running server can already compile for. Not on the
+    host, because `rustc` runs proc macros while it compiles and the database
+    and the settings files are in the Data Directory's root, outside the one
+    bind it gets. Started before the first session of a conversation whose repo
+    has a root `Cargo.toml`, so a machine that never builds Rust never runs one,
+    and started again when the size changes because sccache reads it once.
+    Without one it degrades rather
     than failing: the downloads are still shared, a startup line says the
     compiling is not, and the setup card warns on a repo with a root
     `Cargo.toml`. `CARGO_INCREMENTAL` is deliberately untouched — cargo builds

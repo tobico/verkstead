@@ -34,7 +34,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 use verkstead_schema::Nudge;
 
-use crate::build_cache::BuildCache;
+use crate::build_cache::{self, BuildCache};
 use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
@@ -808,6 +808,17 @@ impl Sessions {
                 // worktree below.
                 let secrets = settings.secrets();
                 let config = settings.config();
+
+                // And the one sccache server this machine compiles through, up
+                // before the session that will reach for it — see
+                // [`BuildCache::compiling`]. Here rather than at startup and
+                // only for a Repo that builds Rust, because a machine that
+                // never builds Rust never needs one; and every time rather than
+                // once, because the switch, the size and whether the server is
+                // still alive are all read at this moment.
+                if build_cache::builds_rust(&conversation.repo.path) {
+                    cache.compiling(config.rust_build_cache());
+                }
 
                 let sandbox = Sandbox::for_conversation(
                     &conversation,

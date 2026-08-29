@@ -562,13 +562,6 @@ pub async fn run(config: Config) -> Result<()> {
     // all.
     let binds = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
 
-    // And the shared build cache, which is resolved here for the same reason and
-    // *made* here, which the binds above never are — see
-    // [`build_cache::BuildCache::resolve`] for why this one directory is
-    // Verkstead's to create. An sccache that could not be found is not a
-    // failure: what is left still shares the downloads, and the log line says so.
-    let cache = build_cache::BuildCache::resolve(config.build_cache_dir.as_deref())?;
-
     let home = sandbox::Home::of_the_server().context(
         "no HOME is set: a session's `~` is the home directory of whoever runs Verkstead, \
          and the machine's git identity is read out of it, so the unit has to say what it is",
@@ -586,6 +579,16 @@ pub async fn run(config: Config) -> Result<()> {
     // every sandbox gets, whatever an earlier one left there.
     let skills = skills::Skills::installed(&data_dir)
         .context("installing the skills every sandbox is given")?;
+
+    // And the shared build cache, which is resolved for the reason the binds
+    // above are and *made* here, which they never are — see
+    // [`build_cache::BuildCache::resolve`] for why this one directory is
+    // Verkstead's to create. After the Data Directory, because it wants the
+    // Worktrees directory inside it: that is what the shared compile server is
+    // given, and a bind of nothing will not start. An sccache that could not be
+    // found is not a failure: what is left still shares the downloads, and the
+    // log line says so.
+    let cache = build_cache::BuildCache::resolve(config.build_cache_dir.as_deref(), &data_dir)?;
 
     // And the executable every sandbox asks with, which is this one: `verkstead
     // serve` and `verkstead ask` are two verbs of one binary, so a session's CLI
