@@ -70,6 +70,7 @@
       }
     }
   },
+  "shared": null,
   "state": "Grilling",
   "stop_asked": false,
   "stopped_by_hand": false,

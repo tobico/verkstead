@@ -42,15 +42,15 @@ pub use conversations::{
     GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, MovedEvent, NewAdoption,
     NewCompanion, NewConversation, NewOrder, NoticeEvent, PinnedEvent, ProposalView,
     PullRequestCheck, PullRequestComment, PullRequestCommit, PullRequestDetails, PullRequestEvent,
-    PullRequestSummary, QuestionSetEvent, Resumed, RoadmapPane, Screen, SetRow, ShowingArchived,
-    Shown, Size, StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
-    SteerCompanionRefusal, SteerEvent, SteerOpened, SteerSubmission, SteerTarget, TaskDocument,
-    TaskEntry, TaskListEvent, TaskListReached, TaskSource, TimelineEvent, UnreadableSetEvent,
-    Watching, Worktree, agent_output_event, backlog_pane, brief_event, commit_event, commit_pane,
-    handoff_event, manual_task_event, moved_event, notice_event, proposal_view,
-    pull_request_details, pull_request_event, pull_request_reached, question_set_event,
-    roadmap_pane, stage_list, stage_list_event, stage_list_reached, steer_event, task_list,
-    task_list_event, task_list_reached, unreadable_set_event,
+    PullRequestSummary, QuestionSetEvent, Resumed, RoadmapPane, Screen, SetRow, ShareView,
+    ShowingArchived, Shown, Size, StageDocument, StageEntry, StageListEvent, StageListReached,
+    StageSource, Started, SteerCompanionRefusal, SteerEvent, SteerOpened, SteerSubmission,
+    SteerTarget, TaskDocument, TaskEntry, TaskListEvent, TaskListReached, TaskSource,
+    TimelineEvent, UnreadableSetEvent, Watching, Worktree, agent_output_event, backlog_pane,
+    brief_event, commit_event, commit_pane, handoff_event, manual_task_event, moved_event,
+    notice_event, proposal_view, pull_request_details, pull_request_event, pull_request_reached,
+    question_set_event, roadmap_pane, stage_list, stage_list_event, stage_list_reached,
+    steer_event, task_list, task_list_event, task_list_reached, unreadable_set_event,
 };
 pub use profiles::{
     AgentType, Broken, PairingView, PickedView, ProfileChoice, ProfileChosen, ProfileDeleted,
@@ -62,7 +62,7 @@ pub use settings::{
     Author, BuildCacheEdit, BuildCacheView, SettingsEdit, SettingsSaved, SettingsView, TokenEdit,
     TokenSaved, Verified,
 };
-pub use sharing::{SharedCommit, SharedConversation, shared, shared_commit};
+pub use sharing::{SharePublished, SharedCommit, SharedConversation, shared, shared_commit};
 pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
     statements, transcript_after, transcript_view, turns,

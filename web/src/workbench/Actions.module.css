@@ -37,6 +37,15 @@
 .share {
 }
 
+/* Publishing that same copy where a link reaches it, and — once there is one —
+   the link itself. Two rows and one thing, drawn like every other row and
+   named here so each can be found. */
+.publish {
+}
+
+.published {
+}
+
 /* Stopping after the current task, and stopping now. Drawn like every other row
    and named here so each can be found. */
 .stop {

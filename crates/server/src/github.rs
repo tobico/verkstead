@@ -29,6 +29,7 @@
 //! the real GitHub would be a test that needed a network, an account and a
 //! repository with a pull request on it.
 
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -109,14 +110,38 @@ impl Gh {
         self.run(None, Some(token.to_owned()), args)
     }
 
-    /// What the two above are: `gh`, run somewhere or nowhere, as somebody or as
-    /// whoever the host is logged in as, read for its stdout or for why there is
-    /// none.
+    /// And the same again with a body written to it, which is how a request
+    /// carrying JSON is made: `gh api --input -` reads the payload from stdin.
+    ///
+    /// Its own entry point rather than a parameter on the others because
+    /// everything else here asks questions — `stdin` is null on those for a
+    /// reason, and a `gh` that stopped to read from a terminal nobody is at
+    /// would be a server thread waiting for ever. See [`create_gist`], which is
+    /// the one caller and the first write.
+    fn tell_as(&self, token: &str, args: &[&str], body: &str) -> Result<String, Trouble> {
+        self.written(None, Some(token.to_owned()), args, Some(body))
+    }
+
+    /// What the three above are: `gh`, run somewhere or nowhere, as somebody or
+    /// as whoever the host is logged in as, read for its stdout or for why there
+    /// is none.
     fn run(
         &self,
         dir: Option<&Path>,
         token: Option<String>,
         args: &[&str],
+    ) -> Result<String, Trouble> {
+        self.written(dir, token, args, None)
+    }
+
+    /// And the same with whatever is to be written to it, which is `None` on
+    /// every read.
+    fn written(
+        &self,
+        dir: Option<&Path>,
+        token: Option<String>,
+        args: &[&str],
+        body: Option<&str>,
     ) -> Result<String, Trouble> {
         let (program, before) = self
             .program
@@ -130,8 +155,15 @@ impl Gh {
             .args(args)
             // Nothing here is interactive: a `gh` that stopped to ask for a
             // password would be a server thread waiting on a terminal nobody is
-            // at.
-            .stdin(Stdio::null());
+            // at. A body to write is the one exception, and it is written and
+            // the pipe shut below rather than left open for anything to be asked
+            // through.
+            .stdin(match body {
+                Some(_) => Stdio::piped(),
+                None => Stdio::null(),
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
         if let Some(dir) = dir {
             command.current_dir(dir);
@@ -146,11 +178,31 @@ impl Gh {
             command.env("GH_TOKEN", token);
         }
 
-        let output = match command.output() {
-            Ok(output) => output,
+        let mut child = match command.spawn() {
+            Ok(child) => child,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Err(Trouble::NoGh);
             }
+            Err(error) => return Err(Trouble::Refused(error.to_string())),
+        };
+
+        // Written before the output is waited on, and the pipe dropped so that
+        // `gh` sees the end of it: a body held open is a child that never
+        // finishes reading and a parent that never finishes waiting.
+        if let Some(body) = body {
+            let written = child
+                .stdin
+                .take()
+                .expect("a piped stdin is there to be written to")
+                .write_all(body.as_bytes());
+
+            if let Err(error) = written {
+                return Err(Trouble::Refused(error.to_string()));
+            }
+        }
+
+        let output = match child.wait_with_output() {
+            Ok(output) => output,
             Err(error) => return Err(Trouble::Refused(error.to_string())),
         };
 
@@ -247,7 +299,7 @@ impl Trouble {
     }
 }
 
-/// Which GitHub account `token` authenticates as, asked through the host's `gh`.
+/// Who `token` authenticates as, and what GitHub will let it do.
 ///
 /// What the settings page verifies a pasted token with. A token is a string of
 /// characters that either is or is not somebody's, and the difference is not
@@ -263,20 +315,206 @@ impl Trouble {
 /// here rather than with `--jq`, so that nothing depends on which jq that `gh`
 /// was built with.
 ///
+/// **`-i`, because the scopes are in the headers and nowhere else.** GitHub
+/// answers every request with `X-OAuth-Scopes`, and what a token may do is not a
+/// field of any resource — so the whole response is read and split at the blank
+/// line that ends the headers. See [`Scopes`] for what the absence of that
+/// header means, which is not *none*.
+///
 /// Blocking, like everything else here — see [`Gh::run`].
-pub(crate) fn authenticates_as(gh: &Gh, token: &str) -> Result<String, Trouble> {
+pub(crate) fn authenticates_as(gh: &Gh, token: &str) -> Result<Account, Trouble> {
     /// The one field of `gh api user` this asks for.
     #[derive(Deserialize)]
-    struct Account {
+    struct Login {
         login: String,
     }
 
-    let said = gh.ask_as(token, &["api", "user"])?;
+    let said = gh.ask_as(token, &["api", "-i", "user"])?;
+    let (headers, body) = split(&said);
 
-    let account: Account = serde_json::from_str(&said)
+    let account: Login = serde_json::from_str(body)
         .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
 
-    Ok(account.login)
+    Ok(Account {
+        login: account.login,
+        scopes: scopes(headers),
+    })
+}
+
+/// Who a token is, and what it may do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Account {
+    /// The login GitHub answered with.
+    pub(crate) login: String,
+
+    /// And the scopes it says the token carries.
+    pub(crate) scopes: Scopes,
+}
+
+/// What GitHub said about a token's scopes, which has three answers rather than
+/// two.
+///
+/// The third is the one worth the type: a **fine-grained** token has permissions
+/// rather than scopes, and GitHub answers for one with no scopes header at all.
+/// A missing header read as an empty list would have Verkstead refuse to publish
+/// with a token that publishes perfectly well, and send the human to re-issue it
+/// — so *nothing said* is kept apart from *said, and `gist` was not among them*.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Scopes {
+    /// GitHub named them. Empty is a classic token with no scopes ticked, which
+    /// really can do nothing.
+    Named(Vec<String>),
+
+    /// GitHub named none, which says nothing either way.
+    Unsaid,
+}
+
+impl Scopes {
+    /// Whether this token is known *not* to carry `scope`.
+    ///
+    /// The question asked in the negative, and deliberately: what a caller wants
+    /// to know is whether to refuse, and a token GitHub said nothing about is
+    /// not one to refuse — it is one to try.
+    pub(crate) fn known_to_lack(&self, scope: &str) -> bool {
+        match self {
+            Scopes::Named(named) => !named.iter().any(|named| named == scope),
+            Scopes::Unsaid => false,
+        }
+    }
+}
+
+/// The scope publishing a share needs, which is the one Verkstead's own writes
+/// to GitHub turn on.
+pub(crate) const GIST: &str = "gist";
+
+/// One `gh api -i` response, split into its headers and its body at the blank
+/// line between them.
+///
+/// Both endings, because the separator is a header block's rather than a text
+/// file's. Something that carried no blank line at all is read as a body on its
+/// own: a response with no headers to read says nothing about scopes, which is
+/// the same answer as a response whose headers did not mention them.
+fn split(said: &str) -> (&str, &str) {
+    for ending in ["\r\n\r\n", "\n\n"] {
+        if let Some(at) = said.find(ending) {
+            return (&said[..at], &said[at + ending.len()..]);
+        }
+    }
+
+    ("", said)
+}
+
+/// The scopes named in a response's headers.
+///
+/// Matched without regard to case, the way a header name is compared everywhere:
+/// `gh` prints them as GitHub sent them, and GitHub has spelled this one
+/// `X-OAuth-Scopes` and `X-Oauth-Scopes` at different times.
+fn scopes(headers: &str) -> Scopes {
+    const NAMED: &str = "x-oauth-scopes:";
+
+    for line in headers.lines() {
+        let Some((name, said)) = line.split_once(':') else {
+            continue;
+        };
+
+        if !format!("{name}:").eq_ignore_ascii_case(NAMED) {
+            continue;
+        }
+
+        return Scopes::Named(
+            said.split(',')
+                .map(str::trim)
+                .filter(|scope| !scope.is_empty())
+                .map(str::to_owned)
+                .collect(),
+        );
+    }
+
+    Scopes::Unsaid
+}
+
+/// A gist Verkstead has just made: where a reader goes, where git puts the file
+/// in, and what to take back if it never gets one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Gist {
+    /// GitHub's id for it, which is what deleting one names.
+    pub(crate) id: String,
+
+    /// The page a link to a share points at.
+    pub(crate) url: String,
+
+    /// And the git remote behind that page, as GitHub gave it — a gist is a
+    /// repository, and this is how the file that matters gets into one.
+    pub(crate) push: String,
+}
+
+/// Make a secret gist holding `name`, and answer where it is.
+///
+/// **`content` is a placeholder rather than the file.** The Gists API's cap on
+/// what a gist may be *created* with is undocumented and has been reported at a
+/// megabyte for a decade; a share is several, mermaid and every diff riding
+/// along. So what the API is asked for is a gist with the right name on it, and
+/// the bytes arrive over git afterwards — which has no such cap, and which is
+/// what GitHub's own documentation points at for a gist file too big to fetch
+/// through the API. See [`crate::publishing`], where the two halves are one act.
+///
+/// Secret rather than public, which is `public: false`: a share is read by
+/// whoever was sent the link and by nobody else, and GitHub's word for that is a
+/// gist that is not listed. It is not private — possession of the link is the
+/// whole of the privacy — which is what the Brief settled and what the human is
+/// choosing when they publish.
+///
+/// `--input -` rather than a field per value: the description is somebody's
+/// branch name and the file's name is built from it, and a request whose shape
+/// depended on what `gh` makes of a bracket in a key would be one that broke on
+/// a Conversation nobody could have predicted.
+pub(crate) fn create_gist(
+    gh: &Gh,
+    token: &str,
+    description: &str,
+    name: &str,
+    content: &str,
+) -> Result<Gist, Trouble> {
+    /// The three fields of the created gist worth having.
+    #[derive(Deserialize)]
+    struct Made {
+        id: String,
+        html_url: String,
+        git_push_url: String,
+    }
+
+    let body = serde_json::json!({
+        "description": description,
+        "public": false,
+        "files": { name: { "content": content } },
+    });
+
+    let said = gh.tell_as(
+        token,
+        &["api", "-X", "POST", "/gists", "--input", "-"],
+        &body.to_string(),
+    )?;
+
+    let made: Made = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    Ok(Gist {
+        id: made.id,
+        url: made.html_url,
+        push: made.git_push_url,
+    })
+}
+
+/// And take one back.
+///
+/// What a publish that fell over after the gist was made does with it. A gist
+/// holding a placeholder and no share is worse than no gist at all: it is a link
+/// that resolves, to a file that says nothing, in an account the human will find
+/// it in months later.
+pub(crate) fn delete_gist(gh: &Gh, token: &str, id: &str) -> Result<(), Trouble> {
+    gh.ask_as(token, &["api", "-X", "DELETE", &format!("/gists/{id}")])?;
+
+    Ok(())
 }
 
 /// The pull request on `branch`, as the host's `gh` finds it.
@@ -1531,8 +1769,8 @@ mod tests {
         ]);
 
         assert_eq!(
-            authenticates_as(&gh, "ghp_thetoken"),
-            Ok("ghp_thetoken".to_owned()),
+            authenticates_as(&gh, "ghp_thetoken").unwrap().login,
+            "ghp_thetoken",
             "the candidate token is what gh was run with",
         );
     }
@@ -1551,9 +1789,88 @@ mod tests {
         let (_data_dir, settings) = configured(Some("github_token: the-saved-one\n"));
 
         assert_eq!(
-            authenticates_as(&gh.authenticated_by(settings), "the-candidate"),
-            Ok("the-candidate".to_owned()),
+            authenticates_as(&gh.authenticated_by(settings), "the-candidate")
+                .unwrap()
+                .login,
+            "the-candidate",
         );
+    }
+
+    /// The scopes come out of the headers, which is why the whole response is
+    /// asked for: what a token may do is on no resource GitHub serves.
+    #[test]
+    fn a_token_carries_the_scopes_github_named_in_its_headers() {
+        let gh = answering(concat!(
+            "HTTP/2.0 200 OK\r\n",
+            "X-Oauth-Scopes: repo, gist, workflow\r\n",
+            "\r\n",
+            r#"{"login":"tobico"}"#,
+        ));
+
+        let account = authenticates_as(&gh, "ghp_thetoken").unwrap();
+
+        assert_eq!(account.login, "tobico");
+        assert!(!account.scopes.known_to_lack(GIST));
+        assert!(account.scopes.known_to_lack("admin:org"));
+    }
+
+    /// And a token issued for reading repositories is known to lack it, which is
+    /// what a publish refuses on.
+    #[test]
+    fn a_token_without_the_gist_scope_is_known_to_lack_it() {
+        let gh = answering(concat!(
+            "HTTP/2.0 200 OK\r\n",
+            "X-Oauth-Scopes: read:org, repo, workflow\r\n",
+            "\r\n",
+            r#"{"login":"tobico"}"#,
+        ));
+
+        assert!(
+            authenticates_as(&gh, "ghp_thetoken")
+                .unwrap()
+                .scopes
+                .known_to_lack(GIST),
+        );
+    }
+
+    /// A fine-grained token has permissions rather than scopes, and GitHub
+    /// answers for one with no scopes header at all. Nothing said is not the
+    /// same as none: read as an empty list it would have Verkstead refuse to
+    /// publish with a token that publishes.
+    #[test]
+    fn a_token_github_named_no_scopes_for_is_not_known_to_lack_any() {
+        let gh = answering(concat!(
+            "HTTP/2.0 200 OK\r\n",
+            "X-Accepted-Oauth-Scopes: \r\n",
+            "\r\n",
+            r#"{"login":"tobico"}"#,
+        ));
+
+        assert_eq!(
+            authenticates_as(&gh, "ghp_thetoken").unwrap().scopes,
+            Scopes::Unsaid,
+        );
+        assert!(
+            !authenticates_as(&gh, "ghp_thetoken")
+                .unwrap()
+                .scopes
+                .known_to_lack(GIST)
+        );
+    }
+
+    /// A `gh` that prints what it is told to, headers and body alike.
+    fn answering(said: &str) -> Gh {
+        Gh::running(vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            format!("printf '%s' {}", shell_quoted(said)),
+            "gh".to_owned(),
+        ])
+    }
+
+    /// One argument as `sh` takes it literally.
+    fn shell_quoted(said: &str) -> String {
+        format!("'{}'", said.replace('\'', r"'\''"))
     }
 
     /// A token GitHub will not accept is trouble in `gh`'s own words rather than

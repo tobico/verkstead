@@ -25,9 +25,27 @@ the workbench.
 
 ## Acceptance criteria
 
-- [ ] One press yields a secret gist holding the byte-identical share file,
+- [x] One press yields a secret gist holding the byte-identical share file,
       created with the settings token, never the host's own login.
 - [ ] Multi-MB creation is verified and the finding recorded — or the share
       branch fallback is built and linked instead.
-- [ ] A token without the needed scope produces a named refusal pointing at
+
+      **Recorded, not verified live.** The API's cap on gist *creation* is
+      undocumented; GitHub documents only the megabyte on the way out. What is
+      documented elsewhere is that the HTTP API takes a megabyte in — the
+      `gistr` client says so outright, and a 405 at 1.9 MB has been reported
+      since 2015 — and that a gist too large for the API is reached over git.
+      A share is 3.7 MB before the record goes in it.
+
+      So the flow does not depend on which is true: the gist is **created with
+      a placeholder and filled over a git push**, which has no such cap either
+      way. Task 06 links a gist URL, and task 05's viewer design stands
+      unchanged.
+
+      **What could not be done here**: this machine's token carries
+      `read:org, repo, workflow, write:packages` and no `gist`, so no gist
+      could be created to test at any size. The next session with a
+      gist-scoped token should publish one share end to end before task 06
+      leans on the link.
+- [x] A token without the needed scope produces a named refusal pointing at
       the settings page.

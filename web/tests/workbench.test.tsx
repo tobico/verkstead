@@ -39,6 +39,7 @@ import type {
   Resumed,
   RoadmapPane,
   Screen,
+  SharePublished,
   Shown,
   ShowingArchived,
   StageListEvent,
@@ -1610,6 +1611,7 @@ describe("what a right-click on a card offers", () => {
     expect(
       [...menu.querySelectorAll("button")].map((button) => button.className),
     ).toEqual([
+      actions.publish,
       actions.stop,
       actions.forceStop,
       actions.steer,
@@ -6606,6 +6608,7 @@ describe("stopping a conversation", () => {
     );
 
     expect(offered).toEqual([
+      actions.publish,
       actions.stop,
       actions.forceStop,
       actions.steer,
@@ -6802,6 +6805,124 @@ describe("stopping a conversation", () => {
     ).toBeNull();
 
     logged.mockRestore();
+  });
+});
+
+/// Where the share is published, which is the one press in this menu that
+/// reaches outside the machine.
+const PUBLISHING = `/api/ui/conversations/${GRILLING.id}/share/publish`;
+
+describe("publishing a share", () => {
+  /// Two rows and one thing: the file to attach, and the same file put where a
+  /// link reaches it. Both are offered on every conversation there is, because
+  /// a share is the record as it stands and a record stands from the moment
+  /// there is one.
+  it("offers publishing beside the download, with nothing to send", async () => {
+    const fetching = theGrillingStanding(
+      {},
+      whenever(
+        PUBLISHING,
+        json({
+          Published: {
+            share: {
+              url: "https://gist.github.com/tobico/9f1",
+              at: "2026-08-30T01:02:03Z",
+            },
+          },
+        } satisfies SharePublished),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    expect(
+      screen.getByText("Publish it as a secret gist and get a link to send."),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
+    );
+
+    await waitFor(() => expect(sent(fetching, PUBLISHING)).toEqual({}));
+  });
+
+  /// A published share is a link the human can send again without publishing a
+  /// second snapshot, so it stands in the menu with the day it was taken.
+  it("draws where the last one went, and when", async () => {
+    theGrillingStanding({
+      shared: {
+        url: "https://gist.github.com/tobico/9f1",
+        at: "2026-08-30T01:02:03Z",
+      },
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    const link = await drawn<HTMLAnchorElement>(
+      container,
+      `.${actions.conversationActions} .${actions.published}`,
+    );
+
+    expect(link.getAttribute("href")).toBe("https://gist.github.com/tobico/9f1");
+    expect(screen.getByText(/Taken .* Opens the gist on GitHub\./)).toBeTruthy();
+
+    // And the press says so: publishing again is a fresh snapshot rather than a
+    // second go at the same one.
+    expect(
+      (await drawn(container, `.${actions.conversationActions} .${actions.publish}`))
+        .textContent,
+    ).toContain("Publish again");
+  });
+
+  /// The one press here whose failures are the human's to read. A token that
+  /// cannot write gists is not a page drawn against a conversation that moved:
+  /// nothing moved, and a re-read would correct nothing — so the row says what
+  /// is wrong and points at the page it is fixed on.
+  it("says which token trouble stopped it, and where to fix it", async () => {
+    theGrillingStanding(
+      {},
+      whenever(PUBLISHING, json("NoGistScope" satisfies SharePublished), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
+    );
+
+    const said = await waitFor(() =>
+      screen.getByText("The saved GitHub token may not write gists.", {
+        exact: false,
+      }),
+    );
+
+    expect(said.closest("button")).toBeTruthy();
+    expect(
+      said.querySelector<HTMLAnchorElement>('a[href="/settings/github"]'),
+    ).toBeTruthy();
+  });
+
+  /// And a Verkstead nobody has given a token is the other half of the same
+  /// answer: there is nobody to publish as, and the settings page is where that
+  /// is said.
+  it("says so when there is no token to publish as", async () => {
+    theGrillingStanding(
+      {},
+      whenever(PUBLISHING, json("NoToken" satisfies SharePublished), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
+    );
+
+    await waitFor(() =>
+      screen.getByText("Verkstead has no GitHub token to publish as.", {
+        exact: false,
+      }),
+    );
   });
 });
 

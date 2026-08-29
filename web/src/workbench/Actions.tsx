@@ -46,6 +46,7 @@
 //! dragged — so on a phone this menu simply is not there, and the ⋯ on the
 //! Conversation is the way to all of it.
 
+import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
@@ -56,6 +57,7 @@ import {
   closeConversation,
   forceStopConversation,
   loadConversation,
+  publishShare,
   sharePath,
   steerConversation,
   stopConversation,
@@ -67,9 +69,11 @@ import type {
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  SharePublished,
   SteerOpened,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { utcStamp } from "../set/when";
 import { Empty, ErrorLine } from "../notices";
 import styles from "./Actions.module.css";
 import { Steer } from "./Steer";
@@ -123,6 +127,49 @@ export const UNARCHIVE_REFUSAL: Record<ConversationUnarchived, string> = {
   NoSuchConversation: "This conversation is gone.",
 };
 
+/// Why a publish did not happen, said to the human rather than to the console.
+///
+/// The one press on this menu whose failures are *not* a page drawn against a
+/// conversation that has moved: publishing writes to GitHub as the token on the
+/// settings page, and two of the three ways it can be refused are that token.
+/// So each is a sentence and a way to the page it is fixed on, drawn in the row
+/// that was pressed — a re-read would correct nothing, there being nothing here
+/// that moved.
+///
+/// `null` where there is nothing to say: no publish has been made from this
+/// menu, or the last one worked. Which is what the row goes back to saying.
+function refusal(published: SharePublished | null): JSX.Element | null {
+  if (published === null) {
+    return null;
+  }
+
+  if (published === "NoToken") {
+    return (
+      <>
+        Verkstead has no GitHub token to publish as.{" "}
+        <A href="/settings/github">Put one in on the settings page.</A>
+      </>
+    );
+  }
+
+  if (published === "NoGistScope") {
+    return (
+      <>
+        The saved GitHub token may not write gists.{" "}
+        <A href="/settings/github">
+          Re-issue it with the gist scope and save it again.
+        </A>
+      </>
+    );
+  }
+
+  if ("Refused" in published) {
+    return <>GitHub would not take it: {published.Refused.why}</>;
+  }
+
+  return null;
+}
+
 /// One row of this menu: what the press is called, and under it the sentence
 /// saying what pressing it means.
 ///
@@ -139,8 +186,10 @@ export function Action(props: {
   /// What it reads as, and what it reads as while its press is in flight.
   label: string;
   pressing: string;
-  /// The sentence under the name.
-  says: string;
+  /// A node rather than a string: most rows say one sentence, and the one that
+  /// publishes says why it could not, with the way to the page that fixes it
+  /// inside the sentence — see [`refusal`].
+  says: JSX.Element;
   /// Whether that press is in flight, which is also what takes the row.
   working: boolean;
   press: () => void;
@@ -257,6 +306,29 @@ function actions(): {
 
   const force = useMutation(() => pressing(forceStopConversation));
 
+  /// What the last publish came back with, or `null` where none has been made
+  /// from this menu. Held for the one row whose refusals are the human's to
+  /// read — see [`refusal`] — and cleared by the next press, so a row that
+  /// failed once does not go on saying so.
+  const [published, setPublished] = createSignal<SharePublished | null>(null);
+
+  /// Publishing the share: the one press here that reaches outside this machine
+  /// and the one that costs somebody an account. The menu stays open whatever
+  /// happens — a refusal is read in the row it was pressed in, and a publish
+  /// that worked puts a link in the row above, which is worth staying to see.
+  const publish = useMutation(() => ({
+    mutationFn: (id: number) => publishShare(id),
+    onSuccess: (outcome: SharePublished) => {
+      setPublished(outcome);
+      reread();
+    },
+    onError: (error: Error) => {
+      // The transport rather than the answer: a request that never landed has
+      // no named outcome, so it is said in the same row in GitHub's place.
+      setPublished({ Refused: { why: error.message } });
+    },
+  }));
+
   /// Clicking Steer, which is a press before it is a modal: it stops the drive,
   /// so that nothing new is launched while the human composes and the world the
   /// modal is drawn against is the world the submit arrives in.
@@ -362,6 +434,47 @@ function actions(): {
           says="Download the conversation as one file to send."
           href={sharePath(conversation().id)}
         />
+
+        {/* And the same file put where a link reaches it, which is the other
+            way to hand it over: a secret gist, published as the token on the
+            settings page. Beside the download rather than instead of it — one
+            is a file to attach and the other is a link to paste, and which of
+            the two a colleague wants is not this menu's to decide. */}
+        <Action
+          class={styles.publish}
+          label={conversation().shared ? "Publish again" : "Publish"}
+          pressing="Publishing…"
+          says={
+            refusal(published()) ??
+            "Publish it as a secret gist and get a link to send."
+          }
+          working={publish.isPending}
+          press={() => {
+            setPublished(null);
+            publish.mutate(conversation().id);
+          }}
+        />
+
+        {/* Where the last one went, on a Conversation somebody has published
+            one of. A link out rather than a row that does anything: what the
+            human came for is the URL, and a share already published is one they
+            can send again without publishing a second snapshot. */}
+        <Show when={conversation().shared}>
+          {(shared) => (
+            <a
+              role="menuitem"
+              class={styles.published}
+              href={shared().url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span class={styles.title}>Published share</span>
+              <span class={styles.says}>
+                Taken {utcStamp(shared().at)}. Opens the gist on GitHub.
+              </span>
+            </a>
+          )}
+        </Show>
 
         <Show when={conversation().ready_to_stop}>
           {/* Until the press has been made. A stop waits for the step the run

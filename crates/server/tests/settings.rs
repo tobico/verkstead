@@ -40,6 +40,11 @@ const REFUSES: &str = r#"printf 'gh: Bad credentials (HTTP 401)\n' >&2; exit 1"#
 /// that repeated it back would be the one doing the leaking.
 const SAYS_AN_ACCOUNT: &str = r#"printf '{"login":"tobico"}'"#;
 
+/// And one that answers with headers, naming the token it was run with as the
+/// scopes GitHub gave it. What a test that is about scopes rather than about
+/// accounts hands a scope list where a token goes.
+const SAYS_ITS_SCOPES: &str = r#"printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: %s\r\n\r\n{"login":"tobico"}' "${GH_TOKEN-unset}""#;
+
 /// A server keeping its settings files in a directory of its own, reaching
 /// GitHub through `gh`.
 async fn app_asking(gh: &str) -> (tempfile::TempDir, Router) {
@@ -261,6 +266,47 @@ async fn a_saved_token_is_verified_and_the_account_comes_back_with_the_save() {
             // The stub answers with the token it was run with, so this is the
             // proof that the token just saved is the one GitHub was asked about.
             login: "ghp_thetoken".to_owned(),
+            // And it names no scopes, which says nothing about what the token
+            // may do — see [`SAYS_ITS_SCOPES`] for the half that does.
+            missing: Vec::new(),
+        }),
+    );
+}
+
+/// And what a token that authenticates and cannot publish comes back as: the
+/// account, and the one scope to go and tick.
+///
+/// A settings-page answer rather than a failure found later by a human pressing
+/// Share. The `gist` scope is Verkstead's own — publishing a share is its own
+/// write to GitHub — and a token issued for reading repositories does not carry
+/// it.
+#[tokio::test]
+async fn a_token_that_cannot_write_a_gist_says_which_scope_is_missing() {
+    let (_dir, app) = app_asking(SAYS_ITS_SCOPES).await;
+
+    let saved = save_token(&app, "read:org, repo, workflow").await;
+
+    assert_eq!(
+        saved.verified,
+        Some(Verified::Account {
+            login: "tobico".to_owned(),
+            missing: vec!["gist".to_owned()],
+        }),
+    );
+}
+
+/// And one that does carry it comes back with nothing to do.
+#[tokio::test]
+async fn a_token_that_can_write_a_gist_is_missing_nothing() {
+    let (_dir, app) = app_asking(SAYS_ITS_SCOPES).await;
+
+    let saved = save_token(&app, "repo, gist").await;
+
+    assert_eq!(
+        saved.verified,
+        Some(Verified::Account {
+            login: "tobico".to_owned(),
+            missing: Vec::new(),
         }),
     );
 }

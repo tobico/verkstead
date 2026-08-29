@@ -208,6 +208,12 @@ pub fn shared(
             waiting_on_checks: false,
             resets: None,
 
+            // And where a share of this Conversation was last published, which
+            // is the workbench's fact about the record rather than part of it:
+            // a reader already holds a share, and one carrying the link to
+            // another would be handing on a URL nobody meant to give them.
+            shared: None,
+
             ..conversation
         },
         exported_at,
@@ -272,4 +278,36 @@ fn frozen(event: TimelineEvent) -> TimelineEvent {
         }),
         other => other,
     }
+}
+
+/// What became of publishing a share: where it went, or why it did not go.
+///
+/// A publish is Verkstead's own write to GitHub rather than a session's, and
+/// every way it can fail is something for the human to go and do — which is why
+/// each is named rather than folded into one refusal. Two of the three are about
+/// the token on the settings page, and the page is where they are answered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SharePublished {
+    /// It is up, at this link and as of this moment.
+    Published {
+        share: crate::conversations::ShareView,
+    },
+
+    /// No token is configured, so there is nobody to publish as.
+    ///
+    /// A refusal rather than a fallback to whatever login the host's `gh` has,
+    /// which is the one place Verkstead's reach into GitHub differs between
+    /// reading and writing: a pull request read as the host is a question asked
+    /// twice, and a gist *written* as the host is a file in an account nobody
+    /// chose, under a login the human may not even be able to find it in.
+    NoToken,
+
+    /// There is one, and gists are not among what GitHub will let it do — the
+    /// `gist` scope, which a token issued for reading repositories does not
+    /// carry. Fixed by re-issuing it with that ticked and saving it again.
+    NoGistScope,
+
+    /// Something else, in `gh`'s or git's own words.
+    Refused { why: String },
 }

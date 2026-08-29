@@ -490,6 +490,50 @@ describe("saving", () => {
     expect(container.querySelector(`.${styles.login}`)!.textContent).toBe("ada");
   });
 
+  /// A token can be whose it should be and still not do what Verkstead needs of
+  /// it. Publishing a share writes a secret gist, which is the `gist` scope, and
+  /// a token issued for reading repositories does not carry it — so the pane
+  /// says so here, where the human already is, rather than leaving it to be
+  /// found by a press on a conversation weeks later.
+  it("says which scope a verified token is missing", async () => {
+    const unscoped: SettingsSaved = {
+      settings: SAVED.settings,
+      verified: { Account: { login: "ada", missing: ["gist"] } },
+    };
+    theSettings(UNSET, json(unscoped));
+    const { container } = mountPane();
+    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+
+    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+      target: { value: TOKEN },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Whose it is, and what it may not do: two lines, because they are two
+    // different things to do about it.
+    await waitFor(() => screen.getByText(/GitHub says it is/));
+    await waitFor(() => screen.getByText(/It cannot publish a share/));
+    expect(container.querySelector(`.${styles.scope}`)!.textContent).toBe(
+      "gist",
+    );
+  });
+
+  /// And a token that can do everything asked of it says nothing extra, which
+  /// is what most tokens are.
+  it("says nothing about scopes on a token that has them all", async () => {
+    theSettings(UNSET, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+
+    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+      target: { value: TOKEN },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => screen.getByText(/GitHub says it is/));
+    expect(screen.queryByText(/It cannot publish a share/)).toBeNull();
+  });
+
   /// A token GitHub would not vouch for is saved all the same — it is pasted
   /// once out of a page that will not show it again — so the pane says both
   /// halves: what is stored, and that nobody could be asked whose it is.

@@ -1232,7 +1232,20 @@ archived: boolean,
  * state of something the work is against. Empty is the ordinary case — a
  * Conversation with no backlog has nothing to pin.
  */
-pinned: Array<PinnedEvent>, };
+pinned: Array<PinnedEvent>, 
+/**
+ * Where the latest share of this Conversation was published, and when.
+ *
+ * `null` on every Conversation nobody has published one of, which is most
+ * of them: downloading a share leaves no trace, and this is only about the
+ * one that was put somewhere a link can reach.
+ *
+ * Replaced rather than added to. Publishing again is a fresh snapshot of a
+ * Conversation that has moved on, so what the workbench draws is where to
+ * send somebody *now* — see the store's `shares`, which says what becomes
+ * of the link it replaced.
+ */
+shared: ShareView | null, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -2233,6 +2246,31 @@ github_token: TokenSaved | null,
 rust_build_cache: BuildCacheView, };
 
 /**
+ * What became of publishing a share: where it went, or why it did not go.
+ *
+ * A publish is Verkstead's own write to GitHub rather than a session's, and
+ * every way it can fail is something for the human to go and do — which is why
+ * each is named rather than folded into one refusal. Two of the three are about
+ * the token on the settings page, and the page is where they are answered.
+ */
+export type SharePublished = { "Published": { share: ShareView, } } | "NoToken" | "NoGistScope" | { "Refused": { why: string, } };
+
+/**
+ * One published share, as the workbench draws it: the link, and the moment the
+ * snapshot was taken.
+ */
+export type ShareView = { 
+/**
+ * The page to send somebody to, as GitHub gave it.
+ */
+url: string, 
+/**
+ * When it was published, RFC 3339 — drawn beside the link, because a link
+ * with no date says nothing about how far the work has moved since.
+ */
+at: string, };
+
+/**
  * One commit as a share carries it: the pane the workbench would have fetched,
  * beside the Event whose card opens it.
  */
@@ -2998,7 +3036,26 @@ export type UpdateNotice = "Current" | { "Available": { version: string, } };
  * one: the token is written down, and this says what happened when it was
  * tried.
  */
-export type Verified = { "Account": { login: string, } } | { "Refused": { why: string, } };
+export type Verified = { "Account": { login: string, 
+/**
+ * The scopes Verkstead needs that GitHub says this token has not been
+ * given — empty on one that can do everything asked of it.
+ *
+ * `gist` is the whole of the list, and it is a list because the answer
+ * is *what to go and tick*: publishing a share writes a secret gist,
+ * which is Verkstead's own write to GitHub rather than a session's, and
+ * a token issued for reading repositories does not carry it. The
+ * scopes a *session* needs are not checked here — a session
+ * authenticates as this token too, but what it does with it is the
+ * repository's review process rather than anything this server asks
+ * for.
+ *
+ * Empty as well where GitHub said nothing about scopes at all, which is
+ * what a fine-grained token comes back as: it has permissions rather
+ * than scopes, and reporting the absence of a header as a missing scope
+ * would be sending the human to re-issue a token that works.
+ */
+missing: Array<string>, } } | { "Refused": { why: string, } };
 
 /**
  * One way a Set fails the question grammar.

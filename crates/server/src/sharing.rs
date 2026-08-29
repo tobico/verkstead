@@ -185,6 +185,21 @@ pub(crate) fn settled(conversation: &ConversationView) -> bool {
     conversation.branch_named || (conversation.state != Lifecycle::Draft && !conversation.naming)
 }
 
+/// What this Conversation is called, as anything naming a share names it: the
+/// branch somebody settled on, or `Draft` where nobody has.
+///
+/// The same rule [`filename`] spells a file by and the same one the pane's
+/// header draws — said once here because a published share is named a third
+/// time, in the description GitHub puts on the gist, and three spellings of one
+/// Conversation's name would be three answers to the same question.
+pub(crate) fn titled(conversation: &ConversationView) -> &str {
+    if settled(conversation) {
+        &conversation.branch
+    } else {
+        "Draft"
+    }
+}
+
 /// A branch name as a filename may hold it: letters, digits and the three marks
 /// that read as part of a word, with everything else — the slashes above all —
 /// standing as a hyphen.

@@ -52,6 +52,9 @@ pub mod handoffs;
 mod limits;
 mod nudge;
 mod profiles;
+/// Putting a share where a link reaches it, which is Verkstead's own write to
+/// GitHub.
+mod publishing;
 mod push;
 /// Following a Conversation's branch to the name a session renamed it to,
 /// rather than repairing a checkout that has not come adrift after all.

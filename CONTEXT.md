@@ -330,7 +330,28 @@ would have been.
 that goes on moving — sharing again makes another file. And privacy is
 possession: whoever holds the file can read it.
 _Avoid_: export, snapshot (the file is the Share; a snapshot is what it is *of*),
-report, publish
+report
+
+**Published Share**:
+A Share put where a link reaches it, rather than handed over as a file: a
+**secret gist**, made by Verkstead itself through the GitHub token on the
+settings page. Taken from the **Publish** row beside the download, and drawn
+back in the same menu as the link and the day it was taken. What the token needs
+for it is the **`gist` scope**, and a token without it is named on the settings
+page when it is saved rather than found by a press weeks later.
+**The API makes it and git fills it**: the Gists API's cap on what a gist may be
+created with is undocumented and reported at a megabyte, and a Share is several
+— so the gist is created holding a placeholder and the file arrives over a push,
+which has no such cap. A publish that falls over after the gist exists takes it
+back.
+**Publishing again is a fresh snapshot**, in a gist of its own: the record holds
+where to send somebody now, and whatever was already sent goes on standing where
+it was.
+This is Verkstead's own write to GitHub rather than a session's, so it happens as
+the configured token and never as whatever login the host's `gh` has — a
+Verkstead with no token configured refuses instead of falling back.
+_Avoid_: upload, hosting, sharing (the Share is the file; publishing is what is
+done with it), gist link (the gist is where it went, not what it is)
 
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose

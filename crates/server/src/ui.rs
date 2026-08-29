@@ -36,9 +36,10 @@ use verkstead_render::{
     ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
     Lifecycle, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
     ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed, RoleChoice, SetReading,
-    SetView, SettingsEdit, SettingsSaved, SettingsView, SharedCommit, SharedConversation,
-    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    SetView, SettingsEdit, SettingsSaved, SettingsView, SharePublished, SharedCommit,
+    SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted,
+    Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe,
+    UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -112,6 +113,13 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // anybody asking what a share would carry — without a viewer having
         // been built.
         .route("/api/ui/conversations/{id}/share.json", get(share_bundle))
+        // And the same file put where a link reaches it: one press builds it
+        // and publishes it as a secret gist, and the link is written down for
+        // whatever comments with it later — see [`crate::publishing`].
+        .route(
+            "/api/ui/conversations/{id}/share/publish",
+            post(publish_share),
+        )
         // One Event's full self, fetched by the pane that shows it rather than
         // carried by the Conversation — see [`capture`].
         .route("/api/ui/conversations/{id}/capture/{event}", get(capture))
@@ -1173,6 +1181,25 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And where the latest share of it was published, where anybody has
+    // published one — the link the workbench draws beside the Share row, and
+    // what a comment on a pull request is written from. Read the way the archive
+    // mark is: a row beside the Conversation rather than a column on it.
+    //
+    // A read that fails reads as *never published*, which is a link missing from
+    // a page rather than a page that will not draw: the record itself is
+    // untouched, and the next publish writes over whatever is there.
+    let shared = match store::share(&state.pool, id).await {
+        Ok(shared) => shared.map(|shared| verkstead_render::ShareView {
+            url: shared.url,
+            at: shared.at,
+        }),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading where a Conversation's share was published failed");
+            None
+        }
+    };
+
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
     // if they were read at different times.
@@ -1215,6 +1242,7 @@ pub(crate) async fn conversation_view(
         waiting_on_checks: narrowed_to_checks && writing.is_none(),
         resets,
         archived,
+        shared,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
         // something is running, and one Event of a session's is not the question
@@ -1430,52 +1458,10 @@ async fn share_file(State(state): State<AppState>, Path(id): Path<String>) -> Ht
         Err(refusal) => return refusal,
     };
 
-    // Only reachable in a checkout where the share build was never made — the
-    // same `allow_missing` the viewer itself is embedded under, and the same
-    // answer: the server runs, and what it cannot do it says.
-    let Some(template) = crate::viewer::Shareable::get(crate::viewer::SHARE) else {
-        return unavailable(
-            "the share build of the viewer was not built into this binary: run `pnpm build` in web/",
-        );
+    let (name, file) = match document(&bundle) {
+        Ok(share) => share,
+        Err(refusal) => return refusal,
     };
-
-    let Ok(template) = std::str::from_utf8(&template.data) else {
-        return unavailable("the share build of the viewer could not be read");
-    };
-
-    // And the diagram renderer, on the one kind of share that needs one. It is
-    // read here rather than embedded in the document because it is three
-    // megabytes: a share of a Conversation nobody drew a picture in carries
-    // none of it.
-    let mermaid = if crate::sharing::diagrammed(&bundle) {
-        match crate::viewer::Shareable::get(crate::viewer::MERMAID) {
-            Some(built) => match String::from_utf8(built.data.into_owned()) {
-                Ok(code) => Some(code),
-                Err(_) => return unavailable("the diagram renderer could not be read"),
-            },
-            // Built by something that is not this build. A share drawn without
-            // it is the record with its Diagrams left as the source the agent
-            // wrote, which is readable — but a colleague would be reading a
-            // page the human never saw, so it is refused instead.
-            None => {
-                return unavailable(
-                    "the diagram renderer was not built into this binary: run `pnpm build` in web/",
-                );
-            }
-        }
-    } else {
-        None
-    };
-
-    let Some(file) = crate::sharing::file(template, &bundle, mermaid.as_deref()) else {
-        return unavailable("the share build of the viewer has nowhere to put a conversation");
-    };
-
-    let name = crate::sharing::filename(
-        &bundle.conversation.branch,
-        crate::sharing::settled(&bundle.conversation),
-        OffsetDateTime::now_utc(),
-    );
 
     (
         [
@@ -1488,6 +1474,167 @@ async fn share_file(State(state): State<AppState>, Path(id): Path<String>) -> Ht
         file,
     )
         .into_response()
+}
+
+/// `POST /api/ui/conversations/{id}/share/publish` — the same file, put where a
+/// link reaches it.
+///
+/// The other half of the Share row: one press builds the document the download
+/// hands over and publishes it as a secret gist, and what comes back is where it
+/// went — see [`crate::publishing`], where the two halves of that are one act.
+/// The link is written down on the way past, because it outlives the press: it
+/// is what a comment on a pull request is composed from, and what the pane goes
+/// on drawing.
+///
+/// Every refusal is named — see [`SharePublished`]. Two of the three are the
+/// token on the settings page, which is where they are fixed, and none of them
+/// is an error dump: this is Verkstead's own write to GitHub, and a write that
+/// did not happen should say which thing to go and do.
+async fn publish_share(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let bundle = match shared(&state, &id).await {
+        Ok(bundle) => bundle,
+        Err(refusal) => return refusal,
+    };
+
+    // Off the record rather than out of the URL: the reading above refused an id
+    // that named no Conversation, so this is the one the share was composed of.
+    let conversation_id = bundle.conversation.id;
+
+    let (name, file) = match document(&bundle) {
+        Ok(share) => share,
+        Err(refusal) => return refusal,
+    };
+
+    // What the gist is called on GitHub's own pages. Readable by whoever holds
+    // the link, which is the same people the file is — so it says what the file
+    // is rather than pretending there is nothing there.
+    let description = format!(
+        "A Verkstead conversation: {}",
+        crate::sharing::titled(&bundle.conversation)
+    );
+
+    let gh = state.github.clone();
+    let settings = state.settings.clone();
+
+    // One blocking hop for the whole publish: a `gh`, a clone, a commit and a
+    // push. Every one of them is a process, and none of them belongs on the
+    // runtime's threads.
+    let published = tokio::task::spawn_blocking(move || {
+        crate::publishing::publish(
+            &gh,
+            settings.secrets().github_token(),
+            settings.config().git_author(),
+            &description,
+            &name,
+            &file,
+        )
+    })
+    .await;
+
+    let published = match published {
+        Ok(published) => published,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "publishing a share failed");
+            return unavailable("the share could not be published");
+        }
+    };
+
+    let url = match published {
+        crate::publishing::Publishing::At(url) => url,
+        crate::publishing::Publishing::NoToken => {
+            return Json(SharePublished::NoToken).into_response();
+        }
+        crate::publishing::Publishing::NoGistScope => {
+            return Json(SharePublished::NoGistScope).into_response();
+        }
+        crate::publishing::Publishing::Refused(why) => {
+            return Json(SharePublished::Refused { why }).into_response();
+        }
+    };
+
+    // Written down after it is up, and the row is what says when: a share is a
+    // snapshot, and the moment on it should be the moment the record was taken
+    // rather than a second reading of the clock.
+    match store::record_share(&state.pool, conversation_id, &url).await {
+        Ok(share) => Json(SharePublished::Published {
+            share: verkstead_render::ShareView {
+                url: share.url,
+                at: share.at,
+            },
+        })
+        .into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "recording where a share was published failed");
+            unavailable("the share was published but could not be written down")
+        }
+    }
+}
+
+/// The share of one bundle as the two of them hand it over: what the file is
+/// called, and the file.
+///
+/// Its own function because a download and a publish are one document put in two
+/// places. A publish composing its own would be a second build of the same
+/// share, and the byte a link points at should be the byte that downloads.
+///
+/// The refusal is an `HttpResponse` because that is what the two callers answer
+/// with, and it is the larger half of this `Result` — which is the one thing
+/// clippy has to say about it. Boxing it would put an allocation on the path
+/// that never fails to save one on the path that already gives up.
+#[allow(clippy::result_large_err)]
+fn document(bundle: &SharedConversation) -> Result<(String, String), HttpResponse> {
+    // Only reachable in a checkout where the share build was never made — the
+    // same `allow_missing` the viewer itself is embedded under, and the same
+    // answer: the server runs, and what it cannot do it says.
+    let Some(template) = crate::viewer::Shareable::get(crate::viewer::SHARE) else {
+        return Err(unavailable(
+            "the share build of the viewer was not built into this binary: run `pnpm build` in web/",
+        ));
+    };
+
+    let Ok(template) = std::str::from_utf8(&template.data) else {
+        return Err(unavailable(
+            "the share build of the viewer could not be read",
+        ));
+    };
+
+    // And the diagram renderer, on the one kind of share that needs one. It is
+    // read here rather than embedded in the document because it is three
+    // megabytes: a share of a Conversation nobody drew a picture in carries
+    // none of it.
+    let mermaid = if crate::sharing::diagrammed(bundle) {
+        match crate::viewer::Shareable::get(crate::viewer::MERMAID) {
+            Some(built) => match String::from_utf8(built.data.into_owned()) {
+                Ok(code) => Some(code),
+                Err(_) => return Err(unavailable("the diagram renderer could not be read")),
+            },
+            // Built by something that is not this build. A share drawn without
+            // it is the record with its Diagrams left as the source the agent
+            // wrote, which is readable — but a colleague would be reading a
+            // page the human never saw, so it is refused instead.
+            None => {
+                return Err(unavailable(
+                    "the diagram renderer was not built into this binary: run `pnpm build` in web/",
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
+    let Some(file) = crate::sharing::file(template, bundle, mermaid.as_deref()) else {
+        return Err(unavailable(
+            "the share build of the viewer has nowhere to put a conversation",
+        ));
+    };
+
+    let name = crate::sharing::filename(
+        &bundle.conversation.branch,
+        crate::sharing::settled(&bundle.conversation),
+        OffsetDateTime::now_utc(),
+    );
+
+    Ok((name, file))
 }
 
 /// The composition behind both: the Conversation as the pane reads it, put
@@ -2865,8 +3012,16 @@ async fn save_settings(
             }
         };
 
+        // What GitHub made of it: whose it is, and what it may do. The second
+        // half is here because a token that authenticates perfectly and cannot
+        // write a gist is a token whose failure would otherwise be found by a
+        // human pressing Share — and the answer to it is on this page, which is
+        // where they already are.
         let verified = verifying.map(|token| match crate::github::authenticates_as(&gh, &token) {
-            Ok(login) => Verified::Account { login },
+            Ok(account) => Verified::Account {
+                login: account.login,
+                missing: needed(&account.scopes),
+            },
             Err(trouble) => Verified::Refused { why: trouble.why() },
         });
 
@@ -2891,6 +3046,23 @@ async fn save_settings(
             tracing::error!(error = ?error, "saving the settings failed");
             unavailable("the settings could not be saved")
         }
+    }
+}
+
+/// The scopes Verkstead needs that this token has not been given.
+///
+/// One question rather than a sweep: publishing a share writes a secret gist,
+/// which needs `gist`, and that is the whole of what this server asks a token
+/// for on its own account. The scopes a *session* spends inside a sandbox are
+/// the repository's review process rather than anything checked here.
+///
+/// Empty where GitHub said nothing about scopes at all — see
+/// [`crate::github::Scopes`], where a fine-grained token's silence is kept
+/// apart from a classic one's answer.
+fn needed(scopes: &crate::github::Scopes) -> Vec<String> {
+    match scopes.known_to_lack(crate::github::GIST) {
+        true => vec![crate::github::GIST.to_owned()],
+        false => Vec::new(),
     }
 }
 

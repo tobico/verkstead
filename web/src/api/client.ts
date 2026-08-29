@@ -51,6 +51,7 @@ import type {
   SettingsEdit,
   SettingsSaved,
   SettingsView,
+  SharePublished,
   ShowingArchived,
   Started,
   SteerOpened,
@@ -278,6 +279,16 @@ export function loadConversation(id: string): Promise<ConversationView> {
 /// memory to hand it straight back to the page it came from.
 export function sharePath(id: number): string {
   return `/api/ui/conversations/${id}/share`;
+}
+
+/// And the same file put where a link reaches it: one press builds the share
+/// and publishes it as a secret gist.
+///
+/// A request rather than a path, unlike the download above, because what comes
+/// back is where it went — and because it costs something: a gist is made in
+/// somebody's account, and every way that can be refused has a name.
+export function publishShare(id: number): Promise<SharePublished> {
+  return post<SharePublished>(`/api/ui/conversations/${id}/share/publish`, {});
 }
 
 /// What one session printed, whole.

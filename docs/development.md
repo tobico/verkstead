@@ -110,7 +110,7 @@ $ curl -X POST -H 'Content-Type: application/json' \
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
     "compiles_cached":true}},
- "verified":{"Account":{"login":"tobico"}}}
+ "verified":{"Account":{"login":"tobico","missing":["gist"]}}}
 ```
 
 The token goes one way. What comes back about it is its last four characters and
@@ -118,12 +118,15 @@ when `secrets.yaml` was written, never the token itself. Saving one asks GitHub
 who it authenticates as and answers with the account or with what went wrong —
 and writes it down either way, because a token is pasted once out of a page that
 will not show it again, and a network that was briefly down is no reason to send
-somebody back for another. `"github_token"` is `"Keep"` to leave the configured
-one alone, which is what a save of the author fields sends, and `"Clear"` to take
-it away. `"rust_build_cache"` is a pair of values rather than an action: an
-empty `"size"` is no size configured, which puts the default back, and
-`"compiles_cached"` is read-only — it says whether the server found an
-`sccache`, which is its own environment rather than anybody's setting.
+somebody back for another. `"missing"` beside the account is the scopes
+Verkstead needs that GitHub says the token has not been given — `gist`, which
+publishing a share writes with, and empty on a token that carries it or on a
+fine-grained one GitHub named no scopes for at all. `"github_token"` is `"Keep"`
+to leave the configured one alone, which is what a save of the author fields
+sends, and `"Clear"` to take it away. `"rust_build_cache"` is a pair of values
+rather than an action: an empty `"size"` is no size configured, which puts the
+default back, and `"compiles_cached"` is read-only — it says whether the server
+found an `sccache`, which is its own environment rather than anybody's setting.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory
@@ -347,6 +350,12 @@ package to a stub that reaches for whatever the *document* is holding, and the
 server writes the library into a second slot only where something in the record
 has a Diagram on it — a Set's Preface or a Commit Summary alike. A Conversation
 nobody drew a picture in stays the size of its own record.
+
+The same file is what a **publish** puts in a secret gist — see
+[`crates/server/src/publishing.rs`](../crates/server/src/publishing.rs), where
+the API makes the gist and git fills it, because the Gists API will not take a
+file this size. So a publish wants the share build too, and a token with the
+`gist` scope on it.
 
 `cargo test` covers the round trip in-process. `nix flake check` runs the
 viewer's vitest suite from the pinned pnpm and node, and boots a VM with the

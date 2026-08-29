@@ -1030,3 +1030,74 @@ async fn a_commit_the_repository_has_lost_says_so_rather_than_stopping_the_expor
         gone.pane.summary
     );
 }
+
+/// Where a share was published is the workbench's fact about a Conversation,
+/// drawn beside the Share row so the human can send the same link twice without
+/// publishing twice.
+#[tokio::test]
+async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
+    let (_dir, pool, app) = app().await;
+    let id = everything(&pool).await;
+
+    let before: verkstead_render::ConversationView =
+        get(&app, &format!("/api/ui/conversations/{id}")).await;
+
+    assert_eq!(
+        before.shared, None,
+        "a Conversation nobody has published one of has no link",
+    );
+
+    store::record_share(&pool, id, "https://gist.github.com/tobico/9f1")
+        .await
+        .unwrap();
+
+    let after: verkstead_render::ConversationView =
+        get(&app, &format!("/api/ui/conversations/{id}")).await;
+    let shared = after.shared.expect("the published share");
+
+    assert_eq!(shared.url, "https://gist.github.com/tobico/9f1");
+    assert!(
+        shared.at.starts_with("20"),
+        "an RFC 3339 stamp, not {:?}",
+        shared.at,
+    );
+}
+
+/// Publishing again is a fresh snapshot, so the record holds where to send
+/// somebody *now* — one link at a time rather than a history of them. What was
+/// already sent goes on standing at its own URL; this is only what the next
+/// comment is written from.
+#[tokio::test]
+async fn publishing_again_replaces_the_link_the_workbench_draws() {
+    let (_dir, pool, app) = app().await;
+    let id = everything(&pool).await;
+
+    store::record_share(&pool, id, "https://gist.github.com/tobico/9f1")
+        .await
+        .unwrap();
+    store::record_share(&pool, id, "https://gist.github.com/tobico/a20")
+        .await
+        .unwrap();
+
+    let whole: verkstead_render::ConversationView =
+        get(&app, &format!("/api/ui/conversations/{id}")).await;
+
+    assert_eq!(
+        whole.shared.map(|shared| shared.url),
+        Some("https://gist.github.com/tobico/a20".to_owned()),
+    );
+}
+
+/// And it stays in the workbench: a share carrying the link to another share is
+/// handing on a URL nobody meant to give the reader.
+#[tokio::test]
+async fn a_share_does_not_carry_the_link_to_a_share() {
+    let (_dir, pool, app) = app().await;
+    let id = everything(&pool).await;
+
+    store::record_share(&pool, id, "https://gist.github.com/tobico/9f1")
+        .await
+        .unwrap();
+
+    assert_eq!(share(&app, id).await.conversation.shared, None);
+}

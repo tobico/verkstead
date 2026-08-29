@@ -182,7 +182,27 @@ pub struct SettingsSaved {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Verified {
     /// GitHub says the token is this account's.
-    Account { login: String },
+    Account {
+        login: String,
+
+        /// The scopes Verkstead needs that GitHub says this token has not been
+        /// given — empty on one that can do everything asked of it.
+        ///
+        /// `gist` is the whole of the list, and it is a list because the answer
+        /// is *what to go and tick*: publishing a share writes a secret gist,
+        /// which is Verkstead's own write to GitHub rather than a session's, and
+        /// a token issued for reading repositories does not carry it. The
+        /// scopes a *session* needs are not checked here — a session
+        /// authenticates as this token too, but what it does with it is the
+        /// repository's review process rather than anything this server asks
+        /// for.
+        ///
+        /// Empty as well where GitHub said nothing about scopes at all, which is
+        /// what a fine-grained token comes back as: it has permissions rather
+        /// than scopes, and reporting the absence of a header as a missing scope
+        /// would be sending the human to re-issue a token that works.
+        missing: Vec<String>,
+    },
 
     /// GitHub would not say, in `gh`'s own words or Verkstead's about `gh`.
     Refused { why: String },
