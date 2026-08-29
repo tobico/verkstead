@@ -12,7 +12,7 @@
 //! tests over there are what say so — and this side's job is to send what was
 //! typed and say in words what came back.
 
-import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -53,6 +53,9 @@ import type {
 // The app's own retry rule, which is what a read that gave up on its deadline
 // is answered by.
 import { retrying } from "../src/api/client";
+// The app itself, for the one test in this file whose subject is the app's own
+// query client rather than anything a page draws.
+import { App } from "../src/App";
 import app from "../src/App.module.css";
 // The card a Set's Preface and a commit's Message are both drawn as, both ways:
 // the hashed names to query the two panes by, and the source to read the box's
@@ -2341,7 +2344,9 @@ describe("the escape hatch on a conversation that will not load", () => {
 
     /// And it is not read again on the strength of having given up: three more
     /// deadlines' worth of nothing before the page is allowed to say anything,
-    /// and what it would say is what it already knew.
+    /// and what it would say is what it already knew. An ordinary failure is
+    /// still worth the ordinary three attempts, which is the other half of the
+    /// rule and the half only this can ask about.
     it("is not one the app makes again", () => {
       const gave_up = new DOMException("timed out", "TimeoutError");
 
@@ -2349,6 +2354,39 @@ describe("the escape hatch on a conversation that will not load", () => {
       expect(retrying(0, new Error("the server fell over"))).toBe(true);
       expect(retrying(2, new Error("the server fell over"))).toBe(true);
       expect(retrying(3, new Error("the server fell over"))).toBe(false);
+    });
+
+    /// And the app really reads that way — the hatch drawn off the one request,
+    /// with no second one behind it.
+    ///
+    /// Through `App` rather than through [`mount`], which is the whole point of
+    /// this one: what is being asked about is the app's own query client, and
+    /// every mount in this file builds a client that retries nothing, so a page
+    /// driven through one would only be asking about the client it built. It is
+    /// the reason `resuming.test.tsx` drives `App` too.
+    ///
+    /// Which matters because the rule is one line, and without it the ordinary
+    /// three retries stand: four deadlines' worth of nothing, with a backoff
+    /// between each, before the page may say anything at all. That is two
+    /// minutes of *Loading…* rather than thirty seconds — near enough to the
+    /// hang this whole branch is about that nothing should be able to take the
+    /// line away quietly.
+    it("draws the hatch off that one read, the app making no second one", async () => {
+      const { timeout, expire } = atOurOwnPace();
+
+      const fetching = theWorkbench(whenever(READING, hangs()));
+      window.history.pushState({}, "", `/conversations/${OPEN.id}`);
+      const { container } = render(() => <App />);
+
+      await waitFor(() => screen.getByText("Loading…"));
+
+      expire();
+
+      const menu = await openActions(container);
+      expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+      expect(askedFor(fetching, READING)).toBe(1);
+
+      timeout.mockRestore();
     });
   });
 
