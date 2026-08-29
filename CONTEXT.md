@@ -743,8 +743,13 @@ as well, frozen where it lands and beside the earlier round's rather than over
 it. The Pairing the modal settled is recorded as the **Conversation's** rather
 than one session's, because steering re-settles what runs the work — which is
 also why the pick is part of the form: a steered Draft has none fixed yet. It
-settles every role the target runs its sessions under, which is one apiece
-except for a wrap-up: that both builds and reviews, so the one pick fills both.
+settles the role the target runs its sessions under, which is one apiece except
+for a wrap-up: that both builds and reviews, so the one pick reaches the Review
+Pairing as well — but only to **fill** one nothing was picked for, never to
+replace one that was. The picker is labelled for the state's own work and
+prefilled with what builds, so a human who changes nothing on it has said
+nothing about the review, and an account they chose on the setup card to be a
+fresh set of eyes stays that.
 
 **And the submit resumes in the same press.** The stop the click left is
 cleared, and what that state ought to be running starts — a fresh grilling, the

@@ -34,8 +34,12 @@
 //! A steered draft has none fixed yet, which is why the pick is part of the form
 //! rather than an error path. Which role the picker settles follows the target:
 //! a grilling runs under the grilling one, and everything that builds runs
-//! under the implementation one. Wrapping up settles the review role from the
-//! same pick, a wrap-up both building and reviewing.
+//! under the implementation one. Wrapping up reaches the review role from the
+//! same pick, a wrap-up both building and reviewing — but only to fill one
+//! nothing was picked for: the picker is prefilled with what builds, so a human
+//! who changes nothing has said nothing about the review, and an account they
+//! chose to be a fresh set of eyes is not quietly replaced by whatever built
+//! the work.
 //!
 //! **Interrupt current task** is the one thing here that is about the world
 //! rather than about the move. The click left whatever was running exactly where
@@ -185,7 +189,7 @@ const TARGETS: {
   {
     target: "Wrapping",
     label: "Wrapping up",
-    note: "The branch looked at again: the checks watched, the review run, the comments answered. What you pick runs both the fixes and the review. The fix attempts start over.",
+    note: "The branch looked at again: the checks watched, the review run, the comments answered. What you pick runs the fixes, and the review too where nothing was picked for it. The fix attempts start over.",
     runs: true,
     role: "implementation",
   },

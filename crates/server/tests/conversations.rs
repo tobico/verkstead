@@ -2448,13 +2448,16 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
     );
 }
 
-/// A wrap-up both builds and reviews, so the one Pairing picked for a steer into
-/// Wrapping settles both of the roles it runs under.
+/// A wrap-up both builds and reviews, and the one Pairing picked for a steer
+/// into Wrapping settles what builds — leaving a review account the human chose
+/// exactly where it is.
 ///
-/// Which is also what lets a Conversation that has never fixed a review Pairing
-/// be steered into a wrap-up at all: one picker, every role the target runs.
+/// The picker is labelled for the state's own work and opens on what builds, so
+/// somebody who steers a wrap-up and changes nothing has said nothing about the
+/// review. Writing that prefill over an account they picked on the setup card to
+/// be a fresh set of eyes would undo the whole reason for picking it apart.
 #[tokio::test]
-async fn steering_into_wrapping_settles_the_building_and_the_review_pairings() {
+async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() {
     let (watched, dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
     let pool = open_database(&dir.path().join("verkstead.db"))
@@ -2481,12 +2484,17 @@ async fn steering_into_wrapping_settles_the_building_and_the_review_pairings() {
     pool.close().await;
 
     let picked = profile(&app, watched.path(), "steering").await;
-    let interviewing = opened(&app, id)
-        .await
+    let before = opened(&app, id).await;
+    let interviewing = before
         .grilling_pairing
         .pairing()
         .cloned()
         .expect("the fixture picks one per role");
+    let reviewing = before
+        .review_pairing
+        .pairing()
+        .cloned()
+        .expect("and one of them is an account of its own for the review");
 
     assert_eq!(
         steer(&app, id).await,
@@ -2518,8 +2526,8 @@ async fn steering_into_wrapping_settles_the_building_and_the_review_pairings() {
         view.review_pairing
             .pairing()
             .map(|pairing| pairing.profile.id),
-        Some(picked),
-        "and what the review runs under, off the same pick",
+        Some(reviewing.profile.id),
+        "and the account chosen to review is still the one that reviews",
     );
     assert_eq!(
         view.grilling_pairing
@@ -2527,6 +2535,106 @@ async fn steering_into_wrapping_settles_the_building_and_the_review_pairings() {
             .map(|pairing| pairing.profile.id),
         Some(interviewing.profile.id),
         "and the role nothing wraps under is exactly where it was",
+    );
+}
+
+/// And where nothing was ever picked to review, the same pick fills it — which
+/// is what lets a Conversation that never fixed a review Pairing be steered into
+/// a wrap-up at all.
+///
+/// A steered Draft is how one gets here: Implementing runs one role and settles
+/// the one it runs, so the review is still unpicked by the time the work is on a
+/// pull request. Filling is not replacing — there was no choice to undo.
+#[tokio::test]
+async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    // Everything but the review, which is what a Conversation steered out of
+    // Draft has: the pickers freeze at the move, and Implementing settles only
+    // what builds.
+    let building = profile(&app, watched.path(), "opus").await;
+    choose(
+        &app,
+        id,
+        "grilling",
+        profile(&app, watched.path(), "fable").await,
+    )
+    .await;
+    choose(&app, id, "implementation", building).await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+
+    let steered: ConversationSteered = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Implementing",
+            "interrupt": false,
+            "instruction": "Add the rate limiter.",
+        }),
+    )
+    .await;
+
+    assert_eq!(steered, ConversationSteered::Steered);
+    assert_eq!(
+        opened(&app, id).await.review_pairing,
+        PickedView::Nothing,
+        "the move settled what builds and left the review unpicked",
+    );
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::record_pull_request(
+            &pool,
+            id,
+            repo_id,
+            &store::PullRequest {
+                number: 42,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/42".to_owned(),
+                repo: None,
+            },
+        )
+        .await
+        .unwrap(),
+        store::Wrapping::Started,
+    );
+
+    pool.close().await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+
+    let steered: ConversationSteered = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Wrapping",
+            "interrupt": false,
+            "pairing": { "profile_id": building, "model": "claude-opus-5" },
+        }),
+    )
+    .await;
+
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    assert_eq!(
+        opened(&app, id)
+            .await
+            .review_pairing
+            .pairing()
+            .map(|pairing| pairing.profile.id),
+        Some(building),
+        "a role with nothing picked for it takes the pick",
     );
 }
 

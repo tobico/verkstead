@@ -644,6 +644,16 @@ fn directing(conversation: &Conversation, instruction: Option<&str>) -> Option<D
 /// And a role the human picked away is left picked away. The modal's one pick is
 /// what the sessions run under, and a role that runs none is not among them:
 /// writing a Pairing over it would turn a review back on that nobody asked for.
+///
+/// **The review role is filled rather than rewritten**, which is the one role
+/// this treats differently and the reason is what the picker says. It is
+/// labelled for the state's own work and prefilled with what builds, so a human
+/// who steers a wrap-up and changes nothing has picked nothing about the
+/// review — and writing that prefill over an account they chose on the setup
+/// card to be a fresh set of eyes would undo the whole point of picking it
+/// apart. So it takes the pick only where nothing was picked for it, which is
+/// still what lets a Conversation that never fixed one — a steered Draft — be
+/// steered into a wrap-up at all.
 fn settling<'a>(conversation: &Conversation, submission: &'a SteerSubmission) -> Vec<Settling<'a>> {
     let Some(choice) = submission.pairing.as_ref() else {
         return Vec::new();
@@ -652,18 +662,25 @@ fn settling<'a>(conversation: &Conversation, submission: &'a SteerSubmission) ->
     roles(submission.target)
         .iter()
         .copied()
-        // The Conversation's own is left exactly as it is rather than rewritten
-        // with itself: a re-choice takes the model row away and puts it back,
-        // and a Pairing that did not change is not something to rewrite.
-        //
-        // Both halves, because both halves are what a pick is. The picker offers
-        // one row per Profile-and-model, so the same Profile on another of its
-        // models is a different pick — and a comparison that asked about the
-        // Profile alone would answer *Steered* to a change of model and write
-        // none of it.
         .filter(|role| {
             let fixed = fixed(conversation, *role);
 
+            // Nothing picked or nothing at all: the review takes this pick only
+            // to fill a role that has none, never to replace one that has.
+            if *role == Role::Review {
+                return !fixed.picked();
+            }
+
+            // The Conversation's own is left exactly as it is rather than
+            // rewritten with itself: a re-choice takes the model row away and
+            // puts it back, and a Pairing that did not change is not something
+            // to rewrite.
+            //
+            // Both halves, because both halves are what a pick is. The picker
+            // offers one row per Profile-and-model, so the same Profile on
+            // another of its models is a different pick — and a comparison that
+            // asked about the Profile alone would answer *Steered* to a change
+            // of model and write none of it.
             !fixed.skipped()
                 && !fixed.pairing().is_some_and(|pairing| {
                     pairing.profile.id == choice.profile_id
@@ -841,9 +858,11 @@ pub(crate) async fn standing(
 /// under whatever else has happened since.
 ///
 /// Wrapping is the one target that names two, because a wrap-up both builds and
-/// reviews: the human's one pick settles both, which is what lets a Conversation
-/// that has never fixed a review Pairing — a steered draft — be steered into a
-/// wrap-up at all.
+/// reviews. What the human's one pick does to each of them is not the same
+/// thing, though — see [`settling`]: it settles what builds, and it fills the
+/// review role only where nothing was picked for it, which is what lets a
+/// Conversation that has never fixed a review Pairing — a steered draft — be
+/// steered into a wrap-up at all without replacing one that was chosen.
 fn roles(target: SteerTarget) -> &'static [Role] {
     match target {
         SteerTarget::Grilling => &[Role::Grilling],
