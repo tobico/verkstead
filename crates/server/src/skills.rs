@@ -250,10 +250,15 @@ pub(crate) fn implementing(brief: &str, handoff: Option<&str>) -> String {
 ///
 /// Which is why the paragraph says what to do with what the Brief leaves open. A
 /// session that guesses at a real decision builds the wrong thing quietly; one
-/// that asks reaches the human on their phone and builds the right thing. There
-/// is nowhere else for the guidance to go — the skill is the same implementation
-/// skill an ordinary inline run reads, and it is written for work a grilling has
-/// already settled.
+/// that asks reaches the human on their phone and builds the right thing.
+///
+/// The skill is the same implementation skill an ordinary inline run reads, and
+/// it knows this run happens: it says a Conversation can be started with no
+/// grilling, that the Brief is the whole of the agreement where one was, and
+/// that the instruction about what the Brief leaves open is here rather than
+/// there. The split is deliberate — the skill is where a session learns what
+/// kind of run this is, and the prompt is where it is told what to do about it,
+/// because only the prompt knows which kind this one is.
 pub(crate) fn ungrilled(brief: &str) -> String {
     format!(
         "{}\n# Nothing was grilled\n\nThis work was not put through a grilling: \
