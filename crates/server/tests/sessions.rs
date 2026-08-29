@@ -913,6 +913,12 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // review being ended on quiet want the two apart, so that a session ended
     // after the shorter of them is one ended by the wrong rule.
     proposing: paced(Duration::from_millis(900)),
+    // Four times the grace above, where a server's is five times it: what the
+    // ceiling on a stir is for is a session that will never speak again, so the
+    // tests that watch one being held off want a window between the two they
+    // can assert *nothing happened* inside — and one long enough that a loaded
+    // machine cannot close it.
+    waking: paced(Duration::from_millis(3600)),
     // Longer than any of these run for, so that the sweep for a stalled
     // Conversation is the one thing that never fires by itself here. Every one
     // of these fixtures is a Conversation whose grilling session has printed and
@@ -15341,7 +15347,19 @@ async fn a_follow_up_that_goes_idle_without_asking_is_told_to_put_it_to_the_huma
          else: {said:?}",
     );
     assert!(
-        said[0].contains("summarize your current status"),
+        said[0].contains("carry on with it now"),
+        "and told first to get on with its next step, where it has one — a line \
+         typed on a guess about a session is one that has to be safe to be \
+         wrong about: {said:?}",
+    );
+    assert!(
+        said[0].contains("blocked or waiting on me"),
+        "with the ask put as the other case rather than as the instruction, so \
+         that a session that was never stuck does not manufacture a Set: \
+         {said:?}",
+    );
+    assert!(
+        said[0].contains("summarize your status"),
         "and asked for where it had got to, in the words somebody watching \
          would have typed: {said:?}",
     );
@@ -15588,6 +15606,58 @@ claude-grilling-5)
 esac
 "#;
 
+/// And one that says a word the moment its answer arrives, and then falls
+/// silent: a session woken by the answer, which is what one that is working does
+/// with it.
+///
+/// The word is the whole of the fixture. Verkstead cannot see an answer reach a
+/// session — what carries it is a chain of hops it has no view of — so what it
+/// waits for is the first thing the session says afterwards, and this is a stub
+/// that says it.
+const A_BACKLOG_THEN_A_STEP_THAT_SPEAKS_WHEN_ANSWERED: &str = r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    printf 'reading the task\n'
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'right, on it\n'
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#;
+
+/// And one that never says anything at all: a step session that comes up and is
+/// silent from its first moment, which is what a cold start looks like from
+/// outside and what a session that died on the way up looks like too.
+const A_BACKLOG_THEN_A_STEP_THAT_NEVER_SPEAKS: &str = r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#;
+
 /// What a step session would ask, where it has something to ask about.
 const A_STEP_QUESTION: &str = r#"
 title: About the counter
@@ -15695,7 +15765,7 @@ async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_stopped() {
     let said = told(&fixture, 1).await;
 
     assert!(
-        said[0].contains("summarize your current status"),
+        said[0].contains("summarize your status"),
         "the same line, in the words somebody watching would have typed: \
          {said:?}",
     );
@@ -15733,7 +15803,7 @@ async fn an_inline_session_that_goes_quiet_without_committing_is_told_and_then_s
     let said = told(&fixture, 1).await;
 
     assert!(
-        said[0].contains("summarize your current status"),
+        said[0].contains("summarize your status"),
         "the same line, in the words somebody watching would have typed: \
          {said:?}",
     );
@@ -15867,6 +15937,186 @@ async fn a_step_that_keeps_talking_is_never_told_to_ask() {
         notices(&view).is_empty(),
         "and nothing stopped over it: {:?}",
         notices(&view),
+    );
+}
+
+/// A session that has just been answered is left alone until it says something,
+/// however long the answer takes to reach it.
+///
+/// **The near half of the condition, and the half that was wrong.** What carries
+/// an answer into a session is a chain Verkstead can see no hop of — the CLI's
+/// long poll returning, the harness noticing its background command exited, the
+/// model beginning its turn, the first bytes drawn — and a chain slower than the
+/// grace is a session that was working perfectly well being told it had gone
+/// quiet. It happened: the line landed on a grilling moments after the human's
+/// pick, and the session dutifully sent them a Set nobody needed. So what is
+/// waited for now is the session's own first word, which is the one thing from
+/// out here that says the answer arrived at all.
+#[tokio::test]
+async fn a_step_that_has_just_been_answered_is_left_alone_until_it_speaks() {
+    let fixture = grilling(A_BACKLOG_THEN_A_STEP_THAT_ASKS).await;
+
+    picked(&fixture, "task-list").await;
+
+    fixture
+        .until(|view| (outputs(view).len() > 1).then_some(()))
+        .await;
+
+    let set = fixture.ask(A_STEP_QUESTION).await;
+
+    // Answered well inside the grace, which is what most picks are: a human on
+    // their phone taps the recommended option and puts it down again. Which is
+    // the case a loop that looked at the store only once the grace was out
+    // would miss entirely — the Set would have come and gone between two looks,
+    // and the session would read as one that had never been handed anything.
+    tokio::time::sleep(BRISKLY.poll * 4).await;
+
+    assert_eq!(
+        fixture
+            .respond(set, serde_json::json!([{ "label": "Q1", "selected": 1 }]))
+            .await,
+        Submitted::Accepted,
+    );
+
+    // Twice over the grace a session gets, and this one has said nothing since
+    // the answer. Which used to be a rescue and half of the next one.
+    tokio::time::sleep(BRISKLY.proposing * 2).await;
+
+    assert!(
+        anything_told(&fixture).is_empty(),
+        "nothing was typed into a session whose answer may still be on its way \
+         to it: {:?}",
+        anything_told(&fixture),
+    );
+
+    // And the ceiling is where the waiting stops. A session that says nothing
+    // at all after its answer is one that died waiting for it, and it is
+    // rescued having never spoken — which is a session nobody could move
+    // otherwise.
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        said[0].contains("verkstead ask"),
+        "the ordinary line, once the ceiling on the waiting has passed: \
+         {said:?}",
+    );
+}
+
+/// And a word after the answer puts the ordinary grace back in charge, counted
+/// from that word.
+///
+/// The other side of the same rule: the wait is on the session speaking rather
+/// than on a longer clock, so a session that speaks and then goes quiet is
+/// judged the way it always was. A rule that waited out the ceiling every time
+/// would be a rescue arriving five minutes late at every session that genuinely
+/// is stuck.
+#[tokio::test]
+async fn a_step_that_speaks_after_its_answer_is_told_on_the_ordinary_grace() {
+    let fixture = grilling(A_BACKLOG_THEN_A_STEP_THAT_SPEAKS_WHEN_ANSWERED).await;
+
+    picked(&fixture, "task-list").await;
+
+    fixture
+        .until(|view| (outputs(view).len() > 1).then_some(()))
+        .await;
+
+    let set = fixture.ask(A_STEP_QUESTION).await;
+
+    assert_eq!(
+        fixture
+            .respond(set, serde_json::json!([{ "label": "Q1", "selected": 1 }]))
+            .await,
+        Submitted::Accepted,
+    );
+
+    let answered = Instant::now();
+
+    // What the answer reaching the session looks like here: the stub is waiting
+    // on the marker rather than on the Set, the two halves of an answer being
+    // split across two processes in this fixture — see [`WHILE_NOBODY_HAS_ASKED`].
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let said = told(&fixture, 1).await;
+    let waited = answered.elapsed();
+
+    assert!(
+        said[0].contains("verkstead ask"),
+        "it was told the ordinary line: {said:?}",
+    );
+    assert!(
+        waited < BRISKLY.waking,
+        "and told on the grace after its word rather than on the ceiling, which \
+         is what the word is for: {waited:?}",
+    );
+}
+
+/// A session that has not said a word since it was launched is left alone too:
+/// coming up is a stir like any other.
+///
+/// A cold start is minutes on a loaded machine — the sandbox, the agent, the
+/// model's first token — and every one of those minutes looked from here exactly
+/// like a session that had gone quiet without asking. So the launch is the first
+/// stir a session gets, and nothing is typed into one that has yet to draw its
+/// first byte. The ceiling is what catches the one that died coming up.
+#[tokio::test]
+async fn a_step_that_has_not_spoken_since_launch_is_left_alone_until_the_ceiling() {
+    let fixture = grilling(A_BACKLOG_THEN_A_STEP_THAT_NEVER_SPEAKS).await;
+
+    picked(&fixture, "task-list").await;
+
+    // The session's own Capture, which is written when it is launched rather
+    // than when it first prints — so this is a session that is up and has said
+    // nothing, which is the whole of the fixture.
+    fixture
+        .until(|view| (outputs(view).len() > 1).then_some(()))
+        .await;
+
+    tokio::time::sleep(BRISKLY.proposing * 2).await;
+
+    assert!(
+        anything_told(&fixture).is_empty(),
+        "nothing was typed into a session that may still be starting up: {:?}",
+        anything_told(&fixture),
+    );
+
+    assert_eq!(
+        told(&fixture, 1).await.len(),
+        1,
+        "and then it was told, the ceiling being what a session that never \
+         speaks at all is caught by",
+    );
+}
+
+/// And the line this loop types itself is a stir like any other: the second
+/// rescue waits on a word too.
+///
+/// Otherwise a slow turn after the first line would burn the second and the stop
+/// with it — a session told twice inside one turn it was in the middle of
+/// taking, and stopped for a silence that was one wait rather than two. What
+/// ends a Conversation here is meant to be the same evidence twice over.
+#[tokio::test]
+async fn the_second_rescue_waits_on_a_word_as_the_first_did() {
+    let fixture = grilling(A_BACKLOG_THEN_A_STEP_THAT_NEVER_SPEAKS).await;
+
+    picked(&fixture, "task-list").await;
+
+    assert_eq!(told(&fixture, 1).await.len(), 1);
+
+    tokio::time::sleep(BRISKLY.proposing * 2).await;
+
+    assert_eq!(
+        anything_told(&fixture).len(),
+        1,
+        "the second line waits on the word the first one did, the session \
+         having said nothing since it was spoken to: {:?}",
+        anything_told(&fixture),
+    );
+
+    assert_eq!(
+        told(&fixture, 2).await.len(),
+        2,
+        "and the ceiling brings it, so a session that will not speak at all is \
+         still stopped rather than left",
     );
 }
 

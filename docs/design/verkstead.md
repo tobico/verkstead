@@ -86,7 +86,8 @@ flowchart LR
   show for itself leaves a conversation nobody can move: the human sees only
   what arrives as a question set, and none has. So Verkstead types a canned
   line into the running session — the channel a watcher's keystrokes take —
-  asking it to summarize where it has got to and ask what to do next, as a set.
+  telling it to carry on where it has a next step and otherwise to summarize
+  where it has got to and ask what to do next, as a set.
   The line and the enter after it are typed a moment apart, because an agent's
   terminal interface reads the two arriving together as a paste and a return
   inside a paste is a line break rather than a send. Twice at most; a session
@@ -104,7 +105,18 @@ flowchart LR
   2026-08-27, building follow-ups*). The inline session was the one the sweep
   left out, and it had no quiet ending either — so it is ended on committed plus
   quiet, the way the instruction session it is the same shape as always was
-  (*refined 2026-08-27, reviewing follow-ups*).
+  (*refined 2026-08-27, reviewing follow-ups*). And it waits for a word after
+  every **stir** — the session's launch, an answer arriving, a line it typed
+  itself — because what carries an answer to a session is a chain of hops
+  Verkstead can see none of, and one slower than the grace looked exactly like
+  a session gone quiet: it interrupted a grilling that was working, which then
+  sent the human a question set nobody needed. So the grace runs from the
+  session's own first word after the stir rather than from the stir, with a
+  five-minute ceiling for the one that died mid-wait and will never speak. The
+  line is conditional for the same reason — carry on if you have a next step,
+  ask only if you are blocked — so that a rescue typed on a guess that was
+  wrong costs a quiet turn rather than a set on somebody's phone (*refined
+  2026-08-29, refining rescues*).
 - **Agent profiles** are minimal: name, claude home dir + config file pair, the
   list of models that account can run — plus an agent-type discriminator so
   other backends can slot in later (claude is the only type now). The model
