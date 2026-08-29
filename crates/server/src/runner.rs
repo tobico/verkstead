@@ -3135,6 +3135,23 @@ enum Prompt {
     FollowingUp(FollowUp),
 }
 
+impl Prompt {
+    /// Which of the Conversation's Pairings a session on this prompt is
+    /// launched under.
+    ///
+    /// The review is the one that is not the Implementation Pairing, and the
+    /// line is that reviewing is a fresh set of eyes and fixing is building:
+    /// the check fixes, the comment responses and the follow-ups a wrap-up
+    /// dispatches are all the work itself carrying on, so they run under what
+    /// built it.
+    fn role(&self) -> store::Role {
+        match self {
+            Self::Reviewing { .. } => store::Role::Review,
+            _ => store::Role::Implementation,
+        }
+    }
+}
+
 /// Wait for the Conversation's Worktree, and then [`launch`] into it.
 ///
 /// What every driver here launches through except the two that are already
@@ -3173,8 +3190,9 @@ async fn launch_in_turn(state: &AppState, conversation_id: i64, inside: Prompt) 
     launch(state, conversation_id, inside).await
 }
 
-/// Start a fresh session on the next step, under the Conversation's
-/// implementation Profile.
+/// Start a fresh session on the next step, under the Profile the prompt's own
+/// role names — the review Pairing for the wrap-up's review, and the
+/// implementation one for everything else.
 ///
 /// Which step it is is not said: the bundled fork reads `.tasks/` and picks the
 /// same one this did, by the same rule. Verkstead decides the step to know what
@@ -3202,10 +3220,18 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
         }
     };
 
-    let Some(pairing) = conversation.implementation_pairing.clone() else {
+    let role = inside.role();
+
+    let paired = match role {
+        store::Role::Review => conversation.review_pairing.clone(),
+        _ => conversation.implementation_pairing.clone(),
+    };
+
+    let Some(pairing) = paired else {
         tracing::error!(
             conversation_id,
-            "the implementation Pairing is gone, so no session was started"
+            role = ?role,
+            "the Pairing that session runs under is gone, so no session was started"
         );
         return None;
     };

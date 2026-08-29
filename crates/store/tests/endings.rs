@@ -248,7 +248,7 @@ async fn following_up(pool: &SqlitePool, conversation: i64) {
             conversation,
             Steer {
                 target: Lifecycle::FollowUp,
-                pairing: None,
+                pairings: &[],
                 brief: None,
                 instruction: Some("Does it count the 429s it sends?\n"),
                 direction: None,

@@ -45,7 +45,7 @@ use verkstead_store::{
 fn into(target: Lifecycle) -> Steer<'static> {
     Steer {
         target,
-        pairing: None,
+        pairings: &[],
         brief: None,
         instruction: None,
         direction: None,
@@ -239,11 +239,11 @@ async fn a_steer_settles_the_pairing_the_human_picked() {
             &pool,
             id,
             Steer {
-                pairing: Some(Settling {
+                pairings: &[Settling {
                     role: Role::Implementation,
                     profile_id: profile,
                     model: "opus-4.8",
-                }),
+                }],
                 ..into(Lifecycle::Wrapping)
             },
         )
@@ -292,11 +292,11 @@ async fn a_steer_naming_a_profile_that_has_gone_moves_nothing() {
             &pool,
             id,
             Steer {
-                pairing: Some(Settling {
+                pairings: &[Settling {
                     role: Role::Implementation,
                     profile_id: 404,
                     model: "opus-5",
-                }),
+                }],
                 ..into(Lifecycle::Wrapping)
             },
         )

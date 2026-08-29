@@ -31,7 +31,47 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     pull_requests_that_named_no_repo(pool).await?;
     fix_attempts_that_named_no_repo(pool).await?;
     settlements_that_named_no_pull_request(pool).await?;
-    addressed_comments_that_named_no_pull_request(pool).await
+    addressed_comments_that_named_no_pull_request(pool).await?;
+    conversations_that_had_no_review_profile(pool).await
+}
+
+/// Give every Conversation written before there was a Review role the column
+/// that holds it.
+///
+/// A Conversation used to fix two Pairings and now fixes three — one for the
+/// grilling, one for what builds, one for the wrap-up's review — and the third
+/// goes in a column beside the other two rather than in a table of its own,
+/// because [`super::conversations::Role`] names a column per role and a role
+/// whose Profile half lived somewhere else would be two ways of storing the one
+/// choice.
+///
+/// Empty for every row it adds, which is what an unchosen picker is: what was
+/// grilled before this existed was reviewed under the implementation Pairing,
+/// and writing that in would be inventing a choice nobody made.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn conversations_that_had_no_review_profile(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('conversations') WHERE name = ?")
+            .bind("review_profile_id")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the review Profile of a Conversation")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query(
+        "ALTER TABLE conversations
+         ADD COLUMN review_profile_id INTEGER REFERENCES profiles(id)",
+    )
+    .execute(pool)
+    .await
+    .context("giving the Conversations written before this a review Profile")?;
+
+    Ok(())
 }
 
 /// Attribute every commit recorded before Verkstead swept more than one

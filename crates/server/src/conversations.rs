@@ -41,7 +41,7 @@ use crate::worktrees;
 /// invented would be a name the server never saw, and the human may well leave
 /// it as it is.
 ///
-/// The two Pairings are prefilled the same way, off what the Repo was last
+/// The Pairings are prefilled the same way, off what the Repo was last
 /// grilled with — see [`prefill`].
 pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
     Ok(
@@ -123,6 +123,10 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
 
     if let Some((profile_id, model)) = usable(&state.watched, remembered.implementation).await? {
         store::set_implementation_pairing(&state.pool, id, profile_id, Some(&model)).await?;
+    }
+
+    if let Some((profile_id, model)) = usable(&state.watched, remembered.review).await? {
+        store::set_review_pairing(&state.pool, id, profile_id, Some(&model)).await?;
     }
 
     Ok(())
@@ -759,8 +763,9 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     let grilling = crate::profiles::pairing(watched, conversation.grilling_pairing.clone()).await?;
     let implementation =
         crate::profiles::pairing(watched, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::pairing(watched, conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref()) {
+    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), review.as_ref()) {
         return Ok(refusal.grilling());
     }
 
@@ -1230,19 +1235,20 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         return Ok(Adopted::NotAdopting);
     };
 
-    // Both Profiles, before anything that costs a git call — the cheap answers
-    // first, which is the order [`start_grilling`] checks the same pair in. Read
+    // Every Profile, before anything that costs a git call — the cheap answers
+    // first, which is the order [`start_grilling`] checks the same set in. Read
     // as rows rather than judged off the ids, because a Profile whose pair has
     // gone is not one to run a session under and the id alone cannot say so.
     //
-    // Both, rather than only the one the work runs under: a stage inherits both
-    // from its predecessor, so what this one is adopted with is what every stage
-    // after it starts with.
+    // All of them, rather than only the one the work runs under: a stage
+    // inherits every one from its predecessor, so what this one is adopted with
+    // is what every stage after it starts with.
     let grilling = crate::profiles::pairing(watched, conversation.grilling_pairing.clone()).await?;
     let implementation =
         crate::profiles::pairing(watched, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::pairing(watched, conversation.review_pairing.clone()).await?;
 
-    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref()) {
+    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), review.as_ref()) {
         return Ok(refusal.adopting());
     }
 
@@ -1603,7 +1609,7 @@ async fn read(state: &AppState, id: i64) {
     }
 }
 
-/// Why these two Pairings are not something to run the work under, or `None`
+/// Why these Pairings are not something to run the work under, or `None`
 /// where they are.
 ///
 /// The same rule [`crate::profiles::ready_to_grill`] answers for the pane, said
@@ -1616,12 +1622,13 @@ async fn read(state: &AppState, id: i64) {
 /// Pairing, Profile and model together.
 ///
 /// The rule rather than either button's answer, because both buttons ask it:
-/// starting a grilling and adopting a stage each want both Pairings fixed
+/// starting a grilling and adopting a stage each want every Pairing fixed
 /// before they will do anything, and each says so in its own words — see
 /// [`Unready::grilling`] and [`Unready::adopting`].
 fn unready(
     grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
+    review: Option<&PairingView>,
 ) -> Option<Unready> {
     let Some(grilling) = grilling.filter(|pairing| pairing.model.is_some()) else {
         return Some(Unready::NoGrillingProfile);
@@ -1631,7 +1638,11 @@ fn unready(
         return Some(Unready::NoImplementationProfile);
     };
 
-    [grilling, implementation]
+    let Some(review) = review.filter(|pairing| pairing.model.is_some()) else {
+        return Some(Unready::NoReviewProfile);
+    };
+
+    [grilling, implementation, review]
         .into_iter()
         .any(|pairing| pairing.profile.broken.is_some())
         .then_some(Unready::ProfileBroken)
@@ -1643,6 +1654,7 @@ fn unready(
 enum Unready {
     NoGrillingProfile,
     NoImplementationProfile,
+    NoReviewProfile,
     ProfileBroken,
 }
 
@@ -1652,6 +1664,7 @@ impl Unready {
         match self {
             Unready::NoGrillingProfile => GrillingStarted::NoGrillingProfile,
             Unready::NoImplementationProfile => GrillingStarted::NoImplementationProfile,
+            Unready::NoReviewProfile => GrillingStarted::NoReviewProfile,
             Unready::ProfileBroken => GrillingStarted::ProfileBroken,
         }
     }
@@ -1661,6 +1674,7 @@ impl Unready {
         match self {
             Unready::NoGrillingProfile => Adopted::NoGrillingProfile,
             Unready::NoImplementationProfile => Adopted::NoImplementationProfile,
+            Unready::NoReviewProfile => Adopted::NoReviewProfile,
             Unready::ProfileBroken => Adopted::ProfileBroken,
         }
     }
@@ -1746,7 +1760,7 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 }
 
 /// Whether everything needed before grilling starts is settled, as the pane
-/// reads it: the two Pairings, and a Brief with something in it.
+/// reads it: the Pairings, and a Brief with something in it.
 ///
 /// Answered against what the endpoint has already read rather than by loading
 /// the Conversation again — and it deliberately says nothing about the branch or
@@ -1755,11 +1769,12 @@ pub(crate) fn ready_to_grill(
     state: store::Lifecycle,
     grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
+    review: Option<&PairingView>,
     brief: &str,
 ) -> bool {
     state == store::Lifecycle::Draft
         && !brief.trim().is_empty()
-        && crate::profiles::ready_to_grill(grilling, implementation)
+        && crate::profiles::ready_to_grill(grilling, implementation, review)
 }
 
 /// Whether git would take this as a branch name.

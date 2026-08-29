@@ -76,7 +76,7 @@ pub(crate) async fn listed(pool: &SqlitePool, watched: &WatchedPaths) -> Result<
 }
 
 /// The same reading for one Pairing, for the panes that show a Conversation's
-/// two choices rather than the whole list.
+/// own choices rather than the whole list.
 pub(crate) async fn pairing(
     watched: &WatchedPaths,
     pairing: Option<store::Pairing>,
@@ -126,9 +126,9 @@ async fn entries(
 
 /// Whether everything the next stage needs before it will grill is settled.
 ///
-/// Both Pairings complete — a Profile *and* a model — and neither Profile
-/// broken. Broken as well as chosen because a pair that has gone is a session
-/// that fails to start, and the whole reason this is answered here is to say so
+/// Every Pairing complete — a Profile *and* a model — and no Profile broken.
+/// Broken as well as chosen because a pair that has gone is a session that
+/// fails to start, and the whole reason this is answered here is to say so
 /// while the human is looking.
 ///
 /// A Profile chosen before pairings existed has no model and so is not a
@@ -139,10 +139,14 @@ async fn entries(
 pub(crate) fn ready_to_grill(
     grilling: Option<&PairingView>,
     implementation: Option<&PairingView>,
+    review: Option<&PairingView>,
 ) -> bool {
-    [grilling, implementation].into_iter().all(|chosen| {
-        chosen.is_some_and(|pairing| pairing.model.is_some() && pairing.profile.broken.is_none())
-    })
+    [grilling, implementation, review]
+        .into_iter()
+        .all(|chosen| {
+            chosen
+                .is_some_and(|pairing| pairing.model.is_some() && pairing.profile.broken.is_none())
+        })
 }
 
 /// Why this Profile cannot be run under as things stand, or `None` while its
@@ -276,6 +280,21 @@ pub(crate) async fn choose_implementation(
 
     Ok(chosen(
         store::set_implementation_pairing(pool, id, choice.profile_id, Some(&choice.model)).await?,
+    ))
+}
+
+/// And the one the wrap-up's review session will run under.
+pub(crate) async fn choose_review(
+    pool: &SqlitePool,
+    id: i64,
+    choice: &ProfileChoice,
+) -> Result<ProfileChosen> {
+    if let Some(refusal) = unlisted(pool, choice).await? {
+        return Ok(refused(refusal));
+    }
+
+    Ok(chosen(
+        store::set_review_pairing(pool, id, choice.profile_id, Some(&choice.model)).await?,
     ))
 }
 

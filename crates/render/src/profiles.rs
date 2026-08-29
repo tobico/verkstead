@@ -161,7 +161,7 @@ pub enum ProfileDeleted {
     InUse,
 }
 
-/// One of a Conversation's two Pairings, as the page shows it: the Profile
+/// One of a Conversation's Pairings, as the page shows it: the Profile
 /// whole, and the model paired with it.
 ///
 /// The Profile whole rather than by id because the pane says what it is and
@@ -183,7 +183,7 @@ pub struct PairingView {
     pub model: Option<String>,
 }
 
-/// Which Profile and model a Conversation is pairing for one of its two roles.
+/// Which Profile and model a Conversation is pairing for one of its roles.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileChoice {

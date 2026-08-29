@@ -318,8 +318,11 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
 pub async fn delete_profile(pool: &SqlitePool, id: i64) -> Result<Deleting> {
     let chosen: Option<(i64,)> = sqlx::query_as(
         "SELECT id FROM conversations
-         WHERE grilling_profile_id = ? OR implementation_profile_id = ?",
+         WHERE grilling_profile_id = ?
+            OR implementation_profile_id = ?
+            OR review_profile_id = ?",
     )
+    .bind(id)
     .bind(id)
     .bind(id)
     .fetch_optional(pool)

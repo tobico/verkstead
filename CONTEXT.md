@@ -208,7 +208,7 @@ thing the Brief could be doing while it is a draft. Once it freezes it is the
 server's rendering of it and nothing else.
 
 While it is still a draft its card carries the whole of the Conversation's
-setup under it — the branch, the base commit, both Pairings and the readiness
+setup under it — the branch, the base commit, the Pairings and the readiness
 verdict — because setting the work up and kicking it off are one act, and both
 belong where the work is read. Every one of those freezes at the same moment
 the Brief does, so once grilling starts the card is the Brief alone; on a
@@ -308,23 +308,32 @@ two-stage pick would cost a tap every time. There is no default model
 anywhere, so an unpaired Profile is half a choice and reads as none.
 _Avoid_: profile choice, model selection, profile+model, combination
 
-**Grilling Pairing** / **Implementation Pairing**:
-The two Pairings a Conversation fixes before grilling starts — one for the
-grilling session, one for the implementation work. They are roles a Pairing is
-used in, not kinds of Pairing: the same Profile, even the same model, may fill
-both. The line between them is planning against building: the grilling
-session's tail — writing the handoff, the backlog or the roadmap — is the
-Grilling Pairing's, and the Implementation Pairing drives what builds. Distinct
-accounts are why an inline implementation is a fresh session rather than the
-grilling session carrying on.
+**Grilling Pairing** / **Implementation Pairing** / **Review Pairing**:
+The three Pairings a Conversation fixes before grilling starts — one for the
+grilling session, one for the implementation work, one for the wrap-up's review.
+They are roles a Pairing is used in, not kinds of Pairing: the same Profile,
+even the same model, may fill all three. The first line between them is planning
+against building: the grilling session's tail — writing the handoff, the backlog
+or the roadmap — is the Grilling Pairing's, and the Implementation Pairing
+drives what builds. Distinct accounts are why an inline implementation is a
+fresh session rather than the grilling session carrying on.
 
-Both are **fixed when grilling starts**, alongside the branch, the base commit
-and the Brief: what runs the work is settled before the work begins rather than
-swapped underneath it — and the implementation one is used long after that,
-which is exactly why it is not left changeable until then.
+The second line is reviewing against fixing. The Review Pairing reaches exactly
+one kind of session — the wrap-up's review, including the fresh one that runs
+after a split-out backlog is built — because reviewing is a fresh set of eyes on
+what was built. Every other session a wrap-up dispatches is the work itself
+carrying on and runs under the Implementation Pairing: the check fixes, the
+comment responses, the follow-ups, and the session sent for a missing pull
+request.
 
-Each Repo **remembers the last pair it was grilled with**, so a new
-Conversation on it arrives with both pickers already filled. Written at grill
+Every one of them is **fixed when grilling starts**, alongside the branch, the
+base commit and the Brief: what runs the work is settled before the work begins
+rather than swapped underneath it — and the implementation and review ones are
+used long after that, which is exactly why they are not left changeable until
+then.
+
+Each Repo **remembers the last set it was grilled with**, so a new
+Conversation on it arrives with every picker already filled. Written at grill
 start, from what the Conversation is actually running under; remembered
 server-side rather than in a browser, because the workbench is answered from a
 phone as readily as from a desk. A prefill and not a lock: it is the human's to
@@ -462,7 +471,7 @@ Take a roadmap the Repo already holds — written by the old tools, by hand, by
 anything that was not this Verkstead — into the pipeline, by starting its next
 Stage as a Conversation. The human's press stands in for the Stage before it
 that would otherwise have started it, so there is no grilling and no Brief to
-write: what they settle is the two Pairings and the base commit, and the stage
+write: what they settle is the Pairings and the base commit, and the stage
 brief becomes the Brief. One Stage is the whole of what adopting starts, and all
 it has to start — that Stage's own plan commit writes to the roadmap, so when it
 settles the Stage after it begins the ordinary unattended way, and an adopted
@@ -655,7 +664,9 @@ stands under it. A steer into Grilling lands that round's Brief under the move
 as well, frozen where it lands and beside the earlier round's rather than over
 it. The Pairing the modal settled is recorded as the **Conversation's** rather
 than one session's, because steering re-settles what runs the work — which is
-also why the pick is part of the form: a steered Draft has none fixed yet.
+also why the pick is part of the form: a steered Draft has none fixed yet. It
+settles every role the target runs its sessions under, which is one apiece
+except for a wrap-up: that both builds and reviews, so the one pick fills both.
 
 **And the submit resumes in the same press.** The stop the click left is
 cleared, and what that state ought to be running starts — a fresh grilling, the

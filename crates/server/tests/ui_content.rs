@@ -1507,16 +1507,20 @@ fn wrap_up_proposal() -> QuestionSet {
 /// The human accepting it, which is picking a direction on the chooser — and
 /// picking one the agent did not recommend, because that is as much an
 /// acceptance as agreeing with it.
-/// Settle a Conversation's two Pairings: the first Profile for the grilling and
-/// the second for the implementation, each with the first model it lists.
+/// Settle a Conversation's Pairings: a Profile apiece, in the order the roles
+/// are read in, each with the first model it lists.
 ///
-/// Both while the Conversation is still drafting, which is the only state
-/// either can be recorded in — every fixture below chooses before it advances.
+/// All of them while the Conversation is still drafting, which is the only state
+/// any of them can be recorded in — every fixture below chooses before it
+/// advances.
 async fn pairings(pool: &SqlitePool, conversation: i64, profiles: &[store::Profile]) {
     store::set_grilling_pairing(pool, conversation, profiles[0].id, profiles[0].model())
         .await
         .unwrap();
     store::set_implementation_pairing(pool, conversation, profiles[1].id, profiles[1].model())
+        .await
+        .unwrap();
+    store::set_review_pairing(pool, conversation, profiles[2].id, profiles[2].model())
         .await
         .unwrap();
 }
@@ -1799,12 +1803,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         );
     }
 
-    // Two Agent Profiles, so the pickers are a choice rather than a row — and so
-    // the two roles can hold different ones, which is the ordinary arrangement:
-    // grill on fable, implement on opus. Their pairs are paths nothing is at,
-    // which is exactly what the broken reading is for: this app watches nothing,
-    // so every Profile it reads back is broken, and these fixtures are what the
-    // viewer's tests draw that state from.
+    // One Agent Profile per role, so the pickers are a choice rather than a row
+    // — and so the three roles can hold different ones, which is the ordinary
+    // arrangement: grill on fable, implement on opus, review on sonnet. Their
+    // pairs are paths nothing is at, which is exactly what the broken reading is
+    // for: this app watches nothing, so every Profile it reads back is broken,
+    // and these fixtures are what the viewer's tests draw that state from.
     //
     // One of them lists more than one model, because a Profile carries the whole
     // list of what its account can launch and the viewer draws every entry.
@@ -1816,6 +1820,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             "/srv/accounts/opus",
             &["claude-opus-5", "claude-haiku-4-5-20251001"][..],
         ),
+        ("sonnet", "/srv/accounts/sonnet", &["claude-sonnet-5"][..]),
     ] {
         profiles.push(
             store::create_profile(
@@ -2577,7 +2582,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         wrapping,
         verkstead_store::Steer {
             target: store::Lifecycle::Grilling,
-            pairing: None,
+            pairings: &[],
             brief: Some("# Rate limiting, per account\n\n"),
             instruction: None,
             direction: None,

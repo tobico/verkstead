@@ -1114,7 +1114,7 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
 }
 
 /// Pair a Profile with the one model [`profile`] gives every Profile here, for
-/// one of a Conversation's two roles.
+/// one of a Conversation's roles.
 async fn choose(app: &Router, id: i64, role: &str, profile_id: i64) {
     let chosen: verkstead_render::ProfileChosen = post(
         app,
@@ -1289,15 +1289,17 @@ fn steered(view: &ConversationView) -> Vec<(&'static str, Lifecycle)> {
         .collect()
 }
 
-/// Everything a Conversation needs before it will grill: both Profiles chosen
+/// Everything a Conversation needs before it will grill: every Profile chosen
 /// and a Brief written. Hands back the Conversation's id.
 async fn ready(app: &Router, watched: &Path, repo_id: i64) -> i64 {
     let id = started(app, repo_id).await;
 
     let grilling = profile(app, watched, "fable").await;
     let implementation = profile(app, watched, "opus").await;
+    let review = profile(app, watched, "haiku").await;
     choose(app, id, "grilling", grilling).await;
     choose(app, id, "implementation", implementation).await;
+    choose(app, id, "review", review).await;
 
     assert_eq!(
         write_brief(app, id, "# Rate limiting\n\nThe API has none.\n").await,
@@ -1591,6 +1593,15 @@ async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
         profile(&app, watched.path(), "opus").await,
     )
     .await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::NoReviewProfile);
+
+    choose(
+        &app,
+        id,
+        "review",
+        profile(&app, watched.path(), "haiku").await,
+    )
+    .await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 }
 
@@ -1625,6 +1636,13 @@ async fn starting_is_refused_when_the_brief_is_empty() {
         id,
         "implementation",
         profile(&app, watched.path(), "opus").await,
+    )
+    .await;
+    choose(
+        &app,
+        id,
+        "review",
+        profile(&app, watched.path(), "haiku").await,
     )
     .await;
 
@@ -2232,8 +2250,10 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
 
     let grilling = profile(&app, watched.path(), "fable").await;
     let implementation = profile(&app, watched.path(), "opus").await;
+    let review = profile(&app, watched.path(), "haiku").await;
     choose(&app, id, "grilling", grilling).await;
     choose(&app, id, "implementation", implementation).await;
+    choose(&app, id, "review", review).await;
 
     assert_eq!(
         steer(&app, id).await,
@@ -2276,9 +2296,9 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
 /// The Pairing picked in the modal for a steer into Grilling is the *grilling*
 /// one, and it is recorded as the Conversation's own.
 ///
-/// Which of the two follows the target, an interview running under the one and
-/// everything that builds running under the other — and the role not steered
-/// into is nobody's to re-settle here.
+/// Which role follows the target, an interview running under the one and
+/// everything that builds running under the other — and the roles not steered
+/// into are nobody's to re-settle here.
 #[tokio::test]
 async fn steering_into_grilling_settles_the_grilling_pairing() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
@@ -2324,6 +2344,82 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
             .map(|pairing| pairing.profile.id),
         Some(building.profile.id),
         "and the other is exactly where it was",
+    );
+}
+
+/// A wrap-up both builds and reviews, so the one Pairing picked for a steer into
+/// Wrapping settles both of the roles it runs under.
+///
+/// Which is also what lets a Conversation that has never fixed a review Pairing
+/// be steered into a wrap-up at all: one picker, every role the target runs.
+#[tokio::test]
+async fn steering_into_wrapping_settles_the_building_and_the_review_pairings() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::record_pull_request(
+            &pool,
+            id,
+            repo_id,
+            &store::PullRequest {
+                number: 41,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                repo: None,
+            },
+        )
+        .await
+        .unwrap(),
+        store::Wrapping::Started,
+    );
+
+    pool.close().await;
+
+    let picked = profile(&app, watched.path(), "steering").await;
+    let interviewing = opened(&app, id)
+        .await
+        .grilling_pairing
+        .expect("the fixture picks one per role");
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+
+    let steered: ConversationSteered = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Wrapping",
+            "interrupt": false,
+            "pairing": { "profile_id": picked, "model": "claude-opus-5" },
+        }),
+    )
+    .await;
+
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(
+        view.implementation_pairing
+            .map(|pairing| pairing.profile.id),
+        Some(picked),
+        "what the fixes run under",
+    );
+    assert_eq!(
+        view.review_pairing.map(|pairing| pairing.profile.id),
+        Some(picked),
+        "and what the review runs under, off the same pick",
+    );
+    assert_eq!(
+        view.grilling_pairing.map(|pairing| pairing.profile.id),
+        Some(interviewing.profile.id),
+        "and the role nothing wraps under is exactly where it was",
     );
 }
 
@@ -4744,8 +4840,10 @@ async fn ready_to_adopt(app: &Router, watched: &Path, repo_id: i64, name: &str) 
 
     let grilling = profile(app, watched, "fable").await;
     let implementation = profile(app, watched, "opus").await;
+    let review = profile(app, watched, "haiku").await;
     choose(app, id, "grilling", grilling).await;
     choose(app, id, "implementation", implementation).await;
+    choose(app, id, "review", review).await;
 
     id
 }
@@ -5974,6 +6072,17 @@ async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
         id,
         "implementation",
         profile(&app, watched.path(), "opus").await,
+    )
+    .await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::NoReviewProfile);
+    nothing_adopted(&app, id, &repo).await;
+
+    choose(
+        &app,
+        id,
+        "review",
+        profile(&app, watched.path(), "haiku").await,
     )
     .await;
 

@@ -2,7 +2,7 @@
 //! drawn under the Brief it belongs to.
 //!
 //! The branch the work will be done on, the branch it will come off, the other
-//! repos it works alongside, and the two pairings its sessions run under. Every
+//! repos it works alongside, and the pairings its sessions run under. Every
 //! one of them is a fact about the Conversation rather than about any one Event,
 //! and every one of them is the human's to change for as long as it is still
 //! drafting.
@@ -14,9 +14,10 @@
 //! that moment, so nothing taken away was still actionable, and the card goes
 //! back to being the Brief alone.
 //!
-//! The two pairings are separate choices because they are genuinely separate
-//! accounts — grill on fable, implement on opus — and because the implementation
-//! session cannot simply carry the grilling one on.
+//! The three pairings are separate choices because they are genuinely separate
+//! accounts — grill on fable, implement on opus, review on whatever did not
+//! build it — and because the implementation session cannot simply carry the
+//! grilling one on.
 
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
@@ -35,6 +36,7 @@ import {
   addCompanion,
   chooseGrillingPairing,
   chooseImplementationPairing,
+  chooseReviewPairing,
   listBranches,
   listProfiles,
   listRepos,
@@ -254,6 +256,14 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
                 chosen={props.conversation.implementation_pairing}
                 choose={chooseImplementationPairing}
               />
+              <PairingPicker
+                conversation={props.conversation}
+                saved={saved()}
+                role="review"
+                label="Review"
+                chosen={props.conversation.review_pairing}
+                choose={chooseReviewPairing}
+              />
             </div>
           )}
         </Match>
@@ -264,20 +274,21 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
           or else explains what is missing. Said up here as well it would be the
           same verdict twice.
 
-          An adopting conversation never grills at all, and why both pairings
-          are fixed for it all the same is worth a line. */}
+          An adopting conversation never grills at all, and why every pairing
+          is fixed for it all the same is worth a line. */}
       <Show when={props.conversation.adopting}>
         <Note>
-          Both pairings are fixed before adopting: the implementation one is
-          what the work runs under, and the grilling one is carried, because
-          the stages after this one inherit both from it.
+          All three pairings are fixed before adopting: the implementation one
+          is what the work runs under, the review one is what looks at it, and
+          the grilling one is carried, because the stages after this one inherit
+          all of them from it.
         </Note>
       </Show>
     </section>
   );
 }
 
-/// One of the two choices: which profile-and-model pairing fills this role.
+/// One of the three choices: which profile-and-model pairing fills this role.
 ///
 /// A select rather than a list of buttons, because the pairings are a short list
 /// that barely changes and the choice is one of them — the same control the

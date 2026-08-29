@@ -152,9 +152,10 @@ export function steerRefusal(outcome: ConversationSteered): string {
 ///
 /// `runs` is whether work goes on in that state, which is the one question the
 /// rest of the form follows from: a target something runs in needs a pairing
-/// settled, and one nothing runs in needs none. `role` is which of the two
-/// pairings that is, there being one for the interviewing and one for
-/// everything that builds.
+/// settled, and one nothing runs in needs none. `role` is which pairing that
+/// is, there being one for the interviewing, one for everything that builds and
+/// one for the review — and wrapping up settles the review one alongside the
+/// building one from the same pick, a wrap-up doing both.
 ///
 /// In the order the work goes through them, because that is the order the human
 /// reads the pipeline in everywhere else.
@@ -182,7 +183,7 @@ const TARGETS: {
   {
     target: "Wrapping",
     label: "Wrapping up",
-    note: "The branch looked at again: the checks watched, the review run, the comments answered. The fix attempts start over.",
+    note: "The branch looked at again: the checks watched, the review run, the comments answered. What you pick runs both the fixes and the review. The fix attempts start over.",
     runs: true,
     role: "implementation",
   },

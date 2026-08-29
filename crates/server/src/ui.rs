@@ -239,6 +239,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/implementation-pairing",
             post(choose_implementation_pairing),
         )
+        .route(
+            "/api/ui/conversations/{id}/review-pairing",
+            post(choose_review_pairing),
+        )
         .route("/api/ui/profiles", get(profiles).post(create_profile))
         .route("/api/ui/profiles/{id}", post(edit_profile))
         // Removing is a POST to a route of its own, as closing a Set unanswered
@@ -740,7 +744,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
-    // The two Pairings are read as rows rather than as ids: what the pane says
+    // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
     // reading the Profile list gets.
     let grilling_pairing = match crate::profiles::pairing(
@@ -765,6 +769,16 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading an implementation Pairing failed");
+            return unavailable("the Conversation could not be read");
+        }
+    };
+
+    let review_pairing = match crate::profiles::pairing(&state.watched, conversation.review_pairing)
+        .await
+    {
+        Ok(pairing) => pairing,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a review Pairing failed");
             return unavailable("the Conversation could not be read");
         }
     };
@@ -893,6 +907,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         conversation.state,
         grilling_pairing.as_ref(),
         implementation_pairing.as_ref(),
+        review_pairing.as_ref(),
         brief,
     );
 
@@ -1074,6 +1089,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         adopting,
         grilling_pairing,
         implementation_pairing,
+        review_pairing,
         worktree,
         direction: conversation.direction,
         pinned,
@@ -2211,6 +2227,26 @@ async fn choose_implementation_pairing(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "choosing an implementation Pairing failed");
             unavailable("the implementation pairing could not be chosen")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/review-pairing` — and the one the wrap-up's
+/// review runs under, which is a third separate choice.
+async fn choose_review_pairing(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(choice): Json<ProfileChoice>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
+    };
+
+    match crate::profiles::choose_review(&state.pool, id, &choice).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "choosing a review Pairing failed");
+            unavailable("the review pairing could not be chosen")
         }
     }
 }

@@ -256,8 +256,12 @@ pub struct ConversationView {
     /// because it is genuinely a separate account and model.
     pub implementation_pairing: Option<PairingView>,
 
-    /// Whether everything needed before grilling will start is settled: both
-    /// Pairings complete and neither Profile broken, a Brief with something in
+    /// And the ones the wrap-up's review session will run under, chosen
+    /// separately again: reviewing is a fresh set of eyes on what was built.
+    pub review_pairing: Option<PairingView>,
+
+    /// Whether everything needed before grilling will start is settled: every
+    /// Pairing complete and no Profile broken, a Brief with something in
     /// it, and a Conversation still drafting.
     ///
     /// The server's rule rather than something the page works out from the
@@ -2398,6 +2402,11 @@ pub enum GrillingStarted {
     /// rather than after, because the grilling ends by handing over to it.
     NoImplementationProfile,
 
+    /// Nor for the review the wrap-up runs. Fixed before starting for the same
+    /// reason: what the work is looked at by is settled before the work begins
+    /// rather than swapped underneath it.
+    NoReviewProfile,
+
     /// A chosen Profile's pair is not where it was left, so there is no account
     /// to run the session under.
     ProfileBroken,
@@ -3026,6 +3035,10 @@ pub enum Adopted {
     /// And none is chosen for the implementation, which is what the stage's own
     /// work runs under.
     NoImplementationProfile,
+
+    /// Nor for the review, which is what looks at what the stage built — and
+    /// which every stage after this one inherits along with the other two.
+    NoReviewProfile,
 
     /// A chosen Profile's pair is not where it was left, so there is no account
     /// to run the session under.

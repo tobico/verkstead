@@ -1396,7 +1396,7 @@ async fn grilling_at_pace(
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    bench.under_both_pairings(id).await;
+    bench.under_every_pairing(id).await;
 
     // While it is still drafting, which is the only time a companion can be
     // added or configured — and off the same endpoints the setup card presses.
@@ -1468,14 +1468,14 @@ struct Bench {
 }
 
 impl Bench {
-    /// Fix both Pairings on a Conversation, which is what every one of these
+    /// Fix every Pairing on a Conversation, which is what every one of these
     /// has to have settled before anything will start in it.
     ///
     /// Each role gets a Profile of its own, paired with the first of the models
     /// that Profile lists — see [`profile`], which lists two so that a pick can
     /// move off this one without moving off the Profile.
-    async fn under_both_pairings(&self, id: i64) {
-        for role in ["grilling", "implementation"] {
+    async fn under_every_pairing(&self, id: i64) {
+        for role in ["grilling", "implementation", "review"] {
             let profile = profile(&self.app, self.watched.path(), role).await;
             let chosen: verkstead_render::ProfileChosen = post(
                 &self.app,
@@ -5722,8 +5722,9 @@ async fn the_review_proposes_its_findings_and_then_fixes_what_was_accepted() {
         "inside the bundled reviewing skill: {told}",
     );
     assert!(
-        started[0].contains("model=claude-implementation-5"),
-        "under the implementation Profile, as every session about the code is: {told}",
+        started[0].contains("model=claude-review-5"),
+        "under the review Profile rather than the one that built it, reviewing \
+         being a fresh set of eyes: {told}",
     );
     assert!(
         started[0].contains("The API has none."),
@@ -6832,6 +6833,13 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
         2,
         "one review per wrap, and the second wrap ran its own: {read_again}",
     );
+    assert!(
+        prompts(&read_again)
+            .iter()
+            .all(|prompt| prompt.contains("model=claude-review-5")),
+        "each of them under the review Pairing, the fresh eyes being what a \
+         review is however many times the branch is looked at: {read_again}",
+    );
 
     let pool = open_database(&fixture.database).await.unwrap();
     let events = verkstead_server::store::timeline(&pool, fixture.id)
@@ -7018,6 +7026,13 @@ async fn a_review_that_split_a_finding_out_sends_the_work_back_to_be_built() {
         prompts(&read_again).len(),
         2,
         "one review per wrap, and the second wrap ran its own: {read_again}",
+    );
+    assert!(
+        prompts(&read_again)
+            .iter()
+            .all(|prompt| prompt.contains("model=claude-review-5")),
+        "each of them under the review Pairing, the fresh eyes being what a \
+         review is however many times the branch is looked at: {read_again}",
     );
 
     let view = fixture.view().await;
@@ -11574,7 +11589,7 @@ async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gril
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    bench.under_both_pairings(id).await;
+    bench.under_every_pairing(id).await;
 
     let adopted: Adopted = post(
         &bench.app,

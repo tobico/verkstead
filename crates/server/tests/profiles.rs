@@ -153,7 +153,7 @@ async fn conversation(app: &Router, watched: &Path) -> i64 {
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    // A Brief, because readiness to grill turns on one as well as on the two
+    // A Brief, because readiness to grill turns on one as well as on the
     // Profiles — and what these tests are about is the Profiles. Written here so
     // that every readiness assertion below is answering about them alone.
     let saved: BriefSaved = post(
@@ -189,6 +189,15 @@ async fn choose_implementation(
     post(
         app,
         &format!("/api/ui/conversations/{id}/implementation-pairing"),
+        &serde_json::json!({ "profile_id": profile_id, "model": model }),
+    )
+    .await
+}
+
+async fn choose_review(app: &Router, id: i64, profile_id: i64, model: &str) -> ProfileChosen {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/review-pairing"),
         &serde_json::json!({ "profile_id": profile_id, "model": model }),
     )
     .await
@@ -642,27 +651,34 @@ async fn a_model_the_profile_does_not_list_cannot_be_paired_with_it() {
     assert_eq!(view.implementation_pairing, None);
 }
 
-/// The whole point of the record: a Conversation missing either Pairing is not
+/// The whole point of the record: a Conversation missing any one Pairing is not
 /// something the next stage will grill.
 #[tokio::test]
-async fn a_conversation_is_not_ready_to_grill_until_both_pairings_are_chosen() {
+async fn a_conversation_is_not_ready_to_grill_until_every_pairing_is_chosen() {
     let (watched, _dir, app) = workbench().await;
     let id = conversation(&app, watched.path()).await;
     let fable = saved(&app, watched.path(), "fable").await;
     let opus = saved(&app, watched.path(), "opus").await;
+    let haiku = saved(&app, watched.path(), "haiku").await;
 
     assert!(
         !opened(&app, id).await.ready_to_grill,
-        "a fresh Conversation has chosen neither"
+        "a fresh Conversation has chosen none of them"
     );
 
     choose_grilling(&app, id, fable.id, MODEL).await;
     assert!(
         !opened(&app, id).await.ready_to_grill,
-        "one of the two is not both of them"
+        "one of the three is not all of them"
     );
 
     choose_implementation(&app, id, opus.id, MODEL).await;
+    assert!(
+        !opened(&app, id).await.ready_to_grill,
+        "and neither is two of them: the review is a pick of its own"
+    );
+
+    choose_review(&app, id, haiku.id, MODEL).await;
     assert!(opened(&app, id).await.ready_to_grill);
 }
 
@@ -677,6 +693,7 @@ async fn a_drafting_conversation_with_an_unpaired_profile_is_not_ready_to_grill(
 
     choose_grilling(&app, id, work.id, MODEL).await;
     choose_implementation(&app, id, work.id, MODEL).await;
+    choose_review(&app, id, work.id, MODEL).await;
     assert!(opened(&app, id).await.ready_to_grill);
 
     // The shape an old choice left behind: the Profile, and no model beside it.
@@ -702,9 +719,11 @@ async fn a_conversation_holding_a_broken_profile_is_not_ready_to_grill() {
     let id = conversation(&app, watched.path()).await;
     let fable = saved(&app, watched.path(), "fable").await;
     let opus = saved(&app, watched.path(), "opus").await;
+    let haiku = saved(&app, watched.path(), "haiku").await;
 
     choose_grilling(&app, id, fable.id, MODEL).await;
     choose_implementation(&app, id, opus.id, MODEL).await;
+    choose_review(&app, id, haiku.id, MODEL).await;
     assert!(opened(&app, id).await.ready_to_grill);
 
     std::fs::remove_file(watched.path().join("opus/.claude.json")).unwrap();
@@ -718,16 +737,17 @@ async fn a_conversation_holding_a_broken_profile_is_not_ready_to_grill() {
     assert!(!view.ready_to_grill);
 }
 
-/// The same Profile may fill both roles: they are roles a Profile is used in,
+/// The same Profile may fill every role: they are roles a Profile is used in,
 /// not kinds of Profile.
 #[tokio::test]
-async fn one_profile_can_be_both_of_a_conversations_choices() {
+async fn one_profile_can_be_every_one_of_a_conversations_choices() {
     let (watched, _dir, app) = workbench().await;
     let id = conversation(&app, watched.path()).await;
     let only = saved(&app, watched.path(), "work").await;
 
     choose_grilling(&app, id, only.id, MODEL).await;
     choose_implementation(&app, id, only.id, MODEL).await;
+    choose_review(&app, id, only.id, MODEL).await;
 
     let view = opened(&app, id).await;
     assert_eq!(view.grilling_pairing.map(|p| p.profile.id), Some(only.id));
@@ -735,6 +755,7 @@ async fn one_profile_can_be_both_of_a_conversations_choices() {
         view.implementation_pairing.map(|p| p.profile.id),
         Some(only.id)
     );
+    assert_eq!(view.review_pairing.map(|p| p.profile.id), Some(only.id));
     assert!(view.ready_to_grill);
 }
 
@@ -859,16 +880,18 @@ async fn another(app: &Router) -> i64 {
 }
 
 /// The whole of it: grill once, and the next Conversation on that Repo arrives
-/// with both pickers already filled.
+/// with every picker already filled.
 #[tokio::test]
 async fn a_new_conversation_arrives_with_what_its_repo_was_last_grilled_with() {
     let (watched, dir, app) = workbench().await;
     let id = conversation(&app, watched.path()).await;
     let fable = saved(&app, watched.path(), "fable").await;
     let opus = saved(&app, watched.path(), "opus").await;
+    let haiku = saved(&app, watched.path(), "haiku").await;
 
     choose_grilling(&app, id, fable.id, MODEL).await;
     choose_implementation(&app, id, opus.id, MODEL).await;
+    choose_review(&app, id, haiku.id, MODEL).await;
     grill(dir.path(), id).await;
 
     let next = another(&app).await;
@@ -886,7 +909,11 @@ async fn a_new_conversation_arrives_with_what_its_repo_was_last_grilled_with() {
     assert_eq!(implementation.profile.id, opus.id);
     assert_eq!(implementation.model.as_deref(), Some(MODEL));
 
-    // Real choices rather than a picture of two: with a Brief written, nothing
+    let review = view.review_pairing.expect("and so is the review one");
+    assert_eq!(review.profile.id, haiku.id);
+    assert_eq!(review.model.as_deref(), Some(MODEL));
+
+    // Real choices rather than a picture of three: with a Brief written, nothing
     // else stands between this Conversation and the grilling button.
     let saved: BriefSaved = post(
         &app,

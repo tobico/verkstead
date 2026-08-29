@@ -117,6 +117,9 @@ function Configuration(props: { conversation: ConversationView }): JSX.Element {
         <Fact term="Implementation">
           <Paired pairing={props.conversation.implementation_pairing} />
         </Fact>
+        <Fact term="Review">
+          <Paired pairing={props.conversation.review_pairing} />
+        </Fact>
       </dl>
 
       {/* And the repos this work was let into beside its own, where there are

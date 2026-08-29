@@ -183,6 +183,7 @@ const GRILL_REFUSAL: Record<
   NoGrillingProfile: "Choose a grilling profile and model first, on the brief.",
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
+  NoReviewProfile: "Choose a review profile and model first, on the brief.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   EmptyBrief: "Write the brief first — it is what the grilling starts from.",
@@ -1962,7 +1963,7 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
           fallback={
             <Show when={missing()}>
               <Note>
-                This needs a brief, and both pairings chosen and working.
+                This needs a brief, and every pairing chosen and working.
               </Note>
             </Show>
           }
@@ -2008,7 +2009,7 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 /// that reason.
 ///
 /// The setup rides under it while the Conversation is still drafting — the
-/// branch, the base commit and the two pairings — because setting the work up
+/// branch, the base commit and the pairings — because setting the work up
 /// and kicking it off are one act, and this is where it is kicked off. Once
 /// grilling starts the card is the Brief alone: everything under it froze at
 /// that moment, so there is nothing there to draw.
@@ -2178,7 +2179,7 @@ function Brief(props: {
       </Show>
 
       {/* Under the brief, and only while the conversation is drafting: the
-          branch, the base commit and the two pairings all freeze when grilling
+          branch, the base commit and the pairings all freeze when grilling
           starts, so past that moment there is nothing here that could be
           changed.
 

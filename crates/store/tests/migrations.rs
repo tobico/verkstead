@@ -1420,3 +1420,68 @@ async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() 
     );
     assert_eq!(wrap_up_settled(&pool, id).await.unwrap().len(), 3);
 }
+
+/// A Conversation written before there was a Review role opens with the column
+/// that holds one, unchosen.
+///
+/// Unchosen rather than filled in from what it was built by: what such a
+/// Conversation was reviewed under was the implementation Pairing, and writing
+/// that in would be recording a choice nobody made.
+#[tokio::test]
+async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // The column off, which is the whole of what says this database is one from
+    // before: nothing else about such a Conversation is any different.
+    sqlx::query("ALTER TABLE conversations DROP COLUMN review_profile_id")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let conversation = load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .expect("it opens, which is most of what this is about");
+
+    assert!(
+        conversation.review_pairing.is_none(),
+        "and the picker it arrives with is the one a Conversation with no memory gets",
+    );
+
+    pool.close().await;
+
+    // And a database opened twice is rewritten once: the second run finds the
+    // column there and leaves it alone.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .expect("it opens again")
+            .review_pairing
+            .is_none()
+    );
+}

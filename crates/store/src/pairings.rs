@@ -1,5 +1,5 @@
-//! What a Repo was last grilled with: the two Pairings, remembered against the
-//! Repo so the next Conversation started on it arrives with both pickers
+//! What a Repo was last grilled with: its Pairings, remembered against the
+//! Repo so the next Conversation started on it arrives with every picker
 //! already filled.
 //!
 //! Server-side rather than in the browser, because the workbench is answered
@@ -26,12 +26,13 @@ use super::conversations::Role;
 /// What a Repo was last grilled with, as far as the store can still stand
 /// behind it.
 ///
-/// Either half is `None` where nothing was remembered for that role, or where
+/// Any of them is `None` where nothing was remembered for that role, or where
 /// what was remembered names a Profile that has since gone.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RepoPairings {
     pub grilling: Option<Pairing>,
     pub implementation: Option<Pairing>,
+    pub review: Option<Pairing>,
 }
 
 /// The table the memory lives in.
@@ -71,7 +72,7 @@ pub(crate) async fn remember(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     conversation_id: i64,
 ) -> Result<()> {
-    for role in [Role::Grilling, Role::Implementation] {
+    for role in Role::ALL {
         sqlx::query(&format!(
             "INSERT INTO repo_pairings (repo_id, role, profile_id, model)
              SELECT c.repo_id, ?, c.{}, m.model
@@ -109,6 +110,7 @@ pub async fn remembered_pairings(pool: &SqlitePool, repo_id: i64) -> Result<Repo
     Ok(RepoPairings {
         grilling: remembered(pool, repo_id, Role::Grilling).await?,
         implementation: remembered(pool, repo_id, Role::Implementation).await?,
+        review: remembered(pool, repo_id, Role::Review).await?,
     })
 }
 

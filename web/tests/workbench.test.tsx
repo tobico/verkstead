@@ -3147,7 +3147,7 @@ describe("a conversation's pairings", () => {
     );
   }
 
-  it("shows the two pairings the conversation has chosen", async () => {
+  it("shows the pairings the conversation has chosen", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByLabelText("Grilling"));
@@ -3156,9 +3156,10 @@ describe("a conversation's pairings", () => {
     const implementing = screen.getByLabelText(
       "Implementation",
     ) as HTMLSelectElement;
+    const reviewing = screen.getByLabelText("Review") as HTMLSelectElement;
 
     // Separate choices, and in the fixture genuinely separate accounts: grill on
-    // fable, implement on opus.
+    // fable, implement on opus, review on sonnet.
     expect(grilling.value).toBe(
       pairing(OPEN.grilling_pairing!.profile, OPEN.grilling_pairing!.model!),
     );
@@ -3168,7 +3169,12 @@ describe("a conversation's pairings", () => {
         OPEN.implementation_pairing!.model!,
       ),
     );
-    expect(grilling.value).not.toBe(implementing.value);
+    expect(reviewing.value).toBe(
+      pairing(OPEN.review_pairing!.profile, OPEN.review_pairing!.model!),
+    );
+    expect(
+      new Set([grilling.value, implementing.value, reviewing.value]).size,
+    ).toBe(3);
   });
 
   /// One flat row per profile-and-model combination, labelled with both — a
@@ -3281,14 +3287,14 @@ describe("a conversation's pairings", () => {
     expect(screen.queryByText("Ready to grill.")).toBeNull();
   });
 
-  /// One row where the pane is wide enough for two, which is the stylesheet's
+  /// One row where the pane is wide enough for them, which is the stylesheet's
   /// half of it; what this holds is that they are the one row's to lay out.
-  it("draws the two pickers as a single row", async () => {
+  it("draws the pickers as a single row", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const row = await drawn(container, `.${setup.conversationProfiles} .${setup.pairings}`);
-    expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(2);
+    expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3);
   });
 
   /// A profile whose pair has gone is not one to launch a session under. What is
@@ -10951,7 +10957,7 @@ describe("the configuration on the brief's pane", () => {
     base_commit: "0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e76f32b11a",
   };
 
-  it("says the repo, the branch, the base commit, the worktree and both pairings", async () => {
+  it("says the repo, the branch, the base commit, the worktree and the pairings", async () => {
     theGrilling();
     await openBrief(GRILLING);
 
@@ -10976,6 +10982,7 @@ describe("the configuration on the brief's pane", () => {
       Worktree: GRILLING.worktree!.path,
       Grilling: "fable — claude-fable-5",
       Implementation: "opus — claude-opus-5",
+      Review: "sonnet — claude-sonnet-5",
     });
   });
 

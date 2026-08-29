@@ -174,7 +174,7 @@ async fn start(
     let branch = stage.branch();
     let repo = conversation.repo.path.clone();
 
-    // Both Profiles are the predecessor's: a stage is the same work by the same
+    // Every Profile is the predecessor's: a stage is the same work by the same
     // hands, one branch further on. The implementation one is what the session
     // runs under, and without it there is nothing to run.
     if conversation.implementation_pairing.is_none() {
@@ -747,7 +747,7 @@ fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
 }
 
 /// Give the new Conversation everything a human would have settled before
-/// pressing anything: the two Pairings, the stage brief as its Brief, and the
+/// pressing anything: the Pairings, the stage brief as its Brief, and the
 /// companion repos the work goes on alongside.
 ///
 /// The one inheritance funnel, which is why the companions are here rather than
@@ -755,8 +755,9 @@ fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
 /// have been set up with has to arrive in the one act, and a set copied
 /// somewhere else would be a second place for it to be forgotten.
 ///
-/// The Pairings are the predecessor's, both of them. The implementation one is
-/// what the work runs under; the grilling one is carried across because a stage
+/// The Pairings are the predecessor's, every one of them. The implementation one
+/// is what the work runs under, the review one is what looks at what it built,
+/// and the grilling one is carried across because a stage
 /// steered into a second round later is grilled by whatever the roadmap's work
 /// has been grilled by all along.
 ///
@@ -799,6 +800,11 @@ async fn settle(
             implementation.model.as_deref(),
         )
         .await?;
+    }
+
+    if let Some(review) = &conversation.review_pairing {
+        store::set_review_pairing(&state.pool, id, review.profile.id, review.model.as_deref())
+            .await?;
     }
 
     store::save_brief(&state.pool, id, &stage.brief).await?;

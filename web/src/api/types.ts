@@ -64,7 +64,7 @@ stage_title: string, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -862,8 +862,13 @@ grilling_pairing: PairingView | null,
  */
 implementation_pairing: PairingView | null, 
 /**
- * Whether everything needed before grilling will start is settled: both
- * Pairings complete and neither Profile broken, a Brief with something in
+ * And the ones the wrap-up's review session will run under, chosen
+ * separately again: reviewing is a fresh set of eyes on what was built.
+ */
+review_pairing: PairingView | null, 
+/**
+ * Whether everything needed before grilling will start is settled: every
+ * Pairing complete and no Profile broken, a Brief with something in
  * it, and a Conversation still drafting.
  *
  * The server's rule rather than something the page works out from the
@@ -1140,7 +1145,7 @@ export type Direction = "inline" | "task-list" | "roadmap";
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -1318,7 +1323,7 @@ text_html: string, recommended: boolean,
 cells: Array<string>, };
 
 /**
- * One of a Conversation's two Pairings, as the page shows it: the Profile
+ * One of a Conversation's Pairings, as the page shows it: the Profile
  * whole, and the model paired with it.
  *
  * The Profile whole rather than by id because the pane says what it is and
@@ -1352,7 +1357,7 @@ model: string | null, };
 export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
 /**
- * Which Profile and model a Conversation is pairing for one of its two roles.
+ * Which Profile and model a Conversation is pairing for one of its roles.
  */
 export type ProfileChoice = { profile_id: number, 
 /**

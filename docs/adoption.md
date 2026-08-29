@@ -81,11 +81,13 @@ working directory, is [development.md](development.md#quickstart).
 
 **Once per machine:** register the Repos you work in, and save at least one
 **Agent Profile** — a claude home and config pair, and the models that account
-can run. A Conversation fixes a **Grilling Pairing** and an **Implementation
-Pairing** before it starts — a Profile and one of its models, picked together
-as one row. The same Profile may fill both, and separate ones are how the two
-halves bill to separate accounts. Both are settled while the Conversation is
-drafting, and grilling starting is what fixes them.
+can run. A Conversation fixes a **Grilling Pairing**, an **Implementation
+Pairing** and a **Review Pairing** before it starts — a Profile and one of its
+models, picked together as one row. The same Profile may fill all three, and
+separate ones are how the parts bill to separate accounts. The review one runs
+the wrap-up's review and nothing else, reviewing being a fresh set of eyes on
+what was built. All of them are settled while the Conversation is drafting, and
+grilling starting is what fixes them.
 
 **Then, per piece of work:**
 

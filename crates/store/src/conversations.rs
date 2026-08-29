@@ -169,6 +169,12 @@ pub struct Conversation {
     /// implementation session cannot simply carry the grilling one on.
     pub implementation_pairing: Option<super::Pairing>,
 
+    /// And the ones the wrap-up's review session runs under. A third choice of
+    /// its own for the reason the second is one: reviewing is a fresh set of
+    /// eyes on what was built, so the account that looks at the work is picked
+    /// apart from the account that built it.
+    pub review_pairing: Option<super::Pairing>,
+
     /// Where the Conversation's worktree was put, once grilling has made one.
     ///
     /// `None` before grilling starts and again after closing — the two ways a
@@ -783,7 +789,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              base_commit               TEXT,
              state                     TEXT NOT NULL,
              grilling_profile_id       INTEGER REFERENCES profiles(id),
-             implementation_profile_id INTEGER REFERENCES profiles(id)
+             implementation_profile_id INTEGER REFERENCES profiles(id),
+             review_profile_id         INTEGER REFERENCES profiles(id)
          ) STRICT",
     )
     .execute(pool)
@@ -1245,6 +1252,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         String,
         Option<i64>,
         Option<i64>,
+        Option<i64>,
         i64,
         String,
         String,
@@ -1254,6 +1262,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
     let row: Option<Row> = sqlx::query_as(
         "SELECT c.id, c.created_at, c.branch, c.base_commit, c.state,
                 c.grilling_profile_id, c.implementation_profile_id,
+                c.review_profile_id,
                 r.id, r.path, r.name, r.default_branch
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
@@ -1272,6 +1281,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         state,
         grilling_profile_id,
         implementation_profile_id,
+        review_profile_id,
         repo_id,
         repo_path,
         repo_name,
@@ -1296,6 +1306,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         grilling_pairing: pairing(pool, id, Role::Grilling, grilling_profile_id).await?,
         implementation_pairing: pairing(pool, id, Role::Implementation, implementation_profile_id)
             .await?,
+        review_pairing: pairing(pool, id, Role::Review, review_profile_id).await?,
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
         adopting: adopting(pool, id).await?,
@@ -1376,7 +1387,7 @@ pub async fn adopting(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
     Ok(row.map(|(roadmap,)| roadmap))
 }
 
-/// Which of the two roles a Pairing is being chosen for.
+/// Which of the three roles a Pairing is being chosen for.
 ///
 /// The word the `pairing_models` table holds, and the column the Profile half
 /// goes in — the two halves of one choice, so the role names both rather than
@@ -1385,13 +1396,20 @@ pub async fn adopting(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
 pub enum Role {
     Grilling,
     Implementation,
+    Review,
 }
 
 impl Role {
+    /// Every one of them, in the order the work goes through them: what the
+    /// memory is written from and read back into, so that adding a role is the
+    /// variant and nothing else.
+    pub(crate) const ALL: [Self; 3] = [Self::Grilling, Self::Implementation, Self::Review];
+
     pub(crate) fn stored(self) -> &'static str {
         match self {
             Self::Grilling => "grilling",
             Self::Implementation => "implementation",
+            Self::Review => "review",
         }
     }
 
@@ -1399,6 +1417,7 @@ impl Role {
         match self {
             Self::Grilling => "grilling_profile_id",
             Self::Implementation => "implementation_profile_id",
+            Self::Review => "review_profile_id",
         }
     }
 }
@@ -1421,6 +1440,16 @@ pub async fn set_implementation_pairing(
     model: Option<&str>,
 ) -> Result<Chosen> {
     choose(pool, id, Role::Implementation, profile_id, model).await
+}
+
+/// And the one the wrap-up's review session will run under.
+pub async fn set_review_pairing(
+    pool: &SqlitePool,
+    id: i64,
+    profile_id: i64,
+    model: Option<&str>,
+) -> Result<Chosen> {
+    choose(pool, id, Role::Review, profile_id, model).await
 }
 
 /// Record one of the two choices, both halves of it.
@@ -2617,9 +2646,11 @@ pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<
 /// the whole of why this does not go through [`set_implementation_pairing`] —
 /// see [`settle`].
 ///
-/// `None` is the ordinary case twice over: a target nothing runs in has no
+/// Empty is the ordinary case twice over: a target nothing runs in has no
 /// Pairing to settle, and a human who left the picker on what the Conversation
-/// already had has changed none.
+/// already had has changed none. More than one is a target whose sessions run
+/// under more than one role — a wrap-up builds its fixes and reviews the work —
+/// which the human's one pick settles together.
 ///
 /// **And how the work is being built, where nothing said yet.** Written only
 /// over a Conversation with no direction on it: a state something runs in with
@@ -2648,7 +2679,7 @@ pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<
 pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) -> Result<Steering> {
     let Steer {
         target,
-        pairing,
+        pairings,
         brief,
         instruction,
         direction,
@@ -2807,8 +2838,8 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         .with_context(|| format!("writing the steered round's Brief of Conversation {id}"))?;
     }
 
-    if let Some(pairing) = pairing
-        && !settle(
+    for pairing in pairings {
+        if !settle(
             &mut tx,
             id,
             pairing.role,
@@ -2816,8 +2847,9 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
             Some(pairing.model),
         )
         .await?
-    {
-        return Ok(Steering::NoSuchProfile);
+        {
+            return Ok(Steering::NoSuchProfile);
+        }
     }
 
     tx.commit().await.context("steering a Conversation")?;
@@ -2835,7 +2867,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
 /// wrapping under a Pairing that was not written, or grilling a round whose
 /// Brief did not land, would be a move only half made.
 ///
-/// Everything but the target is `None` in the ordinary case, and each `None`
+/// Everything but the target is absent in the ordinary case, and each absence
 /// says something different: no Brief is a steer into a round that starts on the
 /// Brief already there, no instruction is a steer that carries on what the
 /// branch already holds, no Pairing is a picker left on what the Conversation
@@ -2847,8 +2879,14 @@ pub struct Steer<'a> {
     /// Which state the human moved it into.
     pub target: Lifecycle,
 
-    /// What the work runs under from here, where they picked something new.
-    pub pairing: Option<Settling<'a>>,
+    /// What the work runs under from here, where they picked something new —
+    /// one entry per role the state steered into runs its sessions under, so a
+    /// target that both builds and reviews settles both from the one pick.
+    ///
+    /// Empty is the ordinary case twice over: a target nothing runs in settles
+    /// nothing, and a human who left the picker on what the Conversation
+    /// already had has changed nothing.
+    pub pairings: &'a [Settling<'a>],
 
     /// The new round's Brief, for a steer that opens one.
     pub brief: Option<&'a str>,
@@ -2915,7 +2953,7 @@ pub struct Steer<'a> {
     pub said: Option<&'a str>,
 }
 
-/// A Pairing a steer settles: which of the two roles, and both halves of the
+/// A Pairing a steer settles: which of the roles, and both halves of the
 /// choice.
 ///
 /// The model borrowed rather than owned, this being read straight off what the

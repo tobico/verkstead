@@ -628,6 +628,18 @@ export function chooseImplementationPairing(
   );
 }
 
+/// And the one the wrap-up's review runs under, which is a third separate
+/// choice: reviewing is a fresh set of eyes on what was built.
+export function chooseReviewPairing(
+  id: number,
+  pairing: ProfileChoice,
+): Promise<ProfileChosen> {
+  return post<ProfileChosen>(
+    `/api/ui/conversations/${id}/review-pairing`,
+    pairing,
+  );
+}
+
 /// Whether a newer Verkstead has been released than the one serving this page.
 ///
 /// The server is the side that asks GitHub, once a day, and this hands over
