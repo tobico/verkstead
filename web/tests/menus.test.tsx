@@ -350,12 +350,12 @@ describe("a nested level of a menu", () => {
   });
 });
 
-/// The two ⋯ triggers — the sidebar's and the Conversation's — sit in the same
-/// place in their two pane headers and mean the same thing there, so they are
-/// one button rather than two painted alike. They were two: a rule each, hashed
-/// off a class each, written apart and drifted into two sizes across the
-/// divider between the panes. The mark and the paint under it are the menu's
-/// now, and neither pane says anything about a trigger at all.
+/// The ⋯ at the head of a Conversation, which is the one left of the two that
+/// were: the sidebar's became a gear that opens the settings, being a way into
+/// a pane rather than a menu of things to do. The two of them were a rule each,
+/// hashed off a class each, written apart and drifted into two sizes across the
+/// divider between the panes — so the mark and the paint under it are the
+/// menu's, and the pane that still has one says nothing about a trigger at all.
 describe("the ⋯ at the head of a pane", () => {
   it("is the menu's own mark, not the caller's", () => {
     const { container } = render(() => (
@@ -376,10 +376,10 @@ describe("the ⋯ at the head of a pane", () => {
     );
   });
 
-  /// The point of moving it: neither pane keeps a trigger of its own to drift
-  /// away from the other.
+  /// The point of moving it: the pane keeps no trigger of its own, and the
+  /// sidebar keeps no menu at its head at all.
   it("leaves neither pane a button to paint", () => {
-    expect(sidebar).not.toContain(".workbenchActions > button");
+    expect(sidebar).not.toContain(".workbenchActions");
     expect(actions).not.toContain(".conversationActions > button");
   });
 });
@@ -566,7 +566,6 @@ describe("what every menu is drawn with", () => {
   it("leaves no menu a shadow of its own", () => {
     const callers: [string, string][] = [
       ['.newConversation > [role="menu"]', sidebar],
-      ['.workbenchActions > [role="menu"]', sidebar],
       ['.conversationActions > [role="menu"]', actions],
       ['.standing > [role="menu"]', standing],
     ];

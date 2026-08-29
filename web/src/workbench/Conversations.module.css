@@ -1,13 +1,15 @@
 /* The conversations sidebar: the wordmark over it, the one way to add to the
-   list, and the rows themselves. See `Conversations.tsx`.
+   list, the rows themselves, and the one setting at the foot of them. See
+   `Conversations.tsx`.
 
-   Two of this pane's menus are `Menu`'s — the ⋯ at the head of the pane and the
-   New conversation button — and what is here is their paint rather than their
-   chrome: how they hang and how they are dismissed is `Menu.module.css`. Their
-   trigger and their drop are that component's own elements, so they are reached
-   by what they are rather than by a class this module cannot spell: the trigger
-   is the one button the menu holds directly, and the drop is the one thing in it
-   with a menu's role.
+   The gear at the head of the pane is an `IconButton` and paints itself — see
+   `IconButton.module.css` — so nothing of it is here. What this pane still
+   paints of somebody else's component is the New conversation menu, and only
+   its paint rather than its chrome: how a menu hangs and how it is dismissed is
+   `Menu.module.css`. Its trigger and its drop are that component's own
+   elements, so they are reached by what they are rather than by a class this
+   module cannot spell: the trigger is the one button the menu holds directly,
+   and the drop is the one thing in it with a menu's role.
 
    The mark a waiting card carries is `Mark.module.css`, drawn out of that module
    so that a ring means the same thing in this list that it means on the row the
@@ -42,29 +44,31 @@
   height: 3rem;
 }
 
-/* The ⋯ at the head of the pane is drawn by the menu itself — see `mark` in
-   `Menu.module.css` — so nothing of the button is here. What is left of this
-   menu's own paint is how wide it comes down.
+/* The one setting that is about this list rather than about the rest of
+   Verkstead, at the foot of the pane under the conversations it is about.
 
-   Wider than the one word in it, so it reads as a menu with room for the next
-   entry rather than as a label that happened to appear under the mark. */
-.workbenchActions > [role="menu"] {
-  min-width: 9rem;
-}
+   `margin-top: auto` is the whole of what puts it there. The pane is a column —
+   see `.conversationsPane` in `Panes.module.css` — so the room the list
+   leaves over is taken above this rather than below it: a short list stands the
+   switch against the bottom of the screen, and a long one leaves it after the
+   last card, behind the scroll. Nothing is stuck and nothing is laid over the
+   rows, which is the difference between the foot of a pane and a strip across
+   it.
 
-/* The one row of that menu that is a setting rather than a way out of the pane.
-   Padded to the row above it so the words line up with Settings over them, and
-   held to the width a failure needs to wrap inside. */
+   With a rule over its head, because a control at the end of a list is not the
+   next row of it — the same rule, from the same edge, that parts the roadmaps
+   from the repos above them. */
 .showArchived {
-  padding: 0.4rem 0.6rem;
-  max-width: 15rem;
+  margin-top: auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--edge);
 }
 
-/* Two words and a switch, on one line however narrow the menu is: a label that
-   wrapped would put the switch on a line of its own with nothing to say what it
-   was for. The switch is `Switch.module.css`'s and its label is the span it
-   holds, which is what this reaches — the failure under it is a paragraph of
-   its own and still wraps. */
+/* Two words and a switch, on one line however narrow the pane is dragged: a
+   label that wrapped would put the switch on a line of its own with nothing to
+   say what it was for. The switch is `Switch.module.css`'s and its label is the
+   span it holds, which is what this reaches — the failure under it is a
+   paragraph of its own and still wraps. */
 .showArchived label > span {
   white-space: nowrap;
 }

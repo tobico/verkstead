@@ -1,5 +1,6 @@
 //! Registering a Repo: everything between a path the human typed and a row in
-//! the store.
+//! the store — and taking one off the registry again, which is the store's own
+//! and passes straight through.
 //!
 //! Three things have to be true, and each of them is checked here rather than in
 //! the browser: the path is inside a Watched Path once resolved, it is the root
@@ -16,7 +17,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
-use verkstead_render::Registered;
+use verkstead_render::{Registered, RepoRemoved, RepoView};
 
 use crate::store;
 use crate::watched::{Admission, WatchedPaths};
@@ -108,6 +109,69 @@ pub(crate) async fn branches(pool: &SqlitePool, id: i64) -> Result<Option<Vec<St
     Ok(Some(
         tokio::task::spawn_blocking(move || crate::worktrees::branches(&repo.path)).await?,
     ))
+}
+
+/// One registered Repo opened: everything its card cannot hold.
+///
+/// `None` is a Repo that is not on the registry, which the pane reads as the
+/// repo being gone — a link followed after somebody took it away, or a pane left
+/// open in another tab while they did. Read through
+/// [`store::registered_repo`] for that reason rather than through `load_repo`,
+/// which goes on finding a Repo that was taken away because a Timeline still has
+/// to name it.
+///
+/// The two filesystem reads go together in one blocking task rather than one
+/// apiece: they are both git against the same directory, and a pane is one thing
+/// the human opened rather than two. The counts are the store's and are awaited
+/// beside them.
+///
+/// Nothing here is stored but the three facts the card already carries. The
+/// branches move without Verkstead hearing about it and a roadmap somebody picks
+/// up stops being abandoned the moment they do, so both are asked afresh every
+/// time the pane is opened — a kept copy would be a second opinion that went
+/// wrong on somebody else's push.
+pub(crate) async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView>> {
+    let Some(repo) = store::registered_repo(pool, id).await? else {
+        return Ok(None);
+    };
+
+    let work = store::work_on_repo(pool, id).await?;
+
+    let read = repo.clone();
+    let (branches, roadmaps) = tokio::task::spawn_blocking(move || {
+        (
+            crate::worktrees::branches(&read.path),
+            crate::stages::waiting(&read),
+        )
+    })
+    .await?;
+
+    Ok(Some(RepoView {
+        id: repo.id,
+        name: repo.name,
+        // Stored as UTF-8 in the first place — a path that is not cannot be
+        // registered — so nothing is lost putting it back on the wire.
+        path: repo.path.to_string_lossy().into_owned(),
+        default_branch: repo.default_branch,
+        branches,
+        live: work.live,
+        finished: work.finished,
+        roadmaps,
+    }))
+}
+
+/// Take a Repo off the registry, if nothing live is being worked in it.
+///
+/// An unregistering rather than a delete, and the whole of that is the store's —
+/// see [`store::unregister_repo`]. Nothing here touches the repository itself:
+/// what Verkstead is being told is that it may stop offering it, and the
+/// directory is the human's either way.
+pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<RepoRemoved> {
+    Ok(match store::unregister_repo(pool, id).await? {
+        store::Unregistering::Unregistered => RepoRemoved::Removed,
+        store::Unregistering::NoSuchRepo => RepoRemoved::NoSuchRepo,
+        store::Unregistering::InUse => RepoRemoved::InUse,
+    })
 }
 
 /// The branch a Conversation branches from unless it is told otherwise.

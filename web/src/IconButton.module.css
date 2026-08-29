@@ -1,0 +1,47 @@
+/* The pressable icon, wherever the app draws one — see `IconButton.tsx`.
+
+   Flat until something happens to it, which is what `CardButton.module.css`
+   says about the card this stands beside in the metaphor: what the eye is being
+   asked for is the one that matters — the one under the pointer, and the one
+   whose pane is open — so at rest this is the paper it sits on and the two
+   moments worth saying are the two that take a fill.
+
+   Sized as the ⋯ it replaced at the head of the conversations pane is sized —
+   see `.trigger.mark` in `Menu.module.css` — because it stands in that slot
+   beside the thing the header names, and a mark is what fits there. */
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.4rem;
+  font: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: transparent;
+  /* An edge that is there and cannot be seen, as the card's is: nothing is
+     drawn here, and a button that reserved no edge could not be given one
+     without growing by a pixel the moment it was. */
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+/* The one whose pane is open, said in the fill the open card is said in: this
+   is another thing in the pane that has been selected, and the app should say
+   that one way rather than two. The ink comes up with it, which is what the ⋯
+   did while its own drop was down. */
+.open {
+  color: var(--ink);
+  background: var(--card);
+}
+
+/* Under the pointer, the same fill the open one takes: the open button is
+   already there and does not move under the hand. */
+@media (hover: hover) {
+  .iconButton:not(.open):hover {
+    color: var(--ink);
+    background: var(--card);
+  }
+}

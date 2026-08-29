@@ -1,5 +1,6 @@
-/* The workbench frame: the panes, the grid they stand in, and the line between
-   two of them. See `Workbench.tsx` for what is drawn inside them.
+/* The three-pane frame: the panes, the grid they stand in, and the line between
+   two of them. See `Panes.tsx` for the frame itself, and whichever page hands
+   it its three panes for what is drawn inside them.
 
    A hierarchy rather than three columns that happen to sit together — a
    conversation is picked, then read, then its details are looked at — so a
@@ -7,6 +8,10 @@
    side by side. Which level is showing is `data-pane` on the frame, put there by
    the page; below the first breakpoint it is the whole of what decides what is
    drawn, and above the last it decides nothing.
+
+   The middle pane is named for its place rather than for what stands in it: the
+   workbench reads a Timeline there and the settings page draws its own root,
+   and the frame has no opinion about either.
 
    The panes are always in the document. A pane that was rendered away would
    have to be rebuilt — and its scroll position found again — every time the
@@ -21,7 +26,7 @@
    `PaneHead.tsx`, `Timeline.tsx` and `Screen.tsx` each import this module for
    the ones they need. */
 
-.workbench {
+.panes {
   display: grid;
 }
 
@@ -32,20 +37,46 @@
 
 /* Phone-first, as everything here is: one pane, and it is whichever one the
    page says. */
-.workbench > .pane {
+.panes > .pane {
   display: none;
 }
 
-.workbench[data-pane="conversations"] > .conversationsPane,
-.workbench[data-pane="timeline"] > .timelinePane,
-.workbench[data-pane="details"] > .detailsPane {
+.panes[data-pane="conversations"] > .conversationsPane,
+.panes[data-pane="middle"] > .middlePane,
+.panes[data-pane="details"] > .detailsPane {
   display: block;
+}
+
+/* Except that the conversations pane is a column rather than a block: the list
+   takes the room it needs and whatever is left over is taken above the foot
+   under it — the archived switch, pushed down by a `margin-top: auto` of its
+   own in `Conversations.module.css`. So a list that does not fill the pane
+   leaves the switch against the bottom of it, and one that fills it leaves the
+   switch after the last card, behind the scroll.
+
+   Which way the column runs is said once, off the pane's own name and outside
+   every rule that shows or hides it: the pane is shown by a different rule at
+   each width, and a direction written into one of them would be a direction the
+   other two widths did not have. What each of those rules has to say instead is
+   `flex` where it used to say `block`. */
+.conversationsPane {
+  flex-direction: column;
+}
+
+/* Said after the rule it takes the `display` back off, which is the only place
+   it could win. Here the pane is the whole page, so what it is a column of is
+   the window, and `min-height` is what says so — taken off again above the
+   first breakpoint, where the pane is a cell of a frame that is already exactly
+   that tall. */
+.panes[data-pane="conversations"] > .conversationsPane {
+  display: flex;
+  min-height: 100dvh;
 }
 
 /* The line between two panes, and the handle that moves it.
 
    Only in the document where a layout stands panes side by side — the page puts
-   it there, and takes it away again below the breakpoint where the workbench is
+   it there, and takes it away again below the breakpoint where the frame is
    walked through one pane at a time. So there is no `display: none` here to
    keep in step with the rules that decide which panes are drawn: a divider that
    is drawn is a divider there is something either side of.
@@ -181,11 +212,11 @@
 }
 
 /* From 60rem the window holds the sidebar beside the level being read: the
-   conversations stay, and the second column is the timeline or the details.
+   conversations stay, and the second column is the middle pane or the details.
    Each pane scrolls on its own from here, because two columns of one page's
    scroll would move the list the human is not reading. */
 @media (min-width: 60rem) {
-  .workbench {
+  .panes {
     /* The sidebar, the divider that moves it, and whichever level is being
        read. A share of the window rather than a length: what the human is
        trading away is a part of what they have, and what they have is not the
@@ -197,7 +228,7 @@
     /* And nothing inside it may make the document taller than that. The frame
        is the window's height here, so anything standing past the bottom of it
        is a pane that has got its own height wrong — and left unclipped that
-       becomes page to scroll, which pushes the whole workbench off the screen
+       becomes page to scroll, which pushes the whole frame off the screen
        once the pane the human is reading runs out of its own. Clipped, the
        mistake stays inside the pane it was made in. */
     overflow: hidden;
@@ -211,36 +242,53 @@
     overscroll-behavior: contain;
   }
 
-  .workbench > .conversationsPane {
+  /* The column again, said where this width is what shows the pane. */
+  .panes > .conversationsPane {
+    display: flex;
+  }
+
+  /* And the window's height it asked for while it was the page goes: the pane
+     is a cell of a frame that is already exactly that tall, and asking the
+     viewport for it a second time is what leaves a pane standing a pixel past
+     the bottom of the frame. Written against the selector that set it, which is
+     what it takes to outrank it. */
+  .panes[data-pane="conversations"] > .conversationsPane {
+    min-height: auto;
+  }
+
+  .panes:not([data-pane="details"]) > .middlePane,
+  .panes[data-pane="details"] > .detailsPane {
     display: block;
   }
 
-  .workbench:not([data-pane="details"]) > .timelinePane,
-  .workbench[data-pane="details"] > .detailsPane {
-    display: block;
-  }
-
-  /* And the conversations being on screen is what makes the timeline's way back
-     to them pointless, so it goes. The details pane keeps its own: it is what
-     the second column gives up to. The way back is drawn by `PaneHead`, and
-     wears this name so that the frame can say where one is not needed. */
-  .timelinePane .paneBack {
+  /* And the conversations being on screen is what makes the middle pane's way
+     back to them pointless, so it goes. The details pane keeps its own: it is
+     what the second column gives up to. The way back is drawn by `PaneHead`,
+     and wears this name so that the frame can say where one is not needed. */
+  .middlePane .paneBack {
     display: none;
   }
 }
 
-/* And from 80rem all three stand together, which is the workbench as it is
-   meant to be read: pick, read, and look into. Nothing is anywhere else to go
+/* And from 80rem all three stand together, which is the frame as it is meant
+   to be read: pick, read, and look into. Nothing is anywhere else to go
    to, so the ways between the panes go away — the last of them in
    `PaneHead.module.css`, there being no pane left to name. */
 @media (min-width: 80rem) {
-  .workbench {
+  .panes {
     grid-template-columns:
-      var(--pane-sidebar, 20%) auto var(--pane-timeline, 30%) auto 1fr;
+      var(--pane-sidebar, 20%) auto var(--pane-middle, 30%) auto 1fr;
   }
 
-  .workbench > .pane {
+  .panes > .pane {
     display: block;
+  }
+
+  /* And the conversations pane goes on being the column it is below, said a
+     third time because the rule that shows every pane at this width would
+     otherwise make a block of it again. */
+  .panes > .conversationsPane {
+    display: flex;
   }
 }
 
@@ -264,12 +312,12 @@
    is the window and the window is narrower than the measure — the `max` picks
    the rem the pane always had, and this rule costs nothing. No media query
    needed to say so. */
-.workbench > .detailsPane {
+.panes > .detailsPane {
   padding-inline: max(1rem, (100% - 60rem) / 2);
 }
 
 /* The one exception to that pane: the one with a Screen in it, which is the one
-   pane in the workbench that ends where the window does rather than running on
+   pane in the frame that ends where the window does rather than running on
    down the page. A column: the header and the turn count keep their size and
    the Screen takes the rest, so the terminal is given a height to fit itself to
    — and a live session's terminal is told what it was given, which is why
@@ -288,13 +336,13 @@
    above it, so the window's height is the height it wants and `100dvh` says so.
    Above it, the pane is a cell of a frame that is already exactly that tall, and
    the height comes from the row instead — the same number by a different route,
-   and asking the viewport twice is what put blank page under the workbench: two
+   and asking the viewport twice is what put blank page under the panes: two
    resolutions of one `dvh` that disagree by a pixel leave the pane standing past
    the bottom of the frame, and that pixel is document to scroll.
 
    And the room a scrolling pane leaves under its last line goes, because a pane
    that does not scroll has no use for it. */
-.workbench > .detailsPane:has(.paneScreen) {
+.panes > .detailsPane:has(.paneScreen) {
   flex-direction: column;
   height: 100dvh;
   padding-bottom: 1.25rem;
@@ -306,12 +354,12 @@
    handed the job and stretching an item to its row is what a grid does by
    itself. It is how every other pane here is already the height it is. */
 @media (min-width: 60rem) {
-  .workbench > .detailsPane:has(.paneScreen) {
+  .panes > .detailsPane:has(.paneScreen) {
     height: auto;
   }
 }
 
-.workbench > .detailsPane:has(.paneScreen) > :not(.paneScreen) {
+.panes > .detailsPane:has(.paneScreen) > :not(.paneScreen) {
   flex: none;
 }
 
@@ -320,12 +368,12 @@
    other pane above it. What must not happen is either of them turning into a
    `display` for a pane that is meant to be hidden — so each is answered where
    it is made rather than once over the top of both. */
-.workbench[data-pane="details"] > .detailsPane:has(.paneScreen) {
+.panes[data-pane="details"] > .detailsPane:has(.paneScreen) {
   display: flex;
 }
 
 @media (min-width: 80rem) {
-  .workbench > .detailsPane:has(.paneScreen) {
+  .panes > .detailsPane:has(.paneScreen) {
     display: flex;
   }
 }

@@ -40,6 +40,8 @@ import type {
   PushKey,
   Registered,
   RepoEntry,
+  RepoRemoved,
+  RepoView,
   Response as Decided,
   Resumed,
   RoleChoice,
@@ -136,6 +138,17 @@ export function listRepos(): Promise<RepoEntry[]> {
   return get<RepoEntry[]>("/api/ui/repos");
 }
 
+/// One registered Repo opened, which is what its card in the settings leads to:
+/// what the card shows, plus the branches, how much work is on it and what it
+/// is holding that nothing is driving.
+///
+/// A 404 for an id nothing is registered under, which the pane reads as the
+/// repo being gone rather than as a failure — the same shape a Set that is not
+/// there comes back in.
+export function loadRepo(id: number): Promise<RepoView> {
+  return get<RepoView>(`/api/ui/repos/${id}`);
+}
+
 /// Every branch of one registered Repo, local and remote-tracking both — which
 /// is what a drafting Conversation picks the one it comes off out of.
 ///
@@ -153,6 +166,17 @@ export function listBranches(repoId: number): Promise<string[]> {
 /// the human.
 export function registerRepo(path: string): Promise<Registered> {
   return post<Registered>("/api/ui/repos", { path });
+}
+
+/// Take one off the registry, which is an unregistering rather than a delete:
+/// every Conversation ever started on it goes on naming it, and what changes is
+/// what is offered for new work. There is nothing to send but its own id, which
+/// is in the path.
+///
+/// The outcome is the answer's body for the reason a registration's is: a Repo
+/// with live work on it is refused for a reason worth saying, and not a failure.
+export function removeRepo(id: number): Promise<RepoRemoved> {
+  return post<RepoRemoved>(`/api/ui/repos/${id}/remove`);
 }
 
 /// The registered Repos holding roadmaps nothing is driving.

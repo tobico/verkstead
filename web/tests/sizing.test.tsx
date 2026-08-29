@@ -1,11 +1,13 @@
-//! How wide the workbench's panes stand: the arithmetic underneath it, the
+//! How wide the frame's three panes stand: the arithmetic underneath it, the
 //! dividers that drive it, and where a device remembers what it was left at.
 //!
 //! Two halves, and they are separable on purpose. The widths are shares of the
-//! frame worked out in `src/workbench/panes.ts`, which knows nothing of the
-//! page; what the page adds is a handle to drag, a frame to measure a drag
-//! against, and the rule that neither exists until the window is wide enough to
-//! stand two panes side by side.
+//! frame worked out in `src/widths.ts`, which knows nothing of the page; what
+//! `src/Panes.tsx` adds is a handle to drag, a frame to measure a drag against,
+//! and the rule that neither exists until the window is wide enough to stand
+//! two panes side by side. Mostly it is mounted in the workbench here, that
+//! being the page that had the frame before it was anybody else's; the last
+//! block mounts it bare, which is how the settings page will get it.
 //!
 //! jsdom lays nothing out, so two things are stood in for. Which breakpoints
 //! hold is `matchMedia`, which the page asks rather than infers — so a test can
@@ -13,16 +15,17 @@
 //! element, because a drag is a point on the screen until something measures it
 //! against the thing it is a share of.
 
-import { fireEvent, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The terminal's own scroller, which is the one thing here still written beside
 // the Screen rather than beside the pane it fills.
 import screenCss from "../src/workbench/Screen.module.css?raw";
-// The frame, both ways: the hashed names to query the page by, and the source
-// to read the rules that jsdom lays nothing out for.
-import shell from "../src/workbench/Workbench.module.css";
-import stylesheet from "../src/workbench/Workbench.module.css?raw";
+// The frame itself, and its stylesheet both ways: the hashed names to query the
+// page by, and the source to read the rules that jsdom lays nothing out for.
+import { Panes } from "../src/Panes";
+import shell from "../src/Panes.module.css";
+import stylesheet from "../src/Panes.module.css?raw";
 import {
   ALL_THREE,
   BESIDE,
@@ -35,13 +38,18 @@ import {
   remember,
   restore,
   widths,
-} from "../src/workbench/panes";
+} from "../src/widths";
 import { drawn, mount, theWorkbench } from "./bench";
 
 /// Where the two widths are kept, asked for by the names a browser would find
 /// them under rather than through the module that writes them.
+///
+/// The middle pane's is still the name it was written under, when the frame was
+/// the workbench's alone and that pane was the Timeline. Said here as much as
+/// anywhere: a device that has dragged it has the width under this key, and a
+/// rename would be a width quietly forgotten.
 const SIDEBAR = "verkstead.pane-sidebar";
-const TIMELINE = "verkstead.pane-timeline";
+const MIDDLE = "verkstead.pane-timeline";
 
 /// How wide the frame is pretending to be, in the pixels a drag is reported in.
 /// Round, so that a share of it is a number worth reading in an assertion.
@@ -57,7 +65,7 @@ afterEach(() => {
 });
 
 /// The window this test is being read on, said the only way the page asks:
-/// which of the workbench's two breakpoints hold.
+/// which of the frame's two breakpoints hold.
 function windowIs(width: "narrow" | "two panes" | "three panes"): void {
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: query === BESIDE ? width !== "narrow" : width === "three panes",
@@ -74,7 +82,7 @@ async function bench(width: Parameters<typeof windowIs>[0]) {
   theWorkbench();
 
   const { container } = mount();
-  const frame = await drawn<HTMLElement>(container, `.${shell.workbench}`);
+  const frame = await drawn<HTMLElement>(container, `.${shell.panes}`);
 
   frame.getBoundingClientRect = () =>
     ({ left: 0, right: FRAME, width: FRAME, top: 0, bottom: 0, height: 0 }) as DOMRect;
@@ -100,11 +108,11 @@ describe("the widths a device remembers", () => {
   });
 
   it("reads back what a drag settled on", () => {
-    remember({ sidebar: 34, timeline: 26 });
+    remember({ sidebar: 34, middle: 26 });
 
     expect(localStorage.getItem(SIDEBAR)).toBe("34");
-    expect(localStorage.getItem(TIMELINE)).toBe("26");
-    expect(widths()).toEqual({ sidebar: 34, timeline: 26 });
+    expect(localStorage.getItem(MIDDLE)).toBe("26");
+    expect(widths()).toEqual({ sidebar: 34, middle: 26 });
   });
 
   /// A storage somebody has edited by hand, or one written by a version of this
@@ -120,11 +128,11 @@ describe("the widths a device remembers", () => {
   /// What a double-click on a divider does. Both widths, because what it puts
   /// back is *the defaults*.
   it("gives up both widths at once", () => {
-    remember({ sidebar: 34, timeline: 26 });
+    remember({ sidebar: 34, middle: 26 });
     restore();
 
     expect(localStorage.getItem(SIDEBAR)).toBeNull();
-    expect(localStorage.getItem(TIMELINE)).toBeNull();
+    expect(localStorage.getItem(MIDDLE)).toBeNull();
     expect(widths()).toEqual(DEFAULTS);
   });
 });
@@ -134,52 +142,52 @@ describe("how far a divider goes", () => {
   /// every one of them keeps a floor — and with all three standing, each floor
   /// has to fit beside the others.
   it("leaves every pane something to be, with all three standing", () => {
-    expect(clamped({ sidebar: 90, timeline: 90 }, true)).toEqual({
-      sidebar: 100 - MINIMUMS.timeline - MINIMUMS.details,
-      timeline: MINIMUMS.timeline,
+    expect(clamped({ sidebar: 90, middle: 90 }, true)).toEqual({
+      sidebar: 100 - MINIMUMS.middle - MINIMUMS.details,
+      middle: MINIMUMS.middle,
     });
 
-    expect(clamped({ sidebar: 1, timeline: 1 }, true)).toEqual({
+    expect(clamped({ sidebar: 1, middle: 1 }, true)).toEqual({
       sidebar: MINIMUMS.sidebar,
-      timeline: MINIMUMS.timeline,
+      middle: MINIMUMS.middle,
     });
   });
 
   /// With two panes up the second column is whichever level is being read and
-  /// takes whatever the sidebar leaves, so the timeline's width decides nothing
-  /// — and a sidebar dragged wide here must not quietly rewrite the layout it
-  /// is not in.
-  it("leaves the timeline's width alone while only two panes stand", () => {
-    expect(clamped({ sidebar: 95, timeline: 30 }, false)).toEqual({
+  /// takes whatever the sidebar leaves, so the middle pane's width decides
+  /// nothing — and a sidebar dragged wide here must not quietly rewrite the
+  /// layout it is not in.
+  it("leaves the middle pane's width alone while only two panes stand", () => {
+    expect(clamped({ sidebar: 95, middle: 30 }, false)).toEqual({
       sidebar: 100 - MINIMUMS.details,
-      timeline: 30,
+      middle: 30,
     });
   });
 
   /// The sidebar's divider says where the sidebar ends, so where it is dropped
-  /// is the width. The timeline's says where the timeline ends, which is a
+  /// is the width. The middle one's says where the middle pane ends, which is a
   /// share of the whole frame rather than of what is left of it.
   it("reads a drop as the pane it is the far edge of", () => {
-    const settled = { sidebar: 20, timeline: 30 };
+    const settled = { sidebar: 20, middle: 30 };
 
     expect(dragged(settled, "sidebar", 34, true).sidebar).toBe(34);
-    expect(dragged(settled, "timeline", 55, true).timeline).toBe(35);
+    expect(dragged(settled, "middle", 55, true).middle).toBe(35);
   });
 
   /// And the travel said out loud, which is what the handle carries: with all
-  /// three up the sidebar has to leave room for the timeline as well as the
+  /// three up the sidebar has to leave room for the middle pane as well as the
   /// details, and with two it only has to leave room for what is being read.
   it("says how far it may go", () => {
     expect(range("sidebar", DEFAULTS, true)).toEqual({
       least: MINIMUMS.sidebar,
-      most: 100 - MINIMUMS.timeline - MINIMUMS.details,
+      most: 100 - MINIMUMS.middle - MINIMUMS.details,
     });
     expect(range("sidebar", DEFAULTS, false)).toEqual({
       least: MINIMUMS.sidebar,
       most: 100 - MINIMUMS.details,
     });
-    expect(range("timeline", DEFAULTS, true)).toEqual({
-      least: MINIMUMS.timeline,
+    expect(range("middle", DEFAULTS, true)).toEqual({
+      least: MINIMUMS.middle,
       most: 100 - DEFAULTS.sidebar - MINIMUMS.details,
     });
   });
@@ -188,19 +196,19 @@ describe("how far a divider goes", () => {
     expect(nudged(DEFAULTS, "sidebar", 1, true).sidebar).toBe(
       DEFAULTS.sidebar + 1,
     );
-    expect(nudged(DEFAULTS, "timeline", -1, true).timeline).toBe(
-      DEFAULTS.timeline - 1,
+    expect(nudged(DEFAULTS, "middle", -1, true).middle).toBe(
+      DEFAULTS.middle - 1,
     );
 
     // And stops where a drag stops.
-    expect(nudged({ sidebar: MINIMUMS.sidebar, timeline: 30 }, "sidebar", -1, true))
-      .toEqual({ sidebar: MINIMUMS.sidebar, timeline: 30 });
+    expect(nudged({ sidebar: MINIMUMS.sidebar, middle: 30 }, "sidebar", -1, true))
+      .toEqual({ sidebar: MINIMUMS.sidebar, middle: 30 });
   });
 });
 
 describe("the dividers on the workbench", () => {
   /// One per border there is: the sidebar's wherever the sidebar stands beside
-  /// something, the timeline's only where all three panes are up, and neither
+  /// something, the middle one's only where all three panes are up, and neither
   /// on a window that shows one pane at a time.
   it("puts a handle on every border there is", async () => {
     const three = await bench("three panes");
@@ -220,19 +228,19 @@ describe("the dividers on the workbench", () => {
   /// breakpoint the page is walked through one pane at a time and what this
   /// device remembers about a desktop's columns is not read at all.
   it("names the widths on the frame only where panes stand together", async () => {
-    remember({ sidebar: 34, timeline: 26 });
+    remember({ sidebar: 34, middle: 26 });
 
     const wide = await bench("three panes");
     expect(wide.frame.style.getPropertyValue("--pane-sidebar")).toBe("34%");
-    expect(wide.frame.style.getPropertyValue("--pane-timeline")).toBe("26%");
+    expect(wide.frame.style.getPropertyValue("--pane-middle")).toBe("26%");
 
     const narrow = await bench("narrow");
     expect(narrow.frame.style.getPropertyValue("--pane-sidebar")).toBe("");
-    expect(narrow.frame.style.getPropertyValue("--pane-timeline")).toBe("");
+    expect(narrow.frame.style.getPropertyValue("--pane-middle")).toBe("");
   });
 
   it("starts where this device left the panes", async () => {
-    remember({ sidebar: 40, timeline: 25 });
+    remember({ sidebar: 40, middle: 25 });
 
     const { frame } = await bench("three panes");
     expect(frame.style.getPropertyValue("--pane-sidebar")).toBe("40%");
@@ -248,14 +256,14 @@ describe("the dividers on the workbench", () => {
     );
     expect(localStorage.getItem(SIDEBAR)).toBe("35");
 
-    // The second divider is the far edge of the timeline rather than of what is
-    // left of the frame, so the sidebar comes off where it was dropped.
+    // The second divider is the far edge of the middle pane rather than of
+    // what is left of the frame, so the sidebar comes off where it was dropped.
     dragTo(dividers(container)[1]!, FRAME * 0.6);
 
     await waitFor(() =>
-      expect(frame.style.getPropertyValue("--pane-timeline")).toBe("25%"),
+      expect(frame.style.getPropertyValue("--pane-middle")).toBe("25%"),
     );
-    expect(localStorage.getItem(TIMELINE)).toBe("25");
+    expect(localStorage.getItem(MIDDLE)).toBe("25");
   });
 
   it("holds the minimum however far the pointer goes", async () => {
@@ -265,7 +273,7 @@ describe("the dividers on the workbench", () => {
 
     await waitFor(() =>
       expect(frame.style.getPropertyValue("--pane-sidebar")).toBe(
-        `${100 - MINIMUMS.timeline - MINIMUMS.details}%`,
+        `${100 - MINIMUMS.middle - MINIMUMS.details}%`,
       ),
     );
 
@@ -279,7 +287,7 @@ describe("the dividers on the workbench", () => {
   });
 
   it("puts the defaults back on a double-click", async () => {
-    remember({ sidebar: 40, timeline: 25 });
+    remember({ sidebar: 40, middle: 25 });
 
     const { container, frame } = await bench("three panes");
     fireEvent.dblClick(dividers(container)[0]!);
@@ -289,11 +297,11 @@ describe("the dividers on the workbench", () => {
         `${DEFAULTS.sidebar}%`,
       ),
     );
-    expect(frame.style.getPropertyValue("--pane-timeline")).toBe(
-      `${DEFAULTS.timeline}%`,
+    expect(frame.style.getPropertyValue("--pane-middle")).toBe(
+      `${DEFAULTS.middle}%`,
     );
     expect(localStorage.getItem(SIDEBAR)).toBeNull();
-    expect(localStorage.getItem(TIMELINE)).toBeNull();
+    expect(localStorage.getItem(MIDDLE)).toBeNull();
   });
 
   /// A handle nobody can put a pointer on is still a handle, so the arrow keys
@@ -315,7 +323,7 @@ describe("the dividers on the workbench", () => {
   /// it: a separator with the share of the workbench it decides on it.
   it("says what it is and where it stands", async () => {
     const { container } = await bench("three panes");
-    const [sidebar, timeline] = dividers(container);
+    const [sidebar, middle] = dividers(container);
 
     expect(sidebar!.getAttribute("role")).toBe("separator");
     expect(sidebar!.getAttribute("aria-orientation")).toBe("vertical");
@@ -326,13 +334,13 @@ describe("the dividers on the workbench", () => {
       String(MINIMUMS.sidebar),
     );
     expect(sidebar!.getAttribute("aria-valuemax")).toBe(
-      String(100 - MINIMUMS.timeline - MINIMUMS.details),
+      String(100 - MINIMUMS.middle - MINIMUMS.details),
     );
 
-    expect(timeline!.getAttribute("aria-valuenow")).toBe(
-      String(DEFAULTS.timeline),
+    expect(middle!.getAttribute("aria-valuenow")).toBe(
+      String(DEFAULTS.middle),
     );
-    expect(timeline!.getAttribute("aria-valuemax")).toBe(
+    expect(middle!.getAttribute("aria-valuemax")).toBe(
       String(100 - DEFAULTS.sidebar - MINIMUMS.details),
     );
   });
@@ -347,7 +355,7 @@ describe("the rules the widths are read by", () => {
     );
     expect(stylesheet).toContain(
       "grid-template-columns:\n" +
-        "      var(--pane-sidebar, 20%) auto var(--pane-timeline, 30%) auto 1fr;",
+        "      var(--pane-sidebar, 20%) auto var(--pane-middle, 30%) auto 1fr;",
     );
 
     // The breakpoints the page asks `matchMedia` about are the ones the rules
@@ -388,14 +396,14 @@ describe("the rules the widths are read by", () => {
   /// it has.
   it("caps the details pane's content at the page's own measure", () => {
     expect(stylesheet).toContain(
-      ".workbench > .detailsPane {\n" +
+      ".panes > .detailsPane {\n" +
         "  padding-inline: max(1rem, (100% - 60rem) / 2);\n}",
     );
 
     // And the pane a terminal fills is still the pane that ends where the
     // window does: the cap is inline, and says nothing about a height.
     expect(stylesheet).toContain(
-      ".workbench > .detailsPane:has(.paneScreen) {\n" +
+      ".panes > .detailsPane:has(.paneScreen) {\n" +
         "  flex-direction: column;\n" +
         "  height: 100dvh;\n",
     );
@@ -430,7 +438,7 @@ describe("the rules the widths are read by", () => {
     // is the only place it could win.
     expect(stylesheet).toContain(
       `@media ${BESIDE} {\n` +
-        "  .workbench > .detailsPane:has(.paneScreen) {\n" +
+        "  .panes > .detailsPane:has(.paneScreen) {\n" +
         "    height: auto;\n  }\n}",
     );
 
@@ -438,6 +446,63 @@ describe("the rules the widths are read by", () => {
     expect(screenCss).toMatch(
       /\.screen \.terminalHost \{[^}]*overscroll-behavior: contain;/,
     );
+  });
+});
+
+/// The frame apart from the page that had it first: it draws three panes it is
+/// handed and knows nothing about what is in them, which is what lets the
+/// settings page stand on the same one.
+describe("the frame on its own", () => {
+  it("draws the three panes it is handed, in the order they are walked", () => {
+    windowIs("three panes");
+
+    const { container } = render(() => (
+      <Panes
+        pane="middle"
+        middleLabel="Settings"
+        conversations={<p>the list</p>}
+        middle={<p>the root</p>}
+        details={<p>the detail</p>}
+      />
+    ));
+
+    const panes = [...container.querySelectorAll("section")];
+
+    expect(panes.map((pane) => pane.getAttribute("aria-label"))).toEqual([
+      "Conversations",
+      "Settings",
+      "Details",
+    ]);
+    expect(panes.map((pane) => pane.textContent)).toEqual([
+      "the list",
+      "the root",
+      "the detail",
+    ]);
+
+    // And which level a narrow window would be showing is the caller's word for
+    // it, carried through untouched.
+    const frame = container.querySelector<HTMLElement>(`.${shell.panes}`)!;
+    expect(frame.dataset.pane).toBe("middle");
+  });
+
+  /// The middle pane is the only one whose name changes from page to page, so
+  /// the handle beside it says which pane it moves in the page's own words.
+  it("names the middle divider after what the pane holds", () => {
+    windowIs("three panes");
+
+    const { container } = render(() => (
+      <Panes
+        pane="middle"
+        middleLabel="Settings"
+        conversations={<p>the list</p>}
+        middle={<p>the root</p>}
+        details={<p>the detail</p>}
+      />
+    ));
+
+    expect(
+      dividers(container).map((divider) => divider.getAttribute("aria-label")),
+    ).toEqual(["Resize the conversations pane", "Resize the settings pane"]);
   });
 });
 

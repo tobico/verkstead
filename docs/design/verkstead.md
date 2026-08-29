@@ -126,12 +126,16 @@ flowchart LR
   2026-08-29, refining rescues*).
 - **Agent profiles** are minimal: name, claude home dir + config file pair, the
   list of models that account can run — plus an agent-type discriminator so
-  other backends can slot in later (claude is the only type now). The model
+  other backends can slot in later. The model
   list is the profile's own rather than one list shared by all of them, and it
   has no default entry: the profile says what is available and the pick is made
   where a session is set up. Account separation works as in the
   current scripts: the profile's pair is bind-mounted at `~/.claude` /
-  `~/.claude.json` inside the sandbox.
+  `~/.claude.json` inside the sandbox. *Which backends, settled 2026-08-29 in
+  [ADR-0011](../adr/0011-agent-backends.md)*: Codex, Grok Build and OpenCode
+  spend the other three slots, each at full parity. A new-type profile stores
+  **one** home directory rather than claude's pair — the whole account lives
+  under it — and the form offers a type only once its stage has landed.
 - **Pairings.** What runs a conversation's sessions is a profile *and* one of
   that profile's models, picked together. Each conversation fixes **two** of
   them before grilling starts: one for grilling, one for implementation work
@@ -430,7 +434,11 @@ flowchart LR
   2026-08-20 building stage 02*: they ride inside the binary as the viewer
   does, are written out under the data directory at startup — replacing
   whatever an earlier binary left — and every sandbox binds that directory
-  read-only over `~/.claude/skills`, hiding any the account itself keeps. What
+  read-only over `~/.claude/skills`, hiding any the account itself keeps.
+  *Where, refined 2026-08-29 in [ADR-0011](../adr/0011-agent-backends.md)*:
+  the mount moves to `/verkstead/skills`, a path no backend owns, and an empty
+  directory is bound over `~/.claude/skills` in its place so the hiding is
+  kept. What
   puts a session *inside* a skill is the prompt: installing one is not invoking
   one, and a sandbox has no global `CLAUDE.md` to say what the session is for,
   so the prompt names the skill by path above the Brief and the skill carries
@@ -451,8 +459,19 @@ flowchart LR
 
 ## UI
 
-Fully responsive 3-pane hierarchy: conversations list → timeline of the
-selected conversation → details pane of the selected event.
+Fully responsive 3-pane hierarchy: pick, read, look into. On the workbench that
+is conversations list → timeline of the selected conversation → details pane of
+the selected event; on the settings it is the same conversations list → the
+settings themselves → whichever of them is being rewritten.
+
+**The frame is one shared component and both pages stand on it** (*settled
+2026-08-29, building settings-redesign*): the grid, the dividers, the widths and
+the one-pane walk are the frame's, and what stands in each pane is the page's.
+The conversations list rides along everywhere because it is the app's navigation
+rather than the workbench's furniture — configuring a machine is done *while*
+work is going on, and a settings page that took the list away made the human
+leave it to see whether anything had moved. The two pages share one pair of
+remembered widths per device rather than a pair each.
 
 The panes are resizable where they stand side by side (*settled 2026-08-24,
 building workbench-refit*). Widths are shares of the window rather than fixed
@@ -473,6 +492,31 @@ Event; the backlog and the roadmap are the exceptions, being read off the
 worktree rather than recorded, so their cards name them by a word where every
 other card names an id — the roadmap carrying its own directory name, a worktree
 being allowed any number of roadmaps where it has one `.tasks/`.
+
+**Every details pane has a path of its own** (*settled 2026-08-29, building
+settings-redesign*), nested under the Conversation — `events/:id`, `backlog`,
+`roadmaps/:name` — or under `/settings` — `github`, `profiles/:id`, `repos/:id`,
+with `new` standing where an id stands for the two that add one. The ids sit
+behind a segment of their own so they can never be read as the panes named by a
+word beside them. Selection is derived from the URL rather than held beside it,
+so a pane survives being navigated away from and can be linked to. **Page-level
+navigations push and detail changes replace**: entering a Conversation or the
+settings is a page, walking between the details of one is not, so Back from a
+details pane leaves what it was nested under rather than stepping back through
+everything that was looked at.
+
+**Opening a conversation lands on the end of its record** (*settled 2026-08-29,
+building settings-redesign*): the last event that has a pane behind it is
+selected and the URL is rewritten to its path, so the human arrives at where the
+work got to. The *last openable* one, because a record very often ends on
+something with nothing to show — a move, a manual task, a steer that carried no
+document. It is the page's rather than the card's — the sidebar has no timeline
+to pick from — and it happens only where the path names no pane already: a cold
+load of a details pane keeps its own selection. The timeline follows its bottom
+the way a running session's output does — pinned to the end until the human
+scrolls up, and again once they come back down. A phone lands on the timeline
+with the newest thing marked open, never carried past the record into the
+details.
 
 What a Conversation needs settling before it runs — branch, base commit, both
 Pairings, the readiness verdict — rides under the Brief on its timeline card
@@ -566,7 +610,16 @@ Timeline events:
   choice, on escape and on a press outside it, and hands the focus to the first
   Repo as it opens.
 - **Sidebar is manually ordered**; conversations needing attention carry a
-  marker icon and border.
+  marker icon and border. At its head a gear opens the settings and reads as
+  open while they are what is being looked at, and at its foot — pushed down by
+  the room the list leaves over, so it stands against the bottom of a short list
+  and after the last card of a long one — is the archived switch. Both were rows
+  of a ⋯ menu until the gear replaced it (*settled 2026-08-29, building
+  settings-redesign*): a menu of one way out and one switch is a press with a
+  press in front of it, and the gear is the same kind of thing the cards below
+  it are — something in this pane that is selected and opened into the pane
+  beside it. The ⋯ at the head of a Conversation's timeline is a different menu
+  and stays.
 - **Push notifications** for needs-you — a blocking question set, a stop
   Verkstead decided on, an exhausted usage window among them — **and
   milestones** (PR opened, stage complete, conversation done). A stop nobody
@@ -589,6 +642,23 @@ Timeline events:
   their own until they were folded in here — all of it is settled once and then
   left alone, and `/profiles` and `/repos` are no such page now rather than
   redirects.
+- **The page is read as cards and panes** (*settled 2026-08-29, building
+  settings-redesign*). Everything on it that used to open a modal is a card in
+  the middle pane and a details pane beside it: the credentials as one github
+  card, each Agent Profile, each registered Repo — and the shared Rust build
+  cache, whose card says how it stands and whose pane holds the switch and the
+  size. What is on a card is what a list is scanned for and the rest is in the
+  pane — a Profile's mounted paths, agent type and Remove; a Repo's branches,
+  how much work is on it and what it is holding that nothing is driving; the
+  cache's switch and the size of its compiled half. Adding one is a plus icon on
+  the section's heading line, which opens the same pane blank and reads as open
+  while it stands. The two switches that are about the device and the server
+  rather than about anything configured stay as they were: notifications on the
+  pane head's line, and the update banner above everything.
+- **A Repo can be taken off the registry** from its own pane (*settled
+  2026-08-29, building settings-redesign*) — an unregistering rather than a
+  delete, refused while live work is on it. See **Repo** in `CONTEXT.md` for
+  what that means and what it leaves alone.
 
 ## Build and migration
 

@@ -1,0 +1,25 @@
+{
+  "branches": [
+    "main"
+  ],
+  "default_branch": "main",
+  "finished": 2,
+  "id": 1,
+  "live": 1,
+  "name": "verkstead",
+  "path": "/srv/repos/verkstead",
+  "roadmaps": [
+    {
+      "name": "mvp",
+      "stage": "04",
+      "stage_title": "Wrap-up",
+      "title": "MVP roadmap"
+    },
+    {
+      "name": "public-release",
+      "stage": "01",
+      "stage_title": "Packaging",
+      "title": "Public release roadmap"
+    }
+  ]
+}

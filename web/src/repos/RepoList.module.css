@@ -1,10 +1,15 @@
-/* The Repos section of the settings page: the list of what is registered, and
-   the form that adds to it — see `RepoList.tsx`.
+/* The Repos section of the settings page: the cards for what is registered, the
+   pane one of them opens, and the pane that adds another — see `RepoList.tsx`.
 
-   The Agent Profiles above are the same card read the same way, and their
-   module carries a copy of it rather than either of them sharing one: two
-   lists that look alike today are still two lists, and a rule they held in
-   common would make every change to one a decision about the other.
+   What a card *is* is `CardButton.module.css`'s, shared with every other card in
+   the app: the surface, and what it does under the pointer where anything is
+   behind it. What is here is only what stands on it. The boxed rows this section
+   drew are gone — the box was a second opinion about what a card looks like.
+
+   The Agent Profiles above are the same card read the same way, and their module
+   carries a copy of it rather than either of them sharing one: two lists that
+   look alike today are still two lists, and a rule they held in common would
+   make every change to one a decision about the other.
 
    The heading each section of this page is topped with is `sectionHead`, page
    vocabulary rather than this module's: it is defined once in `App.module.css`
@@ -19,32 +24,39 @@
   font-size: 1.1rem;
 }
 
+/* The plus that opens the form, on the heading's line. Centred on that line
+   rather than sitting on its baseline, which is what the heading beside it is
+   aligned by: the button is an icon with no text of its own, so a baseline would
+   hang it below the words rather than beside them. */
+.add {
+  align-self: center;
+}
+
 .list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  /* Close, because the cards are flat: what separates two of them is the
+     padding they each already carry, and a gap wide enough for boxes would leave
+     a list of them reading as scattered. */
+  gap: 0.25rem;
 }
 
-/* A registered repo is a list row with nowhere to go yet, so the card is the
-   row's own rather than a link's. */
-.row > div {
+/* What stands on the card — the name, and under it the two things a repo is
+   checked by. A column, because a card is read down. */
+.repo {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  padding: 0.85rem 1rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
 }
 
-.row .title {
+.repo .title {
   font-weight: 600;
 }
 
-.row .meta {
+.repo .meta {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem 0.75rem;
@@ -52,22 +64,21 @@
   color: var(--ink-soft);
 }
 
-/* The two things on the meta line that are quoted rather than said: a path the
-   filesystem knows by, and the branch name git does. */
-.row .path,
-.row .branch {
+/* What is quoted rather than said, wherever it stands: a path the filesystem
+   knows by, and the branch names git does. On the card's meta line, and again
+   in the pane that card opens. */
+.repo .path,
+.repo .branch,
+.facts .path,
+.facts .branch,
+.branchList .branch {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
 /* Registering a repo: a path typed, and the button that sends it. The label
-   stands over the field, because what has to be understood before typing is
-   that the path is an absolute one — and the whole of it is drawn over the page
-   as a modal, so the box around it is the card the modal already draws. */
-.form h3 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-}
-
+   stands over the field, because what has to be understood before typing is that
+   the path is an absolute one. It is the details pane now rather than a modal
+   over the page, so there is nothing around it but the pane's own head. */
 .form label {
   display: block;
   margin-bottom: 0.35rem;
@@ -109,13 +120,6 @@
   opacity: 0.65;
 }
 
-/* The one button that undoes rather than does, drawn as the outline of the one
-   beside it — as the profile form's cancel is. */
-.buttons .cancel {
-  color: var(--accent);
-  background: none;
-}
-
 .form .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
@@ -127,9 +131,8 @@
   border-color: var(--accent);
 }
 
-/* And under the pointer: the field darkens its border, the add deepens the
-   accent it is filled with, and the cancel's outline takes the accent its words
-   are already in. */
+/* And under the pointer: the field darkens its border, and the register deepens
+   the accent it is filled with. */
 @media (hover: hover) {
   .form input:hover {
     border-color: var(--ink-soft);
@@ -139,9 +142,149 @@
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }
+}
 
-  .buttons .cancel:not(:disabled):hover {
-    background: none;
-    border-color: var(--accent);
+/* One Repo opened: the facts under its name, the branches git has, and the
+   roadmaps waiting in it. Read down as three blocks with air between them,
+   because each answers a different question about the same repository. */
+.opened {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* The named short answers: a column of labels with the answers under them
+   rather than a two-column grid, because a path is long and a grid would either
+   wrap it into a strip or push the labels off the left of a phone. */
+.facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.facts dt {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.facts dd {
+  margin: 0.2rem 0 0;
+  /* A path has no spaces to break at, so it is broken wherever it has to be
+     rather than pushing the pane sideways. */
+  overflow-wrap: anywhere;
+}
+
+/* The two counts on one line, which is how they are read: what is on this Repo
+   now, and what has been. */
+.counted {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+}
+
+/* What is going on it now reads first, and what is over reads quietly beside
+   it: the two are the same sentence, and only one of them is news. */
+.counted .live {
+  font-weight: 600;
+}
+
+.counted .finished {
+  color: var(--ink-soft);
+}
+
+.branches h2,
+.roadmaps h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+}
+
+.branchList,
+.roadmapList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* Branch names wrap as a run rather than a column: there may be a great many of
+   them, and what they are read for is finding one. */
+.branchList {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+}
+
+.roadmap {
+  display: flex;
+  flex-direction: column;
+}
+
+.roadmap .title {
+  font-weight: 600;
+}
+
+/* Which stage adopting it would start, said under the roadmap's own name. */
+.roadmap .stage {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The one press there is to make about a Repo, under everything the pane says
+   about it. Set well below the facts and behind a rule, the way the Profile
+   pane's Remove is: a press that undoes something, standing in among the things
+   it would undo, is one waiting to be made by mistake. */
+.standing {
+  margin-top: 0.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--edge);
+}
+
+/* What removing one actually does, said before it is done: an unregistering
+   rather than a delete, which is the difference between a list getting shorter
+   and work going missing. */
+.standing .note {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Drawn as an outline rather than as the filled button the register is — the
+   way the Profile pane's Remove is, and for the same reason: it undoes rather
+   than does. */
+.actions .remove {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--removed);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.actions .remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.standing .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* And under the pointer, which is the only thing it says before it is pressed:
+   the edge takes the colour the words already have. */
+@media (hover: hover) {
+  .actions .remove:not(:disabled):hover {
+    border-color: var(--removed);
   }
 }

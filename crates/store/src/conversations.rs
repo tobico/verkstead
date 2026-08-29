@@ -1143,11 +1143,15 @@ async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
 /// test naming its Conversation means. A name nobody has had to think of yet
 /// goes in through [`start_unnamed_conversation`] instead.
 ///
-/// `None` means there is no such Repo. The insert selects from `repos` rather
-/// than trusting the id, so a Conversation cannot come to hang off a repository
-/// that was never registered — SQLite does not enforce a foreign key unless it
-/// is asked to, and a row that named nothing would be a Conversation with
-/// nowhere to work.
+/// `None` means there is no Repo on the registry with that id — one that never
+/// existed, and one somebody has taken away, which are one answer because
+/// neither is a repository new work may be put in. The insert selects from
+/// `repos` rather than trusting the id, so a Conversation cannot come to hang
+/// off a repository that was never registered — SQLite does not enforce a
+/// foreign key unless it is asked to, and a row that named nothing would be a
+/// Conversation with nowhere to work. A Repo that has been taken off the
+/// registry falls out of that same `SELECT`, so the removal holds against a
+/// press made from a list that has not heard about it yet.
 ///
 /// The Brief goes in with it, in the same transaction: the Brief is the first
 /// Event, and a Conversation whose Timeline was empty because the second insert
@@ -1227,6 +1231,12 @@ async fn started(
 ) -> Result<Option<i64>> {
     let mut tx = super::writing(pool, "starting a Conversation").await?;
 
+    // The registry is asked in the insert's own `SELECT` rather than before it,
+    // for the reason the path's uniqueness is left to the index: a look taken
+    // first is a look something can get past. A Repo that has been taken off the
+    // registry falls out here, so a sidebar that has not heard about the removal
+    // cannot start work in a repository Verkstead has stopped offering.
+    //
     // The name goes in both columns where it is settled: the prefill is what
     // stands if the name is ever handed back, and a Conversation started on a
     // name somebody chose has that name to fall back on and no other.
@@ -1234,7 +1244,8 @@ async fn started(
         "INSERT INTO conversations
              (repo_id, created_at, branch, named_branch, base_commit, state)
          SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, NULL, ?
-         FROM repos WHERE id = ?
+         FROM repos
+         WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)
          RETURNING id",
     )
     .bind(branch)
@@ -1444,6 +1455,57 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
             },
         )
         .collect())
+}
+
+/// How much work is on one Repo, counted by whether it is over.
+///
+/// **Live** is everything still going, a Draft included: the Conversation is on
+/// this repository now, and somebody may be waiting on it. **Finished** is Done
+/// and Closed together — work that ended, however it ended.
+///
+/// What the human archived is counted like anything else. Archiving takes a
+/// Conversation off the sidebar and off nothing else, so a Repo that carried
+/// twenty Conversations carried twenty whatever is being shown at the moment.
+///
+/// Counted by reading the states back rather than by asking SQL which of them
+/// are over: the words in the column are [`Lifecycle`]'s, one of them is a
+/// spelling only [`Lifecycle::read`] knows about, and a list of words in a query
+/// would be a second opinion about what "finished" means.
+pub async fn work_on_repo(pool: &SqlitePool, repo_id: i64) -> Result<Work> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT state, COUNT(*)
+         FROM conversations
+         WHERE repo_id = ?
+         GROUP BY state",
+    )
+    .bind(repo_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("counting the Conversations on Repo {repo_id}"))?;
+
+    let mut work = Work {
+        live: 0,
+        finished: 0,
+    };
+
+    for (state, count) in rows {
+        match Lifecycle::read(&state)? {
+            Lifecycle::Done | Lifecycle::Closed => work.finished += count,
+            _ => work.live += count,
+        }
+    }
+
+    Ok(work)
+}
+
+/// The two counts [`work_on_repo`] answers with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Work {
+    /// Conversations still going — everything that is neither Done nor Closed.
+    pub live: i64,
+
+    /// And the ones that are over.
+    pub finished: i64,
 }
 
 /// One Conversation with its Repo and whichever Profiles it has chosen, or
