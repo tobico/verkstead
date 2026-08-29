@@ -36,6 +36,7 @@
 //! workbench has the root: the Repos and the Agent Profiles are behind the ⋯ at
 //! the head of the pane rather than a page of their own to find.
 
+import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -49,6 +50,8 @@ import {
   type JSX,
 } from "solid-js";
 
+import { CardButton } from "../CardButton";
+import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
 import {
@@ -421,7 +424,7 @@ export function Conversations(props: {
       {/* The mark rather than a title: this pane is where Verkstead is entered
           and the list under it says what it is a list of. The icon is served
           from `assets/`, which vite copies to the site root untouched, and it is
-          cut from the same artwork the favicon is, at the size this draws it.
+          the same artwork the favicon is, at the size this draws it.
 
           No alt text on it, because the word it stands beside is the alt text: a
           screen reader that read both would say the name twice.
@@ -736,9 +739,7 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
           New conversation
           {/* Which way the menu will go, and no part of what the button
               says. */}
-          <span aria-hidden="true">
-            ▾
-          </span>
+          <Icon of={faChevronDown} />
         </>
       }
     >
@@ -913,12 +914,15 @@ function spoken(entry: ConversationEntry): string {
 /// One Conversation: the branch it will be done on, the Repo it is in, and where
 /// it has got to.
 ///
-/// A button rather than a link, because the whole workbench is one page: opening
-/// a Conversation moves the panes rather than going somewhere, and the URL that
+/// A `CardButton`, which is the card every pressable thing in the app is: the
+/// surface, the pointer, and the fill that says this is the one whose pane is
+/// open, are that component's, and what is here is what stands on it. A button
+/// rather than a link, because the whole workbench is one page: opening a
+/// Conversation moves the panes rather than going somewhere, and the URL that
 /// follows is a record of what is open rather than a document to fetch.
 ///
-/// Where it has got to is drawn rather than written: a dotted card is a draft, a
-/// dimmed one is work that has stopped, and the mark at the right edge is a
+/// Where it has got to is drawn rather than written: an italic name is a draft,
+/// a dimmed card is work that has stopped, and the mark at the right edge is a
 /// session running or an answer wanted. The mark is the whole of what a waiting
 /// card says — the accent border and inset ring it used to carry as well are
 /// gone, because a card that was both waiting and open had two edge treatments
@@ -967,19 +971,18 @@ function ConversationRow(props: {
         [styles.held!]: props.held,
       }}
     >
-      <button
-        type="button"
+      <CardButton
         class={styles.open}
-        aria-current={props.selected ? "true" : undefined}
+        open={props.selected}
+        press={() => props.open(props.entry.id)}
         aria-label={spoken(props.entry)}
         // What the grip's own label used to say, now that there is no second
         // control to say it in: this card can be moved, and these are the keys
         // that move it.
         aria-keyshortcuts="ArrowUp ArrowDown"
-        onClick={() => props.open(props.entry.id)}
         onPointerDown={(event) => props.grab(event, props.entry.id)}
         onContextMenu={(event) => props.ask(event, props.entry.id)}
-        onKeyDown={(event) => {
+        keys={(event) => {
           if (event.key === "ArrowUp") {
             event.preventDefault();
             props.step(props.entry.id, -1);
@@ -1003,7 +1006,7 @@ function ConversationRow(props: {
             <span class={`${marks.mark} ${marks[which()]}`} aria-hidden="true" />
           )}
         </Show>
-      </button>
+      </CardButton>
     </li>
   );
 }

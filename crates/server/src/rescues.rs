@@ -9,9 +9,18 @@
 //!
 //! **So it is spoken to.** Verkstead types a canned line into the running
 //! session — through the terminal a watcher's keystrokes go through, which is the
-//! only way in there is — asking it for the one move that reaches the human:
-//! where it has got to, put to them as a Set. An agent that had finished its
-//! turn takes another one.
+//! only way in there is — putting to it the two moves that would end the silence:
+//! carrying on, where it has a next step, and otherwise the one move that reaches
+//! the human at all, which is where it has got to put to them as a Set. An agent
+//! that had finished its turn takes another one.
+//!
+//! **Both, because the line is sometimes wrong.** What it is read off is a
+//! session watched from outside, and a session doing exactly what it should can
+//! wear that shape for a moment — see [`until_it_will_not_ask`], which is mostly
+//! the business of not being wrong. One told only to ask *asks*, and a Set that
+//! nothing needed is noise on the human's phone in the middle of the work they
+//! are being asked about. Told to carry on or to ask, a session that was never
+//! stuck spends the line on one quiet turn and nobody is disturbed.
 //!
 //! **Twice at most**, because the second time it fails to work is evidence rather
 //! than bad luck. What follows is a stop like any other: the Conversation lands
@@ -33,6 +42,18 @@
 //! anything it prints puts the whole grace back on the clock. And a session that
 //! has landed what it was sent for is not spoken to either — the driver beside
 //! this is already ending it.
+//!
+//! **Nor is one that has been handed something and not yet said a word about
+//! it.** An answer reaches a session down a chain Verkstead can see no hop of —
+//! the CLI's long poll returning, the harness noticing its background command
+//! exited, the model beginning its turn, the first bytes drawn — and a chain
+//! slower than the grace is a session that was working perfectly well being told
+//! it had gone quiet. So a *stir* — the session's launch, an answer arriving, a
+//! rescue typed in — holds the rescue off until the session has said something
+//! since, which is the one thing from out here that proves the stir landed. See
+//! [`until_it_will_not_ask`], and [`crate::runner::Pace::waking`], which is the
+//! ceiling on the holding off: a session that says nothing at all for that long
+//! is one that died mid-wait, and it is rescued having never spoken.
 //!
 //! Nothing is written to the Timeline for the rescue itself. It is Verkstead
 //! prodding an agent rather than anything the work has got to, and the session's
@@ -56,15 +77,21 @@ pub(crate) const AT_MOST: usize = 2;
 ///
 /// Written to the agent as the human would write it, because that is what it is:
 /// a line arriving at the session's own terminal, indistinguishable from one
-/// somebody watching had typed. What it asks for is the one move that reaches
-/// the human at all — a Set — and it asks for nothing else, because everything
-/// else a line like this could say about the session is a guess made from
-/// outside it.
+/// somebody watching had typed.
+///
+/// **Conditional, because it is typed on a guess.** Everything a line like this
+/// could say about the session is read from outside it, and outside is where a
+/// session that is working and one that is stuck look alike. So it names the
+/// condition rather than the move: a session that has its next step is told to
+/// get on with it, and only a session that is actually waiting on the human is
+/// told to say so as a Set. Which is what makes a wrongly typed line cheap —
+/// one quiet turn, rather than a Question Set manufactured for a human who did
+/// not need one.
 ///
 /// One line and no newline of its own. The Enter is [`rescue`]'s, and a line
 /// broken over two would be submitted half-written.
-pub(crate) const LINE: &str =
-    "Please summarize your current status and ask me what to do next via `verkstead ask`.";
+pub(crate) const LINE: &str = "If you have your next step, carry on with it now. If you are blocked or waiting on me, \
+     summarize your status and ask me what to do next via `verkstead ask`.";
 
 /// How long the line is left sitting in the session's composer before the Enter
 /// is typed after it.
@@ -81,6 +108,27 @@ pub(crate) const LINE: &str =
 /// nothing else could have happened in between: this is one turnaround of a
 /// terminal, not a wait on anything.
 const BEFORE_THE_ENTER: Duration = Duration::from_millis(250);
+
+/// And how long after the Enter the line is still arriving back.
+///
+/// **Because a terminal says what is typed into it.** The keystrokes a rescue
+/// puts in are echoed straight back out — by the line discipline where the agent
+/// left it alone, and by the interface's own composer where it did not — so the
+/// session appears to say the very words Verkstead just said to it, within a
+/// moment of their being said. Which is nothing about the session: a process
+/// that has hung with its terminal open echoes exactly as well as one that is
+/// about to take a turn.
+///
+/// So the stir a rescue makes is taken from here rather than from the last
+/// keystroke — see [`until_it_will_not_ask`], where what says the line landed is
+/// the session speaking *after* the stir. A stir the typing itself answered
+/// would be no stir at all, and the second rescue would arm on the bare grace
+/// the first one did.
+///
+/// One turnaround of a terminal again, for [`BEFORE_THE_ENTER`]'s reason: an
+/// echo is drawn as it is read, and anything arriving later than this is the
+/// session rather than the keyboard.
+const AFTER_THE_ECHO: Duration = Duration::from_millis(250);
 
 /// Type [`LINE`] into the session, and say whether it reached one.
 ///
@@ -204,9 +252,27 @@ impl Done {
 /// front of them, and a human with something in front of them has it whoever
 /// put it there.
 ///
-/// An answer arriving starts the grace again, exactly as a rescue does and for
-/// the same reason: a session that has just been given something to act on has
-/// had no time to act on it yet.
+/// **And it is asked about every poll rather than once the grace is out**, alone
+/// among the loops here, because this one reads it for two things: whether the
+/// human is holding a question now, and when they were last handed an answer to
+/// give. The second is only ever seen by looking while it is happening.
+///
+/// **And it waits for a word after every stir.** A session's launch, an answer
+/// arriving, and a line typed in by this loop are all something it has just been
+/// given to act on, and a session that has just been given something has had no
+/// time to act on it yet. What used to follow a stir was the grace over again,
+/// which was a guess at how long the answer takes to arrive at a session — down
+/// a chain of hops Verkstead cannot see one of, and one that is slower than the
+/// grace more often than it looks. What follows a stir now is the session's own
+/// first word: it may take as long as it takes, and the grace begins from what
+/// it says. Which is the near half of the condition read properly rather than a
+/// longer number — the question was never *how long has it been* but *did the
+/// thing we handed it get there*, and a word is the only answer to that from out
+/// here.
+///
+/// The ceiling on that is [`Pace::waking`], because a stir a session never
+/// answers is exactly what a session dying mid-wait looks like. One that has said
+/// nothing at all since the stir is rescued when it passes, having never spoken.
 ///
 /// **Returns only where the rescue is spent** — twice typed in, and still idle
 /// with nothing open and nothing landed. What follows is the caller's, and it is
@@ -223,11 +289,15 @@ pub(crate) async fn until_it_will_not_ask(
     done: Done,
 ) {
     // When the session was last stirred: a Set of the Conversation's seen open,
-    // or a rescue typed in. Both start the grace again, and for the one reason —
-    // each is something the session has just been given to act on. `None` while
-    // neither has happened, which is a session that has asked nothing since it
-    // started.
-    let mut stirred: Option<Instant> = None;
+    // a rescue typed in, or the moment this began. Each is something the session
+    // has just been given to act on, and none of them is a moment it can be
+    // judged from until it has said a word since.
+    //
+    // Now, because being watched starts at a stir every time. Every caller here
+    // reaches this either straight after launching a session — the launch being
+    // the stir — or, where a grilling is being seen out, straight after the pick
+    // that gave it its direction was handed back to it.
+    let mut stirred = Instant::now();
 
     // How many times it has been told. Never reset: a session that asked and
     // then went quiet again has had its round, and the bound is on this
@@ -235,28 +305,49 @@ pub(crate) async fn until_it_will_not_ask(
     let mut spent = 0;
 
     loop {
-        // The cheap half first: a session still talking is not one to ask the
-        // store or the Worktree about.
-        let owed = pace.proposing.saturating_sub(quiet.for_how_long());
-
-        if !owed.is_zero() {
-            tokio::time::sleep(owed).await;
-            continue;
-        }
-
+        // The store first, and every poll — which is the one place here that
+        // does not put the cheap half first, and it is deliberate. What this
+        // asks is not only whether the human has something in front of them
+        // now but *when they last did*, and the last look that saw a Set open
+        // is the whole of what says an answer arrived. A Set put up and
+        // answered inside the grace — the human picking within the minute,
+        // which is most of the picks there are — is one that was never open at
+        // any look taken after the grace, so a loop that only looked then would
+        // see a session that had never been stirred at all and type its line
+        // into one that had been answered seconds ago. It costs an indexed read
+        // a poll, beside the git the step's own watcher runs at the same
+        // cadence.
         if crate::runner::open(state, conversation_id).await {
-            stirred = Some(Instant::now());
+            // The last look that saw it open, rather than the answer itself,
+            // which is the same moment to within `pace.poll`.
+            stirred = Instant::now();
             tokio::time::sleep(pace.poll).await;
             continue;
         }
 
-        let owed = stirred
-            .map(|at| pace.proposing.saturating_sub(at.elapsed()))
-            .unwrap_or_default();
+        // Then the quiet, in poll-sized steps rather than in one sleep to the
+        // end of the grace: what is above has to be asked all the way through
+        // it, and a session talking its way past the grace is one this comes
+        // back to anyway.
+        let owed = pace.proposing.saturating_sub(quiet.for_how_long());
 
         if !owed.is_zero() {
-            tokio::time::sleep(owed).await;
+            tokio::time::sleep(owed.min(pace.poll)).await;
             continue;
+        }
+
+        // Quiet, and nothing open — but not a word out of it since it was last
+        // stirred, so nothing yet says the stir ever arrived. Which is the
+        // shape a session wears while the answer is still on its way to it, and
+        // the shape it wears having died waiting for one. They are told apart
+        // by waiting: the first breaks the silence and the second does not.
+        if quiet.since() <= stirred {
+            let owed = pace.waking.saturating_sub(stirred.elapsed());
+
+            if !owed.is_zero() {
+                tokio::time::sleep(owed).await;
+                continue;
+            }
         }
 
         // Idle and silent, but with something to show for it: the driver beside
@@ -281,7 +372,14 @@ pub(crate) async fn until_it_will_not_ask(
         // being waited on beside this, and it is the ending that decides.
         if rescue(state, conversation_id, event_id).await {
             spent += 1;
-            stirred = Some(Instant::now());
+
+            // Once what was typed has finished arriving back, rather than as it
+            // was typed — see [`AFTER_THE_ECHO`]. A terminal echoes, so a stir
+            // taken at the last keystroke is one the keystrokes answer
+            // themselves.
+            tokio::time::sleep(AFTER_THE_ECHO).await;
+
+            stirred = Instant::now();
         }
 
         tokio::time::sleep(pace.poll).await;
@@ -291,12 +389,13 @@ pub(crate) async fn until_it_will_not_ask(
 /// What a stop over a session that would not ask says beyond what it was doing.
 ///
 /// The rescue spent: it was idle with nothing open and nothing landed, it was
-/// twice asked to say where it had got to and put the next move to the human,
-/// and it went on saying nothing. Which leaves a Conversation nobody can move —
-/// nothing to answer and nothing to read — so it stops rather than sitting
-/// there, and Resume is what the human has.
+/// twice told to carry on or else to say where it had got to and put the next
+/// move to the human, and it did neither. Which leaves a Conversation nobody
+/// can move — nothing to answer and nothing to read — so it stops rather than
+/// sitting there, and Resume is what the human has.
 ///
 /// [`crate::stopping::Decided::Verkstead`] wherever it is written: Verkstead
 /// looked at this session and decided it was not going to ask.
 pub(crate) const WOULD_NOT_ASK: &str = "the session went quiet without asking you anything or finishing what it was doing, and \
-     asked nothing after being told twice to say where it had got to and ask you what to do next";
+     went on saying nothing after being told twice to carry on with its next step or else say \
+     where it had got to and ask you what to do next";

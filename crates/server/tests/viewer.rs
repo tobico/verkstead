@@ -231,7 +231,7 @@ fn the_manifest_asks_to_be_installed_with_icons_that_exist() {
     // Every icon is a file that is really there, and says what it is for. None
     // of them claims `maskable`: the mark is artwork that runs to the edges of
     // its square — see `tools/generate-icons.sh` — so a launcher cropping one to
-    // a circle would take the hammer and the anvil's horn off with it. Art drawn
+    // a circle would take the head and the handle's end off with it. Art drawn
     // with a margin inside it could claim `maskable` back, and this is what
     // would have to be relaxed to let it.
     for icon in icons {

@@ -99,6 +99,9 @@ web-push-native = { version = "0.4", default-features = false }
 futures-util = { version = "0.3", default-features = false }
 http-body-util = "0.1"
 serde-saphyr.workspace = true
+# Writing a row the store's own calls will not write: the tests about a state
+# word this Verkstead cannot parse have to put one there by hand.
+sqlx.workspace = true
 tempfile.workspace = true
 # `test-util` for the runtime's own clock: a keep-alive is a quarter-minute
 # apart, and no test should spend that waiting for one.

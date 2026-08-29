@@ -15,6 +15,11 @@
    and what says that now is the sentence each row carries under its name, which
    is a good deal plainer than a border was. */
 
+/* The item title */
+.title {
+  font-weight: bold;
+}
+
 /* The sentence under a row's name, inside the button rather than after it: the
    whole row is the press, so what it is called and what it does are one thing
    to read and one thing to aim at. Quieter and a size down, the way a note

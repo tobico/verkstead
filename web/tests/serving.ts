@@ -17,8 +17,8 @@ import type { SetReading, SetView, UnreadableSet } from "../src/api/types";
 /// them, and a test about one of them should not have to say when the other went
 /// out.
 export function serving(...answers: Array<Answer>) {
-  const asked: Array<() => Promise<Response>> = [];
-  const held = new Map<string, () => Promise<Response>>();
+  const asked: Array<(init?: RequestInit) => Promise<Response>> = [];
+  const held = new Map<string, (init?: RequestInit) => Promise<Response>>();
   for (const answer of answers) {
     if (typeof answer === "function") {
       asked.push(answer);
@@ -32,7 +32,10 @@ export function serving(...answers: Array<Answer>) {
   // back what a page put on the wire and not just that it asked.
   const fetching = vi.fn((path: RequestInfo | URL, init?: RequestInit) => {
     const answer = held.get(`${init?.method ?? "GET"} ${String(path)}`);
-    return answer ? answer() : asked[Math.min(taken++, asked.length - 1)]!();
+    // Handed what the page put on the wire, for the answer that has to behave
+    // like the network rather than like a value — see [`hangs`], which needs
+    // the signal to know when the caller gave up.
+    return answer ? answer(init) : asked[Math.min(taken++, asked.length - 1)]!(init);
   });
   vi.stubGlobal("fetch", fetching);
   return fetching;
@@ -54,8 +57,8 @@ export function askedFor(
 /// What a test hands [`serving`]: an answer in the sequence, or one belonging to
 /// a request.
 type Answer =
-  | (() => Promise<Response>)
-  | { key: string; answer: () => Promise<Response> };
+  | ((init?: RequestInit) => Promise<Response>)
+  | { key: string; answer: (init?: RequestInit) => Promise<Response> };
 
 /// One answer for one request, however often and whenever it is made. For the
 /// endpoint a page fetches alongside the one a test is about.
@@ -66,10 +69,35 @@ type Answer =
 /// about writing to it.
 export function whenever(
   path: string,
-  answer: () => Promise<Response>,
+  answer: (init?: RequestInit) => Promise<Response>,
   method = "GET",
 ): Answer {
   return { key: `${method} ${path}`, answer };
+}
+
+/// A request that never answers, until whoever made it gives up on it.
+///
+/// The hang, which is a thing a network does and a mocked value cannot: the
+/// promise settles only when the caller's own signal aborts, and it settles the
+/// way `fetch` does — rejecting with whatever the signal gave as its reason. A
+/// read with no deadline handed one of these waits for the length of the test,
+/// which is the point.
+export function hangs(): (init?: RequestInit) => Promise<Response> {
+  return (init) =>
+    new Promise((_, reject) => {
+      const signal = init?.signal;
+
+      if (!signal) {
+        return;
+      }
+
+      if (signal.aborted) {
+        reject(signal.reason as Error);
+        return;
+      }
+
+      signal.addEventListener("abort", () => reject(signal.reason as Error));
+    });
 }
 
 /// One answer, as the server would have written it.

@@ -125,6 +125,26 @@ pub struct Pace {
     /// reliably breaks.
     pub proposing: Duration,
 
+    /// And how long a session that has just been stirred — launched, handed an
+    /// answer, or typed a rescue into — is given to say its first word before
+    /// silence alone is enough to rescue it.
+    ///
+    /// The ceiling on the hold-off in [`crate::rescues`]. What carries an
+    /// answer to a session is a chain Verkstead cannot see a single hop of —
+    /// the CLI's long poll returning, the harness noticing, the model taking
+    /// its turn, the first bytes drawn — and a chain slower than
+    /// [`Pace::proposing`] used to look exactly like a session that had gone
+    /// quiet without asking. So a stirred session is left alone until it
+    /// speaks. This is where that ends: one that has said nothing at all for
+    /// this long is one that died mid-wait, and it is rescued having never
+    /// spoken.
+    ///
+    /// Several times [`Pace::proposing`], because it is the outer bound on a
+    /// wake rather than a measure of one. The ordinary case is the session
+    /// speaking within a second or two of the answer; all this decides is how
+    /// long one that never will is left before Verkstead says so.
+    pub waking: Duration,
+
     /// And how often every Conversation is looked over for one that has
     /// Stalled — see [`crate::stalls`].
     ///
@@ -142,6 +162,7 @@ impl Default for Pace {
             grace: Duration::from_secs(5),
             checks: crate::checks::ASKED_EVERY,
             proposing: Duration::from_secs(60),
+            waking: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
         }
     }

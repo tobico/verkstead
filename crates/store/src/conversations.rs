@@ -132,6 +132,25 @@ impl Lifecycle {
             other => bail!("a Conversation is in the unknown state {other:?}"),
         })
     }
+
+    /// Whether a stored word reads as this state, tolerating one this Verkstead
+    /// does not understand.
+    ///
+    /// The compare for the two presses that have to work on a row whose state
+    /// word has gone bad — closing it, and refusing to archive it — where
+    /// [`Self::read`]'s error would be the whole conversation locked away
+    /// behind the one column nothing can get past. A word that will not parse
+    /// is not the state being asked about, which is the answer both of them
+    /// want: it is not Closed, so the close goes ahead and heals the row, and
+    /// it is not Closed, so an archive on its own says `NotClosed` rather than
+    /// putting a possibly-live worktree out of sight.
+    ///
+    /// Nowhere else. Everything that needs to *know* the state still reads it,
+    /// because a reader told Draft about a word nobody can parse would act on a
+    /// guess — see [`load_conversation`], which still refuses.
+    pub(crate) fn reads_as(word: &str, state: Self) -> bool {
+        Self::read(word).is_ok_and(|read| read == state)
+    }
 }
 
 /// A Conversation as the store holds it, with the Repo it is attached to read
@@ -246,6 +265,42 @@ pub struct Conversation {
     pub companions: Vec<super::Companion>,
 }
 
+/// Where a sidebar row's state word got to: the state it names, or the word
+/// itself where this Verkstead has never heard of it.
+///
+/// The one read of that column that does not fail on a word it cannot parse.
+/// Everything else refuses, because everything else acts on the answer — but
+/// the sidebar is the way to every Conversation there is, so one row written by
+/// a Verkstead from the future, or by hand, used to take the whole list with
+/// it and leave the human with no route to any of them but a URL out of their
+/// own history.
+///
+/// The word travels rather than being swallowed here: what to draw for it is
+/// the wire's business, and the store has no log to put it in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowState {
+    /// A word this Verkstead knows.
+    Known(Lifecycle),
+
+    /// And one it does not, kept as it was stored so that whoever draws the row
+    /// can say what it found.
+    Unknown(String),
+}
+
+impl RowState {
+    /// The state where the word named one, and nothing where it did not.
+    ///
+    /// What every reader of this list but the sidebar wants: the sweeps decide
+    /// whether to drive or to look for a stall, and a row whose state nobody
+    /// can read is one neither should touch.
+    pub fn known(&self) -> Option<Lifecycle> {
+        match self {
+            Self::Known(state) => Some(*state),
+            Self::Unknown(_) => None,
+        }
+    }
+}
+
 /// One row of the conversations sidebar, drawn without reading a Timeline.
 ///
 /// The branch is the row's name where somebody has settled on one. A
@@ -275,7 +330,7 @@ pub struct ConversationRow {
     /// What the Repo is called, which is the only thing about it a row shows.
     pub repo: String,
 
-    pub state: Lifecycle,
+    pub state: RowState,
 
     /// Whether anything about this Conversation is waiting on the human.
     ///
@@ -1296,6 +1351,12 @@ async fn started(
 /// fact about this list and this is the one thing that draws it: a caller given
 /// the choice would be a second place to get it wrong, and there is no other way
 /// the sidebar should ever be read.
+///
+/// A row whose state word this Verkstead does not know is still on the list,
+/// carrying the word — see [`RowState`]. Every other read of that column
+/// refuses one, and this one cannot afford to: the list is the only route to a
+/// Conversation's own page, so one bad row failing it would leave the human
+/// with nothing to press on any of them.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     /// The columns in the order the query below selects them.
     type Row = (i64, String, bool, bool, String, String, bool, bool, bool);
@@ -1350,7 +1411,8 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     .await
     .context("listing the Conversations")?;
 
-    rows.into_iter()
+    Ok(rows
+        .into_iter()
         .map(
             |(
                 id,
@@ -1362,21 +1424,26 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                 waiting,
                 narrowed_to_checks,
                 unseen,
-            )| {
-                Ok(ConversationRow {
-                    id,
-                    branch,
-                    branch_named,
-                    naming,
-                    repo,
-                    state: Lifecycle::read(&state)?,
-                    waiting,
-                    narrowed_to_checks,
-                    unseen,
-                })
+            )| ConversationRow {
+                id,
+                branch,
+                branch_named,
+                naming,
+                repo,
+                // The one place a state word that will not parse is carried
+                // rather than refused. This list is the way to every
+                // Conversation there is, so one bad row used to take all of
+                // them off the page — see [`RowState`].
+                state: match Lifecycle::read(&state) {
+                    Ok(state) => RowState::Known(state),
+                    Err(_) => RowState::Unknown(state),
+                },
+                waiting,
+                narrowed_to_checks,
+                unseen,
             },
         )
-        .collect()
+        .collect())
 }
 
 /// One Conversation with its Repo and whichever Profiles it has chosen, or
@@ -1464,6 +1531,97 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         direction: direction(pool, id).await?,
         adopting: adopting(pool, id).await?,
         companions: super::companions(pool, id).await?,
+    }))
+}
+
+/// Everything closing a Conversation needs to know about it, and nothing else.
+///
+/// Which is: that there is one, and where every directory it was given to work
+/// in stands. The state it is in does not come into it — closing is reachable
+/// from all of them — and neither does the direction, the pairings, the base
+/// commit or a companion's mode.
+///
+/// See [`closable`] for why that is a read of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Closable {
+    /// The Repo the worktree below was cut from, which is the directory git is
+    /// asked to remove it from.
+    pub repo: std::path::PathBuf,
+
+    /// And the worktree, where grilling has made one.
+    pub worktree: Option<std::path::PathBuf>,
+
+    /// The same pair again for every companion, plus what the Repo is called —
+    /// a worktree that will not go is logged, and a log naming a path and no
+    /// repository is a line nobody can act on.
+    pub companions: Vec<ClosableCompanion>,
+}
+
+/// One companion of a [`Closable`]: where its repository is, what it is called,
+/// and the directory it was checked out into.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClosableCompanion {
+    pub repo: std::path::PathBuf,
+    pub name: String,
+    pub worktree: Option<std::path::PathBuf>,
+}
+
+/// The same Conversation [`load_conversation`] reads, cut down to what a close
+/// acts on — and read without parsing a single stored word.
+///
+/// A sibling read rather than a flag on the other one, because the difference
+/// is not how much is fetched but what it is allowed to refuse. The full read
+/// parses the state, the direction and each companion's mode, and any of the
+/// three going bad takes the close with it — which is exactly backwards: a
+/// Conversation whose record has gone strange is the one a human most needs to
+/// be able to end. This one has nothing to parse, so there is nothing in it to
+/// refuse but a Conversation that is not there.
+///
+/// Every other reader still goes through [`load_conversation`], and should: a
+/// reader that is going to *act* on the state wants to be told the word is bad
+/// rather than handed a guess.
+pub async fn closable(pool: &SqlitePool, id: i64) -> Result<Option<Closable>> {
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT r.path, w.path
+         FROM conversations c
+         JOIN repos r ON r.id = c.repo_id
+         LEFT JOIN worktrees w ON w.conversation_id = c.id
+         WHERE c.id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading what closing Conversation {id} would remove"))?;
+
+    let Some((repo, worktree)) = row else {
+        return Ok(None);
+    };
+
+    let companions: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT r.path, r.name, w.path
+         FROM companions c
+         JOIN repos r ON r.id = c.repo_id
+         LEFT JOIN companion_worktrees w
+                ON w.conversation_id = c.conversation_id AND w.repo_id = c.repo_id
+         WHERE c.conversation_id = ?
+         ORDER BY r.name, r.id",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading the companion checkouts of Conversation {id}"))?;
+
+    Ok(Some(Closable {
+        repo: std::path::PathBuf::from(repo),
+        worktree: worktree.map(std::path::PathBuf::from),
+        companions: companions
+            .into_iter()
+            .map(|(repo, name, worktree)| ClosableCompanion {
+                repo: std::path::PathBuf::from(repo),
+                name,
+                worktree: worktree.map(std::path::PathBuf::from),
+            })
+            .collect(),
     }))
 }
 
@@ -2756,6 +2914,12 @@ async fn start(
 ///
 /// Closing one that is closed already records nothing and is not an error. The
 /// human asked for it to be closed, and it is.
+///
+/// And closing one whose state word this Verkstead cannot read works, which is
+/// the one read of that column written to tolerate a bad word — see
+/// [`Lifecycle::reads_as`]. The write below is unconditional, so the row comes
+/// out of it holding `closed`: closing a Conversation nobody could read is also
+/// what repairs it.
 pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
     let mut tx = super::writing(pool, "closing a Conversation").await?;
 
@@ -2769,7 +2933,14 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
         return Ok(Closing::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? == Lifecycle::Closed {
+    // Tolerantly, unlike every other compare against this column: a word this
+    // Verkstead cannot parse is not Closed, so the close goes ahead — and the
+    // unconditional write below leaves `closed` where the bad word was, which
+    // is the row healed. That is the point rather than a side effect. A
+    // Conversation whose state column has gone bad is exactly the one a human
+    // most needs to be able to end, and refusing here would be the one column
+    // nothing could get past.
+    if Lifecycle::reads_as(&state, Lifecycle::Closed) {
         return Ok(Closing::AlreadyClosed);
     }
 

@@ -64,6 +64,7 @@ import type {
   CommitEvent,
   ConversationView,
   HandoffEvent,
+  NoticeEvent,
   SteerEvent,
   PullRequestEvent,
   QuestionSetEvent,
@@ -77,6 +78,7 @@ import { Brief } from "./Brief";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
 import { Document } from "./Document";
+import { Hatch } from "./Hatch";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
@@ -109,7 +111,8 @@ type Opened =
   | { opened: PullRequestEvent }
   | { brief: BriefEvent }
   | { handoff: HandoffEvent }
-  | { steer: SteerEvent };
+  | { steer: SteerEvent }
+  | { notice: NoticeEvent };
 
 /// The Event inside, whichever kind it turned out to be — what they have in
 /// common is the id the pane was opened by.
@@ -123,7 +126,8 @@ function which(
   | PullRequestEvent
   | BriefEvent
   | HandoffEvent
-  | SteerEvent {
+  | SteerEvent
+  | NoticeEvent {
   if ("output" in open) {
     return open.output;
   }
@@ -139,7 +143,10 @@ function which(
   if ("handoff" in open) {
     return open.handoff;
   }
-  return "steer" in open ? open.steer : open.opened;
+  if ("steer" in open) {
+    return open.steer;
+  }
+  return "notice" in open ? open.notice : open.opened;
 }
 
 /// And each kind on its own, for the pane that draws it: the Event where this is
@@ -170,6 +177,10 @@ function handoffIn(open: Opened): HandoffEvent | undefined {
 
 function steerIn(open: Opened): SteerEvent | undefined {
   return "steer" in open ? open.steer : undefined;
+}
+
+function noticeIn(open: Opened): NoticeEvent | undefined {
+  return "notice" in open ? open.notice : undefined;
 }
 
 /// Whether a media query holds, as something the page can be built out of.
@@ -538,6 +549,9 @@ function Reading(props: {
         if ("Steer" in entry && entry.Steer.html !== null) {
           return { steer: entry.Steer };
         }
+        if ("Notice" in entry) {
+          return { notice: entry.Notice };
+        }
         return undefined;
       }),
       ...conversation.pinned.map((pinned): Opened | undefined =>
@@ -596,6 +610,12 @@ function Reading(props: {
             <Empty>Loading…</Empty>
           </Match>
           <Match when={conversation.isError}>
+            {/* The reading failed, so there is no header to draw and no menu to
+                hang off one — and this is the Conversation the human is most
+                likely to want the end of. So the header is drawn anyway, in the
+                little that can be known without the reading, and what it carries
+                is the way out: see `Hatch.tsx`. */}
+            <Hatch id={props.id} back={props.list} />
             <ErrorLine>
               Could not read this conversation: {conversation.error?.message}
             </ErrorLine>
@@ -728,6 +748,21 @@ function Reading(props: {
                           }
                           html={steer().html ?? ""}
                           empty="Nothing was asked for."
+                          back={() => props.pane("timeline")}
+                        />
+                      )}
+                    </Match>
+                    {/* And what Verkstead said on its own account, which is a
+                        document like the rest of them: the card shows the one
+                        line that tells one notice from another, and the whole
+                        of what a stop had to say — the reason and the terminal
+                        output under it — is here. */}
+                    <Match when={noticeIn(open())}>
+                      {(notice) => (
+                        <Document
+                          heading="Notice"
+                          html={notice().html}
+                          empty="Verkstead wrote nothing down."
                           back={() => props.pane("timeline")}
                         />
                       )}

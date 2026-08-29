@@ -126,7 +126,11 @@ export const UNARCHIVE_REFUSAL: Record<ConversationUnarchived, string> = {
 /// Both inside the button, which is the whole of what makes it one row: the
 /// name and the sentence are one thing to read and one thing to hit, on a phone
 /// as much as under a pointer.
-function Action(props: {
+///
+/// Exported for the escape hatch in `Hatch.tsx`, which draws a row of this menu
+/// without the reading the rest of it needs — the row a Conversation whose page
+/// will not load is ended by is the same row, and should look and read as one.
+export function Action(props: {
   /// Which row this is, for the paint and for the tests that look for it.
   class?: string;
   /// What it reads as, and what it reads as while its press is in flight.
@@ -146,7 +150,7 @@ function Action(props: {
       disabled={props.working}
       onClick={() => props.press()}
     >
-      <span>{props.working ? props.pressing : props.label}</span>
+      <span class={styles.title}>{props.working ? props.pressing : props.label}</span>
       <span class={styles.says}>{props.says}</span>
     </button>
   );

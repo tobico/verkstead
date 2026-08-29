@@ -5,7 +5,7 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Archiving, Closing, Edited, Event, Grilling, Lifecycle, Unarchiving, adopting,
+    Archiving, Closing, Edited, Event, Grilling, Lifecycle, RowState, Unarchiving, adopting,
     archive_conversation, archived, close_conversation, conversation_branch, conversations,
     follow_branch, load_conversation, open_database, register_repo, rename_branch, save_brief,
     set_base_commit, set_state, settle_naming, show_archived, showing_archived, start_adoption,
@@ -842,6 +842,122 @@ async fn closing_a_conversation_that_is_not_there_says_so() {
     );
 }
 
+/// Write a word into a Conversation's state column that no Verkstead knows.
+///
+/// A database restored from before a migration ran, one written by a Verkstead
+/// from ahead of this one, or a row somebody edited by hand: however it got
+/// there, the human is left with a Conversation whose every reader refuses it.
+/// Which is the state the three below are about.
+async fn corrupt_the_state(pool: &SqlitePool, id: i64) {
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind("meandering")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// And what the state column really holds, read past every parse.
+async fn stored_state(pool: &SqlitePool, id: i64) -> String {
+    let (state,): (String,) = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    state
+}
+
+/// The close is the way out of a state word nothing can read — and the way the
+/// word itself is repaired.
+///
+/// A word this Verkstead does not know is not Closed, so the close goes ahead;
+/// the write it makes is unconditional, so what the row holds afterwards is
+/// `closed`. The Conversation comes back readable, which is the whole point:
+/// everything else about it was locked behind that one column.
+#[tokio::test]
+async fn closing_a_conversation_whose_state_word_is_unreadable_closes_and_heals_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
+        .await
+        .unwrap();
+    corrupt_the_state(&pool, id).await;
+
+    assert!(
+        load_conversation(&pool, id).await.is_err(),
+        "the ordinary read refuses it, which is what the close has to work past"
+    );
+
+    assert_eq!(
+        close_conversation(&pool, id).await.unwrap(),
+        Closing::Closed
+    );
+
+    assert_eq!(stored_state(&pool, id).await, "closed");
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Closed);
+    assert_eq!(conversation.worktree, None);
+}
+
+/// Archiving one is refused rather than failing, and refused the safe way
+/// round: a word nobody can read is not Closed, and hiding a Conversation whose
+/// worktree may still be live would put the work out of sight without ending
+/// it. Closing and archiving is the press that gets there, because the close
+/// heals the word first.
+#[tokio::test]
+async fn archiving_a_conversation_whose_state_word_is_unreadable_says_it_is_not_closed() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    corrupt_the_state(&pool, id).await;
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::NotClosed
+    );
+
+    close_conversation(&pool, id).await.unwrap();
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::Archived
+    );
+    assert!(conversations(&pool).await.unwrap().is_empty());
+}
+
+/// And the sidebar still draws it, carrying the word it could not read.
+///
+/// The list is the only route to a Conversation's own page, so one row nobody
+/// can parse used to take every other row off the page with it — leaving a
+/// human with no way to reach the very Conversation they were trying to end.
+#[tokio::test]
+async fn the_list_carries_a_row_whose_state_word_is_unreadable() {
+    let (_dir, pool) = fresh_pool().await;
+    let readable = drafted(&pool).await;
+    let repo_id = repo(&pool, "askance").await;
+    let broken = start_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+    corrupt_the_state(&pool, broken).await;
+
+    let rows = conversations(&pool).await.unwrap();
+
+    assert_eq!(
+        rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+        [broken, readable],
+        "both rows, newest first"
+    );
+    assert_eq!(
+        rows[0].state,
+        RowState::Unknown("meandering".to_owned()),
+        "with the word it could not read carried, for whoever draws the row to say"
+    );
+    assert_eq!(rows[0].state.known(), None);
+    assert_eq!(rows[1].state, RowState::Known(Lifecycle::Draft));
+}
+
 /// Archiving takes a Closed Conversation off the sidebar and leaves everything
 /// else about it where it was: nothing leaves a Timeline, and the branch is
 /// still the branch.
@@ -958,7 +1074,7 @@ async fn unarchiving_puts_a_conversation_back_on_the_list() {
 
     let list = conversations(&pool).await.unwrap();
     assert_eq!(list.len(), 1);
-    assert_eq!(list[0].state, Lifecycle::Closed);
+    assert_eq!(list[0].state, RowState::Known(Lifecycle::Closed));
 }
 
 /// And it holds: what was taken back out stays out, so a reload does not put

@@ -34,7 +34,9 @@
 //! their own. Three of them are documents — the frozen Brief, the handoff and
 //! the instruction a
 //! steer carried — and a document's summary is its own opening: the card shows
-//! [`CLAMPED_LINES`] of it under a fade, and the pane holds the whole. The
+//! [`CLAMPED_LINES`] of it under a fade, and the pane holds the whole. A Notice
+//! is read the same way and cut differently: what it has to say is a sentence
+//! rather than a document, so its card shows one line under an ellipsis. The
 //! Brief is also the one Event that is written here as well as read: while the
 //! Conversation is drafting it is a field that saves itself rather than a card
 //! to open, and it carries a Conversation's setup under it for as long as there
@@ -104,6 +106,7 @@ import type {
   UnreadableSetEvent,
 } from "../api/types";
 import app from "../App.module.css";
+import { CardButton } from "../CardButton";
 import { Empty, ErrorLine, Note } from "../notices";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
 // from the page that draws the whole record rather than kept a second time
@@ -113,6 +116,10 @@ import { Actions } from "./Actions";
 import { Adoption } from "./Adoption";
 import { Checks } from "./Checks";
 import { Mark } from "./Mark";
+// The marks themselves, for the one this file draws without a session behind
+// it: a Set waiting on the human wears the disc the sidebar's card wears, and
+// that vocabulary is the module's rather than any one component's.
+import marks from "./Mark.module.css";
 import { PaneHead } from "./PaneHead";
 import { Setup } from "./Setup";
 import styles from "./Timeline.module.css";
@@ -255,19 +262,6 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
     "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
 };
 
-/// Whether the event the *blocked on you* badge points at has a details pane
-/// behind it.
-///
-/// Every other thing that stops a run does — a held session opens its screen —
-/// and a Notice does not: what it has to say is drawn whole in the list, marked
-/// where it stands. So the badge selects it and stays put, rather than sending a
-/// narrow window away from the very thing there is to read.
-function opensAPane(conversation: ConversationView, event: number): boolean {
-  return !conversation.timeline.some(
-    (entry) => "Notice" in entry && entry.Notice.id === event,
-  );
-}
-
 /// The state a move came *from*: the state the move before it went to, and
 /// `Draft` where there is no move before it, since a Conversation starts
 /// drafting and its first move is the one out of that.
@@ -340,14 +334,16 @@ function Clamped(props: {
   );
 }
 
-/// A card whose whole surface opens the details pane.
+/// A card whose whole surface opens the details pane, drawn as an `article`.
 ///
-/// Every other openable Event is a `button`, and the cards drawn through here
-/// cannot be: the documents hold rendered markdown, and a link inside a button
-/// is not something a browser will have; the lists and the pull request hold a
-/// heading and rows, which a button would flatten to one run of text. So the
-/// affordance goes on the article instead — the press, the keyboard and the
-/// role that says what it is — and it reads as the same card either way.
+/// Every other openable Event is a `CardButton` drawing the button it is, and
+/// the cards drawn through here cannot have one: the documents hold rendered
+/// markdown, and a link inside a button is not something a browser will have;
+/// the lists and the pull request hold a heading and rows, which a button would
+/// flatten to one run of text. So the card is asked for as an article, and
+/// `CardButton` puts the press, the keyboard and the role that says what it is
+/// on that instead — it reads as the same card either way, because it is the
+/// same card.
 ///
 /// `open` is nothing where the card is not openable, which is the Brief for as
 /// long as it is a draft: a field is not a thing to press, and neither is the
@@ -361,29 +357,15 @@ function Openable(props: {
   open: (() => void) | null;
   children: JSX.Element;
 }): JSX.Element {
-  const press = () => props.open?.();
-
   return (
-    <article
+    <CardButton
+      as="article"
       class={props.kind}
-      classList={{
-        [styles.openable!]: props.open !== null,
-        [styles.selected!]: props.selected,
-      }}
-      role={props.open === null ? undefined : "button"}
-      tabindex={props.open === null ? undefined : 0}
-      aria-pressed={props.open === null ? undefined : props.selected}
-      onClick={press}
-      onKeyDown={(ev) => {
-        // What a button would do for nothing: Enter and Space press it.
-        if (props.open !== null && (ev.key === "Enter" || ev.key === " ")) {
-          ev.preventDefault();
-          press();
-        }
-      }}
+      open={props.selected}
+      press={props.open}
     >
       {props.children}
-    </article>
+    </CardButton>
   );
 }
 
@@ -477,12 +459,14 @@ export function Timeline(props: {
                     ? styles.stopped
                     : styles.blocked
                 }
+                // Whatever stopped it, the badge goes to the whole of it: a
+                // held session opens its screen, and the notice that says what
+                // stopped a run opens the notice. There was a case here for
+                // the one event that had no pane behind it, and a notice has
+                // one now.
                 onClick={() => {
                   props.select(event());
-
-                  if (opensAPane(props.conversation, event())) {
-                    props.details();
-                  }
+                  props.details();
                 }}
               >
                 {props.conversation.stopped_by_hand
@@ -581,7 +565,14 @@ export function Timeline(props: {
                   {(notice) => (
                     <Notice
                       notice={notice()}
+                      blocked={
+                        props.conversation.blocked_on === notice().id
+                      }
                       selected={props.selected === notice().id}
+                      open={() => {
+                        props.select(notice().id);
+                        props.details();
+                      }}
                     />
                   )}
                 </Match>
@@ -747,7 +738,7 @@ function Session(props: {
       class={`${styles.session} ${shell.paneFoot}`}
       onClick={props.open}
     >
-      <span class={styles.what}>Agent output</span>
+      <span class={styles.what}>Agent run</span>
       <Mark
         running={props.output.running}
         idle={props.output.idle}
@@ -1541,26 +1532,52 @@ function Handoff(props: {
 /// branch went, a roadmap with nothing left to run — or a stop, which is what
 /// stopped the run, why, and what the evidence was.
 ///
-/// A card like the events around it, because it is one of the things that
-/// happened — quiet among them, in the dim ink, because there is nothing to open
-/// and nothing to answer. It is rendered markdown, because what it names — a
-/// branch, a stage, a file the repository records its process in — reads better
-/// set apart from the prose around it.
+/// A card that opens, like every other event with a full self. It was the one
+/// that did not: what a notice had to say was drawn whole where it stood, which
+/// works for the line about a stage starting and not at all for a stop — that
+/// one is a paragraph and two blocks of terminal output, and a record with a
+/// couple of them on it was a record to be scrolled past rather than read. So
+/// the card is a line and the whole of it is a press away, which is what the
+/// handoff and the instruction beside it already do.
+///
+/// One line rather than the five a document's card shows, because a notice is
+/// not a document: what it has to say is a sentence, and the sentence is what
+/// tells one notice from another down a column of them. It is cut with an
+/// ellipsis rather than faded, which is the difference between a line that goes
+/// on and a document that does.
+///
+/// It is rendered markdown, because what it names — a branch, a stage, a file
+/// the repository records its process in — reads better set apart from the
+/// prose around it. Which is also why it is an `Openable`: a link inside a
+/// button is not something a browser will have.
 ///
 /// Marked while it is what the conversation is blocked on, which is the whole of
 /// what the badge above does: a timeline is long by the time a run stops, and
-/// the badge is how the notice that stopped it is found. Nothing else selects
-/// one — there is no pane behind it to open.
+/// the badge is how the notice that stopped it is found. Read off `blocked_on`
+/// rather than off being the open one, because the two say different things
+/// now — a notice being read is not a notice the work stopped at.
 function Notice(props: {
   notice: NoticeEvent;
+  blocked: boolean;
   selected: boolean;
+  open: () => void;
 }): JSX.Element {
   return (
-    <div
-      class={`${styles.notice} markdown`}
-      classList={{ [styles.selected!]: props.selected }}
-      innerHTML={props.notice.html}
-    />
+    <Openable
+      kind={
+        props.blocked ? `${styles.notice} ${styles.blocking}` : styles.notice!
+      }
+      selected={props.selected}
+      open={props.open}
+    >
+      <div class={styles.eventHead}>
+        <h2>Notice</h2>
+      </div>
+      <div
+        class={`${styles.noticeBody} markdown`}
+        innerHTML={props.notice.html}
+      />
+    </Openable>
   );
 }
 
@@ -1671,15 +1688,13 @@ function AgentOutput(props: {
   open: () => void;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      class={styles.agentOutput}
-      classList={{ [styles.selected!]: props.selected }}
-      aria-pressed={props.selected}
-      onClick={props.open}
+    <CardButton
+      class={styles.agentOutput!}
+      open={props.selected}
+      press={props.open}
     >
       <span class={styles.eventHead}>
-        <span class={styles.what}>Agent output</span>
+        <span class={styles.what}>Agent run</span>
         {/* How far the conversation has got. A session with no Transcript to
             count has no metric at all rather than a zero: there is nothing here
             that took turns, and a `0 turns` would be a claim about it. */}
@@ -1704,7 +1719,7 @@ function AgentOutput(props: {
           {props.output.latest}
         </Show>
       </span>
-    </button>
+    </CardButton>
   );
 }
 
@@ -1724,6 +1739,15 @@ function AgentOutput(props: {
 ///
 /// A button, as a session's output is, and for the same reason: the whole
 /// document is in the details pane, and this is how it is opened.
+///
+/// One still waiting on the human is the one thing on a Timeline asking for
+/// something rather than recording it, and it says so in the disc — the same
+/// disc, in the same place, that a Conversation waiting on the human wears in
+/// the sidebar. It said it three ways at once before: an accent border round
+/// the card, the words *waiting on you* in the head, and nothing at the edge
+/// where every other mark on this page lives. The border and the words have
+/// gone the way the sidebar's did, and for the same reason — one thing said
+/// once, in the alphabet the rest of the app already reads.
 ///
 /// A Set still waiting says so instead of drawing a column of blanks: nothing
 /// has been decided yet, and an empty answer would read as a Set that was
@@ -1746,27 +1770,31 @@ function QuestionSet(props: {
   };
 
   return (
-    <button
-      type="button"
-      class={styles.questionSet}
-      classList={{
-        [styles.selected!]: props.selected,
-        [styles.waiting!]: waiting(),
-      }}
-      aria-pressed={props.selected}
-      onClick={props.open}
+    <CardButton
+      class={styles.questionSet!}
+      open={props.selected}
+      press={props.open}
     >
       <span class={styles.eventHead}>
         <span class={styles.what}>Question set</span>
         <span class={styles.setTitle}>{props.asked.title}</span>
-        <Show when={waiting()}>
-          <span class={styles.live}>waiting on you</span>
-        </Show>
         <Show when={deferred()}>
           <span class={styles.deferred}>deferred</span>
         </Show>
         <Show when={locked()}>
           <span class={styles.closed}>closed unanswered</span>
+        </Show>
+        {/* And a Set still waiting says so in the disc the sidebar says it in,
+            at the right edge of the title's line — the same mark, in the same
+            place, as the session running beside it puts its ring. It carries
+            its own words, the card having no label of its own and the badge
+            that used to say them having gone with the border. */}
+        <Show when={waiting()}>
+          <span
+            class={`${marks.mark} ${marks.waiting} ${styles.rowMark}`}
+            role="img"
+            aria-label="waiting on you"
+          />
         </Show>
       </span>
 
@@ -1798,7 +1826,7 @@ function QuestionSet(props: {
           )}
         </For>
       </span>
-    </button>
+    </CardButton>
   );
 }
 
@@ -1818,12 +1846,10 @@ function UnreadableSet(props: {
   open: () => void;
 }): JSX.Element {
   return (
-    <button
-      type="button"
+    <CardButton
       class={`${styles.questionSet} ${styles.unreadable}`}
-      classList={{ [styles.selected!]: props.selected }}
-      aria-pressed={props.selected}
-      onClick={props.open}
+      open={props.selected}
+      press={props.open}
     >
       <span class={styles.eventHead}>
         <span class={styles.what}>Question set</span>
@@ -1831,7 +1857,7 @@ function UnreadableSet(props: {
       </span>
 
       <span class={unreadable.unreadableWhy}>{props.asked.why}</span>
-    </button>
+    </CardButton>
   );
 }
 
@@ -1867,12 +1893,10 @@ function Commit(props: {
     `${props.commit.files} ${props.commit.files === 1 ? "file" : "files"}`;
 
   return (
-    <button
-      type="button"
-      class={styles.commit}
-      classList={{ [styles.selected!]: props.selected }}
-      aria-pressed={props.selected}
-      onClick={props.open}
+    <CardButton
+      class={styles.commit!}
+      open={props.selected}
+      press={props.open}
     >
       <span class={styles.eventHead}>
         <span class={styles.what}>Commit</span>
@@ -1901,7 +1925,7 @@ function Commit(props: {
       <Show when={props.commit.snippet}>
         {(snippet) => <span class={styles.snippet}>{snippet()}</span>}
       </Show>
-    </button>
+    </CardButton>
   );
 }
 

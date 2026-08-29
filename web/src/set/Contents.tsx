@@ -19,10 +19,12 @@
 //! those. So the width is measured here and said as a class, and the rules for
 //! the two shapes stay where every other rule about them is.
 
+import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import type { Accessor, JSX, Signal } from "solid-js";
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 
 import app from "../App.module.css";
+import { Icon } from "../Icon";
 import { BY_HAND, scroller } from "../scrolling";
 import { Switch } from "../Switch";
 import shell from "../workbench/Workbench.module.css";
@@ -318,9 +320,7 @@ function Bar(props: { watched: Watched[]; nav: Nav }): JSX.Element {
         )}
       </Show>
       {/* Which way the list will go, and no part of what the bar is called. */}
-      <span class={contents.barMark} aria-hidden="true">
-        ▾
-      </span>
+      <Icon of={faChevronDown} class={contents.barMark!} />
     </button>
   );
 }

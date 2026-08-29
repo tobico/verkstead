@@ -608,7 +608,7 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 branch_named: conversation.branch_named,
                 naming: conversation.naming,
                 repo: conversation.repo,
-                state: lifecycle(conversation.state),
+                state: row_state(conversation.id, conversation.state),
                 working,
                 // Idle is a thing a running session is, and the two sets are
                 // read a moment apart — so the pair is made consistent here
@@ -2379,6 +2379,33 @@ fn own_checks(repo: &Option<String>, checks: Option<CheckRollup>) -> Option<Chec
     match repo {
         None => checks,
         Some(_) => None,
+    }
+}
+
+/// A sidebar row's state as the viewer receives it, including the row whose
+/// stored word this Verkstead has never heard of.
+///
+/// Such a row is drawn as a **Draft**, and the word it really held goes in the
+/// log. Draft rather than anything else because of what the row is *for* here:
+/// it is the way to the Conversation's own page, and the page's own read still
+/// refuses a word it cannot parse — so what the human lands on is the pane's
+/// error state and the escape hatch in it. That hatch offers Archive on a state
+/// of Closed and Close-and-archive on anything else, and Archive on a row like
+/// this would answer `NotClosed` and go nowhere. So the fallback has to read as
+/// *not closed*, and Draft is the one that does while drawing harmlessly.
+fn row_state(id: i64, state: store::RowState) -> Lifecycle {
+    match state {
+        store::RowState::Known(state) => lifecycle(state),
+        store::RowState::Unknown(word) => {
+            tracing::warn!(
+                conversation_id = id,
+                state = word,
+                "a Conversation's stored state is a word this Verkstead does not know, so its \
+                 row is drawn as a draft"
+            );
+
+            Lifecycle::Draft
+        }
     }
 }
 

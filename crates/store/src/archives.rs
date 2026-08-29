@@ -111,7 +111,13 @@ pub async fn archive_conversation(pool: &SqlitePool, id: i64) -> Result<Archivin
         return Ok(Archiving::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::Closed {
+    // Tolerantly, as the close is: a word this Verkstead cannot parse is not
+    // Closed, so this answers `NotClosed`. Which is the safe way round and the
+    // deliberate one — archiving is *hide it from the list*, and hiding a
+    // Conversation whose worktree may still be live would put the work out of
+    // sight without ending it. Close and archive is the press that works end to
+    // end on a row like that, because closing heals the word first.
+    if !Lifecycle::reads_as(&state, Lifecycle::Closed) {
         return Ok(Archiving::NotClosed);
     }
 

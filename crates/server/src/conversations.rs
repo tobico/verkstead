@@ -1541,17 +1541,27 @@ fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
 /// it left open, in [`asked`], and the news mark it was carrying, in [`read`].
 /// The record says Closed by then, which is the order the rest of this is in:
 /// what has happened is written down, and then whatever outlived it is shut.
+///
+/// **The Conversation is read through [`store::closable`] rather than the whole
+/// of it**, which is a decision about what this may be stopped by rather than
+/// about how much is fetched. The full read parses the state word, the
+/// direction and each companion's mode, and a stored word this Verkstead does
+/// not know refuses all three — so a Conversation whose record has gone strange
+/// used to be one nothing could ever end, which is the opposite of what Close
+/// is for. This read parses nothing: it wants a repository path and a worktree
+/// path per checkout, and the only thing it can be refused for is a
+/// Conversation that is not there.
 pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClosed> {
     let pool = &state.pool;
 
-    let Some(conversation) = store::load_conversation(pool, id).await? else {
+    let Some(conversation) = store::closable(pool, id).await? else {
         return Ok(ConversationClosed::NoSuchConversation);
     };
 
     state.sessions.end(id).await;
 
     if let Some(path) = conversation.worktree.clone() {
-        let repo = conversation.repo.path.clone();
+        let repo = conversation.repo.clone();
         let left = path.clone();
 
         let removed = tokio::task::spawn_blocking(move || worktrees::remove(&repo, &path)).await?;
@@ -1570,7 +1580,7 @@ pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClose
             continue;
         };
 
-        let repo = companion.repo.path.clone();
+        let repo = companion.repo.clone();
         let left = path.clone();
 
         let removed = tokio::task::spawn_blocking(move || worktrees::remove(&repo, &path)).await?;
@@ -1578,7 +1588,7 @@ pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClose
         if !removed {
             tracing::warn!(
                 conversation_id = id,
-                repo = companion.repo.name,
+                repo = companion.name,
                 worktree = %left.display(),
                 "a companion repo's worktree could not be removed, so it was closed around it"
             );

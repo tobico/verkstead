@@ -487,7 +487,15 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
         };
 
         for conversation in conversations {
-            if !driven(conversation.state) {
+            // A row whose state word this Verkstead cannot read is not one to
+            // start a session on: what would be resumed is a guess. The sidebar
+            // draws it so the human can reach it and end it; nothing here acts
+            // on it.
+            let Some(lifecycle) = conversation.state.known() else {
+                continue;
+            };
+
+            if !driven(lifecycle) {
                 continue;
             }
 
@@ -508,7 +516,7 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
 
             match resume(&state, conversation.id, Resuming::Restarted).await {
                 Ok(Resumed::Resumed) => {}
-                Ok(refusal) => refused(&state, conversation.id, conversation.state, refusal).await,
+                Ok(refusal) => refused(&state, conversation.id, lifecycle, refusal).await,
                 Err(error) => {
                     tracing::error!(error = ?error, conversation_id = conversation.id, "starting to drive a Conversation a restart left failed");
                 }

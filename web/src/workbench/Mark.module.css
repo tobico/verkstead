@@ -30,17 +30,16 @@
    class keeps the name of the first of them.
 
    A filled disc and nothing else — the whole of the mark, where it used to be
-   one of three things a waiting card said at once. It is a size up on the
-   session marks beside it because this is a list that is glanced down rather
-   than read, and the accent rather than the `--stopped` red because not one of
-   the reasons is anything going wrong.
+   one of three things a waiting card said at once. The accent rather than the
+   `--stopped` red, because not one of the reasons is anything going wrong.
 
-   The sidebar's alone, and it needs no card named in front of it to say so:
-   neither reason is anything a running session has, so the only mark that ever
-   carries it is the one `Conversations.tsx` draws. */
+   Two cards wear it now, and it needs no card named in front of it for either:
+   a Conversation in the sidebar with something waiting on the human, and a
+   Question Set on the record that is the thing waiting. That card went through
+   the same three-marks-at-once as the sidebar's did and came out the same way
+   — see `.questionSet` in `Timeline.module.css`. Neither reason is anything a
+   running session has, so nothing else ever carries it. */
 .mark.waiting {
-  width: 1rem;
-  height: 1rem;
   background: var(--accent);
   border-radius: 50%;
 }
@@ -82,4 +81,3 @@
     animation: none;
   }
 }
-

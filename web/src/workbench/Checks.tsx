@@ -5,7 +5,14 @@
 //! words is one more line to read on a Timeline of them. The shapes are the ones
 //! GitHub puts beside a pull request, because this is a reading of GitHub and
 //! the human has just come from looking at it there: a tick for a green suite, a
-//! cross for a red one, and a dot for a suite that has not finished.
+//! cross for a red one, and a ring for a suite that has not finished.
+//!
+//! Font Awesome's three rather than three shapes built here out of borders and
+//! rotations, which is what they were: a tick was the right and bottom edges of
+//! a box turned onto its corner, and nobody could change its shape without
+//! doing the arithmetic again. What each of the three *means* is still this
+//! file's, and so is the colour — the icons are ink and the palette says which
+//! ink. See `Icon.tsx` for how one is drawn.
 //!
 //! One icon for a whole suite, which is what a card has room for: which of the
 //! three it is, and not what each check in it is called. The details pane draws
@@ -17,8 +24,12 @@
 //! this down. *Not known* is a third thing beside green and red, and an icon
 //! guessing at it would be worse than no icon.
 
+import { faCircle } from "@fortawesome/free-regular-svg-icons";
+import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
+import { faCheck, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { Show, type JSX } from "solid-js";
 
+import { Icon } from "../Icon";
 import type { CheckRollup, Checked } from "../api/types";
 import styles from "./Checks.module.css";
 
@@ -43,7 +54,18 @@ export const SAID: Record<Checked, string> = {
   Failed: "failed",
 };
 
-/// Which rule draws each of them.
+/// Which shape each of them is drawn as.
+///
+/// The empty ring for a suite that has not finished, which is the one of the
+/// three that says nothing has happened yet: a tick and a cross are both an
+/// outcome, and the ring is the shape they are cut into once there is one.
+const SHAPE: Record<Mark, IconDefinition> = {
+  Passed: faCheck,
+  Running: faCircle,
+  Failed: faXmark,
+};
+
+/// And which rule colours it.
 const DRAWN: Record<Mark, string> = {
   Passed: styles.passed!,
   Running: styles.running!,
@@ -67,12 +89,12 @@ export function CheckMark(props: {
   class?: string;
 }): JSX.Element {
   return (
-    <span
+    <Icon
+      of={SHAPE[props.how]}
+      label={props.spoken}
       class={[styles.checks, DRAWN[props.how], props.class]
         .filter(Boolean)
         .join(" ")}
-      role="img"
-      aria-label={props.spoken}
     />
   );
 }
