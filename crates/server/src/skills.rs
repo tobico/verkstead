@@ -792,6 +792,13 @@ mod tests {
         String::from_utf8(file.data.to_vec()).expect("a skill is markdown")
     }
 
+    /// The same, as one long line: the skills are wrapped at eighty columns, so
+    /// a phrase held here against several of them would otherwise turn on where
+    /// each copy happened to break.
+    fn flowed(name: &str) -> String {
+        skill(name).split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
     /// Where the shared commit-summary block starts, and the last line of it.
     /// Every skill that commits work carries the block word for word; what
     /// follows it differs from skill to skill, so the end is found by its own
@@ -1961,8 +1968,8 @@ mod tests {
              {reviewing}"
         );
         assert!(
-            reviewing.contains("background command"),
-            "so the ask that blocks for hours is run as one: {reviewing}"
+            reviewing.contains("Idling is the ask working"),
+            "the wait being the ask working rather than the ask failing: {reviewing}"
         );
         assert!(
             reviewing.contains("part of the instruction"),
@@ -3029,6 +3036,63 @@ mod tests {
             "the words come first and the picture is checked against them, in the block \
              as in the message: {block}"
         );
+    }
+
+    /// Every skill is read by every backend, so none of them names a mechanism
+    /// only one agent has. Holding a shell command open for hours is Claude
+    /// Code's own trick and false of a backend whose shell tool yields after
+    /// seconds — what a skill keeps saying is what is true of all of them, and
+    /// how to run the ask is the Guide's, which every skill already sends the
+    /// session to first.
+    #[test]
+    fn no_skill_says_how_to_hold_an_ask_open() {
+        for name in Bundled::iter() {
+            let text = flowed(&name);
+
+            assert!(
+                !text.contains("background command"),
+                "{name} names one agent's way of waiting, which the Guide says \
+                 instead:\n{text}"
+            );
+
+            if !text.contains("verkstead ask") {
+                continue;
+            }
+
+            assert!(
+                text.contains("may be hours"),
+                "{name} asks, so it says the wait may be hours:\n{text}"
+            );
+            assert!(
+                text.contains("Idling is the ask working rather than the ask failing")
+                    || text.contains("Idling is this working rather than this failing"),
+                "and that idling is the ask working rather than the ask failing:\n{text}"
+            );
+            assert!(
+                text.contains("verkstead guide"),
+                "and sends the session to the Guide, which says how to run one:\n{text}"
+            );
+        }
+    }
+
+    /// And the repository a session works in says what it says about itself in
+    /// a file whichever agent is reading — so a skill that sends the session to
+    /// read it names both spellings rather than only the one Claude answers to.
+    #[test]
+    fn every_skill_that_reads_the_repositorys_own_instructions_names_both_files() {
+        for name in Bundled::iter() {
+            let text = flowed(&name);
+
+            if !text.contains("CLAUDE.md") {
+                continue;
+            }
+
+            assert!(
+                text.contains("`CLAUDE.md` or `AGENTS.md`"),
+                "{name} points at the repository's own instructions, which are one \
+                 file or the other:\n{text}"
+            );
+        }
     }
 
     /// The skills that only keep the books are left alone: a plan, a roadmap or

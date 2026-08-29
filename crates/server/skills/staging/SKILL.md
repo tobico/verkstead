@@ -49,10 +49,10 @@ codebase moves. A roadmap splits the difference:
 ## 1. Ground the plan in the code
 
 Read the codebase before drafting anything. Stage titles and briefs should use
-the project's own vocabulary — its `CLAUDE.md`, its `CONTEXT.md` glossary if it
-has one, the ADRs under `docs/adr/` covering what you are touching — and the
-staging should match how the code is actually laid out rather than how the plan
-imagined it.
+the project's own vocabulary — its `CLAUDE.md` or `AGENTS.md`, its `CONTEXT.md`
+glossary if it has one, the ADRs under `docs/adr/` covering what you are
+touching — and the staging should match how the code is actually laid out
+rather than how the plan imagined it.
 
 If the plan's decisions are not already written down somewhere durable — a
 design document, the ADRs, `CONTEXT.md` — get them written first. Briefs
@@ -231,13 +231,12 @@ machine of its own and they answer on a phone, so a question printed here is one
 nobody will ever see.
 
 - **Read `verkstead guide` before the first ask.** It is everything the binary
-  knows about asking well — how a Set is labelled, how much belongs in one, and
-  the shape it goes over the wire in — and it ships inside the binary, so
-  nothing else has to be found.
+  knows about asking well — how a Set is labelled, how much belongs in one, the
+  shape it goes over the wire in, and how to run an ask that blocks for hours —
+  and it ships inside the binary, so nothing else has to be found.
 - **Put every round through `verkstead ask`.** It blocks until the answers come
   back, which may be hours. Idling is this working rather than this failing, so
-  run it as a background command and do only work the answers cannot invalidate
-  while you wait.
+  do only work the answers cannot invalidate while you wait.
 - **Never answer on their behalf.** If the ask itself fails — the server
   unreachable, any non-zero exit that is not a refused Set — say so and stop.
   Approving your own staging decides in their place the very thing worth asking

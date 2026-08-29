@@ -196,13 +196,12 @@ machine of its own and they answer on a phone, so a question printed here is one
 nobody will ever see.
 
 - **Read `verkstead guide` before the first ask.** It is everything the binary
-  knows about asking well — how a Set is labelled, how much belongs in one, and
-  the shape it goes over the wire in — and it ships inside the binary, so
-  nothing else has to be found.
+  knows about asking well — how a Set is labelled, how much belongs in one, the
+  shape it goes over the wire in, and how to run an ask that blocks for hours —
+  and it ships inside the binary, so nothing else has to be found.
 - **Put every round through `verkstead ask`.** It blocks until the answers come
   back, which may be hours. Idling is this working rather than this failing, so
-  run it as a background command and do only work the answers cannot invalidate
-  while you wait.
+  do only work the answers cannot invalidate while you wait.
 - **Never answer on their behalf.** If the ask itself fails — the server
   unreachable, any non-zero exit that is not a refused Set — say so and stop.
   Taking your own recommendations decides in their place the very thing worth
