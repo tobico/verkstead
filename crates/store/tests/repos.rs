@@ -6,8 +6,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Lifecycle, Unregistering, load_repo, open_database, register_repo, registered_repos, set_state,
-    start_conversation, unregister_repo,
+    Adding, Lifecycle, Unregistering, add_companion, load_repo, open_database, register_repo,
+    registered_repos, set_state, start_adoption, start_conversation, unregister_repo,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -237,4 +237,78 @@ async fn registering_an_unregistered_path_again_revives_it() {
     assert_eq!(again.name, "renamed");
     assert_eq!(again.default_branch, "trunk");
     assert_eq!(registered_repos(&pool).await.unwrap(), vec![again]);
+}
+
+/// Off the registry is not merely off the list: no new work goes into a Repo
+/// that has been taken away, however the id got as far as the press. A sidebar
+/// that has not heard about the removal is the ordinary way that happens — one
+/// device removes a Repo and another still has it in its New conversation menu.
+#[tokio::test]
+async fn nothing_new_is_started_in_an_unregistered_repo() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    unregister_repo(&pool, repo.id).await.unwrap();
+
+    assert!(
+        start_conversation(&pool, repo.id, "rate-limiting")
+            .await
+            .unwrap()
+            .is_none(),
+        "a Repo that was taken away is no Repo to start work in",
+    );
+    assert!(
+        start_adoption(&pool, repo.id, "pane-paths", "mvp")
+            .await
+            .unwrap()
+            .is_none(),
+        "and adopting a roadmap in one is a start like any other",
+    );
+
+    // And registering it again is what makes it startable, the same press that
+    // brought it back to the list.
+    register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        start_conversation(&pool, repo.id, "rate-limiting")
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+/// And nothing already going is given one to work alongside: what a Conversation
+/// may compose is what the human has put in the registry, which is the whole of
+/// the trust boundary a companion sits behind.
+#[tokio::test]
+async fn an_unregistered_repo_is_no_companion() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let own = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+    let beside = register_repo(&pool, Path::new("/watched/askance"), "askance", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let conversation = start_conversation(&pool, own.id, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    unregister_repo(&pool, beside.id).await.unwrap();
+
+    assert_eq!(
+        add_companion(&pool, conversation, beside.id).await.unwrap(),
+        Adding::NoSuchRepo,
+    );
 }

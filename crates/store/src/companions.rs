@@ -473,7 +473,10 @@ pub async fn add_companion(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<A
         return Ok(Adding::OwnRepo);
     }
 
-    if super::load_repo(pool, repo_id).await?.is_none() {
+    // On the registry rather than merely in the table: what a Conversation may
+    // compose is what the human has put in the registry, so a Repo that has been
+    // taken off it is no more a companion than one that was never registered.
+    if super::registered_repo(pool, repo_id).await?.is_none() {
         return Ok(Adding::NoSuchRepo);
     }
 

@@ -992,11 +992,15 @@ async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
 /// Start a Conversation against a registered Repo, on `branch`, with an empty
 /// Brief already in its Timeline.
 ///
-/// `None` means there is no such Repo. The insert selects from `repos` rather
-/// than trusting the id, so a Conversation cannot come to hang off a repository
-/// that was never registered — SQLite does not enforce a foreign key unless it
-/// is asked to, and a row that named nothing would be a Conversation with
-/// nowhere to work.
+/// `None` means there is no Repo on the registry with that id — one that never
+/// existed, and one somebody has taken away, which are one answer because
+/// neither is a repository new work may be put in. The insert selects from
+/// `repos` rather than trusting the id, so a Conversation cannot come to hang
+/// off a repository that was never registered — SQLite does not enforce a
+/// foreign key unless it is asked to, and a row that named nothing would be a
+/// Conversation with nowhere to work. A Repo that has been taken off the
+/// registry falls out of that same `SELECT`, so the removal holds against a
+/// press made from a list that has not heard about it yet.
 ///
 /// The Brief goes in with it, in the same transaction: the Brief is the first
 /// Event, and a Conversation whose Timeline was empty because the second insert
@@ -1045,10 +1049,16 @@ async fn started(
 ) -> Result<Option<i64>> {
     let mut tx = super::writing(pool, "starting a Conversation").await?;
 
+    // The registry is asked in the insert's own `SELECT` rather than before it,
+    // for the reason the path's uniqueness is left to the index: a look taken
+    // first is a look something can get past. A Repo that has been taken off the
+    // registry falls out here, so a sidebar that has not heard about the removal
+    // cannot start work in a repository Verkstead has stopped offering.
     let row: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO conversations (repo_id, created_at, branch, base_commit, state)
          SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, NULL, ?
-         FROM repos WHERE id = ?
+         FROM repos
+         WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)
          RETURNING id",
     )
     .bind(branch)
