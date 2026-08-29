@@ -788,6 +788,14 @@ pub(crate) fn startable(repo: &Path, commit: &str, name: &str) -> Startable {
     }))
 }
 
+/// How long [`adopting`] gives its fetch before git is stopped.
+///
+/// Long enough for a slow remote on a slow connection, and short enough that a
+/// human waiting on a page has not yet decided it is broken. The Conversation
+/// pane is read behind it, so this is the longest that page can take to say
+/// anything at all.
+const FETCHING: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// What an adopting Conversation's page says about the roadmap it was started
 /// for: the roadmap named, and the stage adopting would start.
 ///
@@ -804,6 +812,15 @@ pub(crate) fn startable(repo: &Path, commit: &str, name: &str) -> Startable {
 /// it was is the press's to say by name.
 ///
 /// Blocking git reads, so they happen off the runtime's threads.
+///
+/// And the fetch inside is given [`FETCHING`] and no longer, because this is
+/// the one read on the Conversation pane's own path that can wait on a network.
+/// Everything else the pane reads is the database or the filesystem; this is a
+/// `git fetch`, and a route that drops packets rather than refusing them leaves
+/// one sitting there for good. A pane that never resolves is the worst of all
+/// the answers — the human cannot even reach the menu to close the
+/// Conversation — so past the deadline git is stopped and the page is drawn off
+/// what was last fetched, exactly as it is for a fetch git itself refused.
 pub(crate) async fn adopting(
     repo: store::Repo,
     base: Option<String>,
@@ -825,8 +842,15 @@ pub(crate) async fn adopting(
             // reading off what was last fetched says more than a blank page
             // does. The press is where a failed fetch refuses, because the press
             // is what would act on it.
+            //
+            // Which is why the deadline can be here and cannot be there: a
+            // fetch stopped for running long is a failed fetch, and this path
+            // already knows what to do with one. What it buys is that the pane
+            // behind it always answers.
             None => {
-                if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo.path) {
+                if let worktrees::Fetched::Failed(said) =
+                    worktrees::fetch_within(&repo.path, FETCHING)
+                {
                     tracing::warn!(
                         said,
                         repo = %repo.path.display(),
