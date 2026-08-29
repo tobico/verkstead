@@ -52,6 +52,7 @@ use verkstead_render::{
     TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
+use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Executable, Home, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
@@ -366,6 +367,9 @@ impl Grilling {
                 },
                 Reachable::at(LISTENING),
                 SandboxConfig::resolve(&[self.spill.path().display().to_string()]).unwrap(),
+                // No shared build cache: what these tests are about runs a stub
+                // where claude goes and builds nothing at all.
+                BuildCache::none(),
                 Skills::installed(self.state.path()).expect("this binary carries skills"),
                 equipped(),
                 Handoffs::under(self.state.path()),
@@ -1701,6 +1705,7 @@ async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pac
         },
         Reachable::at(LISTENING),
         SandboxConfig::resolve(&[spill.path().display().to_string()]).unwrap(),
+        BuildCache::none(),
         Skills::installed(state.path()).expect("this binary carries skills"),
         equipped(),
         Handoffs::under(state.path()),
@@ -3029,6 +3034,7 @@ async fn a_capture_survives_the_server_restarting() {
             },
             Reachable::at(LISTENING),
             SandboxConfig::default(),
+            BuildCache::none(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
             equipped(),
             Handoffs::under(fixture.state.path()),
@@ -5014,6 +5020,7 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
             },
             Reachable::at(LISTENING),
             SandboxConfig::default(),
+            BuildCache::none(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
             equipped(),
             Handoffs::under(fixture.state.path()),

@@ -18,6 +18,10 @@
 //! - **by mode** — each companion repo the Conversation was configured with,
 //!   its worktree and its git directory together, read-only or read-write as
 //!   the human said — see [`companion_binds`]
+//! - **the shared Rust build cache** — one directory of Verkstead's own,
+//!   writable, plus the sccache it compiles through read-only beside the
+//!   `verkstead` binary, so a crate is downloaded and compiled once for the
+//!   machine rather than once per Conversation — see [`crate::build_cache`]
 //!
 //! Credentials are on none of those lists, and neither is who a session commits
 //! as. Both arrive in the environment out of the settings files the human filled
@@ -39,6 +43,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::build_cache::{self, BuildCache};
 use crate::handoffs::{self, Handoffs};
 use crate::settings::{Config, GitAuthor, Secrets};
 use crate::skills::{self, Skills};
@@ -84,6 +89,15 @@ const SYSTEM: [&str; 7] = [
 /// to put a file. The directory is made by the bind itself, holds this one
 /// executable and nothing else, and goes first on [`PATH`].
 const VERKSTEAD_INSIDE: &str = "/verkstead/bin/verkstead";
+
+/// And where the sccache the shared build cache compiles through is mounted,
+/// beside it.
+///
+/// The same trick, for the same reason: the binary is the server's own to
+/// choose, the directory is made by the bind and holds nothing the host put
+/// there, and an absolute `RUSTC_WRAPPER` is one that works whatever a project's
+/// dev shell does to `PATH`. See [`crate::build_cache`].
+const SCCACHE_INSIDE: &str = "/verkstead/bin/sccache";
 
 /// What a session's `PATH` is inside.
 ///
@@ -346,8 +360,15 @@ impl SandboxConfig {
     /// this parts company with the settings files: a setting nobody has filled in
     /// is an installation part-way through being set up, and a missing configured
     /// bind is a typo that would otherwise take every session in that repository
-    /// down with it, weeks later, with nobody watching. Not created either — a
-    /// directory outside the Data Directory is not Verkstead's to make.
+    /// down with it, weeks later, with nobody watching. Not created either: the
+    /// path is the human's own word, so a directory made where they meant
+    /// another one is an empty cache that looks like a working one.
+    ///
+    /// Which is the whole of what makes [`crate::build_cache`] the exception it
+    /// is. That directory is Verkstead's own choice on a fresh install rather
+    /// than something typed, there is nothing in it for a typo to hide, and a
+    /// feature that is on by default cannot ask the human to `mkdir` first — so
+    /// it is made, and only failing to make it refuses startup.
     pub fn resolve(binds: &[String]) -> anyhow::Result<SandboxConfig> {
         let mut config = SandboxConfig::default();
 
@@ -534,6 +555,15 @@ pub struct Sandbox {
     /// read-only bind rather than under it — and a cache that could not be
     /// written to is no cache.
     binds: Vec<Bind>,
+
+    /// The shared Rust build cache this session gets, or `None` where the human
+    /// switched it off or this server has none to give.
+    ///
+    /// Decided as the sandbox is built rather than held from startup, for the
+    /// reason the token and the author are: the switch is in `config.yaml`, the
+    /// file is read at every spawn, so flipping it in the workbench applies to
+    /// the next session and a running one keeps what it started with.
+    build_cache: Option<build_cache::Shared>,
 }
 
 impl Sandbox {
@@ -573,6 +603,7 @@ impl Sandbox {
         handoffs: &Handoffs,
         secrets: &Secrets,
         config: &Config,
+        cache: &BuildCache,
         extra: Vec<Bind>,
     ) -> Option<Sandbox> {
         let worktree = conversation.worktree.clone()?;
@@ -595,6 +626,7 @@ impl Sandbox {
             git_author: config.git_author().clone(),
             server: reachable.asking_from(conversation.id),
             binds,
+            build_cache: cache.shared(config.rust_build_cache()),
         })
     }
 
@@ -676,6 +708,20 @@ impl Sandbox {
             .arg(&self.verkstead)
             .arg(VERKSTEAD_INSIDE);
 
+        // And the shared build cache: the directory writable at the same path
+        // inside, and the sccache that compiles into it read-only in the
+        // directory the binary above just made. After the `--dir` on HOME, so
+        // that a cache under the server's own home — which is where it is when
+        // nobody has configured one — lands inside the fresh HOME rather than
+        // being wiped by it. See [`crate::build_cache`].
+        if let Some(cache) = &self.build_cache {
+            bwrap.arg("--bind").arg(cache.dir()).arg(cache.dir());
+
+            if let Some(sccache) = cache.sccache() {
+                bwrap.arg("--ro-bind").arg(sccache).arg(SCCACHE_INSIDE);
+            }
+        }
+
         for bind in &self.binds {
             bwrap.arg(bind.flag()).arg(&bind.path).arg(&bind.path);
         }
@@ -713,6 +759,48 @@ impl Sandbox {
             .arg("--setenv")
             .arg("VERKSTEAD_SERVER")
             .arg(&self.server);
+
+        // Where a Rust build inside puts what it downloads and what it
+        // compiles. Nothing but a Rust build ever reads any of them, which is
+        // what makes them safe to set for every session whatever the repository
+        // holds.
+        //
+        // `CARGO_INCREMENTAL` is deliberately not among them. Cargo compiles
+        // dependencies non-incrementally already, which is exactly what sccache
+        // can cache; the workspace's own crates stay incremental in the
+        // worktree's `target/`, and turning that off to feed the cache would
+        // trade the fast half of every build for the slow half of one.
+        //
+        // Two things this loses to, both on purpose. A project that sets
+        // `build.rustc-wrapper` in its own `.cargo/config.toml` is overridden,
+        // because cargo gives the environment precedence — rare, and accepted. A
+        // project whose dev shell exports these itself wins instead, because
+        // `nix develop` layers its environment over this one — which is a
+        // project saying what its own build needs, and is working as intended.
+        if let Some(cache) = &self.build_cache {
+            bwrap
+                .arg("--setenv")
+                .arg("CARGO_HOME")
+                .arg(cache.cargo_home());
+
+            // Only where there is an sccache to point at. Without one this is a
+            // cache of downloads and nothing else — see [`crate::build_cache`]
+            // — and a `RUSTC_WRAPPER` naming a path that is not mounted would
+            // be every Rust build inside failing rather than one running
+            // uncached.
+            if cache.sccache().is_some() {
+                bwrap
+                    .arg("--setenv")
+                    .arg("RUSTC_WRAPPER")
+                    .arg(SCCACHE_INSIDE)
+                    .arg("--setenv")
+                    .arg("SCCACHE_DIR")
+                    .arg(cache.sccache_dir())
+                    .arg("--setenv")
+                    .arg("SCCACHE_CACHE_SIZE")
+                    .arg(cache.size());
+            }
+        }
 
         // What `gh` inside authenticates as, which it reads from here without
         // being told to and without a file anywhere. Set only where there is one

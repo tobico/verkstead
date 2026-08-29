@@ -21,6 +21,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{
     Bind, Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell,
@@ -43,6 +44,11 @@ const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8
 /// and hands the sandbox that. The bind is the same either way, and this one
 /// answers in words a probe can recognise.
 const SAYS_WHICH_BUILD: &str = "#!/bin/sh\nprintf 'verkstead 0.0.0-the-servers-own\\n'\n";
+
+/// And what stands in for the sccache the server resolved, for the same reason:
+/// what has to be shown is that the binary a session compiles through is the
+/// one the server found, which a real sccache could not say.
+const SAYS_WHICH_SCCACHE: &str = "#!/bin/sh\nprintf 'sccache 0.0.0-the-one-resolved\\n'\n";
 
 /// A Conversation part-way through its first grilling: a Repo inside a Watched
 /// Path, a Profile to run as, and a worktree under Verkstead's own state
@@ -86,7 +92,7 @@ struct Grilling {
 
     /// The settings files, in that directory again. Nothing is in them until a
     /// test says so — see [`Grilling::configure_github_token`] and
-    /// [`Grilling::configure_git_author`] — which is what an installation nobody
+    /// [`Grilling::configure`] — which is what an installation nobody
     /// has been to the settings page of looks like.
     settings: Settings,
 }
@@ -94,8 +100,50 @@ struct Grilling {
 impl Grilling {
     /// The sandbox this Conversation's session would run in, with `extra` as
     /// whatever Sandbox Configuration asked for.
+    ///
+    /// With no shared build cache, which is what every test here that is not
+    /// about one wants: the cache is a bind and four variables, and a test
+    /// asking what else is inside should not have to know about them.
     fn sandbox(&self, extra: Vec<Bind>) -> Sandbox {
-        self.sandbox_reaching(LISTENING, extra)
+        self.sandbox_reaching(LISTENING, &BuildCache::none(), extra)
+    }
+
+    /// And one built around `cache`, which is what the tests about the build
+    /// cache ask for. What is switched on and how big it may grow is read out
+    /// of `config.yaml` as the sandbox is built, so a test says that by writing
+    /// the file — see [`Grilling::configure`].
+    fn sandbox_caching(&self, cache: &BuildCache) -> Sandbox {
+        self.sandbox_reaching(LISTENING, cache, vec![])
+    }
+
+    /// Where the shared build cache is on the host, which is a directory of the
+    /// fixture's own rather than the machine's XDG one.
+    fn cache_dir(&self) -> PathBuf {
+        self.state.path().join("build-cache")
+    }
+
+    /// A cache at that directory, with a stub sccache where `compiling` says so.
+    ///
+    /// The stub is a script that says which build it is, for the reason
+    /// [`SAYS_WHICH_BUILD`] is one: what has to be shown is that the file the
+    /// server resolved is the file a session finds at
+    /// `/verkstead/bin/sccache`, and a real sccache would answer that question
+    /// with whatever the machine happened to have installed.
+    fn cache(&self, compiling: bool) -> BuildCache {
+        let dir = self.cache_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+
+        BuildCache::at(dir, compiling.then(|| self.sccache()))
+    }
+
+    /// The stub sccache, written where the server would have found a real one.
+    fn sccache(&self) -> PathBuf {
+        let path = self.state.path().join("sccache");
+
+        std::fs::write(&path, SAYS_WHICH_SCCACHE).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        path
     }
 
     /// The companion of that name, as the Conversation now carries it — where
@@ -118,7 +166,12 @@ impl Grilling {
 
     /// The same, for a server that is really listening somewhere — which is what
     /// a session inside has to be able to reach to ask anything.
-    fn sandbox_reaching(&self, listening: SocketAddr, extra: Vec<Bind>) -> Sandbox {
+    fn sandbox_reaching(
+        &self,
+        listening: SocketAddr,
+        cache: &BuildCache,
+        extra: Vec<Bind>,
+    ) -> Sandbox {
         Sandbox::for_conversation(
             &self.conversation,
             &self.profile,
@@ -132,6 +185,7 @@ impl Grilling {
             // configured when it was built.
             &self.settings.secrets(),
             &self.settings.config(),
+            cache,
             extra,
         )
         .expect("a grilling Conversation has a worktree to build a sandbox around")
@@ -143,8 +197,9 @@ impl Grilling {
         std::fs::write(self.settings.secrets_path(), yaml).unwrap();
     }
 
-    /// And `config.yaml`, which is who those sandboxes commit as.
-    fn configure_git_author(&self, yaml: &str) {
+    /// And `config.yaml`, which is who those sandboxes commit as and how their
+    /// shared build cache is set.
+    fn configure(&self, yaml: &str) {
         std::fs::write(self.settings.config_path(), yaml).unwrap();
     }
 
@@ -616,7 +671,7 @@ async fn the_system_comes_in_read_only_and_the_hosts_gitconfig_not_at_all() {
 #[tokio::test]
 async fn a_commit_made_inside_is_by_the_configured_author() {
     let fixture = grilling().await;
-    fixture.configure_git_author("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+    fixture.configure("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
 
     let reported = probe(
         &fixture.sandbox(vec![]),
@@ -1058,7 +1113,7 @@ async fn a_session_puts_a_set_to_its_own_conversation_and_nothing_else() {
         }
     });
 
-    let sandbox = fixture.sandbox_reaching(listening, vec![]);
+    let sandbox = fixture.sandbox_reaching(listening, &BuildCache::none(), vec![]);
 
     // Every part of the sandbox blocks, and this one is a process talking to a
     // server on the runtime this test is on.
@@ -1192,7 +1247,7 @@ async fn the_extra_binds_sandbox_configuration_asks_for_are_there_and_writable()
 #[tokio::test]
 async fn a_read_only_companion_is_there_to_read_and_a_commit_from_it_is_refused() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
-    fixture.configure_git_author("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+    fixture.configure("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
 
     let companion = fixture.companion_worktree("askance").to_owned();
 
@@ -1267,7 +1322,7 @@ async fn a_read_only_companion_is_there_to_read_and_a_commit_from_it_is_refused(
 #[tokio::test]
 async fn a_read_write_companion_takes_a_commit_on_its_own_branch() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadWrite)]).await;
-    fixture.configure_git_author("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+    fixture.configure("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
 
     let companion = fixture.companion_worktree("askance").to_owned();
 
@@ -1381,6 +1436,152 @@ async fn a_repos_own_binds_compose_over_the_global_ones() {
         "the global set, then the Conversation's own Repo's, then its companion's — \
          and a Repo it has nothing to do with brings nothing"
     );
+}
+
+/// The shared Rust build cache, with nothing configured — which is the feature
+/// on, because a human who has never opened the settings page should not be the
+/// one paying for every dependency to be compiled twice.
+///
+/// The directory is writable at the same path inside, and `CARGO_HOME` points
+/// into it: that is the half of the cache that works with no sccache anywhere,
+/// and it is what stops two Conversations downloading one crate twice.
+#[tokio::test]
+async fn the_build_cache_is_writable_inside_and_cargos_home_is_in_it() {
+    let fixture = grilling().await;
+    let cache = fixture.cache(false);
+
+    let reported = probe(
+        &fixture.sandbox_caching(&cache),
+        &format!(
+            r#"
+            dir {dir} cache
+            say cargo-home "${{CARGO_HOME-unset}}"
+            say wrapper "${{RUSTC_WRAPPER-unset}}"
+            say sccache-dir "${{SCCACHE_DIR-unset}}"
+            "#,
+            dir = quoted(&fixture.cache_dir()),
+        ),
+    );
+
+    assert_eq!(
+        reported["cache"], "write",
+        "a cache a session cannot write to is no cache"
+    );
+    assert_eq!(
+        reported["cargo-home"],
+        fixture.cache_dir().join("cargo").display().to_string(),
+        "the registry every session downloads into is the one inside the bind"
+    );
+    assert_eq!(
+        reported["wrapper"], "unset",
+        "with no sccache resolved there is nothing to wrap rustc in, and a \
+         RUSTC_WRAPPER naming a path that is not mounted would break every build"
+    );
+    assert_eq!(reported["sccache-dir"], "unset");
+}
+
+/// And with an sccache the server resolved: it is mounted beside the
+/// `verkstead` binary, it is *that* file rather than whatever the machine has
+/// installed, and it is what `RUSTC_WRAPPER` names.
+///
+/// The wrapper is named absolutely on purpose. A session's command may be
+/// wrapped in `nix develop`, which puts the project's own shell in front of the
+/// sandbox's `PATH` — so a bare `sccache` would resolve to whatever that shell
+/// had, or to nothing.
+#[tokio::test]
+async fn the_sccache_the_server_resolved_is_what_rustc_is_wrapped_in() {
+    let fixture = grilling().await;
+    let cache = fixture.cache(true);
+
+    let reported = probe(
+        &fixture.sandbox_caching(&cache),
+        &format!(
+            r#"
+            say wrapper "${{RUSTC_WRAPPER-unset}}"
+            say sccache-dir "${{SCCACHE_DIR-unset}}"
+            say size "${{SCCACHE_CACHE_SIZE-unset}}"
+            say which "$("${{RUSTC_WRAPPER}}")"
+            dir {dir} cache
+            "#,
+            dir = quoted(&fixture.cache_dir()),
+        ),
+    );
+
+    assert_eq!(
+        reported["wrapper"], "/verkstead/bin/sccache",
+        "absolute, because a project's dev shell decides what `PATH` holds"
+    );
+    assert_eq!(
+        reported["which"], "sccache 0.0.0-the-one-resolved",
+        "what a session compiles through is the binary the server resolved"
+    );
+    assert_eq!(
+        reported["sccache-dir"],
+        fixture.cache_dir().join("sccache").display().to_string(),
+        "and it writes its objects inside the one bind, beside cargo's own"
+    );
+    assert_eq!(
+        reported["size"], "30G",
+        "the default where the human has configured no size"
+    );
+    assert_eq!(reported["cache"], "write");
+}
+
+/// The switch is the human's, in `config.yaml` and on the settings page, and it
+/// is read as each sandbox is built — so turning it off is a next session with
+/// no bind and none of the variables.
+#[tokio::test]
+async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
+    let fixture = grilling().await;
+    fixture.configure("rust_build_cache:\n  enabled: false\n");
+
+    // The server still resolved one, sccache and all: what is being shown is
+    // that the switch decides, not that there was nothing to hand out.
+    let cache = fixture.cache(true);
+
+    let reported = probe(
+        &fixture.sandbox_caching(&cache),
+        &format!(
+            r#"
+            dir {dir} cache
+            say cargo-home "${{CARGO_HOME-unset}}"
+            say wrapper "${{RUSTC_WRAPPER-unset}}"
+            say sccache-dir "${{SCCACHE_DIR-unset}}"
+            say size "${{SCCACHE_CACHE_SIZE-unset}}"
+            file /verkstead/bin/sccache binary
+            "#,
+            dir = quoted(&fixture.cache_dir()),
+        ),
+    );
+
+    assert_eq!(
+        reported["cache"], "absent",
+        "the switch closes the hole rather than leaving it open and unused"
+    );
+    assert_eq!(reported["cargo-home"], "unset");
+    assert_eq!(reported["wrapper"], "unset");
+    assert_eq!(reported["sccache-dir"], "unset");
+    assert_eq!(reported["size"], "unset");
+    assert_eq!(
+        reported["binary"], "absent",
+        "and the sccache goes with it: there is nothing left for it to compile into"
+    );
+}
+
+/// The size is the human's word for one, handed to sccache as it was written —
+/// nothing here parses it, because what sccache makes of a size is sccache's to
+/// say.
+#[tokio::test]
+async fn the_size_the_human_configured_is_what_sccache_is_told() {
+    let fixture = grilling().await;
+    fixture.configure("rust_build_cache:\n  size: 5G\n");
+
+    let reported = probe(
+        &fixture.sandbox_caching(&fixture.cache(true)),
+        r#"say size "${SCCACHE_CACHE_SIZE-unset}""#,
+    );
+
+    assert_eq!(reported["size"], "5G");
 }
 
 #[test]

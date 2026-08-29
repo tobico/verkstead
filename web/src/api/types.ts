@@ -403,6 +403,56 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
 export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
 
 /**
+ * The build cache as the human has just set it.
+ *
+ * The size is a string because it is sccache's own word for one, and an empty
+ * one is *no size configured* rather than a size of nothing — which is what
+ * clearing the field means and what puts the default back.
+ *
+ * Whether an sccache was found is not here. It is the server's own
+ * circumstance rather than anything a page can decide, so it travels one way
+ * only — see [`BuildCacheView::compiles_cached`].
+ */
+export type BuildCacheEdit = { enabled: boolean, size: string, };
+
+/**
+ * The shared Rust build cache as the settings page draws it: the switch, the
+ * size, and the one thing about it the human cannot set.
+ *
+ * The switch is never null. Nothing configured is on, so what comes back is
+ * where the switch *sits* rather than whether anybody has touched it — a page
+ * that drew a third state would be asking the human to understand a
+ * distinction the server does not make.
+ */
+export type BuildCacheView = { 
+/**
+ * Whether sessions get one at all.
+ */
+enabled: boolean, 
+/**
+ * How big its compiled half may grow, in sccache's own words — `30G`,
+ * `500M`. Always a value: the default is what an untouched setting means,
+ * and the field shows it rather than standing empty.
+ */
+size: string, 
+/**
+ * Whether that size is one somebody typed, rather than the default being
+ * shown. What lets the field draw the default as a placeholder — a value
+ * nobody chose should not look like a choice.
+ */
+size_configured: boolean, 
+/**
+ * Whether the server found an sccache to compile through.
+ *
+ * Read-only, and the one fact here nobody can set from a page: it is the
+ * server's own environment. False means a session's crate downloads are
+ * still shared and its dependencies are compiled every time — which is
+ * what the workbench warns about on a Rust repository, and what installing
+ * sccache on the server fixes.
+ */
+compiles_cached: boolean, };
+
+/**
  * One session's Capture, whole, as the details pane receives it.
  *
  * Byte for byte, control sequences and all: what a terminal was sent is what a
@@ -936,6 +986,22 @@ review_pairing: PickedView,
  * what it says is true only as of the moment it was read.
  */
 ready_to_grill: boolean, 
+/**
+ * Whether to warn, where the work is started from, that this repository's
+ * dependency compiles will not be cached.
+ *
+ * True on three things at once: the Repo is a Cargo workspace — a
+ * `Cargo.toml` at its root — the shared Rust build cache is switched on,
+ * and the server found no sccache to compile through. Then a session's
+ * crate downloads are shared and its dependencies are compiled from
+ * scratch every time, which is a slow build rather than a broken one — so
+ * it is a note above the button, not a refusal on it.
+ *
+ * The server's rule rather than three fields for the page to combine, for
+ * the reason [`ConversationView::ready_to_grill`] is one: two of the three
+ * are facts about the server that nothing else on this payload carries.
+ */
+compiles_uncached: boolean, 
 /**
  * Whether there is driving to start again: the Conversation is in a state
  * something ought to be driving, and nothing is.
@@ -2061,7 +2127,13 @@ follow_up: boolean, };
  * one — and the token's half is an action rather than a value, because most
  * saves are not about the token at all.
  */
-export type SettingsEdit = { git_author: Author, github_token: TokenEdit, };
+export type SettingsEdit = { git_author: Author, github_token: TokenEdit, 
+/**
+ * The build cache switch and size, as values rather than as an action:
+ * there is nothing secret about either, so a save says where they are to
+ * stand and the server writes that down.
+ */
+rust_build_cache: BuildCacheEdit, };
 
 /**
  * What became of a save.
@@ -2093,7 +2165,11 @@ export type SettingsView = { git_author: Author,
  * What can be said about the configured token, or `null` where there is
  * none — which is what a Verkstead nobody has told anything looks like.
  */
-github_token: TokenSaved | null, };
+github_token: TokenSaved | null, 
+/**
+ * And how the shared Rust build cache stands.
+ */
+rust_build_cache: BuildCacheView, };
 
 /**
  * Whether the sidebar is drawing what the human has archived.

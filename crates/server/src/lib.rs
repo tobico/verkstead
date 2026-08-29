@@ -12,6 +12,13 @@ use axum::routing::{get, post};
 use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
+/// The shared Rust build cache every sandbox is given: where it is, and whether
+/// there is an sccache to compile through.
+///
+/// Public for the reason [`sandbox`] is — what a session builds into is part of
+/// the surface it runs on rather than an implementation detail of an endpoint,
+/// and standing a router up that runs sessions means saying where it is.
+pub mod build_cache;
 mod capture;
 mod checklist;
 mod checks;
@@ -278,6 +285,24 @@ pub struct Config {
     )]
     pub sandbox_binds: Vec<String>,
 
+    /// Where the shared Rust build cache goes: one directory every sandboxed
+    /// session downloads its crates and compiles its dependencies into, so a
+    /// dependency is built once for the machine rather than once per
+    /// Conversation.
+    ///
+    /// Defaults to `$XDG_CACHE_HOME/verkstead`, or `~/.cache/verkstead` where
+    /// that is unset. Made where it is not there, which is the one directory
+    /// outside the Data Directory Verkstead creates — the path is Verkstead's
+    /// own choice unless this says otherwise, and a feature that is on by
+    /// default cannot ask for a `mkdir` first.
+    ///
+    /// Unlike a Sandbox Configuration bind this is not a hole the installer
+    /// opened in the boundary: it is the server's own directory, holding
+    /// nothing but build output, and the switch that closes it is in the
+    /// workbench settings beside the size it may grow to.
+    #[arg(long, env = "VERKSTEAD_BUILD_CACHE_DIR", value_name = "DIR")]
+    pub build_cache_dir: Option<PathBuf>,
+
     /// Don't ask GitHub whether a newer Verkstead has been released, and so
     /// never show the Update Notice. The check is one unauthenticated request
     /// a day and installs nothing, but anything that reaches the internet at
@@ -530,6 +555,14 @@ pub async fn run(config: Config) -> Result<()> {
     // what `~` means inside one, so a server without one can run no session at
     // all.
     let binds = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
+
+    // And the shared build cache, which is resolved here for the same reason and
+    // *made* here, which the binds above never are — see
+    // [`build_cache::BuildCache::resolve`] for why this one directory is
+    // Verkstead's to create. An sccache that could not be found is not a
+    // failure: what is left still shares the downloads, and the log line says so.
+    let cache = build_cache::BuildCache::resolve(config.build_cache_dir.as_deref())?;
+
     let home = sandbox::Home::of_the_server().context(
         "no HOME is set: a session's `~` is the home directory of whoever runs Verkstead, \
          and the machine's git identity is read out of it, so the unit has to say what it is",
@@ -591,6 +624,8 @@ pub async fn run(config: Config) -> Result<()> {
         watched = ?watched.paths(),
         home = %home.path.display(),
         sandbox_binds = binds.count(),
+        build_cache = ?cache.dir(),
+        caches_compiles = cache.caches_compiles(),
         skills = %skills.path().display(),
         verkstead = ?verkstead.as_ref().map(sandbox::Executable::path),
         "verkstead is listening",
@@ -607,6 +642,7 @@ pub async fn run(config: Config) -> Result<()> {
                 home,
                 sandbox::Reachable::at(config.listen),
                 binds,
+                cache,
                 skills,
                 verkstead,
                 handoffs,

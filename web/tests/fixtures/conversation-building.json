@@ -23,6 +23,7 @@
       }
     }
   ],
+  "compiles_uncached": false,
   "direction": "inline",
   "driven": false,
   "grilling_pairing": {

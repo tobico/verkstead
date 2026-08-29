@@ -7,6 +7,12 @@
     "github_token": {
       "at": "2026-08-03T09:07:11.000Z",
       "last_four": "cdef"
+    },
+    "rust_build_cache": {
+      "compiles_cached": false,
+      "enabled": true,
+      "size": "50G",
+      "size_configured": true
     }
   },
   "verified": {

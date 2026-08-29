@@ -21,6 +21,9 @@
 //! git_author:
 //!   name: Tobias Cohen
 //!   email: tobi@tobico.net
+//! rust_build_cache:
+//!   enabled: true
+//!   size: 30G
 //! ```
 //!
 //! Who a session commits as is said here for the reason the token is: it used
@@ -37,6 +40,13 @@
 //! refusing would be a session that never starts. The malformed case is logged,
 //! because a file the human wrote and Verkstead cannot read is the one of the
 //! three they would want telling about.
+//!
+//! Which is why `rust_build_cache` is written the way it is: an absent key, an
+//! absent file and an unparseable one all mean the shared build cache is on at
+//! its default size. The setting is here rather than on the command line
+//! because it is the one sandbox control the human may reasonably want to reach
+//! from a phone — see [`RustBuildCache`], and
+//! [`crate::build_cache`] for what it switches.
 
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -326,6 +336,17 @@ pub struct Config {
     /// Who a session commits as.
     #[serde(default)]
     git_author: GitAuthor,
+
+    /// And how the shared Rust build cache is set: whether sessions get one at
+    /// all, and how big its compiled half may grow — see [`crate::build_cache`].
+    ///
+    /// The one thing in either file that is about the sandbox rather than about
+    /// an identity, and the first control the workbench has that is. A setting
+    /// rather than a flag because it is the human's to change from a phone, and
+    /// safe to be: what it opens is a directory of Verkstead's own making, and
+    /// the switch is the one that *closes* it.
+    #[serde(default)]
+    rust_build_cache: RustBuildCache,
 }
 
 impl Config {
@@ -343,17 +364,82 @@ impl Config {
                 name: config.git_author.name.and_then(blank_is_nothing),
                 email: config.git_author.email.and_then(blank_is_nothing),
             },
+            rust_build_cache: RustBuildCache {
+                enabled: config.rust_build_cache.enabled,
+                size: config.rust_build_cache.size.and_then(blank_is_nothing),
+            },
         })
     }
 
     /// The config a settings page has just been told.
-    pub fn of_author(git_author: GitAuthor) -> Config {
-        Config { git_author }
+    pub fn of(git_author: GitAuthor, rust_build_cache: RustBuildCache) -> Config {
+        Config {
+            git_author,
+            rust_build_cache,
+        }
     }
 
     /// Who a session commits as, which may be nobody.
     pub fn git_author(&self) -> &GitAuthor {
         &self.git_author
+    }
+
+    /// And how the build cache is set, which is on at the default size where
+    /// nobody has said otherwise.
+    pub fn rust_build_cache(&self) -> &RustBuildCache {
+        &self.rust_build_cache
+    }
+}
+
+/// The shared Rust build cache as the human left it: whether sessions get one,
+/// and how much disk its compiled half may take.
+///
+/// Both halves are optional and both are absent on a machine nobody has been to
+/// the settings page of — which is **on**, at the default size. That is the
+/// whole of the shape, and it is deliberate: a human should never have a worse
+/// experience for not having checked the settings, so an unwritten file says
+/// what a switch somebody turned on says.
+///
+/// The size is the human's own word rather than a number of bytes. It is
+/// `SCCACHE_CACHE_SIZE`, which sccache reads as `10G`, `500M` and so on, and
+/// nothing here parses it: what sccache makes of a word it cannot read is
+/// sccache's to say, and a parser here would be a second opinion about the one
+/// thing the value is for.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct RustBuildCache {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    size: Option<String>,
+}
+
+impl RustBuildCache {
+    /// What a settings page has just been told: the switch, and the size where
+    /// one was typed.
+    pub fn of(enabled: bool, size: Option<String>) -> RustBuildCache {
+        RustBuildCache {
+            enabled: Some(enabled),
+            size: size.and_then(blank_is_nothing),
+        }
+    }
+
+    /// Whether a session gets one. Nothing configured is **on**.
+    pub fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
+
+    /// And how big its compiled half may get, which is
+    /// [`crate::build_cache::SIZE`] where nobody has said.
+    pub fn size(&self) -> &str {
+        self.size.as_deref().unwrap_or(crate::build_cache::SIZE)
+    }
+
+    /// The size exactly as it is written down, and `None` where nobody has
+    /// written one: what a settings page draws as a placeholder rather than as
+    /// a value somebody chose.
+    pub fn size_configured(&self) -> Option<&str> {
+        self.size.as_deref()
     }
 }
 
@@ -408,7 +494,7 @@ fn blank_is_nothing(value: String) -> Option<String> {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
-    use super::{Config, GitAuthor, Secrets, Settings};
+    use super::{Config, GitAuthor, RustBuildCache, Secrets, Settings};
 
     #[test]
     fn the_token_is_what_the_file_says() {
@@ -654,10 +740,13 @@ mod tests {
         let settings = Settings::in_data_dir(dir.path());
 
         settings
-            .save_config(&Config::of_author(GitAuthor::of(
-                Some("Tobias Cohen".to_owned()),
-                Some("tobi@tobico.net".to_owned()),
-            )))
+            .save_config(&Config::of(
+                GitAuthor::of(
+                    Some("Tobias Cohen".to_owned()),
+                    Some("tobi@tobico.net".to_owned()),
+                ),
+                RustBuildCache::default(),
+            ))
             .unwrap();
 
         let config = settings.config();
@@ -674,10 +763,13 @@ mod tests {
         let settings = Settings::in_data_dir(dir.path());
 
         settings
-            .save_config(&Config::of_author(GitAuthor::of(
-                Some("Cohen, Tobias: #1".to_owned()),
-                Some("tobi@tobico.net".to_owned()),
-            )))
+            .save_config(&Config::of(
+                GitAuthor::of(
+                    Some("Cohen, Tobias: #1".to_owned()),
+                    Some("tobi@tobico.net".to_owned()),
+                ),
+                RustBuildCache::default(),
+            ))
             .unwrap();
 
         assert_eq!(
@@ -692,10 +784,10 @@ mod tests {
         let settings = Settings::in_data_dir(dir.path());
 
         settings
-            .save_config(&Config::of_author(GitAuthor::of(
-                Some("Tobias Cohen".to_owned()),
-                Some(String::new()),
-            )))
+            .save_config(&Config::of(
+                GitAuthor::of(Some("Tobias Cohen".to_owned()), Some(String::new())),
+                RustBuildCache::default(),
+            ))
             .unwrap();
 
         let config = settings.config();
@@ -729,10 +821,10 @@ mod tests {
             .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
             .unwrap();
         settings
-            .save_config(&Config::of_author(GitAuthor::of(
-                Some("Tobias Cohen".to_owned()),
-                None,
-            )))
+            .save_config(&Config::of(
+                GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
+                RustBuildCache::default(),
+            ))
             .unwrap();
 
         assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
@@ -751,10 +843,10 @@ mod tests {
             .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
             .unwrap();
         settings
-            .save_config(&Config::of_author(GitAuthor::of(
-                Some("Tobias Cohen".to_owned()),
-                None,
-            )))
+            .save_config(&Config::of(
+                GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
+                RustBuildCache::default(),
+            ))
             .unwrap();
 
         let mut left: Vec<String> = std::fs::read_dir(dir.path())

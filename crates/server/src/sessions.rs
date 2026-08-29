@@ -34,6 +34,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 use verkstead_schema::Nudge;
 
+use crate::build_cache::BuildCache;
 use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
@@ -69,10 +70,10 @@ pub(crate) const IDLE_AFTER: Duration = Duration::from_secs(3);
 
 /// How a Conversation's agents are run: the home a sandbox reads the machine's
 /// identity out of, where Verkstead itself is reachable from inside one, the
-/// extra binds Sandbox Configuration asks for, the skills every sandbox is
-/// given, the executable every sandbox asks with, where a Conversation's handoff
-/// directory is made, where the settings files are read from, and what an agent
-/// is on the command line.
+/// extra binds Sandbox Configuration asks for, the shared Rust build cache every
+/// sandbox builds into, the skills every sandbox is given, the executable every
+/// sandbox asks with, where a Conversation's handoff directory is made, where
+/// the settings files are read from, and what an agent is on the command line.
 ///
 /// Resolved once at startup and shared by every session, because each of them is
 /// a fact about the machine rather than about any one Conversation — including
@@ -87,6 +88,12 @@ pub struct Agents {
     home: Home,
     reachable: Reachable,
     config: SandboxConfig,
+
+    /// Where every session's Rust build goes — see [`BuildCache`]. Resolved at
+    /// startup like the rest of this; whether a session gets it is the human's
+    /// switch in `config.yaml`, read at every spawn.
+    cache: BuildCache,
+
     skills: Skills,
 
     /// The executable every sandbox is given as `verkstead`: this server's own
@@ -126,10 +133,12 @@ pub struct Agents {
 
 impl Agents {
     /// The real thing: claude, under whichever account the Profile names.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         home: Home,
         reachable: Reachable,
         config: SandboxConfig,
+        cache: BuildCache,
         skills: Skills,
         verkstead: Option<Executable>,
         handoffs: Handoffs,
@@ -140,6 +149,7 @@ impl Agents {
             home,
             reachable,
             config,
+            cache,
             skills,
             verkstead,
             handoffs,
@@ -154,6 +164,7 @@ impl Agents {
         home: Home,
         reachable: Reachable,
         config: SandboxConfig,
+        cache: BuildCache,
         skills: Skills,
         verkstead: Option<Executable>,
         handoffs: Handoffs,
@@ -163,6 +174,7 @@ impl Agents {
             home,
             reachable,
             config,
+            cache,
             skills,
             verkstead,
             handoffs,
@@ -694,6 +706,18 @@ impl Sessions {
             .unwrap_or_default()
     }
 
+    /// Whether a session's Rust build would have its *compiling* cached and not
+    /// only its downloads — which is whether this server found an sccache to
+    /// hand out. See [`BuildCache::caches_compiles`].
+    ///
+    /// False for a server that runs no sessions at all, which is the same answer
+    /// by another route: there is nothing to give a cache to.
+    pub(crate) fn caches_compiles(&self) -> bool {
+        self.agents
+            .as_ref()
+            .is_some_and(|agents| agents.cache.caches_compiles())
+    }
+
     /// Run `pairing`'s agent on `prompt`, inside `conversation`'s sandbox, and
     /// put what it prints on the Timeline as it arrives.
     ///
@@ -775,6 +799,7 @@ impl Sessions {
             let handoffs = agents.handoffs.clone();
             let settings = agents.settings.clone();
             let extra = agents.config.binds_for(&conversation);
+            let cache = agents.cache.clone();
 
             move || {
                 // Read here rather than held from startup: this is the moment a
@@ -794,6 +819,7 @@ impl Sessions {
                     &handoffs,
                     &secrets,
                     &config,
+                    &cache,
                     extra,
                 )?;
                 let worktree = conversation.worktree.clone()?;
@@ -1524,6 +1550,9 @@ mod tests {
             },
             Reachable::at("127.0.0.1:8422".parse().unwrap()),
             SandboxConfig::default(),
+            // What the argv is built from is not the sandbox, so this asks for
+            // no cache at all rather than making one somewhere.
+            BuildCache::none(),
             Skills::installed(state).expect("this binary carries skills"),
             // A test harness is its own executable, and what a sandbox does with
             // one is bind it: any file that is really there will do where nothing

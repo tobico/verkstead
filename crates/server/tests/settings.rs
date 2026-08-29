@@ -1,5 +1,6 @@
-//! What Verkstead is told, over the viewer's namespace: reading the git author
-//! and the presence of a GitHub token, and writing either.
+//! What Verkstead is told, over the viewer's namespace: reading the git author,
+//! the presence of a GitHub token and how the shared Rust build cache is set,
+//! and writing any of them.
 //!
 //! Asked of the *server*, through the endpoints, rather than of the settings
 //! files underneath them. The one thing this half has to be trusted about is
@@ -77,6 +78,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "name": name, "email": email },
             "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
         }),
     )
     .await
@@ -90,6 +92,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": { "Set": { "token": token } },
+            "rust_build_cache": { "enabled": true, "size": "" },
         }),
     )
     .await
@@ -101,6 +104,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Clear",
+            "rust_build_cache": { "enabled": true, "size": "" },
         }),
     )
     .await
@@ -211,6 +215,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
         &serde_json::json!({
             "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
+            "rust_build_cache": { "enabled": true, "size": "" },
         }),
     )
     .await;
@@ -389,4 +394,91 @@ async fn a_token_that_is_nothing_but_whitespace_configures_nothing() {
         saved.verified, None,
         "there is no token to ask GitHub about"
     );
+}
+
+/// The build cache the human has said nothing about: on, at the default size,
+/// with the size marked as nobody's choice so the page can draw it as a
+/// placeholder.
+///
+/// The whole point of the shape — a fresh install should not be the one paying
+/// for every dependency to be compiled twice, and nothing here asks the human to
+/// find a setting first.
+#[tokio::test]
+async fn a_build_cache_nobody_has_configured_is_on_at_the_default_size() {
+    let (_dir, app) = app().await;
+
+    let cache = settings(&app).await.rust_build_cache;
+
+    assert!(cache.enabled, "on is what an untouched setting means");
+    assert_eq!(cache.size, "30G");
+    assert!(
+        !cache.size_configured,
+        "the default is shown rather than chosen"
+    );
+    assert!(
+        !cache.compiles_cached,
+        "this router runs no sessions, so it has no sccache to hand any"
+    );
+}
+
+/// And what a save of it says: both halves come back off the file, and the
+/// switch is what the next session is built against.
+#[tokio::test]
+async fn the_build_cache_switch_and_size_go_in_and_come_back() {
+    let (dir, app) = app().await;
+
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": false, "size": "5G" },
+        }),
+    )
+    .await;
+
+    assert!(!saved.settings.rust_build_cache.enabled);
+    assert_eq!(saved.settings.rust_build_cache.size, "5G");
+    assert!(saved.settings.rust_build_cache.size_configured);
+
+    // In the file the next session reads, rather than only in the answer.
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(
+        written.contains("enabled: false") && written.contains("5G"),
+        "the switch and the size are in config.yaml: {written}"
+    );
+
+    let read_back = settings(&app).await.rust_build_cache;
+    assert!(!read_back.enabled);
+    assert_eq!(read_back.size, "5G");
+}
+
+/// Clearing the size field is asking for the default back rather than asking
+/// for a cache of no size at all.
+#[tokio::test]
+async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
+    let (_dir, app) = app().await;
+
+    save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "5G" },
+        }),
+    )
+    .await;
+
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "  " },
+        }),
+    )
+    .await;
+
+    assert_eq!(saved.settings.rust_build_cache.size, "30G");
+    assert!(!saved.settings.rust_build_cache.size_configured);
 }

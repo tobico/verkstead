@@ -1,5 +1,6 @@
-//! What Verkstead has been told — the GitHub token and the git author — as the
-//! viewer receives it, and what it sends to change either.
+//! What Verkstead has been told — the GitHub token, the git author and the
+//! shared Rust build cache — as the viewer receives it, and what it sends to
+//! change any of them.
 //!
 //! The token goes one way only. What comes back about it is that there is one,
 //! its last four characters and when it was saved, and nothing here can be made
@@ -14,6 +15,12 @@
 //! pasted is the moment a wrong one is worth saying so about, and the human is
 //! looking at the page then. The save itself happens either way — see
 //! [`SettingsSaved`].
+//!
+//! The build cache is the plain half of all this: a switch and a size, both
+//! values, both readable back. It is here because it is the one thing about a
+//! Sandbox the human sets rather than the installer, and one fact about it
+//! travels one way only — whether the server found an sccache to compile
+//! through, which is its own environment and nobody's setting.
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +37,42 @@ pub struct SettingsView {
     /// What can be said about the configured token, or `null` where there is
     /// none — which is what a Verkstead nobody has told anything looks like.
     pub github_token: Option<TokenSaved>,
+
+    /// And how the shared Rust build cache stands.
+    pub rust_build_cache: BuildCacheView,
+}
+
+/// The shared Rust build cache as the settings page draws it: the switch, the
+/// size, and the one thing about it the human cannot set.
+///
+/// The switch is never null. Nothing configured is on, so what comes back is
+/// where the switch *sits* rather than whether anybody has touched it — a page
+/// that drew a third state would be asking the human to understand a
+/// distinction the server does not make.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct BuildCacheView {
+    /// Whether sessions get one at all.
+    pub enabled: bool,
+
+    /// How big its compiled half may grow, in sccache's own words — `30G`,
+    /// `500M`. Always a value: the default is what an untouched setting means,
+    /// and the field shows it rather than standing empty.
+    pub size: String,
+
+    /// Whether that size is one somebody typed, rather than the default being
+    /// shown. What lets the field draw the default as a placeholder — a value
+    /// nobody chose should not look like a choice.
+    pub size_configured: bool,
+
+    /// Whether the server found an sccache to compile through.
+    ///
+    /// Read-only, and the one fact here nobody can set from a page: it is the
+    /// server's own environment. False means a session's crate downloads are
+    /// still shared and its dependencies are compiled every time — which is
+    /// what the workbench warns about on a Rust repository, and what installing
+    /// sccache on the server fixes.
+    pub compiles_cached: bool,
 }
 
 /// Who a session's commits are by.
@@ -69,6 +112,27 @@ pub struct TokenSaved {
 pub struct SettingsEdit {
     pub git_author: Author,
     pub github_token: TokenEdit,
+
+    /// The build cache switch and size, as values rather than as an action:
+    /// there is nothing secret about either, so a save says where they are to
+    /// stand and the server writes that down.
+    pub rust_build_cache: BuildCacheEdit,
+}
+
+/// The build cache as the human has just set it.
+///
+/// The size is a string because it is sccache's own word for one, and an empty
+/// one is *no size configured* rather than a size of nothing — which is what
+/// clearing the field means and what puts the default back.
+///
+/// Whether an sccache was found is not here. It is the server's own
+/// circumstance rather than anything a page can decide, so it travels one way
+/// only — see [`BuildCacheView::compiles_cached`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct BuildCacheEdit {
+    pub enabled: bool,
+    pub size: String,
 }
 
 /// What is to become of the configured token.
