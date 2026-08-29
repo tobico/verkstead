@@ -131,12 +131,7 @@ async fn a_profiles_single_home_directory_has_a_table_of_its_own() {
     let (_dir, pool) = fresh_pool().await;
     let profile = saved(&pool, "work").await;
 
-    sqlx::query("INSERT INTO profile_homes (profile_id, home) VALUES (?, ?)")
-        .bind(profile.id)
-        .bind("/watched/accounts/work")
-        .execute(&pool)
-        .await
-        .expect("the table is there to be written to");
+    keep_home(&pool, profile.id, "/watched/accounts/work").await;
 
     let home: (String,) = sqlx::query_as("SELECT home FROM profile_homes WHERE profile_id = ?")
         .bind(profile.id)
@@ -145,6 +140,75 @@ async fn a_profiles_single_home_directory_has_a_table_of_its_own() {
         .unwrap();
 
     assert_eq!(home.0, "/watched/accounts/work");
+}
+
+/// And removing a Profile takes the home with it.
+///
+/// `profile_homes` references `profiles(id)` and foreign keys are enforced, so
+/// a home left behind is not an orphan row but a Profile that cannot be removed
+/// at all — which is the stage that first writes one finding removal broken
+/// rather than finding it arranged.
+#[tokio::test]
+async fn removing_a_profile_takes_the_home_it_kept_its_account_under_with_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let profile = saved(&pool, "work").await;
+
+    keep_home(&pool, profile.id, "/watched/accounts/work").await;
+
+    assert_eq!(
+        delete_profile(&pool, profile.id).await.unwrap(),
+        Deleting::Deleted
+    );
+    assert_eq!(
+        homes(&pool).await,
+        0,
+        "the home goes with the Profile that kept its account under it"
+    );
+}
+
+/// And rewriting one replaces it, as it replaces the model list: the account is
+/// the type's shape, so the home a Profile had is the old type's if the type has
+/// changed.
+#[tokio::test]
+async fn rewriting_a_profile_replaces_the_home_its_account_was_under() {
+    let (_dir, pool) = fresh_pool().await;
+    let profile = saved(&pool, "work").await;
+
+    keep_home(&pool, profile.id, "/watched/accounts/work").await;
+
+    assert_eq!(
+        update_profile(&pool, profile.id, &facts("work"))
+            .await
+            .unwrap(),
+        Saving::Saved
+    );
+    assert_eq!(
+        homes(&pool).await,
+        0,
+        "a rewrite writes the account whole rather than reconciling it"
+    );
+}
+
+/// A home written straight into the table, standing in for the backend that
+/// will keep its whole account under one: there is no type with a home yet, so
+/// nothing above the store can put a row here.
+async fn keep_home(pool: &SqlitePool, id: i64, home: &str) {
+    sqlx::query("INSERT INTO profile_homes (profile_id, home) VALUES (?, ?)")
+        .bind(id)
+        .bind(home)
+        .execute(pool)
+        .await
+        .expect("the table is there to be written to");
+}
+
+/// And how many the table is holding.
+async fn homes(pool: &SqlitePool) -> i64 {
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM profile_homes")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    count
 }
 
 /// The list is the Profile's own: a Profile names what its account can

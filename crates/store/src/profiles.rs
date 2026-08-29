@@ -405,6 +405,11 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
     forget_models(&mut tx, id).await?;
     write_models(&mut tx, id, &facts.models).await?;
 
+    // And the account with them: what a Profile's account is, is its type's
+    // shape, so a rewrite that changed the type would otherwise leave the old
+    // type's home sitting behind it.
+    forget_home(&mut tx, id).await?;
+
     tx.commit()
         .await
         .with_context(|| format!("rewriting Profile {id}"))?;
@@ -439,6 +444,7 @@ pub async fn delete_profile(pool: &SqlitePool, id: i64) -> Result<Deleting> {
     let mut tx = super::writing(pool, "removing a Profile").await?;
 
     forget_models(&mut tx, id).await?;
+    forget_home(&mut tx, id).await?;
 
     let removed = sqlx::query("DELETE FROM profiles WHERE id = ?")
         .bind(id)
@@ -594,6 +600,27 @@ async fn forget_models(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, id: i64) ->
         .execute(&mut **tx)
         .await
         .with_context(|| format!("clearing the models Profile {id} runs"))?;
+
+    Ok(())
+}
+
+/// And the same for the home a Profile of a type that keeps one has.
+///
+/// `profile_homes` references `profiles(id)` and foreign keys are enforced, so
+/// a Profile removed with its home left behind it is a Profile that cannot be
+/// removed at all. Called wherever the models are and for the same reasons: a
+/// removal takes the whole of a Profile with it, and a rewrite replaces the
+/// account rather than reconciling it.
+///
+/// Nothing writes a home yet — Claude's account is the pair in the row itself —
+/// so today this clears nothing. The stage that lands a type with a home writes
+/// it beside this, exactly as `write_models` sits beside `forget_models`.
+async fn forget_home(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM profile_homes WHERE profile_id = ?")
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .with_context(|| format!("clearing the home Profile {id} keeps its account under"))?;
 
     Ok(())
 }
