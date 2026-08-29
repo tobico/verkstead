@@ -410,7 +410,17 @@ impl Quiet {
 
     /// When it last said anything, for whoever wants to sleep until it has been
     /// quiet long enough rather than to ask how long it has been.
-    fn since(&self) -> Instant {
+    ///
+    /// And for whoever wants to know whether a word came *after* something else
+    /// — an answer handed to the session, a line typed into it — which is a
+    /// question about the order of two moments rather than about a span. See
+    /// [`crate::rescues::until_it_will_not_ask`], where a word later than the
+    /// stir is the proof that the stir reached the session at all.
+    ///
+    /// The moment it was launched, where it has said nothing yet: a session
+    /// that never spoke has been quiet since it started, which is exactly what
+    /// both readers want of it.
+    pub(crate) fn since(&self) -> Instant {
         self.held().at
     }
 
