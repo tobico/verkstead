@@ -128,6 +128,14 @@ pub(crate) async fn force(state: &AppState, conversation_id: i64) -> Result<Conv
 /// that cannot tell whether the human asked it to stop should wait. Nothing is
 /// written down in that case — the sweep finds the Conversation standing still a
 /// minute later and says so in its own words.
+///
+/// **The request is read twice**, and the second read is the one that decides:
+/// the write goes through [`crate::stopping::stop_as_asked`], which asks again
+/// inside the transaction it writes in. Between the two, a Steer or a Resume may
+/// have taken the request back — and a stop written after that is one on the far
+/// side of a press that undid it, stopping a run that has only just started.
+/// Withdrawn is not a stop and not a reason to hold a launch, so it reads here
+/// as `false`.
 pub(crate) async fn asked(state: &AppState, conversation_id: i64) -> bool {
     match store::asked_to_stop(&state.pool, conversation_id).await {
         Ok(false) => return false,
@@ -153,11 +161,14 @@ pub(crate) async fn asked(state: &AppState, conversation_id: i64) -> bool {
         "the step the human asked to stop after has finished, so the run stops here",
     );
 
-    if let Err(error) = by_hand(state, conversation_id, lifecycle, AFTER_THE_STEP).await {
-        tracing::error!(error = ?error, conversation_id, "a run the human stopped could not be recorded as stopped");
+    match landing(state, conversation_id, lifecycle, AFTER_THE_STEP).await {
+        Ok(store::Stopping::Withdrawn) => false,
+        Ok(store::Stopping::Stopped(_) | store::Stopping::Already) => true,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "a run the human stopped could not be recorded as stopped");
+            true
+        }
     }
-
-    true
 }
 
 /// Whether Stop and Force stop are worth offering: the Conversation is in a
@@ -243,4 +254,32 @@ async fn by_hand(
     stopped?;
 
     Ok(())
+}
+
+/// And the stop a press made earlier lands as, which is [`by_hand`] with one
+/// difference: the request is the condition of the write rather than the cue for
+/// it — see [`crate::stopping::stop_as_asked`], and [`asked`], which is the one
+/// caller.
+///
+/// The asking is forgotten by the write itself, in the transaction that wrote
+/// it, so there is nothing to take away afterwards. Where nothing was written
+/// there is nothing to take away either: a request that has been withdrawn is
+/// already gone, and one on a Conversation that had stopped already is the
+/// Resume's to clear along with the stop it belongs to.
+async fn landing(
+    state: &AppState,
+    conversation_id: i64,
+    lifecycle: Lifecycle,
+    how: &str,
+) -> Result<store::Stopping> {
+    crate::stopping::stop_as_asked(
+        &state.pool,
+        &state.nudges,
+        conversation_id,
+        Decided::Human,
+        crate::stalls::driving(lifecycle),
+        how,
+        crate::stalls::said_last(state, conversation_id).await,
+    )
+    .await
 }

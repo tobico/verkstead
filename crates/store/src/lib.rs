@@ -96,7 +96,8 @@ pub use repos::{
 };
 pub use session_names::session_id;
 pub use stops::{
-    Decision, Stopped, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop, stopped,
+    Decision, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop,
+    stop_as_asked, stopped,
 };
 pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use unseen::{see_conversation, stamp_unseen};
