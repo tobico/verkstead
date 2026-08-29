@@ -926,6 +926,10 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // about something else say nothing about it, and the ones that are about it
     // keep [`SWEEPING`].
     stalls: paced(Duration::from_secs(600)),
+    // Nothing, which is a server's own: the review takes the Worktree as soon
+    // as the wrap-up starts, and the tests that want the window before it hold
+    // it open themselves.
+    reviewing: Duration::ZERO,
 });
 
 /// And the same at a pace that does look, for the tests that are about the
@@ -8027,6 +8031,74 @@ async fn a_batch_with_nothing_to_do_asks_nothing_and_settles_as_addressed() {
         notices(&view).is_empty(),
         "and nothing stopped: {:?}",
         notices(&view),
+    );
+}
+
+/// A comment left while the review runs is answered, on a pull request nobody
+/// had written on when the wrap-up started.
+///
+/// The wrap-up starts its review and its watchers together, so there is a poll
+/// before the review has the Worktree — and what it reads is a pull request with
+/// nothing on it. Settling on that reading is what this is about: the comment
+/// that lands a moment later puts nothing back to waiting, because nothing was
+/// waiting to be put back, and the wrap-up reaches Done the moment the review
+/// ends. The watcher's next poll then finds a Conversation that is not wrapping
+/// up any more and stops, and what the human wrote is never answered at all.
+///
+/// So the settling waits for the review exactly as the dispatching does, and
+/// what this asks is the whole of that rule: the Conversation cannot be Done
+/// with a comment nobody was sent to deal with.
+///
+/// The window is one poll wide and nothing can land in it on purpose, so this
+/// holds it open — [`Pace::reviewing`] is a span a server keeps at zero and this
+/// is the test it exists for.
+#[tokio::test]
+async fn a_comment_left_while_the_review_runs_is_answered_rather_than_settled_over() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    // Long enough that the comments watcher polls a pull request nobody has
+    // written on several times over before anything has looked at it.
+    let dawdling = Pace {
+        reviewing: paced(Duration::from_millis(600)),
+        ..*BRISKLY
+    };
+
+    // Green, unlike the other batch tests here, because what this is about is a
+    // wrap-up that can reach Done: a suite nobody can ask about would hold it in
+    // Wrapping whatever the comments did.
+    let gh = gh_about_once(GREEN, &reviews, THREE_COMMENTS, "");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh,
+        dawdling,
+        &[],
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    // Nothing is settled while the review is still waiting for the Worktree,
+    // whatever the pull request looks like from outside.
+    assert!(
+        !comments_settled(&fixture).await,
+        "a pull request nothing has looked at yet settles nothing",
+    );
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let told = std::fs::read_to_string(&batches)
+        .expect("a batch session was dispatched before the wrap-up finished");
+
+    assert!(
+        told.contains("Rename the window field."),
+        "and it was sent what was written while the review ran: {told}",
     );
 }
 
