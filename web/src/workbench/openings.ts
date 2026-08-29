@@ -21,6 +21,15 @@
 //! A path naming something the loaded Conversation does not have leaves the
 //! pane empty, which is what the pane is when nothing is open at all: the URL
 //! is a record of what was picked rather than a promise that it is still there.
+//!
+//! And which Event opens which pane is here too — see [`openingOf`] — because it
+//! is the same question the paths are about, asked of an Event rather than of a
+//! path: what the details pane can be showing. The Timeline's own cards have no
+//! need of it, each of them being drawn for a kind it already knows; what does
+//! is picking the end of a record, where the kind is whatever the last Event
+//! turned out to be.
+
+import type { TimelineEvent } from "../api/types";
 
 /// What the details pane is showing, as the card that opened it names itself.
 ///
@@ -113,6 +122,74 @@ export function openingAt(pathname: string): Opening | null {
   // selection's.
   if (what === "events" && /^\d+$/.test(which)) {
     return Number(which);
+  }
+
+  return null;
+}
+
+/// What a Timeline Event opens in the details pane, or `null` where it opens
+/// nothing.
+///
+/// Which kinds have a pane behind them, asked of an Event whose kind is not
+/// known yet — the Timeline draws a card per kind and needs no such question,
+/// and picking the end of a record is nothing but it.
+///
+/// Three of them answer for themselves rather than by their kind: the Brief
+/// opens only once it has frozen — while it is being written the card is a field
+/// with the conversation's setup under it — a steer opens only where it carried
+/// a document, and the backlog only where there is still one to read. A move, a
+/// manual task and a steer into wrapping up have nothing to show at all, and
+/// each is drawn as a line rather than as a card for that reason.
+///
+/// The two lists open by their word rather than by the row's id, being read off
+/// the worktree rather than off the record. A row that landed several roadmaps
+/// draws a card apiece, and the last of them is the last card of that row.
+export function openingOf(event: TimelineEvent): Opening | null {
+  if ("Brief" in event) {
+    return event.Brief.frozen ? event.Brief.id : null;
+  }
+
+  if ("Steer" in event) {
+    return event.Steer.html === null ? null : event.Steer.id;
+  }
+
+  if ("TaskList" in event) {
+    return event.TaskList.list === null ? null : "backlog";
+  }
+
+  if ("StageList" in event) {
+    const last = event.StageList.roadmaps.at(-1);
+    return last === undefined ? null : opensRoadmap(last.name);
+  }
+
+  if ("AgentOutput" in event) return event.AgentOutput.id;
+  if ("QuestionSet" in event) return event.QuestionSet.id;
+  if ("UnreadableSet" in event) return event.UnreadableSet.id;
+  if ("Handoff" in event) return event.Handoff.id;
+  if ("Commit" in event) return event.Commit.id;
+  if ("Notice" in event) return event.Notice.id;
+  if ("PullRequest" in event) return event.PullRequest.id;
+
+  return null;
+}
+
+/// The end of a record: the last thing on a Timeline that has a pane behind it,
+/// or `null` where none of it has one.
+///
+/// What opening a Conversation lands on. The last *openable* Event rather than
+/// the last Event, because a record very often ends on a move — every step of
+/// the ladder writes one — and landing on a row with nothing behind it would
+/// leave the pane bare at the exact moment the human asked to be shown where
+/// the work got to.
+///
+/// A record with nothing openable on it at all — a Draft with only the Brief
+/// being written — selects nothing, and the pane stays bare paper.
+export function lastOpening(timeline: readonly TimelineEvent[]): Opening | null {
+  for (let at = timeline.length - 1; at >= 0; at -= 1) {
+    const opening = openingOf(timeline[at]!);
+    if (opening !== null) {
+      return opening;
+    }
   }
 
   return null;

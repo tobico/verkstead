@@ -284,6 +284,19 @@ function frame(container: ParentNode): HTMLElement {
   return container.querySelector(`.${shell.panes}`)!;
 }
 
+/// Where a Conversation is opened for the tests that are about a card *before*
+/// anything has been pressed.
+///
+/// Its own path lands on the end of the record — the last openable card is
+/// selected and the pane opens on it — which is the point of it and no use at
+/// all to a test asking what an unpressed card looks like. A path that names a
+/// details pane is a cold load of that pane and the landing leaves it alone; a
+/// path naming an Event the record has not got leaves the pane empty, as a
+/// stale link does. There is no Event 0, so this is one.
+function unopened(conversation: { id: number }): string {
+  return `/conversations/${conversation.id}/events/0`;
+}
+
 /// Open the conversation's action menu: press the trigger, and wait for what it
 /// drops.
 async function openActions(container: ParentNode): Promise<HTMLElement> {
@@ -3453,14 +3466,24 @@ describe("the panes on a narrow window", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
-    expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
+
+    // The end of the record is open, the landing having picked it — and the
+    // phone is still on the Timeline all the same: what the level follows is
+    // the Conversation changing, and opening the newest thing changes none. So
+    // the way forward is offered rather than taken.
+    expect(frame(container).dataset.pane).toBe("middle");
+    await waitFor(() => screen.getByRole("button", { name: "Details →" }));
 
     fireEvent.click(output);
     expect(frame(container).dataset.pane).toBe("details");
 
-    fireEvent.click(
-      await waitFor(() => screen.getByRole("button", { name: "← Timeline" })),
-    );
+    // Waited for before its way back is taken: the landing had already opened a
+    // pane on the way in, so a "← Timeline" was there to be picked up before the
+    // router had moved to this one — and the button of a pane that has since
+    // been replaced is a button attached to nothing.
+    await drawn(container, `.${shell.detailsPane} .${outputPane.recordSwitch}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "← Timeline" }));
     expect(frame(container).dataset.pane).toBe("middle");
 
     // Still open, so the way forward is there to be taken again.
@@ -5025,10 +5048,16 @@ describe("a session's output on the timeline", () => {
     theSpeaking();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
+    // The Timeline's own following puts the record at its end on the way in,
+    // and that is the pane beside this one: what is asked here is what the
+    // output pane does once it is opened, so the count starts from there.
+    await drawn(container, `.${timeline.timeline}`);
+    const landed = scrolled.mock.calls.length;
+
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.prose}`);
 
-    expect(scrolled).not.toHaveBeenCalled();
+    expect(scrolled.mock.calls.length).toBe(landed);
   });
 });
 
@@ -8578,7 +8607,7 @@ describe("the pinned task list", () => {
   /// documents its entries name, in the details pane.
   it("is one press and offers nothing else", async () => {
     theTasked();
-    const { container } = mount(`/conversations/${TASKED.id}`);
+    const { container } = mount(unopened(TASKED));
 
     const list = await drawn(container, `.${timeline.pinned} .${timeline.taskList}`);
 
@@ -9495,9 +9524,17 @@ describe("the stage list opened", () => {
       await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
     );
 
-    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
+    // Waited for by its title rather than by being a pane head at all: this
+    // conversation opened on the end of its record, so a head was there before
+    // the card was ever pressed and the change is which one it is.
+    const head = await waitFor(() => {
+      const found = container.querySelector<HTMLElement>(
+        `.${shell.detailsPane} .${paneHead.head}`,
+      );
+      expect(found?.querySelector("h1")?.textContent).toBe("Roadmap");
+      return found!;
+    });
 
-    expect(head.querySelector("h1")!.textContent).toBe("Roadmap");
     expect(head.textContent).not.toContain("Close");
     expect(
       (await drawn(container, `.${shell.detailsPane} .${documents.feature}`)).textContent,
@@ -9782,7 +9819,7 @@ describe("a run stopped because an account ran out of window", () => {
   /// finds it is the edge in the colour that means stopped.
   it("marks the notice the run stopped at, apart from the one being read", async () => {
     thePaused();
-    const { container } = mount(`/conversations/${WAITING.id}`);
+    const { container } = mount(unopened(WAITING));
 
     const marked = await drawn(
       container,
@@ -9790,7 +9827,7 @@ describe("a run stopped because an account ran out of window", () => {
     );
 
     expect(marked.textContent).toContain("Implementing the work");
-    // Nothing has been pressed, so the mark is not about being open.
+    // Nothing is open, so the mark is not about being open.
     expect(marked.classList.contains(pressable.open!)).toBe(false);
 
     // And it is the last card on the record, which is what the stylesheet
@@ -10023,7 +10060,7 @@ describe("the pinned pull request", () => {
   /// answers for the keyboard and for anything reading the page aloud.
   it("stays a button for the keyboard and the screen reader", async () => {
     theWrapping();
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
+    const { container } = mount(unopened(WRAPPING));
 
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
 
@@ -10251,7 +10288,7 @@ describe("the pinned pull request", () => {
   /// Nudge about it.
   it("asks GitHub nothing until it is opened", async () => {
     const fetching = theWrapping();
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
+    const { container } = mount(unopened(WRAPPING));
 
     await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
 
@@ -10299,7 +10336,7 @@ describe("the pinned pull request", () => {
         json(CARRIED),
       ),
     );
-    const { container } = mount(`/conversations/${WRAPPING.id}`);
+    const { container } = mount(unopened(WRAPPING));
 
     const dots = await drawn(
       container,
@@ -11462,5 +11499,192 @@ describe("the path a details pane stands at", () => {
     expect(container.querySelector(`.${shell.middlePane} .${timeline.timeline}`)).toBe(
       before,
     );
+  });
+});
+
+/// Opening a Conversation is asking where the work got to, so the page finishes
+/// the walk the sidebar started: the newest thing on the record that has a pane
+/// behind it is selected, and the URL is rewritten to its path.
+///
+/// The sidebar cannot do it itself — its list says a Conversation moved and
+/// nothing about what moved — so the card navigates to the Conversation as it
+/// always did and this lands once the Timeline has arrived.
+///
+/// Which thing on a record that is, is `pathing.test.ts`: the arithmetic over a
+/// Timeline, held true against these same golden fixtures. What is asked here is
+/// what the page does with the answer.
+describe("landing on the end of the record", () => {
+  it("opens the newest thing on the record a card is pressed on", async () => {
+    theThree();
+    const { container, history } = mount();
+    await waitFor(() => screen.getByText(GRILLING.branch));
+
+    fireEvent.click(screen.getByText(GRILLING.branch));
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${UNREADABLE_SET.id}`,
+      ),
+    );
+    // And the pane opens on it, rather than the path naming something the page
+    // has not got round to drawing.
+    await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
+  });
+
+  /// A record very often ends on something with nothing behind it — every step
+  /// of the ladder writes a move, and a wrap-up ends on a manual task — so what
+  /// is picked is the last *openable* thing rather than the last thing.
+  it("skips past the events with nothing to open", async () => {
+    theWrapping();
+    const { container, history } = mount(`/conversations/${WRAPPING.id}`);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${WRAPPING.id}/events/${OPENED.id}`,
+      ),
+    );
+    await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
+  });
+
+  /// And where the newest openable thing is one of the two lists, it is opened
+  /// by the word its card is named by: neither has an Event of its own.
+  it("opens a list by its word where that is the newest thing", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container, history } = mount(`/conversations/${TASKED.id}`);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${TASKED.id}/backlog`),
+    );
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+  });
+
+  /// A record with nothing openable on it selects nothing and the pane stays
+  /// bare paper — which is a Draft whose Brief is still being written, and the
+  /// state every Conversation starts in.
+  it("selects nothing on a record with nothing to open", async () => {
+    theWorkbench();
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${paneHead.head}`),
+    ).toBeNull();
+  });
+
+  /// And a path that already names a pane is a cold load of that pane — a
+  /// reload, or a link somebody kept — so it keeps the selection it was opened
+  /// at rather than being moved on to the end of the record.
+  it("leaves a cold load of a details pane where it was opened", async () => {
+    theGrilling();
+    const { container, history } = mount(
+      `/conversations/${GRILLING.id}/events/${briefOf(GRILLING).id}`,
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${briefPane.brief}`);
+
+    expect(history.get()).toBe(
+      `/conversations/${GRILLING.id}/events/${briefOf(GRILLING).id}`,
+    );
+  });
+
+  /// The landing replaces rather than pushes, as every other change of detail
+  /// does: entering the Conversation is the one entry it wrote, so Back leaves
+  /// it rather than stepping back through the pane it landed on.
+  it("lands by replacing, so back leaves the conversation", async () => {
+    theThree();
+    const { history } = mount();
+    await waitFor(() => screen.getByText(GRILLING.branch));
+
+    fireEvent.click(screen.getByText(GRILLING.branch));
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${UNREADABLE_SET.id}`,
+      ),
+    );
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// And a phone stays on the Timeline. What decides which level a narrow window
+  /// shows is the Conversation changing, and landing on the end of a record
+  /// changes none — so the newest thing is marked open with the details a tap
+  /// away, rather than the human being carried past the record they opened.
+  it("lands a phone on the timeline rather than in the details", async () => {
+    theGrilling();
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${UNREADABLE_SET.id}`,
+      ),
+    );
+
+    expect(frame(container).dataset.pane).toBe("middle");
+    await waitFor(() => screen.getByRole("button", { name: "Details →" }));
+  });
+});
+
+/// One more Event for a record to grow by, which is what a running session does
+/// to the Timeline being read. A notice, that being the shortest thing Verkstead
+/// ever puts on one.
+const LANDED: TimelineEvent = {
+  Notice: {
+    id: 99,
+    at: "2026-08-03T09:07:11.000Z",
+    html: "<p>The session stopped.</p>\n",
+  },
+};
+
+/// The Timeline read from the bottom, which is where the work got to.
+///
+/// The following itself is `following.test.ts` — landing at the end, the pause
+/// when the human scrolls up, the resume when they come back down — asked of a
+/// box whose height is a number, jsdom laying nothing out to measure. What is
+/// asked here is that this pane is following at all: it opens at the end of the
+/// record, and goes after each Event that lands on it.
+describe("the timeline following its bottom", () => {
+  it("opens the record at its end", async () => {
+    const scrolled = vi.fn();
+    vi.stubGlobal("scrollTo", scrolled);
+
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(scrolled).toHaveBeenCalled();
+  });
+
+  it("goes after each event that lands on the record", async () => {
+    const scrolled = vi.fn();
+    vi.stubGlobal("scrollTo", scrolled);
+
+    /// The record as the server has it, which grows under the page the way a
+    /// running session's does.
+    let record: TimelineEvent[] = GRILLING.timeline;
+
+    theGrilling(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, () =>
+        json({ ...GRILLING, timeline: record })(),
+      ),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+    const landed = scrolled.mock.calls.length;
+    expect(landed).toBeGreaterThan(0);
+
+    record = [...GRILLING.timeline, LANDED];
+    await nudged(client);
+
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll(`.${timeline.timelineEvent}`),
+      ).toHaveLength(record.length),
+    );
+    expect(scrolled.mock.calls.length).toBeGreaterThan(landed);
   });
 });

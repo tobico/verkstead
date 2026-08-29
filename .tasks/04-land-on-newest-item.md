@@ -30,10 +30,10 @@ output pane uses is the pattern (and likely the code) to share.
 
 ## Acceptance criteria
 
-- [ ] Pressing a conversation card opens the Timeline at its bottom with the
+- [x] Pressing a conversation card opens the Timeline at its bottom with the
       last openable event selected, its path in the URL via replace
-- [ ] Events with nothing to open are skipped when picking the last item; an
+- [x] Events with nothing to open are skipped when picking the last item; an
       unopenable record selects nothing
-- [ ] While a session runs, arriving events keep the Timeline pinned to the
+- [x] While a session runs, arriving events keep the Timeline pinned to the
       bottom unless the human has scrolled up; a phone lands on the Timeline
       pane, not the details pane

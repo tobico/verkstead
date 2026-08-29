@@ -19,7 +19,7 @@ rather than deleting it, refused while live work is on it.
 - [x] 01: IconButton and the sidebar — [details](01-iconbutton-and-sidebar.md)
 - [x] 02: Extract the three-pane layout — [details](02-extract-three-pane-layout.md)
 - [x] 03: Paths for conversation details panes — [details](03-conversation-detail-paths.md)
-- [ ] 04: Conversation cards land on the newest item — [details](04-land-on-newest-item.md)
+- [x] 04: Conversation cards land on the newest item — [details](04-land-on-newest-item.md)
 - [ ] 05: Settings on the three-pane layout — [details](05-settings-three-pane.md)
 - [ ] 06: Profile cards and panes — [details](06-profile-cards-and-panes.md)
 - [ ] 07: The repo add pane — [details](07-repo-add-pane.md)

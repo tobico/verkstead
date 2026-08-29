@@ -27,6 +27,12 @@
 //! backfilled: a conversation from before the rows existed has its cards in the
 //! pinned block alone.
 //!
+//! The pane is read from the bottom, because that is where the work got to: it
+//! opens at the end of the record and stays there as Events arrive, until the
+//! human scrolls up to read something further back — and again once they come
+//! down to the end. The same following a running session's output is read with,
+//! and the same code (`../scrolling`).
+//!
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one — and so do the
 //! backlog and the roadmap, whose cards open the documents their entries name
@@ -108,6 +114,7 @@ import type {
 import app from "../App.module.css";
 import { CardButton } from "../CardButton";
 import { Empty, ErrorLine, Note } from "../notices";
+import { followBottom } from "../scrolling";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
 // from the page that draws the whole record rather than kept a second time
 // here: the row and the page are one record read at two distances.
@@ -362,6 +369,30 @@ export function Timeline(props: {
       .at(-1),
   );
 
+  /// The record itself, which is what says which box this pane scrolls in: a
+  /// column of the page below the first breakpoint, and the pane above it.
+  let record!: HTMLOListElement;
+
+  // And the pane follows the bottom of it, the way a running session's output
+  // already does — the same code, because it is the same reading: a record still
+  // being written, opened at its end because what is being said now is there.
+  // Every arriving Event puts the view back at the bottom until the human
+  // scrolls up to read something further back, and again once they come down to
+  // the end — see [`../scrolling`].
+  //
+  // Followed whatever the conversation is doing, rather than only while a
+  // session talks. A Timeline is never finished with: a resume, a steer, a
+  // commit landing off a check all put something new on the end of one, and
+  // there is no moment at which it is right to open a record anywhere but at
+  // its end. A record nothing is being added to never grows, so the following
+  // has nothing to do beyond landing the view where it opened.
+  followBottom(
+    () => record,
+    () => true,
+    // What growing means for a record that is only ever appended to.
+    () => props.conversation.timeline.length,
+  );
+
   return (
     <>
       {/* The header and the pinned block as one block, because that is how they
@@ -476,7 +507,7 @@ export function Timeline(props: {
         />
       </div>
 
-      <ol class={styles.timeline}>
+      <ol class={styles.timeline} ref={record}>
         <For each={props.conversation.timeline}>
           {(event, index) => (
             <Show when={drawable(event)}>

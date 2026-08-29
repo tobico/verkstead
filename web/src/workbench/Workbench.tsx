@@ -23,6 +23,13 @@
 //! `openings.ts` — so a details pane survives being navigated away from and
 //! back, and can be linked to.
 //!
+//! Opening a Conversation lands on the end of its record: the last Event with a
+//! pane behind it is selected and the URL is rewritten to its path, so the human
+//! arrives at where the work got to rather than at the beginning of it. It
+//! happens here rather than in the sidebar because the sidebar has no Timeline
+//! to pick from, and only where the path names no pane already — a cold load of
+//! a details pane keeps the selection it was opened at.
+//!
 //! What a Conversation *is* is not drawn there — the setup it needs is on the
 //! Brief card, where it is used — and the way on to an empty pane is not
 //! offered, so a narrow window can only walk into the pane by opening something.
@@ -79,6 +86,7 @@ import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
 import { Timeline } from "./Timeline";
 import {
+  lastOpening,
   openingAt,
   pathOf,
   pathTo,
@@ -298,6 +306,44 @@ export function Workbench(): JSX.Element {
     // turns carry their `id` flat for exactly this reason.
     freshness: { reconcile: "id" },
   }));
+
+  // Arriving at a Conversation with nothing open lands on the end of its record:
+  // the last Event that has a pane behind it, opened by rewriting the URL to its
+  // path with replace. What somebody pressing a Conversation asked for is where
+  // the work got to, and the end of the record is that answer — so it is shown
+  // rather than left one press away.
+  //
+  // Done here rather than by the card, because the sidebar has no Timeline to
+  // pick from: its list says a Conversation has moved and nothing about what
+  // moved. So the card navigates to the Conversation as it always did, and this
+  // finishes the walk once the record has arrived.
+  //
+  // Only where the path names no pane already. A URL that names one is a cold
+  // load of that pane — a reload, or a link somebody kept — and it keeps its own
+  // selection. Which is also what settles this: the navigation it makes names a
+  // pane, so the very next run has nothing left to do.
+  //
+  // A record with nothing openable on it selects nothing and the pane stays bare
+  // paper, which is a Draft with only the Brief being written.
+  //
+  // Which level a narrow window is showing is not touched, and that is the point:
+  // it follows the Conversation changing, and this changes no Conversation. So a
+  // phone lands on the Timeline with the newest thing marked open and the details
+  // one tap away, rather than being carried past the record it was opened to
+  // read.
+  createEffect(() => {
+    const id = selected();
+    const read = conversation.data;
+
+    if (id === "" || read === undefined || event() !== null) {
+      return;
+    }
+
+    const last = lastOpening(read.timeline);
+    if (last !== null) {
+      navigate(pathTo(id, last), { replace: true });
+    }
+  });
 
   return (
     <Panes
