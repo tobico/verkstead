@@ -42,6 +42,32 @@
   display: block;
 }
 
+/* Except that the conversations pane is a column rather than a block: the list
+   takes the room it needs and whatever is left over is taken above the foot
+   under it — the archived switch, pushed down by a `margin-top: auto` of its
+   own in `Conversations.module.css`. So a list that does not fill the pane
+   leaves the switch against the bottom of it, and one that fills it leaves the
+   switch after the last card, behind the scroll.
+
+   Which way the column runs is said once, off the pane's own name and outside
+   every rule that shows or hides it: the pane is shown by a different rule at
+   each width, and a direction written into one of them would be a direction the
+   other two widths did not have. What each of those rules has to say instead is
+   `flex` where it used to say `block`. */
+.conversationsPane {
+  flex-direction: column;
+}
+
+/* Said after the rule it takes the `display` back off, which is the only place
+   it could win. Here the pane is the whole page, so what it is a column of is
+   the window, and `min-height` is what says so — taken off again above the
+   first breakpoint, where the pane is a cell of a frame that is already exactly
+   that tall. */
+.workbench[data-pane="conversations"] > .conversationsPane {
+  display: flex;
+  min-height: 100dvh;
+}
+
 /* The line between two panes, and the handle that moves it.
 
    Only in the document where a layout stands panes side by side — the page puts
@@ -211,8 +237,18 @@
     overscroll-behavior: contain;
   }
 
+  /* The column again, said where this width is what shows the pane. */
   .workbench > .conversationsPane {
-    display: block;
+    display: flex;
+  }
+
+  /* And the window's height it asked for while it was the page goes: the pane
+     is a cell of a frame that is already exactly that tall, and asking the
+     viewport for it a second time is what leaves a pane standing a pixel past
+     the bottom of the frame. Written against the selector that set it, which is
+     what it takes to outrank it. */
+  .workbench[data-pane="conversations"] > .conversationsPane {
+    min-height: auto;
   }
 
   .workbench:not([data-pane="details"]) > .timelinePane,
@@ -241,6 +277,13 @@
 
   .workbench > .pane {
     display: block;
+  }
+
+  /* And the conversations pane goes on being the column it is below, said a
+     third time because the rule that shows every pane at this width would
+     otherwise make a block of it again. */
+  .workbench > .conversationsPane {
+    display: flex;
   }
 }
 

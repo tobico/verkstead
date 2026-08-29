@@ -18,6 +18,7 @@ import type {
   RepoEntry,
   ShowingArchived,
 } from "../src/api/types";
+import { Conversations } from "../src/workbench/Conversations";
 import { Workbench } from "../src/workbench/Workbench";
 import { json, serving, whenever } from "./serving";
 import conversation from "./fixtures/conversation.json" with { type: "json" };
@@ -52,6 +53,37 @@ export const COMPANION_BRANCHES = ["trunk", "origin/trunk"];
 /// for the reason the branches are: one boolean is not a shape a golden file
 /// could hold true.
 export const HIDING_ARCHIVED: ShowingArchived = { showing: false };
+
+/// The conversations pane alone, standing wherever the URL says.
+///
+/// For the one thing about the sidebar that is not about the workbench: the
+/// gear at the head of it reads as open while the settings are what is being
+/// looked at, and the settings are not a page the workbench answers. Mounted on
+/// a route that matches whatever it is handed, because what is being asked is
+/// what the pane draws at a path rather than what any router does with one.
+export function mountSidebar(at: string) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+
+  const history = createMemoryHistory();
+  history.set({ value: at });
+
+  return {
+    ...render(() => (
+      <QueryClientProvider client={client}>
+        <MemoryRouter history={history}>
+          <Route
+            path="*"
+            component={() => <Conversations selected="" open={() => {}} />}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )),
+    history,
+    client,
+  };
+}
 
 /// The workbench on its own routes, so the Conversation it reads is the one the
 /// URL names — and so that opening one is a navigation, which is what it is in

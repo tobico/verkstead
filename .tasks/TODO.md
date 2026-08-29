@@ -16,7 +16,7 @@ rather than deleting it, refused while live work is on it.
 
 ## Tasks
 
-- [ ] 01: IconButton and the sidebar — [details](01-iconbutton-and-sidebar.md)
+- [x] 01: IconButton and the sidebar — [details](01-iconbutton-and-sidebar.md)
 - [ ] 02: Extract the three-pane layout — [details](02-extract-three-pane-layout.md)
 - [ ] 03: Paths for conversation details panes — [details](03-conversation-detail-paths.md)
 - [ ] 04: Conversation cards land on the newest item — [details](04-land-on-newest-item.md)

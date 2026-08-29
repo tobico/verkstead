@@ -31,11 +31,16 @@
 //! `Actions.tsx`, which is where the rows and everything behind them live.
 //!
 //! The sidebar is also where the rest of Verkstead is reached from, because the
-//! workbench has the root: the Repos and the Agent Profiles are behind the ⋯ at
-//! the head of the pane rather than a page of their own to find.
+//! workbench has the root: the gear at the head of the pane opens the settings,
+//! and the Repos and the Agent Profiles are in there rather than being a page
+//! each to find.
+//!
+//! And at the foot of the pane, under the list rather than over it, the one
+//! setting that is about these conversations rather than about anything else:
+//! whether the ones put away are drawn among them.
 
-import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
-import { A } from "@solidjs/router";
+import { faChevronDown, faGear } from "@fortawesome/free-solid-svg-icons";
+import { A, useLocation, useNavigate } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
   For,
@@ -50,6 +55,7 @@ import {
 
 import { CardButton } from "../CardButton";
 import { Icon } from "../Icon";
+import { IconButton } from "../IconButton";
 import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
 import {
@@ -438,7 +444,7 @@ export function Conversations(props: {
           </>
         }
       >
-        <WorkbenchActions />
+        <Settings />
       </PaneHead>
 
       <NewConversation open={props.open} />
@@ -488,44 +494,75 @@ export function Conversations(props: {
           the steer it can open outlives the menu, which a row being dragged
           about underneath it would not. */}
       <CardActions pointed={pointed()} close={() => setPointed(null)} />
+
+      {/* And the foot of the pane, under everything the pane is a list of. Last
+          in the column so that the room left over is left over its head: that
+          is what stands it against the bottom of the screen while the list is
+          short, and what leaves it after the last card once the list is long
+          enough to scroll. */}
+      <ShowArchived />
     </>
   );
 }
 
-/// The rest of Verkstead, which is one page: the Repos and the Agent Profiles a
-/// Conversation is settled against, and what Verkstead itself has been told.
-/// What is waiting on the human is not there — a Question Set is reached
-/// through the Conversation it was asked from, which is the list this sits over.
+/// The way to the rest of Verkstead, which is one page: the Repos and the Agent
+/// Profiles a Conversation is settled against, and what Verkstead itself has
+/// been told. What is waiting on the human is not there — a Question Set is
+/// reached through the Conversation it was asked from, which is the list this
+/// sits over.
 ///
-/// A ⋯ at the head of the pane rather than the link that used to sit at its
-/// foot. That foot is under the conversations, and the conversations are the one
-/// part of the pane with no end: a long enough list and the way out to the
-/// settings was somewhere the human had to scroll to find. Up here it is where
-/// the ⋯ at the top of a Conversation is, drawn through the same component and
-/// painted by the same rule — and the two of them mean the same thing in their
-/// two places, which is *what there is about this pane that is not in it*.
+/// At the head of the pane, where the ⋯ that held it was and where a link at
+/// the foot of the list was before that. That foot is under the conversations,
+/// and the conversations are the one part of the pane with no end: a long
+/// enough list and the way out to the settings was somewhere the human had to
+/// scroll to find.
 ///
-/// A menu for one entry, because the entry is what is behind it rather than what
-/// it is: the next thing that is about the workbench as a whole goes in beside
-/// Settings rather than beside the wordmark.
+/// An [`IconButton`](../IconButton.tsx) rather than a menu of one row, because
+/// a menu of one row is a press with a press in front of it — and because this
+/// is the same kind of thing the cards below it are: something in this pane
+/// that is selected and opened into the pane beside it. So it is drawn as open
+/// while the settings are what is being read, which is what the open card in
+/// the list says about itself, in the same fill.
 ///
-/// A link rather than a button, and the only row of any menu that is one: the
-/// settings are a page of their own, so this is going somewhere in the way that
-/// opening a Conversation is not. Nothing here has to shut the menu — the
-/// navigation takes the whole sidebar with it. First in the menu, because it is
-/// what the menu is for: the way out of the workbench is what the ⋯ was put
-/// there to hold, and the switch under it is a setting that came to sit beside
-/// it.
+/// A gear, which is what a settings icon is everywhere, and the label is the
+/// whole of what a screen reader gets: the shape says nothing when it is read
+/// aloud.
+function Settings(): JSX.Element {
+  const navigate = useNavigate();
+  const where = useLocation();
+
+  /// Open while the settings are what the human is looking at, whichever of
+  /// their panes they are in: everything the settings open into is a path
+  /// under this one.
+  const open = (): boolean =>
+    where.pathname === "/settings" || where.pathname.startsWith("/settings/");
+
+  return (
+    <IconButton
+      of={faGear}
+      label="Settings"
+      open={open()}
+      press={() => navigate("/settings")}
+    />
+  );
+}
+
+/// The one setting that is about this list rather than about the rest of
+/// Verkstead: whether the conversations the human has archived are drawn in it.
 ///
-/// Under it, the one thing that is about this list rather than about the rest
-/// of Verkstead: whether the conversations the human has archived are drawn in
-/// it. A switch rather than a row that presses, because it is a state the list
-/// is in rather than something to do to it — and it stays where it is put, so
-/// the menu does not shut under a hand that may want it back. *Show archived*
-/// rather than the whole sentence it used to be: the menu is over the list of
-/// conversations, so what else it could be showing does not have to be said,
-/// and two words fit on the one line a row of a menu is.
-function WorkbenchActions(): JSX.Element {
+/// At the foot of the pane, under the list it is about. Pushed there by the
+/// room left over rather than stuck over the cards — see `.showArchived`, and
+/// the column the pane is made into in `Workbench.module.css` — so a list that
+/// does not fill the screen leaves this against the bottom of it, and a list
+/// that does leaves it after the last card, behind the scroll. A strip laid
+/// across the list would have covered a card for the whole life of the pane to
+/// save the human a scroll they make once.
+///
+/// A switch rather than something that presses, because it is a state the list
+/// is in rather than something to do to it. *Show archived* rather than the
+/// whole sentence it could be: it stands under the list of conversations, so
+/// what else it could be showing does not have to be said.
+function ShowArchived(): JSX.Element {
   const queries = useQueryClient();
 
   /// The server's answer rather than this device's: the choice is the human's,
@@ -542,7 +579,7 @@ function WorkbenchActions(): JSX.Element {
   const flip = useMutation(() => ({
     mutationFn: (on: boolean) => showArchived(on),
     onSuccess: () => {
-      // The list itself and the switch over it: what is drawn changes with the
+      // The list itself and the switch under it: what is drawn changes with the
       // setting, which is the entire point of it. The other devices hear the
       // same news as a Nudge.
       void queries.invalidateQueries({ queryKey: ["conversations"] });
@@ -557,34 +594,19 @@ function WorkbenchActions(): JSX.Element {
     flip.isPending ? (flip.variables ?? false) : (showing.data ?? false);
 
   return (
-    <Menu
-      class={styles.workbenchActions!}
-      label="Workbench actions"
-      name="Workbench actions"
-      mark
-    >
-      {() => (
-        <>
-          <A role="menuitem" href="/settings">
-            Settings
-          </A>
-
-          <div class={styles.showArchived}>
-            <Toggle
-              label="Show archived"
-              on={on()}
-              disabled={showing.isPending || flip.isPending}
-              flip={(wanted) => flip.mutate(wanted)}
-            />
-            <Show when={flip.isError}>
-              <ErrorLine>
-                The setting could not be saved: {flip.error?.message}
-              </ErrorLine>
-            </Show>
-          </div>
-        </>
-      )}
-    </Menu>
+    <div class={styles.showArchived}>
+      <Toggle
+        label="Show archived"
+        on={on()}
+        disabled={showing.isPending || flip.isPending}
+        flip={(wanted) => flip.mutate(wanted)}
+      />
+      <Show when={flip.isError}>
+        <ErrorLine>
+          The setting could not be saved: {flip.error?.message}
+        </ErrorLine>
+      </Show>
+    </div>
   );
 }
 

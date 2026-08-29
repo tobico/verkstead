@@ -62,6 +62,9 @@ import cardCss from "../src/Card.module.css?raw";
 // read off.
 import pressable from "../src/CardButton.module.css";
 import pressableCss from "../src/CardButton.module.css?raw";
+// And the pressable icon, which is the other thing in a pane that opens into a
+// subpane: the gear at the head of the sidebar is one.
+import button from "../src/IconButton.module.css";
 import dropdown from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
 // The set page as it is drawn inside a details pane: its nav, its sections, and
@@ -160,6 +163,7 @@ import {
   SIDEBAR,
   drawn,
   mount,
+  mountSidebar,
   nudged,
   theWorkbench,
 } from "./bench";
@@ -287,13 +291,11 @@ async function openActions(container: ParentNode): Promise<HTMLElement> {
   return drawn(container, `.${actions.conversationActions} > .${dropdown.drop}`);
 }
 
-/// Open the sidebar's ⋯, which is what the rest of Verkstead is behind: press
-/// the trigger, and wait for what it drops.
-async function openWorkbenchActions(
-  container: ParentNode,
-): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, `.${sidebar.workbenchActions} > .${dropdown.trigger}`));
-  return drawn(container, `.${sidebar.workbenchActions} > .${dropdown.drop}`);
+/// The gear at the head of the sidebar, which is what the rest of Verkstead is
+/// behind. Found by the name it is read aloud by, an icon saying nothing for
+/// itself.
+async function gear(container: ParentNode): Promise<HTMLButtonElement> {
+  return drawn<HTMLButtonElement>(container, 'button[aria-label="Settings"]');
 }
 
 /// Drop the new-conversation menu, which is where both ways of starting one
@@ -445,44 +447,54 @@ describe("the workbench", () => {
 
   /// The sidebar is where the rest of Verkstead is reached from, now that the
   /// workbench has the root — and the rest of Verkstead is one page, since the
-  /// Repos and the Agent Profiles were folded onto the settings page. Behind the
-  /// ⋯ at the head of the pane, where the Conversation's own ⋯ is, rather than
-  /// under a list with no end to it.
-  it("reaches the rest of Verkstead from the sidebar's menu", async () => {
+  /// Repos and the Agent Profiles were folded onto the settings page. A gear at
+  /// the head of the pane, where the ⋯ that held it stood: one press rather than
+  /// the two a menu of one row was.
+  it("reaches the rest of Verkstead from the gear", async () => {
     theWorkbench();
     const { container, history } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
-    const drop = await openWorkbenchActions(container);
-    expect(
-      [...drop.querySelectorAll("a")].map((to) => to.getAttribute("href")),
-    ).toEqual(["/settings"]);
-
-    // A row that goes somewhere rather than one that does something, so pressing
-    // it takes the whole sidebar with it and nothing here has to shut the menu.
-    const settings = screen.getByText("Settings");
-    expect(settings.getAttribute("role")).toBe("menuitem");
-    fireEvent.click(settings);
+    fireEvent.click(await gear(container));
     await waitFor(() => expect(history.get()).toBe("/settings"));
   });
 
-  /// And it is the first thing in the menu, because it is what the ⋯ was put at
-  /// the head of the pane to hold: the switch under it is a setting that came to
-  /// sit beside the way out rather than the reason there is a menu.
-  it("puts settings above the switch", async () => {
+  /// And it is another thing in this pane that is selected and opened into the
+  /// pane beside it, which is what the cards under it are — so it says which of
+  /// the two it is the same way they do. Not open on the workbench, and open
+  /// wherever under the settings the human has got to.
+  it("reads the gear as open only under the settings", async () => {
+    theWorkbench();
+    const { container } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+    expect((await gear(container)).getAttribute("aria-pressed")).toBe("false");
+
+    for (const at of ["/settings", "/settings/repos/1"]) {
+      const page = mountSidebar(at);
+      const there = await gear(page.container);
+      expect(there.getAttribute("aria-pressed")).toBe("true");
+      expect(there.classList).toContain(button.open);
+      page.unmount();
+    }
+  });
+
+  /// The ⋯ that held both of them is gone with them: what it was for was the way
+  /// out of the workbench, and a menu that stood in front of one press is a
+  /// press in front of a press.
+  it("leaves no ⋯ at the head of the conversations", async () => {
     theWorkbench();
     const { container } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
-    const drop = await openWorkbenchActions(container);
-
-    expect(drop.firstElementChild!.tagName).toBe("A");
-    expect(drop.firstElementChild!.textContent).toBe("Settings");
-    expect(drop.lastElementChild!.className).toBe(sidebar.showArchived);
+    expect(
+      container.querySelector(
+        `.${shell.conversationsPane} .${dropdown.trigger}.${dropdown.mark}`,
+      ),
+    ).toBeNull();
   });
 
   /// Two words rather than the sentence it used to be, and never on two lines:
-  /// the menu is over the list of conversations, so what else it could be
+  /// the switch stands under the list of conversations, so what else it could be
   /// showing does not have to be said — and a label that wrapped would leave the
   /// switch on a line of its own with nothing beside it to say what it was for.
   it("keeps the archived switch on one line", () => {
@@ -493,8 +505,9 @@ describe("the workbench", () => {
     );
   });
 
-  /// And the one row of that menu that is about this list rather than about the
-  /// rest of Verkstead: whether the conversations put away are drawn in it.
+  /// And the one thing at the foot of the pane, which is about this list rather
+  /// than about the rest of Verkstead: whether the conversations put away are
+  /// drawn in it.
   ///
   /// The server's answer rather than this device's, which is what makes it the
   /// same list on a phone opened afterwards.
@@ -505,15 +518,15 @@ describe("the workbench", () => {
         json({ showing: true } satisfies ShowingArchived),
       ),
     );
-    const { container } = mount();
-    await waitFor(() => screen.getByText(DRAFTING.branch));
-
-    await openWorkbenchActions(container);
+    mount();
 
     const toggle = await waitFor(() =>
       screen.getByLabelText<HTMLInputElement>("Show archived"),
     );
-    expect(toggle.checked).toBe(true);
+    // Drawn where the server has it rather than where the server had it: the
+    // switch is on the page before its read has landed, and off is where one
+    // nobody has answered for stands.
+    await waitFor(() => expect(toggle.checked).toBe(true));
   });
 
   /// A switch says where it stands rather than asking for a flip, so what goes
@@ -526,10 +539,8 @@ describe("the workbench", () => {
         "POST",
       ),
     );
-    const { container } = mount();
-    await waitFor(() => screen.getByText(DRAFTING.branch));
+    mount();
 
-    await openWorkbenchActions(container);
     const toggle = await waitFor(() =>
       screen.getByLabelText<HTMLInputElement>("Show archived"),
     );
@@ -552,10 +563,9 @@ describe("the workbench", () => {
         "POST",
       ),
     );
-    const { container } = mount();
+    mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
-    await openWorkbenchActions(container);
     const read = askedFor(fetching, "/api/ui/conversations");
     fireEvent.click(
       await waitFor(() => screen.getByLabelText("Show archived")),
@@ -566,19 +576,41 @@ describe("the workbench", () => {
     );
   });
 
-  /// Nothing of it until it is pressed, which is the point of putting it there:
-  /// the head of the pane gives up a mark's worth of room and no more.
-  it("keeps the way out of the workbench behind that menu", async () => {
+  /// The switch is the foot of the pane rather than the last row of the list:
+  /// last in the column, with whatever room the conversations leave over taken
+  /// above it. So a short list stands it against the bottom of the screen and a
+  /// long one leaves it after the last card, behind the scroll — and neither
+  /// costs a card being covered, which is what a strip stuck across the list
+  /// would have cost for the life of the pane.
+  ///
+  /// Where a thing sits is the stylesheet's, and jsdom lays nothing out: what is
+  /// asked here is that it is last in the pane, that the room over it is what
+  /// puts it there, and that the pane is the column that gives it any.
+  it("stands the archived switch at the foot of the pane", async () => {
     theWorkbench();
     const { container } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
+    const pane = container.querySelector(`.${shell.conversationsPane}`)!;
+    expect(pane.lastElementChild!.className).toBe(sidebar.showArchived);
+
+    const at = sidebarCss.indexOf("\n.showArchived {");
+    expect(sidebarCss.slice(at, sidebarCss.indexOf("\n}", at))).toContain(
+      "margin-top: auto;",
+    );
     expect(
-      container.querySelector(`.${sidebar.workbenchActions} > .${dropdown.drop}`),
-    ).toBeNull();
-    // The way to the settings is in the menu and nowhere else, so with the menu
-    // shut there is no way out of this page on it at all.
-    expect(screen.queryByText("Settings")).toBeNull();
+      sidebarCss,
+      "the foot is the end of the pane rather than a strip laid over it",
+    ).not.toContain("position: sticky");
+
+    const column = shellCss.indexOf("\n.conversationsPane {");
+    expect(
+      column,
+      "expected the frame to make a column of the conversations pane",
+    ).toBeGreaterThan(-1);
+    expect(shellCss.slice(column, shellCss.indexOf("\n}", column))).toContain(
+      "flex-direction: column;",
+    );
   });
 
   /// The menu still opens with nothing to start a conversation in — and what is
@@ -815,7 +847,7 @@ describe("how a card says where its conversation has got to", () => {
     // name rather than the card: a card is a `CardButton` now and is flat, so
     // there is no outline left to draw one as the outline of.
     expect(sidebarCss).toContain(
-      ".conversationRow.draft .title {\n  font-style: italic;\n}",
+      ".conversationRow.draft .title {\n  font-style: italic;\n  color: var(--ink-soft);\n}",
     );
   });
 
