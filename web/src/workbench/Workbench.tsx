@@ -77,6 +77,7 @@ import { Brief } from "./Brief";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
 import { Document } from "./Document";
+import { Hatch } from "./Hatch";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
@@ -596,6 +597,12 @@ function Reading(props: {
             <Empty>Loading…</Empty>
           </Match>
           <Match when={conversation.isError}>
+            {/* The reading failed, so there is no header to draw and no menu to
+                hang off one — and this is the Conversation the human is most
+                likely to want the end of. So the header is drawn anyway, in the
+                little that can be known without the reading, and what it carries
+                is the way out: see `Hatch.tsx`. */}
+            <Hatch id={props.id} back={props.list} />
             <ErrorLine>
               Could not read this conversation: {conversation.error?.message}
             </ErrorLine>

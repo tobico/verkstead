@@ -2130,6 +2130,186 @@ describe("a conversation's timeline", () => {
   });
 });
 
+/// The one route out of a Conversation whose page will not load.
+///
+/// The read behind the pane has half a dozen ways to fail, and every one of them
+/// used to leave the human with a line of error and nothing to press — on the
+/// very Conversation they most wanted to be rid of. The presses themselves never
+/// needed the reading; only the menu did. So the header is drawn without it, and
+/// what it carries is the way out. See `Hatch.tsx`.
+describe("the escape hatch on a conversation that will not load", () => {
+  /// The workbench with the open Conversation's own read refusing, which is the
+  /// state the hatch exists for. `list` replaces the sidebar's answer, for the
+  /// tests about what the hatch reads off it.
+  function theBrokenConversation(...answers: Parameters<typeof serving>) {
+    return serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever("/api/ui/abandoned-roadmaps", json([])),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}`,
+        json({ error: "the Conversation could not be read" }, 500),
+      ),
+      ...answers,
+    );
+  }
+
+  /// The sidebar with the open Conversation in whichever state a test is about.
+  const listedAs = (state: ConversationEntry["state"]) =>
+    whenever(
+      "/api/ui/conversations",
+      json(
+        SIDEBAR.map((entry) =>
+          entry.id === OPEN.id ? { ...entry, state } : entry,
+        ),
+      ),
+    );
+
+  const CLOSE_AND_ARCHIVE = `/api/ui/conversations/${OPEN.id}/close-and-archive`;
+  const ARCHIVE = `/api/ui/conversations/${OPEN.id}/archive`;
+
+  /// A header where there could be no header: the branch off the sidebar's own
+  /// list, the ⋯ the ordinary pane carries, and the error still under it.
+  it("draws a header with the ⋯ on it, over the error", async () => {
+    theBrokenConversation();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const head = await drawn(container, `.${shell.timelinePane} .${paneHead.head}`);
+    expect(head.querySelector("h1")?.textContent).toBe(DRAFTING.branch);
+
+    await drawn(container, `.${actions.conversationActions} > .${dropdown.trigger}`);
+    await waitFor(() => screen.getByText(/the Conversation could not be read/));
+  });
+
+  /// And the way back out, which is the whole reason the hatch is on the pane
+  /// rather than on the sidebar's right-click: a phone has no right-click, and
+  /// a page it cannot leave is worse than one it cannot read.
+  it("carries the way back to the conversations", async () => {
+    theBrokenConversation();
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await drawn(container, `.${shell.timelinePane} .${shell.paneBack}`));
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// One row, and the one that covers every state: close refuses nothing but a
+  /// Conversation that is gone, and an already-closed one still archives.
+  it("offers close and archive on a conversation that is not closed", async () => {
+    theBrokenConversation();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+
+    expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+    expect(menu.querySelector(`.${actions.archive}`)).toBeNull();
+    expect(menu.querySelector(`.${actions.close}`)).toBeNull();
+    expect(menu.querySelector(`.${actions.steer}`)).toBeNull();
+    expect(menu.querySelectorAll("button")).toHaveLength(1);
+  });
+
+  /// And the same row where the sidebar cannot say either — the list not in
+  /// hand, or holding no row for this one. The human's own words: if we cannot
+  /// tell which, show only Close and archive, since it covers everything.
+  it("offers it too when the list says nothing about this conversation", async () => {
+    theBrokenConversation(whenever("/api/ui/conversations", json([])));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+
+    expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+    expect(menu.querySelector(`.${actions.archive}`)).toBeNull();
+  });
+
+  /// Archive stands there instead only where the list says the Conversation is
+  /// closed — because Archive on one that is not answers `NotClosed` and goes
+  /// nowhere, which is a dead end rather than an escape.
+  it("offers archive alone where the list says it is closed", async () => {
+    theBrokenConversation(listedAs("Closed"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+
+    // Waited for rather than read at once: the rows are reactive, so the one
+    // the list settles on arrives whenever the list does.
+    await drawn(container, `.${actions.archive}`);
+    expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeNull();
+    expect(menu.querySelectorAll("button")).toHaveLength(1);
+  });
+
+  it("posts to the conversation's own close-and-archive route", async () => {
+    const fetching = theBrokenConversation(
+      whenever(CLOSE_AND_ARCHIVE, json("Closed" satisfies ConversationClosed), "POST"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() => expect(sent(fetching, CLOSE_AND_ARCHIVE)).toEqual({}));
+  });
+
+  it("posts to the archive route where that is the row it drew", async () => {
+    const fetching = theBrokenConversation(
+      listedAs("Closed"),
+      whenever(ARCHIVE, json("Archived" satisfies ConversationArchived), "POST"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.archive}`));
+
+    await waitFor(() => expect(sent(fetching, ARCHIVE)).toEqual({}));
+  });
+
+  /// A press that lands leaves, unlike the ordinary menu's, which stays where it
+  /// is for the re-read to correct. There is nothing here to stay for: the page
+  /// could not be read before the press and will not be read after it. On a
+  /// narrow window that is the way back to the list and on a wide one the empty
+  /// pane, which is one navigation.
+  it("leaves the page a press has landed on", async () => {
+    theBrokenConversation(
+      whenever(CLOSE_AND_ARCHIVE, json("Closed" satisfies ConversationClosed), "POST"),
+    );
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+    await waitFor(() => screen.getByText("Pick a conversation, or start one."));
+  });
+
+  /// And a refusal goes where every other refusal in this menu goes: the
+  /// console. There is no row left to correct and nowhere on a page that will
+  /// not load to put a sentence.
+  it("logs a refusal and stays where it is", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    theBrokenConversation(
+      whenever(
+        CLOSE_AND_ARCHIVE,
+        json("NoSuchConversation" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() =>
+      expect(logged).toHaveBeenCalledWith(CLOSE_REFUSAL.NoSuchConversation),
+    );
+    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
+    expect(screen.queryByText("This conversation is gone.")).toBeNull();
+
+    logged.mockRestore();
+  });
+});
+
 /// The brief while the Conversation is drafting: a field that is always there
 /// and saves itself, rather than a rendering with a way into a form.
 describe("writing the brief", () => {
