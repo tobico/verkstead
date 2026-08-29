@@ -133,9 +133,12 @@ _Avoid_: state directory, work dir, scratch space, cache
 **Sandbox**:
 What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
-Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills and
-the Verkstead executable read-only, and nothing else of the machine at all
-— not even the checkout the Worktree was made from. Each Companion Repo the
+Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills at
+`/verkstead/skills` and the Verkstead executable read-only, and nothing else of
+the machine at all — not even the checkout the Worktree was made from. An empty
+directory read-only over `~/.claude/skills` goes with the Skills' own mount:
+the account's are hidden rather than merged with, and a mount at a path no
+backend owns hides nothing by itself. Each Companion Repo the
 Conversation was configured with is inside as well: its Worktree and the git
 directory behind it, both at that companion's own mode, so a read-only one is
 read-only through both. The **Build Cache** is inside as well, writable, with
@@ -268,10 +271,13 @@ _Avoid_: submodule, dependency, linked repo, sibling checkout, secondary repo
 One of the workflows Verkstead runs its sessions by — grilling, implementing,
 breaking down, working a Step and following up now, the rest as the stages that
 need them arrive. Verkstead's own: shipped inside the binary, installed under
-the Data Directory at startup and mounted read-only over `~/.claude/skills`, so
-a session's behaviour is the product's rather than whatever the machine or the
-account happens to keep. A session is put inside one by the prompt it is started
-on, which names the Skill above the Brief.
+the Data Directory at startup and mounted read-only at `/verkstead/skills` — a
+path no backend owns, beside the Verkstead executable's — so a session's
+behaviour is the product's rather than whatever the machine or the account
+happens to keep. What the account keeps is hidden by an empty directory bound
+over `~/.claude/skills`, which is the mounting the Skills used to do there. A
+session is put inside one by the prompt it is started on, which names the Skill
+above the Brief.
 _Avoid_: prompt, instructions, plugin, workflow file
 
 **Brief**:

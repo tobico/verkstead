@@ -12,8 +12,9 @@
 //!
 //! - **read-write** — the Conversation's worktree, the Repo's common `.git`
 //!   directory, and the Profile's pair at `~/.claude` and `~/.claude.json`
-//! - **read-only** — `/nix` and the system paths, the bundled skills over
-//!   `~/.claude/skills`, and the executable serving all this, as `verkstead`
+//! - **read-only** — `/nix` and the system paths, the bundled skills at
+//!   `/verkstead/skills`, an empty directory over the `~/.claude/skills` they
+//!   used to hide, and the executable serving all this, as `verkstead`
 //! - **tmpfs** — `/tmp`, and everything else in HOME simply absent
 //! - **by mode** — each companion repo the Conversation was configured with,
 //!   its worktree and its git directory together, read-only or read-write as
@@ -514,10 +515,15 @@ pub struct Sandbox {
     /// accounts apart, so the two travel together or not at all.
     config_file: PathBuf,
 
-    /// The bundled skills, mounted read-only inside the Profile's directory at
-    /// `~/.claude/skills` — see [`crate::skills`] for why they are Verkstead's
-    /// rather than the account's, and why they are read-only.
+    /// The bundled skills, mounted read-only at [`skills::INSIDE`] — see
+    /// [`crate::skills`] for why they are Verkstead's rather than the account's,
+    /// why they are read-only, and why the path is nobody's.
     skills: PathBuf,
+
+    /// And the empty directory that goes over `~/.claude/skills` in their place,
+    /// read-only, so what the account keeps there stays hidden now that the
+    /// mount doing the hiding has moved away — see [`skills::Skills::nothing`].
+    nothing: PathBuf,
 
     /// The executable a session runs as `verkstead`, mounted read-only at
     /// [`VERKSTEAD_INSIDE`] and first on `PATH`.
@@ -632,6 +638,7 @@ impl Sandbox {
             claude_dir: profile.claude_dir.clone(),
             config_file: profile.config_file.clone(),
             skills: skills.path().to_owned(),
+            nothing: skills.nothing().to_owned(),
             verkstead: verkstead.path().to_owned(),
             handoff_dir,
             home,
@@ -703,14 +710,21 @@ impl Sandbox {
             .arg(&self.handoff_dir)
             .arg(handoffs::INSIDE);
 
-        // After the Profile's directory, and inside it: a bind is applied in the
-        // order it is given, so this one lands over whatever `~/.claude/skills`
-        // the account itself keeps. Read-only, because what a session is grilled
-        // by is the product's and not a file the session can rewrite mid-run.
+        // The skills, at a path of Verkstead's own outside HOME entirely — the
+        // bind makes the directory, so what a session reads there is what this
+        // binary ships. Read-only, because what a session is grilled by is the
+        // product's and not a file the session can rewrite mid-run.
+        bwrap.arg("--ro-bind").arg(&self.skills).arg(skills::INSIDE);
+
+        // And nothing at all where the account's own skills would otherwise be
+        // found: after the Profile's directory and inside it, because a bind is
+        // applied in the order it is given and the one that lands second is the
+        // one that wins. Read-only as the mount that used to stand here was, so
+        // a session cannot fill the directory in and then read from it.
         bwrap
             .arg("--ro-bind")
-            .arg(&self.skills)
-            .arg(self.home.path.join(skills::INSIDE_HOME));
+            .arg(&self.nothing)
+            .arg(self.home.path.join(skills::CLAUDE_INSIDE_HOME));
 
         // And the binary the session asks with, in a directory of its own that
         // goes first on `PATH` — see [`Executable`]. The bind makes the

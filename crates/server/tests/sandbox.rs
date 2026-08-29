@@ -356,8 +356,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     std::fs::write(claude_dir.join("settings.json"), "{}\n").unwrap();
     std::fs::write(&config_file, "{}\n").unwrap();
 
-    // And a skill of the account's own, where Verkstead's are about to be
-    // mounted: what a session is grilled by is the product's, so this is what
+    // And a skill of the account's own, where a Claude session would otherwise
+    // go looking: what a session is grilled by is the product's, so this is what
     // being hidden looks like from inside.
     std::fs::create_dir_all(claude_dir.join("skills/the-accounts-own")).unwrap();
     std::fs::write(
@@ -970,11 +970,12 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
         &sandbox,
         &format!(
             r#"
-            file "$HOME/.claude/skills/grilling/SKILL.md" grilling
-            file "$HOME/.claude/skills/the-accounts-own/SKILL.md" the-accounts-own
+            file "/verkstead/skills/grilling/SKILL.md" grilling
+            say installed "$(ls /verkstead/skills | sort | tr '\n' ' ')"
+            say verkstead "$(ls /verkstead | sort | tr '\n' ' ')"
             file "$HOME/.claude/CLAUDE.md" claude-md
             dir {tobico} tobico-skills
-            if {grep} -q 'verkstead ask' "$HOME/.claude/skills/grilling/SKILL.md"; then
+            if {grep} -q 'verkstead ask' "/verkstead/skills/grilling/SKILL.md"; then
                 say ask-instruction inside
             else
                 say ask-instruction missing
@@ -990,8 +991,13 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
         "the bundled grilling skill is installed, and is not a session's to rewrite"
     );
     assert_eq!(
-        reported["the-accounts-own"], "absent",
-        "what a session is grilled by is the product's, not whatever the account keeps"
+        reported["installed"],
+        installed_on_the_host(&fixture.skills),
+        "and the whole of what this binary ships is there, at a path no backend owns"
+    );
+    assert_eq!(
+        reported["verkstead"], "bin skills ",
+        "in a directory the binds made, holding what the server put there and nothing else"
     );
     assert_eq!(
         reported["tobico-skills"], "absent",
@@ -1004,6 +1010,58 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
     assert_eq!(
         reported["ask-instruction"], "inside",
         "so the bundled skill has to carry the instruction itself"
+    );
+}
+
+/// The skill names as they sit on the host, in the shape the probe reports them
+/// from inside — so the assertion above is "the installed set, whatever it is
+/// this release" rather than a list to be edited every time a skill lands.
+fn installed_on_the_host(skills: &Skills) -> String {
+    let mut names: Vec<String> = std::fs::read_dir(skills.path())
+        .expect("the skills are installed")
+        .map(|entry| entry.expect("a readable entry").file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .collect();
+
+    names.sort();
+
+    names.iter().map(|name| format!("{name} ")).collect()
+}
+
+/// The mount that hid the account's own skills has moved to a path of
+/// Verkstead's own, so an empty directory stands where it did.
+///
+/// A Profile is an account to run as rather than a second opinion about how to
+/// work, and the case that guards is an older fork of the skills Verkstead ships
+/// sitting in the account's directory. The rest of the pair is the account's as
+/// it always was: what is covered is the one directory.
+#[tokio::test]
+async fn the_accounts_own_skills_are_covered_by_nothing_at_all() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let reported = probe(
+        &sandbox,
+        r#"
+        file "$HOME/.claude/skills/the-accounts-own/SKILL.md" the-accounts-own
+        dir "$HOME/.claude/skills" skills-dir
+        say inside "$(ls -A "$HOME/.claude/skills" | tr '\n' ' ')"
+        file "$HOME/.claude/settings.json" settings
+        "#,
+    );
+
+    assert_eq!(
+        reported["the-accounts-own"], "absent",
+        "what a session is grilled by is the product's, not whatever the account keeps"
+    );
+    assert_eq!(
+        reported["skills-dir"], "read",
+        "and the directory covering it is no more a session's to fill in than the skills are"
+    );
+    assert_eq!(reported["inside"], "", "there is nothing in it to read");
+    assert_eq!(
+        reported["settings"], "write",
+        "while the rest of the Profile's own directory is writable as before"
     );
 }
 

@@ -135,7 +135,7 @@ A `task-list` pick writes no handoff at all, because the backlog *is* the plan
 and the plan is best written by the context that settled it. So this session
 does not end at the pick either. The work is yours.
 
-**Read `~/.claude/skills/breaking-down/SKILL.md` and follow it from *Ground the
+**Read `/verkstead/skills/breaking-down/SKILL.md` and follow it from *Ground the
 plan in the code* onward.** The branch is made, the worktree is this one, and
 the agreement is this conversation rather than a document somebody handed you.
 Whatever they wrote beside the pick is part of what the backlog has to answer
@@ -153,7 +153,7 @@ above all, and its stage briefs are worth what the context that settled them can
 put in them. No handoff here either — each stage is a Conversation with a
 grilling of its own, and what this one settled goes in the briefs.
 
-**Read `~/.claude/skills/staging/SKILL.md` and follow it from *Ground the plan
+**Read `/verkstead/skills/staging/SKILL.md` and follow it from *Ground the plan
 in the code* onward.** Same worktree, same branch, same agreement — this
 conversation, and whatever they wrote beside the pick.
 

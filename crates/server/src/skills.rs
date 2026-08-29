@@ -4,14 +4,16 @@
 //! to be installed on the machine it runs on. So Verkstead carries its own
 //! skills, embedded in the binary as the viewer is (ADR-0004), writes them out
 //! under the Data Directory at startup, and every sandbox binds that directory
-//! read-only over `~/.claude/skills`. Nothing beside the executable has to be
-//! there, and nothing of the host's is bound in for a session to find — the
-//! checkout of the skills the host keeps for its own agents is not reachable at
-//! all.
+//! read-only at [`INSIDE`]. Nothing beside the executable has to be there, and
+//! nothing of the host's is bound in for a session to find — the checkout of
+//! the skills the host keeps for its own agents is not reachable at all.
 //!
-//! An account's own skills are hidden by the bind rather than merged with:
-//! Verkstead's fork is what a Conversation is grilled by, and a Profile is an
-//! account to run as rather than a second opinion about how to work.
+//! An account's own skills are hidden rather than merged with: Verkstead's fork
+//! is what a Conversation is grilled by, and a Profile is an account to run as
+//! rather than a second opinion about how to work. The mount used to do that
+//! hiding by landing on the account's own path; a mount at a path no backend
+//! owns covers nothing, so what a sandbox puts over [`CLAUDE_INSIDE_HOME`]
+//! instead is [`Skills::nothing`].
 //!
 //! Installing a skill is not invoking one, and the sandbox has no global
 //! `CLAUDE.md` to say what a session is for — the host's is not bound in, and
@@ -39,50 +41,61 @@ use crate::store;
 #[folder = "$CARGO_MANIFEST_DIR/skills"]
 struct Bundled;
 
-/// Where the skills are mounted inside a sandbox, under whatever HOME is there.
-pub(crate) const INSIDE_HOME: &str = ".claude/skills";
+/// Where the skills are mounted inside a sandbox.
+///
+/// A directory of Verkstead's own, beside the `/verkstead/bin` the executable
+/// reaches a sandbox in and made by its bind exactly as that one is, so what is
+/// there is what this binary ships and nothing the host put beside it. A path
+/// no backend owns rather than the one whichever backend is running discovers
+/// skills in: what a session reads is named by the prompt, and a prompt can say
+/// any path (ADR-0011).
+pub(crate) const INSIDE: &str = "/verkstead/skills";
 
-/// And what that makes the grilling skill's path, as a session is told to find
-/// it. Written with the tilde because that is how an agent reads a path in its
-/// own home, and because HOME inside is the server's own rather than a fixed
-/// name this could spell out.
-const GRILLING: &str = "~/.claude/skills/grilling/SKILL.md";
+/// And where a Claude session would otherwise find skills of its own, under
+/// whatever HOME a sandbox has: the account's, kept in the Profile's directory,
+/// which [`Skills::nothing`] is bound over instead.
+pub(crate) const CLAUDE_INSIDE_HOME: &str = ".claude/skills";
+
+/// And what [`INSIDE`] makes the grilling skill's path, as a session is told to
+/// find it. Spelled out rather than written against a home: the mount is at a
+/// path of Verkstead's own, absolute and the same for every session.
+const GRILLING: &str = "/verkstead/skills/grilling/SKILL.md";
 
 /// The implementation skill's, the same way.
-const IMPLEMENTING: &str = "~/.claude/skills/implementing/SKILL.md";
+const IMPLEMENTING: &str = "/verkstead/skills/implementing/SKILL.md";
 
 /// And the staging skill's — Verkstead's fork of to-roadmap, which is what the
 /// roadmap direction runs instead of building anything itself.
-const STAGING: &str = "~/.claude/skills/staging/SKILL.md";
+const STAGING: &str = "/verkstead/skills/staging/SKILL.md";
 
 /// And the fork of next-stage, which the one session a roadmap stage starts
 /// with runs inside: the session that re-grounds the stage's brief and writes
 /// the backlog the runner then works.
-const NEXT_STAGE: &str = "~/.claude/skills/next-stage/SKILL.md";
+const NEXT_STAGE: &str = "/verkstead/skills/next-stage/SKILL.md";
 
 /// And the fork of next-task, which every session the runner launches is put
 /// inside — the task sessions and the finish one alike, because which of them it
 /// is, is read off `.tasks/` rather than told.
-const NEXT_TASK: &str = "~/.claude/skills/next-task/SKILL.md";
+const NEXT_TASK: &str = "/verkstead/skills/next-task/SKILL.md";
 
 /// And the submitting skill's, which the one session launched over a finish
 /// that left no pull request runs inside: the work is built and committed, and
 /// the pull request it should have gone for review on is the one thing missing.
-const SUBMITTING: &str = "~/.claude/skills/submitting/SKILL.md";
+const SUBMITTING: &str = "/verkstead/skills/submitting/SKILL.md";
 
 /// And the addressing skill's, which every fix session of a wrap-up runs
 /// inside — whichever of the three kinds of feedback dispatched it.
-const ADDRESSING: &str = "~/.claude/skills/addressing/SKILL.md";
+const ADDRESSING: &str = "/verkstead/skills/addressing/SKILL.md";
 
 /// And the reviewing skill's, which the one session a wrap-up starts with runs
 /// inside: the fresh context that reads the branch none of the sessions that
 /// wrote it ever saw.
-const REVIEWING: &str = "~/.claude/skills/reviewing/SKILL.md";
+const REVIEWING: &str = "/verkstead/skills/reviewing/SKILL.md";
 
 /// And the responding skill's, which a batch of comments left on the pull
 /// request after the review is answered inside: the review's propose-then-fix
 /// shape again, about what somebody has just said rather than about the branch.
-const RESPONDING: &str = "~/.claude/skills/responding/SKILL.md";
+const RESPONDING: &str = "/verkstead/skills/responding/SKILL.md";
 
 /// And the instruction skill's, which the session a steer into Implementing
 /// writes its way into runs inside.
@@ -91,7 +104,7 @@ const RESPONDING: &str = "~/.claude/skills/responding/SKILL.md";
 /// what follows it is whatever the branch then holds, rather than a
 /// Conversation left standing beside the work its session did — see
 /// [`crate::runner::instructed`].
-const INSTRUCTION: &str = "~/.claude/skills/instruction/SKILL.md";
+const INSTRUCTION: &str = "/verkstead/skills/instruction/SKILL.md";
 
 /// And the following-up skill's, which the session a steer into Follow-up
 /// launches runs inside.
@@ -100,12 +113,16 @@ const INSTRUCTION: &str = "~/.claude/skills/instruction/SKILL.md";
 /// and then rounds of ordinary Question Sets go back and forth until they have
 /// nothing else. What ends one is the system's business rather than the
 /// session's, so the skill says nothing about it.
-const FOLLOWING_UP: &str = "~/.claude/skills/following-up/SKILL.md";
+const FOLLOWING_UP: &str = "/verkstead/skills/following-up/SKILL.md";
 
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
 pub struct Skills {
     path: PathBuf,
+
+    /// And an empty directory beside them, which is what covers the account's
+    /// own — see [`Skills::nothing`].
+    nothing: PathBuf,
 }
 
 impl Skills {
@@ -166,12 +183,30 @@ impl Skills {
 
         tracing::debug!(path = %path.display(), files = installed, "the bundled skills are installed");
 
-        Ok(Skills { path })
+        let nothing = data_dir.join("nothing");
+
+        std::fs::create_dir_all(&nothing)
+            .with_context(|| format!("making {}", nothing.display()))?;
+
+        Ok(Skills { path, nothing })
     }
 
-    /// Where they landed, which is what a sandbox binds.
+    /// Where they landed, which is what a sandbox binds at [`INSIDE`].
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// And an empty directory of Verkstead's own, which a sandbox binds
+    /// read-only over [`CLAUDE_INSIDE_HOME`].
+    ///
+    /// What the mount used to do by standing on the account's own path: an
+    /// account's skills are hidden rather than merged with, and the case that
+    /// guards is an older fork of the ones Verkstead ships sitting in the
+    /// Profile's directory. Kept empty rather than made fresh per sandbox
+    /// because nothing is ever written into it — the bind is read-only, so a
+    /// session cannot fill it in and then read from it.
+    pub fn nothing(&self) -> &Path {
+        &self.nothing
     }
 }
 
@@ -746,7 +781,7 @@ mod tests {
     /// The one mount path no prompt here names. Nothing launches a session into
     /// the breakdown: the grilling session reads on into it, in the grilling
     /// skill's own words, so what this is for is holding that promise to a test.
-    const BREAKING_DOWN: &str = "~/.claude/skills/breaking-down/SKILL.md";
+    const BREAKING_DOWN: &str = "/verkstead/skills/breaking-down/SKILL.md";
 
     use super::*;
 
@@ -3039,6 +3074,23 @@ mod tests {
             std::fs::read_to_string(skills.path().join("grilling/SKILL.md")).unwrap(),
             skill("grilling/SKILL.md"),
             "what is installed is what the binary carries"
+        );
+    }
+
+    /// And the empty directory beside them, which is what covers the account's
+    /// own skills now that the mount doing that has moved to a path of
+    /// Verkstead's own.
+    #[test]
+    fn an_empty_directory_is_installed_for_the_accounts_own_to_be_hidden_behind() {
+        let state = tempfile::tempdir().unwrap();
+
+        let skills = Skills::installed(state.path()).expect("this binary carries skills");
+
+        assert_eq!(skills.nothing(), state.path().join("nothing"));
+        assert_eq!(
+            std::fs::read_dir(skills.nothing()).unwrap().count(),
+            0,
+            "what is bound over an account's skills has to hold nothing of its own"
         );
     }
 

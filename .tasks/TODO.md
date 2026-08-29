@@ -23,7 +23,7 @@ Roadmap stage: [01: Foundations](docs/roadmaps/agent-backends/01-foundations.md)
 
 ## Tasks
 
-- [ ] 01: The skills mount at `/verkstead/skills` — [details](01-skills-at-a-neutral-path.md)
+- [x] 01: The skills mount at `/verkstead/skills` — [details](01-skills-at-a-neutral-path.md)
 - [ ] 02: The skills stop speaking Claude — [details](02-skills-stop-speaking-claude.md)
 - [ ] 03: Verkstead passes Claude's bypass flag — [details](03-verkstead-passes-the-bypass-flag.md)
 - [ ] 04: A Profile's account is per type — [details](04-a-profiles-account-is-per-type.md)
