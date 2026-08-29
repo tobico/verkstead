@@ -97,6 +97,21 @@ describe("the build cache as it stands", () => {
     expect(screen.queryByLabelText(/How large/)).toBeNull();
   });
 
+  /// And nothing about it while the cache is switched off, because the half of
+  /// that warning that says the downloads are still shared is only true while
+  /// there is a cache to share them.
+  it("says nothing about sccache while the cache is switched off", async () => {
+    theSettings({
+      ...UNSET,
+      rust_build_cache: { ...UNSET.rust_build_cache, enabled: false },
+    });
+    mount();
+
+    await waitFor(() => expect(theSwitch().checked).toBe(false));
+
+    expect(screen.queryByText(/No sccache is installed/)).toBeNull();
+  });
+
   it("says nothing about sccache where the server found one", async () => {
     theSettings(compiling(UNSET));
     mount();

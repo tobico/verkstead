@@ -124,8 +124,15 @@ export function BuildCache(): JSX.Element {
 
             {/* What the human cannot fix from here, said where they would
                 otherwise wonder why nothing got faster. Not an error: the
-                downloads are still shared, and the builds still work. */}
-            <Show when={!set().compiles_cached}>
+                downloads are still shared, and the builds still work.
+
+                Only while the cache is on, because the rest of it is only true
+                then: switched off, nothing is cached at all, and a line saying
+                the downloads still are would be wrong exactly where somebody
+                has just turned it off. The setup card's own warning is gated
+                the same way — see `ConversationView::compiles_uncached`, which
+                the server works out with the switch already in hand. */}
+            <Show when={set().enabled && !set().compiles_cached}>
               <p class={styles.warning}>
                 No sccache is installed where the server can see it, so
                 dependency <em>compiles</em> are not cached — only the crate
