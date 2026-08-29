@@ -9,8 +9,8 @@ tailored by agent type, and screen-signature quiet beside byte-quiet.
 Demonstrable: a stub session on a store-and-nudge backend asks, ends its
 turn, is nudged when the Response lands and fetches it — or, having died
 first, the answers fold into the next session's prompt; and a stub drawing a
-TUI-shaped screen is judged idle by its signature while byte-quiet alone no
-longer ends it.
+TUI-shaped screen is judged idle by its signature, while a three-second
+byte-quiet no longer ends it and a long one still does.
 
 ## Decisions in force
 
@@ -39,12 +39,17 @@ stage:
   for that backend — blocking with the hold-the-ask advice, or
   store-and-nudge with end-your-turn. One Guide, no skill forks, nothing
   extra in the prompt.
-- **Screen-signature quiet.** For TUI backends, idle is the backend's
-  at-the-prompt signature read off the Screen Verkstead already holds — one
-  constant per backend, kept where `EXHAUSTED` is kept and accepted to
-  drift the same way. Byte-quiet does not count as idle on a TUI backend
-  (silent mid-turn would read as idle); Claude stays on byte-quiet
-  unchanged. Idling, Rescue and session-ending all read the one judgement.
+- **Screen-signature quiet, with byte-quiet as the long-stop.** For TUI
+  backends, idle is the backend's at-the-prompt signature read off the Screen
+  Verkstead already holds — one constant per backend, kept where `EXHAUSTED`
+  is kept and accepted to drift the same way. The three-second byte-quiet mark
+  does not count as idle there (silent mid-turn would read as idle), but a
+  long one does: minutes rather than seconds, past any gap a redrawing TUI
+  leaves. Without it a drifted signature is a session nothing ever catches —
+  Rescue and every ender gate on quiet, and no session has a cap on its life —
+  so the long-stop is what puts a drifted signature in front of the human.
+  Claude stays on the three-second mark unchanged. Idling, Rescue and
+  session-ending all read the one judgement.
 
 ## Proposed tasks (provisional)
 
@@ -70,12 +75,12 @@ stage:
    Guide's asking section per backend.
    - `verkstead guide` inside a stub sandbox prints the channel that
      backend's type names.
-5. **Screen-signature idle.** The per-backend signature constant, the Screen
-   read, and the idle judgement switched per agent type; Rescue and
-   session-ending read it.
+5. **Screen-signature idle, and the byte-quiet long-stop.** The per-backend
+   signature constant, the Screen read, the long-stop duration, and the idle
+   judgement switched per agent type; Rescue and session-ending read it.
    - A repainting stub is never byte-idle but is judged idle at its
-     signature; removing the signature makes it read busy until the ordinary
-     stop.
+     signature; removing the signature makes it read busy until the long-stop
+     catches it and the ordinary would-not-ask rules stop it.
 
 ## Re-verify at start
 
@@ -91,6 +96,8 @@ stage:
 - How the Screen is held server-side (`crate::screen`) and whether its
   emulated rows are readable where the idle judgement runs — the signature
   read wants the drawn frame, not the byte stream.
-- IDLE_AFTER's uses: which of the idle mark, Rescue and the enders read
-  byte-quiet directly, so the switch covers all of them and no caller keeps
-  a private byte rule.
+- IDLE_AFTER's uses, and `Pace`'s: which of the idle mark, Rescue and the
+  enders read byte-quiet directly, so the switch covers all of them and no
+  caller keeps a private byte rule — and where the long-stop belongs beside
+  `pace.proposing`, which is the sixty seconds Rescue and the enders actually
+  wait on.

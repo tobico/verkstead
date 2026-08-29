@@ -74,12 +74,27 @@ For these backends, idle is judged by **parsing the drawn screen** — the
 Screen Verkstead already holds for the live view — for that backend's
 at-the-prompt state. The mark is one signature constant per backend, the same
 bargain the usage-limit phrase already makes: the wording is the backend's
-and will move, so it is kept in one place and costs one edit when it does. A
-drifted signature reads as a session that never goes idle, which the ordinary
-Rescue-then-stop rules catch and put in front of the human. Byte-quiet does
-**not** count as idle on a TUI backend: a TUI that goes silent mid-turn would
-read as idle and be rescued out from under its own work. Claude Code stays on
-byte-quiet, which works and stays measured on what it was calibrated for.
+and will move, so it is kept in one place and costs one edit when it does.
+
+The three-second byte-quiet mark does **not** count as idle on a TUI backend:
+a TUI that falls silent for a moment mid-turn would read as idle and be
+rescued out from under its own work. A **long** byte-quiet does, and has to.
+A signature that has drifted reads as a session that never goes idle, and
+nothing in the run catches that on its own: Rescue's precondition is quiet, so
+`until_it_will_not_ask` never reaches the rescue below it; every ender —
+`quiet_and_nothing_asked`, `committed_and_quiet`, `nothing_else_and_quiet` —
+gates on the same clock; and no session carries a cap on its life. A drifted
+signature would otherwise be a session running for ever, holding its Worktree,
+with the backlog stopped and nothing in front of the human to say so.
+
+So a TUI backend keeps byte-quiet as a **long-stop**, measured in minutes
+rather than seconds — well past any gap a redrawing TUI leaves — and a session
+that crosses it is idle whatever its screen says. A drifted signature then
+lands in front of the human as the ordinary would-not-ask stop: one slow round
+rather than never.
+
+Claude Code stays on the three-second byte-quiet, which works and stays
+measured on what it was calibrated for.
 
 ## The skills move to a neutral path
 
