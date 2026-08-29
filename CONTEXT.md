@@ -48,6 +48,19 @@ on the Timeline — and neither waiting mark is drawn over the stop it carries,
 which stays on the record as history. Done is not Closed in this. A Done
 Conversation's Sets are still there to be answered, so one left open goes on
 drawing the marks: an answerable ask is still an ask.
+
+**What it is called is its branch, where anybody has named one.** A Conversation
+is started on a name Verkstead invented, because there has to be a branch to cut
+and nobody has thought about the work yet — and a name nobody chose says nothing
+about the work, so while it is a Draft none of it is drawn anywhere: the sidebar
+row, the pane header and the row read aloud all call it **Draft**, and the
+branch field on the setup card stands empty under *Automatically select*. Whose
+the name is is kept in the record rather than read off the name's shape. Typing
+one settles it, and it is the title from that moment; clearing the field hands
+the naming back, and the name the Conversation started on stands again rather
+than another being invented. Two drafts against one Repo both reading *Draft*
+beside the same Repo name is what two drafts are: they are few, and they are
+short-lived.
 _Avoid_: task, session, job, thread, ticket
 
 **Worktree**:

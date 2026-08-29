@@ -1881,7 +1881,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // A second one, so the sidebar is a list rather than a row — and against the
     // other Repo, because what a row names beside the branch is which repository
     // the work is in.
-    store::start_conversation(&pool, repos[1].id, "amber-kestrel")
+    //
+    // Started the way the New conversation button starts one, on a name nobody
+    // has settled on: the row the viewer draws from this one is the Draft, which
+    // is what a Conversation whose branch name is still Verkstead's own reads as.
+    store::start_unnamed_conversation(&pool, repos[1].id, "amber-kestrel")
         .await
         .unwrap()
         .unwrap();

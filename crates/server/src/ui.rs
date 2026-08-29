@@ -605,6 +605,7 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
             ConversationEntry {
                 id: conversation.id,
                 branch: conversation.branch,
+                branch_named: conversation.branch_named,
                 repo: conversation.repo,
                 state: lifecycle(conversation.state),
                 working,
@@ -1078,6 +1079,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
             default_branch: conversation.repo.default_branch,
         },
         branch: conversation.branch,
+        branch_named: conversation.branch_named,
         base_commit: conversation.base_commit,
         companions,
         state: lifecycle(conversation.state),

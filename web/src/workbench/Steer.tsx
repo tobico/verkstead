@@ -70,6 +70,7 @@ import { Modal } from "../Modal";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { Switch as Toggle } from "../Switch";
+import { chosen } from "./naming";
 import { BasePicker, RULE } from "./Setup";
 import styles from "./Steer.module.css";
 
@@ -455,7 +456,7 @@ function Alongside(props: {
               <input
                 id={`steer-open-${props.companion.repo.id}-branch`}
                 type="text"
-                value={upgrade().branch || props.conversation.branch}
+                value={upgrade().branch || chosen(props.conversation)}
                 disabled={props.disabled}
                 onInput={(event) =>
                   props.open({ branch: event.currentTarget.value })
@@ -492,8 +493,7 @@ function Adding(props: {
   /// own branch, which is what *mirroring* comes to. Drawn filled in rather than
   /// empty, exactly as the setup card's is, so what the human reads is what they
   /// will get.
-  const branch = () =>
-    props.addition?.branch || props.conversation.branch;
+  const branch = () => props.addition?.branch || chosen(props.conversation);
 
   return (
     <li class={styles.steerAdd}>

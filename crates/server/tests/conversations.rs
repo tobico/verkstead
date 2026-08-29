@@ -299,6 +299,28 @@ async fn a_conversation_starts_against_a_registered_repo_and_appears_in_the_side
     assert!(!sidebar[0].branch.is_empty());
 }
 
+/// The name a Conversation starts on is Verkstead's own: there has to be a
+/// branch to cut, and nobody has thought about the work yet. What says so is the
+/// record rather than the shape of the name, and it is what the row is drawn as
+/// a Draft off.
+#[tokio::test]
+async fn a_new_conversation_is_started_on_a_name_nobody_has_settled_on() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+
+    let id = started(&app, repo_id).await;
+
+    let view = opened(&app, id).await;
+    assert!(
+        !view.branch.is_empty(),
+        "there is a branch to cut all the same"
+    );
+    assert!(!view.branch_named);
+
+    let sidebar = sidebar(&app).await;
+    assert_eq!(sidebar[0].branch, view.branch);
+    assert!(!sidebar[0].branch_named);
+}
+
 /// The prefill is a name, not a placeholder: the human may well leave it, and it
 /// has to be one git will take when the branch is finally created.
 #[tokio::test]
@@ -432,8 +454,54 @@ async fn a_drafting_conversations_branch_is_the_humans_to_name() {
         BranchRenamed::Renamed
     );
 
-    assert_eq!(opened(&app, id).await.branch, "rate-limiting");
-    assert_eq!(sidebar(&app).await[0].branch, "rate-limiting");
+    let view = opened(&app, id).await;
+    assert_eq!(view.branch, "rate-limiting");
+    assert!(
+        view.branch_named,
+        "a name they typed is theirs from that moment"
+    );
+
+    let sidebar = sidebar(&app).await;
+    assert_eq!(sidebar[0].branch, "rate-limiting");
+    assert!(sidebar[0].branch_named);
+}
+
+/// And clearing the field hands it back. What stands again is the name the
+/// Conversation started on rather than another one invented, so a human who
+/// typed a name and thought better of it is where they began.
+#[tokio::test]
+async fn clearing_the_branch_field_hands_the_name_back_to_verkstead() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    let prefilled = opened(&app, id).await.branch;
+
+    assert_eq!(
+        rename(&app, id, "rate-limiting").await,
+        BranchRenamed::Renamed
+    );
+
+    for cleared in ["", "   "] {
+        assert_eq!(
+            rename(&app, id, cleared).await,
+            BranchRenamed::Renamed,
+            "{cleared:?} is the field emptied rather than a name to refuse"
+        );
+
+        let view = opened(&app, id).await;
+        assert_eq!(view.branch, prefilled);
+        assert!(!view.branch_named);
+
+        let sidebar = sidebar(&app).await;
+        assert_eq!(sidebar[0].branch, prefilled);
+        assert!(!sidebar[0].branch_named);
+
+        // And typing one again settles it again, so the next round of the loop
+        // has a name to clear.
+        assert_eq!(
+            rename(&app, id, "rate-limiting").await,
+            BranchRenamed::Renamed
+        );
+    }
 }
 
 /// The name is git's to judge, and a name it would not take is refused now
@@ -444,7 +512,7 @@ async fn a_name_git_would_not_take_for_a_branch_is_refused() {
     let id = started(&app, repo_id).await;
     let prefilled = opened(&app, id).await.branch;
 
-    for refused in ["", "   ", "has space", "two..dots", "with~tilde", "-dash"] {
+    for refused in ["has space", "two..dots", "with~tilde", "-dash"] {
         assert_eq!(
             rename(&app, id, refused).await,
             BranchRenamed::NotABranchName,

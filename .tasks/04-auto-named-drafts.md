@@ -23,11 +23,11 @@ starts, and the instruction that renames the branch, are tasks 05 and 06.
 
 ## Acceptance criteria
 
-- [ ] A new draft shows the empty branch field with the placeholder and is
+- [x] A new draft shows the empty branch field with the placeholder and is
       titled "Draft"; the random name is drawn nowhere while the name is
       Verkstead's.
-- [ ] A typed name is recorded as the human's, shown as the title at once,
+- [x] A typed name is recorded as the human's, shown as the title at once,
       and behaves exactly as today; clearing the field returns the name to
       Verkstead and the title to "Draft".
-- [ ] The sidebar's read-aloud label agrees with the drawn title in both
+- [x] The sidebar's read-aloud label agrees with the drawn title in both
       cases.

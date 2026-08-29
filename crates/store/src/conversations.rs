@@ -148,9 +148,19 @@ pub struct Conversation {
     pub created_at: String,
     pub repo: super::Repo,
 
-    /// The branch the work will be done on. Prefilled with a random name at
-    /// creation and the human's to change while the Conversation is drafting.
+    /// The branch the work will be done on: the name somebody settled on, or
+    /// the one prefilled at creation while nobody has.
     pub branch: String,
+
+    /// Whether that name is one somebody settled on rather than the random one
+    /// Verkstead prefilled the record with.
+    ///
+    /// Kept in the record rather than read off the name's shape: a name
+    /// Verkstead invented is nothing to show the human, so a draft still
+    /// carrying one is drawn as a Draft with an empty branch field. Typing one
+    /// settles it, and clearing the field hands it back — the prefill is still
+    /// where it was, so it stands again.
+    pub branch_named: bool,
 
     /// The commit to branch from, where the human named one. `None` is not a
     /// missing value: it is the rule that the default branch's tip at grill
@@ -222,14 +232,21 @@ pub struct Conversation {
 
 /// One row of the conversations sidebar, drawn without reading a Timeline.
 ///
-/// The branch is the row's name. A Conversation has no title of its own — the
-/// domain gives it a Repo, a Brief, a branch and a base commit and nothing else
-/// — and of those the branch is the one short line the human chose, which is
-/// what a list is read by.
+/// The branch is the row's name where somebody has settled on one. A
+/// Conversation has no title of its own — the domain gives it a Repo, a Brief,
+/// a branch and a base commit and nothing else — and of those the branch is the
+/// one short line a human chose, which is what a list is read by. A name
+/// Verkstead invented is not one of those, which is what [`Self::branch_named`]
+/// says about the name beside it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationRow {
     pub id: i64,
     pub branch: String,
+
+    /// Whether that name is one somebody settled on — see
+    /// [`Conversation::branch_named`], which is the same fact about the same
+    /// record.
+    pub branch_named: bool,
 
     /// What the Repo is called, which is the only thing about it a row shows.
     pub repo: String,
@@ -788,6 +805,11 @@ pub enum Closing {
 /// The Timeline is indexed by the Conversation it belongs to, because that is
 /// the only way it is ever read: a Timeline is one Conversation's, whole and in
 /// order.
+///
+/// A Conversation's branch is two columns rather than one: `branch` is the name
+/// Verkstead prefilled it with, and `named_branch` the one somebody settled on
+/// where anybody has. Which is why handing a name back is the prefill standing
+/// again rather than another name invented — see [`Conversation::branch_named`].
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS conversations (
@@ -795,6 +817,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              repo_id                   INTEGER NOT NULL REFERENCES repos(id),
              created_at                TEXT NOT NULL,
              branch                    TEXT NOT NULL,
+             named_branch              TEXT,
              base_commit               TEXT,
              state                     TEXT NOT NULL,
              grilling_profile_id       INTEGER REFERENCES profiles(id),
@@ -1031,6 +1054,10 @@ async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
 /// Start a Conversation against a registered Repo, on `branch`, with an empty
 /// Brief already in its Timeline.
 ///
+/// A name somebody settled on, which is what a stage's own slug is and what a
+/// test naming its Conversation means. A name nobody has had to think of yet
+/// goes in through [`start_unnamed_conversation`] instead.
+///
 /// `None` means there is no such Repo. The insert selects from `repos` rather
 /// than trusting the id, so a Conversation cannot come to hang off a repository
 /// that was never registered — SQLite does not enforce a foreign key unless it
@@ -1045,7 +1072,21 @@ pub async fn start_conversation(
     repo_id: i64,
     branch: &str,
 ) -> Result<Option<i64>> {
-    started(pool, repo_id, branch, None).await
+    started(pool, repo_id, branch, Named::Settled, None).await
+}
+
+/// The same, on a name Verkstead invented rather than one anybody settled on.
+///
+/// What the New conversation button starts: the record needs a branch name from
+/// the moment it exists, and nobody has thought of one yet. It is Verkstead's
+/// until the human types one — the row reads *Draft* until then, and the name
+/// itself is shown nowhere.
+pub async fn start_unnamed_conversation(
+    pool: &SqlitePool,
+    repo_id: i64,
+    branch: &str,
+) -> Result<Option<i64>> {
+    started(pool, repo_id, branch, Named::Prefilled, None).await
 }
 
 /// Start a Conversation adopting `roadmap` against a registered Repo, on
@@ -1066,11 +1107,27 @@ pub async fn start_adoption(
     branch: &str,
     roadmap: &str,
 ) -> Result<Option<i64>> {
-    started(pool, repo_id, branch, Some(roadmap)).await
+    started(pool, repo_id, branch, Named::Prefilled, Some(roadmap)).await
 }
 
-/// What both of them do: the row, its empty Brief, and the adoption mark where
-/// there is one to write.
+/// Whose the branch name a Conversation is started on is.
+///
+/// Two states rather than a bare `bool` at three call sites, because what the
+/// argument decides is what the human is shown: a settled name is the row's
+/// title, and a prefilled one is drawn nowhere at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Named {
+    /// A name somebody chose: a stage's slug, or the name a test gave its
+    /// Conversation.
+    Settled,
+
+    /// A name Verkstead invented, because the record needs one and nobody has
+    /// thought of one yet.
+    Prefilled,
+}
+
+/// What all three of them do: the row, its empty Brief, and the adoption mark
+/// where there is one to write.
 ///
 /// All of it in one transaction. A Conversation whose Timeline was empty
 /// because the second insert failed would be one the human could not write
@@ -1080,17 +1137,23 @@ async fn started(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
+    named: Named,
     adopts: Option<&str>,
 ) -> Result<Option<i64>> {
     let mut tx = super::writing(pool, "starting a Conversation").await?;
 
+    // The name goes in both columns where it is settled: the prefill is what
+    // stands if the name is ever handed back, and a Conversation started on a
+    // name somebody chose has that name to fall back on and no other.
     let row: Option<(i64,)> = sqlx::query_as(
-        "INSERT INTO conversations (repo_id, created_at, branch, base_commit, state)
-         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, NULL, ?
+        "INSERT INTO conversations
+             (repo_id, created_at, branch, named_branch, base_commit, state)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, NULL, ?
          FROM repos WHERE id = ?
          RETURNING id",
     )
     .bind(branch)
+    .bind((named == Named::Settled).then_some(branch))
     .bind(Lifecycle::Draft.stored())
     .bind(repo_id)
     .fetch_optional(&mut *tx)
@@ -1204,8 +1267,13 @@ async fn started(
 /// the choice would be a second place to get it wrong, and there is no other way
 /// the sidebar should ever be read.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
-    let rows: Vec<(i64, String, String, String, bool, bool, bool)> = sqlx::query_as(&format!(
-        "SELECT c.id, c.branch, r.name, c.state,
+    /// The columns in the order the query below selects them.
+    type Row = (i64, String, bool, String, String, bool, bool, bool);
+
+    let rows: Vec<Row> = sqlx::query_as(&format!(
+        "SELECT c.id, COALESCE(c.named_branch, c.branch),
+                c.named_branch IS NOT NULL AS branch_named,
+                r.name, c.state,
                 c.state NOT IN ('draft', 'closed') AND (
                     EXISTS (
                         SELECT 1 FROM set_events s
@@ -1253,10 +1321,11 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
 
     rows.into_iter()
         .map(
-            |(id, branch, repo, state, waiting, narrowed_to_checks, unseen)| {
+            |(id, branch, branch_named, repo, state, waiting, narrowed_to_checks, unseen)| {
                 Ok(ConversationRow {
                     id,
                     branch,
+                    branch_named,
                     repo,
                     state: Lifecycle::read(&state)?,
                     waiting,
@@ -1280,6 +1349,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         i64,
         String,
         String,
+        bool,
         Option<String>,
         String,
         Option<i64>,
@@ -1292,7 +1362,10 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
     );
 
     let row: Option<Row> = sqlx::query_as(
-        "SELECT c.id, c.created_at, c.branch, c.base_commit, c.state,
+        "SELECT c.id, c.created_at,
+                COALESCE(c.named_branch, c.branch),
+                c.named_branch IS NOT NULL AS branch_named,
+                c.base_commit, c.state,
                 c.grilling_profile_id, c.implementation_profile_id,
                 c.review_profile_id,
                 r.id, r.path, r.name, r.default_branch
@@ -1309,6 +1382,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         id,
         created_at,
         branch,
+        branch_named,
         base_commit,
         state,
         grilling_profile_id,
@@ -1333,6 +1407,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
             default_branch,
         },
         branch,
+        branch_named,
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
         state: Lifecycle::read(&state)?,
         grilling_pairing: picked(pool, id, Role::Grilling, grilling_profile_id).await?,
@@ -2274,17 +2349,23 @@ pub async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<Ed
     Ok(Edited::Saved)
 }
 
-/// Name the branch a drafting Conversation's work will be done on.
+/// Name the branch a drafting Conversation's work will be done on, or hand the
+/// naming of it back to Verkstead.
 ///
 /// Whether the name is one git would take is decided above the store, where git
 /// itself is asked — this records what it is given.
+///
+/// `None` is the field cleared: the settled name goes and the prefill Verkstead
+/// started the Conversation with stands again, which is the name that was there
+/// before anybody typed. Not a branch called nothing, and not a fresh name
+/// invented either — the one that has been sitting in the record all along.
 ///
 /// Refused once the branch has been made as well as off the state — see
 /// [`branch_made`]. Drafting says as much on its own now that a second round
 /// opens where it is steered rather than back in Draft; the branch is asked
 /// about all the same, because what the work branched from is a fact from the
 /// moment there is a branch and no field of the human's rewrites one.
-pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<Edited> {
+pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: Option<&str>) -> Result<Edited> {
     if let Some(refusal) = not_drafting(pool, id).await? {
         return Ok(refusal);
     }
@@ -2293,7 +2374,7 @@ pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<E
         return Ok(Edited::NotDrafting);
     }
 
-    sqlx::query("UPDATE conversations SET branch = ? WHERE id = ?")
+    sqlx::query("UPDATE conversations SET named_branch = ? WHERE id = ?")
         .bind(branch)
         .bind(id)
         .execute(pool)

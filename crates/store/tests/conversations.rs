@@ -8,8 +8,8 @@ use verkstead_store::{
     Archiving, Closing, Edited, Event, Grilling, Lifecycle, Unarchiving, adopting,
     archive_conversation, archived, close_conversation, conversations, load_conversation,
     open_database, register_repo, rename_branch, save_brief, set_base_commit, set_state,
-    show_archived, showing_archived, start_adoption, start_conversation, start_grilling, timeline,
-    unarchive_conversation,
+    show_archived, showing_archived, start_adoption, start_conversation, start_grilling,
+    start_unnamed_conversation, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -201,7 +201,9 @@ async fn a_drafting_conversations_branch_and_base_commit_are_the_humans_to_chang
         .unwrap();
 
     assert_eq!(
-        rename_branch(&pool, id, "rate-limiting").await.unwrap(),
+        rename_branch(&pool, id, Some("rate-limiting"))
+            .await
+            .unwrap(),
         Edited::Saved
     );
     assert_eq!(
@@ -211,7 +213,45 @@ async fn a_drafting_conversations_branch_and_base_commit_are_the_humans_to_chang
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(conversation.branch, "rate-limiting");
+    assert!(conversation.branch_named);
     assert_eq!(conversation.base_commit.as_deref(), Some("6f32b11"));
+}
+
+/// A Conversation started on a name nobody settled on carries it all the same —
+/// there is a branch to cut — and says whose it is.
+#[tokio::test]
+async fn a_conversation_can_be_started_on_a_name_nobody_has_settled_on() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "amber-kestrel");
+    assert!(!conversation.branch_named);
+}
+
+/// Handing the name back leaves the one the Conversation was started on, rather
+/// than a branch called nothing or another name invented on the spot.
+#[tokio::test]
+async fn handing_the_branch_name_back_leaves_the_one_it_started_on() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    rename_branch(&pool, id, Some("rate-limiting"))
+        .await
+        .unwrap();
+    assert_eq!(rename_branch(&pool, id, None).await.unwrap(), Edited::Saved);
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "amber-kestrel");
+    assert!(!conversation.branch_named);
 }
 
 /// Taking the override away puts the Conversation back on the rule, rather than
@@ -262,7 +302,9 @@ async fn nothing_about_a_conversation_past_drafting_can_be_edited() {
         Edited::NotDrafting
     );
     assert_eq!(
-        rename_branch(&pool, id, "something-else").await.unwrap(),
+        rename_branch(&pool, id, Some("something-else"))
+            .await
+            .unwrap(),
         Edited::NotDrafting
     );
     assert_eq!(
@@ -285,7 +327,7 @@ async fn editing_a_conversation_that_is_not_there_says_so() {
         Edited::NoSuchConversation
     );
     assert_eq!(
-        rename_branch(&pool, 404, "nothing").await.unwrap(),
+        rename_branch(&pool, 404, Some("nothing")).await.unwrap(),
         Edited::NoSuchConversation
     );
     assert_eq!(
@@ -312,7 +354,9 @@ async fn a_conversation_and_its_brief_survive_the_database_being_reopened() {
     save_brief(&pool, id, "# Rate limiting\n\nThe API has none.\n")
         .await
         .unwrap();
-    rename_branch(&pool, id, "rate-limiting").await.unwrap();
+    rename_branch(&pool, id, Some("rate-limiting"))
+        .await
+        .unwrap();
     pool.close().await;
 
     let pool = open_database(&database).await.unwrap();
@@ -452,7 +496,9 @@ async fn grilling_freezes_the_brief_and_the_branch_name() {
         Edited::NotDrafting
     );
     assert_eq!(
-        rename_branch(&pool, id, "something-else").await.unwrap(),
+        rename_branch(&pool, id, Some("something-else"))
+            .await
+            .unwrap(),
         Edited::NotDrafting
     );
     assert_eq!(

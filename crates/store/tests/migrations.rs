@@ -29,6 +29,12 @@
 //! Conversation's own repository's, that being the only pull request it could
 //! have been about.
 //!
+//! And one column added: a branch name used to be one thing, prefilled randomly
+//! and typed over or not, and is now two — the name Verkstead invented and the
+//! name somebody settled on, of which only the second is drawn. Every
+//! Conversation from before takes the name it is carrying as settled, because
+//! that is the name the human has been reading it by.
+//!
 //! Both old shapes are written here by hand rather than by the code that used to
 //! write them: that code has gone, and what has to keep working is a database
 //! rather than a function.
@@ -1484,4 +1490,57 @@ async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
             .review_pairing
             .picked()
     );
+}
+
+/// A Conversation written before a branch name had an owner keeps the name it
+/// has been read by, as one somebody settled on.
+///
+/// Whichever of the two it really was. It is the name the human has been reading
+/// in the sidebar all along, and a Conversation that started reading *Draft* on
+/// account of an upgrade would be one they could no longer find.
+#[tokio::test]
+async fn a_conversation_from_before_the_branch_name_had_an_owner_keeps_its_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // The column off, which is the whole of what says this database is one from
+    // before: a branch was one name, drawn wherever the Conversation was.
+    sqlx::query("ALTER TABLE conversations DROP COLUMN named_branch")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let conversation = load_conversation(&pool, id).await.unwrap().expect(opening);
+
+        assert_eq!(conversation.branch, "rate-limiting");
+        assert!(
+            conversation.branch_named,
+            "the name it has been read by is one to go on reading it by",
+        );
+
+        pool.close().await;
+    }
 }

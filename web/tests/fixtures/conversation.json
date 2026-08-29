@@ -4,6 +4,7 @@
   "base_commit": "release-1.4",
   "blocked_on": null,
   "branch": "rate-limiting",
+  "branch_named": true,
   "companions": [
     {
       "base_commit": null,

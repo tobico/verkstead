@@ -118,6 +118,7 @@ import { Setup } from "./Setup";
 import styles from "./Timeline.module.css";
 import shell from "./Workbench.module.css";
 import { WAITING_ON_CHECKS } from "./conditions";
+import { titled } from "./naming";
 import { ENDED, STATE } from "./states";
 import { keeping } from "./settling";
 import { windowed } from "./windowing";
@@ -419,10 +420,14 @@ export function Timeline(props: {
       <div class={shell.paneChrome}>
         {/* The way back out of this level, which is the whole of what a narrow
             window offers instead of the pane beside it. Drawn always and hidden
-            by the pane head where all three panes are on screen at once. */}
+            by the pane head where all three panes are on screen at once.
+
+            Titled for its branch, or a Draft where nobody has named one — the
+            same rule the sidebar row it was opened from draws, so the card and
+            the header are the one name. */}
         <PaneHead
           back={{ to: "Conversations", go: props.back }}
-          title={props.conversation.branch}
+          title={titled(props.conversation)}
         >
           {/* Where the work got to, for the two states it stops at: a Done
               conversation says *Done* and a closed one says *Closed*, beside

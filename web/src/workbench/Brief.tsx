@@ -36,6 +36,7 @@ import type {
 import { Empty } from "../notices";
 import * as pairing from "../pairing";
 import styles from "./Brief.module.css";
+import { chosen } from "./naming";
 import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";
 
@@ -54,6 +55,15 @@ const ACCESS: Record<CompanionMode, string> = {
 /// that does not exist. So the test decides whether there is anything to
 /// abbreviate, rather than the length.
 const COMMIT = /^[0-9a-f]{40}$/;
+
+/// What stands where a branch has no name to report yet: the Conversation's
+/// own, and a companion mirroring the Conversation's own.
+///
+/// Read on the one Conversation whose Brief is frozen while it is still
+/// drafting — an adopting one, whose stage brief comes down frozen from the
+/// start — and nowhere else: every other Conversation with a summary to draw
+/// has been named or has a branch by the time there is a pane to open.
+export const UNNAMED = "Chosen when the work starts.";
 
 export function Brief(props: {
   conversation: ConversationView;
@@ -85,8 +95,17 @@ function Configuration(props: { conversation: ConversationView }): JSX.Element {
 
       <dl class={styles.facts}>
         <Fact term="Repo">{props.conversation.repo.name}</Fact>
+        {/* The name where there is one, and the rule that will pick one where
+            there is not — which is what a Conversation adopting a roadmap
+            reads, its Brief being frozen from the start and its branch being
+            the stage's own slug once it is adopted. */}
         <Fact term="Branch">
-          <span class={styles.ref}>{props.conversation.branch}</span>
+          <Show
+            when={chosen(props.conversation)}
+            fallback={<span class={styles.rule}>{UNNAMED}</span>}
+          >
+            {(branch) => <span class={styles.ref}>{branch()}</span>}
+          </Show>
         </Fact>
         {/* The commit rather than the branch that was picked: the pick is a
             name while the Conversation drafts and is replaced by whatever it
@@ -208,12 +227,16 @@ function Holding(props: {
         </Fact>
       }
     >
+      {/* Mirroring — no name of its own in the record — is the conversation's
+          own branch, so where that has no name yet neither has this: the same
+          words stand under both. */}
       <Fact term="Branch">
-        <span class={styles.ref}>
-          {props.companion.branch === ""
-            ? props.conversation.branch
-            : props.companion.branch}
-        </span>
+        <Show
+          when={props.companion.branch || chosen(props.conversation)}
+          fallback={<span class={styles.rule}>{UNNAMED}</span>}
+        >
+          {(branch) => <span class={styles.ref}>{branch()}</span>}
+        </Show>
       </Fact>
     </Show>
   );

@@ -70,6 +70,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
+import { AUTOMATIC, chosen } from "./naming";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
 
@@ -424,8 +425,15 @@ function PairingPicker(props: {
 /// list is not only pairings — see [`PairingPicker`].
 type Row = { value: string; label: string };
 
-/// The branch the work will be done on: prefilled with a random name when the
-/// Conversation was started, and the human's to change until grilling begins.
+/// The branch the work will be done on: empty until the human names one, and
+/// theirs to change until grilling begins.
+///
+/// Empty is not *no branch*. A name was invented when the Conversation was
+/// started, because there has to be one to cut, and the field stands empty
+/// under a placeholder rather than showing it: a name nobody chose is nothing
+/// to read, and what the human does about it is either type one or leave it
+/// alone. Clearing the field goes back to that, and the Conversation goes back
+/// to being a Draft.
 ///
 /// Nothing is created by naming it. The branch itself arrives with the stage
 /// that starts grilling; this is the name it will be given.
@@ -444,15 +452,16 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
   const [named, setNamed] = createSignal<string | null>(null);
   const [refused, setRefused] = createSignal<BranchRenamed | null>(null);
 
-  /// What is in the field: what has been typed, or the name as it stands.
-  const branch = () => named() ?? props.conversation.branch;
+  /// What is in the field: what has been typed, or the name as it stands —
+  /// which is nothing at all while the name is still Verkstead's.
+  const branch = () => named() ?? chosen(props.conversation);
 
   // The last name a save asked for, whatever became of it: where the save
   // landed it is what the record has, and where it was refused it is the name
   // the refusal was about. Either way, asking again for that same string would
   // only get the same answer back.
   const [asked, setAsked] = createSignal<string | null>(null);
-  const recorded = () => asked() ?? props.conversation.branch;
+  const recorded = () => asked() ?? chosen(props.conversation);
 
   /// Whether the field has moved on since the last save, which is the whole of
   /// what there is to save.
@@ -516,6 +525,7 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
           autocapitalize="off"
           autocorrect="off"
           spellcheck={false}
+          placeholder={AUTOMATIC}
           value={branch()}
           onInput={(ev) => {
             setNamed(ev.currentTarget.value);
@@ -1053,6 +1063,10 @@ function CompanionAccess(props: {
 /// no longer follows. Clearing it back to empty is going back to mirroring,
 /// which is why the field fills itself in again afterwards.
 ///
+/// Where the conversation has no name of its own yet there is nothing to
+/// prefill it with, so it stands empty as well. Still mirroring, and still what
+/// the human will get: the name it follows is the one they have not chosen.
+///
 /// It keeps itself the way the branch field above it does — on a pause in the
 /// typing, on the way out of the field and on Enter — because it is the same
 /// card, and a Save button here would be the one thing on it asking to be
@@ -1070,7 +1084,7 @@ function CompanionBranch(props: {
 
   /// What the record comes to: the name it holds, or the conversation's own
   /// where it holds none.
-  const mirrored = () => props.companion.branch || props.conversation.branch;
+  const mirrored = () => props.companion.branch || chosen(props.conversation);
 
   /// What is in the field: what has been typed, or what the record comes to.
   const branch = () => named() ?? mirrored();

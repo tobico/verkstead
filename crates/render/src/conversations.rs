@@ -49,8 +49,10 @@ pub enum Lifecycle {
 
 /// One row of the conversations sidebar.
 ///
-/// The branch is the row's name: a Conversation has no title of its own, and of
-/// what it does have the branch is the short line the human chose.
+/// The branch is the row's name where somebody has settled on one: a
+/// Conversation has no title of its own, and of what it does have the branch is
+/// the short line a human chose. A draft nobody has named carries a name
+/// Verkstead invented instead, and reads *Draft* — see [`Self::branch_named`].
 ///
 /// Where it has got to is drawn rather than worded — a turning ring for a
 /// session getting on with it, the same ring empty for one that has gone quiet,
@@ -64,6 +66,16 @@ pub enum Lifecycle {
 pub struct ConversationEntry {
     pub id: i64,
     pub branch: String,
+
+    /// Whether that name is one somebody settled on, rather than the one
+    /// Verkstead prefilled the record with.
+    ///
+    /// A name nobody chose says nothing about the work, so a draft carrying one
+    /// is drawn as *Draft* and the name itself is drawn nowhere — in the title
+    /// and in what is read aloud alike. Two drafts against one Repo reading the
+    /// same is what two drafts are. Once the work has started the branch is a
+    /// fact rather than a plan, and a fact is named wherever it is reported.
+    pub branch_named: bool,
 
     /// What the Repo this Conversation is against is called.
     pub repo: String,
@@ -231,6 +243,16 @@ pub struct ConversationView {
     pub repo: RepoEntry,
 
     pub branch: String,
+
+    /// Whether that name is one somebody settled on, rather than the one
+    /// Verkstead prefilled the record with — see
+    /// [`ConversationEntry::branch_named`], which is the same fact drawn as a
+    /// title.
+    ///
+    /// What the pane does about a draft that says no: the header reads *Draft*,
+    /// and the setup card's branch field stands empty under the placeholder
+    /// saying what leaving it empty means. The name itself is drawn nowhere.
+    pub branch_named: bool,
 
     /// The commit the work will branch from, where the human overrode the rule.
     /// `null` is the rule itself: the default branch's tip, as it stands when

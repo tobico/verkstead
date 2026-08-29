@@ -4,6 +4,7 @@
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
   "blocked_on": null,
   "branch": "usage-limits",
+  "branch_named": true,
   "companions": [
     {
       "base_commit": "1f0b6d2e94a7c3518d0f2b6a4e9c7d31b5a08f4e",

@@ -1,6 +1,7 @@
 [
   {
     "branch": "task-runner",
+    "branch_named": true,
     "id": 5,
     "idle": false,
     "repo": "verkstead",
@@ -12,6 +13,7 @@
   },
   {
     "branch": "usage-limits",
+    "branch_named": true,
     "id": 4,
     "idle": false,
     "repo": "verkstead",
@@ -23,6 +25,7 @@
   },
   {
     "branch": "outbound-retries",
+    "branch_named": true,
     "id": 3,
     "idle": false,
     "repo": "verkstead",
@@ -34,6 +37,7 @@
   },
   {
     "branch": "amber-kestrel",
+    "branch_named": false,
     "id": 2,
     "idle": false,
     "repo": "askance",
@@ -45,6 +49,7 @@
   },
   {
     "branch": "rate-limiting",
+    "branch_named": true,
     "id": 1,
     "idle": false,
     "repo": "verkstead",

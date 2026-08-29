@@ -62,11 +62,14 @@ flowchart LR
   2026-08-24, building ui-refinements*: it took a typed commit before, resolved
   and pinned when it was typed). Each conversation owns one branch and one
   worktree; the branch name is prefilled randomly and customizable while the
-  brief is drafted. Worktrees live under Verkstead's own data directory and
-  are kept until the conversation is closed — *corrected 2026-08-20, building
-  stage 02*: this said "archived", and there is no archive action on a
-  conversation. Closing is what the teardown hangs off, and it leaves the
-  branch alone.
+  brief is drafted — and the prefill is Verkstead's own name rather than one
+  anybody chose, so a draft still carrying it is titled *Draft* everywhere and
+  its branch field stands empty, the random name being drawn nowhere at all
+  (*refined 2026-08-29, building optional-steps-and-auto-branch*). Worktrees
+  live under Verkstead's own data directory and are kept until the conversation
+  is closed — *corrected 2026-08-20, building stage 02*: this said "archived",
+  and there is no archive action on a conversation. Closing is what the teardown
+  hangs off, and it leaves the branch alone.
 - **Lifecycle:** Draft → Grilling → Direction → Implementing → Wrapping →
   Done. *Blocked on you* is a badge on any active state, not a state. Closing
   is possible from any state, and **Closed** is a state of its own — off the

@@ -13,6 +13,7 @@
   "base_commit": null,
   "blocked_on": null,
   "branch": "spring-otter",
+  "branch_named": false,
   "companions": [],
   "direction": null,
   "driven": false,

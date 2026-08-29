@@ -15,7 +15,9 @@
 //!
 //! The row's name is the branch. A Conversation has no title of its own, and of
 //! what it does have the branch is the short line the human chose — and the one
-//! they can change while it is still drafting.
+//! they can change while it is still drafting. Until they do the name is one
+//! Verkstead invented, and a draft still carrying one reads *Draft* rather than
+//! a name that says nothing — see `naming.ts`.
 //!
 //! The order the rows are in is the human's own. This is one person's working
 //! set, so which piece of work sits at the top is theirs to say rather than a
@@ -77,6 +79,7 @@ import { SPOKEN } from "./Mark";
 import marks from "./Mark.module.css";
 import { PaneHead } from "./PaneHead";
 import { WAITING_ON_CHECKS } from "./conditions";
+import { titled } from "./naming";
 import { STATE } from "./states";
 
 export function Conversations(props: {
@@ -884,17 +887,27 @@ const DISC = {
 /// than beside it — *Waiting on checks* is what Wrapping has narrowed to, so
 /// saying both would be saying it twice. The words are [`WAITING_ON_CHECKS`],
 /// which the Timeline's own header draws from the same constant.
+///
+/// And a Conversation nobody has named is called a Draft, which is the word its
+/// state is said in as well — so where the name and the state are the one word
+/// it is said once rather than twice over. Whatever is drawn on the card is
+/// what opens this label, which is the whole of what agreeing means here.
 function spoken(entry: ConversationEntry): string {
   const which = mark(entry);
   const where = entry.waiting_on_checks ? WAITING_ON_CHECKS : STATE[entry.state];
-  const said =
+  const name = titled(entry);
+  const marked =
     which === "waiting"
-      ? `${where}, ${entry.waiting ? DISC.waiting : DISC.unseen}`
+      ? entry.waiting
+        ? DISC.waiting
+        : DISC.unseen
       : which
-        ? `${where}, ${SPOKEN[which]}`
-        : where;
+        ? SPOKEN[which]
+        : null;
 
-  return `${entry.branch}, ${entry.repo}, ${said}`;
+  return [name, entry.repo, name === where ? null : where, marked]
+    .filter((part) => part !== null)
+    .join(", ");
 }
 
 /// One Conversation: the branch it will be done on, the Repo it is in, and where
@@ -977,7 +990,7 @@ function ConversationRow(props: {
         }}
       >
         <span class={styles.what}>
-          <span class={styles.title}>{props.entry.branch}</span>
+          <span class={styles.title}>{titled(props.entry)}</span>
           <span class={styles.meta}>
             <span>{props.entry.repo}</span>
           </span>

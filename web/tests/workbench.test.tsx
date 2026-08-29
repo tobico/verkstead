@@ -80,6 +80,8 @@ import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: the brief and what the
 // conversation was configured with, a commit, a document read whole, one
 // session's record and the terminal it was printed on, and a pull request.
+// What the summary under a frozen Brief says of a branch nobody has named.
+import { UNNAMED } from "../src/workbench/Brief";
 import briefPane from "../src/workbench/Brief.module.css";
 import commitPane from "../src/workbench/Commit.module.css";
 import commitPaneCss from "../src/workbench/Commit.module.css?raw";
@@ -117,6 +119,9 @@ import checkMarks from "../src/workbench/Checks.module.css";
 // rules that give it one are what jsdom cannot lay out.
 import screenPane from "../src/workbench/Screen.module.css";
 import screenCss from "../src/workbench/Screen.module.css?raw";
+// What a Conversation is called where nobody has named its branch, which the
+// sidebar and the pane header are both drawn with.
+import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
 // And the timeline, both ways again: it is the biggest of these, and a good
 // deal of what it says about a card is a rule rather than an element.
 // What is still the human's to settle on the brief card.
@@ -401,7 +406,7 @@ describe("the workbench", () => {
       [...container.querySelectorAll(`.${sidebar.conversationRow} .${sidebar.title}`)].map(
         (row) => row.textContent,
       ),
-    ).toEqual(SIDEBAR.map((entry) => entry.branch));
+    ).toEqual(SIDEBAR.map((entry) => titled(entry)));
   });
 
   it("says of each conversation which repo it is in", async () => {
@@ -806,6 +811,40 @@ describe("how a card says where its conversation has got to", () => {
     expect(sidebarCss).toContain(
       ".conversationRow.draft .open {\n  border-style: dotted;\n}",
     );
+  });
+
+  /// A branch name Verkstead invented says nothing about the work, so a row
+  /// carrying one is called what it is: a Draft, with the name itself drawn
+  /// nowhere. A name somebody typed is the row's name exactly as before.
+  it("calls a conversation nobody has named a draft", async () => {
+    theSidebar(
+      { branch: "amber-kestrel", branch_named: false, state: "Draft" },
+      { branch: "rate-limiting", branch_named: true, state: "Draft" },
+    );
+    const { container } = mount();
+    const rows = await cards(container);
+
+    expect(
+      rows.map((card) => card.querySelector(`.${sidebar.title}`)!.textContent),
+    ).toEqual([DRAFT, "rate-limiting"]);
+    expect(container.textContent).not.toContain("amber-kestrel");
+  });
+
+  /// And what it is read aloud as opens on the same word: the label is the card
+  /// said in words, so a card reading Draft cannot be a label reading anything
+  /// else. The state it repeats is said once rather than twice over.
+  it("reads an unnamed row aloud as the draft it is drawn as", async () => {
+    theSidebar(
+      { branch: "amber-kestrel", branch_named: false, state: "Draft" },
+      { branch: "rate-limiting", branch_named: true, state: "Draft" },
+    );
+    const { container } = mount();
+
+    expect(
+      (await cards(container)).map((card) =>
+        card.querySelector("button")!.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Draft, verkstead", "rate-limiting, verkstead, Draft"]);
   });
 
   /// Which of the two it was is the details pane's to say. The sidebar's business
@@ -2438,6 +2477,47 @@ describe("a conversation's setup", () => {
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/branch`),
       ).toEqual({ branch: "counter-in-redis" }),
+    );
+  });
+
+  /// Until the human types one the name is Verkstead's, and a name nobody chose
+  /// is drawn nowhere: the field stands empty under the placeholder that says
+  /// what leaving it empty means, and the pane is headed by what the
+  /// Conversation is — a draft.
+  it("leaves the branch field empty where the name is Verkstead's own", async () => {
+    theWorkbenchWith({ branch_named: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Branch"));
+
+    const field = screen.getByLabelText("Branch") as HTMLInputElement;
+    expect(field.value).toBe("");
+    expect(field.placeholder).toBe(AUTOMATIC);
+
+    // The pane alone, the sidebar beside it being drawn from a list of its own
+    // that this test did not touch.
+    const pane = container.querySelector(`.${shell.timelinePane}`)!;
+    expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(DRAFT);
+    expect(pane.textContent).not.toContain(OPEN.branch);
+  });
+
+  /// And emptying it hands the name back, which is a rename like any other: the
+  /// server holds the one it prefilled, so there is nothing for the page to send
+  /// but the empty field.
+  it("hands the name back when the field is emptied", async () => {
+    const fetching = theWorkbench(json("Renamed"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Branch"));
+
+    const field = screen.getByLabelText("Branch") as HTMLInputElement;
+    expect(field.value).toBe(OPEN.branch);
+
+    fireEvent.input(field, { target: { value: "" } });
+    fireEvent.blur(field);
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/branch`)).toEqual({
+        branch: "",
+      }),
     );
   });
 
@@ -11084,6 +11164,22 @@ describe("the configuration on the brief's pane", () => {
     },
     base_commit: "0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e76f32b11a",
   };
+
+  /// A conversation nobody has named has no branch to report: the name it is
+  /// carrying is Verkstead's own, and what the summary says is what will become
+  /// of it rather than a name nobody chose.
+  ///
+  /// Drawn on the adopting draft, whose brief is frozen from the start — which
+  /// is what makes it the one draft with a pane to open at all.
+  it("reports a branch nobody has named as one still to be chosen", async () => {
+    theWorkbench(
+      whenever(`/api/ui/conversations/${ADOPTING.id}`, json(ADOPTING)),
+    );
+    await openBrief(ADOPTING);
+
+    expect(configuration().Branch).toBe(UNNAMED);
+    expect(summary()!.textContent).not.toContain(ADOPTING.branch);
+  });
 
   it("says the repo, the branch, the base commit, the worktree and the pairings", async () => {
     theGrilling();

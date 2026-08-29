@@ -37,15 +37,19 @@ use crate::worktrees;
 /// Start a Conversation against a registered Repo, on a branch name nobody has
 /// had to think of yet.
 ///
-/// The name is the server's because the record is: a prefill the browser
-/// invented would be a name the server never saw, and the human may well leave
-/// it as it is.
+/// The name is the server's because the record is: a name the browser invented
+/// would be one the server never saw, and there has to be a branch to cut
+/// whether or not the human ever types one.
+///
+/// It stays Verkstead's until they do, which is what the record is started
+/// saying: while the Conversation drafts the workbench draws that name nowhere,
+/// calls it a Draft, and leaves the branch field empty for a name of theirs.
 ///
 /// The Pairings are prefilled the same way, off what the Repo was last
 /// grilled with — see [`prefill`].
 pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
     Ok(
-        match store::start_conversation(&state.pool, repo_id, &branch_name()).await? {
+        match store::start_unnamed_conversation(&state.pool, repo_id, &branch_name()).await? {
             Some(id) => {
                 prefill(state, id, repo_id).await;
                 Started::Started { id }
@@ -61,7 +65,8 @@ pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
 /// is what draws the adoption-shaped page, and it is the only thing about the
 /// roadmap Verkstead keeps. The branch name is the server's here too, and it is
 /// discarded at the press — a stage is worked on its own slug — so what it does
-/// is name the row in the sidebar until then.
+/// until then is stand in the record for a branch nobody has named. The row
+/// reads *Draft* the whole time, which is what it is.
 ///
 /// The roadmap is taken as the notice gave it. Whether it is still there with a
 /// stage to start is a question about a repository at a commit, and it is asked
@@ -468,11 +473,19 @@ pub(crate) async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Re
     })
 }
 
-/// Name the branch the work will be done on.
+/// Name the branch the work will be done on, or hand the naming of it back to
+/// Verkstead.
 ///
 /// Whether the name is usable is git's to say, not a list of forbidden
 /// characters here: the branch this names is one git will be asked to create,
 /// and the only opinion that will matter then is the one being asked now.
+///
+/// Blank is the field cleared rather than a name git would refuse, so it is
+/// never asked about: what the human means by emptying that field is *choose
+/// one for me*, and what stands again is the name Verkstead prefilled the
+/// record with. Which is why it is answered as a rename like any other — the
+/// name has changed hands, and the card has nothing to say about it beyond the
+/// placeholder coming back.
 pub(crate) async fn rename_branch(
     pool: &SqlitePool,
     id: i64,
@@ -480,16 +493,19 @@ pub(crate) async fn rename_branch(
 ) -> Result<BranchRenamed> {
     let branch = branch.trim().to_owned();
 
-    if !tokio::task::spawn_blocking({
-        let branch = branch.clone();
-        move || is_branch_name(&branch)
-    })
-    .await?
+    if !branch.is_empty()
+        && !tokio::task::spawn_blocking({
+            let branch = branch.clone();
+            move || is_branch_name(&branch)
+        })
+        .await?
     {
         return Ok(BranchRenamed::NotABranchName);
     }
 
-    Ok(match store::rename_branch(pool, id, &branch).await? {
+    let named = (!branch.is_empty()).then_some(branch.as_str());
+
+    Ok(match store::rename_branch(pool, id, named).await? {
         store::Edited::Saved => BranchRenamed::Renamed,
         store::Edited::NoSuchConversation => BranchRenamed::NoSuchConversation,
         store::Edited::NotDrafting => BranchRenamed::NotDrafting,
@@ -1422,7 +1438,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // the Brief it works from, and then the move that freezes both. Adoption
     // never stacks — there is no predecessor Conversation to stand on, and
     // standing on an unmerged one is the base commit the human fixed above.
-    store::rename_branch(pool, id, &branch).await?;
+    store::rename_branch(pool, id, Some(branch.as_str())).await?;
     store::save_brief(pool, id, &stage.brief).await?;
 
     // The companion checkouts with it, in the transaction that makes it a stage

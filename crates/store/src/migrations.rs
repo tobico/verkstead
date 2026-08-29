@@ -12,6 +12,11 @@
 //! about, and which pull request a comment somebody was sent to deal with was
 //! left on, are all a pull request's rather than a Conversation's now.
 //!
+//! Two of them are a column arriving rather than rows moving between tables —
+//! the Review role's Profile, and the branch name somebody settled on — which is
+//! the same kind of one-time rewrite: the rows already there are given the value
+//! that says what was true of them before the column existed.
+//!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
 //! rewrites rather than a version number kept somewhere. So a database opened
@@ -32,7 +37,48 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     fix_attempts_that_named_no_repo(pool).await?;
     settlements_that_named_no_pull_request(pool).await?;
     addressed_comments_that_named_no_pull_request(pool).await?;
-    conversations_that_had_no_review_profile(pool).await
+    conversations_that_had_no_review_profile(pool).await?;
+    conversations_whose_branch_name_had_no_owner(pool).await
+}
+
+/// Give every Conversation written before a branch name had an owner the column
+/// that says whose it is, and record the name each of them is carrying as one
+/// somebody settled on.
+///
+/// A branch name used to be one thing — prefilled randomly, typed over or not,
+/// and drawn either way. It is two now: the name Verkstead invented at creation
+/// and the name somebody settled on, and only the second is ever shown — see
+/// [`super::Conversation::branch_named`]. So every row written before this takes
+/// the name it has as settled, whichever of the two it really was: it is the
+/// name the human has been reading in the sidebar all along, and a Conversation
+/// that started reading *Draft* on account of an upgrade would be one they could
+/// no longer find.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn conversations_whose_branch_name_had_no_owner(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('conversations') WHERE name = ?")
+            .bind("named_branch")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the settled branch name of a Conversation")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE conversations ADD COLUMN named_branch TEXT")
+        .execute(pool)
+        .await
+        .context("giving the Conversations written before this a settled branch name")?;
+
+    sqlx::query("UPDATE conversations SET named_branch = branch")
+        .execute(pool)
+        .await
+        .context("settling the branch names the Conversations written before this carry")?;
+
+    Ok(())
 }
 
 /// Give every Conversation written before there was a Review role the column
