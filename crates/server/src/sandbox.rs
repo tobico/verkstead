@@ -632,11 +632,19 @@ impl Sandbox {
         let mut binds = companion_binds(conversation)?;
         binds.extend(extra);
 
+        // One arm per agent type: what is bound over where is that type's own
+        // shape, and a backend arriving with an account of its own lands here
+        // rather than in whatever the pair happened to mean.
+        let store::Account::Claude {
+            claude_dir,
+            config_file,
+        } = &profile.account;
+
         Some(Sandbox {
             worktree,
             git_dir,
-            claude_dir: profile.claude_dir.clone(),
-            config_file: profile.config_file.clone(),
+            claude_dir: claude_dir.clone(),
+            config_file: config_file.clone(),
             skills: skills.path().to_owned(),
             nothing: skills.nothing().to_owned(),
             verkstead: verkstead.path().to_owned(),

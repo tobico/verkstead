@@ -11,10 +11,10 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
-    AgentType, Chosen, Deleting, Lifecycle, Picked, Profile, ProfileFacts, Saving, create_profile,
-    delete_profile, load_conversation, load_profile, open_database, profiles, register_repo,
-    set_grilling_pairing, set_implementation_pairing, set_review_pairing, skip_grilling,
-    skip_review, start_building, start_conversation, start_grilling, update_profile,
+    Account, AgentType, Chosen, Deleting, Lifecycle, Picked, Profile, ProfileFacts, Saving,
+    create_profile, delete_profile, load_conversation, load_profile, open_database, profiles,
+    register_repo, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
+    skip_grilling, skip_review, start_building, start_conversation, start_grilling, update_profile,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -26,15 +26,22 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     (dir, pool)
 }
 
-/// A Profile to save, named — the pair is made up, because whether it is really
-/// there is not this crate's question.
+/// A Profile to save, named — the account is made up, because whether it is
+/// really there is not this crate's question.
 fn facts(name: &str) -> ProfileFacts {
     ProfileFacts {
         name: name.to_owned(),
+        account: claude(name),
+        models: vec!["claude-opus-5".to_owned()],
+    }
+}
+
+/// The Claude account those Profiles run as: the pair, under the account's own
+/// directory.
+fn claude(name: &str) -> Account {
+    Account::Claude {
         claude_dir: PathBuf::from(format!("/watched/accounts/{name}/.claude")),
         config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
-        models: vec!["claude-opus-5".to_owned()],
-        agent_type: AgentType::Claude,
     }
 }
 
@@ -63,30 +70,81 @@ async fn conversation(pool: &SqlitePool) -> i64 {
 }
 
 #[tokio::test]
-async fn a_saved_profile_holds_its_pair_its_models_and_its_agent_type() {
+async fn a_saved_profile_holds_its_account_and_its_models() {
     let (_dir, pool) = fresh_pool().await;
 
     let profile = saved(&pool, "work").await;
 
     assert_eq!(profile.name, "work");
     assert_eq!(
-        profile.claude_dir,
-        PathBuf::from("/watched/accounts/work/.claude")
-    );
-    assert_eq!(
-        profile.config_file,
-        PathBuf::from("/watched/accounts/work/.claude.json")
+        profile.account,
+        Account::Claude {
+            claude_dir: PathBuf::from("/watched/accounts/work/.claude"),
+            config_file: PathBuf::from("/watched/accounts/work/.claude.json"),
+        }
     );
     assert_eq!(profile.models, ["claude-opus-5"]);
 
-    // One value, and the point of it is that the column is there — the second
-    // backend slots in beside `claude` rather than being migrated in under it.
-    assert_eq!(profile.agent_type, AgentType::Claude);
+    // One value, and the point of it is that the column is there and the shape
+    // hangs off it — the second backend slots in beside `claude` rather than
+    // being migrated in under it.
+    assert_eq!(profile.agent_type(), AgentType::Claude);
 
     assert_eq!(
         load_profile(&pool, profile.id).await.unwrap(),
         Some(profile)
     );
+}
+
+/// A Profile of a type this binary does not have is a database written by a
+/// newer Verkstead. Refused by the word that is in the column, rather than read
+/// past as though it were a Claude row with a pair it has not got.
+#[tokio::test]
+async fn a_profile_naming_an_agent_type_this_binary_has_not_got_is_refused_by_name() {
+    let (_dir, pool) = fresh_pool().await;
+
+    sqlx::query(
+        "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("work")
+    .bind("")
+    .bind("")
+    .bind("gpt-5-codex")
+    .bind("codex")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let refused = profiles(&pool).await.unwrap_err().to_string();
+    assert!(
+        refused.contains("codex"),
+        "the refusal should name the word it did not know, and said {refused:?}"
+    );
+}
+
+/// The table the account of every type after Claude lives in: one home per
+/// Profile, keyed by its id, made with the rest of the schema so that the stage
+/// which first writes to it has no migration to do.
+#[tokio::test]
+async fn a_profiles_single_home_directory_has_a_table_of_its_own() {
+    let (_dir, pool) = fresh_pool().await;
+    let profile = saved(&pool, "work").await;
+
+    sqlx::query("INSERT INTO profile_homes (profile_id, home) VALUES (?, ?)")
+        .bind(profile.id)
+        .bind("/watched/accounts/work")
+        .execute(&pool)
+        .await
+        .expect("the table is there to be written to");
+
+    let home: (String,) = sqlx::query_as("SELECT home FROM profile_homes WHERE profile_id = ?")
+        .bind(profile.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(home.0, "/watched/accounts/work");
 }
 
 /// The list is the Profile's own: a Profile names what its account can
@@ -134,8 +192,8 @@ async fn rewriting_a_profile_replaces_its_list_rather_than_adding_to_it() {
 }
 
 /// A Profile saved before the list existed has one model in the old column and
-/// no rows in the new table. It reads as the list it always was, with nothing for
-/// the human to re-enter.
+/// no rows in the new table. It reads as the list it always was, and as the
+/// Claude account it always was, with nothing for the human to re-enter.
 #[tokio::test]
 async fn a_profile_written_before_the_list_reads_its_old_model_as_its_only_one() {
     let (_dir, pool) = fresh_pool().await;
@@ -155,14 +213,11 @@ async fn a_profile_written_before_the_list_reads_its_old_model_as_its_only_one()
 
     let listed = profiles(&pool).await.unwrap();
     assert_eq!(listed[0].models, ["claude-opus-5"]);
-    assert_eq!(
-        load_profile(&pool, listed[0].id)
-            .await
-            .unwrap()
-            .unwrap()
-            .models,
-        ["claude-opus-5"]
-    );
+    assert_eq!(listed[0].account, claude("work"));
+
+    let read = load_profile(&pool, listed[0].id).await.unwrap().unwrap();
+    assert_eq!(read.models, ["claude-opus-5"]);
+    assert_eq!(read.account, claude("work"));
 }
 
 #[tokio::test]
@@ -213,10 +268,7 @@ async fn everything_about_a_profile_is_the_humans_to_rewrite() {
     let read = load_profile(&pool, profile.id).await.unwrap().unwrap();
     assert_eq!(read.name, "anthropic");
     assert_eq!(read.models, ["claude-fable-5"]);
-    assert_eq!(
-        read.claude_dir,
-        PathBuf::from("/watched/accounts/anthropic/.claude")
-    );
+    assert_eq!(read.account, claude("anthropic"));
 }
 
 /// Rewriting a Profile under its own name is not a clash with itself.

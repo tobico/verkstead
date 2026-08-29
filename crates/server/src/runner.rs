@@ -4026,10 +4026,11 @@ mod tests {
             profile: store::Profile {
                 id: 1,
                 name: model.to_owned(),
-                claude_dir: PathBuf::from("/data/claude"),
-                config_file: PathBuf::from("/data/claude.json"),
+                account: store::Account::Claude {
+                    claude_dir: PathBuf::from("/data/claude"),
+                    config_file: PathBuf::from("/data/claude.json"),
+                },
                 models: vec![model.to_owned()],
-                agent_type: store::AgentType::Claude,
             },
             model: Some(model.to_owned()),
         }

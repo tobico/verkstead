@@ -1,9 +1,11 @@
 [
   {
-    "agent_type": "Claude",
+    "account": {
+      "agent_type": "Claude",
+      "claude_dir": "/srv/accounts/fable/.claude",
+      "config_file": "/srv/accounts/fable/.claude.json"
+    },
     "broken": null,
-    "claude_dir": "/srv/accounts/fable/.claude",
-    "config_file": "/srv/accounts/fable/.claude.json",
     "id": 1,
     "models": [
       "claude-fable-5"
@@ -11,10 +13,12 @@
     "name": "fable"
   },
   {
-    "agent_type": "Claude",
+    "account": {
+      "agent_type": "Claude",
+      "claude_dir": "/srv/accounts/opus/.claude",
+      "config_file": "/srv/accounts/opus/.claude.json"
+    },
     "broken": null,
-    "claude_dir": "/srv/accounts/opus/.claude",
-    "config_file": "/srv/accounts/opus/.claude.json",
     "id": 2,
     "models": [
       "claude-opus-5",
@@ -23,10 +27,12 @@
     "name": "opus"
   },
   {
-    "agent_type": "Claude",
+    "account": {
+      "agent_type": "Claude",
+      "claude_dir": "/srv/accounts/sonnet/.claude",
+      "config_file": "/srv/accounts/sonnet/.claude.json"
+    },
     "broken": null,
-    "claude_dir": "/srv/accounts/sonnet/.claude",
-    "config_file": "/srv/accounts/sonnet/.claude.json",
     "id": 3,
     "models": [
       "claude-sonnet-5"

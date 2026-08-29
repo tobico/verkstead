@@ -378,14 +378,18 @@ driving it is ended and advanced by the ordinary rules.
 _Avoid_: terminal, console, attach view, pane
 
 **Agent Profile**:
-A named coding-agent account Verkstead can run a session under: a claude home
-directory and config file pair, the models that account can run, and an
-agent-type discriminator so other backends can slot in later. The pair is
-bind-mounted at `~/.claude` / `~/.claude.json` inside the sandbox, which is what
-keeps accounts separate. The models are a list and the list is the Profile's
-own, because different Profiles reach different accounts and each can launch
-different things; none of them is a default, so which one a session runs is
-always picked — as a Pairing, alongside the Profile itself.
+A named coding-agent account Verkstead can run a session under: an agent type,
+the account itself, and the models that account can run. **The account's shape
+is its type's**, rather than one shape every Profile is assumed to have — Claude
+Code's is the directory and config file pair bind-mounted at `~/.claude` /
+`~/.claude.json` inside the sandbox, and every backend after it keeps its whole
+account under one relocatable home. Whichever it is, mounting it is what keeps
+accounts separate. The type is not offered while there is one of it: a picker
+with a single option is theatre, and one naming a backend that cannot launch yet
+would be a lie. The models are a list and the list is the Profile's own, because
+different Profiles reach different accounts and each can launch different
+things; none of them is a default, so which one a session runs is always picked
+— as a Pairing, alongside the Profile itself.
 _Avoid_: account, identity, persona, agent config
 
 **Pairing**:

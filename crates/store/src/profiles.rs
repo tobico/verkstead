@@ -1,11 +1,10 @@
 //! The Agent Profiles a session can be run under: which account, and which
 //! models.
 //!
-//! A Profile is four facts and a discriminator, because that is the whole of
-//! what launching a session needs. The claude directory and config file are the
-//! pair bind-mounted over `~/.claude` and `~/.claude.json` inside the sandbox,
-//! which is what keeps one account's sessions out of another's; the models are
-//! what a session may be run on.
+//! A Profile is a name, an account and a list of models, because that is the
+//! whole of what launching a session needs. The account is what keeps one
+//! account's sessions out of another's, and its shape is its agent type's — see
+//! [`Account`]; the models are what a session may be run on.
 //!
 //! The models are a list and not one model, and the list is the Profile's own:
 //! different Profiles reach different accounts, so each names what it can
@@ -21,16 +20,18 @@
 //! entry that column holds — which is what carries every saved Profile over with
 //! nothing for the human to re-enter.
 //!
-//! The paths are stored resolved, as a Repo's is and for the same reason:
-//! whoever saved the Profile had `..` and every symlink taken out of them before
-//! they arrived, so what is recorded is what the filesystem means rather than
-//! what somebody typed. Whether they are inside a Watched Path is decided above
-//! the store, where the boundary lives.
+//! An account's paths are stored resolved, as a Repo's is and for the same
+//! reason: whoever saved the Profile had `..` and every symlink taken out of
+//! them before they arrived, so what is recorded is what the filesystem means
+//! rather than what somebody typed. Whether they are inside a Watched Path is
+//! decided above the store, where the boundary lives.
 //!
-//! The agent type is a column with one value in it, and the discriminator a
-//! backend is chosen by above the store: the launch line's flags are keyed on
+//! The agent type is a column with one value in it, and it is what says which
+//! shape a row's account is written in — the launch line's flags are keyed on
 //! it already. The point is that a second backend slots in beside `claude`
-//! rather than having to be migrated in underneath it.
+//! rather than having to be migrated in underneath it: it adds an arm to
+//! [`Account`] and keeps its home in `profile_homes`, which is made here and
+//! stays empty until there is a type with one.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -63,6 +64,40 @@ impl AgentType {
     }
 }
 
+/// The account a Profile runs as, in the shape the agent type running it keeps
+/// one.
+///
+/// Claude Code's account is a pair — a directory and a file beside it, bound
+/// over `~/.claude` and `~/.claude.json` — because that is how Claude Code keeps
+/// one. Every backend after it keeps its whole account under a single
+/// relocatable home, which is a shape of its own and a table of its own: see
+/// `profile_homes` in [`apply_schema`].
+///
+/// The shape *is* the discriminator, rather than sitting beside one: a Profile
+/// holding a pair runs Claude, and there is no second field for it to disagree
+/// with. Which agent type that comes to is [`Account::agent_type`], and the
+/// column is what it is written down as.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Account {
+    /// Claude Code's pair.
+    Claude {
+        /// The directory bind-mounted over `~/.claude`, resolved.
+        claude_dir: PathBuf,
+
+        /// The file bind-mounted over `~/.claude.json`, resolved.
+        config_file: PathBuf,
+    },
+}
+
+impl Account {
+    /// Which agent runs an account of this shape.
+    pub fn agent_type(&self) -> AgentType {
+        match self {
+            Self::Claude { .. } => AgentType::Claude,
+        }
+    }
+}
+
 /// An Agent Profile as the store holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Profile {
@@ -72,21 +107,21 @@ pub struct Profile {
     /// in it is a picker nobody can use.
     pub name: String,
 
-    /// The directory bind-mounted over `~/.claude`, resolved.
-    pub claude_dir: PathBuf,
-
-    /// The file bind-mounted over `~/.claude.json`, resolved.
-    pub config_file: PathBuf,
+    /// The account a session under this Profile is run as, in its type's shape.
+    pub account: Account,
 
     /// The models this account can run a session on, in the order they were
     /// written. None of them is the default: the order is the human's typing
     /// kept intact so that editing the list reads back as they left it.
     pub models: Vec<String>,
-
-    pub agent_type: AgentType,
 }
 
 impl Profile {
+    /// Which agent this Profile runs, which is what its account's shape says.
+    pub fn agent_type(&self) -> AgentType {
+        self.account.agent_type()
+    }
+
     /// The model to run on where nothing paired one with it.
     ///
     /// The first of the list, which is a Profile's only model in the ordinary
@@ -191,10 +226,8 @@ impl Picked {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileFacts {
     pub name: String,
-    pub claude_dir: PathBuf,
-    pub config_file: PathBuf,
+    pub account: Account,
     pub models: Vec<String>,
-    pub agent_type: AgentType,
 }
 
 /// What became of writing a Profile down.
@@ -262,6 +295,22 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the profile_models table")?;
 
+    // And where a Profile whose account is one relocatable home keeps it —
+    // every backend but Claude, none of which has landed yet, so this table is
+    // made and left empty. It is made now rather than with the first of them
+    // for the reason `profile_models` is a table at all: `profiles` is STRICT,
+    // there is no migration machinery, and a new fact about a Profile is a new
+    // table hung off it by id. One home per Profile, so the id is the key.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS profile_homes (
+             profile_id INTEGER PRIMARY KEY REFERENCES profiles(id),
+             home       TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the profile_homes table")?;
+
     Ok(())
 }
 
@@ -272,6 +321,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<Option<Profile>> {
     let mut tx = super::writing(pool, "saving a Profile").await?;
 
+    let (claude_dir, config_file) = pair(&facts.account)?;
+
     let row: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
          VALUES (?, ?, ?, ?, ?)
@@ -279,10 +330,10 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
          RETURNING id",
     )
     .bind(&facts.name)
-    .bind(text(&facts.claude_dir)?)
-    .bind(text(&facts.config_file)?)
+    .bind(claude_dir)
+    .bind(config_file)
     .bind(legacy_model(facts))
-    .bind(facts.agent_type.stored())
+    .bind(facts.account.agent_type().stored())
     .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("saving the Profile {:?}", facts.name))?;
@@ -300,10 +351,8 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
     Ok(Some(Profile {
         id,
         name: facts.name.clone(),
-        claude_dir: facts.claude_dir.clone(),
-        config_file: facts.config_file.clone(),
+        account: facts.account.clone(),
         models: facts.models.clone(),
-        agent_type: facts.agent_type,
     }))
 }
 
@@ -328,16 +377,18 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
         return Ok(Saving::NameTaken);
     }
 
+    let (claude_dir, config_file) = pair(&facts.account)?;
+
     let changed = sqlx::query(
         "UPDATE profiles
          SET name = ?, claude_dir = ?, config_file = ?, model = ?, agent_type = ?
          WHERE id = ?",
     )
     .bind(&facts.name)
-    .bind(text(&facts.claude_dir)?)
-    .bind(text(&facts.config_file)?)
+    .bind(claude_dir)
+    .bind(config_file)
     .bind(legacy_model(facts))
-    .bind(facts.agent_type.stored())
+    .bind(facts.account.agent_type().stored())
     .bind(id)
     .execute(&mut *tx)
     .await
@@ -487,13 +538,33 @@ fn read_row(row: Row, listed: Vec<String>) -> Result<Profile> {
         _ => listed,
     };
 
+    let account = match AgentType::read(&agent_type)? {
+        AgentType::Claude => Account::Claude {
+            claude_dir: PathBuf::from(claude_dir),
+            config_file: PathBuf::from(config_file),
+        },
+    };
+
     Ok(Profile {
         id,
         name,
-        claude_dir: PathBuf::from(claude_dir),
-        config_file: PathBuf::from(config_file),
+        account,
         models,
-        agent_type: AgentType::read(&agent_type)?,
+    })
+}
+
+/// What an account puts in the row's own two path columns.
+///
+/// Claude's pair, which is what those columns were made for. A type whose
+/// account is a single home has nothing to say in them and keeps its home in
+/// `profile_homes` instead — they are NOT NULL and cannot be dropped from a
+/// STRICT table, so what it writes there is the empty string.
+fn pair(account: &Account) -> Result<(&str, &str)> {
+    Ok(match account {
+        Account::Claude {
+            claude_dir,
+            config_file,
+        } => (text(claude_dir)?, text(config_file)?),
     })
 }
 

@@ -19,14 +19,29 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-/// Which coding agent a Profile runs.
+/// The account a Profile names, in the shape the agent type running it keeps
+/// one.
 ///
-/// One value. It is on the wire so that a second backend is a variant added
-/// beside `Claude` rather than a field the viewer has to start being told about.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Flat on the wire — `{"agent_type": "Claude", "claude_dir": "…",
+/// "config_file": "…"}` — so the type is a field the viewer can read and narrow
+/// on rather than a name it has to unwrap the account out of. Which is what the
+/// form draws its fields off: a shape per type, and adding a backend adds a
+/// variant here and the fields beside it.
+///
+/// One shape for both directions. A Profile as the viewer receives it carries
+/// the resolved paths the server recorded and a Profile as the human has just
+/// written it carries what they typed, but they are the same fields either way,
+/// and two types for one shape would be two opinions about what an account is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "agent_type")]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum AgentType {
-    Claude,
+pub enum ProfileAccount {
+    /// Claude Code's pair: what is bind-mounted over `~/.claude` and
+    /// `~/.claude.json` inside the sandbox.
+    Claude {
+        claude_dir: String,
+        config_file: String,
+    },
 }
 
 /// Why a saved Profile cannot be run under as things stand.
@@ -49,43 +64,42 @@ pub enum Broken {
 
 /// One row of the Profile list.
 ///
-/// The paths are the resolved ones the server recorded rather than whatever was
-/// typed to save them: those are what will be bind-mounted, so those are what is
-/// worth showing.
+/// The account's paths are the resolved ones the server recorded rather than
+/// whatever was typed to save them: those are what will be bind-mounted, so
+/// those are what is worth showing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileEntry {
     pub id: i64,
     pub name: String,
-    pub claude_dir: String,
-    pub config_file: String,
+
+    /// Which agent this Profile runs, and the account it runs as — one field,
+    /// because the type is what says which fields the account has.
+    pub account: ProfileAccount,
 
     /// Every model this account can run a session on. At least one, and none of
     /// them preferred over the others: the list says what is available and
     /// nothing more.
     pub models: Vec<String>,
 
-    pub agent_type: AgentType,
-
-    /// `null` while the pair is where it was left, which is the ordinary case.
+    /// `null` while the account is where it was left, which is the ordinary
+    /// case.
     pub broken: Option<Broken>,
 }
 
 /// A Profile as the human has just written it, for saving or for rewriting.
 ///
-/// No agent type: there is one, and offering a choice of one is theatre. The
-/// server records `Claude`, and the field arrives here when there is something
-/// to choose between.
+/// The account says which type it is, because the fields beside it are that
+/// type's. The form still offers no choice of one — there is one type — so what
+/// arrives here is always `Claude`; what makes the discriminator real is that
+/// the shape hangs off it, not that anything picks it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileEdit {
     pub name: String,
 
-    /// The absolute path of the directory bind-mounted over `~/.claude`.
-    pub claude_dir: String,
-
-    /// The absolute path of the file bind-mounted over `~/.claude.json`.
-    pub config_file: String,
+    /// The absolute paths this Profile's account is, in its type's shape.
+    pub account: ProfileAccount,
 
     /// The models this account can run a session on, in the order they were
     /// typed. The form takes them a line apiece; blank lines and repeated

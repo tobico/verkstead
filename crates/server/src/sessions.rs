@@ -235,7 +235,7 @@ impl Agents {
         }
 
         argv.extend(
-            flags(pairing.profile.agent_type)
+            flags(pairing.profile.agent_type())
                 .iter()
                 .map(|flag| (*flag).to_owned()),
         );
@@ -1568,10 +1568,11 @@ mod tests {
         store::Profile {
             id: 1,
             name: "fable".to_owned(),
-            claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
-            config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
+            account: store::Account::Claude {
+                claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
+                config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
+            },
             models: vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()],
-            agent_type: store::AgentType::Claude,
         }
     }
 

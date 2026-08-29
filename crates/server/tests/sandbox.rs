@@ -370,10 +370,11 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         &pool,
         &store::ProfileFacts {
             name: "work".to_owned(),
-            claude_dir,
-            config_file,
+            account: store::Account::Claude {
+                claude_dir,
+                config_file,
+            },
             models: vec!["claude-opus-5".to_owned()],
-            agent_type: store::AgentType::Claude,
         },
     )
     .await

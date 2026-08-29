@@ -2027,8 +2027,11 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
         "/api/ui/profiles",
         &serde_json::json!({
             "name": name,
-            "claude_dir": claude_dir,
-            "config_file": config_file,
+            "account": {
+                "agent_type": "Claude",
+                "claude_dir": claude_dir,
+                "config_file": config_file,
+            },
             "models": [format!("claude-{name}-5"), format!("claude-{name}-4.8")],
         }),
     )
