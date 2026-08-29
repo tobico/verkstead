@@ -16,9 +16,8 @@
 //! Each of them is a moment as well — the pull request the finish step opened,
 //! and the backlog and the roadmap at the moment they landed on the branch — so
 //! each is drawn in both places: the same card in the pinned block and on the
-//! record where it happened. A second appearance rather than a move, for the
-//! reason the running session's strip below is one: what the record says
-//! happened should stay on it.
+//! record where it happened. A second appearance rather than a move: what the
+//! record says happened should stay on it.
 //!
 //! The two lists differ from the pull request in where the card's content comes
 //! from. A PR is three facts the record holds; a backlog and a roadmap are read
@@ -48,24 +47,27 @@
 //! to open, and it carries a Conversation's setup under it for as long as there
 //! is a draft to set up.
 //!
-//! Held against the foot of the pane, for as long as a session is running, is
-//! that session again: a strip carrying its title and its liveness mark, which
-//! opens the same details pane its card does. A second appearance rather than a
-//! move — the card keeps its place on the record — because a record grows past
-//! a screenful within the hour and the one thing on it that is moving should
-//! never have to be scrolled back to.
+//! Nothing is held against the foot of the pane. A strip for the session running
+//! now used to be — the title and the liveness mark, a way back to a card that a
+//! long record had scrolled away from — and the status button at the head of the
+//! pane says what is running, in more words than the strip ever did and where
+//! the eye lands rather than at the far end of the pane.
 //!
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
 //! happened so far, which is exactly where the next thing to happen belongs.
 //! One lives there — `Start work` under the Brief it will freeze. What to
 //! do about a conversation Verkstead has finished with is not there: a Steer is
-//! the way back into one, and it hangs off the header with everything else done
-//! to the conversation as a whole.
+//! the way back into one, and it is in the menu the status button drops with
+//! everything else done to the conversation as a whole.
+//! Getting a stopped conversation going again is in that menu too rather than at
+//! the foot of the record: Resume is a row of it like the rest, so it is reached
+//! from the thing that says nothing is driving this — and from the sidebar's
+//! right-click, which drops the same rows.
 //! Stopping the work is in neither place and not in the list: none of the three
 //! ways of doing it — stop after this task, stop now, close the conversation —
-//! is a step in the work, so all three hang off the header behind a menu, where
-//! what cannot be undone is not one stray click away.
+//! is a step in the work, so all three are in that same menu, where what cannot
+//! be undone is not one stray click away.
 //!
 //! Nothing here ends the grilling, and nothing here chooses a direction. That is
 //! the agent's own closing move — a Question Set carrying a proposal, with the
@@ -85,7 +87,7 @@ import {
   type JSX,
 } from "solid-js";
 
-import { resume, saveBrief, startGrilling } from "../api/client";
+import { saveBrief, startGrilling } from "../api/client";
 import type {
   AgentOutputEvent,
   BriefEvent,
@@ -102,7 +104,6 @@ import type {
   PinnedEvent,
   PullRequestEvent,
   QuestionSetEvent,
-  Resumed,
   StageListEvent,
   StageListReached,
   SteerEvent,
@@ -128,7 +129,7 @@ import { Mark } from "./Mark";
 import marks from "./Mark.module.css";
 import { PaneHead } from "./PaneHead";
 import { Setup } from "./Setup";
-import { StatusButton, running } from "./StatusButton";
+import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import shell from "../Panes.module.css";
 import { titled } from "./naming";
@@ -212,35 +213,6 @@ export function grillRefusal(outcome: GrillingStarted): string {
 
   return GRILL_REFUSAL[outcome];
 }
-
-/// And each way of being refused a resume.
-///
-/// Every one of them is the button doing the one thing it is for: saying what
-/// there is to do about a conversation nothing is driving. A press that quietly
-/// found nothing to start would leave the human exactly as stuck as they were,
-/// which is why the server names these rather than logging them.
-export const RESUME_REFUSAL: Record<Resumed, string> = {
-  Resumed: "",
-  NoSuchConversation: "This conversation is gone.",
-  NotDriven:
-    "Nothing is supposed to be driving this conversation, so there is nothing to start again.",
-  AlreadyDriven:
-    "Something is already driving this conversation. Have a look at what it is doing.",
-  NowhereToWork:
-    "This conversation has no worktree to work in, so there is nowhere to start.",
-  WorktreeRefused:
-    "This conversation's worktree is broken and git would not make it again from the branch. The server log says why.",
-  NoDirection:
-    "Nothing on the record says how this work is being built, so there is no run to pick up.",
-  NothingToWork:
-    "There is no backlog left to work and nothing was ever written on this branch, so there is nothing built here to carry anywhere. Set the next thing going by hand.",
-  NoGrillingPairing:
-    "Choose a grilling profile and model first, on the brief.",
-  NoImplementationPairing:
-    "Choose an implementation profile and model first, on the brief.",
-  NoFollowUpBrief:
-    "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
-};
 
 /// The state a move came *from*: the state the move before it went to, and
 /// `Draft` where there is no move before it, since a Conversation starts
@@ -358,11 +330,6 @@ export function Timeline(props: {
   selected: Opening | null;
   select: (opening: Opening) => void;
 }): JSX.Element {
-  /// The session running now, where there is one — folded in
-  /// `StatusButton.tsx`, which is the other place on this pane that says what
-  /// is running and the one that says it first.
-  const live = createMemo(() => running(props.conversation));
-
   /// The record itself, which is what says which box this pane scrolls in: a
   /// column of the page below the first breakpoint, and the pane above it.
   let record!: HTMLOListElement;
@@ -610,8 +577,9 @@ export function Timeline(props: {
           event that moved every time one landed. Only one is ever drawn — each
           is for a different state — so they read as the one thing there is to do
           from here. What to do about a conversation that is finished is not
-          here: a steer is the way back into one, and it is in the menu on the
-          header, drawn whatever state the conversation is in. */}
+          here, and neither is getting a stopped one going again: a steer and a
+          resume are both rows of the menu the status button drops, drawn
+          whatever state the conversation is in. */}
       <Show
         when={props.conversation.adopting}
         fallback={<StartGrilling conversation={props.conversation} />}
@@ -620,139 +588,7 @@ export function Timeline(props: {
           <Adoption conversation={props.conversation} adopting={adopting()} />
         )}
       </Show>
-      {/* And under that, the way to get a conversation moving again. It is
-          offered *whenever nothing is running*, which is a quiet moment between
-          steps as much as it is a run that has stopped, so it sits below
-          whichever of the two above is drawn rather than instead of it.
-
-          What Verkstead was never going to do is not here: a steer is what says
-          that, and it is in the menu on the header. */}
-      <Resume conversation={props.conversation} />
-
-      {/* And the session running now, held against the foot of the pane so that
-          it can be reached from however far down the record the human has read.
-          A second appearance rather than a move: the session keeps its card in
-          its own place on the record, and this is the way back to it. */}
-      <Show when={live()}>
-        {(output) => (
-          <Session
-            output={output()}
-            open={() => {
-              props.select(output().id);
-              props.details();
-            }}
-          />
-        )}
-      </Show>
     </>
-  );
-}
-
-/// The session running now, held against the foot of the pane.
-///
-/// One line of what the record's own card says — the title and the mark — and
-/// the same press: it opens the session's output in the details pane. It shows
-/// only while something is running, because what it is for is finding the thing
-/// that is moving; a session that has ended is a card on the record like any
-/// other.
-function Session(props: {
-  output: AgentOutputEvent;
-  open: () => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      class={`${styles.session} ${shell.paneFoot}`}
-      onClick={props.open}
-    >
-      <span class={styles.what}>Agent run</span>
-      <Mark
-        running={props.output.running}
-        idle={props.output.idle}
-        class={styles.rowMark}
-      />
-    </button>
-  );
-}
-
-/// The one standing way to get Verkstead driving again: a button, and what it
-/// refuses with when there is nothing to drive.
-///
-/// Drawn exactly where the server says it is worth drawing — see
-/// `ready_to_resume`, which is the state being one something ought to be driving
-/// and nothing driving it. The page cannot work that out for itself: what drives
-/// a conversation is a register of running tasks, and a register lives in the
-/// server.
-///
-/// It carries nothing. What to start is recomputed from the conversation's state
-/// and its branch at the moment of the press, which is the whole point of one
-/// button rather than one per way of stopping — saying something else should
-/// happen is what a steer is for.
-///
-/// Beside it, where the run stopped because an account ran out of window, the
-/// words the session printed about when that account comes back. Words to read
-/// and not a countdown: no stop resumes itself, so this one waits for the same
-/// press as every other, and what the reset time is for is deciding when to
-/// make it. The one thing that tells the two apart.
-function Resume(props: { conversation: ConversationView }): JSX.Element {
-  const queries = useQueryClient();
-
-  const [refused, setRefused] = createSignal<Resumed | null>(null);
-
-  const press = useMutation(() => ({
-    mutationFn: () => resume(props.conversation.id),
-    onSuccess: (outcome: Resumed) => {
-      setRefused(outcome === "Resumed" ? null : outcome);
-
-      // Either way the page it was pressed on is out of date: driving has
-      // started, or the world had moved under the button. Reading it again is
-      // both the correction and the explanation.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
-    },
-  }));
-
-  return (
-    <Show when={props.conversation.ready_to_resume}>
-      <div class={styles.resume}>
-        <h2>Nothing is driving this</h2>
-
-        <button
-          type="button"
-          class={styles.resumeConversation}
-          disabled={press.isPending}
-          onClick={() => press.mutate()}
-        >
-          {press.isPending ? "Resuming…" : "Resume"}
-        </button>
-
-        <Show when={props.conversation.resets}>
-          {(resets) => (
-            <p class={styles.resets}>
-              The account it was spending is out of window until {resets()}.
-            </p>
-          )}
-        </Show>
-
-        <Note>
-          Verkstead works out what should be running from where the work now
-          stands, and starts it.
-        </Note>
-
-        <Show when={refused()}>
-          {(outcome) => (
-            <ErrorLine class={styles.failure}>
-              {RESUME_REFUSAL[outcome()]}
-            </ErrorLine>
-          )}
-        </Show>
-        <Show when={press.isError}>
-          <ErrorLine class={styles.failure}>
-            The conversation could not be resumed: {press.error?.message}
-          </ErrorLine>
-        </Show>
-      </div>
-    </Show>
   );
 }
 

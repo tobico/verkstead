@@ -29,6 +29,12 @@
   color: var(--ink-soft);
 }
 
+/* Getting Verkstead driving again, at the head of the card: the one row here
+   that starts something rather than ending it. Drawn like every other row and
+   named here so it can be found. */
+.resume {
+}
+
 /* Stopping after the current task, and stopping now. Drawn like every other row
    and named here so each can be found. */
 .stop {
@@ -81,8 +87,51 @@
    menu reads the conversation it is about, and there is nothing to press until
    it comes back. A size down on the failures out on the page: the menu is a
    card of its own and the sentence under each row sets the type it is read at.
-   Nothing a *press* does is said here; see `Actions.tsx`. */
+   What a *press* comes to is the card below rather than a line here; see
+   `Actions.tsx`. */
 .conversationActions .failure {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
+}
+
+/* And what a press that did nothing is answered with: the refusal's sentence,
+   drawn over the page through the same `Modal` the steer form is. The card and
+   where it sits are the modal's; what is here is the three things inside it —
+   the heading, the sentence, and the one way out.
+
+   One way out rather than two, which is the whole of what tells this card from
+   a confirm sheet: nothing is being decided here. The press has already been
+   refused, and reading why is all there is left to do. */
+.refused .refusedTitle {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.refused .refusedWhy {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+.refused .refusedOut {
+  display: flex;
+  margin-top: 1rem;
+}
+
+.refused .refusedOut button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .refused .refusedOut button:hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
 }

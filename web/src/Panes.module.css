@@ -17,9 +17,9 @@
    have to be rebuilt — and its scroll position found again — every time the
    human walked back into it.
 
-   Four of the names here are worn by things this file does not draw:
-   `paneChrome` by whatever sticks to the top of a pane, `paneFoot` by whatever
-   sticks to its bottom, `paneBack` by the way out of one, and `paneScreen` by a
+   Three of the names here are worn by things this file does not draw:
+   `paneChrome` by whatever sticks to the top of a pane, `paneBack` by the way
+   out of one, and `paneScreen` by a
    terminal that takes a pane's whole height. The rules that read them are about
    what a *pane* does, and a pane is the frame's; so the frame writes the names
    and the components that have to be recognised by it wear them —
@@ -174,30 +174,11 @@
   pointer-events: none;
 }
 
-/* And what stays at the *bottom* of a pane while the pane goes down under it:
-   the timeline's strip for the session running now, which wears this name in
-   `Timeline.tsx`. The mirror of the chrome above, and sticky for the same
-   reason — a narrow window scrolls the whole page and a wide one scrolls this
-   pane, and one rule hugs the bottom edge in both.
-
-   Beneath the chrome in stacking terms, nought against its one: what is stuck
-   to the top of a pane is the pane's own name, and a menu coming down from it
-   passes over the strip rather than behind it. A layer all the same, so the
-   record goes under the strip rather than through it — which is what the paper
-   is for as well, out past the pane's own padding on both sides.
-
-   And down through the room the pane leaves under its last line, which is what
-   the negative margin takes back: a strip stuck to the bottom edge should be
-   against the edge rather than three rem above it, and the room was only ever
-   there so the record would not end against the frame. */
-.pane > .paneFoot {
-  position: sticky;
-  bottom: 0;
-  z-index: 0;
-  margin: 1rem -1rem -3rem;
-  padding: 0.75rem 1rem;
-  background: var(--paper);
-}
+/* Nothing stays at the *bottom* of a pane. There was a mirror of the chrome
+   above — a `paneFoot` that the timeline's strip for the session running now
+   wore, sticky for the same reason the chrome is — and the strip went when the
+   status button took over saying what is running. A rule with nothing wearing
+   it is a rule nobody can read the reason for, so it went with the strip. */
 
 /* Chrome inside the chrome — the timeline's header, wrapped with the status
    button and the pinned block below it — takes the layer over what it is

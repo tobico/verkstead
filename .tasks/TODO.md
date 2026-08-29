@@ -18,5 +18,5 @@ each task file carries the decisions its slice needs.
 - [x] 02: The waiting fold on ConversationView — [details](02-waiting-fold.md)
 - [x] 03: The running session's pairing on the record — [details](03-session-pairing.md)
 - [x] 04: The StatusButton — [details](04-status-button.md)
-- [ ] 05: Resume into the menu, and the alert modal — [details](05-resume-in-menu.md)
+- [x] 05: Resume into the menu, and the alert modal — [details](05-resume-in-menu.md)
 - [ ] 06: The repo subtitle in the pane head — [details](06-repo-subtitle.md)

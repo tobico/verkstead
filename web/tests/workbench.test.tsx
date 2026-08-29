@@ -86,6 +86,7 @@ import base from "../src/styles/base.css?raw";
 import {
   ARCHIVE_REFUSAL,
   CLOSE_REFUSAL,
+  RESUME_REFUSAL,
   STOP_REFUSAL,
   UNARCHIVE_REFUSAL,
 } from "../src/workbench/Actions";
@@ -160,12 +161,7 @@ import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // jsdom lays nothing out for, and the pane names everything else is found by.
 import shell from "../src/Panes.module.css";
 import shellCss from "../src/Panes.module.css?raw";
-import {
-  ABBREVIATED,
-  CLAMPED_LINES,
-  RESUME_REFUSAL,
-  SWIPE,
-} from "../src/workbench/Timeline";
+import { ABBREVIATED, CLAMPED_LINES, SWIPE } from "../src/workbench/Timeline";
 import {
   COMPANION_BRANCH_REFUSAL,
   COMPANION_MODE_REFUSAL,
@@ -1649,12 +1645,34 @@ describe("what a right-click on a card offers", () => {
     expect(
       [...menu.querySelectorAll("button")].map((button) => button.className),
     ).toEqual([
+      actions.resume,
       actions.stop,
       actions.forceStop,
       actions.steer,
       actions.close,
       actions.closeAndArchive,
     ]);
+  });
+
+  /// Resume among them, which the sidebar gets for nothing: it is a row of the
+  /// one set, so the press that gets a conversation driving again is here as
+  /// well as under the status button — and it acts on the card that was
+  /// right-clicked, like every other row.
+  it("resumes the card that was right-clicked", async () => {
+    const resuming = `/api/ui/conversations/${GRILLING.id}/resume`;
+    const fetching = theSidebarOver(
+      whenever(resuming, json("Resumed" satisfies Resumed), "POST"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    rightClick(await grillingCard(container));
+    fireEvent.click(await drawn(await opened(container), `.${actions.resume}`));
+
+    await waitFor(() => expect(sent(fetching, resuming)).toEqual({}));
+    expect(
+      askedFor(fetching, `/api/ui/conversations/${OPEN.id}/resume`),
+      "the conversation that is open was not the one pressed",
+    ).toBe(0);
   });
 
   /// Which is the whole reason it is worth having: the list is where the human
@@ -5692,89 +5710,39 @@ describe("a session's output on the timeline", () => {
   });
 });
 
-/// And that same session again, held against the foot of the pane for as long
-/// as it is running.
+/// And what is no longer held against the foot of the pane: a strip for the
+/// session running now.
 ///
-/// A second appearance rather than a move: the card stays where it is on the
-/// record, and this is the way back to it from however far down the human has
-/// read. What holds it there is one rule of the frame's, which is what makes it
-/// right in both scrolling regimes — a narrow window scrolls the page, a wide
-/// one scrolls the pane, and sticky hugs the bottom edge in either.
-describe("the strip for the session running now", () => {
-  /// Where the strip is found, which is the pane rather than the record: it is
-  /// no part of the list of what has happened.
-  const strip = (container: HTMLElement) =>
-    container.querySelector(`.${shell.middlePane} > .${timeline.session}`);
-
-  it("holds the running session against the foot of the pane", async () => {
+/// It carried the session's title and its liveness mark, and opened the same
+/// details pane the card on the record opens — a way back to the one moving
+/// thing on a record long enough to have scrolled it away. The status button at
+/// the head of the pane says what is running now, in more words than the strip
+/// ever did and where the eye lands, so what is left of the session is the one
+/// card on the record.
+describe("the foot of the timeline pane", () => {
+  it("holds no strip for the session running now", async () => {
     theGrillingOutput({ running: true, idle: false });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const pinned = await drawn(container, `.${timeline.session}`);
-
-    expect(pinned.textContent).toContain("Agent run");
-    expect(pinned.querySelector(`.${marks.mark}.${marks.working}`)).toBeTruthy();
-
-    // Outside the record, and inside the pane: the strip is a second appearance
-    // of the session rather than an event of its own.
-    expect(pinned.closest(`.${timeline.timeline}`)).toBeNull();
-    expect(strip(container)).toBe(pinned);
-  });
-
-  /// jsdom lays nothing out, so what says it stays down there is the rule, as
-  /// it is for the block stuck to the pane's top edge. One rule for both ways a
-  /// pane scrolls, and beneath the chrome in stacking terms so that a menu
-  /// coming down from the header passes over it.
-  it("stays against the bottom edge while the record scrolls past it", async () => {
-    theGrillingOutput({ running: true });
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    const pinned = await drawn(container, `.${timeline.session}`);
-
-    expect(pinned.classList).toContain(shell.paneFoot);
-    expect(shellCss).toContain(
-      ".pane > .paneFoot {\n  position: sticky;\n  bottom: 0;\n  z-index: 0;",
-    );
-  });
-
-  /// The mark says what the card's says, live: the two are one session read at
-  /// two distances, and a strip disagreeing with the row would be two answers
-  /// to the one question.
-  it("empties the ring while the session is idle", async () => {
-    theGrillingOutput({ running: true, idle: true });
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    const pinned = await drawn(container, `.${timeline.session}`);
-
-    expect(pinned.querySelector(`.${marks.mark}.${marks.idle}`)).toBeTruthy();
-    expect(pinned.querySelector(`.${marks.mark}.${marks.working}`)).toBeNull();
-  });
-
-  /// And the press is the card's own press: the same session's output in the
-  /// details pane, and the card on the record marked as the one that is open.
-  it("opens the session's output", async () => {
-    theGrillingOutput({ running: true });
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    fireEvent.click(await drawn(container, `.${timeline.session}`));
-
-    await drawn(container, `.${shell.detailsPane} .${outputPane.captureSummary}`);
-
-    const card = container.querySelector(`.${timeline.agentOutput}`)!;
-    expect(card.classList).toContain(pressable.open);
-  });
-
-  /// And nothing at all where nothing is running, which is every conversation
-  /// between one step and the next: there is no session to be found, so there
-  /// is nothing to hold in view.
-  it("draws no strip when no session is running", async () => {
-    theGrilling();
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
+    // The record's own card for the session is still there, and is the only
+    // one: a second appearance of it was what the strip was.
     await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
 
-    expect(OUTPUT.running).toBe(false);
-    expect(strip(container)).toBeNull();
+    expect(container.querySelectorAll(`.${timeline.agentOutput}`)).toHaveLength(1);
+
+    // And the frame's own rule for something stuck to a pane's bottom edge went
+    // with it: the strip was the only thing that ever wore that name, and a rule
+    // with no wearer is a rule nobody can read the reason for.
+    expect(shellCss).not.toContain(".pane > .paneFoot {");
+  });
+
+  /// And the status button says what the strip said, which is why it could go:
+  /// the running session, named rather than marked.
+  it("says what is running at the head of the pane instead", async () => {
+    theGrillingOutput({ running: true, profile: "Work", model: "claude-fable-5" });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    expect(await saidRunning(container)).toBe("Work Fable 5");
   });
 });
 
@@ -6233,9 +6201,10 @@ describe("closing a conversation", () => {
     expect(screen.queryByText("This conversation has been closed.")).toBeNull();
   });
 
-  it("logs a conversation that has gone rather than drawing it", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-
+  /// A page drawn against a conversation that has since gone: the press is
+  /// refused, and the refusal opens over the page rather than going to a
+  /// console nobody has open.
+  it("says over the page that the conversation has gone", async () => {
     theGrilling(
       whenever(
         `/api/ui/conversations/${GRILLING.id}/close`,
@@ -6248,12 +6217,9 @@ describe("closing a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.close}`));
 
-    await waitFor(() =>
-      expect(logged).toHaveBeenCalledWith(CLOSE_REFUSAL.NoSuchConversation),
-    );
-    expect(screen.queryByText("This conversation is gone.")).toBeNull();
+    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
 
-    logged.mockRestore();
+    expect(said.textContent).toBe(CLOSE_REFUSAL.NoSuchConversation);
   });
 });
 
@@ -6324,9 +6290,7 @@ describe("closing and archiving a conversation", () => {
     );
   });
 
-  it("logs a conversation that has gone rather than drawing it", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-
+  it("says over the page that the conversation has gone", async () => {
     theGrilling(
       whenever(
         `/api/ui/conversations/${GRILLING.id}/close-and-archive`,
@@ -6341,12 +6305,9 @@ describe("closing and archiving a conversation", () => {
       await drawn(container, `.${actions.conversationActions} .${actions.closeAndArchive}`),
     );
 
-    await waitFor(() =>
-      expect(logged).toHaveBeenCalledWith(CLOSE_REFUSAL.NoSuchConversation),
-    );
-    expect(screen.queryByText("This conversation is gone.")).toBeNull();
+    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
 
-    logged.mockRestore();
+    expect(said.textContent).toBe(CLOSE_REFUSAL.NoSuchConversation);
   });
 });
 
@@ -6404,10 +6365,8 @@ describe("archiving a conversation", () => {
   });
 
   /// A page drawn against a conversation that has since been steered back into
-  /// the work: the press is refused, and the console is where the refusal goes.
-  it("logs one that is not a conversation to put away", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-
+  /// the work: the press is refused, and the refusal opens over the page.
+  it("says over the page that there is nothing to put away", async () => {
     theWorkbenchWith(
       { state: "Closed", ready_to_grill: false },
       whenever(
@@ -6421,12 +6380,9 @@ describe("archiving a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.archive}`));
 
-    await waitFor(() =>
-      expect(logged).toHaveBeenCalledWith(ARCHIVE_REFUSAL.NotClosed),
-    );
-    expect(screen.queryByText(/nothing to put away/)).toBeNull();
+    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
 
-    logged.mockRestore();
+    expect(said.textContent).toBe(ARCHIVE_REFUSAL.NotClosed);
   });
 });
 
@@ -6488,10 +6444,8 @@ describe("unarchiving a conversation", () => {
   });
 
   /// The one thing left to refuse: a page drawn against a conversation that has
-  /// since gone. To the console, as every other refusal here goes.
-  it("logs a conversation that is gone", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-
+  /// since gone. Over the page, as every other refusal here goes.
+  it("says over the page that the conversation is gone", async () => {
     theWorkbenchWith(
       { state: "Closed", ready_to_grill: false, archived: true },
       whenever(
@@ -6505,12 +6459,9 @@ describe("unarchiving a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.unarchive}`));
 
-    await waitFor(() =>
-      expect(logged).toHaveBeenCalledWith(UNARCHIVE_REFUSAL.NoSuchConversation),
-    );
-    expect(screen.queryByText("This conversation is gone.")).toBeNull();
+    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
 
-    logged.mockRestore();
+    expect(said.textContent).toBe(UNARCHIVE_REFUSAL.NoSuchConversation);
   });
 });
 
@@ -6631,12 +6582,12 @@ function theGrillingStanding(
 }
 
 describe("stopping a conversation", () => {
-  /// The two stops sit in the same menu as the steer and the close, in the order
-  /// of what each one costs: pause after this task, stop now, move the work
-  /// somewhere else, end the conversation. Each says what it does, because
-  /// *stop* and *force stop* are two words apart and hours of work apart — and
-  /// each says it *inside* the row, so what the press is called and what it
-  /// means are one thing to read and one thing to aim at.
+  /// The two stops sit in the same menu as the resume, the steer and the close,
+  /// in the order of what each one costs: get going again, pause after this
+  /// task, stop now, move the work somewhere else, end the conversation. Each
+  /// says what it does, because *stop* and *force stop* are two words apart and
+  /// hours of work apart — and each says it *inside* the row, so what the press
+  /// is called and what it means are one thing to read and one thing to aim at.
   it("offers the four ways of stopping, each saying what it does", async () => {
     theGrillingStanding({ ready_to_stop: true, working: true });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -6647,6 +6598,7 @@ describe("stopping a conversation", () => {
     );
 
     expect(offered).toEqual([
+      actions.resume,
       actions.stop,
       actions.forceStop,
       actions.steer,
@@ -6810,14 +6762,15 @@ describe("stopping a conversation", () => {
     );
   });
 
-  /// And a press that was refused draws nothing at all. These are not presses
+  /// And a press that was refused says so over the page. These are not presses
   /// that fail in ordinary use — every refusal is a page drawn against a
   /// conversation that has since moved, and the re-read that follows is what
-  /// answers it, by taking the row away. What is left is a line in the console,
-  /// for whoever is debugging.
-  it("logs a refused stop rather than drawing one", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-
+  /// corrects it, by taking the row away — but the human made the press and is
+  /// owed the sentence rather than a line in a console.
+  ///
+  /// Not in the menu: the card is drawn over the page and the menu has gone by
+  /// the time there is anything to say.
+  it("says a refused stop over the page rather than in the menu", async () => {
     theGrillingStanding(
       { ready_to_stop: true, working: true },
       whenever(
@@ -6831,14 +6784,12 @@ describe("stopping a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.stop}`));
 
-    await waitFor(() =>
-      expect(logged).toHaveBeenCalledWith(STOP_REFUSAL.AlreadyStopped),
-    );
+    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
+
+    expect(said.textContent).toBe(STOP_REFUSAL.AlreadyStopped);
     expect(
       container.querySelector(`.${actions.conversationActions} .${notices.error}`),
     ).toBeNull();
-
-    logged.mockRestore();
   });
 });
 
@@ -7431,9 +7382,9 @@ describe("steering a conversation", () => {
   });
 
   /// Cancel is no press at all: the conversation stays where the click left it,
-  /// stopped, with resume drawn on it. That is accepted rather than a bug — the
-  /// click is what froze the world while the human was composing.
-  it("sends nothing when it is cancelled, and leaves resume drawn", async () => {
+  /// stopped, with resume offered on it. That is accepted rather than a bug —
+  /// the click is what froze the world while the human was composing.
+  it("sends nothing when it is cancelled, and leaves resume offered", async () => {
     // The conversation as the server says it stands once the click has landed:
     // stopped, so there is nothing left to stop and one press that undoes it.
     const fetching = theGrillingStanding(
@@ -7453,7 +7404,7 @@ describe("steering a conversation", () => {
       fetching.mock.calls.filter(([asked]) => String(asked) === STEER_SUBMIT),
     ).toEqual([]);
 
-    const press = await drawn(container, `.${timeline.resume} .${timeline.resumeConversation}`);
+    const press = await drawn(await openActions(container), `.${actions.resume}`);
     expect(press.textContent).toContain("Resume");
   });
 
@@ -10328,10 +10279,10 @@ function thePaused(
 
 describe("a run stopped because an account ran out of window", () => {
   /// One stopped shape: the notice saying what stopped and why, the status
-  /// button saying the work is waiting on the human, and the one Resume at the
-  /// foot of the timeline. The same three things a run stopped by a press
-  /// draws — see the stop above.
-  it("draws the card, the status and the button every stop draws", async () => {
+  /// button saying the work is waiting on the human, and the one Resume in the
+  /// menu it drops. The same three things a run stopped by a press draws — see
+  /// the stop above.
+  it("draws the card, the status and the row every stop draws", async () => {
     thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);
 
@@ -10350,36 +10301,27 @@ describe("a run stopped because an account ran out of window", () => {
       (await drawn(container, `.${statusButton.standing}`)).textContent,
     ).toContain("Waiting on you");
     expect(
-      (await drawn(container, `.${timeline.resume} .${timeline.resumeConversation}`)).textContent,
+      (await drawn(await openActions(container), `.${actions.resume} .${actions.title}`))
+        .textContent,
     ).toBe("Resume");
   });
 
-  /// And the one thing that tells it from any other stop: when the account
-  /// comes back, in the words the session printed them in — `3pm` stays `3pm`.
-  /// Words to read rather than a countdown: no stop resumes itself, so this one
-  /// waits for the same press, and the reset is what says when to make it.
-  it("says when the account comes back, beside the resume", async () => {
-    thePaused();
-    const { container } = mount(`/conversations/${WAITING.id}`);
-
-    const resets = await drawn(container, `.${timeline.resume} .${timeline.resets}`);
-
-    expect(resets.textContent).toContain("out of window until 3pm");
-    expect(resets.closest(`.${timeline.resume}`)!.querySelector(`.${timeline.resumeConversation}`))
-      .not.toBeNull();
-  });
-
-  /// A conversation stopped by a press carries no such words, which is the
-  /// whole of the difference between the two.
+  /// The one thing that tells this stop from any other is when the account
+  /// comes back, and it is said on the status button's second line — where what
+  /// is running is said, this being a stop with nothing running and a reason of
+  /// its own for it. See *the status button* below, which is where that line is
+  /// asked about.
+  ///
+  /// A conversation stopped by a press carries no such words, which is the whole
+  /// of the difference between the two.
   it("is the only thing a conversation stopped by a press draws differently", async () => {
     expect(STOPPED.resets).toBeNull();
 
     theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
-    await drawn(container, `.${timeline.resume} .${timeline.resumeConversation}`);
-
-    expect(container.querySelector(`.${timeline.resets}`)).toBeNull();
+    expect(await saidRunning(container)).toBe("No agent running");
+    await drawn(await openActions(container), `.${actions.resume}`);
   });
 
   /// The record is kept and read rather than rewritten (ADR-0006): a Pause a
@@ -11582,35 +11524,53 @@ describe("a manual task on an old record", () => {
 /// Where a resume is pressed.
 const RESUMING = `/api/ui/conversations/${WRAPPING.id}/resume`;
 
-describe("the resume button", () => {
+/// The card a refused press opens over the page, or nothing where nothing has
+/// been refused. Found on the body rather than in the container, a `dialog`
+/// being drawn in the top layer.
+function refusal(): HTMLElement | null {
+  return document.body.querySelector<HTMLElement>(`.${actions.refused}`);
+}
+
+/// Getting Verkstead driving again, which is a row of the conversation's
+/// actions menu like every other: above the stops, because it is the one *go*
+/// among them.
+///
+/// It was a block at the foot of the timeline, with its own heading, its own
+/// note and its own refusal lines. What put it in the menu is what put every
+/// other control there — the status button says nothing is driving this, and
+/// what there is to do about that is behind its press — and the sidebar's
+/// right-click gets it for nothing, both menus being the one set of rows.
+describe("the resume row", () => {
   /// Drawn on the server's word alone. What drives a conversation is a register
   /// of running tasks, which lives in the server — a page working it out from
   /// the state and the session it can see would be a second opinion about a
   /// question only one side can answer.
-  it("is drawn where nothing is driving the conversation", async () => {
+  it("is the first row where nothing is driving the conversation", async () => {
     theWrapping({ ready_to_resume: true });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    const resume = await drawn(container, `.${timeline.resume}`);
+    const menu = await openActions(container);
+    const resume = await drawn(menu, `.${actions.resume}`);
 
-    expect(resume.querySelector(`.${timeline.resumeConversation}`)!.textContent).toContain(
-      "Resume",
-    );
+    expect(resume.querySelector(`.${actions.title}`)!.textContent).toBe("Resume");
+    // First, over the stops: everything under it ends the work or moves it.
+    expect([...menu.querySelectorAll("button")][0]).toBe(resume);
   });
 
-  /// And gone where something is. There is nothing to start again, and a button
+  /// And gone where something is. There is nothing to start again, and a row
   /// offering to would be one that could only refuse.
   it("goes where something is driving it already", async () => {
     theWrapping({ ready_to_resume: false });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    await drawn(container, `.${timeline.timeline}`);
+    const menu = await openActions(container);
+    await drawn(menu, `.${actions.steer}`);
 
-    expect(container.querySelector(`.${timeline.resume}`)).toBeNull();
+    expect(menu.querySelector(`.${actions.resume}`)).toBeNull();
   });
 
   /// Nothing goes with the press. What should be running is recomputed from
-  /// where the work now stands, which is the whole reason there is one button
+  /// where the work now stands, which is the whole reason there is one row
   /// rather than a choice of them.
   it("sends the press with nothing on it", async () => {
     const fetching = theWrapping(
@@ -11619,15 +11579,16 @@ describe("the resume button", () => {
     );
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    const resume = await drawn(container, `.${timeline.resume}`);
-    fireEvent.click(resume.querySelector(`.${timeline.resumeConversation}`)!);
+    fireEvent.click(await drawn(await openActions(container), `.${actions.resume}`));
 
     await waitFor(() => expect(sent(fetching, RESUMING)).toEqual({}));
+    // Nothing was refused, so nothing is drawn over the page and the menu goes.
+    await waitFor(() => expect(refusal()).toBeNull());
   });
 
-  /// A press that found nothing to start says so where it was pressed. This is
-  /// the whole of what resume is for: a conversation nothing is driving, and
-  /// the reason nothing is.
+  /// A press that found nothing to start says so over the page. This is the
+  /// whole of what resume is for: a conversation nothing is driving, and the
+  /// reason nothing is.
   it("says in words that there was nothing to start", async () => {
     theWrapping(
       { ready_to_resume: true },
@@ -11635,13 +11596,12 @@ describe("the resume button", () => {
     );
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    const resume = await drawn(container, `.${timeline.resume}`);
-    fireEvent.click(resume.querySelector(`.${timeline.resumeConversation}`)!);
+    fireEvent.click(await drawn(await openActions(container), `.${actions.resume}`));
 
-    const refused = await drawn(container, `.${timeline.resume} .${notices.error}`);
+    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
 
-    expect(refused.textContent).toBe(RESUME_REFUSAL.NothingToWork);
-    expect(refused.textContent).toContain("no backlog left");
+    expect(said.textContent).toBe(RESUME_REFUSAL.NothingToWork);
+    expect(said.textContent).toContain("no backlog left");
   });
 
   /// And a second press on a conversation the first one got going is refused as
@@ -11653,12 +11613,129 @@ describe("the resume button", () => {
     );
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    const resume = await drawn(container, `.${timeline.resume}`);
-    fireEvent.click(resume.querySelector(`.${timeline.resumeConversation}`)!);
+    fireEvent.click(await drawn(await openActions(container), `.${actions.resume}`));
 
-    const refused = await drawn(container, `.${timeline.resume} .${notices.error}`);
+    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
 
-    expect(refused.textContent).toBe(RESUME_REFUSAL.AlreadyDriven);
+    expect(said.textContent).toBe(RESUME_REFUSAL.AlreadyDriven);
+  });
+});
+
+/// What a press that did nothing comes to, whichever row was pressed: the
+/// refusal's own sentence, drawn over the page.
+///
+/// This menu used to answer a refusal with a `console.error` and leave the rows
+/// where they were, on the grounds that every refusal it had was a page drawn
+/// against a conversation that had moved and the re-read behind the press was
+/// the correction. Resume is what changed that: its refusals are the whole of
+/// what the row is for, and there was never a way to tell those sentences from
+/// the rest.
+describe("what a refused press says", () => {
+  /// A row that is not resume, to say that the card is the menu's answer rather
+  /// than the resume row's: a close on a conversation the server says is gone.
+  it("opens the refusal's sentence over the page, whichever row was pressed", async () => {
+    theWrapping(
+      {},
+      whenever(
+        `/api/ui/conversations/${WRAPPING.id}/close`,
+        json("NoSuchConversation" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(await drawn(await openActions(container), `.${actions.close}`));
+
+    const card = await drawn(document.body, `.${actions.refused}`);
+
+    expect(card.querySelector(`.${actions.refusedWhy}`)!.textContent).toBe(
+      CLOSE_REFUSAL.NoSuchConversation,
+    );
+    // A heading that says what the card is, and one way out of it: nothing is
+    // being decided here, the press having already been refused.
+    expect(card.querySelector(`.${actions.refusedTitle}`)!.textContent).toBe(
+      "Nothing happened",
+    );
+    expect(card.querySelectorAll(`.${actions.refusedOut} button`)).toHaveLength(1);
+  });
+
+  /// The menu goes on the way: a dropdown left hanging behind a card drawn over
+  /// the page is a menu nobody can see to close.
+  it("takes the menu back as the card comes up", async () => {
+    theWrapping(
+      {},
+      whenever(
+        `/api/ui/conversations/${WRAPPING.id}/close`,
+        json("NoSuchConversation" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(await drawn(await openActions(container), `.${actions.close}`));
+
+    await drawn(document.body, `.${actions.refused}`);
+    expect(
+      container.querySelector(`.${actions.conversationActions} > .${dropdown.drop}`),
+    ).toBeNull();
+  });
+
+  /// And the one way out takes it back, leaving the page as it was.
+  it("goes when the one way out is pressed", async () => {
+    theWrapping(
+      {},
+      whenever(
+        `/api/ui/conversations/${WRAPPING.id}/close`,
+        json("NoSuchConversation" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(await drawn(await openActions(container), `.${actions.close}`));
+
+    const card = await drawn(document.body, `.${actions.refused}`);
+    fireEvent.click(card.querySelector(`.${actions.refusedOut} button`)!);
+
+    await waitFor(() => expect(refusal()).toBeNull());
+  });
+
+  /// A request that never came back is said the same way. Nothing about it is a
+  /// refusal the server named, so the sentence is the page's own — but a press
+  /// that did nothing is a press that did nothing, and the human is owed the
+  /// same answer either way.
+  it("says so when the request itself fell over", async () => {
+    theWrapping(
+      { ready_to_resume: true },
+      whenever(RESUMING, json({ error: "the server is not answering" }, 503), "POST"),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(await drawn(await openActions(container), `.${actions.resume}`));
+
+    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
+
+    expect(said.textContent).toContain("could not be resumed");
+    expect(said.textContent).toContain("the server is not answering");
+  });
+
+  /// And a press that landed says nothing at all. There is no card, because
+  /// there is nothing that did not happen.
+  it("says nothing where the press landed", async () => {
+    theWrapping(
+      { ready_to_resume: true },
+      whenever(RESUMING, json("Resumed" as Resumed), "POST"),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(await drawn(await openActions(container), `.${actions.resume}`));
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${actions.conversationActions} > .${dropdown.drop}`),
+      ).toBeNull(),
+    );
+    expect(refusal()).toBeNull();
   });
 });
 
