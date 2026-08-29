@@ -50,6 +50,13 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       ../web/tests
       # The service worker, the manifest and the icons — vite's `publicDir`.
       ../assets
+      # And the share viewer, which is neither built here nor served from here:
+      # it is a hand-written page the server hands over for the human to host,
+      # so it lives with the server that ships it. The suite drives it as a file
+      # — see `web/tests/viewing.test.ts` — the way it drives the service worker
+      # above, so the check needs it in the source even though the build does
+      # not.
+      ../crates/server/share-viewer.html
     ];
   };
 

@@ -50,6 +50,37 @@ const DIAGRAMS: &str = r#"<script id="diagrams">"#;
 /// And where either ends, which is what the contents are written between.
 const CLOSES: &str = "</script>";
 
+/// The **share viewer**: the small page that turns a Published Share into a
+/// read, handed over on the settings page for the human to host once.
+///
+/// A share downloads and opens off a disk, and that is the whole of what an
+/// emailed one needs. A *published* one is a secret gist, and a gist link alone
+/// draws nothing: GitHub renders a gist as source, and the raw URL is served
+/// `text/plain` with `nosniff`, which every browser refuses to draw. So the gap
+/// between a link and a read is one static page, and this is it — hosted by the
+/// human on a public site of their own, with its URL in
+/// [`crate::settings::Config::share_viewer_url`] so that a comment on a pull
+/// request can be composed through it.
+///
+/// It is Verkstead's file rather than the recipient's server. The gist id rides
+/// in the fragment, which no browser sends anywhere, and the share is fetched
+/// from GitHub by the reader's own browser and drawn in a sandboxed frame — so
+/// the host of the page learns neither which share was read nor anything of what
+/// is in it, and the share's own scripts never get that host's origin. The page
+/// itself says all of this at the top of it.
+///
+/// Compiled in rather than embedded the way the built viewer is: it is written
+/// by hand, has no build behind it and no dependency in it, so every binary
+/// carries it whether or not anybody has run `pnpm build`.
+pub(crate) const VIEWER: &str = include_str!("../share-viewer.html");
+
+/// What it is called when it lands in somebody's downloads.
+///
+/// Named for what it is rather than for the conversation it will draw: a human
+/// downloads this once in the life of a machine, puts it on a site, and comes
+/// back to it only to replace it.
+pub(crate) const VIEWER_FILENAME: &str = "verkstead-share-viewer.html";
+
 /// The share file: the built template with one Conversation's record in it, and
 /// the diagram renderer where the record needs one.
 ///

@@ -276,6 +276,9 @@ export function GithubPane(props: {
           ? (told()?.rust_build_cache.size ?? "")
           : "",
       },
+      // And where the share viewer is hosted, as it stands, for the same
+      // reason: one request writes the whole of `config.yaml`.
+      share_viewer_url: told()?.share_viewer_url ?? "",
     });
 
   const submit = (ev: SubmitEvent) => {

@@ -769,6 +769,16 @@ export function saveSettings(edit: SettingsEdit): Promise<SettingsSaved> {
   return post<SettingsSaved>("/api/ui/settings", edit);
 }
 
+/// Where the share viewer stands to be taken away: the small page Verkstead
+/// ships, which the human hosts once so that a published share can be read in a
+/// browser rather than downloaded.
+///
+/// A path rather than a fetch, for the reason a share's own download is one:
+/// what the press is for is a file, and a link is how a browser is handed one.
+export function shareViewerPath(): string {
+  return "/api/ui/share-viewer.html";
+}
+
 /// The public half of the server's VAPID keypair — what `PushManager.subscribe`
 /// takes as its `applicationServerKey`, and the only way a browser names the
 /// server it is subscribing to.

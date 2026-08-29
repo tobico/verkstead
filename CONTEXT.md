@@ -353,6 +353,25 @@ Verkstead with no token configured refuses instead of falling back.
 _Avoid_: upload, hosting, sharing (the Share is the file; publishing is what is
 done with it), gist link (the gist is where it went, not what it is)
 
+**Share Viewer**:
+The small static page that turns a Published Share into a read. A gist link
+alone shows source — GitHub renders a gist as code, and its raw URL is served as
+plain text a browser refuses to draw — so the page closes the gap: the gist's id
+rides in the **URL fragment**, the Share is fetched from GitHub by the reader's
+own browser, and it is drawn in a **sandboxed frame** with scripts allowed and
+same-origin withheld.
+**Verkstead ships it and the human hosts it**, once, on a public site of their
+own — a GitHub Pages repository is what it was written for. It is offered as a
+download on the settings page, and the **share viewer URL** beside it records
+where it went; that is configuration rather than a secret, and it reads back as
+it was written. A Verkstead with none configured links a Published Share as the
+gist itself, which is a worse read rather than a failure.
+It learns nothing about what passes through it: a fragment is never sent to a
+server, so the host sees only that somebody opened the page, and the frame keeps
+the Share's own scripts off that host's origin.
+_Avoid_: proxy, server, renderer, gateway (nothing passes through it — the
+reader's browser fetches from GitHub itself)
+
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose
 first, a delta Diagram after it — kept by the sweep of whichever repository it

@@ -276,6 +276,7 @@ describe("changing the build cache", () => {
           enabled: false,
           size: TOLD.rust_build_cache.size,
         },
+        share_viewer_url: TOLD.share_viewer_url,
       }),
     );
 
@@ -312,6 +313,7 @@ describe("changing the build cache", () => {
         git_author: TOLD.git_author,
         github_token: "Keep",
         rust_build_cache: { enabled: true, size: "80G" },
+        share_viewer_url: TOLD.share_viewer_url,
       }),
     );
   });

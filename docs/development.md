@@ -79,6 +79,7 @@ git_author:
 rust_build_cache:
   enabled: true
   size: 30G
+share_viewer_url: https://tobico.github.io/verkstead-shares/
 ```
 
 Every session started after that gets the token as `GH_TOKEN`, which `gh`
@@ -100,16 +101,18 @@ what the settings page saves through:
 $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-   "compiles_cached":true}}
+   "compiles_cached":true},"share_viewer_url":""}
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
-         "rust_build_cache":{"enabled":true,"size":""}}' \
+         "rust_build_cache":{"enabled":true,"size":""},
+         "share_viewer_url":"https://tobico.github.io/verkstead-shares/"}' \
     http://127.0.0.1:8422/api/ui/settings
 {"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-    "compiles_cached":true}},
+    "compiles_cached":true},
+  "share_viewer_url":"https://tobico.github.io/verkstead-shares/"},
  "verified":{"Account":{"login":"tobico","missing":["gist"]}}}
 ```
 
@@ -127,6 +130,22 @@ sends, and `"Clear"` to take it away. `"rust_build_cache"` is a pair of values
 rather than an action: an empty `"size"` is no size configured, which puts the
 default back, and `"compiles_cached"` is read-only — it says whether the server
 found an `sccache`, which is its own environment rather than anybody's setting.
+
+`"share_viewer_url"` is where the **share viewer** is hosted, and it is the
+plainest value here: written as it was typed, read back as itself, and empty
+where nobody has hosted one. The viewer is a small static page that draws a
+published share in a browser — a gist link on its own shows source — and
+Verkstead ships it rather than serving it:
+
+```console
+$ curl -O -J http://127.0.0.1:8422/api/ui/share-viewer.html
+```
+
+Put that file on a public site of your own, a GitHub Pages repository being what
+it was written for, and save its address here. A published share is then read at
+`<share-viewer-url>#<gist-id>`; with nothing configured, a share is linked as the
+gist itself. Nothing about it is secret: the page is public, and the id after the
+`#` is never sent to the host that serves it.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory

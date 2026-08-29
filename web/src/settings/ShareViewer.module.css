@@ -1,0 +1,148 @@
+/* The share viewer — see `ShareViewer.tsx`.
+
+   Two halves in two panes, like the sections above it: the card says where the
+   viewer is hosted, or what it costs that nobody has hosted one, and the pane
+   beside it carries the file, the three steps and the field.
+
+   What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
+   while its pane is open, and what it does under the pointer. What is here is
+   only what stands on it. */
+
+.shareViewerCard {
+  margin-bottom: 1.5rem;
+}
+
+.shareViewerCard h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+/* Where the viewer is, in a line: the same quiet the credentials say what is
+   configured in. */
+.standing {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.standing .hosted {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink);
+}
+
+/* And a section nobody has been to, with what that costs. Drawn the way the
+   sections above draw a setting that is not there — an edge with the red down
+   its side, so it says the same thing on all three of the card's surfaces —
+   because it is the same kind of sentence: nothing has failed, and this is what
+   will be worse until somebody acts on it. */
+.warning {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--stopped);
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+}
+
+/* The details pane: what the viewer is, the three steps, and the field. */
+.steps {
+  margin: 1rem 0 0;
+  padding-inline-start: 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.steps li {
+  margin-bottom: 0.5rem;
+}
+
+/* The file itself, which is the one press in this pane that is not a save. A
+   link rather than a button, because a link is how a browser is handed a
+   file. */
+.download {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.hosting {
+  margin-top: 1rem;
+}
+
+.hosting label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* The box and its press on one line, as the build cache's size is — except
+   that a URL is not short, so the field takes what is left of the pane. */
+.field {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.field button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.field button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* What the setting buys, with the address in it: the link a comment on a pull
+   request carries. */
+.linking {
+  margin: 0.85rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.linking .link {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink);
+}
+
+.failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+.field input:focus-visible {
+  border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .field input:hover {
+    border-color: var(--ink-soft);
+  }
+
+  .field button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

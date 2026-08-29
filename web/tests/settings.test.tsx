@@ -55,6 +55,7 @@ import card from "../src/CardButton.module.css";
 import { GithubCard, GithubPane } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
 import buildCache from "../src/settings/BuildCache.module.css";
+import shareViewer from "../src/settings/ShareViewer.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
 import {
   openingAt,
@@ -404,6 +405,7 @@ describe("saving", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
+        share_viewer_url: TOLD.share_viewer_url,
       }),
     );
   });
@@ -625,8 +627,9 @@ describe("replacing and clearing the token", () => {
         git_author: TOLD.git_author,
         github_token: null,
         // Untouched by this form, and so untouched in what the save answers
-        // with — see the section below it for what does change these.
+        // with — see the sections below it for what does change these.
         rust_build_cache: TOLD.rust_build_cache,
+        share_viewer_url: TOLD.share_viewer_url,
       },
       verified: null,
     };
@@ -644,6 +647,7 @@ describe("replacing and clearing the token", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
+        share_viewer_url: TOLD.share_viewer_url,
       }),
     );
 
@@ -696,6 +700,7 @@ function thePage(at = "/settings") {
             <Route path="/" />
             <Route path="/github" />
             <Route path="/build-cache" />
+            <Route path="/share-viewer" />
             <Route path="/profiles/:profile" />
             <Route path="/repos/:repo" />
           </Route>
@@ -865,6 +870,35 @@ describe("the path a details pane stands at", () => {
 
     history.back();
     await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// And the third pane a word names: where the share viewer is hosted.
+  it("opens the share viewer at /settings/share-viewer, replacing", async () => {
+    const { container, history } = thePage();
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${shareViewer.shareViewerCard}`,
+    );
+    fireEvent.click(face);
+
+    await waitFor(() => expect(history.get()).toBe("/settings/share-viewer"));
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("draws the viewer's field in the details pane, and reads its card as open", async () => {
+    const { container } = thePage("/settings/share-viewer");
+
+    await waitFor(() => screen.getByLabelText(/Where you hosted it/));
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${shareViewer.shareViewerCard}`,
+    );
+    expect(face.getAttribute("aria-pressed")).toBe("true");
+    expect(face.classList).toContain(card.open);
   });
 
   it("draws the switch in the details pane, and reads the cache card as open", async () => {
@@ -1145,6 +1179,7 @@ describe("where a settings details pane stands", () => {
   it("puts an id behind a segment of its own, and a word beside it", () => {
     expect(pathTo("github")).toBe("/settings/github");
     expect(pathTo("build-cache")).toBe("/settings/build-cache");
+    expect(pathTo("share-viewer")).toBe("/settings/share-viewer");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
     expect(pathTo(opensRepo(7))).toBe("/settings/repos/7");
@@ -1155,6 +1190,7 @@ describe("where a settings details pane stands", () => {
     for (const opening of [
       "github",
       "build-cache",
+      "share-viewer",
       opensProfile(7),
       opensProfile("new"),
       opensRepo(7),

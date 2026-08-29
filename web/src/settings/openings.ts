@@ -9,9 +9,9 @@
 //! Three shapes under the settings, because there are three kinds of thing the
 //! pane draws:
 //!
-//! - `github` and `build-cache` — the credentials and the shared Rust build
-//!   cache, each named by a word. There is one of each of them, and a word says
-//!   so.
+//! - `github`, `build-cache` and `share-viewer` — the credentials, the shared
+//!   Rust build cache and where the share viewer is hosted, each named by a
+//!   word. There is one of each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
 //! - `repos/:id` — a registered Repo, opened; and `repos/new` for the path
@@ -42,6 +42,7 @@
 export type Opening =
   | "github"
   | "build-cache"
+  | "share-viewer"
   | "repo:new"
   | `repo:${number}`
   | "profile:new"
@@ -118,7 +119,10 @@ export function openingAt(pathname: string): Opening | null {
     return null;
   }
 
-  if ((what === "github" || what === "build-cache") && which === undefined) {
+  if (
+    (what === "github" || what === "build-cache" || what === "share-viewer") &&
+    which === undefined
+  ) {
     return what;
   }
 

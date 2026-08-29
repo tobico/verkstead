@@ -24,6 +24,7 @@
 //! rust_build_cache:
 //!   enabled: true
 //!   size: 30G
+//! share_viewer_url: https://tobico.github.io/verkstead-share-viewer/
 //! ```
 //!
 //! Who a session commits as is said here for the reason the token is: it used
@@ -347,6 +348,18 @@ pub struct Config {
     /// the switch is the one that *closes* it.
     #[serde(default)]
     rust_build_cache: RustBuildCache,
+
+    /// Where the human put the **share viewer** — the small page Verkstead
+    /// ships that draws a Published Share in a browser, hosted once on a public
+    /// site of their own.
+    ///
+    /// Configuration rather than a secret, and the plainest thing in either
+    /// file: a URL, or nothing. Nothing is a Verkstead that has never been to
+    /// that section, and what it costs is a comment linking the gist itself
+    /// rather than a page that renders it — which is a worse read and not a
+    /// failure, so nothing here insists on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    share_viewer_url: Option<String>,
 }
 
 impl Config {
@@ -368,14 +381,20 @@ impl Config {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
             },
+            share_viewer_url: config.share_viewer_url.and_then(blank_is_nothing),
         })
     }
 
     /// The config a settings page has just been told.
-    pub fn of(git_author: GitAuthor, rust_build_cache: RustBuildCache) -> Config {
+    pub fn of(
+        git_author: GitAuthor,
+        rust_build_cache: RustBuildCache,
+        share_viewer_url: Option<String>,
+    ) -> Config {
         Config {
             git_author,
             rust_build_cache,
+            share_viewer_url: share_viewer_url.and_then(blank_is_nothing),
         }
     }
 
@@ -388,6 +407,13 @@ impl Config {
     /// nobody has said otherwise.
     pub fn rust_build_cache(&self) -> &RustBuildCache {
         &self.rust_build_cache
+    }
+
+    /// And where the share viewer is hosted, or `None` where nobody has put it
+    /// anywhere. There is no default: nobody but the human knows where their
+    /// own site is.
+    pub fn share_viewer_url(&self) -> Option<&str> {
+        self.share_viewer_url.as_deref()
     }
 }
 
@@ -591,6 +617,34 @@ mod tests {
     }
 
     #[test]
+    fn where_the_share_viewer_is_hosted_is_what_the_config_file_says() {
+        let config = Config::read("share_viewer_url: https://ada.github.io/shares/\n").unwrap();
+
+        assert_eq!(
+            config.share_viewer_url(),
+            Some("https://ada.github.io/shares/")
+        );
+    }
+
+    /// There is no default, and there could not be one: nobody but the human
+    /// knows where their own site is, and a Verkstead that guessed would put a
+    /// link to somebody else's page on a pull request.
+    #[test]
+    fn a_share_viewer_nobody_has_hosted_is_nowhere() {
+        for text in [
+            "",
+            "git_author:\n  name: Tobias Cohen\n",
+            "share_viewer_url:\n",
+        ] {
+            assert_eq!(
+                Config::read(text).unwrap().share_viewer_url(),
+                None,
+                "for {text:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_config_file_that_says_nothing_configures_nobody() {
         for text in ["", "\n# nothing yet\n", "git_author:\n"] {
             let config = Config::read(text).unwrap();
@@ -746,6 +800,7 @@ mod tests {
                     Some("tobi@tobico.net".to_owned()),
                 ),
                 RustBuildCache::default(),
+                None,
             ))
             .unwrap();
 
@@ -753,6 +808,37 @@ mod tests {
 
         assert_eq!(config.git_author().name(), Some("Tobias Cohen"));
         assert_eq!(config.git_author().email(), Some("tobi@tobico.net"));
+    }
+
+    #[test]
+    fn a_saved_share_viewer_url_is_what_the_next_read_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                Some("https://ada.github.io/shares/".to_owned()),
+            ))
+            .unwrap();
+
+        assert_eq!(
+            settings.config().share_viewer_url(),
+            Some("https://ada.github.io/shares/")
+        );
+
+        // And clearing the field is how it is taken away, which is the whole of
+        // what an empty one means.
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                Some(String::new()),
+            ))
+            .unwrap();
+
+        assert_eq!(settings.config().share_viewer_url(), None);
     }
 
     /// The reason the files are serialized rather than formatted by hand: a name
@@ -769,6 +855,7 @@ mod tests {
                     Some("tobi@tobico.net".to_owned()),
                 ),
                 RustBuildCache::default(),
+                None,
             ))
             .unwrap();
 
@@ -787,6 +874,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), Some(String::new())),
                 RustBuildCache::default(),
+                None,
             ))
             .unwrap();
 
@@ -824,6 +912,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
+                None,
             ))
             .unwrap();
 
@@ -846,6 +935,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
+                None,
             ))
             .unwrap();
 

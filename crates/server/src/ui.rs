@@ -292,6 +292,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read and the save being the same page's two halves — and one save for
         // the author and the token together, because the page has one button.
         .route("/api/ui/settings", get(settings).post(save_settings))
+        // The page the human hosts once so that a Published Share can be read
+        // in a browser — see [`crate::sharing::VIEWER`]. A download beside the
+        // field that records where they put it, because the two are one job:
+        // take this away, put it up, say where it went.
+        .route("/api/ui/share-viewer.html", get(share_viewer))
         .route("/api/ui/update", get(update))
 }
 
@@ -2992,6 +2997,9 @@ async fn save_settings(
                 edit.rust_build_cache.enabled,
                 Some(edit.rust_build_cache.size),
             ),
+            // And where the share viewer is hosted, the same way: an empty
+            // field is nowhere, which is how it is taken away again.
+            Some(edit.share_viewer_url),
         ))?;
 
         let verifying = match &edit.github_token {
@@ -3095,6 +3103,10 @@ fn as_told(settings: &crate::settings::Settings, caches_compiles: bool) -> Setti
             // environment, and the one thing on this page the human cannot set.
             compiles_cached: caches_compiles,
         },
+        // As it was written, because there is nothing secret about it: a public
+        // page, whose URL goes on a pull request the moment a share is
+        // published through it.
+        share_viewer_url: config.share_viewer_url().unwrap_or_default().to_owned(),
         github_token: secrets.github_token().map(|token| TokenSaved {
             last_four: last_four(token),
             at: settings
@@ -3115,6 +3127,38 @@ fn last_four(token: &str) -> String {
     let from = characters.len().saturating_sub(4);
 
     characters[from..].iter().collect()
+}
+
+/// `GET /api/ui/share-viewer.html` — the share viewer, to take away and host.
+///
+/// The one file Verkstead hands over that is nobody's record: a small static
+/// page that draws a Published Share in a browser, which the human puts on a
+/// public site of their own once and never touches again — see
+/// [`crate::sharing::VIEWER`], where what it does and why is written down.
+///
+/// An attachment rather than a page, for the reason a share is one: what the
+/// press is for is getting the file, and a viewer that opened here would be a
+/// viewer served off the tailnet, where nobody a share is sent to can reach it.
+///
+/// Compiled in rather than embedded like the built viewer beside it. There is
+/// no build step behind this one — it is written by hand and has no
+/// dependencies — so it is in every binary rather than in the ones somebody ran
+/// `pnpm build` for.
+async fn share_viewer() -> HttpResponse {
+    (
+        [
+            (CONTENT_TYPE, "text/html; charset=utf-8".to_owned()),
+            (
+                CONTENT_DISPOSITION,
+                format!(
+                    "attachment; filename=\"{}\"",
+                    crate::sharing::VIEWER_FILENAME
+                ),
+            ),
+        ],
+        crate::sharing::VIEWER,
+    )
+        .into_response()
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

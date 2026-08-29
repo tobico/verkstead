@@ -9,8 +9,8 @@
 //! folded together they are sections of one pane, read down in the order a
 //! fresh install needs them: credentials first, because without them nothing a
 //! session does with a Repo can be pushed, then the shared Rust build cache
-//! every session builds into, then the Agent Profiles and the Repos a
-//! Conversation is settled against.
+//! every session builds into, then where the share viewer is hosted, then the
+//! Agent Profiles and the Repos a Conversation is settled against.
 //!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
@@ -52,6 +52,7 @@ import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
 import { BuildCacheCard, BuildCachePane } from "./BuildCache";
 import { GithubCard, GithubPane } from "./Credentials";
+import { ShareViewerCard, ShareViewerPane } from "./ShareViewer";
 import {
   SETTINGS,
   openingAt,
@@ -176,6 +177,15 @@ function Settings(props: {
           open={props.opening === "build-cache"}
           press={() => props.select("build-cache")}
         />
+        {/* And the last of the three things Verkstead itself was told: where the
+            page that draws a published share is hosted. Under the other two
+            because it is the one a machine works perfectly without — what it
+            costs to leave alone is a worse read for whoever a share is sent
+            to. */}
+        <ShareViewerCard
+          open={props.opening === "share-viewer"}
+          press={() => props.select("share-viewer")}
+        />
         {/* Told which of its own things is open rather than the whole opening:
             where a Profile's pane stands is this page's arithmetic, and a
             section that knew the settings' paths would be a second opinion
@@ -239,6 +249,9 @@ function Details(props: {
       </Match>
       <Match when={props.opening === "build-cache"}>
         <BuildCachePane back={props.back} />
+      </Match>
+      <Match when={props.opening === "share-viewer"}>
+        <ShareViewerPane back={props.back} />
       </Match>
       {/* The Repos' two panes are two components rather than one asked about a
           Repo that does not exist yet, the way the Profiles' one form is: what

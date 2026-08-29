@@ -2847,6 +2847,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // build cache that has been configured rather than only its
             // defaults — `settings-unset.json` above is the other half.
             "rust_build_cache": { "enabled": true, "size": "50G" },
+            // And a share viewer hosted somewhere, for the same reason: the
+            // fixture of a Verkstead that has been told everything carries the
+            // configured half of this too, and `settings-unset.json` is where
+            // nobody has hosted one.
+            "share_viewer_url": "https://ada.github.io/verkstead-shares/",
         }),
     )
     .await;

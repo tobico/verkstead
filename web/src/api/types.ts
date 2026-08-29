@@ -2207,7 +2207,13 @@ export type SettingsEdit = { git_author: Author, github_token: TokenEdit,
  * there is nothing secret about either, so a save says where they are to
  * stand and the server writes that down.
  */
-rust_build_cache: BuildCacheEdit, };
+rust_build_cache: BuildCacheEdit, 
+/**
+ * And where the share viewer is hosted, as a value for the same reason:
+ * an empty one is nothing configured, which is what clearing the field
+ * means.
+ */
+share_viewer_url: string, };
 
 /**
  * What became of a save.
@@ -2243,7 +2249,20 @@ github_token: TokenSaved | null,
 /**
  * And how the shared Rust build cache stands.
  */
-rust_build_cache: BuildCacheView, };
+rust_build_cache: BuildCacheView, 
+/**
+ * Where the human hosts the share viewer, or empty where they host it
+ * nowhere.
+ *
+ * A string rather than an optional, empty for nothing configured, the way
+ * the author's two halves are: the field on the page holds it either way,
+ * and clearing the box is how it is taken away.
+ *
+ * Configuration rather than a secret — it is a public page, and its URL
+ * goes in a comment on a pull request — so unlike the token it reads back
+ * exactly as it was written.
+ */
+share_viewer_url: string, };
 
 /**
  * What became of publishing a share: where it went, or why it did not go.

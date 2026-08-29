@@ -32,5 +32,26 @@ PR comment.
       besides the viewer's own are GitHub's.
 - [ ] A multi-MB share renders whole — nothing truncated at the API's 1MB
       file cap.
-- [ ] The viewer file is obtainable from Verkstead with instructions, and the
+
+      **Built and tested, not opened on a published share.** The page is
+      `crates/server/share-viewer.html`, and `web/tests/viewing.test.ts` drives
+      the real file the way `relaying.test.ts` drives the service worker: the
+      id comes out of the fragment, the gist is asked of
+      `api.github.com/gists/{id}`, the file is fetched from the **`raw_url`
+      the API named** rather than from its own `content` — which the fixture
+      marks `truncated`, as GitHub marks a share — and what comes back goes
+      into an `iframe` with `sandbox="allow-scripts"`. Every URL it touches is
+      GitHub's, asserted over the whole file in
+      `crates/server/tests/settings.rs` as well as over every fetch made.
+
+      **What could not be done here**: the same gap task 04 recorded — this
+      machine's token carries no `gist` scope, so there is no published share
+      to open the page on. What is untested is therefore the last hop only:
+      that a real gist's raw URL answers a cross-origin `fetch` (verified from
+      its headers during the grilling) and that the share's own scripts run in
+      an opaque-origin frame. The share reads nothing origin-bound — its
+      `localStorage` is already wrapped in a `try`, and it has no router, no
+      worker and no history — so the frame is the one thing to watch when a
+      gist-scoped token first publishes one.
+- [x] The viewer file is obtainable from Verkstead with instructions, and the
       viewer URL setting round-trips through the settings page.
