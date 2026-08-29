@@ -126,12 +126,16 @@ flowchart LR
   2026-08-29, refining rescues*).
 - **Agent profiles** are minimal: name, claude home dir + config file pair, the
   list of models that account can run — plus an agent-type discriminator so
-  other backends can slot in later (claude is the only type now). The model
+  other backends can slot in later. The model
   list is the profile's own rather than one list shared by all of them, and it
   has no default entry: the profile says what is available and the pick is made
   where a session is set up. Account separation works as in the
   current scripts: the profile's pair is bind-mounted at `~/.claude` /
-  `~/.claude.json` inside the sandbox.
+  `~/.claude.json` inside the sandbox. *Which backends, settled 2026-08-29 in
+  [ADR-0011](../adr/0011-agent-backends.md)*: Codex, Grok Build and OpenCode
+  spend the other three slots, each at full parity. A new-type profile stores
+  **one** home directory rather than claude's pair — the whole account lives
+  under it — and the form offers a type only once its stage has landed.
 - **Pairings.** What runs a conversation's sessions is a profile *and* one of
   that profile's models, picked together. Each conversation fixes **two** of
   them before grilling starts: one for grilling, one for implementation work
@@ -375,7 +379,11 @@ flowchart LR
   2026-08-20 building stage 02*: they ride inside the binary as the viewer
   does, are written out under the data directory at startup — replacing
   whatever an earlier binary left — and every sandbox binds that directory
-  read-only over `~/.claude/skills`, hiding any the account itself keeps. What
+  read-only over `~/.claude/skills`, hiding any the account itself keeps.
+  *Where, refined 2026-08-29 in [ADR-0011](../adr/0011-agent-backends.md)*:
+  the mount moves to `/verkstead/skills`, a path no backend owns, and an empty
+  directory is bound over `~/.claude/skills` in its place so the hiding is
+  kept. What
   puts a session *inside* a skill is the prompt: installing one is not invoking
   one, and a sandbox has no global `CLAUDE.md` to say what the session is for,
   so the prompt names the skill by path above the Brief and the skill carries
