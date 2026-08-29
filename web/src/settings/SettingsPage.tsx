@@ -38,10 +38,10 @@
 //! neither is a card: the switch is one control and the banner asks for nothing.
 
 import { useLocation, useNavigate } from "@solidjs/router";
-import { Show, createMemo, createSignal, type JSX } from "solid-js";
+import { Match, Switch, createMemo, createSignal, type JSX } from "solid-js";
 
 import { Panes, type Pane } from "../Panes";
-import { ProfileList } from "../profiles/ProfileList";
+import { ProfileList, ProfilePane } from "../profiles/ProfileList";
 import { Notifications } from "../push/Notifications";
 import { RepoList } from "../repos/RepoList";
 import { UpdateNotice } from "../update/UpdateNotice";
@@ -49,7 +49,14 @@ import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
 import { GithubCard, GithubPane } from "./Credentials";
-import { openingAt, pathTo, type Opening } from "./openings";
+import {
+  SETTINGS,
+  openingAt,
+  opensProfile,
+  pathTo,
+  profileOpened,
+  type Opening,
+} from "./openings";
 import styles from "./SettingsPage.module.css";
 
 /// The settings page, whole.
@@ -84,6 +91,19 @@ export function SettingsPage(): JSX.Element {
     setPane("details");
   };
 
+  /// And a details pane spending itself, which is what a Profile saved or
+  /// removed leaves behind: the pane was asked about something that is settled
+  /// now, so the settings are what stands after it and the cards there are what
+  /// say the work landed.
+  ///
+  /// Replacing for the reason opening one does, and over the entry opening one
+  /// already wrote: the settings keep the single history entry they were entered
+  /// on, whatever was opened and shut inside them.
+  const shut = () => {
+    navigate(SETTINGS, { replace: true });
+    setPane("middle");
+  };
+
   return (
     <Panes
       pane={pane()}
@@ -99,7 +119,11 @@ export function SettingsPage(): JSX.Element {
         />
       }
       details={
-        <Details opening={opening()} back={() => setPane("middle")} />
+        <Details
+          opening={opening()}
+          back={() => setPane("middle")}
+          done={shut}
+        />
       }
     />
   );
@@ -139,7 +163,15 @@ function Settings(props: {
           open={props.opening === "github"}
           press={() => props.select("github")}
         />
-        <ProfileList />
+        {/* Told which of its own things is open rather than the whole opening:
+            where a Profile's pane stands is this page's arithmetic, and a
+            section that knew the settings' paths would be a second opinion
+            about them. */}
+        <ProfileList
+          opening={profileOpened(props.opening)}
+          open={(id) => props.select(opensProfile(id))}
+          add={() => props.select(opensProfile("new"))}
+        />
         <RepoList />
       </div>
     </>
@@ -153,10 +185,41 @@ function Details(props: {
   /// The way back out to the settings, which is a change of level rather than a
   /// navigation: what is open stays open, and the URL goes on saying so.
   back: () => void;
+  /// And the way out of a pane that has spent itself, which is a navigation.
+  done: () => void;
 }): JSX.Element {
+  const which = createMemo(() => profileOpened(props.opening));
+
+  /// Which Profile the pane is about, as something to key on: a new object each
+  /// time it really changes, and the same one for as long as it does not.
+  ///
+  /// The pane stands inside a `keyed` Match over it, so opening another Profile
+  /// tears the form down and builds it again from nothing. Without the key the
+  /// component would be kept and only its prop changed, and whatever had been
+  /// typed into the last Profile's form would go on standing in this one's.
+  ///
+  /// An object rather than the value itself, because an id of nothing but digits
+  /// is no use as a condition: the first Profile the server ever issued would
+  /// read as nothing being open at all.
+  const profile = createMemo(() => {
+    const one = which();
+    return one === null ? null : { which: one };
+  });
+
   return (
-    <Show when={props.opening === "github"}>
-      <GithubPane back={props.back} />
-    </Show>
+    <Switch>
+      <Match when={props.opening === "github"}>
+        <GithubPane back={props.back} />
+      </Match>
+      <Match when={profile()} keyed>
+        {(open) => (
+          <ProfilePane
+            profile={open.which}
+            back={props.back}
+            done={props.done}
+          />
+        )}
+      </Match>
+    </Switch>
   );
 }

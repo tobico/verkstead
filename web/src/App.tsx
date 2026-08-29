@@ -77,6 +77,11 @@ export function App(): JSX.Element {
         <Route path="/settings" component={SettingsPage}>
           <Route path="/" />
           <Route path="/github" />
+          {/* The blank form rides in the same segment an id does, as
+              `/settings/profiles/new` — it is the same pane asked about a
+              Profile that does not exist yet, and no id the server issues is
+              the word `new`. */}
+          <Route path="/profiles/:profile" />
         </Route>
         {/* One Set as a page of its own, which is what a push notification
             opens: a phone woken by one is being asked about that Set and

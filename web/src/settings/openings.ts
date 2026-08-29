@@ -6,10 +6,23 @@
 //! selection held beside the URL is lost the moment the page is navigated away
 //! from and back, and a link to a pane is a link to nothing.
 //!
-//! Nothing here is an id yet. What the settings open into is named by a word,
-//! because there is one of each: the credentials are the one thing Verkstead
-//! itself was told, and a word says so. The Profiles and the Repos arrive with
-//! ids of their own, which is why this is a path rather than a flag.
+//! Two shapes under the settings, because there are two kinds of thing the pane
+//! draws:
+//!
+//! - `github` — the credentials, named by a word. There is one of what
+//!   Verkstead itself was told, and a word says so.
+//! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
+//!   and `profiles/new` for the blank form that adds one.
+//!
+//! The `profiles/` segment is what keeps the ids and the word-named panes
+//! apart, as the workbench's `events/` does: a bare id segment would have read
+//! the same as `github` the moment anything was named by a word, so the ids go
+//! behind a segment of their own and can never collide with one.
+//!
+//! `new` stands where an id stands rather than beside it, because the blank
+//! form and the filled one are one pane asked about a Profile that does not
+//! exist yet — and no id the server issues is the word `new`, so the two cannot
+//! be confused for each other.
 //!
 //! A path naming a pane this build does not have leaves the details bare, which
 //! is what they are when nothing is open at all: the URL is a record of what was
@@ -21,7 +34,25 @@
 /// thing. A string for the reason the workbench's is: what is open is compared
 /// against what a card would open, and two of the same selection have to be the
 /// same value.
-export type Opening = "github";
+export type Opening = "github" | "profile:new" | `profile:${number}`;
+
+/// What opens a Profile's form: its id, or `"new"` for the blank one.
+export function opensProfile(which: number | "new"): Opening {
+  return `profile:${which}`;
+}
+
+/// And which Profile an opening names — its id, `"new"` for the blank form, or
+/// `null` where it names no Profile at all.
+export function profileOpened(
+  opening: Opening | null,
+): number | "new" | null {
+  if (opening === null || !opening.startsWith("profile:")) {
+    return null;
+  }
+
+  const which = opening.slice("profile:".length);
+  return which === "new" ? "new" : Number(which);
+}
 
 /// Where the settings stand, which every one of their details panes is nested
 /// under.
@@ -29,6 +60,11 @@ export const SETTINGS = "/settings";
 
 /// And where one of those panes stands.
 export function pathTo(opening: Opening): string {
+  const profile = profileOpened(opening);
+  if (profile !== null) {
+    return `${SETTINGS}/profiles/${profile}`;
+  }
+
   return `${SETTINGS}/${opening}`;
 }
 
@@ -40,12 +76,29 @@ export function openingAt(pathname: string): Opening | null {
     return null;
   }
 
-  // One segment under the settings, and nothing after it. Anything longer is no
-  // path of ours, whatever it starts with.
-  const [what, ...rest] = segments.slice(1);
+  // What stands under the settings, which is a segment and at most one thing
+  // named by it. Anything longer is no path of ours, whatever it starts with.
+  const [what, which, ...rest] = segments.slice(1);
   if (rest.length > 0) {
     return null;
   }
 
-  return what === "github" ? "github" : null;
+  if (what === "github" && which === undefined) {
+    return "github";
+  }
+
+  if (what === "profiles" && which !== undefined) {
+    // The blank form, or digits and nothing else, because an id is what the
+    // server issued. A segment that is neither names no Profile — and neither
+    // does an id nothing is saved under, which the pane answers the same way.
+    if (which === "new") {
+      return opensProfile("new");
+    }
+
+    if (/^\d+$/.test(which)) {
+      return opensProfile(Number(which));
+    }
+  }
+
+  return null;
 }

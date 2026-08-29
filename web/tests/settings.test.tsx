@@ -54,6 +54,12 @@ import card from "../src/CardButton.module.css";
 import { GithubCard, GithubPane } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
+import {
+  openingAt,
+  opensProfile,
+  pathTo,
+  profileOpened,
+} from "../src/settings/openings";
 import head from "../src/workbench/PaneHead.module.css";
 import { drawn } from "./bench";
 import { json, serving, whenever } from "./serving";
@@ -611,6 +617,7 @@ function thePage(at = "/settings") {
           <Route path="/settings" component={SettingsPage}>
             <Route path="/" />
             <Route path="/github" />
+            <Route path="/profiles/:profile" />
           </Route>
           <Route path="*" component={() => <p>somewhere else</p>} />
         </MemoryRouter>
@@ -658,7 +665,7 @@ describe("the settings page", () => {
     // The repo names are on the New conversation menu as well as on this list,
     // so each list is waited for inside the pane it belongs to.
     await drawn(settings, `.${styles.githubCard}`);
-    await drawn(settings, `.${profileList.profiles} .${profileList.row}`);
+    await drawn(settings, `.${profileList.profiles} .${profileList.profile}`);
     await drawn(settings, `.${repoList.repos} .${repoList.row}`);
 
     expect(settings.querySelectorAll("h1")).toHaveLength(1);
@@ -666,7 +673,7 @@ describe("the settings page", () => {
       settings.querySelectorAll(`.${repoList.repos} .${repoList.row}`),
     ).toHaveLength(REPOS.length);
     expect(
-      settings.querySelectorAll(`.${profileList.profiles} .${profileList.row}`),
+      settings.querySelectorAll(`.${profileList.profiles} .${profileList.profile}`),
     ).toHaveLength(PROFILES.length);
   });
 
@@ -799,6 +806,156 @@ describe("the path a details pane stands at", () => {
       ).toBe("middle"),
     );
     expect(history.get()).toBe("/settings/github");
+  });
+
+  /// A Profile is the first thing on this page with an id of its own, so it is
+  /// the first whose pane stands behind a segment: `profiles/` keeps the ids
+  /// apart from the panes a word names beside them.
+  it("opens a profile at /settings/profiles/:id, replacing", async () => {
+    const { container, history } = thePage();
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${profileList.profiles} .${profileList.profile}`,
+    );
+    fireEvent.click(face);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/settings/profiles/${PROFILES[0]!.id}`),
+    );
+
+    // Replaced rather than pushed, as every detail of the settings is: Back
+    // leaves the settings rather than walking out of the pane just opened.
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// The blank form stands where a filled one does: it is the same pane asked
+  /// about a Profile that does not exist yet.
+  it("opens the blank form at /settings/profiles/new, replacing", async () => {
+    const { container, history } = thePage();
+
+    const plus = await drawn<HTMLButtonElement>(
+      panes(container)[1]!,
+      'button[aria-label="Add a profile"]',
+    );
+    fireEvent.click(plus);
+
+    await waitFor(() => expect(history.get()).toBe("/settings/profiles/new"));
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("draws the filled-in form in the details pane, and reads the card as open", async () => {
+    const { container } = thePage(`/settings/profiles/${PROFILES[0]!.id}`);
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+        PROFILES[0]!.name,
+      ),
+    );
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${profileList.profiles} .${profileList.profile}`,
+    );
+    expect(face.getAttribute("aria-pressed")).toBe("true");
+    expect(face.classList).toContain(card.open);
+
+    // The paths and the agent type the card gave up, in the pane that has room
+    // for them: the two paths are the form's own fields.
+    const details = panes(container)[2]!;
+    expect(
+      (screen.getByLabelText(/Claude directory/) as HTMLInputElement).value,
+    ).toBe(PROFILES[0]!.claude_dir);
+    expect(details.textContent).toContain(PROFILES[0]!.agent_type);
+
+    // In the third pane rather than over the page: the modal is gone.
+    expect(details.querySelector("form")).not.toBeNull();
+    expect(container.querySelector("dialog")).toBeNull();
+  });
+
+  /// The plus reads as open while the pane it opens stands, the way a card
+  /// does: it is another thing in this pane that has been selected.
+  it("draws the blank form at /settings/profiles/new, and reads the plus as open", async () => {
+    const { container } = thePage("/settings/profiles/new");
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(""),
+    );
+
+    const plus = await drawn<HTMLButtonElement>(
+      panes(container)[1]!,
+      'button[aria-label="Add a profile"]',
+    );
+    expect(plus.getAttribute("aria-pressed")).toBe("true");
+    expect(plus.classList).toContain(button.open);
+    expect(container.querySelector("dialog")).toBeNull();
+  });
+
+  /// A cold load of a profile's pane — a reload, or a link somebody kept —
+  /// opens on that pane, which is the level a narrow window shows.
+  it("opens on the details when the path names a profile", async () => {
+    const { container } = thePage(`/settings/profiles/${PROFILES[0]!.id}`);
+
+    await waitFor(() => screen.getByLabelText("Name"));
+    expect(container.querySelector(`.${shell.panes}`)!.getAttribute("data-pane")).toBe(
+      "details",
+    );
+  });
+
+  /// A segment that is no id the server ever issued names no pane at all, and
+  /// leaves the details as bare as they are when nothing is open: the URL is a
+  /// record of what was picked rather than a promise that it is still there.
+  it("leaves the details bare where the path names nothing", async () => {
+    const { container } = thePage("/settings/profiles/nonsense");
+
+    await drawn(container, `.${profileList.profiles} .${profileList.profile}`);
+    expect(panes(container)[2]!.textContent).toBe("");
+  });
+});
+
+/// The arithmetic alone, which knows nothing of the page: a path is a value, and
+/// a value is cheaper to hold true here than through a mounted one. What the
+/// page does with it is the two suites above.
+describe("where a settings details pane stands", () => {
+  it("puts a profile behind a segment of its own, and a word beside it", () => {
+    expect(pathTo("github")).toBe("/settings/github");
+    expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
+    expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
+  });
+
+  it("reads back everything it writes", () => {
+    for (const opening of ["github", opensProfile(7), opensProfile("new")] as const) {
+      expect(openingAt(pathTo(opening))).toBe(opening);
+    }
+  });
+
+  /// Which Profile an opening is about, asked of the opening rather than of the
+  /// path — it is what says which card reads as open.
+  it("says which profile an opening names, and which names none", () => {
+    expect(profileOpened(opensProfile(7))).toBe(7);
+    expect(profileOpened(opensProfile("new"))).toBe("new");
+    expect(profileOpened("github")).toBeNull();
+    expect(profileOpened(null)).toBeNull();
+  });
+
+  /// The settings' own path opens nothing, and neither does anything that is
+  /// not a path of ours — whatever it starts with.
+  it.each([
+    ["/settings"],
+    ["/settings/"],
+    ["/settings/nonsense"],
+    ["/settings/github/extra"],
+    ["/settings/profiles"],
+    ["/settings/profiles/nonsense"],
+    ["/settings/profiles/7/extra"],
+    ["/settings/profiles/7.5"],
+    ["/conversations/3/events/7"],
+    ["/"],
+  ])("opens nothing at %s", (path) => {
+    expect(openingAt(path)).toBeNull();
   });
 });
 
