@@ -50,6 +50,9 @@ import type {
   Turn,
 } from "../src/api/types";
 // The one menu, which all three of this page's ⋯ and dropdowns are drawn as.
+// The app's own retry rule, which is what a read that gave up on its deadline
+// is answered by.
+import { retrying } from "../src/api/client";
 import app from "../src/App.module.css";
 // The card a Set's Preface and a commit's Message are both drawn as, both ways:
 // the hashed names to query the two panes by, and the source to read the box's
@@ -155,6 +158,7 @@ import {
 } from "./bench";
 import {
   askedFor,
+  hangs,
   json,
   readable,
   reads,
@@ -2280,6 +2284,72 @@ describe("the escape hatch on a conversation that will not load", () => {
 
     await waitFor(() => expect(history.get()).toBe("/"));
     await waitFor(() => screen.getByText("Pick a conversation, or start one."));
+  });
+
+  /// The other way a page ends up in front of the hatch, and the one the
+  /// incident behind all this really was: a read that never comes back at all.
+  /// The server has a deadline of its own on the fetch that hung, and this is
+  /// the net under the hang classes nobody has met yet.
+  describe("a read that never comes back", () => {
+    /// The deadline, as `AbortSignal.timeout` is asked for it.
+    const DEADLINE = 30_000;
+
+    /// The signal the read is really given, so the test can fire the deadline
+    /// itself rather than sitting through it.
+    function atOurOwnPace() {
+      const controller = new AbortController();
+      const timeout = vi
+        .spyOn(AbortSignal, "timeout")
+        .mockReturnValue(controller.signal);
+
+      return {
+        timeout,
+        expire: () =>
+          controller.abort(new DOMException("timed out", "TimeoutError")),
+      };
+    }
+
+    it("gives the conversation's own read a deadline, and nothing else one", async () => {
+      const fetching = theWorkbench();
+      mount(`/conversations/${OPEN.id}`);
+      await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+      const signalOf = (path: string) =>
+        fetching.mock.calls.find(([asked]) => String(asked) === path)?.[1]
+          ?.signal;
+
+      expect(signalOf(READING)).toBeInstanceOf(AbortSignal);
+      expect(signalOf("/api/ui/conversations")).toBeUndefined();
+    });
+
+    it("draws the hatch on a read hung past its deadline", async () => {
+      const { timeout, expire } = atOurOwnPace();
+
+      theWorkbench(whenever(READING, hangs()));
+      const { container } = mount(`/conversations/${OPEN.id}`);
+
+      await waitFor(() => screen.getByText("Loading…"));
+      expect(timeout).toHaveBeenCalledWith(DEADLINE);
+
+      expire();
+
+      const menu = await openActions(container);
+      expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+
+      timeout.mockRestore();
+    });
+
+    /// And it is not read again on the strength of having given up: three more
+    /// deadlines' worth of nothing before the page is allowed to say anything,
+    /// and what it would say is what it already knew.
+    it("is not one the app makes again", () => {
+      const gave_up = new DOMException("timed out", "TimeoutError");
+
+      expect(retrying(0, gave_up)).toBe(false);
+      expect(retrying(0, new Error("the server fell over"))).toBe(true);
+      expect(retrying(2, new Error("the server fell over"))).toBe(true);
+      expect(retrying(3, new Error("the server fell over"))).toBe(false);
+    });
   });
 
   /// And a refusal goes where every other refusal in this menu goes: the
