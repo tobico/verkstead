@@ -31,17 +31,31 @@ So each backend asks on the channel it can afford:
 
 - **Blocking** — Claude Code and OpenCode. `verkstead ask` as today.
 - **Store-and-nudge** — Codex and Grok Build. `verkstead ask` stores the Set
-  and returns at once, exactly as `--deferred` stores one, and the agent ends
-  its turn. When the Response lands and the asking session still runs,
-  Verkstead types one line into its terminal — the channel Rescue already
-  uses — telling it to fetch the answers with **`verkstead answers`**, a new
-  command that prints a stored Set's Response. A session that has gone by
-  then is not a lost Response: the answers fold into the next session's
-  prompt the way answered Deferred Asks already do.
+  and returns at once, as `--deferred` does, and the agent ends its turn. When
+  the Response lands and the asking session still runs, Verkstead types one
+  line into its terminal — the channel Rescue already uses — telling it to
+  fetch the answers with **`verkstead answers`**, a new command that prints a
+  stored Set's Response. A session that has gone by then is not a lost
+  Response: the answers fold into the next session's prompt the way answered
+  Deferred Asks already do.
 
-Store-and-nudge is deliberately the Deferred Ask machinery plus a nudge and a
-fetch, not a third storage path: one storage shape, one folding rule, and the
-nudge as the only new moving part.
+Store-and-nudge is the Deferred Ask machinery — the same stored Set, the same
+folding rule — with one thing added underneath it: **a store-and-nudge Set is
+a state of its own**, and not a Deferred Ask wearing a nudge.
+
+It has to be, because the two mean opposite things to everything that reads
+them. A Deferred Ask is excluded from `store::unanswered_set_since`
+(`d.set_id IS NULL`) precisely because it is a Set nobody is idling on, and
+both halves of the run read that exclusion: the enders through
+`runner::asking`, and Rescue through `runner::open`. A store-and-nudge Set
+stored as a deferred one would therefore look like a session that went quiet
+having asked nothing — ended by the quiet grace, and prodded twice and then
+stopped by Rescue, before the human had answered and so before there was any
+session left to nudge. The new state is **counted as open** by both, and the
+session waits on its answers exactly as a blocking one does.
+
+Which is also what keeps `--deferred` meaning what it means on these
+backends: a Set nothing is idling on, and one the nudge leaves alone.
 
 A session learns which channel is its own from the Guide: Verkstead sets the
 agent type in the sandbox environment, and `verkstead guide` prints the

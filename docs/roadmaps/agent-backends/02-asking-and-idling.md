@@ -17,12 +17,19 @@ longer ends it.
 All from [ADR-0011](../../adr/0011-agent-backends.md); what bears on this
 stage:
 
-- **Store-and-nudge rides the Deferred Ask machinery.** The Set is stored as
-  a `--deferred` one is; one storage shape, one folding rule. What is new is
-  the nudge — one line typed into the session's terminal, the channel Rescue
-  already uses — and `verkstead answers`, which prints a stored Set's
-  Response. A session gone before the nudge is the folding rule's case
-  already.
+- **Store-and-nudge rides the Deferred Ask machinery**, and is a state of its
+  own inside it. The Set is stored as a `--deferred` one is and folds the same
+  way, but it is marked as the kind of ask a session is idling on — because
+  `store::unanswered_set_since` excludes a Deferred Ask by `d.set_id IS NULL`,
+  and the enders (`runner::asking`) and Rescue (`runner::open`) both read that
+  exclusion. Stored as a plain deferred Set, a store-and-nudge ask would have
+  its own session ended by the quiet grace and prodded-then-stopped by Rescue
+  before the human answered, leaving nothing to nudge. So the new state is
+  counted as open by both, and `--deferred` keeps meaning an ask nobody is
+  idling on. What is otherwise new is the nudge — one line typed into the
+  session's terminal, the channel Rescue already uses — and
+  `verkstead answers`, which prints a stored Set's Response. A session gone
+  before the nudge is the folding rule's case already.
 - **Which channel a Set was asked on is the backend's fact, not the Set's.**
   The CLI asks the same way everywhere; the server knows the Conversation's
   session's agent type and treats the ask accordingly. The Timeline and the
@@ -46,10 +53,14 @@ stage:
    - A stored, answered Set prints as Response YAML on stdout, parseable as
      the blocking ask's output is.
 2. **The ask channel per agent type.** The server stores a non-blocking
-   backend's ask as deferred-shaped, keeps the session's claim on it, and
-   the blocking path is untouched for Claude.
-   - A stub-backend ask returns at once with the stored id; a Claude ask
-     blocks as today.
+   backend's ask as deferred-shaped and marked store-and-nudge; the readers
+   that decide whether anybody is idling on a Set — `store::unanswered_set_since`
+   and through it `runner::asking`, `runner::open` and Rescue — count that
+   mark as open, and the blocking path is untouched for Claude.
+   - A stub-backend ask returns at once with the stored id, and its session is
+     neither ended nor rescued while the Set stands unanswered; an ask the
+     agent sent with `--deferred` on the same backend still ends its session as
+     today; a Claude ask blocks as today.
 3. **The nudge.** On a Response landing for a store-and-nudge Set whose
    session still runs: one canned line through the terminal; the folding
    rule untouched for a session that has gone.
@@ -72,6 +83,9 @@ stage:
   is per-backend.
 - The Deferred Ask folding rules (`asked deferred`, folded-once bookkeeping)
   are where the grilling left them — this stage reuses them verbatim.
+- Everything that reads `store::unanswered_set_since` or `store::open_set`,
+  so the new mark reaches all of them and no caller keeps a private notion of
+  which Sets somebody is idling on.
 - Rescue's typing channel is still the way keystrokes reach a session, and
   the canned-line pattern is still in one place.
 - How the Screen is held server-side (`crate::screen`) and whether its
