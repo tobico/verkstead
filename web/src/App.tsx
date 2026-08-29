@@ -82,11 +82,10 @@ export function App(): JSX.Element {
               Profile that does not exist yet, and no id the server issues is
               the word `new`. */}
           <Route path="/profiles/:profile" />
-          {/* The Repos have the one pane, which is the path another is
-              registered by. It stands where an id will stand once a registered
-              Repo has a pane of its own; until then `new` is the only thing
-              under the segment, so nothing else under it is a path of ours. */}
-          <Route path="/repos/new" />
+          {/* And the Repos the same way: a registered one opened by its id, and
+              the path another is registered by riding in the same segment as
+              `/settings/repos/new`. */}
+          <Route path="/repos/:repo" />
         </Route>
         {/* One Set as a page of its own, which is what a push notification
             opens: a phone woken by one is being asked about that Set and

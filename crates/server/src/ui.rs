@@ -58,6 +58,13 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the Conversation: the branches are the repository's, and two
         // Conversations against one Repo are looking at the same list.
         .route("/api/ui/repos/{id}/branches", get(branches))
+        // And one Repo opened, which is the pane its card leads to: the same
+        // three facts the row carries, plus the branches, how much work is on
+        // it, and what it is holding that nothing is driving. Its own read
+        // rather than a fatter row on the list above — every one of those is a
+        // git call or a count, and the list is read on every visit to the
+        // settings while a pane is read when somebody opens one.
+        .route("/api/ui/repos/{id}", get(repo))
         .route(
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
@@ -517,6 +524,27 @@ async fn branches(State(state): State<AppState>, Path(id): Path<String>) -> Http
         Err(error) => {
             tracing::error!(error = ?error, repo_id = id, "listing a Repo's branches failed");
             unavailable("the Repo's branches could not be read")
+        }
+    }
+}
+
+/// `GET /api/ui/repos/{id}` — one registered Repo opened, which is what its
+/// card in the settings leads to.
+///
+/// A 404 for an id that is not registered, and for one that is not a number
+/// either: neither names a Repo, and the pane says the repo is gone rather than
+/// reporting a failure. The same answer the branches give for the same reason.
+async fn repo(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_repo(&id);
+    };
+
+    match crate::repos::opened(&state.pool, id).await {
+        Ok(Some(view)) => Json(view).into_response(),
+        Ok(None) => no_such_repo(&id.to_string()),
+        Err(error) => {
+            tracing::error!(error = ?error, repo_id = id, "reading a Repo failed");
+            unavailable("the Repo could not be read")
         }
     }
 }

@@ -608,6 +608,22 @@ pub(crate) async fn abandoned(repos: Vec<store::Repo>) -> Vec<AbandonedRepo> {
 
 /// One Repo's notice, or `None` where it has nothing to adopt.
 ///
+/// The reading is [`waiting`] below; what this adds is the notice's own rule,
+/// which is that a Repo with nothing to adopt has no notice at all rather than
+/// an empty one.
+fn notice(repo: &store::Repo) -> Option<AbandonedRepo> {
+    let roadmaps = waiting(repo);
+
+    (!roadmaps.is_empty()).then(|| AbandonedRepo {
+        repo_id: repo.id,
+        repo: repo.name.clone(),
+        roadmaps,
+    })
+}
+
+/// The roadmaps one Repo is holding that nothing is driving, whether or not
+/// there are any.
+///
 /// Read at the default branch's tip as origin holds it, which is the repository
 /// as everyone working on it sees it — the same ref [`adopting`] draws the page
 /// from and [`crate::conversations::adopt`] branches off, so what is offered
@@ -617,16 +633,27 @@ pub(crate) async fn abandoned(repos: Vec<store::Repo>) -> Vec<AbandonedRepo> {
 /// resolves has nothing to read and nothing to say — the same shrug the pinned
 /// lists make.
 ///
-/// No fetch, unlike those two. This is drawn for every registered Repo every
+/// No fetch, unlike those two. This is read for every registered Repo every
 /// time the workbench reads the sidebar, and a network call per Repo per read is
 /// not what a notice is worth: origin's copy as it last stood is enough to agree
 /// with the page and the press, both of which freshen it themselves before they
 /// act on it.
-fn notice(repo: &store::Repo) -> Option<AbandonedRepo> {
+///
+/// An empty list rather than the notice's "or nothing at all": the notice under
+/// the new-conversation box is drawn only where there is something to say, and a
+/// Repo's own pane says what is waiting in it however short the list is — empty
+/// included, which is the ordinary answer.
+///
+/// Blocking, like everything else here: it is a handful of short git reads
+/// against a local directory, and whoever calls it is on a borrowed thread
+/// already.
+pub(crate) fn waiting(repo: &store::Repo) -> Vec<AbandonedRoadmap> {
     let named = worktrees::default_ref(&repo.path, &repo.default_branch);
-    let commit = worktrees::resolve(&repo.path, &named)?;
+    let Some(commit) = worktrees::resolve(&repo.path, &named) else {
+        return Vec::new();
+    };
 
-    let roadmaps: Vec<AbandonedRoadmap> = abandoned_at(&repo.path, &commit)
+    abandoned_at(&repo.path, &commit)
         .into_iter()
         .map(|abandoned| AbandonedRoadmap {
             name: abandoned.stage.roadmap,
@@ -634,13 +661,7 @@ fn notice(repo: &store::Repo) -> Option<AbandonedRepo> {
             stage: abandoned.stage.label,
             stage_title: abandoned.stage.title,
         })
-        .collect();
-
-    (!roadmaps.is_empty()).then(|| AbandonedRepo {
-        repo_id: repo.id,
-        repo: repo.name.clone(),
-        roadmaps,
-    })
+        .collect()
 }
 
 /// The abandoned roadmaps `repo` holds at `commit`, in the order their

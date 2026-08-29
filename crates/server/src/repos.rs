@@ -16,7 +16,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
-use verkstead_render::Registered;
+use verkstead_render::{Registered, RepoView};
 
 use crate::store;
 use crate::watched::{Admission, WatchedPaths};
@@ -108,6 +108,51 @@ pub(crate) async fn branches(pool: &SqlitePool, id: i64) -> Result<Option<Vec<St
     Ok(Some(
         tokio::task::spawn_blocking(move || crate::worktrees::branches(&repo.path)).await?,
     ))
+}
+
+/// One registered Repo opened: everything its card cannot hold.
+///
+/// `None` is a Repo that is not registered, which the pane reads as the repo
+/// being gone — a link followed after somebody took it away.
+///
+/// The two filesystem reads go together in one blocking task rather than one
+/// apiece: they are both git against the same directory, and a pane is one thing
+/// the human opened rather than two. The counts are the store's and are awaited
+/// beside them.
+///
+/// Nothing here is stored but the three facts the card already carries. The
+/// branches move without Verkstead hearing about it and a roadmap somebody picks
+/// up stops being abandoned the moment they do, so both are asked afresh every
+/// time the pane is opened — a kept copy would be a second opinion that went
+/// wrong on somebody else's push.
+pub(crate) async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView>> {
+    let Some(repo) = store::load_repo(pool, id).await? else {
+        return Ok(None);
+    };
+
+    let work = store::work_on_repo(pool, id).await?;
+
+    let read = repo.clone();
+    let (branches, roadmaps) = tokio::task::spawn_blocking(move || {
+        (
+            crate::worktrees::branches(&read.path),
+            crate::stages::waiting(&read),
+        )
+    })
+    .await?;
+
+    Ok(Some(RepoView {
+        id: repo.id,
+        name: repo.name,
+        // Stored as UTF-8 in the first place — a path that is not cannot be
+        // registered — so nothing is lost putting it back on the wire.
+        path: repo.path.to_string_lossy().into_owned(),
+        default_branch: repo.default_branch,
+        branches,
+        live: work.live,
+        finished: work.finished,
+        roadmaps,
+    }))
 }
 
 /// The branch a Conversation branches from unless it is told otherwise.

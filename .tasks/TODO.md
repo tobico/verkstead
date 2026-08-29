@@ -23,5 +23,5 @@ rather than deleting it, refused while live work is on it.
 - [x] 05: Settings on the three-pane layout — [details](05-settings-three-pane.md)
 - [x] 06: Profile cards and panes — [details](06-profile-cards-and-panes.md)
 - [x] 07: The repo add pane — [details](07-repo-add-pane.md)
-- [ ] 08: The repo details pane — [details](08-repo-details-pane.md)
+- [x] 08: The repo details pane — [details](08-repo-details-pane.md)
 - [ ] 09: Removing a repo — [details](09-removing-a-repo.md)

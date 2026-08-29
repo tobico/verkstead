@@ -1229,6 +1229,57 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
         .collect()
 }
 
+/// How much work is on one Repo, counted by whether it is over.
+///
+/// **Live** is everything still going, a Draft included: the Conversation is on
+/// this repository now, and somebody may be waiting on it. **Finished** is Done
+/// and Closed together — work that ended, however it ended.
+///
+/// What the human archived is counted like anything else. Archiving takes a
+/// Conversation off the sidebar and off nothing else, so a Repo that carried
+/// twenty Conversations carried twenty whatever is being shown at the moment.
+///
+/// Counted by reading the states back rather than by asking SQL which of them
+/// are over: the words in the column are [`Lifecycle`]'s, one of them is a
+/// spelling only [`Lifecycle::read`] knows about, and a list of words in a query
+/// would be a second opinion about what "finished" means.
+pub async fn work_on_repo(pool: &SqlitePool, repo_id: i64) -> Result<Work> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT state, COUNT(*)
+         FROM conversations
+         WHERE repo_id = ?
+         GROUP BY state",
+    )
+    .bind(repo_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("counting the Conversations on Repo {repo_id}"))?;
+
+    let mut work = Work {
+        live: 0,
+        finished: 0,
+    };
+
+    for (state, count) in rows {
+        match Lifecycle::read(&state)? {
+            Lifecycle::Done | Lifecycle::Closed => work.finished += count,
+            _ => work.live += count,
+        }
+    }
+
+    Ok(work)
+}
+
+/// The two counts [`work_on_repo`] answers with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Work {
+    /// Conversations still going — everything that is neither Done nor Closed.
+    pub live: i64,
+
+    /// And the ones that are over.
+    pub finished: i64,
+}
+
 /// One Conversation with its Repo and whichever Profiles it has chosen, or
 /// `None` if there is no such Conversation.
 ///

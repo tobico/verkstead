@@ -43,19 +43,20 @@ import { Match, Switch, createMemo, createSignal, type JSX } from "solid-js";
 import { Panes, type Pane } from "../Panes";
 import { ProfileList, ProfilePane } from "../profiles/ProfileList";
 import { Notifications } from "../push/Notifications";
-import { RepoList, RepoPane } from "../repos/RepoList";
+import { RepoDetails, RepoList, RepoPane } from "../repos/RepoList";
 import { UpdateNotice } from "../update/UpdateNotice";
 import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
 import { GithubCard, GithubPane } from "./Credentials";
 import {
-  ADDING_REPO,
   SETTINGS,
   openingAt,
   opensProfile,
+  opensRepo,
   pathTo,
   profileOpened,
+  repoOpened,
   type Opening,
 } from "./openings";
 import styles from "./SettingsPage.module.css";
@@ -173,12 +174,13 @@ function Settings(props: {
           open={(id) => props.select(opensProfile(id))}
           add={() => props.select(opensProfile("new"))}
         />
-        {/* Told whether its own pane is open rather than the whole opening, for
-            the reason the Profiles are: where the form stands is this page's
-            arithmetic. */}
+        {/* Told which of its own things is open rather than the whole opening,
+            for the reason the Profiles are: where a Repo's pane stands is this
+            page's arithmetic. */}
         <RepoList
-          adding={props.opening === ADDING_REPO}
-          add={() => props.select(ADDING_REPO)}
+          opening={repoOpened(props.opening)}
+          open={(id) => props.select(opensRepo(id))}
+          add={() => props.select(opensRepo("new"))}
         />
       </div>
     </>
@@ -195,8 +197,6 @@ function Details(props: {
   /// And the way out of a pane that has spent itself, which is a navigation.
   done: () => void;
 }): JSX.Element {
-  const which = createMemo(() => profileOpened(props.opening));
-
   /// Which Profile the pane is about, as something to key on: a new object each
   /// time it really changes, and the same one for as long as it does not.
   ///
@@ -209,8 +209,16 @@ function Details(props: {
   /// is no use as a condition: the first Profile the server ever issued would
   /// read as nothing being open at all.
   const profile = createMemo(() => {
-    const one = which();
+    const one = profileOpened(props.opening);
     return one === null ? null : { which: one };
+  });
+
+  /// And which registered Repo, the same way and for the same reason. Never the
+  /// form: registering one is a pane of its own below, so what is left here is
+  /// an id.
+  const repo = createMemo(() => {
+    const one = repoOpened(props.opening);
+    return typeof one === "number" ? { which: one } : null;
   });
 
   return (
@@ -218,8 +226,15 @@ function Details(props: {
       <Match when={props.opening === "github"}>
         <GithubPane back={props.back} />
       </Match>
-      <Match when={props.opening === ADDING_REPO}>
+      {/* The Repos' two panes are two components rather than one asked about a
+          Repo that does not exist yet, the way the Profiles' one form is: what
+          registers a Repo is a path typed, and what an opened one draws is
+          everything the repository and the store say about it. */}
+      <Match when={repoOpened(props.opening) === "new"}>
         <RepoPane back={props.back} done={props.done} />
+      </Match>
+      <Match when={repo()} keyed>
+        {(open) => <RepoDetails repo={open.which} back={props.back} />}
       </Match>
       <Match when={profile()} keyed>
         {(open) => (

@@ -13,9 +13,8 @@
 //!   Verkstead itself was told, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
-//! - `repos/new` — the path a Repo is registered by. The Repos have no
-//!   `repos/:id` yet: a registered one is a card with nothing behind it, so the
-//!   only pane they open is the one that adds another.
+//! - `repos/:id` — a registered Repo, opened; and `repos/new` for the path
+//!   another is registered by.
 //!
 //! The `profiles/` and `repos/` segments are what keep the ids and the
 //! word-named panes apart, as the workbench's `events/` does: a bare id segment
@@ -27,7 +26,7 @@
 //! form and the filled one are one pane asked about a Profile that does not
 //! exist yet — and no id the server issues is the word `new`, so the two cannot
 //! be confused for each other. The Repos' form stands in the same place for the
-//! same reason, against the ids they have not been given yet.
+//! same reason, beside the ids of the ones that are registered.
 //!
 //! A path naming a pane this build does not have leaves the details bare, which
 //! is what they are when nothing is open at all: the URL is a record of what was
@@ -42,16 +41,9 @@
 export type Opening =
   | "github"
   | "repo:new"
+  | `repo:${number}`
   | "profile:new"
   | `profile:${number}`;
-
-/// What opens the form that registers a Repo, which is the whole of what the
-/// Repos open.
-///
-/// A value rather than a function, which is what every other opening is reached
-/// through: there is one of it, and a function taking a single literal is a
-/// question with one answer.
-export const ADDING_REPO: Opening = "repo:new";
 
 /// What opens a Profile's form: its id, or `"new"` for the blank one.
 export function opensProfile(which: number | "new"): Opening {
@@ -60,14 +52,33 @@ export function opensProfile(which: number | "new"): Opening {
 
 /// And which Profile an opening names — its id, `"new"` for the blank form, or
 /// `null` where it names no Profile at all.
-export function profileOpened(
-  opening: Opening | null,
-): number | "new" | null {
-  if (opening === null || !opening.startsWith("profile:")) {
+export function profileOpened(opening: Opening | null): number | "new" | null {
+  return named("profile", opening);
+}
+
+/// What opens a Repo: its id, or `"new"` for the form another is registered by.
+export function opensRepo(which: number | "new"): Opening {
+  return `repo:${which}`;
+}
+
+/// And which Repo an opening names, read the way a Profile's is.
+export function repoOpened(opening: Opening | null): number | "new" | null {
+  return named("repo", opening);
+}
+
+/// Which of one kind of thing an opening names: its id, `"new"`, or `null`
+/// where the opening is about something else entirely.
+///
+/// The Profiles and the Repos are the same shape — a segment, then an id or the
+/// word — so they are read by the one function. Two copies of this would be two
+/// places for the two to drift apart.
+function named(kind: string, opening: Opening | null): number | "new" | null {
+  const prefix = `${kind}:`;
+  if (opening === null || !opening.startsWith(prefix)) {
     return null;
   }
 
-  const which = opening.slice("profile:".length);
+  const which = opening.slice(prefix.length);
   return which === "new" ? "new" : Number(which);
 }
 
@@ -82,8 +93,9 @@ export function pathTo(opening: Opening): string {
     return `${SETTINGS}/profiles/${profile}`;
   }
 
-  if (opening === ADDING_REPO) {
-    return `${SETTINGS}/repos/new`;
+  const repo = repoOpened(opening);
+  if (repo !== null) {
+    return `${SETTINGS}/repos/${repo}`;
   }
 
   return `${SETTINGS}/${opening}`;
@@ -108,22 +120,24 @@ export function openingAt(pathname: string): Opening | null {
     return "github";
   }
 
-  if (what === "repos" && which === "new") {
-    return ADDING_REPO;
+  if (what === "profiles" && which !== undefined) {
+    const profile = which === "new" ? "new" : id(which);
+    return profile === null ? null : opensProfile(profile);
   }
 
-  if (what === "profiles" && which !== undefined) {
-    // The blank form, or digits and nothing else, because an id is what the
-    // server issued. A segment that is neither names no Profile — and neither
-    // does an id nothing is saved under, which the pane answers the same way.
-    if (which === "new") {
-      return opensProfile("new");
-    }
-
-    if (/^\d+$/.test(which)) {
-      return opensProfile(Number(which));
-    }
+  if (what === "repos" && which !== undefined) {
+    const repo = which === "new" ? "new" : id(which);
+    return repo === null ? null : opensRepo(repo);
   }
 
   return null;
+}
+
+/// The id a segment names, or `null` where it names none.
+///
+/// Digits and nothing else, because an id is what the server issued. A segment
+/// that is anything else names no Profile and no Repo — and neither does an id
+/// nothing is saved under, which the panes answer the same way.
+function id(segment: string): number | null {
+  return /^\d+$/.test(segment) ? Number(segment) : null;
 }

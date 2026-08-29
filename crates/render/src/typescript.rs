@@ -24,9 +24,9 @@ use crate::{
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
     GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
     ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RepoEntry, Resumed, RoadmapPane, Screen, SetReading,
-    SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Shown, Started, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
+    PushKey, Registered, Registration, RepoEntry, RepoView, Resumed, RoadmapPane, Screen,
+    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Shown, Started,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
     UpdateNotice, Watching,
 };
 
@@ -54,8 +54,10 @@ fn the_viewers_types_are_written_from_these() {
     Submitted::export_all(&config).unwrap();
     Locked::export_all(&config).unwrap();
 
-    // The Repos Verkstead has been told about, and adding one by path.
+    // The Repos Verkstead has been told about, adding one by path, and one of
+    // them opened — which brings the roadmaps waiting in it along with it.
     RepoEntry::export_all(&config).unwrap();
+    RepoView::export_all(&config).unwrap();
     Registration::export_all(&config).unwrap();
     Registered::export_all(&config).unwrap();
 

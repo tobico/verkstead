@@ -41,6 +41,7 @@ import type {
   ConversationEntry,
   ProfileEntry,
   RepoEntry,
+  RepoView,
   SettingsSaved,
   SettingsView,
   ShowingArchived,
@@ -55,11 +56,12 @@ import { GithubCard, GithubPane } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
 import {
-  ADDING_REPO,
   openingAt,
   opensProfile,
+  opensRepo,
   pathTo,
   profileOpened,
+  repoOpened,
 } from "../src/settings/openings";
 import head from "../src/workbench/PaneHead.module.css";
 import { drawn } from "./bench";
@@ -67,6 +69,7 @@ import { json, serving, whenever } from "./serving";
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
+import repo from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
 import saved from "./fixtures/settings-saved.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
@@ -74,6 +77,9 @@ import unset from "./fixtures/settings-unset.json" with { type: "json" };
 const TOLD = told as SettingsView;
 const PROFILES = profiles as ProfileEntry[];
 const REPOS = repos as RepoEntry[];
+const FIRST_REPO = REPOS[0]!;
+/// The Repo the fixture opens, which is the first of the list it belongs to.
+const OPENED: RepoView = { ...(repo as RepoView), id: FIRST_REPO.id };
 const SIDEBAR = conversations as ConversationEntry[];
 const UNSET = unset as SettingsView;
 const SAVED = saved as SettingsSaved;
@@ -599,6 +605,11 @@ function thePage(at = "/settings") {
     whenever("/api/ui/settings", json(TOLD)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever("/api/ui/repos", json(REPOS)),
+    // And one of them opened, which is what a card leads to — with the answer
+    // for an id nothing is registered under beside it, because a link followed
+    // after somebody took a repo away is a path this page has to draw.
+    whenever(`/api/ui/repos/${FIRST_REPO.id}`, json(OPENED)),
+    whenever("/api/ui/repos/404", json({ error: "there is no Repo 404" }, 404)),
     // The one write this page can make that is not the credentials' own: a
     // registration, which the pane sends to the same path it read the list
     // from.
@@ -623,7 +634,7 @@ function thePage(at = "/settings") {
             <Route path="/" />
             <Route path="/github" />
             <Route path="/profiles/:profile" />
-            <Route path="/repos/new" />
+            <Route path="/repos/:repo" />
           </Route>
           <Route path="*" component={() => <p>somewhere else</p>} />
         </MemoryRouter>
@@ -903,9 +914,66 @@ describe("the path a details pane stands at", () => {
     expect(container.querySelector("dialog")).toBeNull();
   });
 
-  /// The Repos' one pane: the path another is registered by. It stands behind
-  /// the `repos/` segment for the reason a Profile's stands behind `profiles/`,
-  /// against ids the Repos have not been given yet.
+  /// A registered Repo has a pane of its own, behind the `repos/` segment for
+  /// the reason a Profile's stands behind `profiles/`.
+  it("opens a repo at /settings/repos/:id, replacing", async () => {
+    const { container, history } = thePage();
+
+    const face = await drawn<HTMLElement>(
+      panes(container)[1]!,
+      `.${repoList.repos} .${repoList.repo}`,
+    );
+    fireEvent.click(face);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/settings/repos/${FIRST_REPO.id}`),
+    );
+
+    // Replaced rather than pushed, as every detail of the settings is: Back
+    // leaves the settings rather than walking out of the pane just opened.
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// What the card could not hold, in the pane that has the room for it — and
+  /// the card reading as open while that pane stands, like every other card.
+  it("draws the repo in the details pane, and reads its card as open", async () => {
+    const { container } = thePage(`/settings/repos/${FIRST_REPO.id}`);
+
+    const details = panes(container)[2]!;
+    await waitFor(() => expect(details.textContent).toContain(OPENED.path));
+
+    expect(details.textContent).toContain(OPENED.default_branch);
+    expect(details.textContent).toContain(`${OPENED.live} live`);
+    expect(details.textContent).toContain(`${OPENED.finished} finished`);
+    for (const branch of OPENED.branches) {
+      expect(details.textContent).toContain(branch);
+    }
+    for (const roadmap of OPENED.roadmaps) {
+      expect(details.textContent).toContain(roadmap.title);
+      expect(details.textContent).toContain(roadmap.stage_title);
+    }
+
+    const face = await drawn<HTMLElement>(
+      panes(container)[1]!,
+      `.${repoList.repos} .${repoList.repo}`,
+    );
+    expect(face.getAttribute("aria-pressed")).toBe("true");
+    expect(face.classList).toContain(card.open);
+  });
+
+  /// A link followed after somebody took the repo away: said in a line rather
+  /// than shown as an error the human is meant to do something about.
+  it("says the repo is gone where the server has no such id", async () => {
+    const { container } = thePage("/settings/repos/404");
+
+    await waitFor(() =>
+      expect(panes(container)[2]!.textContent).toContain("That repo is gone."),
+    );
+  });
+
+  /// And the other pane under the same segment: the path another Repo is
+  /// registered by, standing where an id stands.
   it("opens the repo form at /settings/repos/new, replacing", async () => {
     const { container, history } = thePage();
 
@@ -980,11 +1048,12 @@ describe("the path a details pane stands at", () => {
 /// a value is cheaper to hold true here than through a mounted one. What the
 /// page does with it is the two suites above.
 describe("where a settings details pane stands", () => {
-  it("puts a profile behind a segment of its own, and a word beside it", () => {
+  it("puts an id behind a segment of its own, and a word beside it", () => {
     expect(pathTo("github")).toBe("/settings/github");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
-    expect(pathTo(ADDING_REPO)).toBe("/settings/repos/new");
+    expect(pathTo(opensRepo(7))).toBe("/settings/repos/7");
+    expect(pathTo(opensRepo("new"))).toBe("/settings/repos/new");
   });
 
   it("reads back everything it writes", () => {
@@ -992,7 +1061,8 @@ describe("where a settings details pane stands", () => {
       "github",
       opensProfile(7),
       opensProfile("new"),
-      ADDING_REPO,
+      opensRepo(7),
+      opensRepo("new"),
     ] as const) {
       expect(openingAt(pathTo(opening))).toBe(opening);
     }
@@ -1004,8 +1074,19 @@ describe("where a settings details pane stands", () => {
     expect(profileOpened(opensProfile(7))).toBe(7);
     expect(profileOpened(opensProfile("new"))).toBe("new");
     expect(profileOpened("github")).toBeNull();
-    expect(profileOpened(ADDING_REPO)).toBeNull();
+    expect(profileOpened(opensRepo(7))).toBeNull();
     expect(profileOpened(null)).toBeNull();
+  });
+
+  /// And which Repo, read the same way. The two are the same shape and are told
+  /// apart by their segment, which is what keeps a Repo's id from reading as a
+  /// Profile's.
+  it("says which repo an opening names, and which names none", () => {
+    expect(repoOpened(opensRepo(7))).toBe(7);
+    expect(repoOpened(opensRepo("new"))).toBe("new");
+    expect(repoOpened("github")).toBeNull();
+    expect(repoOpened(opensProfile(7))).toBeNull();
+    expect(repoOpened(null)).toBeNull();
   });
 
   /// The settings' own path opens nothing, and neither does anything that is
@@ -1020,7 +1101,8 @@ describe("where a settings details pane stands", () => {
     ["/settings/profiles/7/extra"],
     ["/settings/profiles/7.5"],
     ["/settings/repos"],
-    ["/settings/repos/7"],
+    ["/settings/repos/nonsense"],
+    ["/settings/repos/7/extra"],
     ["/settings/repos/new/extra"],
     ["/conversations/3/events/7"],
     ["/"],

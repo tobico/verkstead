@@ -1,15 +1,16 @@
 //! The Repos section of the settings page: the cards for what is registered,
-//! and the pane that registers another.
+//! the pane one of them opens, and the pane that registers another.
 //!
-//! The two halves are mounted apart, because that is what they are now: cards in
-//! the middle pane carrying what a list is scanned for, and the form that adds
-//! one in the details pane beside them. The page that puts the two together —
-//! which path the plus opens, and whether it reads as open while that pane
-//! stands — is `settings.test.tsx`'s, along with the arithmetic behind it.
+//! The three are mounted apart, because that is what they are: cards in the
+//! middle pane carrying what a list is scanned for, and each pane on its own in
+//! the details beside them. The page that puts them together — which path a card
+//! opens, and whether it reads as open while that pane stands — is
+//! `settings.test.tsx`'s, along with the arithmetic behind it.
 //!
-//! `tests/fixtures/repos.json` is a golden fixture like the profiles':
-//! `cargo test` renders the real `/api/ui/repos` and writes the file, so what
-//! these assertions read is the endpoint's own words.
+//! `tests/fixtures/repos.json` and `repo.json` are golden fixtures like the
+//! profiles': `cargo test` renders the real `/api/ui/repos` and
+//! `/api/ui/repos/{id}` and writes the files, so what these assertions read is
+//! the endpoints' own words.
 //!
 //! What is worth proving here is that a refusal reads as a refusal. The boundary
 //! itself is the server's — the tests over there are what say a path outside a
@@ -22,18 +23,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Registered, RepoEntry } from "../src/api/types";
+import type { Registered, RepoEntry, RepoView } from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
-import { RepoList, RepoPane } from "../src/repos/RepoList";
+import { RepoDetails, RepoList, RepoPane } from "../src/repos/RepoList";
 import styles from "../src/repos/RepoList.module.css";
 import head from "../src/workbench/PaneHead.module.css";
 import { drawn } from "./bench";
 import { json, serving, whenever } from "./serving";
 import repos from "./fixtures/repos.json" with { type: "json" };
+import opened from "./fixtures/repo.json" with { type: "json" };
 
 const REPOS = repos as RepoEntry[];
 const FIRST = REPOS[0]!;
+
+/// One of them opened, which is the pane's own read — the same repository the
+/// first card is about, so a test can mount the pair and have them agree.
+const OPENED: RepoView = { ...(opened as RepoView), id: FIRST.id };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -58,12 +64,24 @@ function mounting(what: () => JSX.Element) {
   ));
 }
 
-/// The cards in the middle pane, and what pressing the plus above them asked
-/// for.
-function mountCards(adding = false) {
+/// The cards in the middle pane, and what pressing one of them — or the plus
+/// above them — asked for.
+function mountCards(opening: number | "new" | null = null) {
+  const open = vi.fn();
   const add = vi.fn();
 
-  return { ...mounting(() => <RepoList adding={adding} add={add} />), add };
+  return {
+    ...mounting(() => <RepoList opening={opening} open={open} add={add} />),
+    open,
+    add,
+  };
+}
+
+/// The pane one of those cards opens, and what its way back asked for.
+function mountOpened(id = FIRST.id) {
+  const back = vi.fn();
+
+  return { ...mounting(() => <RepoDetails repo={id} back={back} />), back };
 }
 
 /// The form in the details pane, and what its two ways out asked for.
@@ -77,6 +95,12 @@ function mountPane() {
 /// The list as it stands, with whatever the pane's writes are answered by.
 function theRepos(...answers: Array<() => Promise<Response>>) {
   return serving(whenever("/api/ui/repos", json(REPOS)), ...answers);
+}
+
+/// And one Repo opened, which is a read of its own rather than a row of that
+/// list.
+function theOpened(view: RepoView = OPENED) {
+  return serving(whenever(`/api/ui/repos/${view.id}`, json(view)));
 }
 
 /// One repo's card, by the name on it.
@@ -134,21 +158,37 @@ describe("the cards", () => {
     ).toEqual(REPOS.map((repo) => repo.name));
   });
 
-  /// A card with nothing behind it yet: the Repos get a pane of their own in
-  /// task 08, and until they do a press would be a promise this build cannot
-  /// keep. `CardButton` draws one without a pointer, without a tab stop and
-  /// without an `aria-pressed` that would say it can be opened.
-  it("draws the cards unpressable, there being nowhere to go yet", async () => {
+  /// A card is pressed to open the pane beside it, like every other card in the
+  /// app: an `article` rather than a button, because it holds more than a run of
+  /// text, with the press, the tab stop and the role that says what it is put on
+  /// the article by `CardButton`.
+  it("opens the repo when a card is pressed", async () => {
     theRepos();
-    mountCards();
+    const { open } = mountCards();
 
     await waitFor(() => screen.getByText(FIRST.name));
 
     const face = theCard(FIRST.name);
     expect(face.classList).toContain(card.card);
-    expect(face.classList).not.toContain(card.pressable);
-    expect(face.getAttribute("aria-pressed")).toBeNull();
-    expect(face.getAttribute("tabindex")).toBeNull();
+    expect(face.getAttribute("role")).toBe("button");
+    expect(face.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(face);
+    expect(open).toHaveBeenCalledWith(FIRST.id);
+  });
+
+  it("reads a card as open while its pane is", async () => {
+    theRepos();
+    mountCards(FIRST.id);
+
+    await waitFor(() => screen.getByText(FIRST.name));
+
+    const face = theCard(FIRST.name);
+    expect(face.getAttribute("aria-pressed")).toBe("true");
+    expect(face.classList).toContain(card.open);
+
+    // And the others are not: a details pane shows one thing.
+    expect(theCard(REPOS[1]!.name).getAttribute("aria-pressed")).toBe("false");
   });
 
   /// The list is what stays in the pane. There is no form on it at all: adding
@@ -208,7 +248,7 @@ describe("the plus that adds one", () => {
 
   it("reads as open while the form is", async () => {
     theRepos();
-    const { container } = mountCards(true);
+    const { container } = mountCards("new");
 
     const plus = await drawn<HTMLButtonElement>(
       container,
@@ -216,6 +256,158 @@ describe("the plus that adds one", () => {
     );
     expect(plus.getAttribute("aria-pressed")).toBe("true");
     expect(plus.classList).toContain(button.open);
+  });
+
+  /// The plus and a card are two selections in the one pane: a Repo being open
+  /// is not the form being open, and the plus says so.
+  it("stays shut while a repo's own pane is open", async () => {
+    theRepos();
+    const { container } = mountCards(FIRST.id);
+
+    const plus = await drawn<HTMLButtonElement>(
+      container,
+      'button[aria-label="Add a repo"]',
+    );
+    expect(plus.getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+/// The pane a card opens: everything about a Repo the list has no room for,
+/// read when somebody opens one rather than carried by the row.
+describe("the pane a card opens", () => {
+  /// A read of its own, keyed by the Repo: none of what it shows is on the list,
+  /// so there is nothing on the list for it to have taken instead.
+  it("asks the server about the one Repo it is about", async () => {
+    const fetching = theOpened();
+    mountOpened();
+
+    await waitFor(() => screen.getByText(OPENED.path));
+    expect(fetching).toHaveBeenCalledWith(
+      `/api/ui/repos/${FIRST.id}`,
+      expect.anything(),
+    );
+  });
+
+  /// Titled by the repository rather than by a word, because a pane about one
+  /// thing is named by that thing.
+  it("is titled by the repo", async () => {
+    theOpened();
+    const { container } = mountOpened();
+
+    await waitFor(() => screen.getByText(OPENED.path));
+    expect(container.querySelector("h1")!.textContent).toBe(OPENED.name);
+  });
+
+  it("draws the path and the default branch", async () => {
+    theOpened();
+    const { container } = mountOpened();
+
+    await waitFor(() => screen.getByText(OPENED.path));
+
+    const facts = container.querySelector(`.${styles.facts}`)!;
+    expect(facts.querySelector(`.${styles.path}`)!.textContent).toBe(
+      OPENED.path,
+    );
+    expect(facts.querySelector(`.${styles.branch}`)!.textContent).toBe(
+      OPENED.default_branch,
+    );
+  });
+
+  /// Counted apart because they are read for different reasons: what is on this
+  /// Repo now, and what has been.
+  it("counts the live and the finished conversations apart", async () => {
+    theOpened();
+    const { container } = mountOpened();
+
+    await waitFor(() => screen.getByText(OPENED.path));
+
+    expect(container.querySelector(`.${styles.live}`)!.textContent).toBe(
+      `${OPENED.live} live`,
+    );
+    expect(container.querySelector(`.${styles.finished}`)!.textContent).toBe(
+      `${OPENED.finished} finished`,
+    );
+  });
+
+  it("lists every branch git gave it, in the order it gave them", async () => {
+    theOpened();
+    const { container } = mountOpened();
+
+    await waitFor(() => screen.getByText(OPENED.path));
+
+    expect(
+      [...container.querySelectorAll(`.${styles.branchList} li`)].map(
+        (branch) => branch.textContent,
+      ),
+    ).toEqual(OPENED.branches);
+  });
+
+  /// The same reading the notice under the new-conversation box makes, said here
+  /// whether or not there is any: the notice is drawn only where there is
+  /// something to say, and this pane is an account of the Repo.
+  it("names the roadmaps waiting in it, with the stage each would start", async () => {
+    theOpened();
+    const { container } = mountOpened();
+
+    await waitFor(() => screen.getByText(OPENED.path));
+
+    const waiting = [...container.querySelectorAll(`.${styles.roadmap}`)];
+    expect(waiting).toHaveLength(OPENED.roadmaps.length);
+    expect(waiting[0]!.querySelector(`.${styles.title}`)!.textContent).toBe(
+      OPENED.roadmaps[0]!.title,
+    );
+    expect(waiting[0]!.querySelector(`.${styles.stage}`)!.textContent).toBe(
+      `${OPENED.roadmaps[0]!.stage}: ${OPENED.roadmaps[0]!.stage_title}`,
+    );
+  });
+
+  it("says so plainly where nothing is waiting to be adopted", async () => {
+    theOpened({ ...OPENED, roadmaps: [] });
+    mountOpened();
+
+    await waitFor(() => screen.getByText("Nothing is waiting to be adopted."));
+  });
+
+  /// A link followed after somebody took the repo away, which the server says
+  /// with a 404: a line rather than an error the human is meant to act on.
+  it("says the repo is gone where there is no such id", async () => {
+    serving(
+      whenever(
+        `/api/ui/repos/${FIRST.id}`,
+        json({ error: `there is no Repo ${FIRST.id}` }, 404),
+      ),
+    );
+    mountOpened();
+
+    await waitFor(() => screen.getByText("That repo is gone."));
+    expect(screen.queryByText(/Could not read this repo/)).toBeNull();
+  });
+
+  /// And a server that could not answer at all, which is a failure rather than
+  /// an absence.
+  it("shows the server's own wording when it could not answer at all", async () => {
+    serving(
+      whenever(
+        `/api/ui/repos/${FIRST.id}`,
+        json({ error: "the Repo could not be read" }, 500),
+      ),
+    );
+    mountOpened();
+
+    await waitFor(() => screen.getByText(/the Repo could not be read/));
+  });
+
+  /// The way back out of it, in the slot every pane keeps for it: a change of
+  /// level rather than a navigation, which is the page's to make.
+  it("goes back to the settings", async () => {
+    theOpened();
+    const { container, back } = mountOpened();
+
+    const out = await drawn<HTMLButtonElement>(container, `.${head.back}`);
+    expect(out.textContent).toContain("Settings");
+
+    fireEvent.click(out);
+    expect(back).toHaveBeenCalled();
   });
 });
 

@@ -1,5 +1,5 @@
-//! The Repos Verkstead has been told about, as the cards that read them, and the
-//! one way to add another: an absolute path, typed.
+//! The Repos Verkstead has been told about, as the cards that read them, each
+//! one opened, and the one way to add another: an absolute path, typed.
 //!
 //! Typed rather than picked out of a browser: the Watched Paths are a security
 //! boundary and nothing here scans the filesystem to offer choices from it, so
@@ -13,23 +13,27 @@
 //! this file is where each of them is said — which is why the pane is what a
 //! refusal keeps up rather than something the answer replaces.
 //!
-//! Two halves in two panes, which is what the settings page is now. Each
-//! registered Repo is a [`CardButton`](../CardButton.tsx) in the middle pane and
-//! the form is the details pane beside it, at `/settings/repos/new`. The modal
-//! the form was drawn over the page in is gone, and so are the boxed rows it
-//! stood over: a card is what everything else on this page is.
+//! The cards are in the middle pane and the two panes they lead to are in the
+//! details beside them, which is what the settings page is now. Each registered
+//! Repo is a [`CardButton`](../CardButton.tsx), pressed to open it at
+//! `/settings/repos/:id`, and the plus over them opens the form at
+//! `/settings/repos/new`. The modal the form was drawn over the page in is gone,
+//! and so are the boxed rows the list stood over: a card is what everything else
+//! on this page is.
 //!
-//! The cards are not pressed. There is nowhere for one to go until task 08 gives
-//! a Repo a pane of its own, and a card that answered a press by doing nothing
-//! would be a promise this build cannot keep — so `CardButton` draws them
-//! without a pointer, without a tab stop and without the role that would say
-//! they can be opened. What is on them is what a list is scanned for, which for
-//! a Repo is all three of the things it knows: the name it is picked by, the
-//! directory Verkstead will work in, and what a Conversation will branch from.
+//! What is on a card is what a list is scanned for, which for a Repo is all
+//! three of the things the list knows: the name it is picked by, the directory
+//! Verkstead will work in, and what a Conversation will branch from. Everything
+//! else about it is in the pane, and is asked for when somebody opens one — the
+//! branches git has, how much work is on it, and the roadmaps in it nothing is
+//! driving. None of that is on the list because none of it is stored: each is a
+//! git read or a count, and a list that carried them would pay for all of them
+//! on every visit to this page.
 //!
-//! Both halves read the one query. They are two views of the same list, and a
-//! read apiece would be two reads of it — the cache is what makes the second
-//! caller free.
+//! The list and the form read the one query. They are two views of the same
+//! list, and a read apiece would be two reads of it — the cache is what makes
+//! the second caller free. The opened Repo is a read of its own, keyed by the
+//! Repo, because it is not on that list at all.
 //!
 //! A section of the settings page rather than a page of its own: which
 //! repositories Verkstead may touch is settled once and then left alone, which
@@ -41,7 +45,7 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { IconButton } from "../IconButton";
-import { listRepos, registerRepo } from "../api/client";
+import { RefusedError, listRepos, loadRepo, registerRepo } from "../api/client";
 import type { Registered, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
@@ -83,12 +87,15 @@ function useRepos() {
   }));
 }
 
-/// The registered Repos, as the cards that read them.
+/// The registered Repos, as the cards that open them.
 export function RepoList(props: {
-  /// Whether the pane that registers one is what is open, which is what the plus
-  /// says about itself.
-  adding: boolean;
-  /// And opening it, which is what the plus does.
+  /// Which Repo's pane is open — its id, `"new"` while the form that registers
+  /// one is, or `null` where the details pane is showing something else
+  /// entirely.
+  opening: number | "new" | null;
+  /// Open one, which is what pressing a card does.
+  open: (id: number) => void;
+  /// And open the form, which is what the plus does.
   add: () => void;
 }): JSX.Element {
   const repos = useRepos();
@@ -107,7 +114,7 @@ export function RepoList(props: {
           of={faPlus}
           label="Add a repo"
           class={styles.add}
-          open={props.adding}
+          open={props.opening === "new"}
           press={props.add}
         />
       </div>
@@ -127,7 +134,15 @@ export function RepoList(props: {
         <Match when={repos.data}>
           {(registered) => (
             <ul class={styles.list}>
-              <For each={registered()}>{(repo) => <RepoCard repo={repo} />}</For>
+              <For each={registered()}>
+                {(repo) => (
+                  <RepoCard
+                    repo={repo}
+                    open={props.opening === repo.id}
+                    press={() => props.open(repo.id)}
+                  />
+                )}
+              </For>
             </ul>
           )}
         </Match>
@@ -143,13 +158,24 @@ export function RepoList(props: {
 /// was typed to register it — that is the directory Verkstead will actually work
 /// in, and the point of showing it is that it can be checked.
 ///
-/// Drawn as an `article`, the way every card holding more than a run of text is,
-/// and pressed by nobody: there is nowhere to go until task 08 gives a Repo a
-/// pane of its own.
-function RepoCard(props: { repo: RepoEntry }): JSX.Element {
+/// Drawn as an `article`, the way every card holding more than a run of text is
+/// — a button may not have paragraphs inside it, and `CardButton` puts the
+/// press, the keyboard and the role that says what it is on the article instead.
+function RepoCard(props: {
+  repo: RepoEntry;
+  /// Whether the pane beside this is the one that is open.
+  open: boolean;
+  /// What pressing it does, which is opening that pane.
+  press: () => void;
+}): JSX.Element {
   return (
     <li>
-      <CardButton as="article" class={styles.repo} open={false} press={null}>
+      <CardButton
+        as="article"
+        class={styles.repo}
+        open={props.open}
+        press={props.press}
+      >
         <span class={styles.title}>{props.repo.name}</span>
         <span class={styles.meta}>
           <span class={styles.path}>{props.repo.path}</span>
@@ -157,6 +183,146 @@ function RepoCard(props: { repo: RepoEntry }): JSX.Element {
         </span>
       </CardButton>
     </li>
+  );
+}
+
+/// One registered Repo opened, which is the details pane a card leads to.
+///
+/// Read-only: everything here is the repository's own answer or the store's
+/// count of what has been done in it, and nothing on this pane changes any of
+/// them. Taking a Repo away is the one thing there will be to do to one, and it
+/// arrives here in task 09.
+///
+/// Its own read rather than the list's row, because none of what it shows is on
+/// that row: the branches are a git call, the counts are a query, and the
+/// roadmaps are a walk of `docs/roadmaps/` at the default branch's tip. All of
+/// them are asked afresh every time the pane is opened, which is why the pane
+/// waits on a read of its own even though the card that opened it already knew
+/// the name.
+///
+/// A 404 is the repo being gone rather than a failure: somebody followed a link
+/// after it was taken away, or reloaded a page they had left open. So it is said
+/// in a line rather than shown as an error the human is meant to do something
+/// about.
+export function RepoDetails(props: {
+  /// Which Repo, by the id its card carried.
+  repo: number;
+  /// The way back to the settings, which is a change of level rather than a
+  /// navigation: what is open stays open, and the URL goes on saying so.
+  back: () => void;
+}): JSX.Element {
+  const opened = useReading(() => ({
+    // The Repo is in the key, so opening another is another query rather than
+    // the same one showing the wrong repository for a moment.
+    queryKey: ["repo", props.repo],
+    queryFn: () => loadRepo(props.repo),
+    // Merged rather than frozen: none of this is the store's alone, and a Nudge
+    // is as good a moment as any to hear that a branch was pushed.
+    freshness: { reconcile: "id" },
+  }));
+
+  /// Whether there is simply no such Repo, which the server says with a 404 —
+  /// the same shape a Set that is not there comes back in.
+  const absent = (): boolean =>
+    opened.error instanceof RefusedError && opened.error.status === 404;
+
+  return (
+    <>
+      {/* Titled by the repository rather than by a word, because a pane about
+          one thing is named by that thing. What it falls back to is a word: the
+          head is drawn before the read lands, and there is nothing else to call
+          it until it does. */}
+      <PaneHead
+        back={{ to: "Settings", go: props.back }}
+        title={opened.data?.name ?? "Repo"}
+      />
+
+      <Switch>
+        <Match when={opened.isPending}>
+          <Empty>Loading…</Empty>
+        </Match>
+        <Match when={absent()}>
+          <Empty>That repo is gone.</Empty>
+        </Match>
+        <Match when={opened.isError}>
+          <ErrorLine>
+            Could not read this repo: {opened.error?.message}
+          </ErrorLine>
+        </Match>
+        <Match when={opened.data}>
+          {(repo) => (
+            <div class={styles.opened}>
+              {/* The three facts that decide what Verkstead will do in it, and
+                  what has been done in it so far. A description list, because
+                  each of them is a short answer to a named question. */}
+              <dl class={styles.facts}>
+                <dt>Path</dt>
+                <dd class={styles.path}>{repo().path}</dd>
+
+                <dt>Default branch</dt>
+                <dd class={styles.branch}>{repo().default_branch}</dd>
+
+                {/* Counted apart because they are read for different reasons:
+                    what is on this Repo now, and what has been. */}
+                <dt>Conversations</dt>
+                <dd class={styles.counted}>
+                  <span class={styles.live}>{repo().live} live</span>
+                  <span class={styles.finished}>
+                    {repo().finished} finished
+                  </span>
+                </dd>
+              </dl>
+
+              {/* Every branch git has, local and remote-tracking both — the same
+                  list a drafting Conversation picks what it comes off out of. */}
+              <section class={styles.branches}>
+                <h2>Branches</h2>
+                <Show
+                  when={repo().branches.length > 0}
+                  fallback={<Empty>Git says nothing about its branches.</Empty>}
+                >
+                  <ul class={styles.branchList}>
+                    <For each={repo().branches}>
+                      {(branch) => <li class={styles.branch}>{branch}</li>}
+                    </For>
+                  </ul>
+                </Show>
+              </section>
+
+              {/* And what it is holding that nothing is driving, which is the
+                  same reading the notice under the new-conversation box makes.
+                  Said here whether or not there is any: the notice is drawn only
+                  where there is something to say, and this pane is an account of
+                  the Repo. */}
+              <section class={styles.roadmaps}>
+                <h2>Roadmaps waiting</h2>
+                <Show
+                  when={repo().roadmaps.length > 0}
+                  fallback={<Empty>Nothing is waiting to be adopted.</Empty>}
+                >
+                  <ul class={styles.roadmapList}>
+                    <For each={repo().roadmaps}>
+                      {(roadmap) => (
+                        <li class={styles.roadmap}>
+                          <span class={styles.title}>
+                            {roadmap.title || roadmap.name}
+                          </span>
+                          {/* Which stage adopting it would start, which is the
+                              roadmap's own order rather than anybody's choice. */}
+                          <span class={styles.stage}>
+                            {roadmap.stage}: {roadmap.stage_title}
+                          </span>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
+              </section>
+            </div>
+          )}
+        </Match>
+      </Switch>
+    </>
   );
 }
 

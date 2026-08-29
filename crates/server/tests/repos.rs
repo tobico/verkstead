@@ -1,5 +1,5 @@
-//! Registering a Repo over the viewer's namespace: what gets on the list, and
-//! everything that is refused before it can.
+//! Registering a Repo over the viewer's namespace: what gets on the list, what
+//! is refused before it can, and what one of them says when it is opened.
 //!
 //! Every refusal here is asked of the *server*, through the endpoint, rather
 //! than of the boundary type underneath it — which is the point of the Watched
@@ -14,12 +14,22 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
+use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Registered, RepoEntry};
-use verkstead_server::{WatchedPaths, open_database, router_watching};
+use verkstead_render::{Registered, RepoEntry, RepoView};
+use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
 /// A router watching `watched`, plus the directory holding its database alive.
 async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
+    let (dir, _pool, app) = app_and_pool_watching(watched).await;
+
+    (dir, app)
+}
+
+/// The same, with the pool beside it — for the tests that put Conversations on
+/// a Repo, which is the one thing they need that this namespace has no endpoint
+/// for.
+async fn app_and_pool_watching(watched: &Path) -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -28,7 +38,7 @@ async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
 
     let data_dir = dir.path().to_owned();
 
-    (dir, router_watching(pool, watched, data_dir))
+    (dir, pool.clone(), router_watching(pool, watched, data_dir))
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -379,5 +389,81 @@ async fn the_branches_of_a_repo_that_is_not_there_are_refused() {
         .await;
 
         assert_eq!(status, StatusCode::NOT_FOUND, "asking about {asked}");
+    }
+}
+
+/// One Repo opened, which is what its card in the settings leads to: the row's
+/// own three facts, plus everything the card had no room for.
+///
+/// The roadmaps are the same reading the notice under the new-conversation box
+/// makes — `ui_content.rs` is where what that finds is pinned — so what is
+/// asserted here is that a repository holding none says so with an empty list
+/// rather than by leaving the field out.
+#[tokio::test]
+async fn a_repo_opened_carries_its_branches_its_work_and_its_roadmaps() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, pool, app) = app_and_pool_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+    git(&repo, &["branch", "release"]);
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    // Three Conversations on it: one still going, and two that are over each
+    // way there is to be over.
+    for (branch, state) in [
+        ("rate-limiting", None),
+        ("pane-paths", Some(store::Lifecycle::Done)),
+        ("dropped", Some(store::Lifecycle::Closed)),
+    ] {
+        let started = store::start_conversation(&pool, id, branch)
+            .await
+            .unwrap()
+            .unwrap();
+
+        if let Some(state) = state {
+            store::set_state(&pool, started, state).await.unwrap();
+        }
+    }
+
+    let opened: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
+
+    assert_eq!(opened.id, id);
+    assert_eq!(opened.name, "verkstead");
+    assert_eq!(opened.path, repo.canonicalize().unwrap().to_str().unwrap());
+    assert_eq!(opened.default_branch, "main");
+    assert_eq!(
+        opened.branches,
+        vec!["main".to_owned(), "release".to_owned()],
+        "the same list the base dropdown is filled from",
+    );
+    assert_eq!(opened.live, 1);
+    assert_eq!(opened.finished, 2, "Done and Closed counted together");
+    assert!(
+        opened.roadmaps.is_empty(),
+        "a repository with no roadmaps has none waiting: {:?}",
+        opened.roadmaps,
+    );
+}
+
+/// A Repo that is not registered has nothing to open, and saying so is a
+/// refusal: the pane reads it as the repo being gone — a link followed after
+/// somebody took it away — rather than as a Repo with nothing on it.
+#[tokio::test]
+async fn a_repo_that_is_not_there_cannot_be_opened() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+
+    for asked in ["404", "not-a-number"] {
+        let (status, _) = fetch(
+            &app,
+            Request::builder()
+                .uri(format!("/api/ui/repos/{asked}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND, "opening {asked}");
     }
 }

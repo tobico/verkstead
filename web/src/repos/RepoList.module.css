@@ -1,5 +1,5 @@
-/* The Repos section of the settings page: the cards for what is registered, and
-   the pane that adds another — see `RepoList.tsx`.
+/* The Repos section of the settings page: the cards for what is registered, the
+   pane one of them opens, and the pane that adds another — see `RepoList.tsx`.
 
    What a card *is* is `CardButton.module.css`'s, shared with every other card in
    the app: the surface, and what it does under the pointer where anything is
@@ -64,10 +64,14 @@
   color: var(--ink-soft);
 }
 
-/* The two things on the meta line that are quoted rather than said: a path the
-   filesystem knows by, and the branch name git does. */
+/* What is quoted rather than said, wherever it stands: a path the filesystem
+   knows by, and the branch names git does. On the card's meta line, and again
+   in the pane that card opens. */
 .repo .path,
-.repo .branch {
+.repo .branch,
+.facts .path,
+.facts .branch,
+.branchList .branch {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
@@ -138,4 +142,93 @@
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }
+}
+
+/* One Repo opened: the facts under its name, the branches git has, and the
+   roadmaps waiting in it. Read down as three blocks with air between them,
+   because each answers a different question about the same repository. */
+.opened {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* The named short answers: a column of labels with the answers under them
+   rather than a two-column grid, because a path is long and a grid would either
+   wrap it into a strip or push the labels off the left of a phone. */
+.facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.facts dt {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.facts dd {
+  margin: 0.2rem 0 0;
+  /* A path has no spaces to break at, so it is broken wherever it has to be
+     rather than pushing the pane sideways. */
+  overflow-wrap: anywhere;
+}
+
+/* The two counts on one line, which is how they are read: what is on this Repo
+   now, and what has been. */
+.counted {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+}
+
+/* What is going on it now reads first, and what is over reads quietly beside
+   it: the two are the same sentence, and only one of them is news. */
+.counted .live {
+  font-weight: 600;
+}
+
+.counted .finished {
+  color: var(--ink-soft);
+}
+
+.branches h2,
+.roadmaps h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+}
+
+.branchList,
+.roadmapList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* Branch names wrap as a run rather than a column: there may be a great many of
+   them, and what they are read for is finding one. */
+.branchList {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+}
+
+.roadmap {
+  display: flex;
+  flex-direction: column;
+}
+
+.roadmap .title {
+  font-weight: 600;
+}
+
+/* Which stage adopting it would start, said under the roadmap's own name. */
+.roadmap .stage {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
 }
