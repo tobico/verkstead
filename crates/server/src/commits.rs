@@ -88,12 +88,39 @@ pub(crate) struct Branch {
     repo_id: i64,
 
     repo: PathBuf,
+
+    /// What the branch was called when the watch started, which is what nearly
+    /// every sweep of it goes on using. What can move it is [`Self::following`].
     branch: String,
+
+    /// Whether that name is still the name, and where a sweep looks to find out.
+    following: Following,
 
     /// What the work branched from. It is the far end of the range, so it is
     /// what stops the whole history of the default branch arriving as this
     /// Conversation's commits.
     base: String,
+}
+
+/// What moves a watched branch's name under the watcher.
+///
+/// A session may rename the branch it is working on, and Verkstead follows that
+/// rather than repairing it — see [`crate::renames`]. Which leaves a sweep
+/// reading a name that has changed since the watcher was spawned, so each sweep
+/// asks first, and this is what it asks about.
+#[derive(Debug, Clone)]
+enum Following {
+    /// Nothing: a companion the human gave a branch name of its own, which is
+    /// that companion's name whatever the Conversation's branch is called.
+    Nothing,
+
+    /// The Conversation's own branch, in its own Worktree — the checkout a
+    /// rename is read off, and the one whose reading moves the record.
+    Own(PathBuf),
+
+    /// A companion left on the empty *mirroring* setting: the Conversation's
+    /// branch name, so the record that says what that is says what this is.
+    Mirroring,
 }
 
 /// Every branch a session running for `conversation` can land a commit on: the
@@ -104,6 +131,11 @@ pub(crate) struct Branch {
 /// names the repository rather than the checkout — the refs are the
 /// repository's, which a worktree shares — and the commit that repository's own
 /// base resolved to when its checkout was made.
+///
+/// The Conversation's own checkout comes along beside its repository all the
+/// same, because that is where a rename shows up: the branch a session is
+/// working on may not be the branch it was given, and each sweep asks — see
+/// [`Following`].
 ///
 /// What is left out is left out with a line in the log, because each absence is
 /// a record that has been got at rather than an ordinary state: a Conversation
@@ -118,6 +150,14 @@ pub(crate) fn watched(conversation: &store::Conversation) -> Vec<Branch> {
             repo_id: conversation.repo.id,
             repo: conversation.repo.path.clone(),
             branch: conversation.branch.clone(),
+            // A Conversation with a session running has a Worktree, and one
+            // without is a record nothing here can repair: a rename is read off
+            // a checkout, so with no checkout to read there is nothing to
+            // follow and the name stands as the record has it.
+            following: match conversation.worktree.clone() {
+                Some(worktree) => Following::Own(worktree),
+                None => Following::Nothing,
+            },
             base,
         }),
         None => tracing::error!(
@@ -153,6 +193,13 @@ pub(crate) fn watched(conversation: &store::Conversation) -> Vec<Branch> {
             repo_id: companion.repo.id,
             repo: companion.repo.path.clone(),
             branch,
+            // And what the mirror rule resolved to is only what it resolves to
+            // *now*: a mirroring companion's branch is renamed along with the
+            // Conversation's, so this one's name moves with the record too.
+            following: match companion.branch.is_empty() {
+                true => Following::Mirroring,
+                false => Following::Nothing,
+            },
             base,
         });
     }
@@ -163,12 +210,20 @@ pub(crate) fn watched(conversation: &store::Conversation) -> Vec<Branch> {
 /// Take one look at the branch, and record whatever is on it that is not on the
 /// Timeline yet.
 ///
+/// What the branch is called is asked before it is read, because it may have
+/// moved since the watcher was spawned — see [`now`], and [`crate::renames`] for
+/// why it moves at all.
+///
 /// Nothing here is refused for. A repository that will not answer, a branch that
 /// has gone, a store that will not take a row: each is logged and the next sweep
 /// tries again. What is being watched is a side effect of work happening
 /// elsewhere, and a watcher that gave up the first time git was busy would be
 /// one that stopped watching without anybody noticing.
 async fn sweep(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, branch: &Branch) {
+    let Some(branch) = now(pool, conversation_id, branch).await else {
+        return;
+    };
+
     let recorded = match store::recorded_commits(pool, conversation_id, branch.repo_id).await {
         Ok(recorded) => recorded,
         Err(error) => {
@@ -229,6 +284,50 @@ async fn sweep(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, branch:
             conversation: conversation_id,
         });
     }
+}
+
+/// The branch as it stands at the top of this sweep: the same one, unless its
+/// name has moved.
+///
+/// A companion the human named is the same one every time and is handed back
+/// unasked. The Conversation's own is where a rename is looked for — one
+/// `git symbolic-ref` in the ordinary case, and a followed record in the rare
+/// one — and a mirroring companion takes the answer the record now holds,
+/// having been renamed along with it.
+///
+/// `None` is a Conversation the record no longer has, which is a Conversation
+/// with no branch to sweep. A reading that merely failed is not that: the name
+/// the watcher was started on stands, and the sweep goes on with it rather than
+/// skipping a poll over a busy database.
+async fn now(pool: &SqlitePool, conversation_id: i64, branch: &Branch) -> Option<Branch> {
+    let worktree = match &branch.following {
+        Following::Nothing => return Some(branch.clone()),
+        Following::Mirroring => None,
+        Following::Own(worktree) => Some(worktree.clone()),
+    };
+
+    let named = match store::conversation_branch(pool, conversation_id).await {
+        Ok(Some(named)) => named,
+        Ok(None) => return None,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading a Conversation's branch failed");
+            branch.branch.clone()
+        }
+    };
+
+    let named = match worktree {
+        Some(worktree) => {
+            crate::renames::follow(pool, conversation_id, &branch.repo, &worktree, &named)
+                .await
+                .unwrap_or(named)
+        }
+        None => named,
+    };
+
+    Some(Branch {
+        branch: named,
+        ..branch.clone()
+    })
 }
 
 /// Every commit on the branch that is not among `recorded`, oldest first.
@@ -513,6 +612,89 @@ mod tests {
         run(dir, &["rev-parse", "HEAD"]).trim().to_owned()
     }
 
+    /// A session that renamed its branch goes on having its commits swept up,
+    /// on the name it renamed it to.
+    ///
+    /// The watcher was spawned on the name the record held when the session
+    /// started, so this is the sweep asking again rather than the watcher being
+    /// told: what is on the branch now is what the human is waiting to see, and
+    /// the branch the watcher was given no longer exists.
+    #[tokio::test]
+    async fn a_sweep_follows_the_branch_where_a_session_renamed_it() {
+        let dir = repository();
+        let repo = dir.path().to_owned();
+        let base = head(&repo);
+
+        let pool = crate::open_database(&repo.join("../verkstead.db"))
+            .await
+            .unwrap();
+
+        let repo_id = store::register_repo(&pool, &repo, "verkstead", "main")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+
+        let conversation = store::start_unnamed_conversation(&pool, repo_id, "verkstead-7f3a")
+            .await
+            .unwrap()
+            .unwrap();
+
+        let worktree = dir.path().join("worktrees/verkstead-work");
+
+        assert!(crate::worktrees::add(
+            &repo,
+            &worktree,
+            "verkstead-7f3a",
+            "HEAD"
+        ));
+
+        store::start_grilling(&pool, conversation, &base, &worktree, &[])
+            .await
+            .unwrap();
+
+        // What the session did: a commit, and then the rename the naming
+        // instruction asked it for.
+        run(
+            &worktree,
+            &["config", "user.email", "test@verkstead.invalid"],
+        );
+        run(&worktree, &["config", "user.name", "Verkstead Test"]);
+        std::fs::write(worktree.join("limiter.rs"), "fn allow() {}\n").unwrap();
+        run(&worktree, &["add", "limiter.rs"]);
+        run(&worktree, &["commit", "-m", "feat: rate limiting"]);
+        run(&worktree, &["branch", "-m", "rate-limiting"]);
+
+        let watched = Branch {
+            repo_id,
+            repo: repo.clone(),
+            branch: "verkstead-7f3a".to_owned(),
+            following: Following::Own(worktree.clone()),
+            base,
+        };
+
+        sweep(&pool, &Nudges::new(), conversation, &watched).await;
+
+        let recorded = store::recorded_commits(&pool, conversation, repo_id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            recorded.len(),
+            1,
+            "the commit is on the Timeline, read off a branch by a name the \
+             watcher was never given",
+        );
+        assert_eq!(
+            store::conversation_branch(&pool, conversation)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("rate-limiting"),
+            "and the record is on the new name for everything else that reads it",
+        );
+    }
+
     #[test]
     fn a_commit_is_described_by_its_subject_and_what_it_moved() {
         let dir = repository();
@@ -701,6 +883,7 @@ mod tests {
             repo_id: 1,
             repo: path.to_owned(),
             branch: "rate-limiting".to_owned(),
+            following: Following::Nothing,
             base: base.clone(),
         };
 
@@ -791,6 +974,7 @@ mod tests {
             repo_id: 1,
             repo: path.to_owned(),
             branch: "rate-limiting".to_owned(),
+            following: Following::Nothing,
             base,
         };
 
@@ -823,6 +1007,7 @@ mod tests {
             repo_id: 1,
             repo: path.to_owned(),
             branch: "main".to_owned(),
+            following: Following::Nothing,
             base: head(path),
         };
 

@@ -145,6 +145,19 @@ pub struct Pace {
     /// long one that never will is left before Verkstead says so.
     pub waking: Duration,
 
+    /// And how long a wrap-up's review waits before it takes the Worktree.
+    ///
+    /// Zero in a server, where nothing is waiting for anything: this is a seam
+    /// the suite reaches for, and the one span here that is not a choice about
+    /// how fast to work. A wrap-up starts its review and its watchers together,
+    /// and the poll that runs before the review has the Worktree is the poll
+    /// that can read a pull request nobody has written on yet — the window a
+    /// comment left during the review used to be settled away in. Nothing can
+    /// land in that window on purpose, so a test that covers it holds it open
+    /// instead. See [`crate::comments::once`], which settles nothing before the
+    /// review for exactly that reason.
+    pub reviewing: Duration,
+
     /// And how often every Conversation is looked over for one that has
     /// Stalled — see [`crate::stalls`].
     ///
@@ -164,6 +177,7 @@ impl Default for Pace {
             proposing: Duration::from_secs(60),
             waking: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
+            reviewing: Duration::ZERO,
         }
     }
 }
@@ -951,6 +965,34 @@ pub(crate) fn build_the_split_out(state: &AppState, conversation_id: i64) {
         crate::conversations::backlog_landed(&state, conversation_id).await;
 
         carry_on(state, conversation_id, driving).await
+    });
+}
+
+/// Build the work of a Conversation whose human picked *no grilling*, from the
+/// press that gave it a branch to the pull request it ends on.
+///
+/// [`build_the_split_out`]'s shape and the other entry into a run that is not a
+/// direction being followed — except that here the direction *is* recorded, the
+/// start having written it: a Brief taken straight to the work is an inline
+/// implementation, so what this launches and what it does with the session is
+/// [`follow_handoff`]'s second half exactly. What it skips is the first half,
+/// there being no grilling session to see out and no handoff for it to have
+/// written.
+///
+/// The registration is taken here rather than by the caller, because the caller
+/// is the press and is about to answer the human: a gap between the two would be
+/// a Conversation the stall sweep found with nothing driving it.
+pub(crate) fn build_the_ungrilled(state: &AppState, conversation_id: i64) {
+    let driving = state.drivers.driving(conversation_id);
+    let state = state.clone();
+
+    tokio::spawn(async move {
+        let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing).await
+        else {
+            return;
+        };
+
+        follow_inline(state, conversation_id, session, driving).await
     });
 }
 
@@ -3156,6 +3198,23 @@ enum Prompt {
     FollowingUp(FollowUp),
 }
 
+impl Prompt {
+    /// Which of the Conversation's Pairings a session on this prompt is
+    /// launched under.
+    ///
+    /// The review is the one that is not the Implementation Pairing, and the
+    /// line is that reviewing is a fresh set of eyes and fixing is building:
+    /// the check fixes, the comment responses and the follow-ups a wrap-up
+    /// dispatches are all the work itself carrying on, so they run under what
+    /// built it.
+    fn role(&self) -> store::Role {
+        match self {
+            Self::Reviewing { .. } => store::Role::Review,
+            _ => store::Role::Implementation,
+        }
+    }
+}
+
 /// Wait for the Conversation's Worktree, and then [`launch`] into it.
 ///
 /// What every driver here launches through except the two that are already
@@ -3194,8 +3253,58 @@ async fn launch_in_turn(state: &AppState, conversation_id: i64, inside: Prompt) 
     launch(state, conversation_id, inside).await
 }
 
-/// Start a fresh session on the next step, under the Conversation's
-/// implementation Profile.
+/// The Pairing a session on `role` is launched under, of what the Conversation
+/// has settled — or `None` where there is no account to launch one under at
+/// all.
+///
+/// The Review role reads its own and **falls back to the Implementation Pairing
+/// where nothing was ever picked for it**. Not a default: the picker is
+/// answered before the work starts, and a Conversation started since the role
+/// existed always has one. What it is for is the two ways of reaching a wrap-up
+/// with the role never picked, neither of which the human can put right — the
+/// pickers freeze when the work starts, and there is no review picker anywhere
+/// else:
+///
+/// - a Conversation written before there was a Review role, whose column the
+///   migration deliberately leaves empty rather than inventing a choice nobody
+///   made — see the store's `migrations`; and
+/// - a Draft steered into a state that settles only what builds, which leaves
+///   the review role untouched because nothing reviews there — see
+///   [`crate::steering`].
+///
+/// Both of them were reviewed by whatever built them before there was a Review
+/// Pairing at all, so that is what reviews them now. Without it a wrap-up like
+/// theirs waits for ever on a review nothing can start: the launch would fail,
+/// the review would never settle, and what the human would see is a stall.
+///
+/// **A role picked away never falls back.** *No review* is a settled choice
+/// rather than an empty picker, and what it settles is that no session runs —
+/// so it is `None` here, and nothing reaches here for it anyway: such a wrap-up
+/// settles its review without launching anything. See [`crate::review`].
+///
+/// Every other role is the Implementation Pairing, which is what the work
+/// itself carrying on runs under — see [`Prompt::role`].
+fn under(
+    role: store::Role,
+    review: &store::Picked,
+    implementation: Option<&store::Pairing>,
+) -> Option<store::Pairing> {
+    match role {
+        store::Role::Review => match review {
+            store::Picked::Skipped => None,
+            picked => picked
+                .pairing()
+                .cloned()
+                .or_else(|| implementation.cloned()),
+        },
+        _ => implementation.cloned(),
+    }
+}
+
+/// Start a fresh session on the next step, under the Profile the prompt's own
+/// role names — the review Pairing for the wrap-up's review, and the
+/// implementation one for everything else. Which account that comes to is
+/// [`under`]'s to say.
 ///
 /// Which step it is is not said: the bundled fork reads `.tasks/` and picks the
 /// same one this did, by the same rule. Verkstead decides the step to know what
@@ -3223,10 +3332,19 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
         }
     };
 
-    let Some(pairing) = conversation.implementation_pairing.clone() else {
+    let role = inside.role();
+
+    let paired = under(
+        role,
+        &conversation.review_pairing,
+        conversation.implementation_pairing.as_ref(),
+    );
+
+    let Some(pairing) = paired else {
         tracing::error!(
             conversation_id,
-            "the implementation Pairing is gone, so no session was started"
+            role = ?role,
+            "the Pairing that session runs under is gone, so no session was started"
         );
         return None;
     };
@@ -3241,6 +3359,16 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                 }
                 Prompt::Staging => skills::staging(&brief),
                 Prompt::NextTask => skills::next_task(&brief, handoff),
+                // The one prompt that reads a Pairing to decide what it says:
+                // a Conversation whose human picked *no grilling* has no
+                // handoff because there was no interview, which is a different
+                // thing from a grilling that ended without writing one. Asked
+                // of the record every launch rather than carried from the
+                // press, so a resumed run says it too — see
+                // [`skills::ungrilled`].
+                Prompt::Implementing if conversation.grilling_pairing.skipped() => {
+                    skills::ungrilled(&brief)
+                }
                 Prompt::Implementing => skills::implementing(&brief, handoff),
                 Prompt::Submitting => skills::submitting(&brief, handoff),
                 Prompt::Instruction(instruction) => {
@@ -3890,5 +4018,87 @@ mod tests {
             "with the Worktree untouched throughout: the handoff is Verkstead's \
              document rather than the project's",
         );
+    }
+
+    /// One Pairing, named by its model so that a test can tell two apart.
+    fn pairing(model: &str) -> store::Pairing {
+        store::Pairing {
+            profile: store::Profile {
+                id: 1,
+                name: model.to_owned(),
+                claude_dir: PathBuf::from("/data/claude"),
+                config_file: PathBuf::from("/data/claude.json"),
+                models: vec![model.to_owned()],
+                agent_type: store::AgentType::Claude,
+            },
+            model: Some(model.to_owned()),
+        }
+    }
+
+    /// Each role runs under the account picked for it, which is the ordinary
+    /// Conversation: the review reads its own and everything else reads what
+    /// builds.
+    #[test]
+    fn a_session_runs_under_the_account_picked_for_its_role() {
+        let review = store::Picked::Under(pairing("reviewing"));
+        let building = pairing("building");
+
+        assert_eq!(
+            under(store::Role::Review, &review, Some(&building)),
+            Some(pairing("reviewing")),
+        );
+        assert_eq!(
+            under(store::Role::Implementation, &review, Some(&building)),
+            Some(pairing("building")),
+            "the work itself carrying on is the account that built it",
+        );
+    }
+
+    /// A review with nothing picked for it runs under what built the work,
+    /// which is what reviewed it before there was a role of its own.
+    ///
+    /// The two ways of getting here are a Conversation from before the Review
+    /// role existed and a Draft steered into a state that settles only what
+    /// builds, and neither can be put right by the human: the pickers froze
+    /// when the work started. Without this the launch fails, the review never
+    /// settles, and the wrap-up waits for ever.
+    #[test]
+    fn a_review_nobody_picked_an_account_for_runs_under_what_built_the_work() {
+        let building = pairing("building");
+
+        assert_eq!(
+            under(
+                store::Role::Review,
+                &store::Picked::Nothing,
+                Some(&building)
+            ),
+            Some(pairing("building")),
+        );
+    }
+
+    /// And a review picked away runs under nothing at all.
+    ///
+    /// *No review* is a settled choice rather than an empty picker, so it is
+    /// the one thing here that must never reach for another account: falling
+    /// back would run the review the human turned off.
+    #[test]
+    fn a_review_picked_away_falls_back_to_nothing() {
+        assert_eq!(
+            under(
+                store::Role::Review,
+                &store::Picked::Skipped,
+                Some(&pairing("building")),
+            ),
+            None,
+        );
+    }
+
+    /// And with nothing to build under there is nothing to launch, whichever
+    /// role is asking.
+    #[test]
+    fn a_conversation_with_no_implementation_pairing_launches_nothing() {
+        for role in [store::Role::Review, store::Role::Implementation] {
+            assert_eq!(under(role, &store::Picked::Nothing, None), None, "{role:?}");
+        }
     }
 }

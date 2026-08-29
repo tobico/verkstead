@@ -369,11 +369,21 @@ pub(crate) enum Checked {
 /// A pull request with nothing running against it comes back empty, which is a
 /// repository with no CI. That is nothing to wait on rather than something
 /// missing — see [`crate::checks`], where it is read as green.
-pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Vec<Check>, Trouble> {
-    /// What `--json statusCheckRollup` comes back as.
+///
+/// **The head is asked for beside them**, because the rollup on its own does not
+/// say which commit it is about. GitHub answers this pull request as its record
+/// currently stands, and that record is behind the branch for a while after a
+/// push: what came back here on 2026-08-29, with the branch three commits along,
+/// was a green suite belonging to the head before them. A green rollup is only
+/// evidence about the commit it names, so the commit it names comes back too —
+/// see [`crate::checks`], where it is compared with what origin is holding.
+pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Suite, Trouble> {
+    /// What `--json statusCheckRollup,headRefOid` comes back as.
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Rollup {
+        #[serde(default)]
+        head_ref_oid: String,
         #[serde(default)]
         status_check_rollup: Vec<Reported>,
     }
@@ -385,14 +395,38 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Vec<Check>, Tr
             "view",
             &number.to_string(),
             "--json",
-            "statusCheckRollup",
+            "statusCheckRollup,headRefOid",
         ],
     )?;
 
     let rollup: Rollup = serde_json::from_str(&said)
         .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
 
-    Ok(read_checks(rollup.status_check_rollup))
+    Ok(Suite {
+        head: rollup.head_ref_oid,
+        checks: read_checks(rollup.status_check_rollup),
+    })
+}
+
+/// What GitHub says about a pull request's checks, and which commit it is
+/// saying it about.
+///
+/// The two together rather than the checks alone: a rollup is a fact about one
+/// commit, and a wrap-up that read it as a fact about the branch would finish
+/// over whatever had been pushed since — see [`crate::checks`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Suite {
+    /// The commit GitHub has the pull request's branch on, which is the commit
+    /// the checks below are about.
+    ///
+    /// Empty where `gh` answered without one, which is a question that came back
+    /// short rather than a head of nothing: nothing is concluded from it and the
+    /// checks stand on their own, as they did before this was asked for.
+    pub(crate) head: String,
+
+    /// Every check GitHub reported against that commit, which is empty for a
+    /// commit nothing has run against.
+    pub(crate) checks: Vec<Check>,
 }
 
 /// One entry of `statusCheckRollup`, which is one of two different things.
@@ -1071,7 +1105,7 @@ mod tests {
         );
 
         assert_eq!(
-            checks(&gh, dir.path(), 41).unwrap(),
+            checks(&gh, dir.path(), 41).unwrap().checks,
             vec![
                 Check {
                     name: "Rust".to_owned(),
@@ -1099,7 +1133,7 @@ mod tests {
             "",
         );
 
-        let checks = checks(&gh, dir.path(), 41).unwrap();
+        let checks = checks(&gh, dir.path(), 41).unwrap().checks;
 
         assert_eq!(checks[0].how, Checked::Failed);
         assert_eq!(checks[0].name, "Rust");
@@ -1118,7 +1152,7 @@ mod tests {
             "",
         );
 
-        let checks = checks(&gh, dir.path(), 41).unwrap();
+        let checks = checks(&gh, dir.path(), 41).unwrap().checks;
 
         assert!(
             checks.iter().all(|check| check.how == Checked::Running),
@@ -1140,7 +1174,7 @@ mod tests {
         );
 
         assert_eq!(
-            checks(&gh, dir.path(), 41).unwrap(),
+            checks(&gh, dir.path(), 41).unwrap().checks,
             vec![
                 Check {
                     name: "ci/buildkite".to_owned(),
@@ -1182,7 +1216,7 @@ mod tests {
     fn a_pull_request_with_no_checks_at_all_reads_back_as_none() {
         let (dir, gh) = stub(r#"{"statusCheckRollup":[]}"#, "");
 
-        assert!(checks(&gh, dir.path(), 41).unwrap().is_empty());
+        assert!(checks(&gh, dir.path(), 41).unwrap().checks.is_empty());
     }
 
     /// And the reason the checks are asked for this way at all: a `gh` that
@@ -1370,7 +1404,7 @@ mod tests {
                    case "$5" in
                      number,title,url)
                        printf '{"number":41,"title":"%s","url":"u"}' "$token" ;;
-                     statusCheckRollup)
+                     statusCheckRollup,headRefOid)
                        printf '{"statusCheckRollup":[{"name":"%s","status":"COMPLETED","conclusion":"SUCCESS"}]}' "$token" ;;
                      comments,reviews)
                        printf '{"comments":[{"id":"IC_1","url":"u","author":{"login":"%s"},"body":"b","createdAt":"t"}],"reviews":[]}' "$token" ;;
@@ -1410,7 +1444,7 @@ mod tests {
             "ghp_theconfiguredone",
         );
         assert_eq!(
-            checks(&gh, repo.path(), 41).unwrap()[0].name,
+            checks(&gh, repo.path(), 41).unwrap().checks[0].name,
             "ghp_theconfiguredone",
         );
         assert_eq!(

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { onCleanup, onMount, type JSX } from "solid-js";
 
 import styles from "./App.module.css";
+import { retrying } from "./api/client";
 import { Empty } from "./notices";
 import { listenForNudges } from "./nudge";
 import { SetPage } from "./set/SetPage";
@@ -26,7 +27,14 @@ import { Workbench } from "./workbench/Workbench";
 /// listening while it was, and the list the human is now looking at stopped
 /// being true while they were gone.
 const queries = new QueryClient({
-  defaultOptions: { queries: { refetchOnWindowFocus: true } },
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: true,
+      // And the ordinary three attempts, minus the read that gave up on a
+      // deadline of its own — see [`retrying`], which is where the reasoning is.
+      retry: retrying,
+    },
+  },
 });
 
 export function App(): JSX.Element {

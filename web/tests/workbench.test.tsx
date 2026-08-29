@@ -12,7 +12,7 @@
 //! tests over there are what say so — and this side's job is to send what was
 //! typed and say in words what came back.
 
-import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -50,6 +50,12 @@ import type {
   Turn,
 } from "../src/api/types";
 // The one menu, which all three of this page's ⋯ and dropdowns are drawn as.
+// The app's own retry rule, which is what a read that gave up on its deadline
+// is answered by.
+import { retrying } from "../src/api/client";
+// The app itself, for the one test in this file whose subject is the app's own
+// query client rather than anything a page draws.
+import { App } from "../src/App";
 import app from "../src/App.module.css";
 // The card a Set's Preface and a commit's Message are both drawn as, both ways:
 // the hashed names to query the two panes by, and the source to read the box's
@@ -72,6 +78,7 @@ import notices from "../src/notices.module.css";
 import contents from "../src/set/Contents.module.css";
 import sheet from "../src/set/Sheet.module.css";
 import illegible from "../src/set/Unreadable.module.css";
+import { NONE, under } from "../src/pairing";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
 // What can be done to a Conversation as a whole, both ways: the hashed names
@@ -88,6 +95,8 @@ import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: the brief and what the
 // conversation was configured with, a commit, a document read whole, one
 // session's record and the terminal it was printed on, and a pull request.
+// What the summary under a frozen Brief says of a branch nobody has named.
+import { UNNAMED } from "../src/workbench/Brief";
 import briefPane from "../src/workbench/Brief.module.css";
 import commitPane from "../src/workbench/Commit.module.css";
 import commitPaneCss from "../src/workbench/Commit.module.css?raw";
@@ -129,6 +138,9 @@ import checkMarks from "../src/workbench/Checks.module.css";
 // rules that give it one are what jsdom cannot lay out.
 import screenPane from "../src/workbench/Screen.module.css";
 import screenCss from "../src/workbench/Screen.module.css?raw";
+// What a Conversation is called where nobody has named its branch, which the
+// sidebar and the pane header are both drawn with.
+import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
 // And the timeline, both ways again: it is the biggest of these, and a good
 // deal of what it says about a card is a rule rather than an element.
 // What is still the human's to settle on the brief card.
@@ -169,6 +181,7 @@ import {
 } from "./bench";
 import {
   askedFor,
+  hangs,
   json,
   readable,
   reads,
@@ -425,7 +438,7 @@ describe("the workbench", () => {
       [...container.querySelectorAll(`.${sidebar.conversationRow} .${sidebar.title}`)].map(
         (row) => row.textContent,
       ),
-    ).toEqual(SIDEBAR.map((entry) => entry.branch));
+    ).toEqual(SIDEBAR.map((entry) => titled(entry)));
   });
 
   it("says of each conversation which repo it is in", async () => {
@@ -858,10 +871,66 @@ describe("how a card says where its conversation has got to", () => {
 
     // What "draft" means is the stylesheet's, and jsdom lays nothing out. The
     // name rather than the card: a card is a `CardButton` now and is flat, so
-    // there is no outline left to draw one as the outline of.
+    // there is no outline left to draw one as the outline of. Both halves of
+    // what the name is drawn as, because the rule says both: leant over, and
+    // dimmed to the soft ink a card that has nothing settled on it is written
+    // in.
     expect(sidebarCss).toContain(
       ".conversationRow.draft .title {\n  font-style: italic;\n  color: var(--ink-soft);\n}",
     );
+  });
+
+  /// A branch name Verkstead invented says nothing about the work, so a row
+  /// carrying one is called what it is: a Draft, with the name itself drawn
+  /// nowhere. A name somebody typed is the row's name exactly as before.
+  it("calls a conversation nobody has named a draft", async () => {
+    theSidebar(
+      { branch: "amber-kestrel", branch_named: false, state: "Draft" },
+      { branch: "rate-limiting", branch_named: true, state: "Draft" },
+    );
+    const { container } = mount();
+    const rows = await cards(container);
+
+    expect(
+      rows.map((card) => card.querySelector(`.${sidebar.title}`)!.textContent),
+    ).toEqual([DRAFT, "rate-limiting"]);
+    expect(container.textContent).not.toContain("amber-kestrel");
+  });
+
+  /// And what it is read aloud as opens on the same word: the label is the card
+  /// said in words, so a card reading Draft cannot be a label reading anything
+  /// else. The state it repeats is said once rather than twice over.
+  it("reads an unnamed row aloud as the draft it is drawn as", async () => {
+    theSidebar(
+      { branch: "amber-kestrel", branch_named: false, state: "Draft" },
+      { branch: "rate-limiting", branch_named: true, state: "Draft" },
+    );
+    const { container } = mount();
+
+    expect(
+      (await cards(container)).map((card) =>
+        card.querySelector("button")!.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Draft, verkstead", "rate-limiting, verkstead, Draft"]);
+  });
+
+  /// And the Draft carries past the draft. Starting the work is not what makes
+  /// an invented name worth reading: the first session is told to replace it, so
+  /// the row goes on saying Draft until somebody has settled the name — by
+  /// renaming the branch, or by the session ending and leaving it.
+  it("keeps calling work on an unnamed branch a draft while it is being named", async () => {
+    theSidebar(
+      { branch: "amber-kestrel", branch_named: false, naming: true, state: "Grilling" },
+      { branch: "brave-otter", branch_named: false, naming: false, state: "Grilling" },
+      { branch: "rate-limiting", branch_named: true, naming: false, state: "Implementing" },
+    );
+    const { container } = mount();
+    const rows = await cards(container);
+
+    expect(
+      rows.map((card) => card.querySelector(`.${sidebar.title}`)!.textContent),
+    ).toEqual([DRAFT, "brave-otter", "rate-limiting"]);
+    expect(container.textContent).not.toContain("amber-kestrel");
   });
 
   /// Which of the two it was is the details pane's to say. The sidebar's business
@@ -2190,6 +2259,287 @@ describe("a conversation's timeline", () => {
   });
 });
 
+/// The one route out of a Conversation whose page will not load.
+///
+/// The read behind the pane has half a dozen ways to fail, and every one of them
+/// used to leave the human with a line of error and nothing to press — on the
+/// very Conversation they most wanted to be rid of. The presses themselves never
+/// needed the reading; only the menu did. So the header is drawn without it, and
+/// what it carries is the way out. See `Hatch.tsx`.
+describe("the escape hatch on a conversation that will not load", () => {
+  /// The workbench with the open Conversation's own read refusing, which is the
+  /// state the hatch exists for. `list` replaces the sidebar's answer, for the
+  /// tests about what the hatch reads off it.
+  function theBrokenConversation(...answers: Parameters<typeof serving>) {
+    return serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever("/api/ui/abandoned-roadmaps", json([])),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}`,
+        json({ error: "the Conversation could not be read" }, 500),
+      ),
+      ...answers,
+    );
+  }
+
+  /// The sidebar with the open Conversation in whichever state a test is about.
+  const listedAs = (state: ConversationEntry["state"]) =>
+    whenever(
+      "/api/ui/conversations",
+      json(
+        SIDEBAR.map((entry) =>
+          entry.id === OPEN.id ? { ...entry, state } : entry,
+        ),
+      ),
+    );
+
+  const CLOSE_AND_ARCHIVE = `/api/ui/conversations/${OPEN.id}/close-and-archive`;
+  const ARCHIVE = `/api/ui/conversations/${OPEN.id}/archive`;
+
+  /// A header where there could be no header: the branch off the sidebar's own
+  /// list, the ⋯ the ordinary pane carries, and the error still under it.
+  it("draws a header with the ⋯ on it, over the error", async () => {
+    theBrokenConversation();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const head = await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
+    expect(head.querySelector("h1")?.textContent).toBe(DRAFTING.branch);
+
+    await drawn(container, `.${actions.conversationActions} > .${dropdown.trigger}`);
+    await waitFor(() => screen.getByText(/the Conversation could not be read/));
+  });
+
+  /// And the way back out, which is the whole reason the hatch is on the pane
+  /// rather than on the sidebar's right-click: a phone has no right-click, and
+  /// a page it cannot leave is worse than one it cannot read.
+  it("carries the way back to the conversations", async () => {
+    theBrokenConversation();
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await drawn(container, `.${shell.middlePane} .${shell.paneBack}`));
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// One row, and the one that covers every state: close refuses nothing but a
+  /// Conversation that is gone, and an already-closed one still archives.
+  it("offers close and archive on a conversation that is not closed", async () => {
+    theBrokenConversation();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+
+    expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+    expect(menu.querySelector(`.${actions.archive}`)).toBeNull();
+    expect(menu.querySelector(`.${actions.close}`)).toBeNull();
+    expect(menu.querySelector(`.${actions.steer}`)).toBeNull();
+    expect(menu.querySelectorAll("button")).toHaveLength(1);
+  });
+
+  /// And the same row where the sidebar cannot say either — the list not in
+  /// hand, or holding no row for this one. The human's own words: if we cannot
+  /// tell which, show only Close and archive, since it covers everything.
+  it("offers it too when the list says nothing about this conversation", async () => {
+    theBrokenConversation(whenever("/api/ui/conversations", json([])));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+
+    expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+    expect(menu.querySelector(`.${actions.archive}`)).toBeNull();
+  });
+
+  /// Archive stands there instead only where the list says the Conversation is
+  /// closed — because Archive on one that is not answers `NotClosed` and goes
+  /// nowhere, which is a dead end rather than an escape.
+  it("offers archive alone where the list says it is closed", async () => {
+    theBrokenConversation(listedAs("Closed"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+
+    // Waited for rather than read at once: the rows are reactive, so the one
+    // the list settles on arrives whenever the list does.
+    await drawn(container, `.${actions.archive}`);
+    expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeNull();
+    expect(menu.querySelectorAll("button")).toHaveLength(1);
+  });
+
+  it("posts to the conversation's own close-and-archive route", async () => {
+    const fetching = theBrokenConversation(
+      whenever(CLOSE_AND_ARCHIVE, json("Closed" satisfies ConversationClosed), "POST"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() => expect(sent(fetching, CLOSE_AND_ARCHIVE)).toEqual({}));
+  });
+
+  it("posts to the archive route where that is the row it drew", async () => {
+    const fetching = theBrokenConversation(
+      listedAs("Closed"),
+      whenever(ARCHIVE, json("Archived" satisfies ConversationArchived), "POST"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.archive}`));
+
+    await waitFor(() => expect(sent(fetching, ARCHIVE)).toEqual({}));
+  });
+
+  /// A press that lands leaves, unlike the ordinary menu's, which stays where it
+  /// is for the re-read to correct. There is nothing here to stay for: the page
+  /// could not be read before the press and will not be read after it. On a
+  /// narrow window that is the way back to the list and on a wide one the empty
+  /// pane, which is one navigation.
+  it("leaves the page a press has landed on", async () => {
+    theBrokenConversation(
+      whenever(CLOSE_AND_ARCHIVE, json("Closed" satisfies ConversationClosed), "POST"),
+    );
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+    await waitFor(() => screen.getByText("Pick a conversation, or start one."));
+  });
+
+  /// The other way a page ends up in front of the hatch, and the one the
+  /// incident behind all this really was: a read that never comes back at all.
+  /// The server has a deadline of its own on the fetch that hung, and this is
+  /// the net under the hang classes nobody has met yet.
+  describe("a read that never comes back", () => {
+    /// The deadline, as `AbortSignal.timeout` is asked for it.
+    const DEADLINE = 30_000;
+
+    /// The signal the read is really given, so the test can fire the deadline
+    /// itself rather than sitting through it.
+    function atOurOwnPace() {
+      const controller = new AbortController();
+      const timeout = vi
+        .spyOn(AbortSignal, "timeout")
+        .mockReturnValue(controller.signal);
+
+      return {
+        timeout,
+        expire: () =>
+          controller.abort(new DOMException("timed out", "TimeoutError")),
+      };
+    }
+
+    it("gives the conversation's own read a deadline, and nothing else one", async () => {
+      const fetching = theWorkbench();
+      mount(`/conversations/${OPEN.id}`);
+      await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+      const signalOf = (path: string) =>
+        fetching.mock.calls.find(([asked]) => String(asked) === path)?.[1]
+          ?.signal;
+
+      expect(signalOf(READING)).toBeInstanceOf(AbortSignal);
+      expect(signalOf("/api/ui/conversations")).toBeUndefined();
+    });
+
+    it("draws the hatch on a read hung past its deadline", async () => {
+      const { timeout, expire } = atOurOwnPace();
+
+      theWorkbench(whenever(READING, hangs()));
+      const { container } = mount(`/conversations/${OPEN.id}`);
+
+      await waitFor(() => screen.getByText("Loading…"));
+      expect(timeout).toHaveBeenCalledWith(DEADLINE);
+
+      expire();
+
+      const menu = await openActions(container);
+      expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+
+      timeout.mockRestore();
+    });
+
+    /// And it is not read again on the strength of having given up: three more
+    /// deadlines' worth of nothing before the page is allowed to say anything,
+    /// and what it would say is what it already knew. An ordinary failure is
+    /// still worth the ordinary three attempts, which is the other half of the
+    /// rule and the half only this can ask about.
+    it("is not one the app makes again", () => {
+      const gave_up = new DOMException("timed out", "TimeoutError");
+
+      expect(retrying(0, gave_up)).toBe(false);
+      expect(retrying(0, new Error("the server fell over"))).toBe(true);
+      expect(retrying(2, new Error("the server fell over"))).toBe(true);
+      expect(retrying(3, new Error("the server fell over"))).toBe(false);
+    });
+
+    /// And the app really reads that way — the hatch drawn off the one request,
+    /// with no second one behind it.
+    ///
+    /// Through `App` rather than through [`mount`], which is the whole point of
+    /// this one: what is being asked about is the app's own query client, and
+    /// every mount in this file builds a client that retries nothing, so a page
+    /// driven through one would only be asking about the client it built. It is
+    /// the reason `resuming.test.tsx` drives `App` too.
+    ///
+    /// Which matters because the rule is one line, and without it the ordinary
+    /// three retries stand: four deadlines' worth of nothing, with a backoff
+    /// between each, before the page may say anything at all. That is two
+    /// minutes of *Loading…* rather than thirty seconds — near enough to the
+    /// hang this whole branch is about that nothing should be able to take the
+    /// line away quietly.
+    it("draws the hatch off that one read, the app making no second one", async () => {
+      const { timeout, expire } = atOurOwnPace();
+
+      const fetching = theWorkbench(whenever(READING, hangs()));
+      window.history.pushState({}, "", `/conversations/${OPEN.id}`);
+      const { container } = render(() => <App />);
+
+      await waitFor(() => screen.getByText("Loading…"));
+
+      expire();
+
+      const menu = await openActions(container);
+      expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+      expect(askedFor(fetching, READING)).toBe(1);
+
+      timeout.mockRestore();
+    });
+  });
+
+  /// And a refusal goes where every other refusal in this menu goes: the
+  /// console. There is no row left to correct and nowhere on a page that will
+  /// not load to put a sentence.
+  it("logs a refusal and stays where it is", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    theBrokenConversation(
+      whenever(
+        CLOSE_AND_ARCHIVE,
+        json("NoSuchConversation" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() =>
+      expect(logged).toHaveBeenCalledWith(CLOSE_REFUSAL.NoSuchConversation),
+    );
+    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
+    expect(screen.queryByText("This conversation is gone.")).toBeNull();
+
+    logged.mockRestore();
+  });
+});
+
 /// The brief while the Conversation is drafting: a field that is always there
 /// and saves itself, rather than a rendering with a way into a form.
 describe("writing the brief", () => {
@@ -2497,6 +2847,83 @@ describe("a conversation's setup", () => {
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/branch`),
       ).toEqual({ branch: "counter-in-redis" }),
+    );
+  });
+
+  /// Until the human types one the name is Verkstead's, and a name nobody chose
+  /// is drawn nowhere: the field stands empty under the placeholder that says
+  /// what leaving it empty means, and the pane is headed by what the
+  /// Conversation is — a draft.
+  it("leaves the branch field empty where the name is Verkstead's own", async () => {
+    theWorkbenchWith({ branch_named: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Branch"));
+
+    const field = screen.getByLabelText("Branch") as HTMLInputElement;
+    expect(field.value).toBe("");
+    expect(field.placeholder).toBe(AUTOMATIC);
+
+    // The pane alone, the sidebar beside it being drawn from a list of its own
+    // that this test did not touch.
+    const pane = container.querySelector(`.${shell.middlePane}`)!;
+    expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(DRAFT);
+    expect(pane.textContent).not.toContain(OPEN.branch);
+  });
+
+  /// And the header goes on saying it once the work has started, for as long as
+  /// the name is the first session's to replace. The card has gone by then, so
+  /// there is no field left to say anything about — only the title.
+  it("heads the pane Draft until the branch has been named", async () => {
+    theWorkbenchWith({
+      branch_named: false,
+      naming: true,
+      state: "Grilling",
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const pane = container.querySelector(`.${shell.middlePane}`)!;
+    await waitFor(() =>
+      expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(DRAFT),
+    );
+    expect(pane.textContent).not.toContain(OPEN.branch);
+  });
+
+  /// And says the branch the moment nobody is waiting on the name — the session
+  /// renamed it, or ended and left it. Nothing reads Draft for ever.
+  it("heads the pane with the branch once the naming is over", async () => {
+    theWorkbenchWith({
+      branch_named: false,
+      naming: false,
+      state: "Grilling",
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const pane = container.querySelector(`.${shell.middlePane}`)!;
+    await waitFor(() =>
+      expect(pane.querySelector(`.${paneHead.head} h1`)!.textContent).toBe(
+        OPEN.branch,
+      ),
+    );
+  });
+
+  /// And emptying it hands the name back, which is a rename like any other: the
+  /// server holds the one it prefilled, so there is nothing for the page to send
+  /// but the empty field.
+  it("hands the name back when the field is emptied", async () => {
+    const fetching = theWorkbench(json("Renamed"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Branch"));
+
+    const field = screen.getByLabelText("Branch") as HTMLInputElement;
+    expect(field.value).toBe(OPEN.branch);
+
+    fireEvent.input(field, { target: { value: "" } });
+    fireEvent.blur(field);
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/branch`)).toEqual({
+        branch: "",
+      }),
     );
   });
 
@@ -3184,8 +3611,9 @@ describe("a conversation's pairings", () => {
   /// looks like.
   const UNCHOSEN: ConversationView = {
     ...OPEN,
-    grilling_pairing: null,
+    grilling_pairing: "Nothing",
     implementation_pairing: null,
+    review_pairing: "Nothing",
     ready_to_grill: false,
   };
 
@@ -3207,7 +3635,7 @@ describe("a conversation's pairings", () => {
     );
   }
 
-  it("shows the two pairings the conversation has chosen", async () => {
+  it("shows the pairings the conversation has chosen", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByLabelText("Grilling"));
@@ -3216,11 +3644,17 @@ describe("a conversation's pairings", () => {
     const implementing = screen.getByLabelText(
       "Implementation",
     ) as HTMLSelectElement;
+    const reviewing = screen.getByLabelText("Review") as HTMLSelectElement;
 
     // Separate choices, and in the fixture genuinely separate accounts: grill on
-    // fable, implement on opus.
+    // fable, implement on opus, review on sonnet.
+    //
+    // The fixture picks a Pairing for the grilling, which is one of that
+    // picker's rows; the other says there is to be no grilling at all.
+    const interviewing = under(OPEN.grilling_pairing)!;
+
     expect(grilling.value).toBe(
-      pairing(OPEN.grilling_pairing!.profile, OPEN.grilling_pairing!.model!),
+      pairing(interviewing.profile, interviewing.model!),
     );
     expect(implementing.value).toBe(
       pairing(
@@ -3228,7 +3662,13 @@ describe("a conversation's pairings", () => {
         OPEN.implementation_pairing!.model!,
       ),
     );
-    expect(grilling.value).not.toBe(implementing.value);
+    // And the same for the review.
+    const reviewed = under(OPEN.review_pairing)!;
+
+    expect(reviewing.value).toBe(pairing(reviewed.profile, reviewed.model!));
+    expect(
+      new Set([grilling.value, implementing.value, reviewing.value]).size,
+    ).toBe(3);
   });
 
   /// One flat row per profile-and-model combination, labelled with both — a
@@ -3240,7 +3680,7 @@ describe("a conversation's pairings", () => {
     await waitFor(() => screen.getByLabelText("Grilling"));
 
     const options = Array.from(
-      (screen.getByLabelText("Grilling") as HTMLSelectElement).options,
+      (screen.getByLabelText("Implementation") as HTMLSelectElement).options,
     ).map((option) => option.text);
 
     expect(options).toEqual(
@@ -3262,8 +3702,10 @@ describe("a conversation's pairings", () => {
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/grilling-pairing`),
       ).toEqual({
-        profile_id: PROFILES[0]!.id,
-        model: PROFILES[0]!.models[0],
+        pairing: {
+          profile_id: PROFILES[0]!.id,
+          model: PROFILES[0]!.models[0],
+        },
       }),
     );
 
@@ -3285,12 +3727,129 @@ describe("a conversation's pairings", () => {
     );
   });
 
+  /// Two of the pickers have a row that is no account at all, and it is one of
+  /// the rows rather than a switch beside them: what runs this, and one of the
+  /// answers is nobody. The implementation picker has none, there being no work
+  /// without something building it.
+  it("offers the no-session row on the grilling and review pickers alone", async () => {
+    withConversation(UNCHOSEN);
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Review"));
+
+    const rows = (label: string) =>
+      Array.from(
+        (screen.getByLabelText(label) as HTMLSelectElement).options,
+      ).map((option) => option.text);
+
+    const combinations = PROFILES.flatMap((profile) =>
+      profile.models.map((model) => `${profile.name} — ${model}`),
+    );
+
+    expect(rows("Review")).toEqual([
+      // The placeholder, because nothing has been picked yet — and above the
+      // accounts, the row that says none of them will read this branch.
+      "Not chosen",
+      "No review",
+      ...combinations,
+    ]);
+    expect(rows("Grilling")).toEqual([
+      "Not chosen",
+      "No grilling",
+      ...combinations,
+    ]);
+    expect(rows("Implementation")).toEqual(["Not chosen", ...combinations]);
+  });
+
+  /// And picking it sends a choice rather than the absence of one, exactly as
+  /// the review row does: the brief goes straight to the work.
+  it("sends no grilling as the choice it is", async () => {
+    const fetching = withConversation(UNCHOSEN, json("Chosen"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    fireEvent.change(screen.getByLabelText("Grilling"), {
+      target: { value: NONE },
+    });
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/grilling-pairing`),
+      ).toEqual({ pairing: null }),
+    );
+  });
+
+  /// And a picker already on it keeps it, the placeholder not being drawn over a
+  /// settled choice.
+  it("shows no grilling as what is chosen where it is", async () => {
+    withConversation({ ...UNCHOSEN, grilling_pairing: "Skipped" });
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    expect((screen.getByLabelText("Grilling") as HTMLSelectElement).value).toBe(
+      NONE,
+    );
+  });
+
+  /// And picking it sends a choice rather than the absence of one: an untouched
+  /// picker and a picker moved to that row leave the same column empty, and only
+  /// one of them lets the work start.
+  it("sends no review as the choice it is", async () => {
+    const fetching = withConversation(UNCHOSEN, json("Chosen"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Review"));
+
+    fireEvent.change(screen.getByLabelText("Review"), {
+      target: { value: NONE },
+    });
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+      ).toEqual({ pairing: null }),
+    );
+  });
+
+  /// And picking an account sends the pairing under the same key, because it is
+  /// the same press on the same picker.
+  it("sends a review pairing under the same key", async () => {
+    const fetching = withConversation(UNCHOSEN, json("Chosen"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Review"));
+
+    fireEvent.change(screen.getByLabelText("Review"), {
+      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
+    });
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+      ).toEqual({
+        pairing: {
+          profile_id: PROFILES[0]!.id,
+          model: PROFILES[0]!.models[0],
+        },
+      }),
+    );
+  });
+
+  /// A picker already on that row keeps it: it is a settled choice, so the
+  /// placeholder is not drawn over it the way it is over an empty one.
+  it("shows no review as what is chosen where it is", async () => {
+    withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Review"));
+
+    expect((screen.getByLabelText("Review") as HTMLSelectElement).value).toBe(
+      NONE,
+    );
+  });
+
   /// A profile chosen before models were paired with them is half a choice: the
   /// picker draws it as none, and says so where it would have been shown.
   it("reads a profile with no model beside it as nothing chosen", async () => {
     withConversation({
       ...OPEN,
-      grilling_pairing: { ...OPEN.grilling_pairing!, model: null },
+      grilling_pairing: { Under: { ...under(OPEN.grilling_pairing)!, model: null } },
       ready_to_grill: false,
     });
     mount(`/conversations/${OPEN.id}`);
@@ -3315,7 +3874,7 @@ describe("a conversation's pairings", () => {
 
     await waitFor(() =>
       screen.getByText(
-        "The grilling has started, so who runs this conversation is settled.",
+        "The work has started, so who runs this conversation is settled.",
       ),
     );
   });
@@ -3341,14 +3900,14 @@ describe("a conversation's pairings", () => {
     expect(screen.queryByText("Ready to grill.")).toBeNull();
   });
 
-  /// One row where the pane is wide enough for two, which is the stylesheet's
+  /// One row where the pane is wide enough for them, which is the stylesheet's
   /// half of it; what this holds is that they are the one row's to lay out.
-  it("draws the two pickers as a single row", async () => {
+  it("draws the pickers as a single row", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const row = await drawn(container, `.${setup.conversationProfiles} .${setup.pairings}`);
-    expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(2);
+    expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3);
   });
 
   /// A profile whose pair has gone is not one to launch a session under. What is
@@ -3990,7 +4549,7 @@ describe("opening a conversation is looking at it", () => {
   });
 });
 
-describe("starting the grilling", () => {
+describe("starting the work", () => {
   it("offers the button under the timeline once the conversation is ready", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -3998,7 +4557,7 @@ describe("starting the grilling", () => {
     const start = await drawn(container, `.${timeline.startGrilling} .${timeline.start}`);
 
     expect(OPEN.ready_to_grill).toBe(true);
-    expect(start.textContent).toContain("Start grilling");
+    expect(start.textContent).toContain("Start work");
 
     // Under the timeline, which is where the reason to press it is: at the end
     // of everything that has happened, under the brief it will freeze.
@@ -4021,7 +4580,7 @@ describe("starting the grilling", () => {
       `.${timeline.startGrilling} .${timeline.start}`,
     );
 
-    expect(start.textContent).toContain("Start grilling");
+    expect(start.textContent).toContain("Start work");
     expect(start.classList).toContain(timeline.inert);
     expect(start.getAttribute("aria-disabled")).toBe("true");
     expect(start.disabled).toBe(false);
@@ -4088,8 +4647,9 @@ describe("starting the grilling", () => {
   /// Every refusal is its own sentence, because each of them is something
   /// different for the human to go and do.
   it.each([
-    ["NoGrillingProfile", /Choose a grilling profile/],
+    ["NoGrillingProfile", /Pick a grilling profile/],
     ["NoImplementationProfile", /Choose an implementation profile/],
+    ["NoReviewProfile", /Pick a review profile/],
     ["EmptyBrief", /Write the brief first/],
     ["NoBaseCommit", /nothing to branch from/],
     ["BranchExists", /branch already exists/],
@@ -6623,7 +7183,7 @@ describe("steering a conversation", () => {
     const modal = await openSteer(container);
 
     const picker = (await drawn(modal, "#steer-pairing")) as HTMLSelectElement;
-    const interviewing = GRILLING.grilling_pairing!;
+    const interviewing = under(GRILLING.grilling_pairing)!;
 
     await waitFor(() =>
       expect(picker.value).toBe(
@@ -6696,7 +7256,7 @@ describe("steering a conversation", () => {
     fireEvent.click(await drawn(modal, `.${steerModal.steerDigest} input`));
     fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
 
-    const own = GRILLING.grilling_pairing!;
+    const own = under(GRILLING.grilling_pairing)!;
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
@@ -11156,7 +11716,23 @@ describe("the configuration on the brief's pane", () => {
     base_commit: "0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e76f32b11a",
   };
 
-  it("says the repo, the branch, the base commit, the worktree and both pairings", async () => {
+  /// A conversation nobody has named has no branch to report: the name it is
+  /// carrying is Verkstead's own, and what the summary says is what will become
+  /// of it rather than a name nobody chose.
+  ///
+  /// Drawn on the adopting draft, whose brief is frozen from the start — which
+  /// is what makes it the one draft with a pane to open at all.
+  it("reports a branch nobody has named as one still to be chosen", async () => {
+    theWorkbench(
+      whenever(`/api/ui/conversations/${ADOPTING.id}`, json(ADOPTING)),
+    );
+    await openBrief(ADOPTING);
+
+    expect(configuration().Branch).toBe(UNNAMED);
+    expect(summary()!.textContent).not.toContain(ADOPTING.branch);
+  });
+
+  it("says the repo, the branch, the base commit, the worktree and the pairings", async () => {
     theGrilling();
     await openBrief(GRILLING);
 
@@ -11181,7 +11757,36 @@ describe("the configuration on the brief's pane", () => {
       Worktree: GRILLING.worktree!.path,
       Grilling: "fable — claude-fable-5",
       Implementation: "opus — claude-opus-5",
+      Review: "sonnet — claude-sonnet-5",
     });
+  });
+
+  /// A conversation nobody is to review says so, rather than reading as one
+  /// whose review pairing was never picked: what the human picked is a choice,
+  /// and the pane says what it was.
+  it("says no review where that is what was picked", async () => {
+    theGrillingStanding({ review_pairing: "Skipped" });
+    await openBrief(GRILLING);
+
+    expect(configuration().Review).toBe("No review.");
+    expect(
+      configuration().Implementation,
+      "and the roles beside it read as they always did",
+    ).toBe("opus — claude-opus-5");
+  });
+
+  /// And the same one role along: a conversation whose brief went straight to
+  /// the work says so, rather than reading as one whose grilling pairing was
+  /// never picked.
+  it("says no grilling where that is what was picked", async () => {
+    theGrillingStanding({ grilling_pairing: "Skipped" });
+    await openBrief(GRILLING);
+
+    expect(configuration().Grilling).toBe("No grilling.");
+    expect(
+      configuration().Review,
+      "and the roles beside it read as they always did",
+    ).toBe("sonnet — claude-sonnet-5");
   });
 
   it("lists each companion with its mode, its branch and its directory", async () => {

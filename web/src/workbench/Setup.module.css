@@ -1,5 +1,5 @@
 /* What is still the human's to change while the brief is a draft: the branch,
-   the base commit, the repos the work runs alongside and the two pairings. See
+   the base commit, the repos the work runs alongside and the pairings. See
    `Setup.tsx`.
 
    Drawn under the brief it belongs to, on the same card, which is why the block
@@ -248,11 +248,11 @@
   font-size: 1.1rem;
 }
 
-/* The two of them across one row where the pane is wide enough, and down the
-   page where it is not. The wrap does that on its own — each choice asks for
-   about half of a wide pane and refuses to go under a readable width, so a
-   narrow pane cannot fit two and puts the second on its own line. No breakpoint,
-   because the width that matters here is the pane's rather than the window's. */
+/* All of them across one row where the pane is wide enough, and down the
+   page where it is not. The wrap does that on its own — each choice refuses to
+   go under a readable width, so a narrow pane cannot fit them all and puts what
+   is left over on its own line. No breakpoint, because the width that matters
+   here is the pane's rather than the window's. */
 .pairings {
   display: flex;
   flex-wrap: wrap;

@@ -32,9 +32,14 @@
 //! from what the conversation already runs the work under and what is picked is
 //! recorded as the conversation's own: steering re-settles what runs the work.
 //! A steered draft has none fixed yet, which is why the pick is part of the form
-//! rather than an error path. Which of the two pairings is shown follows the
-//! target: a grilling runs under the grilling one, and everything that builds
-//! runs under the other.
+//! rather than an error path. Which role the picker settles follows the target:
+//! a grilling runs under the grilling one, and everything that builds runs
+//! under the implementation one. Wrapping up reaches the review role from the
+//! same pick, a wrap-up both building and reviewing — but only to fill one
+//! nothing was picked for: the picker is prefilled with what builds, so a human
+//! who changes nothing has said nothing about the review, and an account they
+//! chose to be a fresh set of eyes is not quietly replaced by whatever built
+//! the work.
 //!
 //! **Interrupt current task** is the one thing here that is about the world
 //! rather than about the move. The click left whatever was running exactly where
@@ -70,6 +75,7 @@ import { Modal } from "../Modal";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { Switch as Toggle } from "../Switch";
+import { chosen } from "./naming";
 import { BasePicker, RULE } from "./Setup";
 import styles from "./Steer.module.css";
 
@@ -152,9 +158,10 @@ export function steerRefusal(outcome: ConversationSteered): string {
 ///
 /// `runs` is whether work goes on in that state, which is the one question the
 /// rest of the form follows from: a target something runs in needs a pairing
-/// settled, and one nothing runs in needs none. `role` is which of the two
-/// pairings that is, there being one for the interviewing and one for
-/// everything that builds.
+/// settled, and one nothing runs in needs none. `role` is which pairing that
+/// is, there being one for the interviewing, one for everything that builds and
+/// one for the review — and wrapping up settles the review one alongside the
+/// building one from the same pick, a wrap-up doing both.
 ///
 /// In the order the work goes through them, because that is the order the human
 /// reads the pipeline in everywhere else.
@@ -182,7 +189,7 @@ const TARGETS: {
   {
     target: "Wrapping",
     label: "Wrapping up",
-    note: "The branch looked at again: the checks watched, the review run, the comments answered. The fix attempts start over.",
+    note: "The branch looked at again: the checks watched, the review run, the comments answered. What you pick runs the fixes, and the review too where nothing was picked for it. The fix attempts start over.",
     runs: true,
     role: "implementation",
   },
@@ -454,7 +461,7 @@ function Alongside(props: {
               <input
                 id={`steer-open-${props.companion.repo.id}-branch`}
                 type="text"
-                value={upgrade().branch || props.conversation.branch}
+                value={upgrade().branch || chosen(props.conversation)}
                 disabled={props.disabled}
                 onInput={(event) =>
                   props.open({ branch: event.currentTarget.value })
@@ -491,8 +498,7 @@ function Adding(props: {
   /// own branch, which is what *mirroring* comes to. Drawn filled in rather than
   /// empty, exactly as the setup card's is, so what the human reads is what they
   /// will get.
-  const branch = () =>
-    props.addition?.branch || props.conversation.branch;
+  const branch = () => props.addition?.branch || chosen(props.conversation);
 
   return (
     <li class={styles.steerAdd}>
@@ -625,7 +631,8 @@ export function Steer(props: {
     () => offered().find((one) => one.target === target())?.runs ?? false,
   );
 
-  /// And which of the two pairings that picker is of.
+  /// And which role that picker settles — the one the target's sessions run
+  /// under, and for wrapping up the review role beside it.
   const role = createMemo(
     () => offered().find((one) => one.target === target())?.role,
   );
@@ -650,8 +657,14 @@ export function Steer(props: {
   // different work, and a pick made for a grilling that followed the human over
   // to wrapping up would be the form answering a question they had not been
   // asked.
+  //
+  // The Pairing behind the grilling pick rather than the pick itself: a
+  // conversation whose human chose "No grilling" has no account to prefill this
+  // with, and steering into a grilling is asking for an interview — so that row
+  // is not one this picker offers, and the field opens empty for them to pick
+  // who runs it.
   const [grilling, setGrilling] = createSignal(
-    pairing.chosen(props.conversation.grilling_pairing),
+    pairing.chosen(pairing.under(props.conversation.grilling_pairing)),
   );
   const [implementation, setImplementation] = createSignal(
     pairing.chosen(props.conversation.implementation_pairing),

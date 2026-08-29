@@ -81,21 +81,28 @@ working directory, is [development.md](development.md#quickstart).
 
 **Once per machine:** register the Repos you work in, and save at least one
 **Agent Profile** — a claude home and config pair, and the models that account
-can run. A Conversation fixes a **Grilling Pairing** and an **Implementation
-Pairing** before it starts — a Profile and one of its models, picked together
-as one row. The same Profile may fill both, and separate ones are how the two
-halves bill to separate accounts. Both are settled while the Conversation is
-drafting, and grilling starting is what fixes them.
+can run. A Conversation fixes a **Grilling Pairing**, an **Implementation
+Pairing** and a **Review Pairing** before it starts — a Profile and one of its
+models, picked together as one row. The same Profile may fill all three, and
+separate ones are how the parts bill to separate accounts. The review one runs
+the wrap-up's review and nothing else, reviewing being a fresh set of eyes on
+what was built — and its picker offers **No review** beside the accounts, for
+work you would rather have wrapped up without one. The grilling picker offers
+**No grilling** the same way, for work whose Brief is already the whole plan.
+All of them are settled while the Conversation is drafting, and the work
+starting is what fixes them.
 
 **Then, per piece of work:**
 
 1. **New conversation**, against a Repo. Write the **Brief** — the markdown
    document the work starts from, and its first Event. The base commit defaults
    to the default branch's tip and is yours to override.
-2. **Start grilling.** The branch and the **Worktree** are made here, and a
+2. **Start work.** The branch and the **Worktree** are made here, and a
    grilling session opens in the Sandbox. What it wants to know arrives as
    Question Sets on the Timeline and, if you have subscribed, on your phone.
-   Answer from wherever you are; the session waits.
+   Answer from wherever you are; the session waits. On **No grilling** the same
+   press skips to step 5 instead: one session builds from the Brief alone, and
+   what the Brief leaves genuinely open comes back to you as a Question Set.
 3. **The Proposal.** The grilling ends by proposing a **Direction** — inline,
    task list or roadmap — on a Set carrying the chooser. Picking one accepts
    the Proposal, and the pick is delivered back to the grilling session rather

@@ -11,7 +11,13 @@
 //! profile with no model beside it is not a pairing, and the pickers draw it as
 //! nothing chosen.
 
-import type { PairingView, ProfileEntry, ProfileChoice } from "./api/types";
+import type {
+  PairingView,
+  PickedView,
+  ProfileEntry,
+  ProfileChoice,
+  RoleChoice,
+} from "./api/types";
 
 /// One row of a pairing picker: an account, and one thing that account can run.
 export type Pairing = {
@@ -57,4 +63,36 @@ export function choice(picked: string): ProfileChoice {
     profile_id: Number(picked.slice(0, colon)),
     model: picked.slice(colon + 1),
   };
+}
+
+/// The row that says a role runs no session at all, as it travels inside a
+/// `<select>` — "No grilling" on one picker and "No review" on the other.
+///
+/// Not the empty string, which is the picker's own placeholder: nothing chosen
+/// and *chosen to run nothing* are different states, and one of them lets the
+/// work start.
+///
+/// A colon and nothing after it, which no pairing can spell — [`value`] writes
+/// a profile id before its colon and there is no profile numbered nothing.
+export const NONE = ":";
+
+/// What is chosen now for a role that can be picked away as well as paired.
+export function settled(picked: PickedView): string {
+  if (picked === "Skipped") {
+    return NONE;
+  }
+
+  return picked === "Nothing" ? "" : chosen(picked.Under);
+}
+
+/// And the Pairing behind it, where one was picked — for the panes that draw
+/// what a Conversation settled rather than offer it.
+export function under(picked: PickedView): PairingView | null {
+  return picked === "Nothing" || picked === "Skipped" ? null : picked.Under;
+}
+
+/// One picked string, back into the body a picker that offers that row sends: a
+/// pairing, or the row that runs nothing.
+export function role(picked: string): RoleChoice {
+  return { pairing: picked === NONE ? null : choice(picked) };
 }

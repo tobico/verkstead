@@ -57,6 +57,39 @@ on the Timeline — and neither waiting mark is drawn over the stop it carries,
 which stays on the record as history. Done is not Closed in this. A Done
 Conversation's Sets are still there to be answered, so one left open goes on
 drawing the marks: an answerable ask is still an ask.
+
+**What it is called is its branch, where anybody has named one.** A Conversation
+is started on a name Verkstead invented, because there has to be a branch to cut
+and nobody has thought about the work yet — and a name nobody chose says nothing
+about the work, so while it is a Draft none of it is drawn anywhere: the sidebar
+row, the pane header and the row read aloud all call it **Draft**, and the
+branch field on the setup card stands empty under *Automatically select*. Whose
+the name is is kept in the record rather than read off the name's shape. Typing
+one settles it, and it is the title from that moment; clearing the field hands
+the naming back, and the name the Conversation started on stands again rather
+than another being invented. Two drafts against one Repo both reading *Draft*
+beside the same Repo name is what two drafts are: they are few, and they are
+short-lived.
+
+**And where nobody has named it, the work's first session is asked to.** The
+press that starts the work leaves the naming to the session it starts — the
+grilling one, the ungrilled build one, or the one a steered Draft starts — and
+its prompt carries the instruction under the Brief: switch the branch to a short
+kebab-case name taken from what the work is about, with git, before anything
+lands on it. Nothing is asked back, a rename being read off the checkout the way
+commits are. A Conversation the human named carries no such instruction, having
+nothing to leave to anybody.
+
+Which is why the **Draft** title outlives the Draft. Starting the work is not
+what makes an invented name worth reading, so the sidebar row, the pane header
+and the row read aloud go on saying *Draft* through the first minutes of
+Grilling or Implementing — and say the branch the moment the name is settled.
+Two things settle it and both are final: the session renames the branch and
+Verkstead follows it, or the session ends having left the name alone, and the
+name it left is the Conversation's. The setup card is not part of this: the
+branch is a plan while the Conversation drafts and a fact from the moment it is
+cut, so the field goes when the card does, whatever the name on it turns out to
+be.
 _Avoid_: task, session, job, thread, ticket
 
 **Worktree**:
@@ -76,6 +109,14 @@ were trying to escape.
 Named for the Repo and what the checkout holds — the branch, or the base a
 detached one stands at — and it lives in the Data Directory rather than inside
 a Watched Path: Verkstead made it, so it goes among Verkstead's own things.
+**A session may rename the branch in its Worktree, and Verkstead follows it.**
+A recorded branch that is gone from the Repo while the checkout sits on another
+branch is a rename: the record moves to the new name, and every mirroring
+Companion Repo's branch is renamed to match in the same act. A recorded branch
+still standing while the checkout is elsewhere, or a checkout on a detached
+HEAD, is a Worktree that has come adrift and rebuilds as it always did. The
+directory keeps the name it was made with either way — it is cosmetic, and
+moving a live Worktree is another way to fail.
 _Avoid_: checkout, working copy, sandbox (that's what runs *in* it), clone
 
 **Data Directory**:
@@ -217,7 +258,7 @@ thing the Brief could be doing while it is a draft. Once it freezes it is the
 server's rendering of it and nothing else.
 
 While it is still a draft its card carries the whole of the Conversation's
-setup under it — the branch, the base commit, both Pairings and the readiness
+setup under it — the branch, the base commit, the Pairings and the readiness
 verdict — because setting the work up and kicking it off are one act, and both
 belong where the work is read. Every one of those freezes at the same moment
 the Brief does, so once grilling starts the card is the Brief alone; on a
@@ -317,23 +358,69 @@ two-stage pick would cost a tap every time. There is no default model
 anywhere, so an unpaired Profile is half a choice and reads as none.
 _Avoid_: profile choice, model selection, profile+model, combination
 
-**Grilling Pairing** / **Implementation Pairing**:
-The two Pairings a Conversation fixes before grilling starts — one for the
-grilling session, one for the implementation work. They are roles a Pairing is
-used in, not kinds of Pairing: the same Profile, even the same model, may fill
-both. The line between them is planning against building: the grilling
-session's tail — writing the handoff, the backlog or the roadmap — is the
-Grilling Pairing's, and the Implementation Pairing drives what builds. Distinct
-accounts are why an inline implementation is a fresh session rather than the
-grilling session carrying on.
+**Grilling Pairing** / **Implementation Pairing** / **Review Pairing**:
+The three Pairings a Conversation fixes before grilling starts — one for the
+grilling session, one for the implementation work, one for the wrap-up's review.
+They are roles a Pairing is used in, not kinds of Pairing: the same Profile,
+even the same model, may fill all three. The first line between them is planning
+against building: the grilling session's tail — writing the handoff, the backlog
+or the roadmap — is the Grilling Pairing's, and the Implementation Pairing
+drives what builds. Distinct accounts are why an inline implementation is a
+fresh session rather than the grilling session carrying on.
 
-Both are **fixed when grilling starts**, alongside the branch, the base commit
-and the Brief: what runs the work is settled before the work begins rather than
-swapped underneath it — and the implementation one is used long after that,
-which is exactly why it is not left changeable until then.
+The second line is reviewing against fixing. The Review Pairing reaches exactly
+one kind of session — the wrap-up's review, including the fresh one that runs
+after a split-out backlog is built — because reviewing is a fresh set of eyes on
+what was built. Every other session a wrap-up dispatches is the work itself
+carrying on and runs under the Implementation Pairing: the check fixes, the
+comment responses, the follow-ups, and the session sent for a missing pull
+request.
 
-Each Repo **remembers the last pair it was grilled with**, so a new
-Conversation on it arrives with both pickers already filled. Written at grill
+**A review with no Pairing of its own runs under the Implementation Pairing**,
+which is the one place a role reaches past itself for an account. Not a default
+— the picker is answered before the work starts, and a Conversation started
+since has one — but the two ways of arriving at a wrap-up with the role never
+picked: a Conversation from before the role existed, whose pickers froze when
+its work started, and a Draft steered into a state that settles only what
+builds. Both were reviewed by whatever built them before there was a Review
+Pairing, and a wrap-up that would not review them at all is one waiting for ever
+on a review nothing can start. **No review** is not this and never falls back:
+it settles the review rather than leaving it unpicked, which is the whole
+difference between the row and an empty picker.
+
+Two of the pickers offer a row that is not an account: **No grilling** and **No
+review**. Picking one is a choice like picking a Pairing — it satisfies
+readiness, freezes when the work starts, is remembered per Repo and inherited by
+a stage — and what it settles is that the role runs no session at all. An empty
+picker is not that: the two leave the same thing unchosen and only one of them
+lets the work start.
+
+**No grilling** takes the Brief straight to the work. The one press does
+everything a grill start does — fetch, resolve the base, cut the branch, make
+the Worktree and every companion's, freeze the Brief and the Pairings — and
+lands the Conversation Implementing rather than Grilling, with an inline session
+under the Implementation Pairing primed on the Brief alone. Its prompt says
+there was no interview, so a real decision the Brief leaves open is put to the
+human as a Blocking Ask rather than guessed at. Inline only — no backlog and no
+roadmap — and watched out to a pull request and an ordinary wrap-up exactly as
+an inline implementation picked at the end of a grilling is. The button reads
+**Start work** whichever way the Conversation starts.
+
+**No review** settles the wrap-up's review the moment it looks, with no
+session and nothing on the Timeline, and everything else runs exactly as it
+always does: the checks with their two fix attempts apiece, what is said on the
+pull request answered in batches, Done once the suites are green. With no review
+there is nothing to split findings out of, so the one path back down the ladder
+never opens from a wrap-up like this.
+
+Every one of them is **fixed when grilling starts**, alongside the branch, the
+base commit and the Brief: what runs the work is settled before the work begins
+rather than swapped underneath it — and the implementation and review ones are
+used long after that, which is exactly why they are not left changeable until
+then.
+
+Each Repo **remembers the last set it was grilled with**, so a new
+Conversation on it arrives with every picker already filled. Written at grill
 start, from what the Conversation is actually running under; remembered
 server-side rather than in a browser, because the workbench is answered from a
 phone as readily as from a desk. A prefill and not a lock: it is the human's to
@@ -471,7 +558,7 @@ Take a roadmap the Repo already holds — written by the old tools, by hand, by
 anything that was not this Verkstead — into the pipeline, by starting its next
 Stage as a Conversation. The human's press stands in for the Stage before it
 that would otherwise have started it, so there is no grilling and no Brief to
-write: what they settle is the two Pairings and the base commit, and the stage
+write: what they settle is the Pairings and the base commit, and the stage
 brief becomes the Brief. One Stage is the whole of what adopting starts, and all
 it has to start — that Stage's own plan commit writes to the roadmap, so when it
 settles the Stage after it begins the ordinary unattended way, and an adopted
@@ -664,7 +751,14 @@ stands under it. A steer into Grilling lands that round's Brief under the move
 as well, frozen where it lands and beside the earlier round's rather than over
 it. The Pairing the modal settled is recorded as the **Conversation's** rather
 than one session's, because steering re-settles what runs the work — which is
-also why the pick is part of the form: a steered Draft has none fixed yet.
+also why the pick is part of the form: a steered Draft has none fixed yet. It
+settles the role the target runs its sessions under, which is one apiece except
+for a wrap-up: that both builds and reviews, so the one pick reaches the Review
+Pairing as well — but only to **fill** one nothing was picked for, never to
+replace one that was. The picker is labelled for the state's own work and
+prefilled with what builds, so a human who changes nothing on it has said
+nothing about the review, and an account they chose on the setup card to be a
+fresh set of eyes stays that.
 
 **And the submit resumes in the same press.** The stop the click left is
 cleared, and what that state ought to be running starts — a fresh grilling, the

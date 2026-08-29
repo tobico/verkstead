@@ -113,7 +113,7 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
     // The grilling Pairing, which is the one a grilling runs under whatever else
     // has happened since — the implementation one is what the work is built
     // under, and this session is not building anything.
-    let Some(pairing) = conversation.grilling_pairing.clone() else {
+    let Some(pairing) = conversation.grilling_pairing.pairing().cloned() else {
         tracing::error!(
             conversation_id,
             "the grilling Pairing is gone, so the grilling was not started again"

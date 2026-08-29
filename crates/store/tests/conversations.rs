@@ -5,10 +5,11 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Archiving, Closing, Edited, Event, Grilling, Lifecycle, Unarchiving, adopting,
-    archive_conversation, archived, close_conversation, conversations, load_conversation,
-    open_database, register_repo, rename_branch, save_brief, set_base_commit, set_state,
-    show_archived, showing_archived, start_adoption, start_conversation, start_grilling, timeline,
+    Archiving, Closing, Edited, Event, Grilling, Lifecycle, RowState, Unarchiving, adopting,
+    archive_conversation, archived, close_conversation, conversation_branch, conversations,
+    follow_branch, load_conversation, open_database, register_repo, rename_branch, save_brief,
+    set_base_commit, set_state, settle_naming, show_archived, showing_archived, start_adoption,
+    start_building, start_conversation, start_grilling, start_unnamed_conversation, timeline,
     unarchive_conversation,
 };
 
@@ -201,7 +202,9 @@ async fn a_drafting_conversations_branch_and_base_commit_are_the_humans_to_chang
         .unwrap();
 
     assert_eq!(
-        rename_branch(&pool, id, "rate-limiting").await.unwrap(),
+        rename_branch(&pool, id, Some("rate-limiting"))
+            .await
+            .unwrap(),
         Edited::Saved
     );
     assert_eq!(
@@ -211,7 +214,282 @@ async fn a_drafting_conversations_branch_and_base_commit_are_the_humans_to_chang
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(conversation.branch, "rate-limiting");
+    assert!(conversation.branch_named);
     assert_eq!(conversation.base_commit.as_deref(), Some("6f32b11"));
+}
+
+/// A Conversation started on a name nobody settled on carries it all the same —
+/// there is a branch to cut — and says whose it is.
+#[tokio::test]
+async fn a_conversation_can_be_started_on_a_name_nobody_has_settled_on() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "amber-kestrel");
+    assert!(!conversation.branch_named);
+}
+
+/// Starting the work on a name nobody settled on leaves the naming of it to the
+/// first session, and starting it on a name the human typed leaves nothing to
+/// anybody.
+#[tokio::test]
+async fn starting_the_work_leaves_an_invented_branch_name_to_be_replaced() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let invented = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+    let typed = start_conversation(&pool, repo_id, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Before the press there is nothing to name: the field is the human's until
+    // the branch is cut.
+    assert!(
+        !load_conversation(&pool, invented)
+            .await
+            .unwrap()
+            .unwrap()
+            .naming
+    );
+
+    for (id, worktree) in [(invented, "amber-kestrel"), (typed, "rate-limiting")] {
+        start_grilling(
+            &pool,
+            id,
+            "c0ffee",
+            &Path::new("/data/worktrees").join(worktree),
+            &[],
+        )
+        .await
+        .unwrap();
+    }
+
+    assert!(
+        load_conversation(&pool, invented)
+            .await
+            .unwrap()
+            .unwrap()
+            .naming,
+        "the first session is the one told to pick a name",
+    );
+    assert!(
+        !load_conversation(&pool, typed)
+            .await
+            .unwrap()
+            .unwrap()
+            .naming,
+        "a name the human typed has nothing to wait for",
+    );
+}
+
+/// A start with no grilling in it leaves the same job to the session it starts,
+/// there being nothing different about it but which state it lands in.
+#[tokio::test]
+async fn a_start_with_no_grilling_leaves_the_branch_to_be_named_too() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_building(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/data/worktrees/amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Implementing);
+    assert!(conversation.naming);
+}
+
+/// The rename the instruction asked for is the end of the waiting, and so is a
+/// session that ended without making one.
+#[tokio::test]
+async fn a_branch_stops_waiting_to_be_named_by_being_renamed_or_by_being_settled_for() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let renamed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+    let left = start_unnamed_conversation(&pool, repo_id, "brave-otter")
+        .await
+        .unwrap()
+        .unwrap();
+
+    for (id, worktree) in [(renamed, "amber-kestrel"), (left, "brave-otter")] {
+        start_grilling(
+            &pool,
+            id,
+            "c0ffee",
+            &Path::new("/data/worktrees").join(worktree),
+            &[],
+        )
+        .await
+        .unwrap();
+    }
+
+    follow_branch(&pool, renamed, "rate-limiting")
+        .await
+        .unwrap();
+    settle_naming(&pool, left).await.unwrap();
+
+    let renamed = load_conversation(&pool, renamed).await.unwrap().unwrap();
+    assert_eq!(renamed.branch, "rate-limiting");
+    assert!(!renamed.naming);
+
+    let left = load_conversation(&pool, left).await.unwrap().unwrap();
+    assert_eq!(
+        left.branch, "brave-otter",
+        "settling for a name is not changing it",
+    );
+    assert!(!left.naming);
+    assert!(
+        !left.branch_named,
+        "settling for a name is not somebody having chosen it either",
+    );
+}
+
+/// And the sidebar row says the same thing, being what draws the title.
+#[tokio::test]
+async fn a_row_says_whether_its_branch_is_still_to_be_named() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/data/worktrees/amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let rows = conversations(&pool).await.unwrap();
+    let row = rows.iter().find(|row| row.id == id).unwrap();
+    assert!(row.naming);
+    assert!(!row.branch_named);
+
+    settle_naming(&pool, id).await.unwrap();
+
+    let rows = conversations(&pool).await.unwrap();
+    assert!(!rows.iter().find(|row| row.id == id).unwrap().naming);
+}
+
+/// Following a session's rename moves the name and leaves whose it is where it
+/// was — in either of the two columns a Conversation's branch lives in.
+///
+/// The name Verkstead invented is still Verkstead's after a session picked a
+/// better one; the name the human typed is still theirs. What moves is the
+/// branch, because the branch has moved.
+#[tokio::test]
+async fn following_a_rename_moves_the_name_and_not_whose_it_is() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let verksteads = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+    let theirs = start_conversation(&pool, repo_id, "throttling")
+        .await
+        .unwrap()
+        .unwrap();
+
+    follow_branch(&pool, verksteads, "rate-limiting")
+        .await
+        .unwrap();
+    follow_branch(&pool, theirs, "rate-limiting-too")
+        .await
+        .unwrap();
+
+    let conversation = load_conversation(&pool, verksteads).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "rate-limiting");
+    assert!(!conversation.branch_named);
+
+    let conversation = load_conversation(&pool, theirs).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "rate-limiting-too");
+    assert!(conversation.branch_named);
+
+    assert_eq!(
+        conversation_branch(&pool, theirs).await.unwrap().as_deref(),
+        Some("rate-limiting-too"),
+        "which is the reading everything that only wants the name takes",
+    );
+    assert_eq!(
+        conversation_branch(&pool, theirs + 1000).await.unwrap(),
+        None,
+        "and no such Conversation is no such branch",
+    );
+}
+
+/// Handing a followed name back is still the name the Conversation started on,
+/// rather than the one the session renamed the branch to.
+///
+/// The prefill is what stands when the field is cleared, and following a rename
+/// is not the human typing in it — but it does move the prefill, because the
+/// branch it named is not there any more. So what stands is where the branch
+/// actually is.
+#[tokio::test]
+async fn handing_back_a_name_after_a_rename_leaves_the_branch_that_exists() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    rename_branch(&pool, id, Some("rate-limiting"))
+        .await
+        .unwrap();
+    follow_branch(&pool, id, "throttling").await.unwrap();
+    rename_branch(&pool, id, None).await.unwrap();
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "throttling");
+    assert!(!conversation.branch_named);
+}
+
+/// Handing the name back leaves the one the Conversation was started on, rather
+/// than a branch called nothing or another name invented on the spot.
+#[tokio::test]
+async fn handing_the_branch_name_back_leaves_the_one_it_started_on() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    rename_branch(&pool, id, Some("rate-limiting"))
+        .await
+        .unwrap();
+    assert_eq!(rename_branch(&pool, id, None).await.unwrap(), Edited::Saved);
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "amber-kestrel");
+    assert!(!conversation.branch_named);
 }
 
 /// Taking the override away puts the Conversation back on the rule, rather than
@@ -262,7 +540,9 @@ async fn nothing_about_a_conversation_past_drafting_can_be_edited() {
         Edited::NotDrafting
     );
     assert_eq!(
-        rename_branch(&pool, id, "something-else").await.unwrap(),
+        rename_branch(&pool, id, Some("something-else"))
+            .await
+            .unwrap(),
         Edited::NotDrafting
     );
     assert_eq!(
@@ -285,7 +565,7 @@ async fn editing_a_conversation_that_is_not_there_says_so() {
         Edited::NoSuchConversation
     );
     assert_eq!(
-        rename_branch(&pool, 404, "nothing").await.unwrap(),
+        rename_branch(&pool, 404, Some("nothing")).await.unwrap(),
         Edited::NoSuchConversation
     );
     assert_eq!(
@@ -312,7 +592,9 @@ async fn a_conversation_and_its_brief_survive_the_database_being_reopened() {
     save_brief(&pool, id, "# Rate limiting\n\nThe API has none.\n")
         .await
         .unwrap();
-    rename_branch(&pool, id, "rate-limiting").await.unwrap();
+    rename_branch(&pool, id, Some("rate-limiting"))
+        .await
+        .unwrap();
     pool.close().await;
 
     let pool = open_database(&database).await.unwrap();
@@ -452,7 +734,9 @@ async fn grilling_freezes_the_brief_and_the_branch_name() {
         Edited::NotDrafting
     );
     assert_eq!(
-        rename_branch(&pool, id, "something-else").await.unwrap(),
+        rename_branch(&pool, id, Some("something-else"))
+            .await
+            .unwrap(),
         Edited::NotDrafting
     );
     assert_eq!(
@@ -556,6 +840,122 @@ async fn closing_a_conversation_that_is_not_there_says_so() {
         close_conversation(&pool, 404).await.unwrap(),
         Closing::NoSuchConversation
     );
+}
+
+/// Write a word into a Conversation's state column that no Verkstead knows.
+///
+/// A database restored from before a migration ran, one written by a Verkstead
+/// from ahead of this one, or a row somebody edited by hand: however it got
+/// there, the human is left with a Conversation whose every reader refuses it.
+/// Which is the state the three below are about.
+async fn corrupt_the_state(pool: &SqlitePool, id: i64) {
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind("meandering")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// And what the state column really holds, read past every parse.
+async fn stored_state(pool: &SqlitePool, id: i64) -> String {
+    let (state,): (String,) = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    state
+}
+
+/// The close is the way out of a state word nothing can read — and the way the
+/// word itself is repaired.
+///
+/// A word this Verkstead does not know is not Closed, so the close goes ahead;
+/// the write it makes is unconditional, so what the row holds afterwards is
+/// `closed`. The Conversation comes back readable, which is the whole point:
+/// everything else about it was locked behind that one column.
+#[tokio::test]
+async fn closing_a_conversation_whose_state_word_is_unreadable_closes_and_heals_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
+        .await
+        .unwrap();
+    corrupt_the_state(&pool, id).await;
+
+    assert!(
+        load_conversation(&pool, id).await.is_err(),
+        "the ordinary read refuses it, which is what the close has to work past"
+    );
+
+    assert_eq!(
+        close_conversation(&pool, id).await.unwrap(),
+        Closing::Closed
+    );
+
+    assert_eq!(stored_state(&pool, id).await, "closed");
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Closed);
+    assert_eq!(conversation.worktree, None);
+}
+
+/// Archiving one is refused rather than failing, and refused the safe way
+/// round: a word nobody can read is not Closed, and hiding a Conversation whose
+/// worktree may still be live would put the work out of sight without ending
+/// it. Closing and archiving is the press that gets there, because the close
+/// heals the word first.
+#[tokio::test]
+async fn archiving_a_conversation_whose_state_word_is_unreadable_says_it_is_not_closed() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    corrupt_the_state(&pool, id).await;
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::NotClosed
+    );
+
+    close_conversation(&pool, id).await.unwrap();
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::Archived
+    );
+    assert!(conversations(&pool).await.unwrap().is_empty());
+}
+
+/// And the sidebar still draws it, carrying the word it could not read.
+///
+/// The list is the only route to a Conversation's own page, so one row nobody
+/// can parse used to take every other row off the page with it — leaving a
+/// human with no way to reach the very Conversation they were trying to end.
+#[tokio::test]
+async fn the_list_carries_a_row_whose_state_word_is_unreadable() {
+    let (_dir, pool) = fresh_pool().await;
+    let readable = drafted(&pool).await;
+    let repo_id = repo(&pool, "askance").await;
+    let broken = start_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+    corrupt_the_state(&pool, broken).await;
+
+    let rows = conversations(&pool).await.unwrap();
+
+    assert_eq!(
+        rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+        [broken, readable],
+        "both rows, newest first"
+    );
+    assert_eq!(
+        rows[0].state,
+        RowState::Unknown("meandering".to_owned()),
+        "with the word it could not read carried, for whoever draws the row to say"
+    );
+    assert_eq!(rows[0].state.known(), None);
+    assert_eq!(rows[1].state, RowState::Known(Lifecycle::Draft));
 }
 
 /// Archiving takes a Closed Conversation off the sidebar and leaves everything
@@ -674,7 +1074,7 @@ async fn unarchiving_puts_a_conversation_back_on_the_list() {
 
     let list = conversations(&pool).await.unwrap();
     assert_eq!(list.len(), 1);
-    assert_eq!(list[0].state, Lifecycle::Closed);
+    assert_eq!(list[0].state, RowState::Known(Lifecycle::Closed));
 }
 
 /// And it holds: what was taken back out stays out, so a reload does not put

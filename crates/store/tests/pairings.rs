@@ -1,5 +1,5 @@
 //! What a Repo remembers about the Pairings it was last grilled with, so the
-//! next Conversation started on it arrives with both pickers filled.
+//! next Conversation started on it arrives with every picker filled.
 //!
 //! Nothing here looks at the filesystem. Whether a remembered Profile's pair is
 //! still where it was left is decided above the store, where the boundary lives
@@ -9,9 +9,10 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    AgentType, Deleting, Profile, ProfileFacts, Repo, create_profile, delete_profile,
+    AgentType, Deleting, Picked, Profile, ProfileFacts, Repo, create_profile, delete_profile,
     open_database, register_repo, remembered_pairings, set_grilling_pairing,
-    set_implementation_pairing, start_conversation, start_grilling, update_profile,
+    set_implementation_pairing, set_review_pairing, skip_grilling, skip_review, start_building,
+    start_conversation, start_grilling, update_profile,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -55,9 +56,15 @@ async fn repo(pool: &SqlitePool, name: &str) -> Repo {
     .expect("nothing is registered there yet")
 }
 
-/// A Conversation on `repo`, grilled under both Pairings — which is the one
+/// A Conversation on `repo`, grilled under every Pairing — which is the one
 /// thing that writes the memory.
-async fn grilled(pool: &SqlitePool, repo: &Repo, grilling: &Profile, implementation: &Profile) {
+async fn grilled(
+    pool: &SqlitePool,
+    repo: &Repo,
+    grilling: &Profile,
+    implementation: &Profile,
+    review: &Profile,
+) {
     let id = start_conversation(pool, repo.id, "amber-kestrel")
         .await
         .unwrap()
@@ -69,8 +76,53 @@ async fn grilled(pool: &SqlitePool, repo: &Repo, grilling: &Profile, implementat
     set_implementation_pairing(pool, id, implementation.id, Some(MODEL))
         .await
         .unwrap();
+    set_review_pairing(pool, id, review.id, Some(MODEL))
+        .await
+        .unwrap();
 
     start_grilling(pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
+        .await
+        .unwrap();
+}
+
+/// And one grilled with the Review picker on the row that runs nothing.
+async fn unreviewed(pool: &SqlitePool, repo: &Repo, grilling: &Profile, implementation: &Profile) {
+    let id = start_conversation(pool, repo.id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    set_grilling_pairing(pool, id, grilling.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(pool, id, implementation.id, Some(MODEL))
+        .await
+        .unwrap();
+    skip_review(pool, id).await.unwrap();
+
+    start_grilling(pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
+        .await
+        .unwrap();
+}
+
+/// And one started with the *Grilling* picker on the row that runs nothing,
+/// which is the press that starts the work rather than an interview — the same
+/// moment, and so the same memory written.
+async fn ungrilled(pool: &SqlitePool, repo: &Repo, implementation: &Profile, review: &Profile) {
+    let id = start_conversation(pool, repo.id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    skip_grilling(pool, id).await.unwrap();
+    set_implementation_pairing(pool, id, implementation.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_review_pairing(pool, id, review.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    start_building(pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
         .await
         .unwrap();
 }
@@ -83,20 +135,32 @@ async fn a_repo_remembers_what_it_was_last_grilled_with() {
     let repo = repo(&pool, "verkstead").await;
     let fable = saved(&pool, "fable").await;
     let opus = saved(&pool, "opus").await;
+    let haiku = saved(&pool, "haiku").await;
 
-    grilled(&pool, &repo, &fable, &opus).await;
+    grilled(&pool, &repo, &fable, &opus, &haiku).await;
 
     let remembered = remembered_pairings(&pool, repo.id).await.unwrap();
 
-    let grilling = remembered.grilling.expect("the grilling half was recorded");
+    let grilling = remembered
+        .grilling
+        .pairing()
+        .expect("the grilling half was recorded");
     assert_eq!(grilling.profile.id, fable.id);
     assert_eq!(grilling.model.as_deref(), Some(MODEL));
 
     let implementation = remembered
         .implementation
+        .pairing()
         .expect("the implementation half was recorded");
     assert_eq!(implementation.profile.id, opus.id);
     assert_eq!(implementation.model.as_deref(), Some(MODEL));
+
+    let review = remembered
+        .review
+        .pairing()
+        .expect("and so was the review one");
+    assert_eq!(review.profile.id, haiku.id);
+    assert_eq!(review.model.as_deref(), Some(MODEL));
 }
 
 /// A Repo nobody has grilled anything on has nothing to say, which is what
@@ -130,6 +194,9 @@ async fn choosing_without_grilling_remembers_nothing() {
     set_implementation_pairing(&pool, id, fable.id, Some(MODEL))
         .await
         .unwrap();
+    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
 
     assert_eq!(
         remembered_pairings(&pool, repo.id).await.unwrap(),
@@ -146,12 +213,16 @@ async fn grilling_again_replaces_what_was_remembered() {
     let fable = saved(&pool, "fable").await;
     let opus = saved(&pool, "opus").await;
 
-    grilled(&pool, &repo, &fable, &opus).await;
-    grilled(&pool, &repo, &opus, &fable).await;
+    grilled(&pool, &repo, &fable, &opus, &fable).await;
+    grilled(&pool, &repo, &opus, &fable, &opus).await;
 
     let remembered = remembered_pairings(&pool, repo.id).await.unwrap();
-    assert_eq!(remembered.grilling.unwrap().profile.id, opus.id);
-    assert_eq!(remembered.implementation.unwrap().profile.id, fable.id);
+    assert_eq!(remembered.grilling.pairing().unwrap().profile.id, opus.id);
+    assert_eq!(
+        remembered.implementation.pairing().unwrap().profile.id,
+        fable.id
+    );
+    assert_eq!(remembered.review.pairing().unwrap().profile.id, opus.id);
 }
 
 /// One memory per Repo. Two Repos grilled under different accounts each get
@@ -164,14 +235,15 @@ async fn each_repo_remembers_its_own() {
     let fable = saved(&pool, "fable").await;
     let opus = saved(&pool, "opus").await;
 
-    grilled(&pool, &verkstead, &fable, &fable).await;
-    grilled(&pool, &askance, &opus, &opus).await;
+    grilled(&pool, &verkstead, &fable, &fable, &fable).await;
+    grilled(&pool, &askance, &opus, &opus, &opus).await;
 
     assert_eq!(
         remembered_pairings(&pool, verkstead.id)
             .await
             .unwrap()
             .grilling
+            .pairing()
             .unwrap()
             .profile
             .id,
@@ -182,6 +254,7 @@ async fn each_repo_remembers_its_own() {
             .await
             .unwrap()
             .grilling
+            .pairing()
             .unwrap()
             .profile
             .id,
@@ -198,14 +271,16 @@ async fn a_model_a_profile_no_longer_lists_still_comes_back_as_it_was_written() 
     let repo = repo(&pool, "verkstead").await;
     let fable = saved(&pool, "fable").await;
 
-    grilled(&pool, &repo, &fable, &fable).await;
+    grilled(&pool, &repo, &fable, &fable, &fable).await;
 
     update_profile(&pool, fable.id, &facts("fable", &["claude-sonnet-5"]))
         .await
         .unwrap();
 
     let grilling = remembered_pairings(&pool, repo.id).await.unwrap().grilling;
-    let grilling = grilling.expect("the row still names a Profile that is there");
+    let grilling = grilling
+        .pairing()
+        .expect("the row still names a Profile that is there");
     assert_eq!(grilling.model.as_deref(), Some(MODEL));
     assert_eq!(grilling.profile.models, ["claude-sonnet-5"]);
 }
@@ -219,7 +294,9 @@ async fn a_remembered_profile_cannot_be_removed_out_from_under_the_memory() {
     let fable = saved(&pool, "fable").await;
     let opus = saved(&pool, "opus").await;
 
-    grilled(&pool, &repo, &fable, &opus).await;
+    let haiku = saved(&pool, "haiku").await;
+
+    grilled(&pool, &repo, &fable, &opus, &haiku).await;
 
     assert_eq!(
         delete_profile(&pool, fable.id).await.unwrap(),
@@ -229,8 +306,161 @@ async fn a_remembered_profile_cannot_be_removed_out_from_under_the_memory() {
         delete_profile(&pool, opus.id).await.unwrap(),
         Deleting::InUse
     );
+    assert_eq!(
+        delete_profile(&pool, haiku.id).await.unwrap(),
+        Deleting::InUse,
+        "the review half is in use exactly as the other two are",
+    );
 
     let remembered = remembered_pairings(&pool, repo.id).await.unwrap();
-    assert_eq!(remembered.grilling.unwrap().profile.id, fable.id);
-    assert_eq!(remembered.implementation.unwrap().profile.id, opus.id);
+    assert_eq!(remembered.grilling.pairing().unwrap().profile.id, fable.id);
+    assert_eq!(
+        remembered.implementation.pairing().unwrap().profile.id,
+        opus.id
+    );
+    assert_eq!(remembered.review.pairing().unwrap().profile.id, haiku.id);
+}
+
+/// A Conversation grilled with no review remembers that, and the next
+/// Conversation on that Repo arrives with the same row picked.
+///
+/// The row is remembered exactly as a Pairing is, because it is a pick like any
+/// other: what the human last chose is what the next picker arrives on.
+#[tokio::test]
+async fn a_repo_remembers_having_been_grilled_with_no_review() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool, "verkstead").await;
+    let fable = saved(&pool, "fable").await;
+
+    unreviewed(&pool, &repo, &fable, &fable).await;
+
+    let remembered = remembered_pairings(&pool, repo.id).await.unwrap();
+
+    assert_eq!(
+        remembered.review,
+        Picked::Skipped,
+        "the row that runs nothing, remembered as the choice it was",
+    );
+    assert_eq!(
+        remembered.grilling.pairing().unwrap().profile.id,
+        fable.id,
+        "and the roles beside it are remembered as they always were",
+    );
+}
+
+/// And a Repo grilled with a review after one without forgets the row: the
+/// memory is the last thing grilled and never a history of both.
+#[tokio::test]
+async fn a_pairing_grilled_after_no_review_replaces_the_row_that_ran_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool, "verkstead").await;
+    let fable = saved(&pool, "fable").await;
+    let opus = saved(&pool, "opus").await;
+
+    unreviewed(&pool, &repo, &fable, &fable).await;
+    grilled(&pool, &repo, &fable, &fable, &opus).await;
+
+    assert_eq!(
+        remembered_pairings(&pool, repo.id)
+            .await
+            .unwrap()
+            .review
+            .pairing()
+            .unwrap()
+            .profile
+            .id,
+        opus.id,
+        "the account that reviewed last, with no trace of the round before it",
+    );
+}
+
+/// And the other way round, which is the half that the row has to take away
+/// rather than be taken away by.
+#[tokio::test]
+async fn no_review_grilled_after_a_pairing_replaces_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool, "verkstead").await;
+    let fable = saved(&pool, "fable").await;
+    let opus = saved(&pool, "opus").await;
+
+    grilled(&pool, &repo, &fable, &fable, &opus).await;
+    unreviewed(&pool, &repo, &fable, &fable).await;
+
+    assert_eq!(
+        remembered_pairings(&pool, repo.id).await.unwrap().review,
+        Picked::Skipped,
+        "one answer rather than two to choose between",
+    );
+}
+
+/// A Conversation started with no grilling remembers that against its Repo, and
+/// the next Conversation on it arrives on the same row.
+///
+/// The start that skips the interview writes the memory the start that runs one
+/// does, because it is the same moment: what the roles are fixed as.
+#[tokio::test]
+async fn a_repo_remembers_having_been_started_with_no_grilling() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool, "verkstead").await;
+    let fable = saved(&pool, "fable").await;
+
+    ungrilled(&pool, &repo, &fable, &fable).await;
+
+    let remembered = remembered_pairings(&pool, repo.id).await.unwrap();
+
+    assert_eq!(
+        remembered.grilling,
+        Picked::Skipped,
+        "the row that runs nothing, remembered as the choice it was",
+    );
+    assert_eq!(
+        remembered.implementation.pairing().unwrap().profile.id,
+        fable.id,
+        "and the roles beside it are remembered as they always were",
+    );
+}
+
+/// And a Repo grilled after one started without a grilling forgets the row: the
+/// memory is the last thing started and never a history of both.
+#[tokio::test]
+async fn a_pairing_grilled_after_no_grilling_replaces_the_row_that_ran_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool, "verkstead").await;
+    let fable = saved(&pool, "fable").await;
+    let opus = saved(&pool, "opus").await;
+
+    ungrilled(&pool, &repo, &fable, &fable).await;
+    grilled(&pool, &repo, &opus, &fable, &fable).await;
+
+    assert_eq!(
+        remembered_pairings(&pool, repo.id)
+            .await
+            .unwrap()
+            .grilling
+            .pairing()
+            .unwrap()
+            .profile
+            .id,
+        opus.id,
+        "the account that interviewed last, with no trace of the round before it",
+    );
+}
+
+/// And the other way round, which is the half that the row has to take away
+/// rather than be taken away by.
+#[tokio::test]
+async fn no_grilling_started_after_a_pairing_replaces_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool, "verkstead").await;
+    let fable = saved(&pool, "fable").await;
+    let opus = saved(&pool, "opus").await;
+
+    grilled(&pool, &repo, &opus, &fable, &fable).await;
+    ungrilled(&pool, &repo, &fable, &fable).await;
+
+    assert_eq!(
+        remembered_pairings(&pool, repo.id).await.unwrap().grilling,
+        Picked::Skipped,
+        "one answer rather than two to choose between",
+    );
 }

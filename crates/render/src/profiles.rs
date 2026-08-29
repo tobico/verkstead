@@ -161,7 +161,7 @@ pub enum ProfileDeleted {
     InUse,
 }
 
-/// One of a Conversation's two Pairings, as the page shows it: the Profile
+/// One of a Conversation's Pairings, as the page shows it: the Profile
 /// whole, and the model paired with it.
 ///
 /// The Profile whole rather than by id because the pane says what it is and
@@ -183,7 +183,57 @@ pub struct PairingView {
     pub model: Option<String>,
 }
 
-/// Which Profile and model a Conversation is pairing for one of its two roles.
+/// What a Conversation has settled about one of its roles, as the page shows
+/// it: the Pairing its sessions run under, that the role runs none, or nothing
+/// picked yet.
+///
+/// Three rather than a nullable Pairing, because a picker offers *no grilling*
+/// or *no review* as a row of its own: a Conversation that picked one is as
+/// ready to start as one that picked a Pairing, and a page that could not tell
+/// it from an empty picker would draw the placeholder over a settled choice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum PickedView {
+    /// Nothing picked — which includes a Profile chosen before pairings
+    /// existed, that being half a choice and so a choice to make again.
+    Nothing,
+
+    /// The row that runs no session at all.
+    Skipped,
+
+    /// The Profile and model this role's sessions run under.
+    Under(PairingView),
+}
+
+impl PickedView {
+    /// The Pairing where one was picked, for the readers that want the account
+    /// rather than which of the three this is.
+    pub fn pairing(&self) -> Option<&PairingView> {
+        match self {
+            Self::Under(pairing) => Some(pairing),
+            _ => None,
+        }
+    }
+
+    /// Whether the human picked the row that runs no session, which is what the
+    /// presses that behave differently for it turn on.
+    pub fn skipped(&self) -> bool {
+        matches!(self, Self::Skipped)
+    }
+}
+
+/// Which Pairing one of a Conversation's roles runs under, or that it runs none.
+///
+/// `null` is the row that runs no session: a picker that offers one offers it
+/// beside the Pairings, so the one press that picks either sends the same body
+/// — see [`PickedView`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RoleChoice {
+    pub pairing: Option<ProfileChoice>,
+}
+
+/// Which Profile and model a Conversation is pairing for one of its roles.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileChoice {

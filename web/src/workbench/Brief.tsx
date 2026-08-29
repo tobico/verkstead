@@ -7,7 +7,7 @@
 //! the pairings and the companions all settled at that moment — so from then on
 //! a read-only companion leaves no trace anywhere: a read-write one surfaces
 //! later through its commits and its pull request, and a read-only one never
-//! does. The worktree directories and the two Pairings are as unfindable, and
+//! does. The worktree directories and the Pairings are as unfindable, and
 //! they belong in the same place.
 //!
 //! Read where the frozen Brief is read, because that is where the human goes to
@@ -30,11 +30,13 @@ import type {
   CompanionView,
   ConversationView,
   PairingView,
+  PickedView,
   Worktree,
 } from "../api/types";
 import { Empty } from "../notices";
 import * as pairing from "../pairing";
 import styles from "./Brief.module.css";
+import { chosen } from "./naming";
 import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";
 
@@ -53,6 +55,15 @@ const ACCESS: Record<CompanionMode, string> = {
 /// that does not exist. So the test decides whether there is anything to
 /// abbreviate, rather than the length.
 const COMMIT = /^[0-9a-f]{40}$/;
+
+/// What stands where a branch has no name to report yet: the Conversation's
+/// own, and a companion mirroring the Conversation's own.
+///
+/// Read on the one Conversation whose Brief is frozen while it is still
+/// drafting — an adopting one, whose stage brief comes down frozen from the
+/// start — and nowhere else: every other Conversation with a summary to draw
+/// has been named or has a branch by the time there is a pane to open.
+export const UNNAMED = "Chosen when the work starts.";
 
 export function Brief(props: {
   conversation: ConversationView;
@@ -84,8 +95,17 @@ function Configuration(props: { conversation: ConversationView }): JSX.Element {
 
       <dl class={styles.facts}>
         <Fact term="Repo">{props.conversation.repo.name}</Fact>
+        {/* The name where there is one, and the rule that will pick one where
+            there is not — which is what a Conversation adopting a roadmap
+            reads, its Brief being frozen from the start and its branch being
+            the stage's own slug once it is adopted. */}
         <Fact term="Branch">
-          <span class={styles.ref}>{props.conversation.branch}</span>
+          <Show
+            when={chosen(props.conversation)}
+            fallback={<span class={styles.rule}>{UNNAMED}</span>}
+          >
+            {(branch) => <span class={styles.ref}>{branch()}</span>}
+          </Show>
         </Fact>
         {/* The commit rather than the branch that was picked: the pick is a
             name while the Conversation drafts and is replaced by whatever it
@@ -112,10 +132,16 @@ function Configuration(props: { conversation: ConversationView }): JSX.Element {
           <Where worktree={props.conversation.worktree} />
         </Fact>
         <Fact term="Grilling">
-          <Paired pairing={props.conversation.grilling_pairing} />
+          <Picked
+            picked={props.conversation.grilling_pairing}
+            away="No grilling."
+          />
         </Fact>
         <Fact term="Implementation">
           <Paired pairing={props.conversation.implementation_pairing} />
+        </Fact>
+        <Fact term="Review">
+          <Picked picked={props.conversation.review_pairing} away="No review." />
         </Fact>
       </dl>
 
@@ -201,12 +227,16 @@ function Holding(props: {
         </Fact>
       }
     >
+      {/* Mirroring — no name of its own in the record — is the conversation's
+          own branch, so where that has no name yet neither has this: the same
+          words stand under both. */}
       <Fact term="Branch">
-        <span class={styles.ref}>
-          {props.companion.branch === ""
-            ? props.conversation.branch
-            : props.companion.branch}
-        </span>
+        <Show
+          when={props.companion.branch || chosen(props.conversation)}
+          fallback={<span class={styles.rule}>{UNNAMED}</span>}
+        >
+          {(branch) => <span class={styles.ref}>{branch()}</span>}
+        </Show>
       </Fact>
     </Show>
   );
@@ -236,8 +266,8 @@ function Where(props: { worktree: Worktree | null }): JSX.Element {
   );
 }
 
-/// One of the two Pairings, said the way every picker of one says it: the
-/// account, and the model that account runs on.
+/// One of the Pairings, said the way every picker of one says it: the account,
+/// and the model that account runs on.
 ///
 /// A Profile chosen before models were paired beside them is half a choice, and
 /// the pane says the half there is rather than inventing the other — there is no
@@ -255,6 +285,23 @@ function Paired(props: { pairing: PairingView | null }): JSX.Element {
             : paired().profile.name}
         </>
       )}
+    </Show>
+  );
+}
+
+/// And a role that could be picked away as well as paired, which is the grilling
+/// and the review.
+///
+/// Said as the choice it was rather than as an absence: *no grilling* and *no
+/// review* are what the human picked, and a pane that read either as "not
+/// chosen" would show a settled conversation as an unsettled one.
+function Picked(props: { picked: PickedView; away: string }): JSX.Element {
+  return (
+    <Show
+      when={props.picked !== "Skipped"}
+      fallback={<span class={styles.rule}>{props.away}</span>}
+    >
+      <Paired pairing={pairing.under(props.picked)} />
     </Show>
   );
 }

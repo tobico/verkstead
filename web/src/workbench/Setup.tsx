@@ -2,7 +2,7 @@
 //! drawn under the Brief it belongs to.
 //!
 //! The branch the work will be done on, the branch it will come off, the other
-//! repos it works alongside, and the two pairings its sessions run under. Every
+//! repos it works alongside, and the pairings its sessions run under. Every
 //! one of them is a fact about the Conversation rather than about any one Event,
 //! and every one of them is the human's to change for as long as it is still
 //! drafting.
@@ -14,9 +14,12 @@
 //! that moment, so nothing taken away was still actionable, and the card goes
 //! back to being the Brief alone.
 //!
-//! The two pairings are separate choices because they are genuinely separate
-//! accounts — grill on fable, implement on opus — and because the implementation
-//! session cannot simply carry the grilling one on.
+//! The three pairings are separate choices because they are genuinely separate
+//! accounts — grill on fable, implement on opus, review on whatever did not
+//! build it — and because the implementation session cannot simply carry the
+//! grilling one on. Two of the pickers carry one row that is not an account at
+//! all: a conversation can be built without being grilled and wrapped up
+//! without being reviewed.
 
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
@@ -35,6 +38,7 @@ import {
   addCompanion,
   chooseGrillingPairing,
   chooseImplementationPairing,
+  chooseReviewPairing,
   listBranches,
   listProfiles,
   listRepos,
@@ -57,7 +61,6 @@ import type {
   CompanionView,
   ConversationView,
   PairingView,
-  ProfileChoice,
   ProfileChosen,
   ProfileEntry,
   RepoEntry,
@@ -67,6 +70,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
+import { AUTOMATIC, chosen } from "./naming";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
 
@@ -141,8 +145,7 @@ export const CHOICE_REFUSAL: Record<ProfileChosen, string> = {
   NoSuchConversation: "This conversation is gone.",
   NoSuchProfile: "That profile has been removed.",
   NoSuchModel: "That profile no longer lists that model.",
-  NotDrafting:
-    "The grilling has started, so who runs this conversation is settled.",
+  NotDrafting: "The work has started, so who runs this conversation is settled.",
 };
 
 export function Setup(props: {
@@ -195,8 +198,8 @@ export function Setup(props: {
   );
 }
 
-/// The two pairings the work will run under, and whether everything grilling
-/// needs is settled.
+/// The three pairings the work will run under — two of which may be picked
+/// away instead — and whether everything the work needs is settled.
 ///
 /// The profile list is read here rather than passed down, so the pickers are
 /// whole wherever they are drawn — the sidebar does the same with the repos. The
@@ -233,26 +236,53 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
         </Match>
         <Match when={profiles.data}>
           {(saved) => (
-            /* Side by side wherever there is room for two, stacked where there
-               is not. The wrap is the pane's own width rather than the
+            /* Side by side wherever there is room for them, stacked where
+               there is not. The wrap is the pane's own width rather than the
                window's, because this card is drawn in a pane the human can
                narrow. */
             <div class={styles.pairings}>
+              {/* One of the two pickers with a row that is not an account: a
+                  brief can go straight to the work, with no interview between
+                  the two. */}
               <PairingPicker
                 conversation={props.conversation}
                 saved={saved()}
                 role="grilling"
                 label="Grilling"
-                chosen={props.conversation.grilling_pairing}
-                choose={chooseGrillingPairing}
+                away="No grilling"
+                chosen={pairing.settled(props.conversation.grilling_pairing)}
+                pairing={pairing.under(props.conversation.grilling_pairing)}
+                choose={(id, picked) =>
+                  chooseGrillingPairing(id, pairing.role(picked))
+                }
               />
               <PairingPicker
                 conversation={props.conversation}
                 saved={saved()}
                 role="implementation"
                 label="Implementation"
-                chosen={props.conversation.implementation_pairing}
-                choose={chooseImplementationPairing}
+                chosen={pairing.chosen(
+                  props.conversation.implementation_pairing,
+                )}
+                pairing={props.conversation.implementation_pairing}
+                choose={(id, picked) =>
+                  chooseImplementationPairing(id, pairing.choice(picked))
+                }
+              />
+              {/* And the other: a conversation can be wrapped up without being
+                  reviewed at all, and that is picked here rather than anywhere
+                  else. */}
+              <PairingPicker
+                conversation={props.conversation}
+                saved={saved()}
+                role="review"
+                label="Review"
+                away="No review"
+                chosen={pairing.settled(props.conversation.review_pairing)}
+                pairing={pairing.under(props.conversation.review_pairing)}
+                choose={(id, picked) =>
+                  chooseReviewPairing(id, pairing.role(picked))
+                }
               />
             </div>
           )}
@@ -264,41 +294,60 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
           or else explains what is missing. Said up here as well it would be the
           same verdict twice.
 
-          An adopting conversation never grills at all, and why both pairings
-          are fixed for it all the same is worth a line. */}
+          An adopting conversation never grills at all, and why every pairing
+          is fixed for it all the same is worth a line. */}
       <Show when={props.conversation.adopting}>
         <Note>
-          Both pairings are fixed before adopting: the implementation one is
-          what the work runs under, and the grilling one is carried, because
-          the stages after this one inherit both from it.
+          All three pairings are fixed before adopting: the implementation one
+          is what the work runs under, the review one is what looks at it, and
+          the grilling one is carried, because the stages after this one inherit
+          all of them from it.
         </Note>
       </Show>
     </section>
   );
 }
 
-/// One of the two choices: which profile-and-model pairing fills this role.
+/// One of the three choices: which profile-and-model pairing fills this role —
+/// or, where the role can be picked away, that it runs nothing.
 ///
 /// A select rather than a list of buttons, because the pairings are a short list
 /// that barely changes and the choice is one of them — the same control the
 /// sidebar picks a repo with. One flat row per pairing rather than a profile
 /// picker with a model picker after it: the counts stay small, and two stages
 /// would cost a tap every time.
+///
+/// `away` is the row a role that can run nothing offers above the pairings,
+/// where it offers one. In the same flat list rather than beside it as a switch,
+/// because it is the same decision: what runs this, and one of the answers is
+/// nobody.
 function PairingPicker(props: {
   conversation: ConversationView;
   saved: ProfileEntry[];
   role: string;
   label: string;
-  chosen: PairingView | null;
-  choose: (id: number, choice: ProfileChoice) => Promise<ProfileChosen>;
+  away?: string;
+  chosen: string;
+  pairing: PairingView | null;
+  choose: (id: number, picked: string) => Promise<ProfileChosen>;
 }): JSX.Element {
   const queries = useQueryClient();
 
   const [refused, setRefused] = createSignal<ProfileChosen | null>(null);
 
+  /// Every row the control offers: the pairings, and the row that runs nothing
+  /// above them where this role has one. Above rather than below, because it is
+  /// the choice that says *skip this* and a reader scanning accounts should meet
+  /// it before the accounts.
+  const rows = (): Row[] => [
+    ...(props.away ? [{ value: pairing.NONE, label: props.away }] : []),
+    ...pairing
+      .pairings(props.saved)
+      .map((row) => ({ value: pairing.value(row), label: pairing.label(row) })),
+  ];
+
   const choose = useMutation(() => ({
-    mutationFn: (choice: ProfileChoice) =>
-      props.choose(props.conversation.id, choice),
+    mutationFn: (picked: string) => props.choose(props.conversation.id, picked),
     onSuccess: (outcome: ProfileChosen) => {
       if (outcome !== "Chosen") {
         setRefused(outcome);
@@ -326,29 +375,33 @@ function PairingPicker(props: {
           comes back if the profile that was picked is deleted, or if it stopped
           listing the model it was paired with, which is the honest reading of
           it — and nothing is said upwards about that, the choice being the
-          server's record rather than this card's to clear. */}
+          server's record rather than this card's to clear.
+
+          The row that runs nothing is not that state and never sends the empty
+          string: it is a choice like the pairings, and the placeholder stands
+          above it until one of them is made. */}
       <Picker
         id={`${props.role}-pairing`}
-        options={pairing.pairings(props.saved)}
-        value={pairing.value}
-        label={pairing.label}
-        chosen={pairing.chosen(props.chosen)}
-        pick={(picked) => choose.mutate(pairing.choice(picked))}
+        options={rows()}
+        value={(row) => row.value}
+        label={(row) => row.label}
+        chosen={props.chosen}
+        pick={(picked) => choose.mutate(picked)}
         disabled={choose.isPending}
       />
 
       {/* A profile chosen before models were paired with them: half a choice,
           which the picker draws as none. Said in words rather than left as a
           bare placeholder, because the conversation does have a profile. */}
-      <Show when={props.chosen && !props.chosen.model}>
+      <Show when={props.pairing && !props.pairing.model}>
         <Note class={styles.unpaired}>
-          {props.chosen?.profile.name} was chosen before models were picked
+          {props.pairing?.profile.name} was chosen before models were picked
           beside them. Pick one to pair.
         </Note>
       </Show>
 
       {/* What is wrong with the one that is chosen, said where it is chosen. */}
-      <Show when={props.chosen?.profile.broken}>
+      <Show when={props.pairing?.profile.broken}>
         {(broken) => <ErrorLine class={styles.broken}>{BROKEN[broken()]}</ErrorLine>}
       </Show>
       <Show when={refused()}>
@@ -365,8 +418,22 @@ function PairingPicker(props: {
   );
 }
 
-/// The branch the work will be done on: prefilled with a random name when the
-/// Conversation was started, and the human's to change until grilling begins.
+/// One row of a picker, as the control reads it: what it sends and what it
+/// says.
+///
+/// Made here rather than taken from the pairings, because the review picker's
+/// list is not only pairings — see [`PairingPicker`].
+type Row = { value: string; label: string };
+
+/// The branch the work will be done on: empty until the human names one, and
+/// theirs to change until grilling begins.
+///
+/// Empty is not *no branch*. A name was invented when the Conversation was
+/// started, because there has to be one to cut, and the field stands empty
+/// under a placeholder rather than showing it: a name nobody chose is nothing
+/// to read, and what the human does about it is either type one or leave it
+/// alone. Clearing the field goes back to that, and the Conversation goes back
+/// to being a Draft.
 ///
 /// Nothing is created by naming it. The branch itself arrives with the stage
 /// that starts grilling; this is the name it will be given.
@@ -385,15 +452,16 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
   const [named, setNamed] = createSignal<string | null>(null);
   const [refused, setRefused] = createSignal<BranchRenamed | null>(null);
 
-  /// What is in the field: what has been typed, or the name as it stands.
-  const branch = () => named() ?? props.conversation.branch;
+  /// What is in the field: what has been typed, or the name as it stands —
+  /// which is nothing at all while the name is still Verkstead's.
+  const branch = () => named() ?? chosen(props.conversation);
 
   // The last name a save asked for, whatever became of it: where the save
   // landed it is what the record has, and where it was refused it is the name
   // the refusal was about. Either way, asking again for that same string would
   // only get the same answer back.
   const [asked, setAsked] = createSignal<string | null>(null);
-  const recorded = () => asked() ?? props.conversation.branch;
+  const recorded = () => asked() ?? chosen(props.conversation);
 
   /// Whether the field has moved on since the last save, which is the whole of
   /// what there is to save.
@@ -457,6 +525,7 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
           autocapitalize="off"
           autocorrect="off"
           spellcheck={false}
+          placeholder={AUTOMATIC}
           value={branch()}
           onInput={(ev) => {
             setNamed(ev.currentTarget.value);
@@ -994,6 +1063,10 @@ function CompanionAccess(props: {
 /// no longer follows. Clearing it back to empty is going back to mirroring,
 /// which is why the field fills itself in again afterwards.
 ///
+/// Where the conversation has no name of its own yet there is nothing to
+/// prefill it with, so it stands empty as well. Still mirroring, and still what
+/// the human will get: the name it follows is the one they have not chosen.
+///
 /// It keeps itself the way the branch field above it does — on a pause in the
 /// typing, on the way out of the field and on Enter — because it is the same
 /// card, and a Save button here would be the one thing on it asking to be
@@ -1011,7 +1084,7 @@ function CompanionBranch(props: {
 
   /// What the record comes to: the name it holds, or the conversation's own
   /// where it holds none.
-  const mirrored = () => props.companion.branch || props.conversation.branch;
+  const mirrored = () => props.companion.branch || chosen(props.conversation);
 
   /// What is in the field: what has been typed, or what the record comes to.
   const branch = () => named() ?? mirrored();

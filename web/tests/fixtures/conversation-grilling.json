@@ -4,21 +4,24 @@
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
   "blocked_on": null,
   "branch": "outbound-retries",
+  "branch_named": true,
   "companions": [],
   "direction": null,
   "driven": false,
   "grilling_pairing": {
-    "model": "claude-fable-5",
-    "profile": {
-      "agent_type": "Claude",
-      "broken": null,
-      "claude_dir": "/srv/accounts/fable/.claude",
-      "config_file": "/srv/accounts/fable/.claude.json",
-      "id": 1,
-      "models": [
-        "claude-fable-5"
-      ],
-      "name": "fable"
+    "Under": {
+      "model": "claude-fable-5",
+      "profile": {
+        "agent_type": "Claude",
+        "broken": null,
+        "claude_dir": "/srv/accounts/fable/.claude",
+        "config_file": "/srv/accounts/fable/.claude.json",
+        "id": 1,
+        "models": [
+          "claude-fable-5"
+        ],
+        "name": "fable"
+      }
     }
   },
   "id": 3,
@@ -37,6 +40,7 @@
       "name": "opus"
     }
   },
+  "naming": false,
   "pinned": [],
   "ready_to_continue": false,
   "ready_to_grill": false,
@@ -49,6 +53,22 @@
     "path": "/srv/repos/verkstead"
   },
   "resets": null,
+  "review_pairing": {
+    "Under": {
+      "model": "claude-sonnet-5",
+      "profile": {
+        "agent_type": "Claude",
+        "broken": "DirMissing",
+        "claude_dir": "/srv/accounts/sonnet/.claude",
+        "config_file": "/srv/accounts/sonnet/.claude.json",
+        "id": 3,
+        "models": [
+          "claude-sonnet-5"
+        ],
+        "name": "sonnet"
+      }
+    }
+  },
   "state": "Grilling",
   "stop_asked": false,
   "stopped_by_hand": false,

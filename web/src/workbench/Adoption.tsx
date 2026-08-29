@@ -45,6 +45,7 @@ export const ADOPT_REFUSAL: Record<
   NoGrillingProfile: "Choose a grilling profile and model first, on the brief.",
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
+  NoReviewProfile: "Choose a review profile and model first, on the brief.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   FetchFailed:

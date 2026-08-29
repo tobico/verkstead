@@ -46,6 +46,9 @@ mod limits;
 mod nudge;
 mod profiles;
 mod push;
+/// Following a Conversation's branch to the name a session renamed it to,
+/// rather than repairing a checkout that has not come adrift after all.
+mod renames;
 mod reply;
 mod repos;
 /// Speaking to a session that has gone idle without asking anything.

@@ -101,8 +101,8 @@ impl Profile {
     }
 }
 
-/// What a Conversation has settled about one of its two roles: a Profile, and
-/// the one of that Profile's models its sessions run on.
+/// What a Conversation has settled about one of its roles: a Profile, and the
+/// one of that Profile's models its sessions run on.
 ///
 /// The pair rather than the Profile alone, because a Profile's list says what
 /// its account *can* launch and a session runs one thing. Both halves are
@@ -131,6 +131,58 @@ impl Pairing {
     /// exactly as it did.
     pub fn runs_on(&self) -> Option<&str> {
         self.model.as_deref().or_else(|| self.profile.model())
+    }
+}
+
+/// What a Conversation has settled about one of its roles: the Pairing that
+/// role's sessions run under, that the role runs no session at all, or nothing
+/// yet.
+///
+/// Three states rather than an `Option`, because *no review* is a choice the
+/// human made and an empty picker is one they have not. Both leave the role
+/// without a Pairing and only one of them lets the work start, so a record that
+/// could not tell them apart would either refuse a settled Conversation or
+/// start an unsettled one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Picked {
+    /// The picker is empty: nothing has been chosen for this role.
+    ///
+    /// Which includes a Profile chosen before pairings existed — see
+    /// [`Pairing::model`] — because half a choice is a choice to make again.
+    #[default]
+    Nothing,
+
+    /// The role runs no session at all, picked from the same flat list the
+    /// Pairings are picked from and stored apart from having picked nothing.
+    Skipped,
+
+    /// The Profile and model this role's sessions are launched under.
+    Under(Pairing),
+}
+
+impl Picked {
+    /// The Pairing where one was picked, for everything that reads a role as
+    /// something to launch a session under.
+    pub fn pairing(&self) -> Option<&Pairing> {
+        match self {
+            Self::Under(pairing) => Some(pairing),
+            _ => None,
+        }
+    }
+
+    /// Whether the human picked the row that runs no session.
+    pub fn skipped(&self) -> bool {
+        matches!(self, Self::Skipped)
+    }
+
+    /// Whether anything has been picked at all — a Pairing or the row that says
+    /// there is to be none.
+    ///
+    /// Says nothing about whether a Pairing that was picked is still something
+    /// to run: whether its Profile's pair is where it was left is read against
+    /// the Watched Paths, which is above the store.
+    pub fn picked(&self) -> bool {
+        !matches!(self, Self::Nothing)
     }
 }
 
@@ -318,8 +370,11 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
 pub async fn delete_profile(pool: &SqlitePool, id: i64) -> Result<Deleting> {
     let chosen: Option<(i64,)> = sqlx::query_as(
         "SELECT id FROM conversations
-         WHERE grilling_profile_id = ? OR implementation_profile_id = ?",
+         WHERE grilling_profile_id = ?
+            OR implementation_profile_id = ?
+            OR review_profile_id = ?",
     )
+    .bind(id)
     .bind(id)
     .bind(id)
     .fetch_optional(pool)

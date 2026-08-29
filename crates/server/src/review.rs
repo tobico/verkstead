@@ -39,6 +39,21 @@
 //! are recorded as addressed as this session is dispatched, so no batch session is
 //! later sent to do what nobody agreed to. See [`crate::comments::for_the_review`].
 //!
+//! **A Conversation may be wrapped up with no review at all.** *No review* is a
+//! row of the Review picker on the setup card, and a Conversation whose human
+//! picked it settles this the moment its wrap-up looks — no session, no
+//! Worktree wanted, nothing on the Timeline. Everything else the wrap-up does
+//! is untouched: the checks are watched and fixed on their two attempts apiece,
+//! what is said on the pull requests is answered in batches, and the whole
+//! thing goes Done when the suites are green. See [`skipped`].
+//!
+//! The settle is what carries that, rather than a rule somewhere reading the
+//! pick: what the rest of a wrap-up waits on is *the review is over*, and a
+//! review that was never to happen is over. Which is also why nothing further
+//! down the ladder has to know — a batch session is dispatched once the review
+//! has settled, and that is as true of one settled without a session as of one
+//! settled by a session that found nothing.
+//!
 //! A review that finds nothing and was given nothing asks nothing. It says so as
 //! the last thing it prints — which is what the Timeline shows of a session — and
 //! ends. A Set with no findings in it would be a row for the human to dismiss,
@@ -151,8 +166,17 @@ use crate::store;
 /// Nothing is refused for. This runs unattended with nobody watching, and what it
 /// has to say it says on the Timeline or in the log.
 pub(crate) async fn run(state: AppState, conversation_id: i64) {
-    if matches!(wanted(&state, conversation_id).await, Wanted::Nothing) {
-        return;
+    // Zero in a server, and a window a test holds open — see
+    // [`crate::runner::Pace::reviewing`].
+    tokio::time::sleep(state.sessions.pace().reviewing).await;
+
+    match wanted(&state, conversation_id).await {
+        Wanted::Nothing => return,
+        // Nothing is launched and no Worktree is wanted, so this settles where
+        // it stands rather than queueing behind whatever is working — see
+        // [`skipped`].
+        Wanted::Skipped => return skipped(&state, conversation_id).await,
+        _ => {}
     }
 
     // Waited for rather than tried for: nothing else will start this review on
@@ -172,9 +196,32 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
     // the Conversation may have been closed out from under this altogether.
     match wanted(&state, conversation_id).await {
         Wanted::Nothing => {}
+        Wanted::Skipped => skipped(&state, conversation_id).await,
         Wanted::Review => reading(&state, conversation_id).await,
         Wanted::Unattended(set_id) => unattended(&state, conversation_id, set_id).await,
     }
+}
+
+/// Settle the review of a Conversation whose human picked *no review*.
+///
+/// The one wrap-up step that runs no session. What the settle is for is the
+/// same either way — it is what the rest of the wrap-up reads to know the
+/// branch has been seen to, and what lets a batch session be dispatched about
+/// what is on the pull request — so the wrap-up from here on is exactly the one
+/// a review that found nothing leaves behind: the checks with their two fix
+/// attempts apiece, the comments answered in batches, and Done once the suites
+/// are green.
+///
+/// Nothing is written to the Timeline for it. What the human picked is on the
+/// setup card and read on the details pane ever after, and a Notice saying the
+/// review they turned off did not happen would be a row to dismiss.
+async fn skipped(state: &AppState, conversation_id: i64) {
+    settle(state, conversation_id).await;
+
+    tracing::info!(
+        conversation_id,
+        "this Conversation is not to be reviewed, so the wrap-up carries on without one"
+    );
 }
 
 /// Read the branch from the start, whatever this wrap's review has already left
@@ -191,8 +238,10 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
 /// stands — anything that session did land included — and raises whatever is
 /// still worth raising.
 pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
-    if matches!(wanted(&state, conversation_id).await, Wanted::Nothing) {
-        return;
+    match wanted(&state, conversation_id).await {
+        Wanted::Nothing => return,
+        Wanted::Skipped => return skipped(&state, conversation_id).await,
+        _ => {}
     }
 
     // Waited for on the same terms [`run`] waits on it, and for the same reason:
@@ -202,6 +251,7 @@ pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
 
     match wanted(&state, conversation_id).await {
         Wanted::Nothing => return,
+        Wanted::Skipped => return skipped(&state, conversation_id).await,
         Wanted::Review => {}
         Wanted::Unattended(set_id) => closed(&state, conversation_id, set_id).await,
     }
@@ -484,6 +534,10 @@ enum Wanted {
     /// keep, that nothing is launched behind a stop.
     Nothing,
 
+    /// There is to be no review: the human picked that on the setup card, so
+    /// this settles without a session — see [`skipped`].
+    Skipped,
+
     /// Nobody has read the branch, so a review session reads it.
     Review,
 
@@ -494,7 +548,7 @@ enum Wanted {
     Unattended(i64),
 }
 
-/// Which of the three there is, asked of the record.
+/// Which of the four there is, asked of the record.
 ///
 /// The order matters and is the order the questions rule each other out in: a
 /// Conversation that is not wrapping up has no wrap-up to see to, a review that
@@ -529,9 +583,35 @@ async fn wanted(state: &AppState, conversation_id: i64) -> Wanted {
         return Wanted::Nothing;
     }
 
+    // Asked after the stop and before the Set, because it rules out everything
+    // below it: a Conversation that is not to be reviewed has no review session
+    // to have left a Set standing, and one that did leave a Set is one whose
+    // human picked *no review* after it was already asking, which is not
+    // reachable — the pick freezes at grill start.
+    if skipping(state, conversation_id).await {
+        return Wanted::Skipped;
+    }
+
     match asked(state, conversation_id).await {
         Some(set_id) => Wanted::Unattended(set_id),
         None => Wanted::Review,
+    }
+}
+
+/// Whether the human picked the row that says this Conversation is not to be
+/// reviewed.
+///
+/// A store that will not answer reads as *it is to be reviewed*, which is the
+/// safe way round: what hangs on this is a wrap-up settling a review nobody
+/// read, and a database that will not say is not grounds for it.
+async fn skipping(state: &AppState, conversation_id: i64) -> bool {
+    match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.review_pairing.skipped(),
+        Ok(None) => false,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a Conversation is to be reviewed failed");
+            false
+        }
     }
 }
 

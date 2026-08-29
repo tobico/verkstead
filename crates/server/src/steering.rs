@@ -280,9 +280,11 @@ pub(crate) async fn submit(
 
     let said = announced(&added, &opened, &conversation.branch);
 
+    let settling = settling(&conversation, submission);
+
     let steer = store::Steer {
         target,
-        pairing: settling(&conversation, submission),
+        pairings: &settling,
         brief: brief(submission),
         // Whichever of the two the target takes, both landing in the one place:
         // the Steer Event's own body is what the human wrote to steer it with.
@@ -507,9 +509,11 @@ async fn refusal(
         return Ok(Some(ConversationSteered::EmptyBrief));
     }
 
-    let Some(role) = role(submission.target) else {
+    let roles = roles(submission.target);
+
+    if roles.is_empty() {
         return Ok(None);
-    };
+    }
 
     // What the human picked, judged the way the drafting pickers judge theirs: a
     // Profile that has gone and a model it no longer lists are both a list that
@@ -527,9 +531,14 @@ async fn refusal(
     // Nothing picked, which is the human leaving the picker on what the
     // Conversation already had — and a refusal where it had none. A session is
     // launched under a Pairing, so a state something runs in with none settled is
-    // a move into work nothing could start.
-    Ok(fixed(conversation, role)
-        .is_none()
+    // a move into work nothing could start. Every role the target runs under,
+    // because any one of them missing is a session the wrap-up could not start.
+    //
+    // A role picked away is settled: what it says is that the state runs no
+    // session there, which is not a session that could not be started.
+    Ok(roles
+        .iter()
+        .any(|role| !fixed(conversation, *role).picked())
         .then_some(ConversationSteered::NoPairing))
 }
 
@@ -625,37 +634,65 @@ fn directing(conversation: &Conversation, instruction: Option<&str>) -> Option<D
         .then_some(Direction::Inline)
 }
 
-/// The Pairing to write with the move, or `None` where there is none to write.
+/// The Pairings to write with the move, one per role the target runs under —
+/// empty where there are none to write.
 ///
-/// `None` twice over: a target nothing runs in settles nothing, and a human who
+/// Empty twice over: a target nothing runs in settles nothing, and a human who
 /// left the picker alone has changed nothing — [`refusal`] has already made sure
 /// that the Conversation's own is there in that case.
-fn settling<'a>(
-    conversation: &Conversation,
-    submission: &'a SteerSubmission,
-) -> Option<Settling<'a>> {
-    let role = role(submission.target)?;
-    let choice = submission.pairing.as_ref()?;
+///
+/// And a role the human picked away is left picked away. The modal's one pick is
+/// what the sessions run under, and a role that runs none is not among them:
+/// writing a Pairing over it would turn a review back on that nobody asked for.
+///
+/// **The review role is filled rather than rewritten**, which is the one role
+/// this treats differently and the reason is what the picker says. It is
+/// labelled for the state's own work and prefilled with what builds, so a human
+/// who steers a wrap-up and changes nothing has picked nothing about the
+/// review — and writing that prefill over an account they chose on the setup
+/// card to be a fresh set of eyes would undo the whole point of picking it
+/// apart. So it takes the pick only where nothing was picked for it, which is
+/// still what lets a Conversation that never fixed one — a steered Draft — be
+/// steered into a wrap-up at all.
+fn settling<'a>(conversation: &Conversation, submission: &'a SteerSubmission) -> Vec<Settling<'a>> {
+    let Some(choice) = submission.pairing.as_ref() else {
+        return Vec::new();
+    };
 
-    // The Conversation's own is left exactly as it is rather than rewritten with
-    // itself: a re-choice takes the model row away and puts it back, and a
-    // Pairing that did not change is not something to rewrite.
-    //
-    // Both halves, because both halves are what a pick is. The picker offers one
-    // row per Profile-and-model, so the same Profile on another of its models is
-    // a different pick — and a comparison that asked about the Profile alone
-    // would answer *Steered* to a change of model and write none of it.
-    if fixed(conversation, role).is_some_and(|pairing| {
-        pairing.profile.id == choice.profile_id && pairing.model.as_deref() == Some(&choice.model)
-    }) {
-        return None;
-    }
+    roles(submission.target)
+        .iter()
+        .copied()
+        .filter(|role| {
+            let fixed = fixed(conversation, *role);
 
-    Some(Settling {
-        role,
-        profile_id: choice.profile_id,
-        model: &choice.model,
-    })
+            // Nothing picked or nothing at all: the review takes this pick only
+            // to fill a role that has none, never to replace one that has.
+            if *role == Role::Review {
+                return !fixed.picked();
+            }
+
+            // The Conversation's own is left exactly as it is rather than
+            // rewritten with itself: a re-choice takes the model row away and
+            // puts it back, and a Pairing that did not change is not something
+            // to rewrite.
+            //
+            // Both halves, because both halves are what a pick is. The picker
+            // offers one row per Profile-and-model, so the same Profile on
+            // another of its models is a different pick — and a comparison that
+            // asked about the Profile alone would answer *Steered* to a change
+            // of model and write none of it.
+            !fixed.skipped()
+                && !fixed.pairing().is_some_and(|pairing| {
+                    pairing.profile.id == choice.profile_id
+                        && pairing.model.as_deref() == Some(&choice.model)
+                })
+        })
+        .map(|role| Settling {
+            role,
+            profile_id: choice.profile_id,
+            model: &choice.model,
+        })
+        .collect()
 }
 
 /// What a steer into Implementing would find on the branch to carry on.
@@ -809,23 +846,29 @@ pub(crate) async fn standing(
     }
 }
 
-/// Which role's Pairing a target's sessions run under, or `None` where nothing
+/// Which roles' Pairings a target's sessions run under, empty where nothing
 /// runs there.
 ///
-/// Implementing, Wrapping and Follow-up are one answer between them, because
-/// they are one run seen at three moments: the task sessions build the work, the
-/// wrap-up's watchers dispatch the fix, review and comment sessions that see it
-/// through, and a follow-up session does whatever the human wants doing about it
-/// afterwards. Every one of those is the work itself, so all of them run under
-/// the implementation Pairing. A grilling is the other one, which is what an
-/// interview runs under whatever else has happened since.
-fn role(target: SteerTarget) -> Option<Role> {
+/// Implementing, Wrapping and Follow-up share the implementation Pairing,
+/// because they are one run seen at three moments: the task sessions build the
+/// work, the wrap-up's watchers dispatch the fix and comment sessions that see
+/// it through, and a follow-up session does whatever the human wants doing
+/// about it afterwards. Every one of those is the work itself, so all of them
+/// run under what builds. A grilling is its own, which is what an interview runs
+/// under whatever else has happened since.
+///
+/// Wrapping is the one target that names two, because a wrap-up both builds and
+/// reviews. What the human's one pick does to each of them is not the same
+/// thing, though — see [`settling`]: it settles what builds, and it fills the
+/// review role only where nothing was picked for it, which is what lets a
+/// Conversation that has never fixed a review Pairing — a steered draft — be
+/// steered into a wrap-up at all without replacing one that was chosen.
+fn roles(target: SteerTarget) -> &'static [Role] {
     match target {
-        SteerTarget::Grilling => Some(Role::Grilling),
-        SteerTarget::Implementing | SteerTarget::Wrapping | SteerTarget::FollowUp => {
-            Some(Role::Implementation)
-        }
-        SteerTarget::Done => None,
+        SteerTarget::Grilling => &[Role::Grilling],
+        SteerTarget::Implementing | SteerTarget::FollowUp => &[Role::Implementation],
+        SteerTarget::Wrapping => &[Role::Implementation, Role::Review],
+        SteerTarget::Done => &[],
     }
 }
 
@@ -835,11 +878,25 @@ fn role(target: SteerTarget) -> Option<Role> {
 /// held against — see [`settling`]. A Pairing carrying no model is a Profile
 /// chosen before pairings existed, which is half a choice and so never the same
 /// choice as one made now.
-fn fixed(conversation: &Conversation, role: Role) -> Option<&store::Pairing> {
+///
+/// And whether the role was picked away rather than paired, which is settled
+/// too: a Conversation that will not be grilled or will not be reviewed is not
+/// one with a Pairing missing, and the difference is what the two readers below
+/// turn on.
+fn fixed(conversation: &Conversation, role: Role) -> store::Picked {
     match role {
-        Role::Grilling => conversation.grilling_pairing.as_ref(),
-        Role::Implementation => conversation.implementation_pairing.as_ref(),
+        Role::Grilling => conversation.grilling_pairing.clone(),
+        Role::Implementation => carried(conversation.implementation_pairing.as_ref()),
+        Role::Review => conversation.review_pairing.clone(),
     }
+}
+
+/// A role that can only be paired or unpicked, read the same way as one that
+/// can be picked away.
+fn carried(pairing: Option<&store::Pairing>) -> store::Picked {
+    pairing
+        .cloned()
+        .map_or(store::Picked::Nothing, store::Picked::Under)
 }
 
 /// The line that goes under the Steer, naming every companion the steer put in

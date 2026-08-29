@@ -44,6 +44,7 @@ import type {
   RepoView,
   Response as Decided,
   Resumed,
+  RoleChoice,
   RoadmapPane,
   Screen,
   SetReading,
@@ -76,6 +77,30 @@ export class RefusedError extends Error {
     this.status = status;
     this.violations = refusal.violations ?? [];
   }
+}
+
+/// Whether a read failed because it ran past a deadline of its own.
+///
+/// `AbortSignal.timeout` aborts with a `TimeoutError`, which is how a read that
+/// gave up is told apart from one the server refused.
+export function timedOut(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
+}
+
+/// How many times a read that failed is made again — the count every query in
+/// the app is retried by, said here because the rule beside it is.
+const RETRIES = 3;
+
+/// Whether a read that failed is worth making again. The app's retry rule, set
+/// as the query client's default in `App.tsx`.
+///
+/// The ordinary three attempts, minus the one case where trying again is worse
+/// than not: a read that gave up on its own deadline. Retrying that is thirty
+/// seconds of nothing, three more times, before the page is allowed to say
+/// anything — and what it would say is what it already knew. The error is the
+/// answer, and on the Conversation pane the error is what draws the way out.
+export function retrying(attempts: number, error: unknown): boolean {
+  return !timedOut(error) && attempts < RETRIES;
 }
 
 /// One Set, rendered, with where it stands — or the stored body where this
@@ -215,6 +240,22 @@ export async function showArchived(showing: boolean): Promise<void> {
   await refused(await sent("/api/ui/conversations/archived", { showing }));
 }
 
+/// How long this read is given before the browser gives up on it.
+///
+/// The one read here with a deadline, because it is the one that can hang. The
+/// server does a good deal behind it — a Timeline, two Pairings, a look at
+/// every checkout on disk, and on an adopting Conversation a `git fetch` — and
+/// any of it stalling leaves the pane at *Loading…* for ever, which is worse
+/// than any answer: a page that never resolves is one the human cannot even
+/// reach the menu on to close the Conversation.
+///
+/// The server has a deadline of its own on the fetch, which is the hang anybody
+/// has actually met. This is the net under the ones nobody has met yet, so it
+/// is generous: thirty seconds is far past a read that is merely slow, and a
+/// long way short of for ever. What it turns a hang into is an error, and the
+/// error is what draws the escape hatch — see `workbench/Hatch.tsx`.
+const READING_A_CONVERSATION = 30_000;
+
 /// One Conversation with its Timeline.
 ///
 /// The id is whatever the URL held, unparsed, as a Set's is: one that is not a
@@ -223,6 +264,7 @@ export async function showArchived(showing: boolean): Promise<void> {
 export function loadConversation(id: string): Promise<ConversationView> {
   return get<ConversationView>(
     `/api/ui/conversations/${encodeURIComponent(id)}`,
+    READING_A_CONVERSATION,
   );
 }
 
@@ -630,13 +672,17 @@ export function deleteProfile(id: number): Promise<ProfileDeleted> {
 }
 
 /// Choose which account and model a conversation's grilling session runs under.
+///
+/// `null` is the picker's own "No grilling" row, which is a choice like any
+/// other rather than the absence of one: the brief goes straight to an inline
+/// implementation.
 export function chooseGrillingPairing(
   id: number,
-  pairing: ProfileChoice,
+  choice: RoleChoice,
 ): Promise<ProfileChosen> {
   return post<ProfileChosen>(
     `/api/ui/conversations/${id}/grilling-pairing`,
-    pairing,
+    choice,
   );
 }
 
@@ -649,6 +695,21 @@ export function chooseImplementationPairing(
   return post<ProfileChosen>(
     `/api/ui/conversations/${id}/implementation-pairing`,
     pairing,
+  );
+}
+
+/// And the one the wrap-up's review runs under, which is a third separate
+/// choice: reviewing is a fresh set of eyes on what was built.
+///
+/// `null` is the picker's own "No review" row, which is a choice like any
+/// other rather than the absence of one.
+export function chooseReviewPairing(
+  id: number,
+  choice: RoleChoice,
+): Promise<ProfileChosen> {
+  return post<ProfileChosen>(
+    `/api/ui/conversations/${id}/review-pairing`,
+    choice,
   );
 }
 
@@ -709,10 +770,15 @@ export async function unsubscribePush(endpoint: string): Promise<void> {
   await refused(await sent("/api/ui/push/unsubscribe", { endpoint }));
 }
 
-async function get<T>(path: string): Promise<T> {
+async function get<T>(path: string, within?: number): Promise<T> {
   return taken(
     await fetch(path, {
       headers: { accept: "application/json" },
+      // Only where the caller named one. A deadline is a decision about what a
+      // page does while it waits rather than a property of talking to this
+      // server, so it belongs to the read that has something to draw instead —
+      // see [`loadConversation`], which is the only one.
+      ...(within === undefined ? {} : { signal: AbortSignal.timeout(within) }),
     }),
   );
 }

@@ -37,6 +37,7 @@ import actions from "../src/workbench/Actions.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import marks from "../src/workbench/Mark.module.css";
 import steerModal from "../src/workbench/Steer.module.css";
+import { under } from "../src/pairing";
 import { Picker } from "../src/picking";
 import {
   OPEN,
@@ -257,7 +258,7 @@ describe("what a picker shows and what it would send", () => {
   /// whichever one happens to be first, because that is a session running under
   /// an account nobody chose.
   it("shows no pairing at all when the chosen profile is deleted", async () => {
-    const chosen = OPEN.grilling_pairing!;
+    const chosen = under(OPEN.grilling_pairing)!;
     const standing = { profiles: PROFILES };
     theWorkbench(whenever("/api/ui/profiles", () => json(standing.profiles)()));
     const { client } = mount(`/conversations/${OPEN.id}`);
@@ -278,7 +279,7 @@ describe("what a picker shows and what it would send", () => {
   /// it was paired with: half a pairing is not a pairing, so what is shown is
   /// nothing rather than the same account on a model nobody chose.
   it("shows no pairing at all when the chosen model leaves the list", async () => {
-    const chosen = OPEN.grilling_pairing!;
+    const chosen = under(OPEN.grilling_pairing)!;
     const standing = { profiles: PROFILES };
     theWorkbench(whenever("/api/ui/profiles", () => json(standing.profiles)()));
     const { client } = mount(`/conversations/${OPEN.id}`);
