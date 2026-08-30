@@ -772,6 +772,17 @@ pub enum TimelineEvent {
     /// it should be there.
     Steer(SteerEvent),
 
+    /// The human pressing **Resolve conflicts** on a finished Conversation's
+    /// pull request.
+    ///
+    /// Drawn beside the Moved line the same press wrote, exactly as a Steer is
+    /// and for a Steer's reason — and its own kind rather than a Steer into
+    /// Wrapping because the two are different acts. A steer opens the branch to
+    /// be read again; this leaves the review that carried the work to Done
+    /// standing, and asks only that the conflict be resolved. A record that drew
+    /// them the same line could never be read back for which of them happened.
+    ResolveConflicts(ResolveConflictsEvent),
+
     /// The pull request the finish step opened, at the moment it reached the
     /// Timeline.
     ///
@@ -1468,6 +1479,25 @@ pub struct SteerEvent {
     /// out as every piece of markdown on this wire is — and `None` for every
     /// steer that carried nothing written.
     pub html: Option<String>,
+}
+
+/// The **Resolve conflicts** press as the page receives it: when, and nothing
+/// else.
+///
+/// Nothing else because there is nothing else. Where it sends the work is always
+/// Wrapping, which the move under it says; what it was about is the pull
+/// requests the record says conflict, which the cards above it draw. The row is
+/// the deciding, and the deciding is the whole of what it holds.
+///
+/// So the words are the viewer's, as a move's are — see [`SteerEvent`], whose
+/// sentence this one stands beside and must not be mistaken for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ResolveConflictsEvent {
+    pub id: i64,
+
+    /// When it was pressed, RFC 3339.
+    pub at: String,
 }
 
 /// A move as the page receives it: when, and to what.
@@ -2304,6 +2334,16 @@ pub fn steer_event(
         target,
         html: instruction.map(crate::markdown::to_html),
     })
+}
+
+/// The **Resolve conflicts** press as an Event: when it was pressed, and nothing
+/// else.
+///
+/// Nothing rendered, unlike the steer above it — there is no markdown here, and
+/// no state either. Where it sends the work is always Wrapping, and the words
+/// are the viewer's, exactly as a move's are.
+pub fn resolve_conflicts_event(id: i64, at: String) -> TimelineEvent {
+    TimelineEvent::ResolveConflicts(ResolveConflictsEvent { id, at })
 }
 
 /// Starting a Conversation: the Repo it is against, and nothing else.

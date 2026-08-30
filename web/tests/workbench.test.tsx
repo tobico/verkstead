@@ -8229,6 +8229,48 @@ describe("steering a conversation", () => {
     expect(moved.at(-1)).toBe("Grilling → Done");
   });
 
+  /// And the other press that stands above a move into wrapping is drawn as
+  /// itself, which is the whole reason it is a kind of its own.
+  ///
+  /// A steer into wrapping carrying nothing written would otherwise be the same
+  /// row and the same line — and the two are different acts: a steer opens the
+  /// branch to be read again, and this leaves the review that carried the work
+  /// to done standing. Which of them happened is what a record months old has to
+  /// be readable back for.
+  it("draws the resolve press as itself rather than as a steer", async () => {
+    theGrillingStanding({
+      state: "Wrapping",
+      timeline: [
+        ...GRILLING.timeline,
+        { ResolveConflicts: { id: 9101, at: "2026-08-24T11:00:00Z" } },
+        { Moved: { id: 9102, at: "2026-08-24T11:00:00Z", state: "Wrapping" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pressed = await drawn(
+      container,
+      `.${timeline.timelineEvent} > .${timeline.pressed}`,
+    );
+
+    expect(pressed.textContent).toBe("You asked for the conflict to be resolved");
+
+    expect(
+      container.querySelector(
+        `.${timeline.timelineEvent} > .${timeline.steered}`,
+      ),
+      "and not as a steer, which would say the branch was read again",
+    ).toBeNull();
+
+    const moved = [
+      ...container.querySelectorAll(
+        `.${timeline.timelineEvent} > .${timeline.moved}`,
+      ),
+    ].map((line) => line.textContent);
+
+    expect(moved.at(-1)).toBe("Grilling → Wrapping");
+  });
+
   /// And where it carries an instruction it is a card rather than a line: what
   /// the session was sent off to do is a document like the brief and the
   /// handoff, and is read the same way — clamped beside the move, whole in the

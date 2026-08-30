@@ -525,6 +525,27 @@ pub enum Event {
     /// the reason the target goes above the document rather than under it.
     Steer(Lifecycle, Option<String>),
 
+    /// The human pressed **Resolve conflicts** on a finished Conversation's pull
+    /// request, and this is where they did it.
+    ///
+    /// A kind of its own rather than a [`Event::Steer`] into Wrapping, because
+    /// the two are different acts and a Timeline that drew them the same could
+    /// never be read back for which happened. A steer into Wrapping opens the
+    /// branch to be read again — the review's settle goes with it, and a review
+    /// session runs. This deliberately does not: the work was reviewed and
+    /// carried to Done on the strength of that review, and a base that has moved
+    /// underneath it since is not a reason to read the same branch twice.
+    ///
+    /// No body, and nothing joined in beside it. Where it goes is always
+    /// Wrapping — there is nowhere else a conflict is resolved — so the
+    /// [`Event::Moved`] line under it says the whole of where, and the
+    /// pull requests it was about are the ones the record says conflicted at
+    /// that moment. What the row keeps is the deciding: somebody read a conflict
+    /// on work Verkstead had finished with and asked for another round.
+    ///
+    /// See `crate::resolving` in the server, and [`resolve_conflicts`].
+    ResolveConflicts,
+
     /// The backlog landed on the branch, and this is where that happened.
     ///
     /// No body, and nothing joined in beside it either. What the Timeline draws
@@ -587,6 +608,7 @@ impl Event {
             Self::Notice(_) => "notice",
             Self::ManualTask(_) => "manual-task",
             Self::Steer(..) => "steer",
+            Self::ResolveConflicts => "resolve-conflicts",
             Self::TaskList => TASK_LIST,
             Self::StageList => STAGE_LIST,
         }
@@ -624,6 +646,10 @@ impl Event {
             Self::Steer(target, Some(instruction)) => {
                 Cow::Owned(format!("{}\n{instruction}", target.stored()))
             }
+            // Nothing either: where it goes is always Wrapping, so the move
+            // under it says the whole of where, and what this row keeps is
+            // the deciding.
+            Self::ResolveConflicts => Cow::Borrowed(""),
             // Nothing, and for neither of those reasons: there is no content
             // here to hold anywhere. The row fixes a position, and the card
             // drawn at it is read off the Worktree — see the variants.
@@ -690,6 +716,7 @@ impl Event {
                 }
                 None => Self::Steer(Lifecycle::read(&body)?, None),
             },
+            "resolve-conflicts" => Self::ResolveConflicts,
             TASK_LIST => Self::TaskList,
             STAGE_LIST => Self::StageList,
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
@@ -3461,6 +3488,14 @@ pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<
 /// under it because that is what came of the deciding. A long Timeline that said
 /// only *Done → Wrapping* could never be read back for who put it there.
 ///
+/// **A kind of its own rather than a Steer**, though, which is the difference
+/// that matters when it is read back. A steer into Wrapping may carry no
+/// instruction either, so the two would be the same row and the same line on the
+/// page — and they are not the same act: a steer opens the branch to be read
+/// again and this deliberately leaves the review's settle standing. Which of
+/// them happened is the whole of what a reader wants to know months later, so
+/// the record says which. See [`Event::ResolveConflicts`].
+///
 /// One transaction, as every move is: a Conversation that says Wrapping always
 /// has the move on its Timeline to say when it got there.
 pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> {
@@ -3490,15 +3525,15 @@ pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> 
         super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Mergeable(repo_id)).await?;
     }
 
-    let steer = Event::Steer(Lifecycle::Wrapping, None);
+    let pressed = Event::ResolveConflicts;
 
     sqlx::query(
         "INSERT INTO timeline_events (conversation_id, at, kind, body)
          VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
     )
     .bind(id)
-    .bind(steer.kind())
-    .bind(steer.body().into_owned())
+    .bind(pressed.kind())
+    .bind(pressed.body().into_owned())
     .execute(&mut *tx)
     .await
     .with_context(|| format!("putting a resolve press on the Timeline of Conversation {id}"))?;

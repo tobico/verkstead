@@ -642,8 +642,14 @@
 /* And the human saying where the work goes, which is the line the move under it
    came of. Drawn like the move for that reason — the two are one moment read
    twice — and in the ink the rest of the page is set in rather than the dim the
-   move takes: of the pair, this is the half somebody decided. */
+   move takes: of the pair, this is the half somebody decided.
+
+   The press that asks for a conflict to be resolved is drawn the same way and is
+   the same kind of thing: a human sending a finished conversation back into its
+   wrap-up, with the move it came of under it. What tells the two apart is the
+   sentence, because what differs between them is what happens to the branch. */
 .timelineEvent > .steered,
+.timelineEvent > .pressed,
 .steeredWith > .steered {
   margin: 0;
   padding: 0.15rem 0 0;

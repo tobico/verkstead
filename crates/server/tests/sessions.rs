@@ -9464,24 +9464,32 @@ async fn pressing_resolve_on_a_conflicted_done_pull_request_gets_it_resolved() {
     );
 
     // Two moves and the human's own line between them, which is what a Timeline
-    // long enough to have forgotten this has to be readable back for.
+    // long enough to have forgotten this has to be readable back for — and the
+    // line is the press's own rather than a steer's, because the two are
+    // different acts. A steer into Wrapping would have read the branch again.
     assert_eq!(
         view.timeline
             .iter()
             .filter_map(|event| match event {
-                verkstead_render::TimelineEvent::Moved(moved) => Some(Ok(moved.state)),
-                verkstead_render::TimelineEvent::Steer(steer) => Some(Err(steer.target)),
+                verkstead_render::TimelineEvent::Moved(moved) =>
+                    Some(format!("moved to {:?}", moved.state)),
+                verkstead_render::TimelineEvent::Steer(steer) =>
+                    Some(format!("steered into {:?}", steer.target)),
+                verkstead_render::TimelineEvent::ResolveConflicts(_) =>
+                    Some("asked for the conflict to be resolved".to_owned()),
                 _ => None,
             })
-            .skip_while(|event| event != &Ok(Lifecycle::Done))
+            .skip_while(|event| event.as_str() != "moved to Done")
             .collect::<Vec<_>>(),
         [
-            Ok(Lifecycle::Done),
-            Err(Lifecycle::Wrapping),
-            Ok(Lifecycle::Wrapping),
-            Ok(Lifecycle::Done),
-        ],
-        "somebody decided this, and the machine's move says what came of it",
+            "moved to Done",
+            "asked for the conflict to be resolved",
+            "moved to Wrapping",
+            "moved to Done",
+        ]
+        .map(str::to_owned),
+        "somebody decided this, the machine's move says what came of it, and no \
+         steer was written for a press that reads no branch",
     );
 }
 

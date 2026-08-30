@@ -1517,6 +1517,13 @@ pub(crate) async fn conversation_view(
                         lifecycle(target),
                         instruction.as_deref(),
                     ),
+                    // And the other press that stands beside a move, which is
+                    // its own kind for exactly that reason: a steer into
+                    // Wrapping reads the branch again and this one deliberately
+                    // does not, so the record says which of them happened.
+                    store::Event::ResolveConflicts => {
+                        verkstead_render::resolve_conflicts_event(event.id, event.at)
+                    }
                     // The one kind that is pinned as well as listed, handed
                     // over twice for the page to draw twice: the sticky block
                     // above the record keeps it in view, and here is the moment

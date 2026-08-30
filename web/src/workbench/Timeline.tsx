@@ -512,6 +512,11 @@ export function Timeline(props: {
                     />
                   )}
                 </Match>
+                <Match
+                  when={"ResolveConflicts" in event && event.ResolveConflicts}
+                >
+                  <ConflictsResolved />
+                </Match>
                 <Match when={"Handoff" in event && event.Handoff}>
                   {(handoff) => (
                     <Handoff
@@ -1521,6 +1526,27 @@ function Steered(props: {
       )}
     </Show>
   );
+}
+
+/// The press that asks for a finished conversation's conflict to be resolved.
+///
+/// A line and not a card, drawn like the steer beside it and the move directly
+/// under it, and read as the same pair: this says who decided, and the move says
+/// what came of it.
+///
+/// **Its own line rather than a steer's**, because the two are not the same act.
+/// A steer into wrapping opens the branch to be read again — the review goes
+/// with it and the whole of the work is read afresh — and this deliberately
+/// leaves the review that carried the work to done standing, asking only that
+/// the conflict be resolved. Both are the human sending a finished conversation
+/// back into its wrap-up, and a record that drew them the same line could never
+/// be read back for which of them happened.
+///
+/// It says nothing about which pull request, for the reason the steer says
+/// nothing about which branch: the cards above it are what a conflict is drawn
+/// on, and this is the moment somebody acted on one.
+function ConflictsResolved(): JSX.Element {
+  return <p class={styles.pressed}>You asked for the conflict to be resolved</p>;
 }
 
 /// What a session has printed: how much of it there is, and the last thing it

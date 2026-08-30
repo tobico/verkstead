@@ -998,21 +998,27 @@ async fn resolving_a_conflict_sends_a_done_conversation_back_to_wrapping_up() {
             .await
             .into_iter()
             .filter_map(|event| match event {
-                Event::Steer(target, said) => Some(Ok((target, said))),
-                Event::Moved(state) => Some(Err(state)),
+                Event::Steer(target, _) => Some(format!("steered into {target:?}")),
+                Event::ResolveConflicts => Some("pressed resolve".to_owned()),
+                Event::Moved(state) => Some(format!("moved to {state:?}")),
                 _ => None,
             })
             .collect::<Vec<_>>(),
         [
-            Err(Lifecycle::Grilling),
-            Err(Lifecycle::Wrapping),
-            Err(Lifecycle::Done),
-            // The press, in a steer's own shape and carrying nothing written:
-            // somebody decided this, and the move under it is what came of it.
-            Ok((Lifecycle::Wrapping, None)),
-            Err(Lifecycle::Wrapping),
-        ],
-        "the human's line lands above the machine's move",
+            "moved to Grilling",
+            "moved to Wrapping",
+            "moved to Done",
+            // The press, in a steer's own shape and a kind of its own: somebody
+            // decided this, and the move under it is what came of it. Its own
+            // kind because a steer into Wrapping carrying nothing written would
+            // otherwise be the same row, and the two are different acts — that
+            // one reads the branch again and this one leaves the review alone.
+            "pressed resolve",
+            "moved to Wrapping",
+        ]
+        .map(str::to_owned),
+        "the human's line lands above the machine's move, and says which press \
+         it was",
     );
 
     let settled = wrap_up_settled(&pool, id).await.unwrap();

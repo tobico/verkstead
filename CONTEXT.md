@@ -1080,9 +1080,12 @@ standing — the work was reviewed and carried to Done on the strength of it, an
 a base that has moved underneath it since is not a reason to read the branch
 again — so no review session runs anywhere in it, and the ordinary settling rule
 carries the work back to Done once the resolution pushes and the checks on it go
-green. A press rather than a **Steer**, which would read the branch afresh; the
-Timeline says so in a steer's shape all the same, the human's own line above the
-machine's move, because a long record should say who decided this.
+green. A press rather than a **Steer**, which would read the branch afresh. The
+Timeline says it in a steer's shape — the human's own line above the machine's
+move, because a long record should say who decided this — and in words of its
+own, because a steer into Wrapping needs no instruction either and the two would
+otherwise be the same line. They are not the same act, and which of them happened
+is the thing a record months old has to be readable back for.
 
 Opening a pull request's details pane asks GitHub the same two things on its way
 to listing the checks, so it freshens both wherever the Conversation has got to —

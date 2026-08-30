@@ -2088,6 +2088,24 @@ export type Resolution = "Merge" | "Rebase";
 export type ResolutionEdit = { resolution: Resolution | null, };
 
 /**
+ * The **Resolve conflicts** press as the page receives it: when, and nothing
+ * else.
+ *
+ * Nothing else because there is nothing else. Where it sends the work is always
+ * Wrapping, which the move under it says; what it was about is the pull
+ * requests the record says conflict, which the cards above it draw. The row is
+ * the deciding, and the deciding is the whole of what it holds.
+ *
+ * So the words are the viewer's, as a move's are — see [`SteerEvent`], whose
+ * sentence this one stands beside and must not be mistaken for.
+ */
+export type ResolveConflictsEvent = { id: number, 
+/**
+ * When it was pressed, RFC 3339.
+ */
+at: string, };
+
+/**
  * What became of pressing **Resolve conflicts** on a finished Conversation's
  * pull request.
  *
@@ -3050,7 +3068,7 @@ list: TaskListEvent | null, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent } | { "PullRequest": PullRequestEvent } | { "TaskList": TaskListReached } | { "StageList": StageListReached };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent } | { "ResolveConflicts": ResolveConflictsEvent } | { "PullRequest": PullRequestEvent } | { "TaskList": TaskListReached } | { "StageList": StageListReached };
 
 /**
  * What is to become of the configured token.
