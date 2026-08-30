@@ -227,14 +227,18 @@ impl WatchedPaths {
 /// absolute, there, a directory — asked here so that the two sides of the
 /// boundary agree about what a Watched Path is and disagree only about what to
 /// do when one is not.
-fn resolved_dir(path: &Path) -> Result<PathBuf> {
+///
+/// What is wrong with it is said in words a human can act on rather than in a
+/// programmer's: this is what the log says about a skipped entry, and it is also
+/// what the settings page draws on the row — see [`crate::paths`].
+pub(crate) fn resolved_dir(path: &Path) -> Result<PathBuf> {
     if !path.is_absolute() {
         bail!("it is relative, and a boundary has to name one directory");
     }
 
     let real = path
         .canonicalize()
-        .with_context(|| format!("resolving {}", path.display()))?;
+        .context("the server cannot see it")?;
 
     if !real.is_dir() {
         bail!("{} is not a directory", real.display());

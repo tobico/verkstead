@@ -338,6 +338,22 @@ branch: string | null, };
 export type BaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "NoSuchBranch";
 
 /**
+ * And one Sandbox Configuration bind.
+ */
+export type BindEntry = { 
+/**
+ * The directory bound in, read out of the entry — and the whole entry as
+ * it was written, where nothing could be read out of it at all. A row
+ * nobody can see is a row nobody can correct.
+ */
+path: string, 
+/**
+ * The Repo this bind is only for, by the name it is registered under, or
+ * `null` for one every sandbox gets.
+ */
+repo: string | null, source: PathSource, resolution: Resolution, };
+
+/**
  * One line of the backend's own bookkeeping.
  */
 export type Bookkeeping = { 
@@ -1541,6 +1557,37 @@ export type PairingView = { profile: ProfileEntry,
 model: string | null, };
 
 /**
+ * Which of the two places an entry was said in.
+ *
+ * What decides whether the page will let it be edited: the installation's are
+ * the unit's word or the command line's and are read-only wherever they are
+ * drawn, and the settings' own are the human's to add to and take away.
+ */
+export type PathSource = "Installation" | "Settings";
+
+/**
+ * Every path Verkstead has been told about, from both sources at once: the
+ * directories it may operate inside, and the extra directories a sandbox is
+ * given beyond the surface every one of them has.
+ *
+ * Two lists rather than one, because they are two different permissions — a
+ * Watched Path says where the human may point Verkstead, and a bind says what
+ * a session may write in — and the page draws them apart for that reason.
+ *
+ * The installation's own entries come first in each list, and the settings'
+ * follow in the order they were written down. That is the order the two were
+ * decided in: a flag is said once when the machine is set up, and the file is
+ * where somebody has been adding to it since.
+ */
+export type PathsView = { watched: Array<WatchedPathEntry>, 
+/**
+ * Every configured bind, the ones every sandbox gets and the ones one Repo
+ * does together — see [`BindEntry::repo`], which is what says which of the
+ * two an entry is.
+ */
+binds: Array<BindEntry>, };
+
+/**
  * What a Conversation has settled about one of its roles, as the page shows
  * it: the Pairing its sessions run under, that the role runs none, or nothing
  * picked yet.
@@ -2026,6 +2073,17 @@ finished: number,
 roadmaps: Array<AbandonedRoadmap>, };
 
 /**
+ * Whether the server can see what an entry names, at the moment it was asked.
+ *
+ * Reported rather than refused: a save lands whatever it was told, so an entry
+ * naming a directory nobody has made yet is something to say on the row rather
+ * than something to turn a save down over. It is also how a nix install learns
+ * that a path added here needs the installer to widen the unit's namespace
+ * before it can do anything — the file says it, and the server cannot see it.
+ */
+export type Resolution = "Resolves" | { "Unresolved": { why: string, } };
+
+/**
  * The submitted collection of Answers and Unanswered markers for one Question
  * Set, plus an optional set-level comment — and, on a Set carrying a proposal,
  * the direction the human picked.
@@ -2292,7 +2350,27 @@ rust_build_cache: BuildCacheEdit,
  * an empty one is nothing configured, which is what clearing the field
  * means.
  */
-share_viewer_url: string, };
+share_viewer_url: string, 
+/**
+ * The Watched Paths the settings own, as values again: what is sent is
+ * what `config.yaml` holds afterwards, so a row taken off the page is a
+ * row taken out of the file.
+ *
+ * The installation's own are not here and cannot be sent. They are the
+ * unit's word rather than this page's, and a save leaves them exactly
+ * where they are — see [`PathSource`].
+ */
+watched_paths: Array<string>, 
+/**
+ * And the Sandbox Configuration binds the settings own, in the grammar
+ * `--sandbox-bind` uses: `/abs/path` for a bind every sandbox gets, and
+ * `name=/abs/path` for one the Repo registered under that name gets.
+ *
+ * Strings rather than a shape of their own, because a string is what the
+ * file holds — and one grammar for both of the places a bind is said is
+ * one thing to learn rather than two.
+ */
+sandbox_binds: Array<string>, };
 
 /**
  * What became of a save.
@@ -2341,7 +2419,12 @@ rust_build_cache: BuildCacheView,
  * goes in a comment on a pull request — so unlike the token it reads back
  * exactly as it was written.
  */
-share_viewer_url: string, };
+share_viewer_url: string, 
+/**
+ * And the Watched Paths and the Sandbox Configuration binds, from both of
+ * the places either of them is said.
+ */
+paths: PathsView, };
 
 /**
  * What became of sharing a Conversation to the pull requests its work is on.
@@ -3176,6 +3259,18 @@ export type Violation = {
  * the Set as a whole.
  */
 label?: string | null, message: string, };
+
+/**
+ * One Watched Path, whichever of the two places said it.
+ */
+export type WatchedPathEntry = { 
+/**
+ * The directory: resolved, for the installation's own, which were resolved
+ * when the server started; and exactly as it was written, for one out of
+ * the settings — that is what a save sends back, so it has to come back as
+ * it went in.
+ */
+path: string, source: PathSource, resolution: Resolution, };
 
 /**
  * And what a watcher says back up it.

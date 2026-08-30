@@ -77,6 +77,18 @@ import saved from "./fixtures/settings-saved.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
 
 const TOLD = told as SettingsView;
+
+/// The paths the fixture holds, as a save puts them back on the wire: the
+/// settings' own entries, and a Repo's bind in the `name=path` grammar the file
+/// keeps them in. Every section's save carries them, because one request writes
+/// the whole of `config.yaml` — a list left out would be a list emptied.
+const PATHS = {
+  watched_paths: ["/home/ada/src"],
+  sandbox_binds: [
+    "/var/cache/verkstead-node",
+    "verkstead=/var/cache/verkstead-cargo",
+  ],
+};
 const PROFILES = profiles as ProfileEntry[];
 const REPOS = repos as RepoEntry[];
 const FIRST_REPO = REPOS[0]!;
@@ -406,6 +418,7 @@ describe("saving", () => {
           size: TOLD.rust_build_cache.size,
         },
         share_viewer_url: TOLD.share_viewer_url,
+        ...PATHS,
       }),
     );
   });
@@ -630,6 +643,7 @@ describe("replacing and clearing the token", () => {
         // with — see the sections below it for what does change these.
         rust_build_cache: TOLD.rust_build_cache,
         share_viewer_url: TOLD.share_viewer_url,
+        paths: TOLD.paths,
       },
       verified: null,
     };
@@ -648,6 +662,7 @@ describe("replacing and clearing the token", () => {
           size: TOLD.rust_build_cache.size,
         },
         share_viewer_url: TOLD.share_viewer_url,
+        ...PATHS,
       }),
     );
 

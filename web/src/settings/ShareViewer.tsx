@@ -31,6 +31,7 @@ import type { SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
+import { heldPaths } from "./held";
 import styles from "./ShareViewer.module.css";
 
 /// The settings as they stand, read once for the two panes that draw them —
@@ -129,6 +130,10 @@ export function ShareViewerPane(props: {
             : "",
         },
         share_viewer_url,
+        // And the paths as the read left them: one request writes the whole of
+        // `config.yaml`, so a list this form left out would be a list it
+        // emptied — see [`heldPaths`].
+        ...heldPaths(settings),
       });
     },
     onSuccess: (saved: SettingsSaved) => {

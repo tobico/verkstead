@@ -59,8 +59,8 @@ pub use profiles::{
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use repos::{Registered, Registration, RepoEntry, RepoRemoved, RepoView};
 pub use settings::{
-    Author, BuildCacheEdit, BuildCacheView, SettingsEdit, SettingsSaved, SettingsView, TokenEdit,
-    TokenSaved, Verified,
+    Author, BindEntry, BuildCacheEdit, BuildCacheView, PathSource, PathsView, Resolution,
+    SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified, WatchedPathEntry,
 };
 pub use sharing::{
     CommentedOn, MissedOut, ShareCommented, SharePublished, SharedCommit, SharedConversation,

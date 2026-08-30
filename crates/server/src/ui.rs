@@ -3185,22 +3185,41 @@ async fn unsubscribe(
     }
 }
 
-/// `GET /api/ui/settings` — what Verkstead has been told: the git author, and
-/// that there is a GitHub token.
+/// `GET /api/ui/settings` — what Verkstead has been told: the git author, that
+/// there is a GitHub token, and every path either place has said.
 ///
 /// Read off the two files at the moment it is asked for, like everything else
 /// that reads them: the files are the source of truth, so a token or an author
 /// somebody hand-edited into place is what this comes back with.
+///
+/// The paths are the one part read from more than the files: the installation's
+/// own were said on the command line, and each entry comes back saying which of
+/// the two said it and whether the server can see what it names — see
+/// [`crate::paths`].
 async fn settings(State(state): State<AppState>) -> HttpResponse {
-    Json(as_told(&state.settings, state.sessions.caches_compiles())).into_response()
+    Json(as_told(
+        &state.settings,
+        state.sessions.caches_compiles(),
+        &state.watched,
+        &state.binds,
+    ))
+    .into_response()
 }
 
-/// `POST /api/ui/settings` — write the author down, and set or clear the token.
+/// `POST /api/ui/settings` — write the author and the paths down, and set or
+/// clear the token.
 ///
 /// Both files in one request, because the page has one button. The token's half
 /// is an action rather than a value — see [`TokenEdit`]: most saves are about
 /// the author, and a blank write-only field read as *clear this* would take the
 /// credentials away every time somebody corrected their own email address.
+///
+/// The paths are values, like the author and the build cache: what is sent is
+/// what `config.yaml` holds afterwards. Only the settings' own — the
+/// installation's are the unit's word, they were never in this file, and they
+/// come back on the read either way. Nothing about them is checked as it is
+/// written: the save lands, and what the server can see of what it landed is
+/// reported with the view that rides back.
 ///
 /// A token that was set is then tried against GitHub, and what GitHub said rides
 /// back with the save. Tried after the writing and never before it: a token is
@@ -3219,16 +3238,13 @@ async fn save_settings(
     // none of it belongs on the runtime's threads.
     let caches_compiles = state.sessions.caches_compiles();
 
-    let saved = tokio::task::spawn_blocking(move || {
-        // What the file already holds, carried through untouched. The page has
-        // no Sandbox Configuration and no Watched Paths on it yet, and a save
-        // that wrote a field it does not know about as empty would take a
-        // hand-written bind — or the boundary itself — away every time somebody
-        // corrected their own email address.
-        let held = settings.config();
-        let sandbox_binds = held.sandbox_binds().to_vec();
-        let watched_paths = held.watched_paths().to_vec();
+    // And what the installation configured, for the read that rides back with
+    // the save: the page draws both sources, and neither of these is anything a
+    // save can touch.
+    let watched = state.watched.clone();
+    let installed = state.binds.clone();
 
+    let saved = tokio::task::spawn_blocking(move || {
         settings.save_config(&Config::of(
             GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
             // The size as it was typed, and an empty field as nothing
@@ -3241,8 +3257,13 @@ async fn save_settings(
             // And where the share viewer is hosted, the same way: an empty
             // field is nowhere, which is how it is taken away again.
             Some(edit.share_viewer_url),
-            sandbox_binds,
-            watched_paths,
+            // And the paths as values too: what is sent is what the file holds
+            // afterwards, so a row taken off the page is a row taken out of the
+            // file. Only the settings' own — the installation's are the unit's
+            // word, they are not in this file, and nothing here could rewrite
+            // them if they were.
+            edit.sandbox_binds,
+            edit.watched_paths,
         ))?;
 
         let verifying = match &edit.github_token {
@@ -3277,7 +3298,7 @@ async fn save_settings(
         });
 
         Ok::<_, std::io::Error>(SettingsSaved {
-            settings: as_told(&settings, caches_compiles),
+            settings: as_told(&settings, caches_compiles, &watched, &installed),
             verified,
         })
     })
@@ -3324,7 +3345,12 @@ fn needed(scopes: &crate::github::Scopes) -> Vec<String> {
 /// token nobody can read back out is a token that cannot leak through a page,
 /// and the four characters are the whole of what the human needs to tell one
 /// from another.
-fn as_told(settings: &crate::settings::Settings, caches_compiles: bool) -> SettingsView {
+fn as_told(
+    settings: &crate::settings::Settings,
+    caches_compiles: bool,
+    watched: &crate::WatchedPaths,
+    binds: &crate::sandbox::SandboxConfig,
+) -> SettingsView {
     let secrets = settings.secrets();
     let config = settings.config();
     let author = config.git_author();
@@ -3350,6 +3376,11 @@ fn as_told(settings: &crate::settings::Settings, caches_compiles: bool) -> Setti
         // page, whose URL goes on a pull request the moment a share is
         // published through it.
         share_viewer_url: config.share_viewer_url().unwrap_or_default().to_owned(),
+        // Both sources at once, each entry saying which of the two said it and
+        // whether the server can see it now — see [`crate::paths`]. Read from
+        // the file again rather than off the `config` above, because that is
+        // where the whole of this one question is answered.
+        paths: crate::paths::told(watched, binds, settings),
         github_token: secrets.github_token().map(|token| TokenSaved {
             last_four: last_four(token),
             at: settings

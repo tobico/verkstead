@@ -52,6 +52,10 @@ mod grillings;
 pub mod handoffs;
 mod limits;
 mod nudge;
+/// Every Watched Path and every Sandbox Configuration bind as the settings page
+/// reads them: which of the two places said each one, and whether the server can
+/// see it.
+mod paths;
 mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.
@@ -204,6 +208,12 @@ pub(crate) struct AppState {
 
     updates: updates::Updates,
     watched: WatchedPaths,
+
+    /// And the Sandbox Configuration the installation was started with, which is
+    /// here for the settings page rather than for a session: a session's binds
+    /// are composed where its sandbox is built, and this page draws every bind
+    /// there is and says which of the two places said each one — see [`paths`].
+    binds: sandbox::SandboxConfig,
 
     /// How Verkstead itself asks GitHub about a pull request — the host's `gh`,
     /// authenticating as the configured token.
@@ -366,6 +376,7 @@ pub fn router(pool: SqlitePool) -> Router {
         pool,
         updates::Updates::nothing_learned(),
         WatchedPaths::none(),
+        nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
@@ -383,9 +394,36 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBu
         pool,
         updates::Updates::nothing_learned(),
         watched,
+        nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
         Gh::on_path(),
+    )
+}
+
+/// The same, over the whole of what the *installation* configured — the Watched
+/// Paths its flags named and the Sandbox Configuration binds beside them — and
+/// reaching GitHub through `gh`.
+///
+/// What the settings endpoints are stood up over where the question is about
+/// paths: the page draws both sources at once and says which of the two said
+/// each entry, so a test of that labelling needs a router that was configured by
+/// an installation as well as by a file — see [`paths`].
+pub fn router_installed(
+    pool: SqlitePool,
+    watched: WatchedPaths,
+    binds: sandbox::SandboxConfig,
+    data_dir: PathBuf,
+    gh: Gh,
+) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        watched,
+        binds,
+        data_dir,
+        sessions::Sessions::none(),
+        gh,
     )
 }
 
@@ -403,10 +441,16 @@ pub fn router_running_sessions(
     agents: Agents,
     gh: Gh,
 ) -> Router {
+    // Taken off the agents rather than asked for again: the binds a session gets
+    // and the binds the settings page draws as the installation's are the one
+    // set, and two ways of saying it would be two things to keep in step.
+    let binds = agents.binds().clone();
+
     routed(
         pool,
         updates::Updates::nothing_learned(),
         watched,
+        binds,
         data_dir,
         sessions::Sessions::under(agents),
         gh,
@@ -425,10 +469,18 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
         pool,
         updates::Updates::nothing_learned(),
         WatchedPaths::none(),
+        nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
         gh,
     )
+}
+
+/// The Sandbox Configuration of a router the installation configured none for,
+/// which is every one of them but the served router and the test that is about
+/// what an installation said.
+fn nothing_bound() -> sandbox::SandboxConfig {
+    sandbox::SandboxConfig::default()
 }
 
 /// The data directory of a router that has no use for one.
@@ -453,6 +505,7 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
         pool,
         updates::watching(releases),
         WatchedPaths::none(),
+        nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
@@ -463,6 +516,7 @@ fn routed(
     pool: SqlitePool,
     updates: updates::Updates,
     watched: WatchedPaths,
+    binds: sandbox::SandboxConfig,
     data_dir: PathBuf,
     sessions: sessions::Sessions,
     github: Gh,
@@ -484,6 +538,11 @@ fn routed(
         // put in `config.yaml` — read at each admission rather than here, so a
         // directory added on the settings page admits from the next request on.
         watched: watched.reading(settings),
+
+        // And what the installation asked every sandbox to bind, kept whole for
+        // the settings page: what a session gets is this composed with whatever
+        // the file holds at the moment it spawns — see [`sandbox`].
+        binds,
 
         github,
         data_dir,
@@ -545,10 +604,15 @@ pub fn router_with_ui(
     agents: Agents,
     gh: Gh,
 ) -> Router {
+    // Off the agents, for the reason [`router_running_sessions`] takes it off
+    // them: one configured set, said once.
+    let binds = agents.binds().clone();
+
     routed(
         pool,
         updates::watching(releases),
         watched,
+        binds,
         data_dir,
         sessions::Sessions::under(agents),
         gh,

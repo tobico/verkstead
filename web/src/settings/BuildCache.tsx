@@ -46,6 +46,7 @@ import type { BuildCacheView, SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
+import { heldPaths } from "./held";
 import styles from "./BuildCache.module.css";
 
 /// The settings as they stand, read once for the two panes that draw them.
@@ -186,6 +187,10 @@ export function BuildCachePane(props: {
         // Untouched, for the reason the author is: the endpoint writes the
         // whole of `config.yaml`, and the section below is where this is set.
         share_viewer_url: told()?.share_viewer_url ?? "",
+        // And the paths as they stand, which is the same reason again: a save
+        // says what the file holds afterwards, so a list left out is a list
+        // emptied — see [`heldPaths`].
+        ...heldPaths(told()),
       });
     },
     onSuccess: (saved: SettingsSaved) => {

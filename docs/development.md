@@ -101,18 +101,26 @@ what the settings page saves through:
 $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-   "compiles_cached":true},"share_viewer_url":""}
+   "compiles_cached":true},"share_viewer_url":"",
+ "paths":{"watched":[],"binds":[]}}
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
          "rust_build_cache":{"enabled":true,"size":""},
-         "share_viewer_url":"https://tobico.github.io/verkstead-shares/"}' \
+         "share_viewer_url":"https://tobico.github.io/verkstead-shares/",
+         "watched_paths":["/home/tobi/src"],
+         "sandbox_binds":["/var/cache/verkstead-node"]}' \
     http://127.0.0.1:8422/api/ui/settings
 {"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
     "compiles_cached":true},
-  "share_viewer_url":"https://tobico.github.io/verkstead-shares/"},
+  "share_viewer_url":"https://tobico.github.io/verkstead-shares/",
+  "paths":{"watched":[{"path":"/home/tobi/src","source":"Settings",
+    "resolution":"Resolves"}],
+   "binds":[{"path":"/var/cache/verkstead-node","repo":null,
+    "source":"Settings","resolution":{"Unresolved":{"why":
+      "the server cannot see it: there is nothing at that path"}}}]}},
  "verified":{"Account":{"login":"tobico","missing":["gist"]}}}
 ```
 
@@ -130,6 +138,16 @@ sends, and `"Clear"` to take it away. `"rust_build_cache"` is a pair of values
 rather than an action: an empty `"size"` is no size configured, which puts the
 default back, and `"compiles_cached"` is read-only — it says whether the server
 found an `sccache`, which is its own environment rather than anybody's setting.
+
+`"watched_paths"` and `"sandbox_binds"` are the two lists `config.yaml` holds,
+sent as values in the grammar the flags use — so a Verkstead started with no
+flags at all is pointed at its first directory through this endpoint. What is
+sent is what the file holds afterwards, and the `"paths"` that comes back is
+both sources at once: every entry says whether the installation's flags or the
+settings said it, and whether the server can see what it names right now. Only
+the settings' own can be sent, and nothing about them is checked as it is
+written — the save lands whatever it was told, and an entry the server cannot
+see is a `"resolution"` saying so rather than a refusal.
 
 `"share_viewer_url"` is where the **share viewer** is hosted, and it is the
 plainest value here: written as it was typed, read back as itself, and empty

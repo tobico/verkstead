@@ -516,11 +516,31 @@ impl SandboxConfig {
     pub fn count(&self) -> usize {
         self.global.len() + self.per_repo.values().map(Vec::len).sum::<usize>()
     }
+
+    /// And every one of them as the Repo it is for — `None` for every Repo — and
+    /// the directory it binds: what the settings page draws the installation's
+    /// half of its list from.
+    ///
+    /// The global ones first and each Repo's after them, which is the order they
+    /// are composed in and the order the page reads them in. A pair rather than
+    /// the entry as it was written, because what was written is gone by here:
+    /// this is the parsed set, and the page draws the two halves apart anyway.
+    pub fn entries(&self) -> Vec<(Option<&str>, &Path)> {
+        let global = self.global.iter().map(|path| (None, path.as_path()));
+
+        let per_repo = self.per_repo.iter().flat_map(|(repo, paths)| {
+            paths
+                .iter()
+                .map(move |path| (Some(repo.as_str()), path.as_path()))
+        });
+
+        global.chain(per_repo).collect()
+    }
 }
 
 /// One `--sandbox-bind`, as the Repo it belongs to — `None` for every Repo — and
 /// the directory it binds.
-fn read_bind(bind: &str) -> anyhow::Result<(Option<String>, PathBuf)> {
+pub(crate) fn read_bind(bind: &str) -> anyhow::Result<(Option<String>, PathBuf)> {
     if bind.starts_with('/') {
         return Ok((None, PathBuf::from(bind)));
     }
