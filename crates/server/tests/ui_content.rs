@@ -2604,6 +2604,15 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap();
 
+    // And whether it merges, which the same poll writes down beside it. Cleanly,
+    // which is what a wrap-up waiting on its suite looks like: the branch is
+    // fine and GitHub is still thinking about the tests. A conflict is the
+    // reading the viewer's own tests compose over this one — what is being
+    // carried here is the field.
+    store::record_merging(&pool, wrapping, repos[0].id, store::Merging::Cleanly)
+        .await
+        .unwrap();
+
     write(
         "conversation-wrapping.json",
         &pin_health(&pin_timeline(

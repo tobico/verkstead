@@ -7,9 +7,13 @@
 //!
 //! What it shows is a reading of GitHub as it stands — the commits the PR
 //! carries, what GitHub is running against it and everything said on it — rather
-//! than anything Verkstead wrote down. The three facts that *are* written down
-//! are on the pinned event above: the number, the title and the way out to
-//! GitHub itself.
+//! than anything Verkstead wrote down. The facts that *are* written down are on
+//! the pinned event above: the number, the title, the way out to GitHub itself,
+//! and whether the last look found the branch conflicting with its base.
+//!
+//! That last one is said here in words. It is the same recorded fact the card
+//! draws its mark from, and this is the place with room to say what follows from
+//! it — nothing lands until somebody resolves it.
 //!
 //! The checks are the part the card above has only one icon for. Here each of
 //! them is named, marked with the same three shapes, and linked to its own run —
@@ -29,6 +33,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
 import { CheckMark, SAID } from "./Checks";
+import { IN_WORDS } from "./Merging";
 import { PaneHead } from "./PaneHead";
 import styles from "./PullRequest.module.css";
 import { ABBREVIATED } from "./Timeline";
@@ -69,6 +74,19 @@ export function PullRequest(props: {
             {props.opened.url}
           </a>
         </p>
+        {/* And the conflict, where the last look at GitHub found one: the same
+            recorded fact the card draws a mark for, said here in the words a
+            mark has no room for. Off the pinned Event rather than the reading
+            below, which is what makes the two one fact drawn twice — see
+            `Merging.tsx`. In words alone and with no mark beside them: the mark
+            on the card exists because a card has no room to say this, and an
+            icon here would be the same sentence read out twice.
+
+            Nothing at all where the pull request merges, where GitHub has not
+            worked the answer out, and where nothing has asked. */}
+        <Show when={props.opened.merging === "Conflicting"}>
+          <p class={styles.conflict}>{IN_WORDS}</p>
+        </Show>
       </div>
 
       <Switch>

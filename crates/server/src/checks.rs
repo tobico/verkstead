@@ -982,10 +982,19 @@ async fn merging(
     // watching stops when the wrap-up is over and this is the one place that
     // asks, so a reading that went no further than the settle would be one
     // nothing could draw afterwards.
-    if let Err(error) =
-        store::record_merging(&state.pool, conversation_id, watched.repo.id, merging).await
-    {
-        tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "recording whether the pull request merges failed");
+    //
+    // And Nudged where the word changed, as the rollup is: the card draws a mark
+    // off this, and a pull request that merged cleanly on the last poll merges
+    // cleanly on this one — a page told so every thirty seconds would be a page
+    // re-reading a Timeline nothing had happened on.
+    match store::record_merging(&state.pool, conversation_id, watched.repo.id, merging).await {
+        Ok(true) => state.nudges.announce(Nudge::Conversation {
+            conversation: conversation_id,
+        }),
+        Ok(false) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "recording whether the pull request merges failed");
+        }
     }
 
     let waiting_on = store::WaitingOn::Mergeable(watched.repo.id);

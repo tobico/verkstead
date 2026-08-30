@@ -807,12 +807,38 @@ pub async fn check_rollup(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
 /// out is not written down at all, so what stands is the last thing it did say —
 /// see [`Merging`], and [`crate::checks`] in the server, where not knowing is
 /// what changes nothing.
+///
+/// Says whether that was news, exactly as [`record_check_rollup`] does and for
+/// the same reason: this is asked on every poll of a wrap-up's watcher and on
+/// every sweep after Done, and a pull request that merged cleanly a minute ago
+/// merges cleanly now. The caller Nudges the open pages on the strength of it,
+/// so a word that did not move is a page not re-reading a Timeline nothing
+/// happened on.
 pub async fn record_merging(
     pool: &SqlitePool,
     conversation_id: i64,
     repo_id: i64,
     merging: Merging,
-) -> Result<()> {
+) -> Result<bool> {
+    let mut tx = super::writing(pool, "recording whether a pull request merges").await?;
+
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT merging FROM pull_request_merges
+         WHERE conversation_id = ? AND repo_id = ?",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| {
+        format!(
+            "reading whether the pull request Conversation {conversation_id} opened in \
+             Repo {repo_id} merged"
+        )
+    })?;
+
+    let before = row.map(|(word,)| Merging::read(&word)).transpose()?;
+
     sqlx::query(
         "INSERT INTO pull_request_merges (conversation_id, repo_id, merging, at)
          VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -822,7 +848,7 @@ pub async fn record_merging(
     .bind(conversation_id)
     .bind(repo_id)
     .bind(merging.stored())
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .with_context(|| {
         format!(
@@ -831,7 +857,11 @@ pub async fn record_merging(
         )
     })?;
 
-    Ok(())
+    tx.commit()
+        .await
+        .context("recording whether a pull request merges")?;
+
+    Ok(before != Some(merging))
 }
 
 /// And how it merged the last time anything asked, or `None` where nothing has.
@@ -860,6 +890,42 @@ pub async fn merging(
     })?;
 
     row.map(|(word,)| Merging::read(&word)).transpose()
+}
+
+/// And every one of them a Conversation has, by the Timeline Event each pull
+/// request is.
+///
+/// What the Conversation view draws the conflict mark off: the card is drawn
+/// twice from one Event — pinned above the record and at the moment it opened —
+/// and an Event id is what both copies have to hand. Which is why this is keyed
+/// by the Event rather than by the Repo, unlike [`merging`] above, whose caller
+/// is a watcher that already knows which repository it is asking about.
+///
+/// Every repository's rather than the Conversation's own, unlike the rollup
+/// beside it: whether a branch merges is written down per pull request, so a
+/// companion's card draws its own reading rather than nothing.
+///
+/// A pull request nothing has asked GitHub about has no entry at all, which is
+/// the card that draws no mark. Stale on a Conversation nothing is watching or
+/// sweeping any more, in the spirit everything read back here is.
+pub async fn merges(pool: &SqlitePool, conversation_id: i64) -> Result<HashMap<i64, Merging>> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT p.event_id, m.merging
+         FROM pull_requests p
+         JOIN pull_request_merges m
+           ON m.conversation_id = p.conversation_id AND m.repo_id = p.repo_id
+         WHERE p.conversation_id = ?",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| {
+        format!("reading whether Conversation {conversation_id}'s pull requests merge")
+    })?;
+
+    rows.into_iter()
+        .map(|(event_id, word)| Ok((event_id, Merging::read(&word)?)))
+        .collect()
 }
 
 /// Write down where the pull request opened in `repo_id` has got to.

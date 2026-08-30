@@ -1,0 +1,14 @@
+/* The mark a pull request that will not merge is drawn with. See `Merging.tsx`
+   for why there is one of it rather than three, and `Icon.module.css` for how
+   any icon in the viewer is drawn.
+
+   Sized as the check marks beside it are, so the two sit on one line and read as
+   one row of marks rather than as two decisions about height. And red, because
+   nothing on this pull request lands until somebody resolves it — the palette's
+   one colour for work that has stopped, which the failed check mark beside it is
+   drawn in too. The shape is what tells the two apart. */
+.conflict {
+  align-self: center;
+  height: 1.1em;
+  color: var(--stopped);
+}

@@ -481,8 +481,16 @@
    the line that drew it. `margin-left: auto` rather than a `space-between`,
    because the head is `flex-start` here — the number and the label sit against
    the heading and the checks against the card's edge. */
-.pullRequest .checkRollup {
+/* What is true of the pull request now, on the other end of the line from what
+   it was called: whether it merges, and how its checks are. Together in one box
+   rather than pushed right one at a time, because either of them may be absent —
+   two marks each claiming the free space would put them at opposite ends of the
+   card the moment both were drawn. */
+.pullRequest .marks {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 /* And the name of the work, under the name of the pull request. A line of text

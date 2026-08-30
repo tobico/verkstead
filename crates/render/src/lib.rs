@@ -39,7 +39,7 @@ pub use conversations::{
     CompanionMode, CompanionModeChoice, CompanionModeChosen, CompanionRefusal, CompanionRemoved,
     CompanionUpgrade, CompanionView, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
-    GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, MovedEvent, NewAdoption,
+    GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, Merging, MovedEvent, NewAdoption,
     NewCompanion, NewConversation, NewOrder, NoticeEvent, PinnedEvent, ProposalView,
     PullRequestCheck, PullRequestComment, PullRequestCommit, PullRequestDetails, PullRequestEvent,
     PullRequestSummary, QuestionSetEvent, Resumed, RoadmapPane, Screen, SetRow, ShareView,

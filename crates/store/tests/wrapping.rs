@@ -18,10 +18,11 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     Event, Finished, Lifecycle, Merging, PullRequest, Rebuilding, Rollup, Standing, WAITED_ON,
     WaitingOn, Wrapping, check_rollup, close_conversation, finish_wrap_up, implement_again,
-    load_conversation, merging, open_database, pick_direction, pull_request, pull_request_repo,
-    pull_requests, record_another_pull_request, record_check_rollup, record_merging,
-    record_pull_request, record_standing, register_repo, save_brief, settle_wrap_up, standing,
-    start_conversation, start_grilling, timeline, unfinished_pull_requests,
+    load_conversation, merges, merging, open_database, pick_direction, pull_request,
+    pull_request_repo, pull_requests, record_another_pull_request, record_check_rollup,
+    record_merging, record_pull_request, record_standing, register_repo, save_brief,
+    settle_wrap_up, standing, start_conversation, start_grilling, timeline,
+    unfinished_pull_requests,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -604,8 +605,9 @@ async fn how_the_checks_are_outlives_the_server_that_asked() {
 ///
 /// A Conversation with a read-write companion has one clean and one conflicted
 /// as easily as two of either: the base moved in one repository and not in the
-/// other. So what these ask is that the two are told apart, and that the last
-/// word written is the word read back.
+/// other. So what these ask is that the two are told apart, that the last word
+/// written is the word read back, and — as for the rollup beside it — that
+/// saying the same thing twice is not news.
 #[tokio::test]
 async fn whether_each_pull_request_merges_is_written_down_and_read_back() {
     let (_dir, pool) = fresh_pool().await;
@@ -626,9 +628,12 @@ async fn whether_each_pull_request_merges_is_written_down_and_read_back() {
         "nothing has asked GitHub yet, which is not the same as merging cleanly",
     );
 
-    record_merging(&pool, id, own, Merging::Conflicting)
-        .await
-        .unwrap();
+    assert!(
+        record_merging(&pool, id, own, Merging::Conflicting)
+            .await
+            .unwrap(),
+        "the first poll is news",
+    );
     record_merging(&pool, id, beside, Merging::Cleanly)
         .await
         .unwrap();
@@ -643,15 +648,86 @@ async fn whether_each_pull_request_merges_is_written_down_and_read_back() {
         "the companion's own base has not moved, and its pull request says so",
     );
 
+    assert!(
+        !record_merging(&pool, id, own, Merging::Conflicting)
+            .await
+            .unwrap(),
+        "and a conflict still standing on the next poll is the same thing said again",
+    );
+
     // And the conflict resolved: written over rather than added to, a conflict
     // that has been dealt with not being a conflict.
-    record_merging(&pool, id, own, Merging::Cleanly)
-        .await
-        .unwrap();
+    assert!(
+        record_merging(&pool, id, own, Merging::Cleanly)
+            .await
+            .unwrap(),
+        "a resolution landing is news, which is what takes the mark off the card",
+    );
 
     assert_eq!(
         merging(&pool, id, own).await.unwrap(),
         Some(Merging::Cleanly)
+    );
+}
+
+/// And every one of them together, by the Timeline Event each pull request is,
+/// which is what the Conversation view draws its cards off.
+///
+/// Keyed by the Event rather than by the Repo because that is what a card has to
+/// hand — the same pull request is drawn pinned above the record and at the
+/// moment it opened, and both copies know only which Event they are. A pull
+/// request nothing has asked GitHub about is missing from the map rather than
+/// carried as a word, which is the card that draws no mark.
+#[tokio::test]
+async fn every_pull_requests_merge_is_read_back_by_the_event_it_is() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    let beside = companion(&pool).await;
+
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+    record_another_pull_request(&pool, id, beside, &beside_it())
+        .await
+        .unwrap();
+
+    assert!(
+        merges(&pool, id).await.unwrap().is_empty(),
+        "nothing has asked GitHub about either of them, so there is nothing to draw",
+    );
+
+    record_merging(&pool, id, own, Merging::Conflicting)
+        .await
+        .unwrap();
+
+    // Which Event each pull request is, in the order they were recorded — the
+    // Conversation's own first, then the companion's.
+    let events: Vec<i64> = timeline(&pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|event| matches!(event.event, Event::PullRequest(_)))
+        .map(|event| event.id)
+        .collect();
+
+    assert_eq!(
+        merges(&pool, id).await.unwrap(),
+        std::collections::HashMap::from([(events[0], Merging::Conflicting)]),
+        "the one that was asked about is in it, and the one that was not is absent",
+    );
+
+    record_merging(&pool, id, beside, Merging::Cleanly)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        merges(&pool, id).await.unwrap(),
+        std::collections::HashMap::from([
+            (events[0], Merging::Conflicting),
+            (events[1], Merging::Cleanly),
+        ]),
+        "and each Event carries what was written down about its own pull request",
     );
 }
 

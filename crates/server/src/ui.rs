@@ -34,7 +34,7 @@ use verkstead_render::{
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
-    Lifecycle, Locked, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
     ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, ResolutionEdit,
     Resumed, RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
     ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing,
@@ -995,6 +995,26 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And whether each of them merges, which is the other written-down fact that
+    // moves — the checks watcher writes it every poll of a wrap-up, and the sweep
+    // after Done goes on writing it until the pull request is merged or closed.
+    //
+    // Every pull request rather than the Conversation's own, unlike the rollup
+    // above: this is written down per pull request, so a companion's card draws
+    // its own reading. Which is why it is read as a map by the Event each pull
+    // request is — that is what both copies of a card have to hand.
+    //
+    // A pull request nothing has asked GitHub about is absent, and so is one
+    // GitHub has not worked the answer out for. Both are a card with no mark,
+    // which is the same honesty the rollup is drawn with.
+    let merges = match store::merges(&state.pool, id).await {
+        Ok(merges) => merges,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation's pull requests merge failed");
+            std::collections::HashMap::new()
+        }
+    };
+
     // And every pull request the work ended up on, which are pinned beside them.
     // These *are* on the record — the Conversation's own repository's is what
     // moved the Conversation into Wrapping, and a companion's is that wrap-up
@@ -1014,6 +1034,7 @@ pub(crate) async fn conversation_view(
                 url: opened.url.clone(),
                 repo: opened.repo.clone(),
                 checks: own_checks(&opened.repo, checks),
+                merging: merges.get(&event.id).copied().map(merging),
             },
         )),
         _ => None,
@@ -1499,6 +1520,7 @@ pub(crate) async fn conversation_view(
                             url: opened.url,
                             repo: opened.repo.clone(),
                             checks: own_checks(&opened.repo, checks),
+                            merging: merges.get(&event.id).copied().map(merging),
                         },
                     ),
                     // And the two rows that carry nothing of their own: what is
@@ -3125,6 +3147,18 @@ fn rollup(checks: store::Rollup) -> CheckRollup {
         store::Rollup::Passed => CheckRollup::Passed,
         store::Rollup::Running => CheckRollup::Running,
         store::Rollup::Failed => CheckRollup::Failed,
+    }
+}
+
+/// And whether a pull request merges, the same way: the store's two words as the
+/// card that draws a mark off one of them receives them.
+///
+/// No third word either side, because *not known* is neither: what GitHub has
+/// not worked out is no row in the store and no reading on the wire.
+fn merging(merges: store::Merging) -> Merging {
+    match merges {
+        store::Merging::Cleanly => Merging::Cleanly,
+        store::Merging::Conflicting => Merging::Conflicting,
     }
 }
 

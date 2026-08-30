@@ -1145,6 +1145,21 @@ pub struct PullRequestEvent {
     /// will be: what keeps it fresh is the checks watcher, and that stops when
     /// the wrap-up is over.
     pub checks: Option<CheckRollup>,
+
+    /// And whether it merges into its base, as the last look at GitHub found it
+    /// — or nothing where nothing has looked.
+    ///
+    /// Beside the rollup because it is the same kind of fact: a reading of
+    /// GitHub written down when something asked, drawn as a mark on the card,
+    /// and stale on a Conversation nothing is watching. What keeps this one
+    /// fresh outlives the wrap-up, though — a sweep asks about a Done
+    /// Conversation's pull requests every quarter of an hour until each is
+    /// merged or closed.
+    ///
+    /// Unlike the rollup, a companion's card carries its own: whether a branch
+    /// conflicts with its base is a fact about that branch, and it is written
+    /// down per pull request rather than per Conversation.
+    pub merging: Option<Merging>,
 }
 
 /// How a pull request's checks are getting on, taken all together.
@@ -1158,6 +1173,24 @@ pub enum CheckRollup {
     Passed,
     Running,
     Failed,
+}
+
+/// And whether it merges into its base.
+///
+/// The store's own word again, and two rather than GitHub's three for the reason
+/// it keeps two: a GitHub that has not worked the answer out yet is *not known*,
+/// and not knowing is the absence of this rather than a word in it — the same
+/// card with no mark on it that a pull request nothing has asked about draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Merging {
+    /// GitHub says it merges, which is a card with nothing to draw about it:
+    /// merging cleanly is what a pull request is expected to do.
+    Cleanly,
+
+    /// GitHub says it does not, and nothing lands until somebody resolves it.
+    /// The one of the two the card has a mark for.
+    Conflicting,
 }
 
 /// What is on a pull request now: the commits it carries, what GitHub is running
@@ -2161,6 +2194,7 @@ fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestE
         repo: opened.repo,
 
         checks: opened.checks,
+        merging: opened.merging,
     }
 }
 
@@ -2181,6 +2215,9 @@ pub struct PullRequestSummary {
 
     /// How its checks were, as the store last wrote it down.
     pub checks: Option<CheckRollup>,
+
+    /// And whether it merged, the same way — see [`PullRequestEvent::merging`].
+    pub merging: Option<Merging>,
 }
 
 /// What a pull request holds, as the details pane receives it: the commit list

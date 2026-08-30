@@ -1072,6 +1072,15 @@ Opening a pull request's details pane asks GitHub the same two things on its way
 to listing the checks, so it freshens both wherever the Conversation has got to —
 the way it already freshens a stale **check rollup**.
 
+**And the conflict is drawn.** The **pull request** card carries a mark beside
+its check rollup wherever the last look said *conflicting*, in whatever state the
+Conversation is in, and the details pane says the same in words. One recorded
+fact drawn one way everywhere, and never guessed at for the rollup's reason: a
+pull request nothing has asked about draws nothing, *mergeable* and *unknown*
+draw nothing, and the mark goes the moment a fresh reading says the conflict is
+gone. What tells an open page to look again is the Nudge the Conversation
+already carries, sent where the word changed rather than on every poll.
+
 *Can be merged* rather than *has been merged*: Verkstead never waits for the
 merge itself, which is the human's act and the one this pipeline is built
 around. The sweep above asks whether it has happened, which is not the same

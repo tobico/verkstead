@@ -24,9 +24,9 @@ use verkstead_render::{
     CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChosen,
     CompanionRefusal, CompanionRemoved, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationUnarchived, ConversationView,
-    GrillingStarted, Lifecycle, PickedView, PinnedEvent, ProfileChosen, ProfileSaved, Registered,
-    RoadmapPane, ShowingArchived, Standing, Started, SteerCompanionRefusal, SteerOpened,
-    TimelineEvent,
+    GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen, ProfileSaved,
+    Registered, RoadmapPane, ShowingArchived, Standing, Started, SteerCompanionRefusal,
+    SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
@@ -7052,6 +7052,181 @@ fn checks(view: &ConversationView) -> [Option<CheckRollup>; 2] {
     });
 
     [pinned.flatten(), reached.flatten()]
+}
+
+/// And whether it merges is carried the same way, to the same two copies of the
+/// same card — and drawn in whatever state the Conversation is in, this one
+/// never leaving Wrapping at all.
+///
+/// Walked through the store rather than watched for, as the checks above are:
+/// what is under test is the reading, and asking GitHub is `src/checks.rs`'s and
+/// `src/merges.rs`'s.
+///
+/// Both words go over, because both are what GitHub said. Which of them is drawn
+/// is the viewer's — a card marks the conflict and says nothing about a pull
+/// request that merges — and a wire that carried the conflict alone could not
+/// tell *it merges* from *nobody asked*.
+#[tokio::test]
+async fn whether_a_pull_request_merges_reaches_both_copies_of_its_card() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        merges(&opened(&app, id).await),
+        [None, None],
+        "nothing has asked GitHub yet, and a card with nothing to say draws no mark",
+    );
+
+    for (asked, drawn) in [
+        (store::Merging::Conflicting, Merging::Conflicting),
+        // And back again, because a conflict that has been resolved is not a
+        // conflict: the reading is written over, so the mark goes.
+        (store::Merging::Cleanly, Merging::Cleanly),
+    ] {
+        store::record_merging(&pool, id, repo_id, asked)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            merges(&opened(&app, id).await),
+            [Some(drawn), Some(drawn)],
+            "the card follows the poll, in both places it is drawn",
+        );
+    }
+
+    // And on to Done, where the sweep goes on asking long after the wrap-up's
+    // own watcher stopped: a base moving under a branch nobody is working on is
+    // exactly what that sweep is for, so the mark is drawn in this state as
+    // readily as in the one above.
+    for waiting_on in store::WAITED_ON.into_iter().chain([
+        store::WaitingOn::Checks(repo_id),
+        store::WaitingOn::Comments(repo_id),
+        store::WaitingOn::Mergeable(repo_id),
+    ]) {
+        store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    store::finish_wrap_up(&pool, id).await.unwrap();
+
+    store::record_merging(&pool, id, repo_id, store::Merging::Conflicting)
+        .await
+        .unwrap();
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Done);
+    assert_eq!(
+        merges(&view),
+        [Some(Merging::Conflicting), Some(Merging::Conflicting)],
+        "the work being finished with is no reason to stop saying the branch will not merge",
+    );
+}
+
+/// Whether the pull request merges on each copy of its card, in the same order:
+/// the pinned one first, then the one on the record.
+fn merges(view: &ConversationView) -> [Option<Merging>; 2] {
+    let pinned = view.pinned.iter().find_map(|event| match event {
+        PinnedEvent::PullRequest(opened) => Some(opened.merging),
+        _ => None,
+    });
+
+    let reached = view.timeline.iter().find_map(|event| match event {
+        TimelineEvent::PullRequest(opened) => Some(opened.merging),
+        _ => None,
+    });
+
+    [pinned.flatten(), reached.flatten()]
+}
+
+/// A companion's pull request carries its own reading, which is where this
+/// parts company with the rollup beside it: a rollup is written down per
+/// Conversation, and whether a branch merges is a fact about that branch.
+///
+/// So a wrap-up ending on two pull requests can have one conflicted and one
+/// clean, which is the ordinary shape of it — a base having moved in one
+/// repository and not in the other — and each card says what is true of its own.
+#[tokio::test]
+async fn each_pull_request_carries_whether_its_own_branch_merges() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    // A second registered repository, standing in for the read-write companion
+    // the work also committed in.
+    let beside = second_repo(&app, watched.path(), "askance").await;
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::record_another_pull_request(
+        &pool,
+        id,
+        beside,
+        &store::PullRequest {
+            number: 7,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/askance/pull/7".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::record_merging(&pool, id, repo_id, store::Merging::Cleanly)
+        .await
+        .unwrap();
+    store::record_merging(&pool, id, beside, store::Merging::Conflicting)
+        .await
+        .unwrap();
+
+    let view = opened(&app, id).await;
+
+    let each: Vec<(Option<String>, Option<Merging>)> = view
+        .pinned
+        .iter()
+        .filter_map(|event| match event {
+            PinnedEvent::PullRequest(opened) => Some((opened.repo.clone(), opened.merging)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        each,
+        vec![
+            (None, Some(Merging::Cleanly)),
+            (Some("askance".to_owned()), Some(Merging::Conflicting)),
+        ],
+        "each card says whether its own branch merges, whatever the other's does",
+    );
 }
 
 /// A wrap-up that has narrowed to its checks says so where the human reads a

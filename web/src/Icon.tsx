@@ -19,8 +19,8 @@
 //! bigger or in another colour says so about the text around it, or styles the
 //! class it hands down.
 //!
-//! Of the four the app draws, one is the regular cut and three are solid: Font
-//! Awesome Free has a regular `circle` and no regular `check`, `xmark` or
+//! Of the ones the app draws, one is the regular cut and the rest are solid:
+//! Font Awesome Free has a regular `circle` and no regular `check`, `xmark` or
 //! `chevron-down`, those three being Pro's. At a mark's size the difference is
 //! a hairline, and the alternative was three shapes from somewhere else.
 

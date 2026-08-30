@@ -85,7 +85,7 @@ pub use profiles::{
     delete_profile, load_profile, profiles, update_profile,
 };
 pub use pull_requests::{
-    Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup, merging,
+    Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup, merges, merging,
     pull_request, pull_request_repo, pull_requests, record_another_pull_request,
     record_check_rollup, record_merging, record_pull_request, record_standing, standing,
     unfinished_pull_requests,

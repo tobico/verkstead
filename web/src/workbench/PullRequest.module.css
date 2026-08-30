@@ -25,6 +25,16 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* And the conflict, where the last look at GitHub found one. In the palette's
+   colour for work that has stopped, which is what a conflict is: nothing on this
+   pull request lands until somebody resolves it. Drawn only where there is one —
+   see `PullRequest.tsx`. */
+.summary .conflict {
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  color: var(--stopped);
+}
+
 /* The commit list, the checks and the comments, each a section of the pane. All
    three are a reading of GitHub as it stands rather than anything Verkstead
    wrote down. */

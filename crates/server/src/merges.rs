@@ -33,7 +33,9 @@
 //! watching and nothing else: no session, no Notice, no push to a device. A
 //! conflict on a pull request whose Conversation is finished is the human's to
 //! decide about — Verkstead's part is that the fact is there to be drawn when
-//! they look.
+//! they look. The one thing that goes out is a Nudge on the Conversation where
+//! the word changed, which is a page already open being told to read again
+//! rather than anybody being told anything.
 //!
 //! A `gh` that cannot answer changes nothing at all, exactly as it changes
 //! nothing for a wrap-up: *Verkstead does not know* is a third thing beside
@@ -48,6 +50,8 @@
 //! [`remember`].
 
 use std::time::Duration;
+
+use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::github::{Landing, Mergeable, Stands};
@@ -173,11 +177,20 @@ pub(crate) async fn remember(
         Mergeable::Unknown => None,
     };
 
+    // Nudged where the word changed, exactly as the wrap-up's own watcher does
+    // it: the card draws a mark off this, and a page open on a Done Conversation
+    // is how a conflict that appeared after the work finished catches the eye.
+    // A sweep that found the same word a quarter of an hour later has nothing to
+    // tell anybody.
     if let Some(merging) = merging {
-        if let Err(error) =
-            store::record_merging(&state.pool, conversation_id, repo.id, merging).await
-        {
-            tracing::error!(error = ?error, conversation_id, repo = repo.name, "recording whether a pull request that has not landed merges failed");
+        match store::record_merging(&state.pool, conversation_id, repo.id, merging).await {
+            Ok(true) => state.nudges.announce(Nudge::Conversation {
+                conversation: conversation_id,
+            }),
+            Ok(false) => {}
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, repo = repo.name, "recording whether a pull request that has not landed merges failed");
+            }
         }
     }
 
