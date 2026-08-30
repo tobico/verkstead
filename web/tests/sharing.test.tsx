@@ -200,6 +200,49 @@ describe("a shared conversation", () => {
     ).toBe(true);
   });
 
+  /// And says nothing under it about the machine the work was done on.
+  ///
+  /// The Configuration under a Brief is two halves: what the work is against,
+  /// which a reader is owed, and where it sits on somebody's disk and which
+  /// account wrote it, which is the human's own arrangement. A share is emailed
+  /// about and attached to pull requests, so the second half is neither drawn
+  /// here nor carried in the file — see `shared` in
+  /// `crates/render/src/sharing.rs`.
+  it("says nothing about the machine the work was done on", async () => {
+    const brief = SHARED.conversation.timeline.find(
+      (event): event is Extract<TimelineEvent, { Brief: unknown }> =>
+        "Brief" in event,
+    );
+    expect(brief).toBeTruthy();
+
+    render(() => <Share shared={holding([brief!])} />);
+
+    const details = await screen.findByLabelText("Details");
+    await waitFor(() =>
+      expect(details.querySelector("h1")?.textContent).toBe("Brief"),
+    );
+
+    const facts = () =>
+      [...details.querySelectorAll("dt")].map((term) => term.textContent);
+
+    // What the work is against, which is the whole of what a reader is owed
+    // about how it was set up.
+    expect(facts()).toContain("Repo");
+    expect(facts()).toContain("Branch");
+    expect(facts()).toContain("Base");
+
+    // And nothing about where any of it lives or who ran it.
+    expect(facts()).not.toContain("Worktree");
+    expect(facts()).not.toContain("Grilling");
+    expect(facts()).not.toContain("Implementation");
+    expect(facts()).not.toContain("Review");
+
+    // Not by name, and not by anything a path or an account would have put on
+    // the page.
+    expect(details.textContent).not.toContain("/var/lib/verkstead");
+    expect(details.textContent).not.toContain("/srv/");
+  });
+
   /// The template before anything is written into it, and any file whose slot
   /// somebody has emptied: a page that says what it is holding rather than a
   /// blank one.

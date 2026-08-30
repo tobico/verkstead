@@ -326,6 +326,12 @@ Conversation's actions, and named for the branch and the day.
 the commits, the Steers and the lifecycle lines board; a session's output, the
 Notices, the Handoff and the pinned cards do not, and nothing marks where they
 would have been.
+**And nothing about the machine it was taken on.** Where the Worktrees sit on
+the disk and which Agent Profile and model each kind of session ran under are
+facts about this Verkstead rather than about the work, so they come off the
+record on the way out and the Brief's own pane draws neither — a Repo goes by
+its name and not by its path. What a share cannot give away is what it does not
+carry.
 **A snapshot as of the moment it was taken**, never a window onto a Conversation
 that goes on moving — sharing again makes another file. And privacy is
 possession: whoever holds the file can read it.

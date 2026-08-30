@@ -100,6 +100,7 @@ export function Details(props: {
                 conversation={props.conversation}
                 brief={brief()}
                 back={props.back}
+                readOnly
               />
             )}
           </Match>

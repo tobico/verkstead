@@ -21,6 +21,14 @@
 //! own, so this is what makes it read-only at the source: a share cannot express
 //! an action, whatever a component reused to draw it would otherwise offer.
 //!
+//! **And every field that is about the machine rather than the work.** Where the
+//! checkouts sit on somebody's disk, and which account and model each kind of
+//! session ran under, are facts about this Verkstead — and the reader of a share
+//! has none of it, out of a file that is emailed about and attached to pull
+//! requests. So the paths and the Pairings come off here as well, and the Brief's
+//! pane draws neither of them in a share: see `Brief.tsx`, which is the other
+//! half of this and the reason the values left behind are never read.
+//!
 //! What the reader does have is the record and the way around it, which is the
 //! whole point: the Timeline on one side, and whatever it opens on the other.
 
@@ -28,7 +36,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::conversations::{CommitPane, ConversationView, TimelineEvent};
+use crate::conversations::{CommitPane, CompanionView, ConversationView, TimelineEvent};
+use crate::profiles::PickedView;
+use crate::repos::RepoEntry;
 use crate::view::SetView;
 
 /// One Conversation as a share carries it, which is what the shared file boots
@@ -158,6 +168,30 @@ pub fn shared(
     let boarded: Vec<i64> = timeline.iter().filter_map(asked).collect();
     let landed: Vec<i64> = timeline.iter().filter_map(committed).collect();
 
+    // The two that are nested rather than fields of their own, said here because
+    // a functional update cannot reach inside one. A repository keeps its name
+    // and loses where it is on the disk — the name is what the record calls the
+    // work's repository and the path is where this machine happens to keep it —
+    // and a companion loses its checkout for the reason the Conversation's own
+    // does below.
+    let repo = RepoEntry {
+        path: String::new(),
+        ..conversation.repo
+    };
+
+    let companions: Vec<CompanionView> = conversation
+        .companions
+        .into_iter()
+        .map(|companion| CompanionView {
+            repo: RepoEntry {
+                path: String::new(),
+                ..companion.repo
+            },
+            worktree: None,
+            ..companion
+        })
+        .collect();
+
     SharedConversation {
         sets: sets
             .into_iter()
@@ -213,6 +247,19 @@ pub fn shared(
             // a reader already holds a share, and one carrying the link to
             // another would be handing on a URL nobody meant to give them.
             shared: None,
+
+            // And the machine this was worked on, said as nothing. Where a
+            // checkout is, and which account and model wrote the work, are the
+            // human's own arrangements rather than anything a colleague reading
+            // the record is owed — and a share is a file that leaves the
+            // tailnet, so what it does not carry is the only thing it cannot
+            // give away.
+            repo,
+            companions,
+            worktree: None,
+            grilling_pairing: PickedView::Nothing,
+            implementation_pairing: None,
+            review_pairing: PickedView::Nothing,
 
             ..conversation
         },

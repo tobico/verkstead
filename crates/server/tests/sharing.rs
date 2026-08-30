@@ -410,6 +410,110 @@ async fn a_share_has_nothing_left_on_it_to_act_on() {
     );
 }
 
+/// And nothing about the machine it was taken on.
+///
+/// A share leaves the tailnet — it is emailed about and attached to pull
+/// requests — so where the checkouts sit on somebody's disk, and which account
+/// and model each kind of session ran under, come off on the way out. The Brief's
+/// pane draws neither in a share, and this is the half that means they are not
+/// in the file to be read out of it either.
+#[tokio::test]
+async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
+    let (dir, pool, app) = app().await;
+
+    let own = repository(dir.path().join("verkstead"));
+    let alongside = repository(dir.path().join("askance"));
+
+    let repo = store::register_repo(&pool, &own, "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    let companion = store::register_repo(&pool, &alongside, "askance", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = store::start_conversation(&pool, repo, "sharing")
+        .await
+        .unwrap()
+        .unwrap();
+    store::add_companion(&pool, id, companion).await.unwrap();
+
+    // An account to run under, which is the other half of what comes off: a
+    // Pairing names a profile and the model it runs on, and both are the human's
+    // own arrangements rather than anything the work is.
+    let profile = store::create_profile(
+        &pool,
+        &store::ProfileFacts {
+            name: "fable".to_owned(),
+            claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
+            config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
+            models: vec!["claude-fable-5".to_owned()],
+            agent_type: store::AgentType::Claude,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    store::set_grilling_pairing(&pool, id, profile.id, profile.model())
+        .await
+        .unwrap();
+
+    // And the checkouts, which is what puts a path on the Conversation and on
+    // the companion beside it.
+    store::start_grilling(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        &dir.path().join("worktrees/verkstead-sharing"),
+        &[store::CompanionWorktree {
+            repo_id: companion,
+            path: dir.path().join("worktrees/askance-sharing"),
+            base_commit: None,
+        }],
+    )
+    .await
+    .unwrap();
+
+    let conversation = share(&app, id).await.conversation;
+
+    // Where any of it is on this disk.
+    assert!(
+        conversation.worktree.is_none(),
+        "a share carried a worktree: {:?}",
+        conversation.worktree,
+    );
+    assert_eq!(conversation.repo.path, "");
+
+    let companions = &conversation.companions;
+    assert_eq!(companions.len(), 1, "the companion is still on the record");
+    assert!(
+        companions[0].worktree.is_none(),
+        "a share carried a companion's worktree: {:?}",
+        companions[0].worktree,
+    );
+    assert_eq!(companions[0].repo.path, "");
+
+    // And which account wrote it.
+    assert_eq!(
+        conversation.grilling_pairing,
+        verkstead_render::PickedView::Nothing,
+    );
+    assert!(conversation.implementation_pairing.is_none());
+    assert_eq!(
+        conversation.review_pairing,
+        verkstead_render::PickedView::Nothing,
+    );
+
+    // What each repository is *called* stays, because that is what the record
+    // calls the work's repository and a companion's card is labelled by.
+    assert_eq!(conversation.repo.name, "verkstead");
+    assert_eq!(companions[0].repo.name, "askance");
+}
+
 #[tokio::test]
 async fn a_drafts_brief_boards_as_the_document_it_is() {
     let (_dir, pool, app) = app().await;

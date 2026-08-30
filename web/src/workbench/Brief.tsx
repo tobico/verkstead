@@ -69,6 +69,21 @@ export function Brief(props: {
   conversation: ConversationView;
   brief: BriefEvent;
   back: () => void;
+
+  /// Whether this is a record read out of a file — a share — rather than the
+  /// Conversation on the machine it was worked on.
+  ///
+  /// What it takes off is the half of the Configuration that is about the
+  /// machine rather than about the work: where each checkout sits on somebody's
+  /// disk, and which account and model each kind of session ran under. A share
+  /// is emailed about and attached to pull requests, and none of that is
+  /// anything its reader is owed.
+  ///
+  /// The record it is drawn from does not carry them either — see `shared` in
+  /// `crates/render/src/sharing.rs`, which is the half that keeps them out of
+  /// the file rather than merely off the page. This is why what is left of them
+  /// there is never read.
+  readOnly?: boolean;
 }): JSX.Element {
   return (
     <>
@@ -81,14 +96,21 @@ export function Brief(props: {
         <div class={`${styles.brief} markdown`} innerHTML={props.brief.html} />
       </Show>
 
-      <Configuration conversation={props.conversation} />
+      <Configuration
+        conversation={props.conversation}
+        readOnly={props.readOnly}
+      />
     </>
   );
 }
 
 /// What the Conversation was configured with, under the Brief it was configured
 /// for.
-function Configuration(props: { conversation: ConversationView }): JSX.Element {
+function Configuration(props: {
+  conversation: ConversationView;
+  /// Drawn out of a share, which is a shorter list — see [`Brief`].
+  readOnly?: boolean;
+}): JSX.Element {
   return (
     <section class={styles.configuration} aria-label="Configuration">
       <h2>Configuration</h2>
@@ -128,21 +150,32 @@ function Configuration(props: { conversation: ConversationView }): JSX.Element {
             )}
           </Show>
         </Fact>
-        <Fact term="Worktree">
-          <Where worktree={props.conversation.worktree} />
-        </Fact>
-        <Fact term="Grilling">
-          <Picked
-            picked={props.conversation.grilling_pairing}
-            away="No grilling."
-          />
-        </Fact>
-        <Fact term="Implementation">
-          <Paired pairing={props.conversation.implementation_pairing} />
-        </Fact>
-        <Fact term="Review">
-          <Picked picked={props.conversation.review_pairing} away="No review." />
-        </Fact>
+        {/* And where it was worked, and by whom — the half of this section that
+            is about the machine rather than about the work, so the half a share
+            does not draw. The record it would be drawn from is empty there
+            anyway; this is what keeps the pane from reporting that emptiness as
+            *not checked out* and *no grilling*, which would be a share telling
+            the reader something untrue instead of nothing at all. */}
+        <Show when={!props.readOnly}>
+          <Fact term="Worktree">
+            <Where worktree={props.conversation.worktree} />
+          </Fact>
+          <Fact term="Grilling">
+            <Picked
+              picked={props.conversation.grilling_pairing}
+              away="No grilling."
+            />
+          </Fact>
+          <Fact term="Implementation">
+            <Paired pairing={props.conversation.implementation_pairing} />
+          </Fact>
+          <Fact term="Review">
+            <Picked
+              picked={props.conversation.review_pairing}
+              away="No review."
+            />
+          </Fact>
+        </Show>
       </dl>
 
       {/* And the repos this work was let into beside its own, where there are
@@ -162,9 +195,13 @@ function Configuration(props: { conversation: ConversationView }): JSX.Element {
                     companion={companion}
                     conversation={props.conversation}
                   />
-                  <Fact term="Worktree">
-                    <Where worktree={companion.worktree} />
-                  </Fact>
+                  {/* And its checkout, off a share for the reason the
+                      Conversation's own is. */}
+                  <Show when={!props.readOnly}>
+                    <Fact term="Worktree">
+                      <Where worktree={companion.worktree} />
+                    </Fact>
+                  </Show>
                 </dl>
               </li>
             )}
