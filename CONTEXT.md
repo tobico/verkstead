@@ -38,6 +38,9 @@ either way. Refused while a Conversation that is neither Done nor Closed is on
 it, the way removing an Agent Profile a Conversation is set to run under is; and
 registering the same path again brings the same Repo back rather than making a
 second one.
+One thing about a registered Repo is configured rather than read off the
+repository: its **resolution strategy**, where its conflicts are to be resolved
+differently from every other Repo's.
 _Avoid_: project, codebase, checkout
 
 **Conversation**:
@@ -45,14 +48,16 @@ The core entity: a Repo, a base commit, a Brief, one branch and one Worktree.
 Everything done about one piece of work hangs off it. Runs through Draft →
 Grilling → Implementing → Wrapping → Done — a roadmap Conversation passes
 straight from Grilling to Wrapping, its building belonging to its Stages — and
-can be closed from any of them, a **Steer** being the one way back into a
-Conversation that is closed or Done. There is one move back down the ladder: a
-wrap-up whose review split its findings out into a backlog returns to
-Implementing to build it, and its finish step wraps up again on the pull request
-it already had, reviewed afresh. **Follow-up** sits beside the ladder rather
-than on it, the way Closed does, and is the one state with no way in but a
-Steer: the human taking something up about work that is already on a pull
-request, and landing back in the wrap-up when they are finished with it.
+can be closed from any of them, a **Steer** being the way back into a
+Conversation that is closed and one of the two ways into one that is Done. There
+is one move back down the ladder: a wrap-up whose review split its findings out
+into a backlog returns to Implementing to build it, and its finish step wraps up
+again on the pull request it already had, reviewed afresh. And one back up it: a
+Done Conversation whose pull request has stopped merging returns to Wrapping at
+one press, reviewed no further — see **Mergeable**. **Follow-up** sits beside
+the ladder rather than on it, the way Closed does, and is the one state with no
+way in but a Steer: the human taking something up about work that is already on
+a pull request, and landing back in the wrap-up when they are finished with it.
 *Blocked on you* is a condition of an active state, never a state of its own,
 and *Waiting on checks* is a condition of Wrapping read the same way — where
 **Closed** is a state of its own, off the ladder rather than on it: every other
@@ -999,11 +1004,15 @@ finish flag
 
 **Waiting on checks**:
 What a wrap-up has narrowed to when the review is answered, nothing said on the
-pull request is left unaddressed, the checks alone are outstanding and nothing
-is running in the Worktree. A **Notice** says so on the Timeline, once per
-narrowing; the status button reads the words where its status word goes, and
-the sidebar row reads them in place of the state word, Wrapping being what has
-narrowed.
+pull request is left unaddressed, every pull request merges, the checks alone
+are outstanding and nothing is running in the Worktree. A **Notice** says so on
+the Timeline, once per narrowing; the status button reads the words where its
+status word goes, and the sidebar row reads them in place of the state word,
+Wrapping being what has narrowed.
+
+A pull request that is not **mergeable** is not this, and says nothing: what
+that one is waiting on is somebody resolving a conflict rather than GitHub
+finishing something.
 
 A condition of Wrapping rather than a state, exactly as *blocked on you* is a
 condition of an active state: the Lifecycle is untouched, and the only thing
@@ -1038,6 +1047,101 @@ beside green and red, exactly as it is for the watcher meeting a `gh` that will
 not answer, and what a card with no rollup draws is no icon.
 _Avoid_: status, CI (the word here is checks), green as a state name, one check
 (the rollup is the whole suite)
+
+**Mergeable**:
+Whether GitHub can merge a pull request into its base as it stands, asked of the
+same `gh` call the **check rollup** comes back in and written down per pull
+request. A branch its base has moved under conflicts without anybody having
+touched it, and nothing lands after that — so being mergeable is one of the
+things a wrap-up waits on before it reaches Done, one settlement per pull
+request beside the checks and the comments.
+
+Three answers and each is its own thing: *mergeable* settles it, *conflicting*
+puts it back to waiting, and *unknown* — which is what GitHub says while it is
+still working the answer out — changes nothing at all and is written down
+nowhere, exactly as a `gh` that will not answer about the checks is. So what
+stands about a pull request is the last thing GitHub actually said about it.
+
+**A conflicting pull request has a session sent at it**, the way a failed check
+does and through the same dispatch: one under the Conversation's implementation
+Pairing, inside the bundled addressing skill, told which pull request will not
+merge and which worktree to work in, and told to put the base branch's work on
+the branch by the configured **resolution strategy**, resolve the conflicts, run
+the repository's tests, commit and push. Two goes per pull request, counted as
+each session is dispatched and kept across a restart; one out of goes waits for
+every other pull request's before the run stops, and the stop's Notice names the
+pull request that would not merge clean. Resume, a steer into Wrapping and the
+press below all forget the count, exactly as they forget the checks'.
+
+**And it goes on being asked after Done.** A wrap-up's watchers stop when the
+Conversation reaches Done, and the pull request goes on sitting there waiting to
+be merged while its base moves under it — so a sweep of its own asks, every
+fifteen minutes, about every Done Conversation's pull requests. What it writes
+down is the same reading and one beside it: where the pull request has got to,
+which is *open*, *merged* or *closed*. A pull request recorded merged or closed
+is never asked about again, that being a question with a final answer; a Closed
+Conversation is never asked about at all, and an **Archived** one with it, a
+human who has closed the work being finished with it. Nothing is dispatched from
+there and nothing moves: after Done a conflict is the human's to decide about,
+and the sweep's part is that the fact is there when they look.
+
+**And the human has one press for it.** A Done pull request's details pane
+offers **Resolve conflicts** while the recorded fact says the branch conflicts,
+and pressing it sends the Conversation back into Wrapping to have another go:
+the conflict is something the wrap-up waits on again, both counts of spent goes
+are forgotten the way Resume forgets them, and the watchers dispatch the
+resolution session by the rules above. The review's settle is deliberately left
+standing — the work was reviewed and carried to Done on the strength of it, and
+a base that has moved underneath it since is not a reason to read the branch
+again — so no review session runs anywhere in it, and the ordinary settling rule
+carries the work back to Done once the resolution pushes and the checks on it go
+green. A press rather than a **Steer**, which would read the branch afresh. The
+Timeline says it in a steer's shape — the human's own line above the machine's
+move, because a long record should say who decided this — and in words of its
+own, because a steer into Wrapping needs no instruction either and the two would
+otherwise be the same line. They are not the same act, and which of them happened
+is the thing a record months old has to be readable back for.
+
+Opening a pull request's details pane asks GitHub the same two things on its way
+to listing the checks, so it freshens both wherever the Conversation has got to —
+the way it already freshens a stale **check rollup**.
+
+**And the conflict is drawn.** The **pull request** card carries a mark beside
+its check rollup wherever the last look said *conflicting*, in whatever state the
+Conversation is in, and the details pane says the same in words. One recorded
+fact drawn one way everywhere, and never guessed at for the rollup's reason: a
+pull request nothing has asked about draws nothing, *mergeable* and *unknown*
+draw nothing, and the mark goes the moment a fresh reading says the conflict is
+gone. What tells an open page to look again is the Nudge the Conversation
+already carries, sent where the word changed rather than on every poll.
+
+*Can be merged* rather than *has been merged*: Verkstead never waits for the
+merge itself, which is the human's act and the one this pipeline is built
+around. The sweep above asks whether it has happened, which is not the same
+thing — it is watching for the moment there is nothing left to watch, rather
+than holding anything up until it comes.
+_Avoid_: merged, landed, mergeability, clean (the words here are mergeable and
+conflicting)
+
+**Resolution strategy**:
+How a resolution session is told to put the base branch's work on a branch that
+conflicts with it: **merge**, which merges the base in and pushes, or **rebase**,
+which rebases the branch onto the base and force-pushes it with a lease. The two
+are different acts on a branch rather than two spellings of one, so the session
+is told which rather than left to pick.
+
+Merge is what a Verkstead nobody has configured does, and that is the whole
+shape of the setting: a rebase rewrites what reviewers have already read and
+breaks anything stacked on the branch, and nobody should meet that for never
+having found a settings page. What it costs is said on the page beside the
+choice.
+
+Said once for every Repo, in `config.yaml` beside the build cache — an absent
+key, an absent file and an unparseable one all mean merge — and any Repo may
+override it, which is a fact about the Repo and lives in the store beside it. A
+Repo that says nothing follows the global setting rather than a copy of what it
+said the day the Repo was registered.
+_Avoid_: merge strategy, conflict policy, force push setting
 
 **Rescue**:
 The canned line Verkstead types into a session that has gone quiet without

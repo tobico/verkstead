@@ -2604,6 +2604,15 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap();
 
+    // And whether it merges, which the same poll writes down beside it. Cleanly,
+    // which is what a wrap-up waiting on its suite looks like: the branch is
+    // fine and GitHub is still thinking about the tests. A conflict is the
+    // reading the viewer's own tests compose over this one — what is being
+    // carried here is the field.
+    store::record_merging(&pool, wrapping, repos[0].id, store::Merging::Cleanly)
+        .await
+        .unwrap();
+
     write(
         "conversation-wrapping.json",
         &pin_health(&pin_timeline(
@@ -2620,6 +2629,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let waiting_on = verkstead_store::WAITED_ON.into_iter().chain([
         verkstead_store::WaitingOn::Checks(repos[0].id),
         verkstead_store::WaitingOn::Comments(repos[0].id),
+        verkstead_store::WaitingOn::Mergeable(repos[0].id),
     ]);
 
     for waiting_on in waiting_on {
@@ -2855,6 +2865,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // configured half of this too, and `settings-unset.json` is where
             // nobody has hosted one.
             "share_viewer_url": "https://ada.github.io/verkstead-shares/",
+            // And a rebase configured, for the reason the size above is typed:
+            // the fixture of a Verkstead that has been told everything carries
+            // the answer somebody chose, and `settings-unset.json` is the one
+            // nobody has chosen anything in.
+            "conflict_resolution": "Rebase",
+
             // And the paths this Verkstead was told about, which come back
             // labelled as the settings' own — the router behind this fixture was
             // started with none of its own, the way a standalone install is.

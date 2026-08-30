@@ -32,14 +32,14 @@ use verkstead_render::{
     Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup,
     CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
-    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
-    Lifecycle, Locked, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed,
-    RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
+    GrillingStarted, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RepoEntry, Resolved, Resumed, RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -74,6 +74,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // under the Profile: what comes back is a named outcome, and a refusal
         // is an answer rather than a status.
         .route("/api/ui/repos/{id}/remove", post(remove_repo))
+        .route("/api/ui/repos/{id}/resolution", post(set_repo_resolution))
         .route(
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
@@ -254,6 +255,17 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // with no body at all — there is nothing to say about it beyond which
         // Conversation it is.
         .route("/api/ui/conversations/{id}/resume", post(resume))
+        // And the press on a finished Conversation's pull request that will not
+        // merge, which is the one press here that is not on the Conversation as
+        // a whole: it is offered on the pull request's own details pane, and it
+        // sends the Conversation back to its wrap-up to have the conflict
+        // resolved. No body either — which Conversation it is is the whole of
+        // what it says, and which pull requests conflict is the record's to
+        // know. See [`crate::resolving`].
+        .route(
+            "/api/ui/conversations/{id}/resolve-conflicts",
+            post(resolve_conflicts),
+        )
         // And the two presses that stop it, which are Resume's opposite number
         // and take a body for the same reason it does: none. Which Conversation
         // it is is the whole of what either says, and which press it was is the
@@ -645,6 +657,38 @@ async fn remove_repo(State(state): State<AppState>, Path(id): Path<String>) -> H
     }
 }
 
+/// `POST /api/ui/repos/{id}/resolution` — say how this Repo resolves a merge
+/// conflict, or take back what was said.
+///
+/// A value rather than an action, and nothing to refuse: what the body carries
+/// is where the setting is to stand — one of the two words, or nothing at all
+/// for *whatever the settings page says for every Repo*.
+///
+/// The answer is the Repo as it now stands rather than an outcome to read, for
+/// the reason the settings' save answers with the settings: the pane draws what
+/// the server says rather than what it just sent.
+///
+/// A 404 for an id nothing is registered under, as the reads above give: neither
+/// names a Repo, and the pane says the repo is gone.
+async fn set_repo_resolution(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(edit): Json<ConflictResolutionEdit>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_repo(&id);
+    };
+
+    match crate::repos::set_resolution(&state.pool, id, edit.resolution).await {
+        Ok(Some(view)) => Json(view).into_response(),
+        Ok(None) => no_such_repo(&id.to_string()),
+        Err(error) => {
+            tracing::error!(error = ?error, repo_id = id, "saying how a Repo resolves a conflict failed");
+            unavailable("the Repo could not be told how to resolve a conflict")
+        }
+    }
+}
+
 /// `GET /api/ui/abandoned-roadmaps` — the registered Repos holding roadmaps
 /// nothing is driving, one notice each.
 ///
@@ -962,6 +1006,26 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And whether each of them merges, which is the other written-down fact that
+    // moves — the checks watcher writes it every poll of a wrap-up, and the sweep
+    // after Done goes on writing it until the pull request is merged or closed.
+    //
+    // Every pull request rather than the Conversation's own, unlike the rollup
+    // above: this is written down per pull request, so a companion's card draws
+    // its own reading. Which is why it is read as a map by the Event each pull
+    // request is — that is what both copies of a card have to hand.
+    //
+    // A pull request nothing has asked GitHub about is absent, and so is one
+    // GitHub has not worked the answer out for. Both are a card with no mark,
+    // which is the same honesty the rollup is drawn with.
+    let merges = match store::merges(&state.pool, id).await {
+        Ok(merges) => merges,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation's pull requests merge failed");
+            std::collections::HashMap::new()
+        }
+    };
+
     // And every pull request the work ended up on, which are pinned beside them.
     // These *are* on the record — the Conversation's own repository's is what
     // moved the Conversation into Wrapping, and a companion's is that wrap-up
@@ -981,6 +1045,7 @@ pub(crate) async fn conversation_view(
                 url: opened.url.clone(),
                 repo: opened.repo.clone(),
                 checks: own_checks(&opened.repo, checks),
+                merging: merges.get(&event.id).copied().map(merging),
             },
         )),
         _ => None,
@@ -1452,6 +1517,13 @@ pub(crate) async fn conversation_view(
                         lifecycle(target),
                         instruction.as_deref(),
                     ),
+                    // And the other press that stands beside a move, which is
+                    // its own kind for exactly that reason: a steer into
+                    // Wrapping reads the branch again and this one deliberately
+                    // does not, so the record says which of them happened.
+                    store::Event::ResolveConflicts => {
+                        verkstead_render::resolve_conflicts_event(event.id, event.at)
+                    }
                     // The one kind that is pinned as well as listed, handed
                     // over twice for the page to draw twice: the sticky block
                     // above the record keeps it in view, and here is the moment
@@ -1466,6 +1538,7 @@ pub(crate) async fn conversation_view(
                             url: opened.url,
                             repo: opened.repo.clone(),
                             checks: own_checks(&opened.repo, checks),
+                            merging: merges.get(&event.id).copied().map(merging),
                         },
                     ),
                     // And the two rows that carry nothing of their own: what is
@@ -2333,6 +2406,11 @@ async fn roadmap(
 /// The checks watcher keeps that fresh while a wrap-up is running and stops when
 /// the wrap-up is over, so on a Conversation carried to Done the pane is the one
 /// thing left that asks.
+///
+/// And whether the pull request merges and where it has got to ride the same
+/// answer, so opening the pane freshens those too — whatever state the
+/// Conversation is in. See [`crate::merges`], whose sweep is what keeps them
+/// fresh between one opening and the next.
 async fn pull_request(
     State(state): State<AppState>,
     Path((id, event)): Path<(String, String)>,
@@ -2369,7 +2447,7 @@ async fn pull_request(
     // pull request asked about in the work's own repo would come back as
     // somebody else's work or as a 404. See [`store::pull_request_repo`].
     let repo = match store::pull_request_repo(&state.pool, id, event).await {
-        Ok(Some(repo)) => repo.path,
+        Ok(Some(repo)) => repo,
         Ok(None) => return no_such_pull_request(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a pull request failed");
@@ -2379,9 +2457,11 @@ async fn pull_request(
 
     let gh = state.github.clone();
 
-    let asked =
-        tokio::task::spawn_blocking(move || crate::github::details(&gh, &repo, opened.number))
-            .await;
+    let asked = {
+        let path = repo.path.clone();
+
+        tokio::task::spawn_blocking(move || crate::github::details(&gh, &path, opened.number)).await
+    };
 
     match asked {
         Ok(Ok(read)) => {
@@ -2389,6 +2469,12 @@ async fn pull_request(
             // the card on the Nudge this sends draws what the pane is about to
             // show it.
             crate::checks::remember(&state, id, &read.checks).await;
+
+            // And the two facts about the pull request itself that came back on
+            // the same question: whether it merges, and where it has got to. The
+            // pane is what freshens both on a Conversation nothing is watching
+            // and nothing is sweeping — see [`crate::merges::remember`].
+            crate::merges::remember(&state, id, &repo, read.landing).await;
 
             Json(read.pane).into_response()
         }
@@ -2639,6 +2725,32 @@ async fn resume(State(state): State<AppState>, Path(id): Path<String>) -> HttpRe
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting to drive a Conversation again failed");
             unavailable("the conversation could not be resumed")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/resolve-conflicts` — send a finished
+/// Conversation back to its wrap-up to have its conflict resolved.
+///
+/// The press on a Done pull request's details pane, offered only while the
+/// recorded fact says the branch conflicts. What it starts is the wrap-up's own
+/// watchers, which dispatch the resolution session by the rules they always
+/// dispatch one under — with the review left settled, so nothing reads the
+/// branch again.
+///
+/// Answered as soon as the move is made rather than once anything is dispatched,
+/// as Resume is: the browser is waiting for *whether* the Conversation moved,
+/// and what follows the move takes as long as GitHub takes to answer.
+async fn resolve_conflicts(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(Resolved::NoSuchConversation).into_response();
+    };
+
+    match crate::resolving::resolve(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "sending a Conversation back to its wrap-up to resolve a conflict failed");
+            unavailable("the conflict could not be sent back to the wrap-up")
         }
     }
 }
@@ -3082,6 +3194,18 @@ fn rollup(checks: store::Rollup) -> CheckRollup {
     }
 }
 
+/// And whether a pull request merges, the same way: the store's two words as the
+/// card that draws a mark off one of them receives them.
+///
+/// No third word either side, because *not known* is neither: what GitHub has
+/// not worked out is no row in the store and no reading on the wire.
+fn merging(merges: store::Merging) -> Merging {
+    match merges {
+        store::Merging::Cleanly => Merging::Cleanly,
+        store::Merging::Conflicting => Merging::Conflicting,
+    }
+}
+
 /// How the checks are, but only on the pull request they were written down
 /// about.
 ///
@@ -3272,6 +3396,10 @@ async fn save_settings(
             // And where the share viewer is hosted, the same way: an empty
             // field is nowhere, which is how it is taken away again.
             Some(edit.share_viewer_url),
+            // And how a conflict is resolved where the Repo it is in says
+            // nothing, which is one of two words and never absent: there is no
+            // third state for a page to send.
+            crate::repos::stored(edit.conflict_resolution),
             // And the paths as values too: what is sent is what the file holds
             // afterwards, so a row taken off the page is a row taken out of the
             // file. Only the settings' own — the installation's are the unit's
@@ -3391,6 +3519,10 @@ fn as_told(
         // page, whose URL goes on a pull request the moment a share is
         // published through it.
         share_viewer_url: config.share_viewer_url().unwrap_or_default().to_owned(),
+        // Where the setting sits rather than whether anybody has been here:
+        // nothing configured is a merge, and there is no third state to draw.
+        conflict_resolution: crate::repos::resolution(config.conflict_resolution()),
+
         // Both sources at once, each entry saying which of the two said it and
         // whether the server can see it now — see [`crate::paths`]. Read from
         // the file again rather than off the `config` above, because that is

@@ -28,7 +28,9 @@ use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
-use verkstead_render::{PathSource, Resolution, SettingsSaved, SettingsView, Verified};
+use verkstead_render::{
+    ConflictResolution, PathResolution, PathSource, SettingsSaved, SettingsView, Verified,
+};
 use verkstead_server::sandbox::SandboxConfig;
 use verkstead_server::{Gh, WatchedPaths, open_database, router_asking_github, router_installed};
 
@@ -94,6 +96,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "share_viewer_url": "",
+            "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -111,6 +114,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "github_token": { "Set": { "token": token } },
             "rust_build_cache": { "enabled": true, "size": "" },
             "share_viewer_url": "",
+            "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -126,6 +130,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "github_token": "Clear",
             "rust_build_cache": { "enabled": true, "size": "" },
             "share_viewer_url": "",
+            "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -240,6 +245,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
             "rust_build_cache": { "enabled": true, "size": "" },
             "share_viewer_url": "",
+            "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -464,6 +470,7 @@ async fn a_save_carrying_the_paths_as_they_stand_leaves_them() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "share_viewer_url": "",
+            "conflict_resolution": "Merge",
             "watched_paths": ["/home/ada/src"],
             "sandbox_binds": ["/var/cache/verkstead-node"],
         }),
@@ -535,6 +542,7 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": false, "size": "5G" },
             "share_viewer_url": "",
+            "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -557,6 +565,82 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
     assert_eq!(read_back.size, "5G");
 }
 
+/// How a conflict is resolved where nobody has said: a merge, which is the half
+/// of the choice that rewrites nothing.
+///
+/// The whole point of the shape, as it is for the build cache above: a human who
+/// has never found this section should not have a branch force-pushed under
+/// whoever was reading it.
+#[tokio::test]
+async fn a_conflict_nobody_has_configured_is_merged() {
+    let (_dir, app) = app().await;
+
+    assert_eq!(
+        settings(&app).await.conflict_resolution,
+        ConflictResolution::Merge
+    );
+}
+
+/// And what a save of it says: the word goes into the file the next resolution
+/// session is dispatched out of, and comes back off it.
+#[tokio::test]
+async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
+    let (dir, app) = app().await;
+
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "share_viewer_url": "",
+            "conflict_resolution": "Rebase",
+            "watched_paths": [],
+            "sandbox_binds": [],
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        saved.settings.conflict_resolution,
+        ConflictResolution::Rebase
+    );
+
+    // In the file rather than only in the answer, and as the word a human
+    // hand-editing it would write.
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(
+        written.contains("conflict_resolution: rebase"),
+        "the strategy is in config.yaml, in the file's own words: {written}"
+    );
+
+    assert_eq!(
+        settings(&app).await.conflict_resolution,
+        ConflictResolution::Rebase
+    );
+
+    // And back again, because a setting that could only be turned on would be a
+    // setting nobody could undo from a phone.
+    save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "share_viewer_url": "",
+            "conflict_resolution": "Merge",
+            "watched_paths": [],
+            "sandbox_binds": [],
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        settings(&app).await.conflict_resolution,
+        ConflictResolution::Merge
+    );
+}
+
 /// Clearing the size field is asking for the default back rather than asking
 /// for a cache of no size at all.
 #[tokio::test]
@@ -570,6 +654,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "5G" },
             "share_viewer_url": "",
+            "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -583,6 +668,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "  " },
             "share_viewer_url": "",
+            "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -682,6 +768,7 @@ async fn save_viewer(app: &Router, url: &str) -> SettingsSaved {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "share_viewer_url": url,
+            "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -792,6 +879,7 @@ async fn save_paths(app: &Router, watched: &[&str], binds: &[&str]) -> SettingsS
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "share_viewer_url": "",
+            "conflict_resolution": "Merge",
             "watched_paths": watched,
             "sandbox_binds": binds,
         }),
@@ -807,10 +895,10 @@ fn made(dir: &Path, name: &str) -> std::path::PathBuf {
     path
 }
 
-fn why(resolution: &Resolution) -> String {
+fn why(resolution: &PathResolution) -> String {
     match resolution {
-        Resolution::Resolves => panic!("it resolved"),
-        Resolution::Unresolved { why } => why.clone(),
+        PathResolution::Resolves => panic!("it resolved"),
+        PathResolution::Unresolved { why } => why.clone(),
     }
 }
 
@@ -855,7 +943,7 @@ async fn the_installations_own_paths_come_back_as_the_installations() {
         watched.canonicalize().unwrap().display().to_string()
     );
     assert_eq!(watched_path.source, PathSource::Installation);
-    assert_eq!(watched_path.resolution, Resolution::Resolves);
+    assert_eq!(watched_path.resolution, PathResolution::Resolves);
 
     let [global, per_repo] = &paths.binds[..] else {
         panic!("two binds, not {:?}", paths.binds);
@@ -867,7 +955,7 @@ async fn the_installations_own_paths_come_back_as_the_installations() {
         "a bind every sandbox gets is nobody's own"
     );
     assert_eq!(global.source, PathSource::Installation);
-    assert_eq!(global.resolution, Resolution::Resolves);
+    assert_eq!(global.resolution, PathResolution::Resolves);
 
     // And the other half of a bind's shape: which Repo it is scoped to.
     assert_eq!(per_repo.path, own.display().to_string());

@@ -42,6 +42,8 @@ import type {
   RepoEntry,
   RepoRemoved,
   RepoView,
+  ConflictResolution,
+  Resolved,
   Response as Decided,
   Resumed,
   RoleChoice,
@@ -179,6 +181,20 @@ export function registerRepo(path: string): Promise<Registered> {
 /// with live work on it is refused for a reason worth saying, and not a failure.
 export function removeRepo(id: number): Promise<RepoRemoved> {
   return post<RepoRemoved>(`/api/ui/repos/${id}/remove`);
+}
+
+/// Say how one Repo resolves a merge conflict from now on, or — with `null` —
+/// take that back, so it does whatever every other Repo does.
+///
+/// A value rather than an action, and nothing to refuse: what is sent is where
+/// the setting is to stand. The answer is the Repo as it now stands, read afresh
+/// by the server, which is what the pane draws — the same rule the settings page
+/// saves under.
+export function setRepoResolution(
+  id: number,
+  resolution: ConflictResolution | null,
+): Promise<RepoView> {
+  return post<RepoView>(`/api/ui/repos/${id}/resolution`, { resolution });
 }
 
 /// The registered Repos holding roadmaps nothing is driving.
@@ -620,6 +636,21 @@ export async function seeConversation(id: string): Promise<void> {
 /// could: resume is never silent, and the refusals are what that means.
 export function resume(id: number): Promise<Resumed> {
   return post<Resumed>(`/api/ui/conversations/${id}/resume`, {});
+}
+
+/// Get a finished conversation's merge conflict resolved.
+///
+/// The press on a done pull request's details pane, offered only while the
+/// recorded fact says the branch conflicts. It sends the conversation back into
+/// its wrap-up, where the resolution session is dispatched at the pull request
+/// by the rules a wrap-up already resolves a conflict under — with the review's
+/// settle left standing, so nothing reads the branch a second time.
+///
+/// Nothing is sent, for the reason nothing goes with a resume: which
+/// conversation it is is the whole of it, and which of its pull requests
+/// conflict is the server's to know.
+export function resolveConflicts(id: number): Promise<Resolved> {
+  return post<Resolved>(`/api/ui/conversations/${id}/resolve-conflicts`, {});
 }
 
 /// Stop driving a conversation after the task it is on.

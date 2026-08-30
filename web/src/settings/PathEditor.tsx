@@ -32,8 +32,8 @@ import { QuietButton } from "../QuietButton";
 import { loadSettings, saveSettings } from "../api/client";
 import type {
   BindEntry,
+  PathResolution,
   PathSource,
-  Resolution,
   SettingsSaved,
   SettingsView,
   WatchedPathEntry,
@@ -84,7 +84,7 @@ export function rowed<Entry extends { source: PathSource }>(
 }
 
 /// Why the server cannot see what an entry names, or `null` where it can.
-export function unresolved(resolution: Resolution): string | null {
+export function unresolved(resolution: PathResolution): string | null {
   return resolution === "Resolves" ? null : resolution.Unresolved.why;
 }
 
@@ -135,6 +135,7 @@ export function useWritingPaths() {
             : "",
         },
         share_viewer_url: standing?.share_viewer_url ?? "",
+        conflict_resolution: standing?.conflict_resolution ?? "Merge",
         ...lists,
       });
     },

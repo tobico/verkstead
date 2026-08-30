@@ -29,7 +29,7 @@
 
 use std::path::Path;
 
-use verkstead_render::{BindEntry, PathSource, PathsView, Resolution, WatchedPathEntry};
+use verkstead_render::{BindEntry, PathResolution, PathSource, PathsView, WatchedPathEntry};
 
 use crate::sandbox::SandboxConfig;
 use crate::settings::Settings;
@@ -108,7 +108,7 @@ fn binds_told(binds: &SandboxConfig, written: &[String]) -> Vec<BindEntry> {
                 path: written.to_owned(),
                 repo: None,
                 source: PathSource::Settings,
-                resolution: Resolution::Unresolved {
+                resolution: PathResolution::Unresolved {
                     why: format!("{error:#}"),
                 },
             },
@@ -121,10 +121,10 @@ fn binds_told(binds: &SandboxConfig, written: &[String]) -> Vec<BindEntry> {
 /// [`crate::watched`] would log about it — the same three questions it asks of
 /// an entry it is deciding an admission on, so that the page and the boundary
 /// cannot come to disagree about what a Watched Path is.
-fn resolved_dir(path: &Path) -> Resolution {
+fn resolved_dir(path: &Path) -> PathResolution {
     match watched::resolved_dir(path) {
-        Ok(_) => Resolution::Resolves,
-        Err(error) => Resolution::Unresolved {
+        Ok(_) => PathResolution::Resolves,
+        Err(error) => PathResolution::Unresolved {
             why: format!("{error:#}"),
         },
     }
@@ -133,10 +133,10 @@ fn resolved_dir(path: &Path) -> Resolution {
 /// And whether `path` is there at all, which is the whole of what a bind asks —
 /// see [`crate::sandbox::SandboxConfig::settings_binds`], which drops one that
 /// is not as the session spawns.
-fn there(path: &Path) -> Resolution {
+fn there(path: &Path) -> PathResolution {
     match path.exists() {
-        true => Resolution::Resolves,
-        false => Resolution::Unresolved {
+        true => PathResolution::Resolves,
+        false => PathResolution::Unresolved {
             why: "the server cannot see it: there is nothing at that path".to_owned(),
         },
     }

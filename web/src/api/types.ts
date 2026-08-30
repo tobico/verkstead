@@ -351,7 +351,7 @@ path: string,
  * The Repo this bind is only for, by the name it is registered under, or
  * `null` for one every sandbox gets.
  */
-repo: string | null, source: PathSource, resolution: Resolution, };
+repo: string | null, source: PathSource, resolution: PathResolution, };
 
 /**
  * One line of the backend's own bookkeeping.
@@ -791,6 +791,31 @@ worktree: Worktree | null,
  * Verkstead kept the commit.
  */
 base_commit: string | null, };
+
+/**
+ * How a merge conflict between a pull request and its base branch is resolved.
+ *
+ * Two words for two ways of putting the base's work on a branch that has
+ * diverged from it, and what tells them apart is what happens to the commits
+ * already pushed: a merge leaves every one of them where it is, and a rebase
+ * writes them again and has to be force-pushed — which rewrites what reviewers
+ * have read and breaks anything stacked on the branch.
+ *
+ * Which is why the page says so beside the choice rather than leaving it to be
+ * found later, and why merge is what nobody choosing anything gets.
+ */
+export type ConflictResolution = "Merge" | "Rebase";
+
+/**
+ * How one Repo is to resolve a conflict from now on, which is the one thing
+ * there is to *say* to a registered Repo besides taking it away.
+ *
+ * `null` takes the override back rather than writing the global's word down:
+ * what *use the global setting* means is that this Repo says nothing, and a
+ * Repo holding a copy of today's global would go on holding it after the global
+ * moved.
+ */
+export type ConflictResolutionEdit = { resolution: ConflictResolution | null, };
 
 /**
  * And what became of archiving one: putting a Closed Conversation away, so the
@@ -1419,6 +1444,16 @@ at: string,
 html: string, };
 
 /**
+ * And whether it merges into its base.
+ *
+ * The store's own word again, and two rather than GitHub's three for the reason
+ * it keeps two: a GitHub that has not worked the answer out yet is *not known*,
+ * and not knowing is the absence of this rather than a word in it — the same
+ * card with no mark on it that a pull request nothing has asked about draws.
+ */
+export type Merging = "Cleanly" | "Conflicting";
+
+/**
  * And one it did not.
  */
 export type MissedOut = { number: number, repo: string | null, 
@@ -1555,6 +1590,17 @@ export type PairingView = { profile: ProfileEntry,
  * here has to say — its Pairings are fixed and there is no picking left.
  */
 model: string | null, };
+
+/**
+ * Whether the server can see what an entry names, at the moment it was asked.
+ *
+ * Reported rather than refused: a save lands whatever it was told, so an entry
+ * naming a directory nobody has made yet is something to say on the row rather
+ * than something to turn a save down over. It is also how a nix install learns
+ * that a path added here needs the installer to widen the unit's namespace
+ * before it can do anything — the file says it, and the server cannot see it.
+ */
+export type PathResolution = "Resolves" | { "Unresolved": { why: string, } };
 
 /**
  * Which of the two places an entry was said in.
@@ -1871,7 +1917,23 @@ repo: string | null,
  * will be: what keeps it fresh is the checks watcher, and that stops when
  * the wrap-up is over.
  */
-checks: CheckRollup | null, };
+checks: CheckRollup | null, 
+/**
+ * And whether it merges into its base, as the last look at GitHub found it
+ * — or nothing where nothing has looked.
+ *
+ * Beside the rollup because it is the same kind of fact: a reading of
+ * GitHub written down when something asked, drawn as a mark on the card,
+ * and stale on a Conversation nothing is watching. What keeps this one
+ * fresh outlives the wrap-up, though — a sweep asks about a Done
+ * Conversation's pull requests every quarter of an hour until each is
+ * merged or closed.
+ *
+ * Unlike the rollup, a companion's card carries its own: whether a branch
+ * conflicts with its base is a fact about that branch, and it is written
+ * down per pull request rather than per Conversation.
+ */
+merging: Merging | null, };
 
 /**
  * The public half of the server's VAPID keypair, base64url-encoded from the
@@ -2070,18 +2132,53 @@ finished: number,
  * new-conversation box finds them. Empty where there are none, which is
  * most repositories most days.
  */
-roadmaps: Array<AbandonedRoadmap>, };
+roadmaps: Array<AbandonedRoadmap>, 
+/**
+ * How a conflicted pull request in this repository is resolved, where this
+ * Repo has been told something other than what every other one does.
+ *
+ * `null` is *whatever the global setting says* rather than *merge*: the two
+ * are the same answer today and stop being the same the moment the global
+ * is changed, and a Repo that had quietly frozen this morning's global
+ * would be a choice nobody made. What that global is, is on the settings
+ * themselves — see [`crate::SettingsView::conflict_resolution`].
+ */
+conflict_resolution: ConflictResolution | null, };
 
 /**
- * Whether the server can see what an entry names, at the moment it was asked.
+ * The **Resolve conflicts** press as the page receives it: when, and nothing
+ * else.
  *
- * Reported rather than refused: a save lands whatever it was told, so an entry
- * naming a directory nobody has made yet is something to say on the row rather
- * than something to turn a save down over. It is also how a nix install learns
- * that a path added here needs the installer to widen the unit's namespace
- * before it can do anything — the file says it, and the server cannot see it.
+ * Nothing else because there is nothing else. Where it sends the work is always
+ * Wrapping, which the move under it says; what it was about is the pull
+ * requests the record says conflict, which the cards above it draw. The row is
+ * the deciding, and the deciding is the whole of what it holds.
+ *
+ * So the words are the viewer's, as a move's are — see [`SteerEvent`], whose
+ * sentence this one stands beside and must not be mistaken for.
  */
-export type Resolution = "Resolves" | { "Unresolved": { why: string, } };
+export type ResolveConflictsEvent = { id: number, 
+/**
+ * When it was pressed, RFC 3339.
+ */
+at: string, };
+
+/**
+ * What became of pressing **Resolve conflicts** on a finished Conversation's
+ * pull request.
+ *
+ * Named the way [`Resumed`]'s refusals are, and for the same reason: the press
+ * either sets a resolution going or it does not, and a button that quietly did
+ * nothing would leave the human waiting on a session that was never dispatched.
+ *
+ * The refusals are of two kinds. Two of them are readings that have moved on
+ * rather than anything for the human to correct — the button is drawn off the
+ * record, and the record is what this is answered from — so each says what has
+ * changed since the pane was drawn. The other two are about the checkout the
+ * resolution session would work in, which a Conversation left Done for weeks is
+ * the likeliest of any to have lost.
+ */
+export type Resolved = "Resolving" | "NoSuchConversation" | "NotDone" | "NothingConflicts" | "NowhereToWork" | "WorktreeRefused";
 
 /**
  * The submitted collection of Answers and Unanswered markers for one Question
@@ -2352,6 +2449,12 @@ rust_build_cache: BuildCacheEdit,
  */
 share_viewer_url: string, 
 /**
+ * And how a conflicted pull request is resolved where its Repo says
+ * nothing, as a value for the same reason: there are two answers and a save
+ * says which of them this is to be.
+ */
+conflict_resolution: ConflictResolution, 
+/**
  * The Watched Paths the settings own, as values again: what is sent is
  * what `config.yaml` holds afterwards, so a row taken off the page is a
  * row taken out of the file.
@@ -2425,6 +2528,16 @@ rust_build_cache: BuildCacheView,
  * exactly as it was written.
  */
 share_viewer_url: string, 
+/**
+ * And how a conflicted pull request is resolved in every Repo that has not
+ * said otherwise.
+ *
+ * Never null, the way the build cache's switch is never null: nothing
+ * configured is a merge, so what comes back is where the setting sits
+ * rather than whether anybody has been here. A Repo's own override is on
+ * the Repo — see [`crate::RepoView::conflict_resolution`].
+ */
+conflict_resolution: ConflictResolution, 
 /**
  * And the Watched Paths and the Sandbox Configuration binds, from both of
  * the places either of them is said.
@@ -3038,7 +3151,7 @@ list: TaskListEvent | null, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent } | { "PullRequest": PullRequestEvent } | { "TaskList": TaskListReached } | { "StageList": StageListReached };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent } | { "ResolveConflicts": ResolveConflictsEvent } | { "PullRequest": PullRequestEvent } | { "TaskList": TaskListReached } | { "StageList": StageListReached };
 
 /**
  * What is to become of the configured token.
@@ -3282,7 +3395,7 @@ export type WatchedPathEntry = {
  * the settings — that is what a save sends back, so it has to come back as
  * it went in.
  */
-path: string, source: PathSource, resolution: Resolution, };
+path: string, source: PathSource, resolution: PathResolution, };
 
 /**
  * And what a watcher says back up it.

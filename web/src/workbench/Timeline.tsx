@@ -128,6 +128,7 @@ import { Mark } from "./Mark";
 // it: a Set waiting on the human wears the disc the sidebar's card wears, and
 // that vocabulary is the module's rather than any one component's.
 import marks from "./Mark.module.css";
+import { Conflict } from "./Merging";
 import { PaneHead } from "./PaneHead";
 import { Setup } from "./Setup";
 import { StatusButton } from "./StatusButton";
@@ -510,6 +511,11 @@ export function Timeline(props: {
                       }}
                     />
                   )}
+                </Match>
+                <Match
+                  when={"ResolveConflicts" in event && event.ResolveConflicts}
+                >
+                  <ConflictsResolved />
                 </Match>
                 <Match when={"Handoff" in event && event.Handoff}>
                   {(handoff) => (
@@ -1035,8 +1041,13 @@ function Card(props: {
   );
 }
 
-/// The pull request the finish step opened: what it is called, its number, and
-/// how its checks are getting on.
+/// The pull request the finish step opened: what it is called, its number, how
+/// its checks are getting on, and whether it merges into its base at all.
+///
+/// The last two are the marks on the end of the head line, and neither is ever
+/// guessed at: each is drawn only where something has asked GitHub, and the
+/// conflict mark goes the moment a fresh reading says the conflict is gone. See
+/// `Checks.tsx` and `Merging.tsx`.
 ///
 /// The whole card is the press, as the two lists beside it are: what is *on* it
 /// — the commits and the comments — is in the details pane, fetched from GitHub
@@ -1072,9 +1083,14 @@ function PullRequest(props: {
           {(repo) => <span class={styles.repo}>{repo()}</span>}
         </Show>
         {/* On the other end of the line, where every card's second thing sits:
-            the checks are what is true of the pull request now, beside what it
-            was called when it opened. */}
-        <Checks checks={props.opened.checks} class={styles.checkRollup!} />
+            what is true of the pull request now, beside what it was called when
+            it opened. Two marks rather than one — how the checks are, and
+            whether it merges at all — and each is drawn only where something
+            has asked GitHub about it. */}
+        <span class={styles.marks}>
+          <Conflict merging={props.opened.merging} />
+          <Checks checks={props.opened.checks} />
+        </span>
       </div>
 
       <p class={styles.pullRequestTitle}>{props.opened.title}</p>
@@ -1510,6 +1526,27 @@ function Steered(props: {
       )}
     </Show>
   );
+}
+
+/// The press that asks for a finished conversation's conflict to be resolved.
+///
+/// A line and not a card, drawn like the steer beside it and the move directly
+/// under it, and read as the same pair: this says who decided, and the move says
+/// what came of it.
+///
+/// **Its own line rather than a steer's**, because the two are not the same act.
+/// A steer into wrapping opens the branch to be read again — the review goes
+/// with it and the whole of the work is read afresh — and this deliberately
+/// leaves the review that carried the work to done standing, asking only that
+/// the conflict be resolved. Both are the human sending a finished conversation
+/// back into its wrap-up, and a record that drew them the same line could never
+/// be read back for which of them happened.
+///
+/// It says nothing about which pull request, for the reason the steer says
+/// nothing about which branch: the cards above it are what a conflict is drawn
+/// on, and this is the moment somebody acted on one.
+function ConflictsResolved(): JSX.Element {
+  return <p class={styles.pressed}>You asked for the conflict to be resolved</p>;
 }
 
 /// What a session has printed: how much of it there is, and the last thing it

@@ -289,6 +289,9 @@ describe("changing the build cache", () => {
           size: TOLD.rust_build_cache.size,
         },
         share_viewer_url: TOLD.share_viewer_url,
+        // Untouched by this form, and sent back as it stands: one request
+        // writes the whole of `config.yaml`.
+        conflict_resolution: TOLD.conflict_resolution,
         ...PATHS,
       }),
     );
@@ -327,6 +330,9 @@ describe("changing the build cache", () => {
         github_token: "Keep",
         rust_build_cache: { enabled: true, size: "80G" },
         share_viewer_url: TOLD.share_viewer_url,
+        // Untouched by this form, and sent back as it stands: one request
+        // writes the whole of `config.yaml`.
+        conflict_resolution: TOLD.conflict_resolution,
         ...PATHS,
       }),
     );

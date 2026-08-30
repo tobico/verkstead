@@ -64,16 +64,17 @@ pub use companions::{
 };
 pub use conversations::{
     Chosen, Closable, ClosableCompanion, Closing, Conversation, ConversationRow, Directing, Edited,
-    Ending, Event, Grilling, Implementing, Landed, Lifecycle, Rebuilding, Role, RowState,
-    SetOnTimeline, Settling, Staged, Steer, Steering, TimelineEvent, Work, adopting, ask,
+    Ending, Event, Grilling, Implementing, Landed, Lifecycle, Rebuilding, Resolving, Role,
+    RowState, SetOnTimeline, Settling, Staged, Steer, Steering, TimelineEvent, Work, adopting, ask,
     asked_from, closable, close_conversation, conversation_branch, conversations, follow_branch,
     follow_up_over, implement_again, last_batch_proposal, last_proposal, load_conversation, note,
     open_set, opened_at, pick_direction, record_backlog, record_handoff, record_roadmap,
-    recorded_worktrees, rename_branch, save_brief, set_asked_from, set_base_commit,
-    set_grilling_pairing, set_implementation_pairing, set_review_pairing, set_state, settle_naming,
-    skip_grilling, skip_review, stacks_on, start_adoption, start_building, start_conversation,
-    start_grilling, start_implementing, start_stage, start_unnamed_conversation, state,
-    steer_conversation, timeline, unanswered_set_since, waiting, work_on_repo,
+    recorded_worktrees, rename_branch, resolve_conflicts, save_brief, set_asked_from,
+    set_base_commit, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
+    set_state, settle_naming, skip_grilling, skip_review, stacks_on, start_adoption,
+    start_building, start_conversation, start_grilling, start_implementing, start_stage,
+    start_unnamed_conversation, state, steer_conversation, timeline, unanswered_set_since, waiting,
+    work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
 pub use endings::{ended_on, nothing_else};
@@ -85,16 +86,18 @@ pub use profiles::{
     delete_profile, load_profile, profiles, update_profile,
 };
 pub use pull_requests::{
-    PullRequest, Rollup, Wrapping, check_rollup, pull_request, pull_request_repo, pull_requests,
-    record_another_pull_request, record_check_rollup, record_pull_request,
+    Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup, merges, merging,
+    pull_request, pull_request_repo, pull_requests, record_another_pull_request,
+    record_check_rollup, record_merging, record_pull_request, record_standing, standing,
+    unfinished_pull_requests,
 };
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
     store_subscription, vapid_keys,
 };
 pub use repos::{
-    Repo, Unregistering, load_repo, recorded_repos, register_repo, registered_repo,
-    registered_repos, unregister_repo,
+    ConflictResolution, Repo, Unregistering, load_repo, recorded_repos, register_repo,
+    registered_repo, registered_repos, repo_resolution, set_repo_resolution, unregister_repo,
 };
 pub use session_names::session_id;
 pub use session_pairings::RanUnder;
@@ -107,10 +110,11 @@ pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use unseen::{see_conversation, stamp_unseen};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
-    Finished, Narrowing, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
-    forget_addressed_comments, forget_every_addressed_comment, forget_fix_attempts,
-    forget_narrowing, most_fix_attempts, narrowed_to_checks, narrowing, record_addressed_comments,
-    record_fix_attempt, settle_wrap_up, unsettle_wrap_up, wrap_up_settled,
+    Finished, Narrowing, WAITED_ON, WaitingOn, addressed_comments, conflict_fix_attempts,
+    finish_wrap_up, fix_attempts, forget_addressed_comments, forget_every_addressed_comment,
+    forget_fix_attempts, forget_narrowing, most_fix_attempts, narrowed_to_checks, narrowing,
+    record_addressed_comments, record_conflict_fix_attempt, record_fix_attempt, settle_wrap_up,
+    unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Set as the store holds it: what was asked plus the identity the server

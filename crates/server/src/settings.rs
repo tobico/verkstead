@@ -25,6 +25,7 @@
 //!   enabled: true
 //!   size: 30G
 //! share_viewer_url: https://ada.github.io/verkstead-share-viewer/
+//! conflict_resolution: merge
 //! sandbox_binds:
 //!   - /var/cache/verkstead-node
 //!   - verkstead=/var/cache/verkstead-cargo
@@ -53,6 +54,12 @@
 //! because it is the one sandbox control the human may reasonably want to reach
 //! from a phone — see [`RustBuildCache`], and
 //! [`crate::build_cache`] for what it switches.
+//!
+//! `conflict_resolution` is written that way too, and the default it falls back
+//! to is the safe half of the choice: a conflicted pull request has its base
+//! merged in rather than its branch rebased and force-pushed. One Repo may say
+//! otherwise — that override is a fact about the Repo and lives in the store
+//! beside it, not here.
 
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -60,6 +67,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+
+use crate::store::ConflictResolution;
 
 /// What the secrets file is called inside the Data Directory. Fixed rather than
 /// configurable, for the reason the database's name is: the directory is what an
@@ -366,6 +375,21 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     share_viewer_url: Option<String>,
 
+    /// And how a pull request that will not merge is resolved: the base merged
+    /// in, which is what nobody choosing anything gets, or the branch rebased
+    /// onto the base and force-pushed.
+    ///
+    /// Written the way `rust_build_cache` is, and for the same reason: an absent
+    /// key, an absent file and one nothing can parse all mean a merge. A human
+    /// should never have a worse experience for not having checked the settings,
+    /// and the worse experience here is a branch rewritten under whoever was
+    /// reading it.
+    ///
+    /// One Repo can say otherwise — that override is a fact about the Repo and
+    /// lives in the store beside it, and this is what it falls back to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    conflict_resolution: Option<ConflictResolution>,
+
     /// And the Sandbox Configuration binds said here rather than at the
     /// installation: a flat list in the grammar `--sandbox-bind` takes,
     /// `/abs/path` for a bind every sandbox gets and `name=/abs/path` for one
@@ -426,6 +450,7 @@ impl Config {
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
             },
             share_viewer_url: config.share_viewer_url.and_then(blank_is_nothing),
+            conflict_resolution: config.conflict_resolution,
             sandbox_binds: entries_written(config.sandbox_binds),
             watched_paths: entries_written(config.watched_paths),
         })
@@ -436,6 +461,7 @@ impl Config {
         git_author: GitAuthor,
         rust_build_cache: RustBuildCache,
         share_viewer_url: Option<String>,
+        conflict_resolution: ConflictResolution,
         sandbox_binds: Vec<String>,
         watched_paths: Vec<String>,
     ) -> Config {
@@ -443,6 +469,11 @@ impl Config {
             git_author,
             rust_build_cache,
             share_viewer_url: share_viewer_url.and_then(blank_is_nothing),
+            // Written down as it stands rather than left out where it is the
+            // default, the way the build cache's switch is: what the page sends
+            // is where the setting is to sit, and a key that appeared only for
+            // one of the two answers would read as a file half-written.
+            conflict_resolution: Some(conflict_resolution),
             sandbox_binds: entries_written(sandbox_binds),
             watched_paths: entries_written(watched_paths),
         }
@@ -469,6 +500,17 @@ impl Config {
     /// [`crate::sharing::link`]'s to say.
     pub fn share_viewer_url(&self) -> Option<&str> {
         self.share_viewer_url.as_deref()
+    }
+
+    /// And how a conflict is resolved where the Repo it is in says nothing,
+    /// which is a merge until somebody says otherwise.
+    ///
+    /// Where the switch above answers rather than the field beside it: there is
+    /// no third state to draw, so what comes back is where the setting *sits*
+    /// and not whether anybody has been here.
+    pub fn conflict_resolution(&self) -> ConflictResolution {
+        self.conflict_resolution
+            .unwrap_or(ConflictResolution::Merge)
     }
 
     /// And the binds it holds, in the order they were written down. An empty
@@ -612,7 +654,7 @@ fn blank_is_nothing(value: String) -> Option<String> {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
-    use super::{Config, GitAuthor, RustBuildCache, Secrets, Settings};
+    use super::{Config, ConflictResolution, GitAuthor, RustBuildCache, Secrets, Settings};
 
     #[test]
     fn the_token_is_what_the_file_says() {
@@ -715,6 +757,102 @@ mod tests {
         assert_eq!(
             config.share_viewer_url(),
             Some("https://ada.github.io/shares/")
+        );
+    }
+
+    /// How a conflict is resolved is the human's word for it, and what they
+    /// wrote is what comes back.
+    #[test]
+    fn how_a_conflict_is_resolved_is_what_the_config_file_says() {
+        assert_eq!(
+            Config::read("conflict_resolution: rebase\n")
+                .unwrap()
+                .conflict_resolution(),
+            ConflictResolution::Rebase,
+        );
+        assert_eq!(
+            Config::read("conflict_resolution: merge\n")
+                .unwrap()
+                .conflict_resolution(),
+            ConflictResolution::Merge,
+        );
+    }
+
+    /// And the whole point of the shape: nothing configured is a merge.
+    ///
+    /// An absent key, an absent file and one nothing can parse all say the same
+    /// thing, because the alternative is a human who never found this section
+    /// having their branch rewritten and force-pushed under whoever was reading
+    /// it.
+    #[test]
+    fn a_conflict_nobody_has_said_anything_about_is_merged() {
+        for text in [
+            "",
+            "git_author:\n  name: Tobias Cohen\n",
+            "conflict_resolution:\n",
+        ] {
+            assert_eq!(
+                Config::read(text).unwrap().conflict_resolution(),
+                ConflictResolution::Merge,
+                "nothing said here is a merge: {text:?}",
+            );
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        assert_eq!(
+            settings.config().conflict_resolution(),
+            ConflictResolution::Merge,
+            "and so is a Data Directory with no config file in it at all",
+        );
+
+        std::fs::write(settings.config_path(), "conflict_resolution: [oh\n").unwrap();
+
+        assert_eq!(
+            settings.config().conflict_resolution(),
+            ConflictResolution::Merge,
+            "and so is a file nothing can parse",
+        );
+    }
+
+    /// The word a save writes is one the next read understands, which is what
+    /// the settings page depends on: it saves and then draws what came back.
+    #[test]
+    fn how_a_conflict_is_resolved_goes_through_the_file_and_comes_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                None,
+                ConflictResolution::Rebase,
+                vec![],
+                vec![],
+            ))
+            .unwrap();
+
+        assert_eq!(
+            settings.config().conflict_resolution(),
+            ConflictResolution::Rebase,
+        );
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                None,
+                ConflictResolution::Merge,
+                vec![],
+                vec![],
+            ))
+            .unwrap();
+
+        assert_eq!(
+            settings.config().conflict_resolution(),
+            ConflictResolution::Merge
         );
     }
 
@@ -893,6 +1031,7 @@ mod tests {
                 ),
                 RustBuildCache::default(),
                 None,
+                ConflictResolution::Merge,
                 vec![],
                 vec![],
             ))
@@ -914,6 +1053,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Some("https://ada.github.io/shares/".to_owned()),
+                ConflictResolution::Merge,
                 vec![],
                 vec![],
             ))
@@ -931,6 +1071,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 Some(String::new()),
+                ConflictResolution::Merge,
                 vec![],
                 vec![],
             ))
@@ -954,6 +1095,7 @@ mod tests {
                 ),
                 RustBuildCache::default(),
                 None,
+                ConflictResolution::Merge,
                 vec![],
                 vec![],
             ))
@@ -975,6 +1117,7 @@ mod tests {
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), Some(String::new())),
                 RustBuildCache::default(),
                 None,
+                ConflictResolution::Merge,
                 vec![],
                 vec![],
             ))
@@ -1015,6 +1158,7 @@ mod tests {
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
                 None,
+                ConflictResolution::Merge,
                 vec![],
                 vec![],
             ))
@@ -1040,6 +1184,7 @@ mod tests {
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
                 None,
+                ConflictResolution::Merge,
                 vec![],
                 vec![],
             ))
@@ -1101,6 +1246,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 None,
+                ConflictResolution::Merge,
                 vec!["/var/cache/verkstead-node".to_owned()],
                 vec![],
             ))
@@ -1118,6 +1264,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 None,
+                ConflictResolution::Merge,
                 vec![],
                 vec![],
             ))
@@ -1164,6 +1311,7 @@ mod tests {
                 GitAuthor::default(),
                 RustBuildCache::default(),
                 None,
+                ConflictResolution::Merge,
                 vec![],
                 vec!["/home/ada/src".to_owned()],
             ))

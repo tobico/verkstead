@@ -140,6 +140,10 @@ export function ShareViewerPane(props: {
             : "",
         },
         share_viewer_url,
+        // Untouched, for the reason the rest of it is: the endpoint writes the
+        // whole of `config.yaml`, and the last section on the page is where it
+        // is set.
+        conflict_resolution: settings?.conflict_resolution ?? "Merge",
         // And the paths as the read left them: one request writes the whole of
         // `config.yaml`, so a list this form left out would be a list it
         // emptied — see [`heldPaths`].

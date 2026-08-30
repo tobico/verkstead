@@ -1802,20 +1802,81 @@ mod tests {
         );
     }
 
-    /// One skill for three callers is the whole reason it is one skill, so it
-    /// has to name all three: a failed check, a review finding and a comment on
-    /// the pull request are one job, and three skills saying it would be three
-    /// things to keep true.
+    /// One skill for four callers is the whole reason it is one skill, so it
+    /// has to name all four: a failed check, a review finding, a comment on the
+    /// pull request and a conflict with its base are one job, and four skills
+    /// saying it would be four things to keep true.
     #[test]
-    fn the_addressing_skill_is_written_for_all_three_kinds_of_feedback() {
+    fn the_addressing_skill_is_written_for_all_four_kinds_of_feedback() {
         let addressing = skill("addressing/SKILL.md");
 
-        for named in ["check that failed", "finding from the review", "comment"] {
+        for named in [
+            "check that failed",
+            "finding from the review",
+            "comment",
+            "merge conflict",
+        ] {
             assert!(
                 addressing.contains(named),
                 "the skill should say it serves a {named}: {addressing}"
             );
         }
+    }
+
+    /// What a resolution session must not do, and it is the one failure mode
+    /// nothing downstream would catch: a conflict "resolved" by taking one side
+    /// wholesale merges cleanly, passes the checks, and has thrown away work
+    /// somebody did without saying so.
+    ///
+    /// And what its commit does not owe: the merge is the base branch arriving
+    /// rather than anything the session set out to build, so it is bookkeeping,
+    /// and a summary written for it would be a summary of somebody else's diff.
+    #[test]
+    fn the_addressing_skill_says_a_conflict_is_two_changes_to_reconcile() {
+        let addressing = skill("addressing/SKILL.md");
+
+        assert!(
+            addressing.contains("two changes to reconcile"),
+            "neither side is the one to keep: {addressing}"
+        );
+        assert!(
+            addressing.contains("--ours") && addressing.contains("--theirs"),
+            "and the shortcuts that throw one of them away are named: {addressing}"
+        );
+        assert!(
+            addressing.contains("commit that resolves a conflict is bookkeeping"),
+            "and its commit is bookkeeping rather than a summary to fight over: \
+             {addressing}"
+        );
+    }
+
+    /// And what says which of the two acts on the branch a resolution session is
+    /// making: the feedback, because the human has a setting for it — merge,
+    /// which is pushed and never force-pushed, or rebase, which cannot be pushed
+    /// any other way than with a lease.
+    ///
+    /// The skill has to name both and hand the choice back to the feedback. One
+    /// that said *merge* outright would be a skill arguing with a Repo configured
+    /// for a rebase, and a session that split the difference would either fail to
+    /// push or rewrite a branch nobody asked it to.
+    #[test]
+    fn the_addressing_skill_leaves_merge_or_rebase_to_the_feedback() {
+        let addressing = skill("addressing/SKILL.md");
+
+        assert!(
+            addressing.contains("The feedback\n  names which of the two"),
+            "which act on the branch this is, is the feedback's to say: {addressing}"
+        );
+        assert!(
+            addressing.contains("never force-push"),
+            "a merge is pushed as it stands, nothing stacked on the branch \
+             breaking: {addressing}"
+        );
+        assert!(
+            addressing.contains("--force-with-lease"),
+            "and a rebase is force-pushed with a lease, having rewritten the \
+             branch: {addressing}"
+        );
     }
 
     /// What a fix session has to leave behind, and the one way it differs from

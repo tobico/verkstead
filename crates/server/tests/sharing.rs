@@ -192,6 +192,7 @@ fn kind(event: &TimelineEvent) -> &'static str {
         TimelineEvent::Notice(_) => "Notice",
         TimelineEvent::ManualTask(_) => "ManualTask",
         TimelineEvent::Steer(_) => "Steer",
+        TimelineEvent::ResolveConflicts(_) => "ResolveConflicts",
         TimelineEvent::PullRequest(_) => "PullRequest",
         TimelineEvent::TaskList(_) => "TaskList",
         TimelineEvent::StageList(_) => "StageList",

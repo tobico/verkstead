@@ -90,6 +90,7 @@ rust_build_cache:
   enabled: true
   size: 30G
 share_viewer_url: https://ada.github.io/verkstead-shares/
+conflict_resolution: merge
 sandbox_binds:
   - /var/cache/verkstead-node
   - verkstead=/var/cache/verkstead-cargo
@@ -122,13 +123,14 @@ what the settings page saves through:
 $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-   "compiles_cached":true},"share_viewer_url":"",
+   "compiles_cached":true},"share_viewer_url":"","conflict_resolution":"Merge",
  "paths":{"watched":[],"binds":[]}}
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
          "rust_build_cache":{"enabled":true,"size":""},
          "share_viewer_url":"https://ada.github.io/verkstead-shares/",
+         "conflict_resolution":"Merge",
          "watched_paths":["/home/tobi/src"],
          "sandbox_binds":["/var/cache/verkstead-node"]}' \
     http://127.0.0.1:8422/api/ui/settings
@@ -137,6 +139,7 @@ $ curl -X POST -H 'Content-Type: application/json' \
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
     "compiles_cached":true},
   "share_viewer_url":"https://ada.github.io/verkstead-shares/",
+  "conflict_resolution":"Merge",
   "paths":{"watched":[{"path":"/home/tobi/src","source":"Settings",
     "resolution":"Resolves"}],
    "binds":[{"path":"/var/cache/verkstead-node","repo":null,
@@ -198,6 +201,29 @@ Put that on a public site of your own, a GitHub Pages repository being what it
 was written for, and save its address here. Nothing about it is secret either
 way: the page is public, and the id after the `#` is never sent to the host that
 serves it.
+
+`"conflict_resolution"` is what a session sent at a pull request that will not
+merge is told to do about it: `"Merge"`, which merges the base branch into the
+work branch and pushes, or `"Rebase"`, which rebases the branch onto its base and
+force-pushes it with `--force-with-lease`. An absent key, an absent file and one
+nothing can parse all mean a merge — a rebase rewrites what reviewers have
+already read and breaks anything stacked on the branch, and nobody should meet
+that for never having found the settings page. In `config.yaml` the word is
+lowercase, as `merge` or `rebase`.
+
+One repo can say otherwise, which is a fact about the repo rather than about the
+machine and so lives in the database beside it — set from that repo's own pane on
+the settings page, or over the API:
+
+```console
+$ curl -X POST -H 'Content-Type: application/json' \
+    -d '{"resolution":"Rebase"}' \
+    http://127.0.0.1:8422/api/ui/repos/1/resolution
+```
+
+`null` there takes the override back, so that repo does whatever every other one
+does. It is nothing at all rather than a copy of today's global, so a repo left
+alone follows the setting above when it is changed.
 
 The link is composed as a page is drawn rather than written down at the publish.
 What the record holds is the gist's own URL, so a share published before a viewer

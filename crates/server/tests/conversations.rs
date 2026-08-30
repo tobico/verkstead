@@ -24,9 +24,9 @@ use verkstead_render::{
     CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChosen,
     CompanionRefusal, CompanionRemoved, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationUnarchived, ConversationView,
-    GrillingStarted, Lifecycle, PickedView, PinnedEvent, ProfileChosen, ProfileSaved, Registered,
-    RoadmapPane, ShowingArchived, Standing, Started, SteerCompanionRefusal, SteerOpened,
-    TimelineEvent,
+    GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen, ProfileSaved,
+    Registered, Resolved, RoadmapPane, ShowingArchived, Standing, Started, SteerCompanionRefusal,
+    SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
@@ -7054,6 +7054,339 @@ fn checks(view: &ConversationView) -> [Option<CheckRollup>; 2] {
     [pinned.flatten(), reached.flatten()]
 }
 
+/// And whether it merges is carried the same way, to the same two copies of the
+/// same card — and drawn in whatever state the Conversation is in, this one
+/// never leaving Wrapping at all.
+///
+/// Walked through the store rather than watched for, as the checks above are:
+/// what is under test is the reading, and asking GitHub is `src/checks.rs`'s and
+/// `src/merges.rs`'s.
+///
+/// Both words go over, because both are what GitHub said. Which of them is drawn
+/// is the viewer's — a card marks the conflict and says nothing about a pull
+/// request that merges — and a wire that carried the conflict alone could not
+/// tell *it merges* from *nobody asked*.
+#[tokio::test]
+async fn whether_a_pull_request_merges_reaches_both_copies_of_its_card() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        merges(&opened(&app, id).await),
+        [None, None],
+        "nothing has asked GitHub yet, and a card with nothing to say draws no mark",
+    );
+
+    for (asked, drawn) in [
+        (store::Merging::Conflicting, Merging::Conflicting),
+        // And back again, because a conflict that has been resolved is not a
+        // conflict: the reading is written over, so the mark goes.
+        (store::Merging::Cleanly, Merging::Cleanly),
+    ] {
+        store::record_merging(&pool, id, repo_id, asked)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            merges(&opened(&app, id).await),
+            [Some(drawn), Some(drawn)],
+            "the card follows the poll, in both places it is drawn",
+        );
+    }
+
+    // And on to Done, where the sweep goes on asking long after the wrap-up's
+    // own watcher stopped: a base moving under a branch nobody is working on is
+    // exactly what that sweep is for, so the mark is drawn in this state as
+    // readily as in the one above.
+    for waiting_on in store::WAITED_ON.into_iter().chain([
+        store::WaitingOn::Checks(repo_id),
+        store::WaitingOn::Comments(repo_id),
+        store::WaitingOn::Mergeable(repo_id),
+    ]) {
+        store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    store::finish_wrap_up(&pool, id).await.unwrap();
+
+    store::record_merging(&pool, id, repo_id, store::Merging::Conflicting)
+        .await
+        .unwrap();
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Done);
+    assert_eq!(
+        merges(&view),
+        [Some(Merging::Conflicting), Some(Merging::Conflicting)],
+        "the work being finished with is no reason to stop saying the branch will not merge",
+    );
+}
+
+/// Whether the pull request merges on each copy of its card, in the same order:
+/// the pinned one first, then the one on the record.
+fn merges(view: &ConversationView) -> [Option<Merging>; 2] {
+    let pinned = view.pinned.iter().find_map(|event| match event {
+        PinnedEvent::PullRequest(opened) => Some(opened.merging),
+        _ => None,
+    });
+
+    let reached = view.timeline.iter().find_map(|event| match event {
+        TimelineEvent::PullRequest(opened) => Some(opened.merging),
+        _ => None,
+    });
+
+    [pinned.flatten(), reached.flatten()]
+}
+
+/// A companion's pull request carries its own reading, which is where this
+/// parts company with the rollup beside it: a rollup is written down per
+/// Conversation, and whether a branch merges is a fact about that branch.
+///
+/// So a wrap-up ending on two pull requests can have one conflicted and one
+/// clean, which is the ordinary shape of it — a base having moved in one
+/// repository and not in the other — and each card says what is true of its own.
+#[tokio::test]
+async fn each_pull_request_carries_whether_its_own_branch_merges() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    // A second registered repository, standing in for the read-write companion
+    // the work also committed in.
+    let beside = second_repo(&app, watched.path(), "askance").await;
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::record_another_pull_request(
+        &pool,
+        id,
+        beside,
+        &store::PullRequest {
+            number: 7,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/askance/pull/7".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::record_merging(&pool, id, repo_id, store::Merging::Cleanly)
+        .await
+        .unwrap();
+    store::record_merging(&pool, id, beside, store::Merging::Conflicting)
+        .await
+        .unwrap();
+
+    let view = opened(&app, id).await;
+
+    let each: Vec<(Option<String>, Option<Merging>)> = view
+        .pinned
+        .iter()
+        .filter_map(|event| match event {
+            PinnedEvent::PullRequest(opened) => Some((opened.repo.clone(), opened.merging)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        each,
+        vec![
+            (None, Some(Merging::Cleanly)),
+            (Some("askance".to_owned()), Some(Merging::Conflicting)),
+        ],
+        "each card says whether its own branch merges, whatever the other's does",
+    );
+}
+
+/// The press that gets a finished Conversation's conflict resolved is refused
+/// where there is nothing to resolve, and where the Conversation has moved since
+/// the pane was drawn.
+///
+/// Every refusal, because a press that quietly did nothing is what the named
+/// outcomes exist to prevent — and both of these are readings that have moved on
+/// rather than anything for the human to correct: the button is drawn off the
+/// record, and the record is what the press is answered from.
+///
+/// The press that *works* is not here. It starts the wrap-up's watchers, which
+/// go to GitHub — so what it does end to end is `sessions.rs`'s, over a `gh` of
+/// its own. What these ask is the reading in front of it.
+#[tokio::test]
+async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resolving(&app, 404).await,
+        Resolved::NoSuchConversation,
+        "there is nothing there to press anything on",
+    );
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+    store::record_merging(&pool, id, repo_id, store::Merging::Conflicting)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resolving(&app, id).await,
+        Resolved::NotDone,
+        "this one is wrapping up, so its own watchers have the conflict in hand",
+    );
+
+    // And on to Done, which is where the press is offered.
+    for waiting_on in store::WAITED_ON.into_iter().chain([
+        store::WaitingOn::Checks(repo_id),
+        store::WaitingOn::Comments(repo_id),
+        store::WaitingOn::Mergeable(repo_id),
+    ]) {
+        store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    store::finish_wrap_up(&pool, id).await.unwrap();
+
+    // Where somebody has resolved it in the meantime, or the freshening the pane
+    // does as it opens found the conflict gone.
+    store::record_merging(&pool, id, repo_id, store::Merging::Cleanly)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resolving(&app, id).await,
+        Resolved::NothingConflicts,
+        "and a press that found nothing to resolve moves nothing",
+    );
+
+    assert_eq!(
+        opened(&app, id).await.state,
+        Lifecycle::Done,
+        "so the Conversation is where the press found it",
+    );
+}
+
+/// And refused where there is nowhere to resolve it — the Worktree gone and git
+/// unable to make it again.
+///
+/// The refusal this press has that no other reading gives it. A Conversation
+/// stays Done for as long as nobody merges its pull request, which is weeks in
+/// the case the press is for, and a directory goes in that time: deleted by
+/// hand, hollowed out, or left behind by a repository that is no longer there.
+/// A press that moved the work back into a wrap-up over one would dispatch a
+/// resolution session at a path that is not there, spend both of the pull
+/// request's goes on a sandbox nothing could build, and stop the run with a
+/// Notice blaming the conflict.
+///
+/// So the checkout is seen to before the move, and where it cannot be made the
+/// press refuses and the Conversation stays exactly where it was. The
+/// repository itself is taken away here because that is the one way to make git
+/// refuse for certain — what is being asked is what the press does when it
+/// refuses, rather than which of the ways a checkout goes was this one.
+#[tokio::test]
+async fn resolving_a_conflict_is_refused_where_there_is_nowhere_to_resolve_it() {
+    let (watched, dir, app, repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+    store::record_merging(&pool, id, repo_id, store::Merging::Conflicting)
+        .await
+        .unwrap();
+
+    for waiting_on in store::WAITED_ON.into_iter().chain([
+        store::WaitingOn::Checks(repo_id),
+        store::WaitingOn::Comments(repo_id),
+        store::WaitingOn::Mergeable(repo_id),
+    ]) {
+        store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    store::finish_wrap_up(&pool, id).await.unwrap();
+
+    // The work is finished with, the pull request conflicts, and there is
+    // nothing left on this machine to do anything about it in.
+    std::fs::remove_dir_all(repo.join(".git")).unwrap();
+
+    assert_eq!(
+        resolving(&app, id).await,
+        Resolved::WorktreeRefused,
+        "git cannot make the checkout again, so the press says so rather than \
+         moving the work into a wrap-up with nowhere to work",
+    );
+
+    assert_eq!(
+        opened(&app, id).await.state,
+        Lifecycle::Done,
+        "and the Conversation is where the press found it",
+    );
+}
+
+/// Press **Resolve conflicts**, the way the button on a Done pull request's
+/// details pane does. Nothing goes with it: which Conversation it is is the
+/// whole of what it says.
+async fn resolving(app: &Router, id: i64) -> Resolved {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/resolve-conflicts"),
+        &serde_json::json!({}),
+    )
+    .await
+}
 /// A wrap-up that has narrowed to its checks says so where the human reads a
 /// Conversation: on its card, and on the row in the sidebar they find it by.
 ///
@@ -7093,12 +7426,13 @@ async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
     assert_eq!(view.state, Lifecycle::Wrapping);
     assert!(
         !view.waiting_on_checks,
-        "a wrap-up nobody has read yet is waiting on all three of them",
+        "a wrap-up nobody has read yet is waiting on all four of them",
     );
 
     for waiting_on in [
         store::WaitingOn::Review,
         store::WaitingOn::Comments(repo_id),
+        store::WaitingOn::Mergeable(repo_id),
     ] {
         store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
@@ -7180,6 +7514,16 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
 
     assert_eq!(
         store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::NotNarrowed,
+        "a pull request nothing has said merges is not one waiting on its checks",
+    );
+
+    store::settle_wrap_up(&pool, id, store::WaitingOn::Mergeable(repo_id))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
         store::Narrowing::Narrowed,
         "the first look is the one that owes the Timeline a line",
     );
@@ -7218,6 +7562,17 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
         store::narrowing(&pool, id, false).await.unwrap(),
         store::Narrowing::Narrowed,
         "and dealing with it narrows the wrap-up a second time, which is a second line",
+    );
+
+    store::unsettle_wrap_up(&pool, id, store::WaitingOn::Mergeable(repo_id))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::NotNarrowed,
+        "and a pull request that has fallen into conflict is not waiting on GitHub \
+         to finish anything: what it needs is a resolution",
     );
 
     pool.close().await;

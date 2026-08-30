@@ -109,7 +109,8 @@ pub(crate) const LINE: &str = "If you have your next step, carry on with it now.
 /// terminal, not a wait on anything.
 const BEFORE_THE_ENTER: Duration = Duration::from_millis(250);
 
-/// And how long after the Enter the line is still arriving back.
+/// How long the terminal has to say nothing before what was typed is taken to
+/// have finished arriving back.
 ///
 /// **Because a terminal says what is typed into it.** The keystrokes a rescue
 /// puts in are echoed straight back out — by the line discipline where the agent
@@ -119,16 +120,30 @@ const BEFORE_THE_ENTER: Duration = Duration::from_millis(250);
 /// that has hung with its terminal open echoes exactly as well as one that is
 /// about to take a turn.
 ///
-/// So the stir a rescue makes is taken from here rather than from the last
-/// keystroke — see [`until_it_will_not_ask`], where what says the line landed is
-/// the session speaking *after* the stir. A stir the typing itself answered
-/// would be no stir at all, and the second rescue would arm on the bare grace
-/// the first one did.
+/// So the stir a rescue makes is taken from after the echo rather than from the
+/// last keystroke — see [`until_it_will_not_ask`], where what says the line
+/// landed is the session speaking *after* the stir. A stir the typing itself
+/// answered would be no stir at all, and the second rescue would arm on the bare
+/// grace the first one did.
 ///
-/// One turnaround of a terminal again, for [`BEFORE_THE_ENTER`]'s reason: an
-/// echo is drawn as it is read, and anything arriving later than this is the
-/// session rather than the keyboard.
+/// One turnaround of a terminal, for [`BEFORE_THE_ENTER`]'s reason: an echo is
+/// drawn as it is read, so a window this long with nothing in it is one no echo
+/// is still arriving inside.
 const AFTER_THE_ECHO: Duration = Duration::from_millis(250);
+
+/// And how long that wait goes on for before the stir is taken anyway.
+///
+/// The ceiling on [`after_the_echo`], and there are two terminals it is for: the
+/// one that takes the keystrokes and draws nothing back for them, where there is
+/// no echo to wait out at all; and the one whose session took the line and got
+/// straight on with its work, which is a session printing for reasons of its own
+/// and no longer anything this loop is waiting to see.
+///
+/// Long against a turnaround, because what it bounds is the machine rather than
+/// the terminal: an echo is written the moment the keystroke is, and seconds
+/// later is not an echo running late but a terminal that was never going to send
+/// one.
+const FOR_THE_ECHO: Duration = Duration::from_secs(2);
 
 /// Type [`LINE`] into the session, and say whether it reached one.
 ///
@@ -177,6 +192,42 @@ pub(crate) async fn rescue(state: &AppState, conversation_id: i64, event_id: i64
     );
 
     true
+}
+
+/// Wait for what was just typed to finish arriving back, and give the moment it
+/// had as the stir.
+///
+/// **Watched rather than waited out.** What the stir was taken after used to be
+/// a fixed pause, long enough for an echo on a machine with nothing else on it —
+/// and a pause is a guess at something that can be looked at instead. An echo a
+/// moment slower than the guess landed *after* the stir, where it reads as the
+/// session's own word: the second rescue then armed on the bare grace the first
+/// one did, which is the one thing the stir is there to prevent.
+///
+/// So it waits for the terminal to speak and then to settle. A word later than
+/// the keystrokes is the echo arriving, [`AFTER_THE_ECHO`] with nothing in it is
+/// the echo all in, and the stir is taken from there — which is after every word
+/// the keyboard put in the session's mouth, however long the machine took to
+/// carry them.
+///
+/// [`FOR_THE_ECHO`] bounds the whole of it, for the terminals that never settle.
+async fn after_the_echo(quiet: &Quiet) -> Instant {
+    let typed = Instant::now();
+
+    while typed.elapsed() < FOR_THE_ECHO {
+        let said = quiet.since();
+
+        tokio::time::sleep(AFTER_THE_ECHO).await;
+
+        // A word since the keystrokes, and nothing after it in the window just
+        // waited out: what was typed has come back and the terminal has gone
+        // quiet behind it.
+        if said > typed && quiet.since() == said {
+            break;
+        }
+    }
+
+    Instant::now()
 }
 
 /// What would say this session's work is done, which is the one thing about the
@@ -374,12 +425,10 @@ pub(crate) async fn until_it_will_not_ask(
             spent += 1;
 
             // Once what was typed has finished arriving back, rather than as it
-            // was typed — see [`AFTER_THE_ECHO`]. A terminal echoes, so a stir
+            // was typed — see [`after_the_echo`]. A terminal echoes, so a stir
             // taken at the last keystroke is one the keystrokes answer
             // themselves.
-            tokio::time::sleep(AFTER_THE_ECHO).await;
-
-            stirred = Instant::now();
+            stirred = after_the_echo(quiet).await;
         }
 
         tokio::time::sleep(pace.poll).await;

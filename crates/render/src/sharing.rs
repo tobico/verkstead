@@ -279,6 +279,7 @@ fn boards(event: &TimelineEvent) -> bool {
         | TimelineEvent::QuestionSet(_)
         | TimelineEvent::Commit(_)
         | TimelineEvent::Steer(_)
+        | TimelineEvent::ResolveConflicts(_)
         | TimelineEvent::Moved(_)
         | TimelineEvent::ManualTask(_) => true,
 

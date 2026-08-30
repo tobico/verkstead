@@ -33,9 +33,11 @@ import type {
   ConversationUnarchived,
   ConversationView,
   GrillingStarted,
+  Merging,
   ProfileEntry,
   PinnedEvent,
   PullRequestDetails,
+  Resolved,
   Resumed,
   RoadmapPane,
   Screen,
@@ -128,6 +130,7 @@ import outputCss from "../src/workbench/Output.module.css?raw";
 import paneHead from "../src/workbench/PaneHead.module.css";
 import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The pause card, which is one of the record's and draws itself.
+import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
@@ -140,6 +143,13 @@ import {
   SPOKEN as CHECKS_SPOKEN,
 } from "../src/workbench/Checks";
 import checkMarks from "../src/workbench/Checks.module.css";
+// And the mark a pull request that will not merge is said in, the same two ways
+// — the hashed name, and the words the icon is read aloud in. Its own shape,
+// named here rather than read off the component, for the reason the three above
+// are.
+import { faCodeMerge } from "@fortawesome/free-solid-svg-icons";
+import { CONFLICTED, IN_WORDS } from "../src/workbench/Merging";
+import conflictMark from "../src/workbench/Merging.module.css";
 // The Screen, both ways: it is the one pane with a height of its own, and the
 // rules that give it one are what jsdom cannot lay out.
 import screenPane from "../src/workbench/Screen.module.css";
@@ -8219,6 +8229,48 @@ describe("steering a conversation", () => {
     expect(moved.at(-1)).toBe("Grilling → Done");
   });
 
+  /// And the other press that stands above a move into wrapping is drawn as
+  /// itself, which is the whole reason it is a kind of its own.
+  ///
+  /// A steer into wrapping carrying nothing written would otherwise be the same
+  /// row and the same line — and the two are different acts: a steer opens the
+  /// branch to be read again, and this leaves the review that carried the work
+  /// to done standing. Which of them happened is what a record months old has to
+  /// be readable back for.
+  it("draws the resolve press as itself rather than as a steer", async () => {
+    theGrillingStanding({
+      state: "Wrapping",
+      timeline: [
+        ...GRILLING.timeline,
+        { ResolveConflicts: { id: 9101, at: "2026-08-24T11:00:00Z" } },
+        { Moved: { id: 9102, at: "2026-08-24T11:00:00Z", state: "Wrapping" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pressed = await drawn(
+      container,
+      `.${timeline.timelineEvent} > .${timeline.pressed}`,
+    );
+
+    expect(pressed.textContent).toBe("You asked for the conflict to be resolved");
+
+    expect(
+      container.querySelector(
+        `.${timeline.timelineEvent} > .${timeline.steered}`,
+      ),
+      "and not as a steer, which would say the branch was read again",
+    ).toBeNull();
+
+    const moved = [
+      ...container.querySelectorAll(
+        `.${timeline.timelineEvent} > .${timeline.moved}`,
+      ),
+    ].map((line) => line.textContent);
+
+    expect(moved.at(-1)).toBe("Grilling → Wrapping");
+  });
+
   /// And where it carries an instruction it is a card rather than a line: what
   /// the session was sent off to do is a document like the brief and the
   /// handoff, and is read the same way — clamped beside the move, whole in the
@@ -11162,6 +11214,7 @@ const BESIDE_IT: PinnedEvent = {
     url: "https://github.com/tobico/askance/pull/7",
     repo: "askance",
     checks: null,
+    merging: null,
   },
 };
 
@@ -11225,6 +11278,21 @@ function whoseChecks(checks: CheckRollup | null): Partial<ConversationView> {
     pinned: WRAPPING.pinned.map((event) =>
       "PullRequest" in event
         ? { PullRequest: { ...event.PullRequest, checks } }
+        : event,
+    ),
+  };
+}
+
+/// And the same Conversation with its pull request merging in a given state — or
+/// in none, which is one nothing has asked GitHub about.
+///
+/// Both copies of the card again, and both drawn from the pinned Event for the
+/// same reason: the record row holds the one reading handed over twice.
+function whoseMerging(merging: Merging | null): Partial<ConversationView> {
+  return {
+    pinned: WRAPPING.pinned.map((event) =>
+      "PullRequest" in event
+        ? { PullRequest: { ...event.PullRequest, merging } }
         : event,
     ),
   };
@@ -11348,6 +11416,104 @@ describe("the pinned pull request", () => {
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
 
     expect(opened.querySelector(`.${checkMarks.checks}`)).toBeNull();
+  });
+
+  /// And the mark beside them, which is about something else: whether the branch
+  /// merges into its base at all. One shape and one meaning — a conflict — drawn
+  /// in the palette's colour for work that has stopped.
+  ///
+  /// The shape is named here rather than read off the component, for the reason
+  /// the three above are: an icon swapped for the wrong one is a mark that says
+  /// something else, and no rule anywhere would have changed.
+  it("marks a pull request that will not merge, and says so aloud", async () => {
+    theWrapping(whoseMerging("Conflicting"));
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const mark = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.pullRequest} .${conflictMark.conflict}`,
+    );
+
+    expect(mark.getAttribute("role")).toBe("img");
+    expect(mark.getAttribute("aria-label")).toBe(CONFLICTED);
+
+    expect(mark.tagName.toLowerCase()).toBe("svg");
+    expect(mark.getAttribute("viewBox")).toBe(
+      `0 0 ${faCodeMerge.icon[0]} ${faCodeMerge.icon[1]}`,
+    );
+    expect(mark.querySelector("path")!.getAttribute("d")).toBe(
+      faCodeMerge.icon[4],
+    );
+  });
+
+  /// Beside the rollup rather than instead of it: the two are readings of
+  /// different things, and a wrap-up whose suite is still running can conflict
+  /// with its base at the same time.
+  it("draws the conflict beside how the checks are", async () => {
+    theWrapping({ ...whoseChecks("Running"), ...whoseMerging("Conflicting") });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
+
+    expect(opened.querySelector(`.${conflictMark.conflict}`)).not.toBeNull();
+    expect(opened.querySelector(`.${checkMarks.checks}`)).not.toBeNull();
+  });
+
+  /// And nothing for the other two readings, nor for the absence of one. A pull
+  /// request that merges is doing what a pull request is supposed to do, and a
+  /// GitHub still working the answer out has said nothing at all — so *merges*,
+  /// *not worked out yet* and *nobody asked* are one card with no mark on it.
+  it("draws no conflict where there is none to draw", async () => {
+    for (const merging of ["Cleanly", null] as const) {
+      theWrapping(whoseMerging(merging));
+      const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+      const opened = await drawn(
+        container,
+        `.${timeline.pinned} .${timeline.pullRequest}`,
+      );
+
+      expect(opened.querySelector(`.${conflictMark.conflict}`)).toBeNull();
+    }
+  });
+
+  /// And it goes when the conflict does, without the page being reloaded: the
+  /// mark is drawn off the reading the Conversation carries, so a fresh one
+  /// takes it away. Which is what a Nudge lands as — the server writes the new
+  /// word down and tells the page, and the page re-reads.
+  it("takes the mark away when a fresh reading says the conflict is gone", async () => {
+    let merging: Merging = "Conflicting";
+
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${WRAPPING.id}`, () =>
+        json({ ...WRAPPING, ...whoseMerging(merging) })(),
+      ),
+      whenever(WHAT_IS_ON_IT, json(CARRIED)),
+    );
+
+    const { container, client } = mount(`/conversations/${WRAPPING.id}`);
+
+    await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.pullRequest} .${conflictMark.conflict}`,
+    );
+
+    // The resolution session pushed, GitHub was asked again, and the server
+    // Nudged on the strength of a word that changed.
+    merging = "Cleanly";
+    await nudged(client);
+
+    await waitFor(() => {
+      expect(
+        container.querySelector(
+          `.${timeline.pinned} .${timeline.pullRequest} .${conflictMark.conflict}`,
+        ),
+      ).toBeNull();
+    });
   });
 
   /// Pinned and on the record both: the sticky block holds it in view for as
@@ -11483,6 +11649,163 @@ describe("the pinned pull request", () => {
     expect(checks.querySelector(`.${notices.empty}`)!.textContent).toBe(
       "Nothing is running against it.",
     );
+  });
+
+  /// And the conflict in words, which is what the pane has room for and the
+  /// card's mark has not: the same recorded fact, off the same pinned Event.
+  ///
+  /// Only the conflict. A pull request that merges, one GitHub is still working
+  /// the answer out about, and one nothing has asked about are all a pane with
+  /// nothing to say about merging — the mark's own rule, drawn in the other
+  /// alphabet.
+  it("says the conflict in words, and says nothing where there is none", async () => {
+    theWrapping(whoseMerging("Conflicting"));
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+    );
+
+    const said = await drawn(
+      container,
+      `.${shell.detailsPane} .${prPane.conflict}`,
+    );
+
+    expect(said.textContent).toBe(IN_WORDS);
+
+    for (const merging of ["Cleanly", null] as const) {
+      theWrapping(whoseMerging(merging));
+      const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+      fireEvent.click(
+        await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+      );
+
+      await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
+
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${prPane.conflict}`),
+      ).toBeNull();
+    }
+  });
+
+  /// And the one press that does something about it, on a conversation
+  /// Verkstead has finished with.
+  ///
+  /// Which is the only state it is drawn in. A wrapping conversation has the
+  /// watchers on it already and is resolving the conflict as fast as it can, so
+  /// a button there would offer what is happening anyway; and a pull request
+  /// that merges has nothing to resolve, which is the same rule the words above
+  /// it are drawn by.
+  it("offers the press only on a done conversation whose branch conflicts", async () => {
+    theWrapping({ ...whoseMerging("Conflicting"), state: "Done" });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+    );
+
+    const press = await drawn(
+      container,
+      `.${shell.detailsPane} .${prPane.resolve}`,
+    );
+
+    expect(press.textContent).toBe("Resolve conflicts");
+
+    for (const over of [
+      // The same conflict on a conversation the wrap-up is still running.
+      { ...whoseMerging("Conflicting"), state: "Wrapping" as const },
+      // And the same finished conversation with nothing to resolve — one that
+      // merges, and one nothing has asked GitHub about.
+      { ...whoseMerging("Cleanly"), state: "Done" as const },
+      { ...whoseMerging(null), state: "Done" as const },
+    ]) {
+      theWrapping(over);
+      const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+      fireEvent.click(
+        await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+      );
+
+      await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
+
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${prPane.resolve}`),
+      ).toBeNull();
+    }
+  });
+
+  /// The press posts to the conversation's own route with nothing in the body —
+  /// which conversation it is is the whole of what it says, and which of its
+  /// pull requests conflict is the server's own reading. And what it leaves
+  /// behind is a conversation that has moved into a wrap-up, so the page is
+  /// read again.
+  it("posts to the conversation's own resolve route and reads it again", async () => {
+    const route = `/api/ui/conversations/${WRAPPING.id}/resolve-conflicts`;
+    const fetching = theWrapping(
+      { ...whoseMerging("Conflicting"), state: "Done" },
+      whenever(route, json("Resolving" satisfies Resolved), "POST"),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+    );
+
+    const before = askedFor(fetching, `/api/ui/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${prPane.resolve}`),
+    );
+
+    await waitFor(() => expect(sent(fetching, route)).toEqual({}));
+
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, `/api/ui/conversations/${WRAPPING.id}`),
+      ).toBeGreaterThan(before),
+    );
+  });
+
+  /// And a press that was refused says which refusal it was. Two of them are
+  /// the record having moved on under a page somebody left open — the
+  /// conversation is not finished with any more, or the branch merges again —
+  /// and neither is anything to go and do, which is why the re-read behind the
+  /// sentence is as much of the answer. The other two are the checkout the
+  /// resolution session would have worked in, which a conversation left finished
+  /// with for weeks is the likeliest of any to have lost.
+  it("says which refusal a press came back with", async () => {
+    for (const outcome of [
+      "NotDone",
+      "NothingConflicts",
+      "NowhereToWork",
+      "WorktreeRefused",
+    ] satisfies Resolved[]) {
+      theWrapping(
+        { ...whoseMerging("Conflicting"), state: "Done" },
+        whenever(
+          `/api/ui/conversations/${WRAPPING.id}/resolve-conflicts`,
+          json(outcome),
+          "POST",
+        ),
+      );
+      const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+      fireEvent.click(
+        await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+      );
+
+      fireEvent.click(
+        await drawn(container, `.${shell.detailsPane} .${prPane.resolve}`),
+      );
+
+      const said = await drawn(
+        container,
+        `.${shell.detailsPane} .${prPane.refused}`,
+      );
+
+      expect(said.textContent).toBe(RESOLVE_REFUSAL[outcome]);
+    }
   });
 
   /// Every way `gh` cannot answer is a different afternoon for the human, so

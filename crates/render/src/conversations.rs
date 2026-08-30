@@ -772,6 +772,17 @@ pub enum TimelineEvent {
     /// it should be there.
     Steer(SteerEvent),
 
+    /// The human pressing **Resolve conflicts** on a finished Conversation's
+    /// pull request.
+    ///
+    /// Drawn beside the Moved line the same press wrote, exactly as a Steer is
+    /// and for a Steer's reason — and its own kind rather than a Steer into
+    /// Wrapping because the two are different acts. A steer opens the branch to
+    /// be read again; this leaves the review that carried the work to Done
+    /// standing, and asks only that the conflict be resolved. A record that drew
+    /// them the same line could never be read back for which of them happened.
+    ResolveConflicts(ResolveConflictsEvent),
+
     /// The pull request the finish step opened, at the moment it reached the
     /// Timeline.
     ///
@@ -1145,6 +1156,21 @@ pub struct PullRequestEvent {
     /// will be: what keeps it fresh is the checks watcher, and that stops when
     /// the wrap-up is over.
     pub checks: Option<CheckRollup>,
+
+    /// And whether it merges into its base, as the last look at GitHub found it
+    /// — or nothing where nothing has looked.
+    ///
+    /// Beside the rollup because it is the same kind of fact: a reading of
+    /// GitHub written down when something asked, drawn as a mark on the card,
+    /// and stale on a Conversation nothing is watching. What keeps this one
+    /// fresh outlives the wrap-up, though — a sweep asks about a Done
+    /// Conversation's pull requests every quarter of an hour until each is
+    /// merged or closed.
+    ///
+    /// Unlike the rollup, a companion's card carries its own: whether a branch
+    /// conflicts with its base is a fact about that branch, and it is written
+    /// down per pull request rather than per Conversation.
+    pub merging: Option<Merging>,
 }
 
 /// How a pull request's checks are getting on, taken all together.
@@ -1158,6 +1184,24 @@ pub enum CheckRollup {
     Passed,
     Running,
     Failed,
+}
+
+/// And whether it merges into its base.
+///
+/// The store's own word again, and two rather than GitHub's three for the reason
+/// it keeps two: a GitHub that has not worked the answer out yet is *not known*,
+/// and not knowing is the absence of this rather than a word in it — the same
+/// card with no mark on it that a pull request nothing has asked about draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Merging {
+    /// GitHub says it merges, which is a card with nothing to draw about it:
+    /// merging cleanly is what a pull request is expected to do.
+    Cleanly,
+
+    /// GitHub says it does not, and nothing lands until somebody resolves it.
+    /// The one of the two the card has a mark for.
+    Conflicting,
 }
 
 /// What is on a pull request now: the commits it carries, what GitHub is running
@@ -1435,6 +1479,25 @@ pub struct SteerEvent {
     /// out as every piece of markdown on this wire is — and `None` for every
     /// steer that carried nothing written.
     pub html: Option<String>,
+}
+
+/// The **Resolve conflicts** press as the page receives it: when, and nothing
+/// else.
+///
+/// Nothing else because there is nothing else. Where it sends the work is always
+/// Wrapping, which the move under it says; what it was about is the pull
+/// requests the record says conflict, which the cards above it draw. The row is
+/// the deciding, and the deciding is the whole of what it holds.
+///
+/// So the words are the viewer's, as a move's are — see [`SteerEvent`], whose
+/// sentence this one stands beside and must not be mistaken for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ResolveConflictsEvent {
+    pub id: i64,
+
+    /// When it was pressed, RFC 3339.
+    pub at: String,
 }
 
 /// A move as the page receives it: when, and to what.
@@ -2161,6 +2224,7 @@ fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestE
         repo: opened.repo,
 
         checks: opened.checks,
+        merging: opened.merging,
     }
 }
 
@@ -2181,6 +2245,9 @@ pub struct PullRequestSummary {
 
     /// How its checks were, as the store last wrote it down.
     pub checks: Option<CheckRollup>,
+
+    /// And whether it merged, the same way — see [`PullRequestEvent::merging`].
+    pub merging: Option<Merging>,
 }
 
 /// What a pull request holds, as the details pane receives it: the commit list
@@ -2267,6 +2334,16 @@ pub fn steer_event(
         target,
         html: instruction.map(crate::markdown::to_html),
     })
+}
+
+/// The **Resolve conflicts** press as an Event: when it was pressed, and nothing
+/// else.
+///
+/// Nothing rendered, unlike the steer above it — there is no markdown here, and
+/// no state either. Where it sends the work is always Wrapping, and the words
+/// are the viewer's, exactly as a move's are.
+pub fn resolve_conflicts_event(id: i64, at: String) -> TimelineEvent {
+    TimelineEvent::ResolveConflicts(ResolveConflictsEvent { id, at })
 }
 
 /// Starting a Conversation: the Repo it is against, and nothing else.
@@ -2675,6 +2752,66 @@ pub enum Resumed {
     /// about: another record that cannot be true, a steer being the only way
     /// into Follow-up and one without a brief being refused.
     NoFollowUpBrief,
+}
+
+/// What became of pressing **Resolve conflicts** on a finished Conversation's
+/// pull request.
+///
+/// Named the way [`Resumed`]'s refusals are, and for the same reason: the press
+/// either sets a resolution going or it does not, and a button that quietly did
+/// nothing would leave the human waiting on a session that was never dispatched.
+///
+/// The refusals are of two kinds. Two of them are readings that have moved on
+/// rather than anything for the human to correct — the button is drawn off the
+/// record, and the record is what this is answered from — so each says what has
+/// changed since the pane was drawn. The other two are about the checkout the
+/// resolution session would work in, which a Conversation left Done for weeks is
+/// the likeliest of any to have lost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Resolved {
+    /// The Conversation is wrapping up again: the press is on its Timeline, the
+    /// conflict is something the wrap-up waits on once more, the goes the
+    /// machine had already spent are forgotten, and the watchers are on it.
+    ///
+    /// What they find is a review already settled, which runs nothing, and a
+    /// pull request that will not merge, which dispatches a resolution session.
+    Resolving,
+
+    NoSuchConversation,
+
+    /// It is not Done any more: something else has moved it since the pane was
+    /// drawn. A Conversation that is wrapping up has the watchers on it already
+    /// and needs no press; one that has been closed is the human finished with
+    /// the work.
+    NotDone,
+
+    /// Nothing on it conflicts any more. The pull request merges again —
+    /// somebody resolved it, or the freshening the pane does as it opens found
+    /// the conflict gone — and a press that put the Conversation back to
+    /// Wrapping for it would be a round trip to Done with nothing done on the
+    /// way.
+    NothingConflicts,
+
+    /// There is no Worktree on the record for the resolution session to work in.
+    /// A Conversation past drafting is supposed to have one, so this is a record
+    /// that cannot be true.
+    ///
+    /// [`Resumed::NowhereToWork`] under another press, and the same thing: a
+    /// conflict is resolved by a session doing git in a checkout, and there is
+    /// no checkout here to name.
+    NowhereToWork,
+
+    /// There is one on the record, the directory it names is not a worktree any
+    /// more, and it could not be made again from the branch.
+    ///
+    /// The one refusal here with nothing for the human to correct, exactly as
+    /// [`Resumed::WorktreeRefused`] is: the reason is in the server's log. A
+    /// Conversation stays Done for as long as nobody merges its pull request,
+    /// which is time enough for a directory to go — so this is the press
+    /// refusing over the checkout rather than moving the work back into a
+    /// wrap-up that had nowhere to do it.
+    WorktreeRefused,
 }
 
 /// What clicking Steer found, which is what the modal it opens is drawn from.

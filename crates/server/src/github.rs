@@ -698,8 +698,15 @@ pub(crate) enum Checked {
 /// was a green suite belonging to the head before them. A green rollup is only
 /// evidence about the commit it names, so the commit it names comes back too —
 /// see [`crate::checks`], where it is compared with what origin is holding.
+///
+/// **And whether it can be merged at all**, which rides this call rather than a
+/// poll of its own: a pull request whose base has moved under it conflicts, and
+/// a conflict is as much a reason for a wrap-up to wait as a red check is.
+/// GitHub says it in the same answer for no second call — see [`Mergeable`], and
+/// [`crate::checks`], where each of the three words it says it in is its own
+/// thing to do.
 pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Suite, Trouble> {
-    /// What `--json statusCheckRollup,headRefOid` comes back as.
+    /// What `--json statusCheckRollup,headRefOid,mergeable` comes back as.
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Rollup {
@@ -707,6 +714,8 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Suite, Trouble
         head_ref_oid: String,
         #[serde(default)]
         status_check_rollup: Vec<Reported>,
+        #[serde(default)]
+        mergeable: String,
     }
 
     let said = gh.ask(
@@ -716,7 +725,7 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Suite, Trouble
             "view",
             &number.to_string(),
             "--json",
-            "statusCheckRollup,headRefOid",
+            "statusCheckRollup,headRefOid,mergeable",
         ],
     )?;
 
@@ -726,6 +735,140 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Suite, Trouble
     Ok(Suite {
         head: rollup.head_ref_oid,
         checks: read_checks(rollup.status_check_rollup),
+        mergeable: Mergeable::read(&rollup.mergeable),
+    })
+}
+
+/// Whether GitHub can merge the pull request into its base as it stands.
+///
+/// Three answers, and each of them is its own thing to a wrap-up: a conflicting
+/// pull request is one nothing can land, and one GitHub has not made its mind up
+/// about yet is neither that nor a clean merge — see [`crate::checks`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mergeable {
+    /// It merges: `MERGEABLE`.
+    Cleanly,
+
+    /// It does not: `CONFLICTING`, which is the branch and its base having
+    /// changed the same lines since they parted.
+    Conflicting,
+
+    /// GitHub has not worked it out — `UNKNOWN`, which is what it answers while
+    /// it is still computing, and what an answer carrying no `mergeable` at all
+    /// comes to.
+    ///
+    /// A word this does not know is read as *not known* rather than as a
+    /// conflict, which is the way round that matters: not knowing changes
+    /// nothing at all, and a conflict holds a wrap-up up. The opposite of
+    /// [`read_check`], where green is the reading that has to be earned — the
+    /// two are different questions, and the honest answer to each is the one
+    /// that concludes nothing from a word nobody here has seen before.
+    Unknown,
+}
+
+impl Mergeable {
+    /// The one GitHub's word names.
+    fn read(said: &str) -> Self {
+        match said.to_ascii_uppercase().as_str() {
+            "MERGEABLE" => Self::Cleanly,
+            "CONFLICTING" => Self::Conflicting,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// Where a pull request has got to, and whether it merges — the two facts one
+/// look at a pull request that nobody is wrapping up any more comes back with.
+///
+/// One question rather than two, `gh` taking a list of fields: a pull request
+/// whose base has moved and one somebody has merged are the two things a sweep
+/// after Done is looking for, and asking them separately would be two round
+/// trips over somebody else's network for one answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Landing {
+    /// Whether GitHub can merge it into its base as it stands.
+    pub(crate) mergeable: Mergeable,
+
+    /// And where it has got to, which is what says whether there is any point
+    /// asking again.
+    pub(crate) stands: Stands,
+}
+
+/// Where GitHub says a pull request has got to.
+///
+/// Three answers and a fourth for not knowing, exactly as [`Mergeable`] has: the
+/// two endings are final, and *open* and *not known* are each a reason to ask
+/// again. Which way an unreadable word falls matters here for [`Mergeable`]'s
+/// reason turned around — reading one as an ending would stop the asking for
+/// good, so nothing but GitHub's own two words for an ending is one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stands {
+    /// It is open: `OPEN`.
+    Open,
+
+    /// Somebody merged it: `MERGED`.
+    Merged,
+
+    /// Somebody closed it without merging it: `CLOSED`.
+    Closed,
+
+    /// GitHub said nothing this knows how to read, which includes an answer
+    /// carrying no `state` at all. Nothing is concluded from it, the way nothing
+    /// is concluded from a `gh` that would not answer.
+    Unknown,
+}
+
+impl Stands {
+    /// The one GitHub's word names.
+    fn read(said: &str) -> Self {
+        match said.to_ascii_uppercase().as_str() {
+            "OPEN" => Self::Open,
+            "MERGED" => Self::Merged,
+            "CLOSED" => Self::Closed,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// Whether pull request `number` merges into its base, and where it has got to.
+///
+/// What the sweep after Done asks, and the only question it asks: a Conversation
+/// that has finished wrapping up has no suite anybody is waiting on and no
+/// comments left to dispatch about, so what is left worth knowing is whether the
+/// branch still lands and whether anybody has landed it. See [`crate::merges`].
+///
+/// [`checks`] is what asks the same about a pull request somebody is still
+/// wrapping up — the merge rides that call rather than this one, because a
+/// wrap-up is asking about the suite anyway. The two never both run over one
+/// pull request: the watcher stops at Done and the sweep starts there.
+pub(crate) fn landing(gh: &Gh, repo: &Path, number: i64) -> Result<Landing, Trouble> {
+    /// What `--json mergeable,state` comes back as.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Read {
+        #[serde(default)]
+        mergeable: String,
+        #[serde(default)]
+        state: String,
+    }
+
+    let said = gh.ask(
+        repo,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "mergeable,state",
+        ],
+    )?;
+
+    let read: Read = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    Ok(Landing {
+        mergeable: Mergeable::read(&read.mergeable),
+        stands: Stands::read(&read.state),
     })
 }
 
@@ -748,6 +891,15 @@ pub(crate) struct Suite {
     /// Every check GitHub reported against that commit, which is empty for a
     /// commit nothing has run against.
     pub(crate) checks: Vec<Check>,
+
+    /// And whether GitHub can merge the pull request into its base, which is a
+    /// fact about the branch rather than about the commit above: a base that has
+    /// moved under a branch nobody has touched is what puts a pull request in
+    /// conflict.
+    ///
+    /// Here rather than in an answer of its own because it rides the same call —
+    /// see [`checks`].
+    pub(crate) mergeable: Mergeable,
 }
 
 /// One entry of `statusCheckRollup`, which is one of two different things.
@@ -1091,6 +1243,14 @@ fn identity(id: &str, url: &str, author: &str, at: &str) -> String {
 pub(crate) struct Details {
     pub(crate) pane: verkstead_render::PullRequestDetails,
     pub(crate) checks: Vec<Check>,
+
+    /// And where the pull request has got to and whether it merges, which ride
+    /// the same question for the reason the checks do — see [`Landing`]. What
+    /// they are for is the recording rather than the pane: opening it is the one
+    /// thing that asks GitHub about a pull request nothing is watching or
+    /// sweeping, so it freshens every fact that is drawn off a card as well as
+    /// the list it came for.
+    pub(crate) landing: Landing,
 }
 
 /// What is on the pull request now: the commits it carries, what GitHub is
@@ -1105,9 +1265,16 @@ pub(crate) struct Details {
 /// taking a list of fields: two questions would be two round trips over somebody
 /// else's network, and a commit list from before a push beside checks from after
 /// it.
+///
+/// And whether it merges and where it has got to ride the same list again, for
+/// the same reason and one of their own: opening the pane is the one thing left
+/// that asks GitHub about a pull request nothing is watching, so it is what
+/// freshens every fact a card draws rather than only the one the pane came for.
+/// See [`Landing`], and [`crate::merges`], where the recording is.
 pub(crate) fn details(gh: &Gh, repo: &Path, number: i64) -> Result<Details, Trouble> {
-    /// What `--json commits,comments,statusCheckRollup` comes back as, of which
-    /// this takes the fields the details pane draws.
+    /// What `--json commits,comments,statusCheckRollup,mergeable,state` comes
+    /// back as, of which this takes the fields the details pane draws and the
+    /// three the card does.
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Carried {
@@ -1117,6 +1284,10 @@ pub(crate) fn details(gh: &Gh, repo: &Path, number: i64) -> Result<Details, Trou
         comments: Vec<Said>,
         #[serde(default)]
         status_check_rollup: Vec<Reported>,
+        #[serde(default)]
+        mergeable: String,
+        #[serde(default)]
+        state: String,
     }
 
     /// `gh` writes its JSON in the field names the GraphQL API uses, which are
@@ -1147,7 +1318,7 @@ pub(crate) fn details(gh: &Gh, repo: &Path, number: i64) -> Result<Details, Trou
             "view",
             &number.to_string(),
             "--json",
-            "commits,comments,statusCheckRollup",
+            "commits,comments,statusCheckRollup,mergeable,state",
         ],
     )?;
 
@@ -1178,6 +1349,10 @@ pub(crate) fn details(gh: &Gh, repo: &Path, number: i64) -> Result<Details, Trou
             checks.iter().map(drawn).collect(),
         ),
         checks,
+        landing: Landing {
+            mergeable: Mergeable::read(&carried.mergeable),
+            stands: Stands::read(&carried.state),
+        },
     })
 }
 
@@ -1540,6 +1715,48 @@ mod tests {
         assert!(checks(&gh, dir.path(), 41).unwrap().checks.is_empty());
     }
 
+    /// Whether the pull request merges comes back in the same answer the checks
+    /// do, in the three words GitHub says it in — and each of them reads as
+    /// itself.
+    #[test]
+    fn whether_the_pull_request_merges_is_read_off_the_answer_the_checks_are_in() {
+        for (said, read) in [
+            ("MERGEABLE", Mergeable::Cleanly),
+            ("CONFLICTING", Mergeable::Conflicting),
+            ("UNKNOWN", Mergeable::Unknown),
+        ] {
+            let (dir, gh) = stub(
+                &format!(r#"{{"mergeable":"{said}","statusCheckRollup":[]}}"#),
+                "",
+            );
+
+            assert_eq!(checks(&gh, dir.path(), 41).unwrap().mergeable, read);
+        }
+    }
+
+    /// And a word this does not know is not knowing rather than a conflict —
+    /// an answer with no `mergeable` on it at all included.
+    ///
+    /// The way round that matters: not knowing changes nothing, where a
+    /// conflict holds a wrap-up up. A GitHub that invented a fourth word would
+    /// otherwise stop every wrap-up there is.
+    #[test]
+    fn a_word_about_merging_this_does_not_know_is_not_a_conflict() {
+        for said in [
+            r#"{"mergeable":"MERGEABLE_BUT_DIRTY","statusCheckRollup":[]}"#,
+            r#"{"mergeable":"","statusCheckRollup":[]}"#,
+            r#"{"statusCheckRollup":[]}"#,
+        ] {
+            let (dir, gh) = stub(said, "");
+
+            assert_eq!(
+                checks(&gh, dir.path(), 41).unwrap().mergeable,
+                Mergeable::Unknown,
+                "{said}",
+            );
+        }
+    }
+
     /// And the reason the checks are asked for this way at all: a `gh` that
     /// cannot answer has to arrive as [`Trouble`], because *Verkstead could not
     /// ask* is a third thing beside green and red.
@@ -1725,7 +1942,7 @@ mod tests {
                    case "$5" in
                      number,title,url)
                        printf '{"number":41,"title":"%s","url":"u"}' "$token" ;;
-                     statusCheckRollup,headRefOid)
+                     statusCheckRollup,headRefOid,mergeable)
                        printf '{"statusCheckRollup":[{"name":"%s","status":"COMPLETED","conclusion":"SUCCESS"}]}' "$token" ;;
                      comments,reviews)
                        printf '{"comments":[{"id":"IC_1","url":"u","author":{"login":"%s"},"body":"b","createdAt":"t"}],"reviews":[]}' "$token" ;;
