@@ -316,12 +316,16 @@ impl Agents {
     /// rather than repainting a screen, so there is no frame to read a prompt
     /// off, and three seconds of silence is an answer that works.
     ///
-    /// Codex's is [`CODEX_AT_WORK`] and Grok Build's is [`GROK_AT_WORK`], and
-    /// both are the same one of the two readings — see [`Signature`]. What
-    /// stands where either goes instead is whatever the suite handed in, which
-    /// is the prompt drawn by the stub it stands where an agent goes: no
-    /// backend here draws a prompt of its own, so the reading for the ones that
-    /// will is proved against a stub rather than against an account.
+    /// Codex's is [`CODEX_AT_WORK`], Grok Build's is [`GROK_AT_WORK`] and
+    /// OpenCode's is [`OPENCODE_AT_WORK`], and all three are the same one of
+    /// the two readings — see [`Signature`]. Every backend that draws a screen
+    /// has now been measured and every one of them came out that way round, so
+    /// the at-the-prompt reading stands unused: what it is there for is the
+    /// backend that turns out to differ, and none has. What stands where any of
+    /// the three goes instead is whatever the suite handed in, which is the
+    /// prompt drawn by the stub it stands where an agent goes: no backend here
+    /// draws a prompt of its own, so that reading is proved against a stub
+    /// rather than against an account.
     fn signature(&self, agent_type: store::AgentType) -> Option<Signature> {
         match agent_type {
             store::AgentType::Claude => None,
@@ -335,12 +339,11 @@ impl Agents {
                     .clone()
                     .unwrap_or_else(|| Signature::AtWork(GROK_AT_WORK.to_owned())),
             ),
-
-            // And OpenCode has none of its own yet — the task that reads one
-            // off the real TUI is the next of this stage's. What stands here
-            // meanwhile is whatever the suite handed in, and silence otherwise,
-            // which is Claude's judgement rather than a signature guessed at.
-            store::AgentType::OpenCode => self.signature.clone(),
+            store::AgentType::OpenCode => Some(
+                self.signature
+                    .clone()
+                    .unwrap_or_else(|| Signature::AtWork(OPENCODE_AT_WORK.to_owned())),
+            ),
         }
     }
 
@@ -426,6 +429,16 @@ struct Line {
 /// drawing inline instead: the Capture and the Screen are the record of what a
 /// session did, and an alternate screen is a record that is thrown away as the
 /// program leaves it.
+///
+/// **opencode has no such flag and takes the alternate screen**, which is a
+/// finding rather than an oversight (ADR-0011): its Screen reads either way,
+/// since the screen model tracks which buffer is in front, and what its Capture
+/// then replays to is the farewell banner opencode leaves on the ordinary
+/// buffer as it exits rather than anything the session did. The record this
+/// backend is read back from is its session store, which is what the Timeline
+/// draws from. `--mini` — the minimal interface, which draws inline and carries
+/// the same at-work label — is what to reach for the day the Capture has to be
+/// that record instead.
 ///
 /// **Grok Build is the one backend after Claude that takes the session id.** It
 /// takes it under the spelling [`Agents::argv`] writes, it insists on a valid
@@ -574,6 +587,42 @@ const CODEX_AT_WORK: &str = "esc to interrupt";
 /// the usage-limit phrase makes: the wording is grok's and it will move, and
 /// moving it costs one edit here.
 const GROK_AT_WORK: &str = "Esc:cancel";
+
+/// What opencode has on its Screen while it is working, and nothing of what it
+/// has there when it is waiting for a human — see [`Signature::AtWork`].
+///
+/// Read off opencode 1.18.25 driven on a hundred-column terminal rather than
+/// guessed at, and it comes out where the two before it came out: the frame
+/// opencode leaves when its turn is over and the frame it draws mid-turn are
+/// the same screen but for the status bar at its foot. Mid-turn that bar is a
+/// progress dial and this label — `⬝⬝⬝⬝⬝■■■  esc interrupt` — and at rest it is
+/// the project's path instead. The composer above it, the `Build auto ·
+/// <model>` label on its border and the `tab agents` and `ctrl+p commands`
+/// hints beside this one stand in both, so none of them says whether the
+/// session has stopped. Across two turns of one session sampled once a second —
+/// a tool call and then a streamed reply, twice — the label was in every
+/// working frame and in none of the resting ones.
+///
+/// The label rather than the dial in front of it, which goes and comes with it:
+/// the dial's cells fill and empty every frame where this does not move, and a
+/// keybinding label is a harder thing to find by accident in what the session
+/// printed than a run of block characters is.
+///
+/// Two words where codex's is three — opencode writes `esc interrupt` where
+/// codex writes `esc to interrupt` — so neither backend's constant reads the
+/// other's frame, which is what the tests on this reading turn on.
+///
+/// **And it is the same label in either interface opencode offers.** The
+/// minimal one — `--mini`, which is what draws inline rather than taking the
+/// alternate screen — puts it in a status bar of its own, and it goes there
+/// when the turn is over exactly as it goes here. So the reading does not turn
+/// on which of the two a session was started in, whatever a later stage
+/// decides about the Capture (ADR-0011).
+///
+/// Named for the same reason [`CODEX_AT_WORK`] is, and it is the same bargain
+/// the usage-limit phrase makes: the wording is opencode's and it will move,
+/// and moving it costs one edit here.
+const OPENCODE_AT_WORK: &str = "esc interrupt";
 
 /// The sessions this server has running, by the Conversation each belongs to.
 ///

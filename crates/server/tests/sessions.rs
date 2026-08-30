@@ -1467,6 +1467,28 @@ async fn grilling_on_grok(stub: &str) -> Grilling {
     .await
 }
 
+/// And the same again on the fourth, whose account is one home as well — two
+/// directories inside it rather than the directory itself, which is what
+/// [`Bench::everything_on_opencode`] makes.
+///
+/// What the tests about opencode's own reading of itself stand on, for the
+/// reason [`grilling_on_grok`] is there: a session run under another type's
+/// Profile would be judged by that type's constants, and the whole claim here
+/// is that this backend is judged by its own.
+async fn grilling_on_opencode(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnOpenCode,
+        Origin::None,
+        None,
+    )
+    .await
+}
+
 /// What Verkstead is told this backend has on its Screen when it is sitting at
 /// its prompt — one line, the whole of the coupling to somebody else's display.
 const AT_THE_PROMPT: &str = "▌ ready for anything";
@@ -1495,6 +1517,14 @@ const GROK_MODEL: &str = "grok-4.6";
 
 /// See [`GROK_MODEL`].
 const GROK_GRILLING_MODEL: &str = "grok-4.6-grilling";
+
+/// And the pair an OpenCode Profile lists, which are `provider/model` strings
+/// because that is the whole of what opencode is told about a model — the
+/// provider it comes from is the front half of the same word.
+const OPENCODE_MODEL: &str = "opencode/big-pickle";
+
+/// See [`OPENCODE_MODEL`].
+const OPENCODE_GRILLING_MODEL: &str = "opencode/big-pickle-grilling";
 
 /// The same, with a second repository registered beside this one and added to
 /// the Conversation as a companion before the press — which is a companion in
@@ -1637,6 +1667,9 @@ enum Pickers {
 
     /// The same on the third backend — see [`Bench::everything_on_grok`].
     EverythingOnGrok,
+
+    /// And on the fourth — see [`Bench::everything_on_opencode`].
+    EverythingOnOpenCode,
 }
 
 /// The same with a read-write companion beside it, for the tests about a
@@ -1774,6 +1807,7 @@ async fn grilling_however_started(
         Pickers::GrillingOnCodex => bench.grilling_on_codex(id).await,
         Pickers::EverythingOnCodex => bench.everything_on_codex(id).await,
         Pickers::EverythingOnGrok => bench.everything_on_grok(id).await,
+        Pickers::EverythingOnOpenCode => bench.everything_on_opencode(id).await,
     }
 
     // While it is still drafting, which is the only time a companion can be
@@ -1922,11 +1956,35 @@ impl Bench {
             id,
             "Grok",
             "grok",
+            &[],
             &[GROK_MODEL, GROK_GRILLING_MODEL],
             &[
                 ("grilling", GROK_GRILLING_MODEL),
                 ("implementation", GROK_MODEL),
                 ("review", GROK_MODEL),
+            ],
+        )
+        .await;
+    }
+
+    /// And every role on an OpenCode Profile, which is the same again on the
+    /// fourth backend.
+    ///
+    /// The two directories are what makes that home an opencode account: this
+    /// type's home is judged by what opencode keeps an account in rather than
+    /// by the directory holding them, so a home without them is a Profile the
+    /// form refuses to save.
+    async fn everything_on_opencode(&self, id: i64) {
+        self.on_one_home(
+            id,
+            "OpenCode",
+            "opencode",
+            &[".config/opencode", ".local/share/opencode"],
+            &[OPENCODE_MODEL, OPENCODE_GRILLING_MODEL],
+            &[
+                ("grilling", OPENCODE_GRILLING_MODEL),
+                ("implementation", OPENCODE_MODEL),
+                ("review", OPENCODE_MODEL),
             ],
         )
         .await;
@@ -1939,6 +1997,7 @@ impl Bench {
             id,
             "Codex",
             "codex",
+            &[],
             &[CODEX_MODEL, CODEX_GRILLING_MODEL],
             roles,
         )
@@ -1952,16 +2011,26 @@ impl Bench {
     /// what differs between them is the word in the type and the directory the
     /// account keeps, and a second copy of this would be a second place to
     /// forget one of them.
+    ///
+    /// `inside` is what has to be *in* that home for it to be an account of
+    /// this type, and it is the last of the differences between them: none for
+    /// the two whose home is the whole of the account, and the two directories
+    /// opencode keeps an account in for an OpenCode one.
     async fn on_one_home(
         &self,
         id: i64,
         agent_type: &str,
         name: &str,
+        inside: &[&str],
         models: &[&str],
         roles: &[(&str, &str)],
     ) {
         let home = self.watched.path().join(name).join(format!(".{name}"));
         std::fs::create_dir_all(&home).unwrap();
+
+        for directory in inside {
+            std::fs::create_dir_all(home.join(directory)).unwrap();
+        }
 
         let saved: ProfileSaved = post(
             &self.app,
@@ -18487,6 +18556,11 @@ const AT_WORK_IN_OTHER_WORDS: &str = "◦ Thinking (12s • press escape to stop
 /// `commits` is whether the step does what its task asked, as it is there: one
 /// that does is ended on its landing and its judgement together, and one that
 /// does not is a run nobody can move, which is the rescue's.
+///
+/// **The Brief is read where the backend it is launched under puts it.** Three
+/// of the four take it as the one positional argument and opencode takes it
+/// under `--prompt`, so the two are put back into the order the rest of this
+/// reads them in before anything looks at either.
 fn a_backlog_at_work(grilling_model: &str, at_work: &str, resting: &str, commits: bool) -> String {
     let working = if commits {
         r#"
@@ -18526,6 +18600,7 @@ resting() {{
     printf 'silent\n' > "/tmp/verkstead/silent-$1"
     sleep 300
 }}
+[ "$2" = --prompt ] && set -- "$1" "$3"
 case "$1" in
 {grilling_model})
     working 10
@@ -18828,6 +18903,122 @@ async fn a_grok_at_work_hint_that_never_goes_is_caught_by_the_long_stop() {
          three seconds behind the screen — which is the whole of what says \
          Verkstead is reading grok's own hint here: a hint it did not know \
          would have had this session in half the time",
+    );
+    assert!(
+        said[0].contains("summarize your status"),
+        "the ordinary line, this being the ordinary rules arriving late: \
+         {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and the ordinary stop under them: {:?}",
+        stopped.html,
+    );
+}
+
+/// What the real opencode has in the status bar at the foot of every frame
+/// while it is working, which is the whole of what says an OpenCode session has
+/// not stopped — see the server's `sessions` module, where Verkstead's own copy
+/// of this wording is kept.
+///
+/// Written out here rather than reached for out of the server, and deliberately,
+/// the way codex's and grok's are: what these prove is that Verkstead already
+/// knows opencode's label, so the stub draws what opencode draws and nothing is
+/// handed in to meet it.
+const OPENCODE_AT_WORK: &str = "  ⬝⬝⬝⬝⬝■■■  esc interrupt          tab agents  ctrl+p commands";
+
+/// And the bar it leaves when its turn is over: the project's path where the
+/// dial and the label were, and the same two hints on the right of it.
+///
+/// That is the reason an OpenCode session is read the same way round as the two
+/// before it: opencode's composer, the `Build auto` label on its border and
+/// these hints are drawn exactly the same while it works, and this bar is where
+/// the two states differ.
+const OPENCODE_AT_ITS_PROMPT: &str = "  /work/verkstead                tab agents  ctrl+p commands";
+
+/// A backlog worked by sessions that draw opencode's at-work label is worked to
+/// the end, on that label going.
+///
+/// The same claim as the two above, on the fourth backend's own wording and with
+/// nothing handed in to read it by. It is worth making once per backend rather
+/// than once: this label is two words where codex's is three — `esc interrupt`
+/// against `esc to interrupt` — so a Verkstead that reached for codex's constant
+/// here would find nothing in any frame and read every session as stopped from
+/// its first one.
+#[tokio::test]
+async fn opencode_sessions_are_ended_on_their_own_at_work_label_rather_than_on_codexs() {
+    let fixture = grilling_on_opencode(&a_backlog_at_work(
+        OPENCODE_GRILLING_MODEL,
+        OPENCODE_AT_WORK,
+        OPENCODE_AT_ITS_PROMPT,
+        true,
+    ))
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: every session was ended where it stood, its at-work \
+         label gone and its terminal quiet: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into any of them: the silence each left in the \
+         middle of its turn is longer than the grace, and its at-work label was \
+         standing through the whole of it",
+    );
+}
+
+/// And an opencode label that never goes is caught by the long-stop, as the two
+/// before it are.
+///
+/// The dangerous drift on this reading, and the one worth proving per backend
+/// rather than once: a release draws the label at the prompt as well, or the bar
+/// Verkstead reads is not the bar it thought, and the session then reads as one
+/// that never stops working. Nothing else here would catch it — the rescue's
+/// precondition is idle and every ender waits on the same judgement — so the
+/// byte clock stays behind it, and what the human gets is the ordinary
+/// would-not-ask stop.
+#[tokio::test]
+async fn an_opencode_at_work_label_that_never_goes_is_caught_by_the_long_stop() {
+    let fixture = grilling_on_opencode(&a_backlog_at_work(
+        OPENCODE_GRILLING_MODEL,
+        OPENCODE_AT_WORK,
+        OPENCODE_AT_WORK,
+        false,
+    ))
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    // The step session has drawn its at-work label for a window longer than the
+    // grace, and has now stopped printing altogether — which is where the
+    // long-stop starts.
+    until_written(&handoff_directory(&fixture).join("silent-step")).await;
+    let fell_silent = Instant::now();
+
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "nothing was typed into it while it was drawing: an OpenCode session \
+         drawing that it is at work is at work, however long it sits there \
+         saying so",
+    );
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        fell_silent.elapsed() >= BRISKLY.long_stop,
+        "and what caught it was the long-stop rather than the grace or the \
+         three seconds behind the screen — which is the whole of what says \
+         Verkstead is reading opencode's own label here: a label it did not \
+         know would have had this session in half the time",
     );
     assert!(
         said[0].contains("summarize your status"),

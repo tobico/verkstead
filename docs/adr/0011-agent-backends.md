@@ -152,6 +152,54 @@ So both backends that ship a signature so far read by an at-work line, and the
 at-the-prompt reading stands unused for the backends that will draw a prompt of
 their own.
 
+Amended a third time: **OpenCode reads that way round as well**, measured
+against opencode 1.18.25 on a hundred-column terminal with a stand-in provider
+behind it.
+
+- **Its waiting frame is its working frame.** The composer, the `Build auto ·
+  <model>` label on its border and the `tab agents` and `ctrl+p commands` hints
+  stand in both. What differs is the status bar at the foot of the frame: while
+  a turn runs it is a progress dial and an `esc interrupt` label, and at rest it
+  is the project's path instead. Across two turns of one session sampled once a
+  second — a tool call and then a streamed reply, twice — the label was in every
+  working frame and in none of the resting ones. The constant is the label
+  rather than the dial in front of it, the dial's cells filling and emptying
+  every frame where the label does not move.
+- **It is byte-silent at its prompt**: not one byte in the 106 seconds it was
+  left sitting there. Mid-turn the widest gap between reads was 86 ms once it
+  had drawn its first frame, so the three-second quiet asked for beside the
+  label is never met while it works. Before that first frame the widest gap was
+  1.4 s, which is the startup the quiet is there to cover.
+
+So every backend that draws a screen has now been measured and every one of them
+reads by an at-work line. The at-the-prompt reading stands unused: what it is
+there for is the backend that turns out to differ, and none has.
+
+**And opencode takes the alternate screen, with no flag to keep it inline.**
+codex and grok each take `--no-alt-screen` because the Capture is the record of
+what a session did and an alternate screen is a record thrown away as the
+program leaves it. opencode's help offers no such flag, and `\e[?1049h` is
+among the first bytes it writes. Two consequences, both measured rather than
+reasoned about:
+
+- **The Screen still reads.** The screen model already tracks which buffer is in
+  front, so the idle judgement above and a human watching a live session both
+  see the frames opencode is drawing.
+- **The Capture replayed holds none of the session.** A clean exit writes
+  `\e[?1049l`, and the grid a replay of the whole Capture then leaves is what
+  was on the ordinary buffer: opencode's farewell banner, naming the session's
+  id and the command to resume it, and nothing of the conversation. Every byte
+  is still in the Capture — what is gone is the grid they drew. So for this
+  backend the record a human reads back is the session store rather than the
+  Capture, which is what the Timeline draws from anyway.
+
+**The inline alternative is `--mini`**, the minimal interface opencode offers:
+it writes no `\e[?1049h` at all, and it carries the same `esc interrupt` label
+in a status bar of its own, so the signature reads under either. It is not
+reached for here, because what it costs is the interface a human attaching to
+the Screen gets and what it buys is a record this backend does not depend on.
+It is what to reach for the day the Capture has to be that record.
+
 ## The skills move to a neutral path
 
 The bundled skills mount at **`/verkstead/skills`** for every backend, Claude
