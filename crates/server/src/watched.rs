@@ -128,6 +128,28 @@ impl WatchedPaths {
         &self.configured
     }
 
+    /// The boundary as it stands at this moment, with the settings' half read
+    /// and resolved once.
+    ///
+    /// What a caller with more than one path to decide about asks for. Both
+    /// halves are questions of the filesystem — the file, and a `canonicalize`
+    /// per entry written in it — and asking them per path would ask them once
+    /// per Agent Profile a list draws, which is the batch a caller went off the
+    /// runtime to make in the first place.
+    ///
+    /// One moment, and deliberately: every path in a batch is decided against
+    /// the same boundary, rather than against whatever the file happened to say
+    /// as each one came up. A save landing mid-list moves what the *next* batch
+    /// sees, which is the same as everything else read out of the settings.
+    ///
+    /// Blocking: reading the file, and resolving what it names.
+    pub(crate) fn standing(&self) -> Boundary<'_> {
+        Boundary {
+            configured: &self.configured,
+            said: self.settings_paths(),
+        }
+    }
+
     /// Whether `path` is inside a Watched Path, and where it really is if so.
     ///
     /// The settings file is read here, so a Watched Path added to it admits from
@@ -135,44 +157,14 @@ impl WatchedPaths {
     /// nothing already registered, because admission is asked at registration and
     /// never again.
     ///
+    /// The one-path form of [`WatchedPaths::standing`], which is what a caller
+    /// deciding a whole list wants instead: this reads the file for the one
+    /// answer it gives.
+    ///
     /// Blocking: resolving a path is a filesystem read, and so is reading the
     /// file.
     pub fn admit(&self, path: &Path) -> Admission {
-        if !path.is_absolute() {
-            return Admission::NotAbsolute;
-        }
-
-        let Ok(real) = path.canonicalize() else {
-            return Admission::Missing;
-        };
-
-        if self.covers(&real) {
-            Admission::Inside(real)
-        } else {
-            Admission::Outside
-        }
-    }
-
-    /// Whether any Watched Path, from either side, holds `real` — which is
-    /// already resolved.
-    ///
-    /// The installation's are asked first because they are already resolved and
-    /// the file has not been opened yet: a machine configured by its unit never
-    /// reads a settings file to admit a repo inside what the unit said.
-    fn covers(&self, real: &Path) -> bool {
-        // Component by component, which `starts_with` is: `/watched-elsewhere`
-        // begins with the text of `/watched` and is not inside it.
-        if self
-            .configured
-            .iter()
-            .any(|watched| real.starts_with(watched))
-        {
-            return true;
-        }
-
-        self.settings_paths()
-            .iter()
-            .any(|watched| real.starts_with(watched))
+        self.standing().admit(path)
     }
 
     /// What `config.yaml` holds now, resolved, with whatever will not resolve
@@ -218,6 +210,59 @@ impl WatchedPaths {
                 }
             })
             .collect()
+    }
+}
+
+/// The boundary at one moment: the installation's Watched Paths and whatever
+/// the settings held when this was taken, both resolved.
+///
+/// What [`WatchedPaths::standing`] hands back, and what decides an admission.
+/// Nothing here touches the settings file — that was done once, when this was
+/// taken — so a caller with a list of paths to decide about pays for the file
+/// once rather than once per path.
+///
+/// Borrowed from the [`WatchedPaths`] it was taken off, which is what keeps it
+/// to the batch it was taken for: it cannot outlive the boundary it is a moment
+/// of, and a caller wanting a fresh moment asks for one.
+pub(crate) struct Boundary<'a> {
+    /// The installation's own, resolved at startup and unchanged since.
+    configured: &'a [PathBuf],
+
+    /// And the settings' own as they stood when this was taken, resolved, with
+    /// whatever would not resolve already left out.
+    said: Vec<PathBuf>,
+}
+
+impl Boundary<'_> {
+    /// Whether `path` is inside a Watched Path, and where it really is if so.
+    ///
+    /// Blocking: resolving a path is a filesystem read. Only the one, though —
+    /// the file behind this was read when the moment was taken.
+    pub(crate) fn admit(&self, path: &Path) -> Admission {
+        if !path.is_absolute() {
+            return Admission::NotAbsolute;
+        }
+
+        let Ok(real) = path.canonicalize() else {
+            return Admission::Missing;
+        };
+
+        if self.covers(&real) {
+            Admission::Inside(real)
+        } else {
+            Admission::Outside
+        }
+    }
+
+    /// Whether any Watched Path, from either side, holds `real` — which is
+    /// already resolved.
+    fn covers(&self, real: &Path) -> bool {
+        // Component by component, which `starts_with` is: `/watched-elsewhere`
+        // begins with the text of `/watched` and is not inside it.
+        self.configured
+            .iter()
+            .chain(&self.said)
+            .any(|watched| real.starts_with(watched))
     }
 }
 
@@ -498,5 +543,30 @@ mod tests {
 
         // The one that resolves goes on covering what it covers.
         assert!(matches!(watched.admit(dir.path()), Admission::Inside(_)));
+    }
+
+    /// A boundary taken as a moment decides every path in the batch against
+    /// that moment, and reads the file no further: what a caller with a list to
+    /// judge asks for, so a list's worth of looks is one reading of the file
+    /// rather than one per look.
+    #[test]
+    fn a_boundary_taken_is_the_moment_it_was_taken_at() {
+        let data_dir = tempdir();
+        let first = tempdir();
+        let second = tempdir();
+
+        let watched = settings_watching(data_dir.path(), &[first.path()]);
+        let boundary = watched.standing();
+
+        // Written after the moment was taken, so this boundary has never heard
+        // of it — while the one taken next does, which is what makes it a
+        // moment rather than a cache.
+        write_watched(data_dir.path(), &[second.path()]);
+
+        assert!(matches!(boundary.admit(first.path()), Admission::Inside(_)));
+        assert_eq!(boundary.admit(second.path()), Admission::Outside);
+
+        assert_eq!(watched.admit(first.path()), Admission::Outside);
+        assert!(matches!(watched.admit(second.path()), Admission::Inside(_)));
     }
 }
