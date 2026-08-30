@@ -1740,6 +1740,40 @@ pub async fn closable(pool: &SqlitePool, id: i64) -> Result<Option<Closable>> {
     }))
 }
 
+/// Every directory a Conversation's record still names as a checkout: its own
+/// worktree, and one per companion it was given.
+///
+/// The keep-set an orphan sweep decides by, which is why it is one read of both
+/// tables rather than two reads a caller joins. A row here is the whole fact:
+/// closing deletes both a Conversation's own worktree row and its companions'
+/// — see [`close_conversation`] — and archiving is refused for a Conversation
+/// that is not already closed, so *a live Conversation still works in it* and
+/// *there is a row for it* are the same statement. Nothing here parses a state
+/// word, and nothing needs to.
+///
+/// Which includes a Conversation that is Done. Done is not Closed: its
+/// directory is still where a Follow-up steer will pick the work up, and only
+/// closing gives one back.
+///
+/// Every path there is rather than a page of them, because what asks is
+/// deciding what to delete: a keep-set that stopped short would be a keep-set
+/// that named live work as an orphan.
+pub async fn recorded_worktrees(pool: &SqlitePool) -> Result<Vec<PathBuf>> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT path FROM worktrees
+         UNION
+         SELECT path FROM companion_worktrees",
+    )
+    .fetch_all(pool)
+    .await
+    .context("listing the worktrees the Conversations are still working in")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(path,)| PathBuf::from(path))
+        .collect())
+}
+
 /// One of a Conversation's Pairings: the Profile its column names, and the
 /// model paired with it where one was.
 ///

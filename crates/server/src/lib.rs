@@ -3,6 +3,7 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -220,6 +221,36 @@ pub(crate) struct AppState {
     /// the human may point Verkstead at, and this is the directory Verkstead was
     /// given for its own things.
     data_dir: PathBuf,
+
+    /// Held across the window between a checkout being made and the record
+    /// naming it.
+    ///
+    /// A start makes its directories and *then* writes the rows that name them,
+    /// which is the right way round — a row naming a directory that was never
+    /// made is the worse of the two half-states, and it is the order every start
+    /// here is written in. But it leaves a moment in which a live checkout is on
+    /// disk and nothing in the store says so, and the sweep of orphaned
+    /// worktrees decides what to delete by exactly that reading. So the two are
+    /// serialised on this: every make-then-record window takes it, and
+    /// [`worktrees::sweep`] holds it across reading the keep-set and acting on
+    /// what it read.
+    ///
+    /// Nothing is inside it. What it protects is a window rather than a value,
+    /// and the value that window is about is the store.
+    ///
+    /// **The window is the making, and nothing before it.** A start asks git
+    /// plenty before it makes anything — a fetch per repository above all,
+    /// which has no deadline to answer within — and a lock held around the
+    /// asking as well would let one unreachable remote hold every close in the
+    /// workbench behind it, a close being the one thing that must never be
+    /// held. So each of these takes it as late as it can. The three that plan
+    /// inside a blocking half take it in there, past the fetches, and hand the
+    /// guard back out to the record; a steer plans before it takes anything,
+    /// so it holds it from its own [`steering::make`] onwards.
+    ///
+    /// A rebuild does not take it. What that remakes is a directory the record
+    /// already names, so the keep-set holds it whenever the sweep looks.
+    checkouts: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// The one name the database is ever kept under, inside the Data Directory.
@@ -475,7 +506,14 @@ fn routed(
         watched,
         github,
         data_dir,
+        checkouts: Arc::new(tokio::sync::Mutex::new(())),
     };
+
+    // First of all, the worktrees directory swept of everything no Conversation
+    // is working in any more. A close sweeps after itself, so what is on disk
+    // unrecorded when a server comes up is what the last one never got to — and
+    // nothing else is ever going to look at it. See [`worktrees::at_startup`].
+    worktrees::at_startup(&state);
 
     // Before anything is served, because it is about what was already happening
     // rather than about anything a request will start: every Conversation the
