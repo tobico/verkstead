@@ -103,9 +103,16 @@ out again on the branch that was worked, which is one of the two times a
 Worktree is made without a branch being made with it — a read-only companion's,
 checked out detached, is the other.
 A removal git refuses — a directory it no longer reads as a Worktree — does not
-hold the close up: it is logged with its path and left on disk, closing being
+hold the close up: it is logged with its path and closed around, closing being
 what the human asked for and a directory nobody can be rid of being what they
-were trying to escape.
+were trying to escape. **Nothing under the Data Directory outlives the record
+that named it, though.** Every close ends by sweeping the whole worktrees
+directory, and a server sweeps it again as it comes up: a directory there that
+no live Conversation names is deleted, git's own removal where git still knows
+it and outright where git does not. Which is what reclaims the ones a close was
+refused over, and the ones a crash left behind. A Conversation that is Done
+keeps its checkouts like any other — Done is not Closed, and a Follow-up steer
+works in them.
 Named for the Repo and what the checkout holds — the branch, or the base a
 detached one stands at — and it lives in the Data Directory rather than inside
 a Watched Path: Verkstead made it, so it goes among Verkstead's own things.

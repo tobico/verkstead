@@ -22,6 +22,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::repos::git;
+use crate::store;
 
 /// The directory every Worktree goes under, inside `data`.
 ///
@@ -742,6 +743,308 @@ pub(crate) fn rebuild(repo: &Path, path: &Path, branch: &str) -> bool {
     made
 }
 
+/// Take back every directory under the worktrees directory that no Conversation
+/// is working in any more.
+///
+/// Closing already removes a Conversation's own checkouts, politely and by name.
+/// This is the backstop under that: git refuses to remove a directory it no
+/// longer reads as a worktree, and a close that hit one logs the path and closes
+/// around it — see [`crate::conversations::close`] — while a server that died
+/// mid-run had no close at all. Neither leaves anything that would ever come
+/// back for the directory. This is what comes back for it.
+///
+/// **A directory is kept exactly when a record names it.** Closing deletes both
+/// worktree rows, so *there is a row for it* and *a live Conversation still
+/// works in it* are one statement — see [`store::recorded_worktrees`], which is
+/// the whole of the rule. Everything else under this directory is orphaned by
+/// definition: it is Verkstead's own data directory, made for exactly one thing,
+/// and nothing but a checkout has any business in it.
+///
+/// **Nothing is deleted on a reading that failed.** A store error would come
+/// back as an empty keep-set, and an empty keep-set is every live worktree there
+/// is — so the error ends the sweep instead, and the orphans wait for the next
+/// one. That is the shape of every judgement here: the unrecoverable mistake is
+/// deleting work somebody is still doing, and an orphan left behind is swept
+/// again in a minute.
+pub(crate) async fn sweep(state: &crate::AppState) {
+    // Held across the read and everything it decides, because the window between
+    // a checkout being made and the record naming it is exactly the window in
+    // which a keep-set is a lie — see [`crate::AppState::checkouts`], which the
+    // other end of the same window takes.
+    let _checkouts = state.checkouts.lock().await;
+
+    swept(&state.pool, &state.data_dir).await;
+}
+
+/// The same sweep, off what it needs rather than off the whole of the server:
+/// the store to ask, and the directory to sweep.
+///
+/// Split from [`sweep`] so that the refusal above it is something a test can
+/// reach — a store with the table taken out from under it is a reading that
+/// failed, and *that deletes nothing* is the one behaviour here worth proving
+/// twice.
+async fn swept(pool: &sqlx::SqlitePool, data: &Path) {
+    let kept = match store::recorded_worktrees(pool).await {
+        Ok(kept) => kept,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                "reading which worktrees are still a Conversation's failed, so none are being swept",
+            );
+            return;
+        }
+    };
+
+    // Where the registrations left behind are cleared afterwards. Read under the
+    // same rule as the keep-set: a sweep that cannot say what it is working over
+    // does not start.
+    let repos = match store::registered_repos(pool).await {
+        Ok(repos) => repos.into_iter().map(|repo| repo.path).collect::<Vec<_>>(),
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                "listing the registered Repos failed, so the orphaned worktrees are not being swept",
+            );
+            return;
+        }
+    };
+
+    let data = data.to_owned();
+
+    // Every part of this blocks — a directory listing, a git call per orphan and
+    // a tree deleted — so it goes off the runtime's threads, as the removals a
+    // close makes do.
+    if let Err(error) = tokio::task::spawn_blocking(move || sweeping(&data, &kept, &repos)).await {
+        tracing::error!(error = ?error, "sweeping the orphaned worktrees failed");
+    }
+}
+
+/// The filesystem half: what is under the worktrees directory, held against what
+/// the records name, with everything else taken away. Hands back what it
+/// deleted.
+///
+/// **Every candidate comes out of reading this one directory**, and nothing
+/// else is ever a candidate. No path is built from git's output, from a record
+/// or from anything a request carried — the only thing a record does here is
+/// save a directory, never name one to delete. Which is what makes the boundary
+/// checkable at all: one parent, resolved once, and every deletion an immediate
+/// child of it.
+///
+/// Every reading an entry is put through asks one question of a different
+/// thing — *is this certainly an orphan under this directory?* — and any of
+/// them coming back short of a yes leaves the entry exactly where it is. A
+/// reading that failed is one of those: it is not a reading that says *delete*.
+fn sweeping(data: &Path, kept: &[PathBuf], repos: &[PathBuf]) -> Vec<PathBuf> {
+    let mut swept = Vec::new();
+
+    // A router with no data directory has nowhere to have put a worktree, and
+    // the empty path would resolve to the working directory — which is somebody
+    // else's. See [`crate::nowhere`].
+    if data.as_os_str().is_empty() {
+        return swept;
+    }
+
+    let worktrees = directory(data);
+
+    // Resolved once, and it is the whole of the boundary: every deletion below
+    // is checked against this rather than against the path it was joined from,
+    // so a link anywhere above cannot move it. A directory that will not resolve
+    // is one that is not there — a fresh install, or a data directory the human
+    // has taken away — and there is nothing in it to sweep.
+    let Ok(root) = worktrees.canonicalize() else {
+        return swept;
+    };
+
+    let entries = match std::fs::read_dir(&worktrees) {
+        Ok(entries) => entries,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                path = %worktrees.display(),
+                "the worktrees directory could not be read, so nothing is being swept",
+            );
+            return swept;
+        }
+    };
+
+    // Each record as it was written and as it resolves. Both, because they are
+    // the same directory under two names as soon as anything above it is a link
+    // or has been moved, and a keep-set that missed one of them would be a
+    // keep-set that deleted live work.
+    let recorded: Vec<(PathBuf, Option<PathBuf>)> = kept
+        .iter()
+        .map(|path| (path.clone(), path.canonicalize().ok()))
+        .collect();
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                tracing::error!(error = ?error, path = %worktrees.display(), "an entry of the worktrees directory could not be read, so it is being left alone");
+                continue;
+            }
+        };
+
+        let path = entry.path();
+
+        // What `read_dir` hands back is an entry of this directory, said out
+        // loud rather than trusted: everything below deletes, and a candidate
+        // that is not a child of the directory that was resolved is one no
+        // check here describes.
+        if path.parent() != Some(worktrees.as_path()) {
+            tracing::error!(path = %path.display(), "a worktrees entry is not a child of the worktrees directory, so it is being left alone");
+            continue;
+        }
+
+        // A link is deleted as a link and never followed. `remove_dir_all` on
+        // one walks what is on the other end, which is by definition somewhere
+        // else — and somewhere else is the one place nothing here may touch.
+        let linked = match path.symlink_metadata() {
+            Ok(metadata) => metadata.is_symlink(),
+            Err(error) => {
+                tracing::error!(error = ?error, path = %path.display(), "a worktrees entry could not be read, so it is being left alone");
+                continue;
+            }
+        };
+
+        if linked {
+            if names(&recorded, &path, None) {
+                continue;
+            }
+
+            match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    tracing::info!(path = %path.display(), "a link in the worktrees directory that no Conversation names was removed");
+                    swept.push(path);
+                }
+                Err(error) => {
+                    tracing::error!(error = ?error, path = %path.display(), "a link in the worktrees directory could not be removed");
+                }
+            }
+
+            continue;
+        }
+
+        // And where it actually is, which is what the boundary is checked
+        // against. Nothing that will not resolve is deleted: a reading that
+        // failed is not a reading that says *outside*.
+        let resolved = match path.canonicalize() {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                tracing::error!(error = ?error, path = %path.display(), "a worktrees entry could not be resolved, so it is being left alone");
+                continue;
+            }
+        };
+
+        if resolved.parent() != Some(root.as_path()) {
+            tracing::error!(path = %path.display(), resolved = %resolved.display(), "a worktrees entry resolves outside the worktrees directory, so it is being left alone");
+            continue;
+        }
+
+        if names(&recorded, &path, Some(&resolved)) {
+            continue;
+        }
+
+        if discard(&path) {
+            tracing::info!(path = %path.display(), "an orphaned worktree that no Conversation names was deleted");
+            swept.push(path);
+        }
+    }
+
+    // And then the registrations git is still holding for directories that have
+    // gone. Every registered Repo rather than the ones this could name: a
+    // directory hollowed out no longer says which repository made it, and the
+    // registration it leaves is what has git refusing to check that branch out
+    // anywhere later. Only where something went — a sweep that found nothing has
+    // left nothing stale.
+    if !swept.is_empty() {
+        for repo in repos {
+            git(repo, &["worktree", "prune"]);
+        }
+    }
+
+    swept
+}
+
+/// Whether any record names `path`, or anything inside it.
+///
+/// Both readings of every record, and either matching is enough to keep the
+/// directory. `resolved` is what the candidate resolves to, or `None` for a
+/// candidate that is a symlink — nothing there was followed, so there is nothing
+/// resolved to compare.
+///
+/// Anything *inside* rather than the directory itself, because the rule is
+/// *keep what a record could be talking about*. Every path Verkstead writes is
+/// an immediate child of the worktrees directory — see [`worktree_path`] — so
+/// the wider reading costs nothing today and is the safe way to be wrong if a
+/// record ever holds something deeper.
+fn names(recorded: &[(PathBuf, Option<PathBuf>)], path: &Path, resolved: Option<&Path>) -> bool {
+    recorded.iter().any(|(named, at)| {
+        named.starts_with(path)
+            || match (at, resolved) {
+                (Some(at), Some(resolved)) => at.starts_with(resolved),
+                _ => false,
+            }
+    })
+}
+
+/// Take one orphan away: git's own removal where the directory still says which
+/// repository it belongs to, and the directory itself where it does not or where
+/// git will not have it.
+///
+/// Forceful, which is the whole point of sweeping at all. What is left under the
+/// worktrees directory after a close is precisely what the close's own polite
+/// removal already failed on, so a sweep that asked as nicely would reclaim
+/// exactly nothing. [`remove`] is already the forceful one and already prunes
+/// the repository it removed from, which is why the polite half is a call to it
+/// rather than a second way of saying the same thing.
+///
+/// The directory is deleted outright where git would not name it. That is the
+/// state this exists for: a `.git` file that has gone, or a directory that was
+/// never a worktree — and either way it is unrecorded, under Verkstead's own
+/// data directory, which is the definition of something to reclaim.
+fn discard(path: &Path) -> bool {
+    if let Some(repo) = common_git_dir(path)
+        && remove(&repo, path)
+    {
+        return true;
+    }
+
+    // A directory or something that is not one. A stray file under here is as
+    // unrecorded as a stray checkout and goes the same way; what it must not do
+    // is fail a `remove_dir_all` and be reported as a worktree that would not go.
+    let taken = match path.is_dir() {
+        true => std::fs::remove_dir_all(path),
+        false => std::fs::remove_file(path),
+    };
+
+    match taken {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::error!(error = ?error, path = %path.display(), "an orphaned worktree could not be deleted");
+            false
+        }
+    }
+}
+
+/// Sweep once, as the server comes up.
+///
+/// The other place orphans come from. A close sweeps after itself, so what is
+/// on disk unrecorded when a server starts is what the last one never got to: a
+/// process that died between making a checkout and recording it, or between
+/// being asked to remove one and removing it. Nothing else will ever look at
+/// those, because nothing else knows they are there.
+///
+/// Started rather than waited on, and nothing waits on it: what it is racing is
+/// [`crate::resume::at_startup`] rebuilding the checkouts a restart left broken,
+/// and those are recorded, so the keep-set holds them whichever of the two looks
+/// first.
+pub(crate) fn at_startup(state: &crate::AppState) {
+    let state = state.clone();
+
+    tokio::spawn(async move { sweep(&state).await });
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Read;
@@ -1149,6 +1452,211 @@ mod tests {
         );
     }
 
+    /// The whole of the sweep's rule in one run: the directory a record names
+    /// stays, and the one no record names goes — along with the registration
+    /// git was holding for it.
+    #[test]
+    fn a_worktree_a_conversation_names_survives_a_sweep_and_one_it_does_not_goes() {
+        let (dir, repo) = repository();
+        let kept = dir.path().join("worktrees/verkstead-rate-limiting");
+        let orphan = dir.path().join("worktrees/verkstead-abandoned");
+
+        assert!(add(&repo, &kept, "rate-limiting", "HEAD"));
+        assert!(add(&repo, &orphan, "abandoned", "HEAD"));
+
+        let swept = sweeping(
+            dir.path(),
+            std::slice::from_ref(&kept),
+            std::slice::from_ref(&repo),
+        );
+
+        assert_eq!(swept, vec![orphan.clone()]);
+        assert!(kept.exists(), "a Conversation is still working in it");
+        assert!(!orphan.exists(), "and nothing is working in this one");
+        assert!(
+            !repo.join(".git/worktrees/verkstead-abandoned").exists(),
+            "the registration goes with the directory",
+        );
+    }
+
+    /// The one this exists for: a directory git no longer reads as a worktree,
+    /// which is exactly what a close logs and closes around.
+    ///
+    /// Git's own removal is asked first and refuses, as it refused at the close;
+    /// what reclaims the directory is the sweep deleting it outright, and the
+    /// prune afterwards is what clears the registration nothing else would have.
+    #[test]
+    fn a_worktree_git_will_not_remove_is_swept_anyway() {
+        let (dir, repo) = repository();
+        let path = dir.path().join("worktrees/verkstead-hollowed");
+
+        assert!(add(&repo, &path, "hollowed", "HEAD"));
+        std::fs::remove_file(path.join(".git")).unwrap();
+
+        assert!(
+            !remove(&repo, &path),
+            "which is the state the close's own removal leaves behind",
+        );
+
+        let swept = sweeping(dir.path(), &[], std::slice::from_ref(&repo));
+
+        assert_eq!(swept, vec![path.clone()]);
+        assert!(!path.exists());
+        assert!(
+            !repo.join(".git/worktrees/verkstead-hollowed").exists(),
+            "and the prune cleared what git was still holding for it",
+        );
+    }
+
+    /// Everything unrecorded goes, whether or not git has ever heard of it. This
+    /// is Verkstead's own data directory: a directory that was never a checkout
+    /// and a file that was never anything are both something nobody named.
+    #[test]
+    fn what_was_never_a_worktree_at_all_is_swept_too() {
+        let (dir, repo) = repository();
+        let worktrees = dir.path().join("worktrees");
+
+        std::fs::create_dir_all(worktrees.join("a-directory/deeper")).unwrap();
+        std::fs::write(worktrees.join("a-directory/deeper/notes.md"), "left\n").unwrap();
+        std::fs::write(worktrees.join("a-file"), "left\n").unwrap();
+
+        let mut swept = sweeping(dir.path(), &[], std::slice::from_ref(&repo));
+        swept.sort();
+
+        assert_eq!(
+            swept,
+            vec![worktrees.join("a-directory"), worktrees.join("a-file")],
+        );
+    }
+
+    /// A link is deleted as a link and never followed. What is on the other end
+    /// is by definition outside the one directory this may delete inside, so
+    /// walking it would be the whole of the mistake this is written against.
+    #[test]
+    fn a_link_under_the_worktrees_directory_goes_as_a_link() {
+        let (dir, repo) = repository();
+        let worktrees = dir.path().join("worktrees");
+
+        std::fs::create_dir_all(&worktrees).unwrap();
+
+        let elsewhere = dir.path().join("somebody-elses");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("their-work.md"), "not Verkstead's\n").unwrap();
+
+        let link = worktrees.join("a-link");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+
+        let swept = sweeping(dir.path(), &[], std::slice::from_ref(&repo));
+
+        assert_eq!(swept, vec![link.clone()]);
+        assert!(
+            link.symlink_metadata().is_err(),
+            "the link itself is what was removed",
+        );
+        assert!(
+            elsewhere.join("their-work.md").exists(),
+            "and what it pointed at is untouched",
+        );
+    }
+
+    /// A store that will not answer deletes nothing. An error read as an empty
+    /// keep-set would be every live worktree there is, which is the one mistake
+    /// here that cannot be undone by sweeping again.
+    #[tokio::test]
+    async fn a_keep_set_that_could_not_be_read_sweeps_nothing() {
+        let (dir, repo) = repository();
+        let orphan = dir.path().join("worktrees/verkstead-abandoned");
+
+        assert!(add(&repo, &orphan, "abandoned", "HEAD"));
+
+        let pool = store::open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        // The table the keep-set is read out of, taken out from under it: any
+        // way of failing would do, and this is the one a test can arrange.
+        sqlx::query("DROP TABLE worktrees")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        swept(&pool, dir.path()).await;
+
+        assert!(
+            orphan.exists(),
+            "nothing is deleted on a reading that failed",
+        );
+    }
+
+    /// Both tables are the keep-set, so a companion's checkout is as safe as the
+    /// Conversation's own — and the orphan beside them still goes.
+    ///
+    /// End to end through the store rather than over a list of paths, because
+    /// what is being proved is which rows are read: a keep-set built from
+    /// `worktrees` alone would delete every companion checkout on the machine.
+    #[tokio::test]
+    async fn a_companion_checkout_is_kept_by_the_row_that_names_it() {
+        let (dir, repo) = repository();
+        let (beside, companion) = repository();
+
+        let pool = store::open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let registered = store::register_repo(&pool, &repo, "verkstead", "main")
+            .await
+            .unwrap()
+            .expect("nothing is registered at that path yet");
+        let alongside = store::register_repo(&pool, &companion, "askance", "main")
+            .await
+            .unwrap()
+            .expect("nothing is registered at that path yet");
+
+        let id = store::start_conversation(&pool, registered.id, "rate-limiting")
+            .await
+            .unwrap()
+            .expect("the Repo was just registered");
+
+        store::add_companion(&pool, id, alongside.id).await.unwrap();
+
+        let own = dir.path().join("worktrees/verkstead-rate-limiting");
+        let alongside_path = dir.path().join("worktrees/askance-rate-limiting");
+        let orphan = dir.path().join("worktrees/verkstead-abandoned");
+
+        assert!(add(&repo, &own, "rate-limiting", "HEAD"));
+        assert!(add(&companion, &alongside_path, "rate-limiting", "HEAD"));
+        assert!(add(&repo, &orphan, "abandoned", "HEAD"));
+
+        store::start_grilling(
+            &pool,
+            id,
+            "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+            &own,
+            &[store::CompanionWorktree {
+                repo_id: alongside.id,
+                path: alongside_path.clone(),
+                base_commit: None,
+            }],
+        )
+        .await
+        .unwrap();
+
+        swept(&pool, dir.path()).await;
+
+        assert!(own.exists(), "the Conversation's own checkout");
+        assert!(alongside_path.exists(), "and the companion's beside it");
+        assert!(!orphan.exists(), "and the orphan between them is gone");
+
+        drop(beside);
+    }
+
+    /// A router with no data directory sweeps nothing. The empty path would
+    /// resolve against the working directory, which is somebody else's — see
+    /// [`crate::nowhere`].
+    #[test]
+    fn a_server_with_no_data_directory_sweeps_nothing() {
+        assert!(sweeping(Path::new(""), &[], &[]).is_empty());
+    }
     /// A repository with one commit on it and a branch to check out, and the
     /// directory that keeps it alive.
     fn repository() -> (tempfile::TempDir, PathBuf) {

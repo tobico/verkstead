@@ -844,6 +844,12 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch)
     });
 
+    // From here to the record naming what this makes, held against the sweep of
+    // orphaned worktrees: everything below makes directories the store does not
+    // know about yet, and a sweep reading in between would find live checkouts
+    // no record names. See [`crate::AppState::checkouts`].
+    let making = state.checkouts.lock().await;
+
     // The filesystem and git halves together, off the runtime: a worktree of a
     // large repository is not a quick call, and every part of this blocks.
     let made = tokio::task::spawn_blocking({
@@ -935,6 +941,11 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         store::Grilling::NotDrafting => return Ok(GrillingStarted::NotDrafting),
         store::Grilling::Started => {}
     }
+
+    // The record names them now, so the sweep would keep them: released here
+    // rather than at the end, because what follows is a launch and holding a
+    // lock across one would hold every other start behind it.
+    drop(making);
 
     // From here the Conversation says it is being worked on, and the thing that
     // will say so is a session that does not exist yet. So a registration stands
@@ -1400,6 +1411,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // The same [`plan`], [`make`] and [`recorded`] a grill start uses, at the
     // stage's own branch: a read-write companion mirrors that where its row
     // names nothing, so the branch cut beside the stage is the stage's own.
+
+    // From here to the record naming what this makes, as a grill start holds it
+    // and for its reason: a directory made and not yet recorded is one a sweep
+    // would read as nobody's. See [`crate::AppState::checkouts`].
+    let making = state.checkouts.lock().await;
+
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
         let branch = branch.clone();
@@ -1452,6 +1469,10 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         store::Staged::NoSuchConversation => return Ok(Adopted::NoSuchConversation),
         store::Staged::NotDrafting => return Ok(Adopted::NotDrafting),
     }
+
+    // Recorded, so the sweep would keep them. What follows is a Timeline and a
+    // launch, and neither makes a directory.
+    drop(making);
 
     // What was adopted, from where, and where its branch came off — on the
     // Conversation's own Timeline, because that is the only Timeline there is:
@@ -1609,6 +1630,18 @@ pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClose
         asked(state, id).await;
         read(state, id).await;
     }
+
+    // And then the backstop under all of it: every directory under the worktrees
+    // directory that no Conversation names any more. The targeted removals above
+    // are still what ordinarily gives this Conversation its checkouts back —
+    // this is what reclaims the ones git refused, which are exactly the ones the
+    // warnings above have just been written about, along with whatever earlier
+    // closes and crashes left behind. See [`worktrees::sweep`].
+    //
+    // After the record rather than before it: the rows this close deletes are
+    // what makes its own directories orphans, and a sweep that ran first would
+    // read them as live and leave them.
+    worktrees::sweep(state).await;
 
     Ok(match closing {
         store::Closing::Closed => ConversationClosed::Closed,

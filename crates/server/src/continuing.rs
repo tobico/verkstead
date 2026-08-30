@@ -293,6 +293,13 @@ async fn start(
     // whole list is planned first for the reason a grill start plans one — that
     // is what lets a stage that cannot be given one companion start with nothing
     // left behind anywhere.
+
+    // From here to the record naming what this makes, as a grill start holds it
+    // and for its reason: a directory made and not yet recorded is one the sweep
+    // of orphaned worktrees would read as nobody's. See
+    // [`crate::AppState::checkouts`].
+    let making = state.checkouts.lock().await;
+
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
         let branch = branch.clone();
@@ -379,6 +386,10 @@ async fn start(
             return;
         }
     }
+
+    // Recorded, so the sweep would keep them. What follows says so on two
+    // Timelines and launches a session, and none of it makes a directory.
+    drop(making);
 
     // What Verkstead decided, on both Timelines: on the stage's, because the
     // branch it is on was nobody's choice but this; and on the settled one,

@@ -3436,13 +3436,14 @@ async fn closing_a_conversation_whose_worktree_has_already_gone_works() {
     assert_eq!(worktrees(&repo).len(), 1, "git should have let it go too");
 }
 
-/// And a worktree git will not let go of is a close that works too. A directory
-/// hollowed out — its `.git` file gone — is one git refuses to remove and one
-/// the human has every reason to want the end of: the close goes through, and
-/// what is left on disk is left for them.
+/// And a worktree git will not let go of is a close that works too — and the
+/// directory does not outlive it. A directory hollowed out — its `.git` file
+/// gone — is one git refuses to remove and one the human has every reason to
+/// want the end of: the close's own removal cannot touch it and says so in the
+/// log, and the sweep that follows deletes it outright.
 #[tokio::test]
-async fn closing_a_conversation_whose_worktree_git_will_not_remove_still_closes() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+async fn closing_a_conversation_whose_worktree_git_will_not_remove_sweeps_it_away() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
     let id = ready(&app, watched.path(), repo_id).await;
     grill(&app, id).await;
 
@@ -3455,8 +3456,58 @@ async fn closing_a_conversation_whose_worktree_git_will_not_remove_still_closes(
     assert_eq!(view.state, Lifecycle::Closed);
     assert_eq!(view.worktree, None);
     assert!(
-        path.exists(),
-        "the directory git would not remove should still be there to be found"
+        !path.exists(),
+        "the directory git would not remove is what the sweep is for"
+    );
+    assert_eq!(
+        worktrees(&repo).len(),
+        1,
+        "and the prune cleared the registration it left behind"
+    );
+}
+
+/// A close sweeps the whole worktrees directory, not just its own: whatever an
+/// earlier close or a crash left unrecorded goes with it, and every checkout a
+/// live Conversation is still working in stays.
+///
+/// Which is the pair the whole thing turns on. Nothing under the Data Directory
+/// that no record names has any business surviving, and nothing a record names
+/// may be touched however the sweep was triggered.
+#[tokio::test]
+async fn closing_one_conversation_sweeps_the_strays_and_leaves_the_live_worktrees() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+
+    let closing = ready(&app, watched.path(), repo_id).await;
+    grill(&app, closing).await;
+    let closing_path = PathBuf::from(opened(&app, closing).await.worktree.unwrap().path);
+
+    // A second Conversation off the Profiles the first one made, `ready` making
+    // those by name and a name being takeable once.
+    let working = started(&app, repo_id).await;
+    write_brief(&app, working, "# Another\n\nThe API still has none.\n").await;
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(&app, "/api/ui/profiles").await;
+    choose(&app, working, "grilling", profiles[0].id).await;
+    choose(&app, working, "implementation", profiles[1].id).await;
+    assert_eq!(grill(&app, working).await, GrillingStarted::Started);
+
+    let working_path = PathBuf::from(opened(&app, working).await.worktree.unwrap().path);
+
+    // What a crash leaves: a directory under the worktrees directory that was
+    // never a checkout and that no record has ever named.
+    let stray = dir.path().join("worktrees/verkstead-from-a-crash");
+    std::fs::create_dir_all(stray.join("src")).unwrap();
+    std::fs::write(stray.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+    assert_eq!(close(&app, closing).await, ConversationClosed::Closed);
+
+    assert!(!closing_path.exists(), "the Conversation that closed");
+    assert!(
+        !stray.exists(),
+        "and the stray nobody would ever come back for"
+    );
+    assert!(
+        working_path.exists(),
+        "while the Conversation still working is untouched",
     );
 }
 
