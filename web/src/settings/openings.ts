@@ -33,6 +33,23 @@
 //! is what they are when nothing is open at all: the URL is a record of what was
 //! picked rather than a promise that it is still there.
 
+/// The openings named by a word rather than by an id: the credentials, the
+/// shared Rust build cache, and where the share viewer is hosted — the things
+/// there is exactly one of on this page.
+///
+/// A list rather than a word written wherever one is needed, because three
+/// separate things read it and all three have to agree: the [`Opening`] below is
+/// made of it, [`openingAt`] turns a path into one, and the routes the app
+/// declares under `/settings` decide whether that path reaches this page at all.
+/// Written apart, a fourth section can be added to the page, given a card and a
+/// pane and a path, and answer that path with *No such page* — a nested route
+/// with no matching child falls to the catch-all, and nothing about the section
+/// itself is wrong. Which is what happened to the share viewer.
+///
+/// So the app writes those routes from this — see `panes` in `SettingsPage.tsx`
+/// — and a word added here arrives with the route that reaches it.
+export const WORDS = ["github", "build-cache", "share-viewer"] as const;
+
 /// What the details pane on the settings page is showing.
 ///
 /// One channel, so that opening any closes the rest — a details pane shows one
@@ -40,13 +57,16 @@
 /// against what a card would open, and two of the same selection have to be the
 /// same value.
 export type Opening =
-  | "github"
-  | "build-cache"
-  | "share-viewer"
+  | (typeof WORDS)[number]
   | "repo:new"
   | `repo:${number}`
   | "profile:new"
   | `profile:${number}`;
+
+/// Whether a segment is one of the words above.
+function worded(what: string | undefined): what is (typeof WORDS)[number] {
+  return WORDS.some((word) => word === what);
+}
 
 /// What opens a Profile's form: its id, or `"new"` for the blank one.
 export function opensProfile(which: number | "new"): Opening {
@@ -119,10 +139,7 @@ export function openingAt(pathname: string): Opening | null {
     return null;
   }
 
-  if (
-    (what === "github" || what === "build-cache" || what === "share-viewer") &&
-    which === undefined
-  ) {
+  if (worded(what) && which === undefined) {
     return what;
   }
 

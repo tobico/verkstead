@@ -10,7 +10,7 @@ import { retrying } from "./api/client";
 import { Empty } from "./notices";
 import { listenForNudges } from "./nudge";
 import { SetPage } from "./set/SetPage";
-import { SettingsPage } from "./settings/SettingsPage";
+import { SettingsPage, panes } from "./settings/SettingsPage";
 import { Workbench } from "./workbench/Workbench";
 
 /// One client for the whole app, made once rather than per render: it is where
@@ -81,21 +81,14 @@ export function App(): JSX.Element {
             rather than read, nested for the reason the Conversation's are: the
             settings are one page across all of them, and a route the router
             swapped for another would take the middle pane down with it every
-            time a card was pressed. The leaves draw nothing — what they are is
-            what the path says, and the page reads that off the URL. */}
+            time a card was pressed.
+
+            Which panes there are is that page's own — see `panes` in
+            `SettingsPage.tsx`. Written out here, this list was a second opinion
+            about where a card leads, and a section added to the page without a
+            line added here answered its own path with the catch-all below. */}
         <Route path="/settings" component={SettingsPage}>
-          <Route path="/" />
-          <Route path="/github" />
-          <Route path="/build-cache" />
-          {/* The blank form rides in the same segment an id does, as
-              `/settings/profiles/new` — it is the same pane asked about a
-              Profile that does not exist yet, and no id the server issues is
-              the word `new`. */}
-          <Route path="/profiles/:profile" />
-          {/* And the Repos the same way: a registered one opened by its id, and
-              the path another is registered by riding in the same segment as
-              `/settings/repos/new`. */}
-          <Route path="/repos/:repo" />
+          {panes()}
         </Route>
         {/* One Set as a page of its own, which is what a push notification
             opens: a phone woken by one is being asked about that Set and

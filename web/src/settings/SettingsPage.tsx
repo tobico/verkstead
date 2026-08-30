@@ -39,7 +39,7 @@
 //! released. Both belong here for the same reason everything else does, and
 //! neither is a card: the switch is one control and the banner asks for nothing.
 
-import { useLocation, useNavigate } from "@solidjs/router";
+import { Route, useLocation, useNavigate } from "@solidjs/router";
 import { Match, Switch, createMemo, createSignal, type JSX } from "solid-js";
 
 import { Panes, type Pane } from "../Panes";
@@ -55,6 +55,7 @@ import { GithubCard, GithubPane } from "./Credentials";
 import { ShareViewerCard, ShareViewerPane } from "./ShareViewer";
 import {
   SETTINGS,
+  WORDS,
   openingAt,
   opensProfile,
   opensRepo,
@@ -64,6 +65,44 @@ import {
   type Opening,
 } from "./openings";
 import styles from "./SettingsPage.module.css";
+
+/// Every details pane of this page, as the routes that reach one.
+///
+/// Declared here rather than in `App.tsx` because they are this page's own
+/// arithmetic: what a pane is reached at is [`pathTo`]'s answer, and a route
+/// table written somewhere else is a second opinion about it — one that agreed
+/// with this page for as long as somebody remembered to keep the two in step,
+/// and then quietly stopped. That is what happened to the share viewer: card,
+/// pane and path all in hand, and *No such page* at the end of it, because a
+/// nested route with no matching child falls to the app's catch-all.
+///
+/// So the ones named by a word are written from [`WORDS`], which is what
+/// [`openingAt`] reads a path against — a section added there arrives with the
+/// route that reaches it. The two named by an id keep their own line: what
+/// stands in that segment is an id or the word `new`, and no id the server
+/// issues is `new`.
+///
+/// The leaves draw nothing. What they are is what the path says, and this page
+/// reads that off the URL — they are here so the parent route matches, and so
+/// that pressing a card does not take the middle pane down with it.
+///
+/// A plain function rather than a component: the router reads the routes out of
+/// the JSX handed to it rather than out of anything a component renders, so this
+/// is called where they are written.
+export function panes(): JSX.Element {
+  return (
+    <>
+      <Route path="/" />
+      {WORDS.map((word) => (
+        <Route path={`/${word}`} />
+      ))}
+      {/* The blank form rides in the same segment an id does, as
+          `/settings/profiles/new`. */}
+      <Route path="/profiles/:profile" />
+      <Route path="/repos/:repo" />
+    </>
+  );
+}
 
 /// The settings page, whole.
 export function SettingsPage(): JSX.Element {
