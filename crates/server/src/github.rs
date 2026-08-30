@@ -202,17 +202,24 @@ impl Gh {
         // Written before the output is waited on, and the pipe dropped so that
         // `gh` sees the end of it: a body held open is a child that never
         // finishes reading and a parent that never finishes waiting.
-        if let Some(body) = body {
-            let written = child
+        //
+        // **A write that fails is not the answer.** `gh` refuses a request
+        // before it has read the body of one — a token GitHub will not let write
+        // a gist is a 404 and an exit — and the write into what it is no longer
+        // reading then fails with a broken pipe. Reported as the refusal, that
+        // is the shape of the failing standing in for the reason for it: *Broken
+        // pipe (os error 32)* where GitHub said *Not Found*, which is the one
+        // sentence [`crate::publishing`] reads to tell a missing scope from
+        // anything else. So it is kept rather than returned, and the child is
+        // waited on regardless.
+        let unwritten = body.and_then(|body| {
+            child
                 .stdin
                 .take()
                 .expect("a piped stdin is there to be written to")
-                .write_all(body.as_bytes());
-
-            if let Err(error) = written {
-                return Err(Trouble::Refused(error.to_string()));
-            }
-        }
+                .write_all(body.as_bytes())
+                .err()
+        });
 
         let output = match child.wait_with_output() {
             Ok(output) => output,
@@ -221,6 +228,14 @@ impl Gh {
 
         if !output.status.success() {
             return Err(Trouble::read(&String::from_utf8_lossy(&output.stderr)));
+        }
+
+        // And here is where the pipe is worth reporting after all: a `gh` that
+        // stopped reading and then said everything went well made its request
+        // without what the request was, and whatever it answered is about
+        // something nobody asked for.
+        if let Some(error) = unwritten {
+            return Err(Trouble::Refused(error.to_string()));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -1939,6 +1954,39 @@ mod tests {
     /// One argument as `sh` takes it literally.
     fn shell_quoted(said: &str) -> String {
         format!("'{}'", said.replace('\'', r"'\''"))
+    }
+
+    /// A `gh` that refuses before it has read the body is answered in its own
+    /// words rather than in the pipe's.
+    ///
+    /// Which is what every write here meets: `gh` decides a request is refused
+    /// and exits, and the body still being written into it then fails with a
+    /// broken pipe. Reported as the refusal, *Broken pipe (os error 32)* stands
+    /// where GitHub's own sentence should be — and that sentence is what
+    /// [`crate::publishing`] reads to tell a token that may not write a gist
+    /// from anything else.
+    ///
+    /// The body is bigger than a pipe will hold, so the write cannot finish
+    /// before the child has gone. A small one lands in the buffer and succeeds
+    /// or does not depending on the scheduler, which is how this went unnoticed
+    /// on the machines it was written on.
+    #[test]
+    fn a_gh_that_stopped_reading_is_still_read_for_why() {
+        let gh = Gh::running(vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            r#"printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1"#.to_owned(),
+            "gh".to_owned(),
+        ]);
+
+        assert_eq!(
+            gh.tell_as(
+                "ghp_token",
+                &["api", "-X", "POST", "/gists", "--input", "-"],
+                &"x".repeat(1 << 20),
+            ),
+            Err(Trouble::Refused("gh: Not Found (HTTP 404)".to_owned())),
+        );
     }
 
     /// A token GitHub will not accept is trouble in `gh`'s own words rather than
