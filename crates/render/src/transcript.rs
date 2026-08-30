@@ -1201,14 +1201,28 @@ fn tool_name(update: &Value) -> &str {
         .unwrap_or_default()
 }
 
-/// What a Grok tool answered: the content of the update that finished the call.
+/// What a Grok tool answered: the content of the update that finished the call,
+/// or — where it finished carrying none — what grok told the model it answered.
+///
+/// Both, because grok writes an answer under whichever of the two its tool
+/// reaches for, and some tools reach only for the second: a plan update finishes
+/// with its own `rawOutput` and no content at all, so a call read out of the
+/// blocks alone draws as an answer with nothing in it. The same shape codex's
+/// reader takes and for the same reason — an item that says one thing under two
+/// names is read without asking for both.
 fn answering(update: &Value, failed: bool, reads: Reads) -> ToolResult {
     ToolResult {
         id: UNPLACED,
         call: text(update["toolCallId"].as_str().unwrap_or_default(), reads),
         failed,
         text: match reads {
-            Reads::Drawing => said_back(&update["content"]),
+            Reads::Drawing => match said_back(&update["content"]) {
+                // Nothing in the blocks covers both a call that answered in none
+                // of them and one whose blocks held nothing to draw: either way
+                // what there is to show is under the tool's own output.
+                said if said.is_empty() => for_the_prompt(&update["rawOutput"]).unwrap_or_default(),
+                said => said,
+            },
             _ => String::new(),
         },
     }
@@ -1219,8 +1233,8 @@ fn answering(update: &Value, failed: bool, reads: Reads) -> ToolResult {
 /// A block that is not text says what it was instead — a diff, a terminal, a
 /// picture — the way a tool's answer does everywhere else here: something
 /// nobody can draw as text is still something that happened. Empty where the
-/// update carried no content at all, which is a call that answered its caller
-/// and had nothing to show for it.
+/// update carried no content at all, which is where [`for_the_prompt`] takes
+/// over.
 fn said_back(content: &Value) -> String {
     content
         .as_array()
@@ -1247,6 +1261,34 @@ fn said_back(content: &Value) -> String {
         .unwrap_or_default()
 }
 
+/// And what grok told the model a call answered with, out of the tool's own raw
+/// output.
+///
+/// Grok writes an answer twice over: once as the protocol's content blocks, and
+/// once as whatever the tool itself produced — with the words the model was
+/// actually handed under a key ending [`FOR_THE_PROMPT`]. `output_for_prompt` on
+/// a command that ran, `summary_for_prompt` on a plan that was rewritten.
+///
+/// **The suffix rather than the keys there are**, for the reason [`ABOUT`] is
+/// keys rather than tools: what tools a session has is grok's business and half
+/// of them are whatever the project added, where the convention for naming what
+/// the model was told is one thing and shared. And found at whatever depth it
+/// sits at, because the shape around it is the tool's own — a command puts it
+/// beside its exit code and a plan puts it inside the update it made.
+///
+/// `None` where there is none, which is a call that answered its caller and had
+/// nothing to show for it.
+fn for_the_prompt(output: &Value) -> Option<String> {
+    match output {
+        Value::Object(fields) => fields.iter().find_map(|(key, value)| match value.as_str() {
+            Some(said) if key.ends_with(FOR_THE_PROMPT) => Some(said.to_owned()),
+            _ => for_the_prompt(value),
+        }),
+        Value::Array(values) => values.iter().find_map(for_the_prompt),
+        _ => None,
+    }
+}
+
 /// Whether an update to a tool call is the answer to it, and whether the call
 /// failed: `Some(true)` for one that ended badly, `Some(false)` for one that
 /// went through, and `None` for a call that is still running.
@@ -1268,6 +1310,10 @@ const SESSION_UPDATE: &str = "sessionUpdate";
 /// Where grok writes what it knows about a tool of its own, beside the
 /// protocol's own fields.
 const XAI_TOOL: &str = "x.ai/tool";
+
+/// And how it ends the key holding what a tool handed the model — see
+/// [`for_the_prompt`].
+const FOR_THE_PROMPT: &str = "_for_prompt";
 
 /// What grok calls a tool call that ran to the end, and what it calls one that
 /// ended badly.
@@ -2182,11 +2228,13 @@ mod tests {
                     }))
                     .unwrap(),
                 }),
+                // Answered in no content block at all, so what it drew with is
+                // what grok handed the model — the plan as the tool rewrote it.
                 Turn::ToolResult(ToolResult {
                     id: 7,
                     call: "call_2".to_owned(),
                     failed: false,
-                    text: String::new(),
+                    text: "- [in_progress] 1: Read the renderer task\n".to_owned(),
                 }),
                 Turn::Prose(Prose {
                     id: 8,
@@ -2313,6 +2361,73 @@ mod tests {
             matches!(
                 &view.turns[..],
                 [Turn::ToolResult(answer)] if answer.text == "one file changed\n[diff]"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// A call that answered in no content block at all is drawn with what grok
+    /// handed the model instead, wherever inside the tool's own output that sat.
+    ///
+    /// Which is the case the plan tool is, and it is called on most turns: the
+    /// blocks are the protocol's and the raw output is the tool's, and a tool
+    /// that only wrote the second would otherwise draw as an answer with nothing
+    /// in it. The key is looked for by its ending, at whatever depth the tool put
+    /// it — a command beside its exit code, a plan inside the update it made.
+    #[test]
+    fn a_grok_answer_kept_only_as_the_tools_own_output_is_drawn_from_it() {
+        let view = transcript_view(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_2","status":"completed","rawOutput":{"type":"Todo","TodosUpdated":{"summary_for_prompt":"- [in_progress] 1: Read the renderer task\n","todos":[{"content":"Read the renderer task","status":"in_progress"}]}}}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolResult(answer)]
+                    if answer.text == "- [in_progress] 1: Read the renderer task\n"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// And the blocks win where a tool wrote both, which is what most of them do.
+    ///
+    /// The raw output is the tool's own record and says more than the answer —
+    /// a command keeps its exit code in there — so it is the fall-back rather
+    /// than the reading, and a call that answered in blocks is drawn from them.
+    #[test]
+    fn a_grok_answer_in_blocks_is_drawn_from_them_rather_than_the_raw_output() {
+        let view = transcript_view(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"04-render.md\n"}}],"rawOutput":{"type":"Bash","exit_code":0,"output_for_prompt":"exit: 0\n04-render.md\n"}}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolResult(answer)] if answer.text == "04-render.md\n"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// And a call that answered its caller with nothing at all is still an
+    /// answer, drawn empty: there is no third place to look.
+    #[test]
+    fn a_grok_call_that_showed_nothing_is_an_answer_with_nothing_in_it() {
+        let view = transcript_view(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_4","status":"completed"}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolResult(answer)] if answer.text.is_empty() && answer.call == "call_4"
             ),
             "{:?}",
             view.turns
