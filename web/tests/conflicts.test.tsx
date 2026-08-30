@@ -158,6 +158,8 @@ describe("the pane", () => {
         github_token: "Keep",
         rust_build_cache: { enabled: UNSET.rust_build_cache.enabled, size: "" },
         share_viewer_url: UNSET.share_viewer_url,
+        watched_paths: [],
+        sandbox_binds: [],
         conflict_resolution: "Rebase",
       }),
     );

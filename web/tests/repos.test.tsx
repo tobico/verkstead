@@ -28,6 +28,7 @@ import type {
   RepoEntry,
   RepoView,
   Resolution,
+  SettingsView,
 } from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
@@ -38,6 +39,7 @@ import { drawn } from "./bench";
 import { json, serving, whenever } from "./serving";
 import repos from "./fixtures/repos.json" with { type: "json" };
 import opened from "./fixtures/repo.json" with { type: "json" };
+import settings from "./fixtures/settings.json" with { type: "json" };
 
 const REPOS = repos as RepoEntry[];
 const FIRST = REPOS[0]!;
@@ -45,6 +47,11 @@ const FIRST = REPOS[0]!;
 /// One of them opened, which is the pane's own read — the same repository the
 /// first card is about, so a test can mount the pair and have them agree.
 const OPENED: RepoView = { ...(opened as RepoView), id: FIRST.id };
+
+/// And the settings the pane's own Sandbox Configuration is drawn out of, which
+/// hold one bind for this repository by name. What that section is *about* is
+/// `paths.test.tsx`'s; what is asked here is only that the pane carries it.
+const SETTINGS = settings as SettingsView;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -119,6 +126,9 @@ function theOpened(
 ) {
   return serving(
     whenever(`/api/ui/repos/${view.id}`, json(view)),
+    // The pane reads the settings as well as the Repo, for the binds scoped to
+    // it — the same read every other section of this page makes.
+    whenever("/api/ui/settings", json(SETTINGS)),
     ...(removal
       ? [whenever(`/api/ui/repos/${view.id}/remove`, removal, "POST")]
       : []),
@@ -130,6 +140,7 @@ function theOpened(
 function theOpenedResolving(view: RepoView, saved: RepoView) {
   return serving(
     whenever(`/api/ui/repos/${view.id}`, json(view)),
+    whenever("/api/ui/settings", json(SETTINGS)),
     whenever(`/api/ui/repos/${view.id}/resolution`, json(saved), "POST"),
   );
 }
@@ -147,10 +158,18 @@ async function thePicker(): Promise<HTMLSelectElement> {
   )) as HTMLSelectElement;
 }
 
-/// Press the Remove in the opened pane, once the read behind it has landed.
+/// Press the Remove that unregisters the Repo, once the read behind it has
+/// landed.
+///
+/// By where it stands rather than by its word: the binds section above it draws
+/// a Remove on every row the settings own, and both presses say the same thing
+/// about two different things.
 async function removePressed() {
   fireEvent.click(
-    await waitFor(() => screen.getByRole("button", { name: "Remove" })),
+    await drawn<HTMLButtonElement>(
+      document,
+      `.${styles.actions} .${styles.remove}`,
+    ),
   );
 }
 
@@ -417,6 +436,21 @@ describe("the pane a card opens", () => {
     mountOpened();
 
     await waitFor(() => screen.getByText("Nothing is waiting to be adopted."));
+  });
+
+  /// The one section on this pane that is settings rather than facts, carrying
+  /// the binds written against this repository's own name. What it draws and
+  /// what a press on it saves is `paths.test.tsx`'s; what is asked here is that
+  /// the pane holds it at all, out of the settings read beside the Repo's own.
+  it("carries the binds scoped to this repo", async () => {
+    theOpened();
+    mountOpened();
+
+    await waitFor(() => screen.getByText("/var/cache/verkstead-cargo"));
+    expect(screen.getByText("Sandbox configuration")).toBeTruthy();
+
+    // And not the bind every sandbox gets, which is the Paths section's.
+    expect(screen.queryByText("/var/cache/verkstead-node")).toBeNull();
   });
 
   /// A link followed after somebody took the repo away, which the server says

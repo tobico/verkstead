@@ -56,6 +56,7 @@ import type {
 import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
 import { PaneHead } from "../workbench/PaneHead";
+import { heldPaths } from "./held";
 import styles from "./Credentials.module.css";
 
 /// The two files as they stand, read once for the two panes that draw them.
@@ -282,6 +283,10 @@ export function GithubPane(props: {
       share_viewer_url: told()?.share_viewer_url ?? "",
       // And how a conflicted pull request is resolved, likewise.
       conflict_resolution: told()?.conflict_resolution ?? "Merge",
+      // And the Watched Paths and the binds the settings hold, again for that
+      // reason — a list this form left out would be a list it emptied, and one
+      // of them is the boundary itself. See [`heldPaths`].
+      ...heldPaths(told()),
     });
 
   const submit = (ev: SubmitEvent) => {

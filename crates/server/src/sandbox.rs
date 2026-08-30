@@ -345,9 +345,11 @@ enum Reach {
 ///
 /// Two sets, composed. The global one every sandbox gets, and a per-Repo one so
 /// that a repository needing a build cache can say so without every repository
-/// getting it. A bind here is a hole in the one boundary a sandbox is, which is
-/// why they are configured where the Watched Paths are — in the environment, at
-/// installation — rather than anywhere a session or a browser could reach.
+/// getting it. This type is the *installation's* half of them: what
+/// `--sandbox-bind` was given, resolved once and kept. The settings file says
+/// binds too, in the same two grammars and composed the same way — see
+/// [`SandboxConfig::settings_binds`], which is where the two part company, in
+/// what a bind that will not resolve costs.
 ///
 /// A Repo is named by its *name*, which is the directory's own: the human writes
 /// what they call the repository rather than a path they would then have to keep
@@ -406,6 +408,68 @@ impl SandboxConfig {
         Ok(config)
     }
 
+    /// And what `config.yaml` asks for, resolved afresh for `conversation` at
+    /// the moment its session spawns.
+    ///
+    /// The same grammar and the same composition as [`SandboxConfig::resolve`]
+    /// and [`SandboxConfig::binds_for`] — one bind is one bind, however it was
+    /// said — and the opposite answer to a bind that will not resolve. The two
+    /// sets compose: what is here is added to what the installation configured
+    /// rather than standing in for it.
+    ///
+    /// **Nothing here is ever an error.** An entry that is neither a path nor
+    /// `name=path`, and one naming a directory the server cannot see — never
+    /// made, or outside what a hardened unit's namespace holds — is skipped with
+    /// a line in the log naming it, and the session starts without it. That is
+    /// the settings side of the line the whole of [`crate::settings`] is on: the
+    /// file is edited from a phone, a save lands whatever it was told, and a
+    /// typo in it is a bind that is missing rather than every session in that
+    /// Repo failing to start. The flag keeps the other answer, because a flag is
+    /// the installation's own word and nobody is watching when it is wrong.
+    ///
+    /// The ones that are not there are dropped after the composition rather than
+    /// before it, so what is logged is what *this* session would have been
+    /// given: a bind configured for some other Repo has nothing to say to a
+    /// session that was never going to get it. An entry that will not read at
+    /// all is the exception, and unavoidably: an entry nothing can tell the Repo
+    /// of is one there is no composition to drop it out of.
+    pub fn settings_binds(binds: &[String], conversation: &store::Conversation) -> Vec<Bind> {
+        let mut config = SandboxConfig::default();
+
+        for bind in binds {
+            match read_bind(bind) {
+                Ok((Some(repo), path)) => config.per_repo.entry(repo).or_default().push(path),
+                Ok((None, path)) => config.global.push(path),
+                Err(error) => tracing::warn!(
+                    conversation_id = conversation.id,
+                    bind,
+                    error = ?error,
+                    "a sandbox bind in the settings could not be read, so the session was \
+                     started without it"
+                ),
+            }
+        }
+
+        config
+            .binds_for(conversation)
+            .into_iter()
+            .filter(|bind| {
+                let there = bind.path.exists();
+
+                if !there {
+                    tracing::warn!(
+                        conversation_id = conversation.id,
+                        bind = %bind.path.display(),
+                        "a sandbox bind in the settings is not there, so the session was \
+                         started without it"
+                    );
+                }
+
+                there
+            })
+            .collect()
+    }
+
     /// What a sandbox for `conversation` binds beyond the decided surface: the
     /// global set, then its own Repo's, then each of its companions' own.
     ///
@@ -422,9 +486,10 @@ impl SandboxConfig {
     ///
     /// Writable, every one of them, and a companion's whatever its mode. A
     /// configured bind is a build cache or a package registry — somewhere a
-    /// build writes — and the installer opened the hole on purpose. They sit
-    /// outside the repository besides, so a read-only companion whose cache
-    /// could not be written to would fail on a cold cache for nothing gained.
+    /// build writes — and whoever configured it opened the hole on purpose.
+    /// They sit outside the repository besides, so a read-only companion whose
+    /// cache could not be written to would fail on a cold cache for nothing
+    /// gained.
     pub fn binds_for(&self, conversation: &store::Conversation) -> Vec<Bind> {
         let mut binds: Vec<Bind> = self.global.iter().cloned().map(Bind::writable).collect();
 
@@ -454,11 +519,31 @@ impl SandboxConfig {
     pub fn count(&self) -> usize {
         self.global.len() + self.per_repo.values().map(Vec::len).sum::<usize>()
     }
+
+    /// And every one of them as the Repo it is for — `None` for every Repo — and
+    /// the directory it binds: what the settings page draws the installation's
+    /// half of its list from.
+    ///
+    /// The global ones first and each Repo's after them, which is the order they
+    /// are composed in and the order the page reads them in. A pair rather than
+    /// the entry as it was written, because what was written is gone by here:
+    /// this is the parsed set, and the page draws the two halves apart anyway.
+    pub fn entries(&self) -> Vec<(Option<&str>, &Path)> {
+        let global = self.global.iter().map(|path| (None, path.as_path()));
+
+        let per_repo = self.per_repo.iter().flat_map(|(repo, paths)| {
+            paths
+                .iter()
+                .map(move |path| (Some(repo.as_str()), path.as_path()))
+        });
+
+        global.chain(per_repo).collect()
+    }
 }
 
 /// One `--sandbox-bind`, as the Repo it belongs to — `None` for every Repo — and
 /// the directory it binds.
-fn read_bind(bind: &str) -> anyhow::Result<(Option<String>, PathBuf)> {
+pub(crate) fn read_bind(bind: &str) -> anyhow::Result<(Option<String>, PathBuf)> {
     if bind.starts_with('/') {
         return Ok((None, PathBuf::from(bind)));
     }
@@ -566,13 +651,16 @@ pub struct Sandbox {
     server: String,
 
     /// Everything bound beyond that surface: the Conversation's companion repos
-    /// first, each by its own mode, and then what Sandbox Configuration asked
-    /// for.
+    /// first, each by its own mode, then what the installation's Sandbox
+    /// Configuration asked for, and then what the settings file adds to it.
     ///
     /// The companions first because a bind is applied in the order it is given,
     /// so a configured cache inside a read-only companion's tree lands over the
     /// read-only bind rather than under it — and a cache that could not be
-    /// written to is no cache.
+    /// written to is no cache. The settings-held set last for no stronger reason
+    /// than that the two sets compose and one of them has to be second; what
+    /// says it is this one is that the other was resolved at startup and this
+    /// one is read here.
     binds: Vec<Bind>,
 
     /// The shared Rust build cache this session gets, or `None` where the human
@@ -604,6 +692,12 @@ impl Sandbox {
     ///
     /// Git is asked here and the filesystem is written to, so this blocks.
     ///
+    /// `extra` is what the installation's Sandbox Configuration asked for,
+    /// resolved once at startup. What the settings file asks for is not a
+    /// parameter beside it: `config` is already here, it is already the thing
+    /// read afresh at this moment, and a caller passing binds it read out of the
+    /// same file would be a second way to say one thing.
+    ///
     /// The parameter list is the surface: every one of these is something the
     /// session gets, and spelling them out is what lets a reader of a call site
     /// see the whole of what one is given. A struct grouping them would hide
@@ -631,6 +725,17 @@ impl Sandbox {
 
         let mut binds = companion_binds(conversation)?;
         binds.extend(extra);
+
+        // And what `config.yaml` asks for on top of it, read here for the reason
+        // the author and the build cache below are read here: the settings side
+        // of Sandbox Configuration is the human's to change from a phone, so a
+        // bind added there reaches the next session without the server being
+        // restarted. See [`SandboxConfig::settings_binds`] for why an entry that
+        // will not resolve is dropped rather than refused.
+        binds.extend(SandboxConfig::settings_binds(
+            config.sandbox_binds(),
+            conversation,
+        ));
 
         // One arm per agent type: what is bound over where is that type's own
         // shape, and a backend arriving with an account of its own lands here

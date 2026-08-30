@@ -1,12 +1,12 @@
 //! The shared Rust build cache, on the settings page: whether sessions get one,
 //! and how big its compiled half may grow.
 //!
-//! The one thing on this page that is about a **Sandbox** rather than about who
-//! Verkstead is. Everything else a sandbox is given is configured where the
-//! watched paths are, because every extra bind is a hole in a boundary somebody
-//! opened on purpose; this one is Verkstead's own directory, holding nothing but
-//! build output, and the switch here is the one that *closes* it. That is what
-//! makes it safe to reach from a phone.
+//! One of two things on this page that are about a **Sandbox** rather than about
+//! who Verkstead is — the Paths section is the other — and the only one of the
+//! two that is on with nothing configured. Every bind the Paths section adds is
+//! a hole somebody typed on purpose; this one is Verkstead's own directory,
+//! holding nothing but build output, so it can be opened for a human who never
+//! asked and the only control over it here is the one that *closes* it.
 //!
 //! It is on with nothing configured, which is the whole shape of the feature: a
 //! human should not have a slower machine for never having found this section.
@@ -46,6 +46,7 @@ import type { BuildCacheView, SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
+import { heldPaths } from "./held";
 import styles from "./BuildCache.module.css";
 
 /// The settings as they stand, read once for the two panes that draw them.
@@ -189,6 +190,10 @@ export function BuildCachePane(props: {
         // And so is how a conflict is resolved, which is the section under
         // that one.
         conflict_resolution: told()?.conflict_resolution ?? "Merge",
+        // And the paths as they stand, which is the same reason again: a save
+        // says what the file holds afterwards, so a list left out is a list
+        // emptied — see [`heldPaths`].
+        ...heldPaths(told()),
       });
     },
     onSuccess: (saved: SettingsSaved) => {

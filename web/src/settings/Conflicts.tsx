@@ -37,6 +37,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { Picker } from "../picking";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./Conflicts.module.css";
+import { heldPaths } from "./held";
 
 /// What each strategy is called where a human reads it, and what it does said
 /// in one line.
@@ -164,6 +165,9 @@ export function ConflictsPane(props: {
         },
         share_viewer_url: settings?.share_viewer_url ?? "",
         conflict_resolution,
+        // And the paths as the read left them: a list this section left out
+        // would be a list it emptied — see [`heldPaths`].
+        ...heldPaths(settings),
       });
     },
     // The save's answer *is* a fresh read of both files, so a second read would
