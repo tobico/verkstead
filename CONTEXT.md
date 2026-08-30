@@ -407,10 +407,10 @@ second — the frame each leaves when its turn is over and the frame it draws
 mid-turn are the same screen but for the line saying it is working. One
 signature per backend, kept in one place and accepted to drift the way the
 usage-limit phrase does. The at-work reading asks for the ordinary silence
-beside it, because the line is
-equally missing from a session that has drawn nothing yet; the at-the-prompt one
-does not, and a silence mid-turn is not idle either way — a TUI that stops to
-think would otherwise be reaped out from under its own work.
+beside it, because the line is equally missing from a session that has drawn
+nothing yet; the at-the-prompt one does not, and a silence mid-turn is not idle
+either way — a TUI that stops to think would otherwise be reaped out from under
+its own work.
 
 **With a long silence behind it as the long-stop.** A signature that has drifted
 reads as a session that never stops, and nothing else here would catch one: the
@@ -430,13 +430,13 @@ Code's is the directory and config file pair bind-mounted at `~/.claude` /
 account under one relocatable home — Codex's at `~/.codex`, Grok Build's at
 `~/.grok`. Whichever it is, mounting it is what keeps accounts separate. A type
 is offered to the human only once it can launch the real thing: one that cannot
-would be a lie in a picker,
-so the form offers Claude, Codex and Grok Build, and a Profile of a type whose
-stage has not landed is one saved over the API until it does. Picking a type on
-the form asks for that type's own account paths. The models are a list and the
-list is the Profile's own, because different Profiles reach different accounts
-and each can launch different things; none of them is a default, so which one a
-session runs is always picked — as a Pairing, alongside the Profile itself.
+would be a lie in a picker, so the form offers Claude, Codex and Grok Build, and
+a Profile of a type whose stage has not landed is one saved over the API until
+it does. Picking a type on the form asks for that type's own account paths. The
+models are a list and the list is the Profile's own, because different Profiles
+reach different accounts and each can launch different things; none of them is a
+default, so which one a session runs is always picked — as a Pairing, alongside
+the Profile itself.
 _Avoid_: account, identity, persona, agent config
 
 **Pairing**:
