@@ -11,7 +11,7 @@ their fail-fast startup checks and show on the page read-only.
 
 ## Tasks
 
-- [ ] 01: Settings-held sandbox binds reach sessions — [details](01-settings-sandbox-binds.md)
+- [x] 01: Settings-held sandbox binds reach sessions — [details](01-settings-sandbox-binds.md)
 - [ ] 02: Settings-held watched paths widen the boundary — [details](02-settings-watched-paths.md)
 - [ ] 03: The settings API tells and takes Paths — [details](03-paths-settings-api.md)
 - [ ] 04: The Paths card and pane — [details](04-paths-card-and-pane.md)

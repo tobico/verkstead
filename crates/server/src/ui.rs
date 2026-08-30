@@ -3220,6 +3220,12 @@ async fn save_settings(
     let caches_compiles = state.sessions.caches_compiles();
 
     let saved = tokio::task::spawn_blocking(move || {
+        // What the file already holds, carried through untouched. The page has
+        // no Sandbox Configuration on it yet, and a save that wrote the field it
+        // does not know about as empty would take a hand-written bind away every
+        // time somebody corrected their own email address.
+        let sandbox_binds = settings.config().sandbox_binds().to_vec();
+
         settings.save_config(&Config::of(
             GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
             // The size as it was typed, and an empty field as nothing
@@ -3232,6 +3238,7 @@ async fn save_settings(
             // And where the share viewer is hosted, the same way: an empty
             // field is nowhere, which is how it is taken away again.
             Some(edit.share_viewer_url),
+            sandbox_binds,
         ))?;
 
         let verifying = match &edit.github_token {
