@@ -17,5 +17,5 @@ displays the share directly.
 
 - [x] 01: Give the share document the app's column — [details](01-share-column.md)
 - [x] 02: A divider between the share's two panes — [details](02-share-divider.md)
-- [ ] 03: Host the share viewer on GitHub Pages — [details](03-viewer-hosting.md)
+- [x] 03: Host the share viewer on GitHub Pages — [details](03-viewer-hosting.md)
 - [ ] 04: Default the viewer URL and compose every link through it — [details](04-viewer-links.md)
