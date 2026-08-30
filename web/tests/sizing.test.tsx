@@ -6,8 +6,9 @@
 //! `src/Panes.tsx` adds is a handle to drag, a frame to measure a drag against,
 //! and the rule that neither exists until the window is wide enough to stand
 //! two panes side by side. Mostly it is mounted in the workbench here, that
-//! being the page that had the frame before it was anybody else's; the last
-//! block mounts it bare, which is how the settings page will get it.
+//! being the page that had the frame before it was anybody else's; the last two
+//! blocks mount it bare — which is how the settings page will get it, and how a
+//! share gets the frame it has no list to fill the first pane of.
 //!
 //! jsdom lays nothing out, so two things are stood in for. Which breakpoints
 //! hold is `matchMedia`, which the page asks rather than infers — so a test can
@@ -41,11 +42,12 @@ import {
   restore,
   widths,
   type Frame,
+  type Widths,
 } from "../src/widths";
 import { drawn, mount, theWorkbench } from "./bench";
 
-/// Where the two widths are kept, asked for by the names a browser would find
-/// them under rather than through the module that writes them.
+/// Where the widths are kept, asked for by the names a browser would find them
+/// under rather than through the module that writes them.
 ///
 /// The middle pane's is still the name it was written under, when the frame was
 /// the workbench's alone and that pane was the Timeline. Said here as much as
@@ -53,6 +55,10 @@ import { drawn, mount, theWorkbench } from "./bench";
 /// rename would be a width quietly forgotten.
 const SIDEBAR = "verkstead.pane-sidebar";
 const MIDDLE = "verkstead.pane-timeline";
+
+/// And the third, which is the frame with no list in it: the one border a share
+/// has, between the record and whatever it has open.
+const PAIR_KEY = "verkstead.pane-pair";
 
 /// How wide the frame is pretending to be, in the pixels a drag is reported in:
 /// 80rem at the 16px a rem is here, which is the window the third pane arrives
@@ -62,8 +68,20 @@ const FRAME = 1280;
 /// The same frame as the arithmetic is asked about it, and a two-pane window
 /// that is not the same width — a minimum is a length now, so what it is worth
 /// depends on which frame it is being met in.
-const THREE: Frame = { rem: FRAME / 16, three: true };
-const TWO: Frame = { rem: 70, three: false };
+const THREE: Frame = { rem: FRAME / 16, three: true, picking: true };
+const TWO: Frame = { rem: 70, three: false, picking: true };
+
+/// And the frame with nothing to pick from, which is the share's: two panes and
+/// the one divider. [`FRAME`] wide, that being the window the page tests below
+/// draw it in, so the same constant answers for the arithmetic and for what
+/// they read off the frame.
+const PAIR: Frame = { rem: FRAME / 16, three: false, picking: false };
+
+/// A set of widths with one or two of them said: the rest are the defaults,
+/// which is what a device that has dragged one frame and not the other holds.
+function all(some: Partial<Widths>): Widths {
+  return { ...DEFAULTS, ...some };
+}
 
 /// And what one of those lengths is worth as a share of a frame, which is the
 /// whole of the conversion the widths do.
@@ -150,11 +168,23 @@ describe("the widths a device remembers", () => {
   });
 
   it("reads back what a drag settled on", () => {
-    remember({ sidebar: 34, middle: 26 });
+    remember(all({ sidebar: 34, middle: 26 }), THREE);
 
     expect(localStorage.getItem(SIDEBAR)).toBe("34");
     expect(localStorage.getItem(MIDDLE)).toBe("26");
-    expect(widths()).toEqual({ sidebar: 34, middle: 26 });
+    expect(widths()).toEqual(all({ sidebar: 34, middle: 26 }));
+  });
+
+  /// And writes down what the frame in front of the human can move, and nothing
+  /// else: a reader settling a share's panes has said nothing about how wide
+  /// this device stands the workbench's columns.
+  it("writes down only the widths the frame it settled in has", () => {
+    remember(all({ sidebar: 34, middle: 26, pair: 55 }), PAIR);
+
+    expect(localStorage.getItem(PAIR_KEY)).toBe("55");
+    expect(localStorage.getItem(SIDEBAR)).toBeNull();
+    expect(localStorage.getItem(MIDDLE)).toBeNull();
+    expect(widths()).toEqual(all({ pair: 55 }));
   });
 
   /// A storage somebody has edited by hand, or one written by a version of this
@@ -170,12 +200,26 @@ describe("the widths a device remembers", () => {
   /// What a double-click on a divider does. Both widths, because what it puts
   /// back is *the defaults*.
   it("gives up both widths at once", () => {
-    remember({ sidebar: 34, middle: 26 });
-    restore();
+    remember(all({ sidebar: 34, middle: 26 }), THREE);
 
+    expect(restore(all({ sidebar: 34, middle: 26 }), THREE)).toEqual(DEFAULTS);
     expect(localStorage.getItem(SIDEBAR)).toBeNull();
     expect(localStorage.getItem(MIDDLE)).toBeNull();
     expect(widths()).toEqual(DEFAULTS);
+  });
+
+  /// The frame's own, that is. A share put back to its default is a share put
+  /// back, and the workbench's columns are still where this device left them.
+  it("puts back only what the frame it was asked in has", () => {
+    remember(all({ sidebar: 34, middle: 26 }), THREE);
+    remember(all({ pair: 55 }), PAIR);
+
+    expect(restore(all({ sidebar: 34, middle: 26, pair: 55 }), PAIR)).toEqual(
+      all({ sidebar: 34, middle: 26 }),
+    );
+    expect(localStorage.getItem(PAIR_KEY)).toBeNull();
+    expect(localStorage.getItem(SIDEBAR)).toBe("34");
+    expect(localStorage.getItem(MIDDLE)).toBe("26");
   });
 });
 
@@ -184,15 +228,19 @@ describe("how far a divider goes", () => {
   /// every one of them keeps a floor — and with all three standing, each floor
   /// has to fit beside the others.
   it("leaves every pane something to be, with all three standing", () => {
-    expect(clamped({ sidebar: 90, middle: 90 }, THREE)).toEqual({
-      sidebar: 100 - share(MINIMUMS.middle + MINIMUMS.details, THREE),
-      middle: share(MINIMUMS.middle, THREE),
-    });
+    expect(clamped(all({ sidebar: 90, middle: 90 }), THREE)).toEqual(
+      all({
+        sidebar: 100 - share(MINIMUMS.middle + MINIMUMS.details, THREE),
+        middle: share(MINIMUMS.middle, THREE),
+      }),
+    );
 
-    expect(clamped({ sidebar: 1, middle: 1 }, THREE)).toEqual({
-      sidebar: share(MINIMUMS.sidebar, THREE),
-      middle: share(MINIMUMS.middle, THREE),
-    });
+    expect(clamped(all({ sidebar: 1, middle: 1 }), THREE)).toEqual(
+      all({
+        sidebar: share(MINIMUMS.sidebar, THREE),
+        middle: share(MINIMUMS.middle, THREE),
+      }),
+    );
   });
 
   /// With two panes up the second column is whichever level is being read and
@@ -200,20 +248,44 @@ describe("how far a divider goes", () => {
   /// nothing — and a sidebar dragged wide here must not quietly rewrite the
   /// layout it is not in.
   it("leaves the middle pane's width alone while only two panes stand", () => {
-    expect(clamped({ sidebar: 95, middle: 30 }, TWO)).toEqual({
-      sidebar: 100 - share(MINIMUMS.details, TWO),
-      middle: 30,
-    });
+    expect(clamped(all({ sidebar: 95, middle: 30 }), TWO)).toEqual(
+      all({ sidebar: 100 - share(MINIMUMS.details, TWO), middle: 30 }),
+    );
+  });
+
+  /// The frame with no list in it has no sidebar spent before its divider and
+  /// no middle pane to leave room for beyond it, so what its one divider owes
+  /// is a middle pane's width on the left and the details' on the right.
+  it("holds the pair to the two floors it has", () => {
+    expect(clamped(all({ pair: 95 }), PAIR)).toEqual(
+      all({ pair: 100 - share(MINIMUMS.details, PAIR) }),
+    );
+    expect(clamped(all({ pair: 1 }), PAIR)).toEqual(
+      all({ pair: share(MINIMUMS.middle, PAIR) }),
+    );
+  });
+
+  /// And the workbench's two widths are no business of that frame's, however
+  /// far its own has been dragged: a share is a document of its own, and the
+  /// model would have to stay right if the two ever met in one browser.
+  it("leaves the workbench's widths alone while the pair stands", () => {
+    expect(clamped(all({ sidebar: 95, middle: 95, pair: 40 }), PAIR)).toEqual(
+      all({ sidebar: 95, middle: 95, pair: 40 }),
+    );
   });
 
   /// The sidebar's divider says where the sidebar ends, so where it is dropped
   /// is the width. The middle one's says where the middle pane ends, which is a
   /// share of the whole frame rather than of what is left of it.
   it("reads a drop as the pane it is the far edge of", () => {
-    const settled = { sidebar: 20, middle: 30 };
+    const settled = all({ sidebar: 20, middle: 30 });
 
     expect(dragged(settled, "sidebar", 34, THREE).sidebar).toBe(34);
     expect(dragged(settled, "middle", 55, THREE).middle).toBe(35);
+
+    // And the pair's pane starts at the frame's own edge, so where that divider
+    // is dropped is the width, as the sidebar's is.
+    expect(dragged(DEFAULTS, "pair", 55, PAIR).pair).toBe(55);
   });
 
   /// And the travel said out loud, which is what the handle carries: with all
@@ -232,22 +304,29 @@ describe("how far a divider goes", () => {
       least: share(MINIMUMS.middle, THREE),
       most: 100 - DEFAULTS.sidebar - share(MINIMUMS.details, THREE),
     });
+
+    // And the pair's, which has nothing spent before it and only the details
+    // beyond it.
+    expect(range("pair", DEFAULTS, PAIR)).toEqual({
+      least: share(MINIMUMS.middle, PAIR),
+      most: 100 - share(MINIMUMS.details, PAIR),
+    });
   });
 
   it("moves by a point at a time for a keyboard", () => {
     expect(nudged(DEFAULTS, "sidebar", 1, THREE).sidebar).toBe(
       DEFAULTS.sidebar + 1,
     );
-    expect(nudged({ sidebar: 20, middle: 40 }, "middle", -1, THREE).middle).toBe(
-      39,
-    );
+    expect(
+      nudged(all({ sidebar: 20, middle: 40 }), "middle", -1, THREE).middle,
+    ).toBe(39);
 
     // And stops where a drag stops.
     const floor = share(MINIMUMS.sidebar, THREE);
 
     expect(
-      nudged({ sidebar: floor, middle: 30 }, "sidebar", -1, THREE),
-    ).toEqual({ sidebar: floor, middle: 30 });
+      nudged(all({ sidebar: floor, middle: 30 }), "sidebar", -1, THREE),
+    ).toEqual(all({ sidebar: floor, middle: 30 }));
   });
 });
 
@@ -273,7 +352,7 @@ describe("the dividers on the workbench", () => {
   /// breakpoint the page is walked through one pane at a time and what this
   /// device remembers about a desktop's columns is not read at all.
   it("names the widths on the frame only where panes stand together", async () => {
-    remember({ sidebar: 34, middle: 34 });
+    remember(all({ sidebar: 34, middle: 34 }), THREE);
 
     const wide = await bench("three panes");
     expect(wide.frame.style.getPropertyValue("--pane-sidebar")).toBe("34%");
@@ -285,7 +364,7 @@ describe("the dividers on the workbench", () => {
   });
 
   it("starts where this device left the panes", async () => {
-    remember({ sidebar: 40, middle: 25 });
+    remember(all({ sidebar: 40, middle: 25 }), THREE);
 
     const { frame } = await bench("three panes");
     expect(frame.style.getPropertyValue("--pane-sidebar")).toBe("40%");
@@ -336,21 +415,21 @@ describe("the dividers on the workbench", () => {
   /// on every window. So the same minimum is a different percentage of every
   /// frame, and a narrower window owes the sidebar more of itself.
   it("keeps a pane's width, not its share, as the window narrows", async () => {
-    remember({ sidebar: 5, middle: 30 });
+    remember(all({ sidebar: 5, middle: 30 }), THREE);
 
     const wide = await bench("two panes");
     expect(wide.frame.style.getPropertyValue("--pane-sidebar")).toBe(
-      `${share(MINIMUMS.sidebar, { rem: FRAME / 16, three: false })}%`,
+      `${share(MINIMUMS.sidebar, { ...TWO, rem: FRAME / 16 })}%`,
     );
 
     const narrow = await bench("two panes", 960);
     expect(narrow.frame.style.getPropertyValue("--pane-sidebar")).toBe(
-      `${share(MINIMUMS.sidebar, { rem: 60, three: false })}%`,
+      `${share(MINIMUMS.sidebar, { ...TWO, rem: 60 })}%`,
     );
   });
 
   it("puts the defaults back on a double-click", async () => {
-    remember({ sidebar: 40, middle: 25 });
+    remember(all({ sidebar: 40, middle: 25 }), THREE);
 
     const { container, frame } = await bench("three panes");
     fireEvent.dblClick(dividers(container)[0]!);
@@ -416,13 +495,20 @@ describe("the dividers on the workbench", () => {
 /// What the widths are *for* is a grid, and jsdom lays out no grids: the rules
 /// themselves are what is read, as everywhere else in this suite.
 describe("the rules the widths are read by", () => {
-  it("builds both layouts out of the shares the page names", () => {
+  it("builds every layout out of the shares the page names", () => {
     expect(stylesheet).toContain(
       "grid-template-columns: var(--pane-sidebar, 20%) auto 1fr;",
     );
     expect(stylesheet).toContain(
       "grid-template-columns:\n" +
         "      var(--pane-sidebar, 20%) auto var(--pane-middle, 30%) auto 1fr;",
+    );
+
+    // And the frame with no list in it, whose one divider stands where the
+    // sidebar's and the middle pane's do in the others.
+    expect(stylesheet).toContain(
+      "  .panes.two {\n" +
+        "    grid-template-columns: var(--pane-pair, 40%) auto 1fr;\n  }",
     );
 
     // The breakpoints the page asks `matchMedia` about are the ones the rules
@@ -570,6 +656,180 @@ describe("the frame on its own", () => {
     expect(
       dividers(container).map((divider) => divider.getAttribute("aria-label")),
     ).toEqual(["Resize the conversations pane", "Resize the settings pane"]);
+  });
+});
+
+/// And the frame a share is drawn in: the same frame handed no conversations
+/// pane, which is two panes with one border between them. What that border does
+/// is what every other divider does — dragged, nudged, and put back — over a
+/// width that is the pair's own.
+describe("the divider between two panes with no list beside them", () => {
+  /// Mounted the way a share mounts it: no conversations pane at all, and so no
+  /// sidebar and no third level for a breakpoint to bring in.
+  function pair(width: Parameters<typeof windowIs>[0], wide = FRAME) {
+    across = wide;
+    windowIs(width);
+
+    const { container } = render(() => (
+      <Panes
+        pane="middle"
+        middleLabel="Timeline"
+        middle={<p>the record</p>}
+        details={<p>what it has open</p>}
+      />
+    ));
+
+    return {
+      container,
+      frame: container.querySelector<HTMLElement>(`.${shell.panes}`)!,
+    };
+  }
+
+  /// One divider, between the two panes it parts — and it is there from the
+  /// width the two stand side by side at rather than from the one the third
+  /// pane would have arrived at.
+  it("puts one handle between the panes, and none below the breakpoint", () => {
+    const beside = pair("two panes");
+
+    expect(
+      [...beside.frame.children].map((child) =>
+        child.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Timeline", "Resize the timeline pane", "Details"]);
+
+    // A wider window changes nothing: there is no third pane to arrive, so
+    // there is no second border for one to make.
+    expect(dividers(pair("three panes").container)).toHaveLength(1);
+
+    // And below the breakpoint the frame is walked one pane at a time, with no
+    // border to drag and nothing this device remembers being read.
+    const narrow = pair("narrow");
+    expect(dividers(narrow.container)).toEqual([]);
+    expect(narrow.frame.style.getPropertyValue("--pane-pair")).toBe("");
+  });
+
+  it("starts where this device left the two panes", () => {
+    remember(all({ pair: 55 }), PAIR);
+
+    const { frame } = pair("two panes");
+
+    expect(frame.style.getPropertyValue("--pane-pair")).toBe("55%");
+
+    // And names nothing else on the frame: the widths the workbench's columns
+    // are drawn at belong to a frame that is not standing here.
+    expect(frame.style.getPropertyValue("--pane-sidebar")).toBe("");
+    expect(frame.style.getPropertyValue("--pane-middle")).toBe("");
+  });
+
+  it("moves the border the pointer drags, and writes it down", async () => {
+    const { container, frame } = pair("two panes");
+
+    dragTo(dividers(container)[0]!, FRAME * 0.5);
+
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--pane-pair")).toBe("50%"),
+    );
+    expect(localStorage.getItem(PAIR_KEY)).toBe("50");
+
+    // And what the workbench's frame was left at is still what it was left at.
+    expect(localStorage.getItem(SIDEBAR)).toBeNull();
+    expect(localStorage.getItem(MIDDLE)).toBeNull();
+  });
+
+  it("holds both panes to their minimums however far the pointer goes", async () => {
+    const { container, frame } = pair("two panes");
+
+    dragTo(dividers(container)[0]!, FRAME * 0.98);
+
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--pane-pair")).toBe(
+        `${100 - share(MINIMUMS.details, PAIR)}%`,
+      ),
+    );
+
+    dragTo(dividers(container)[0]!, -FRAME);
+
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--pane-pair")).toBe(
+        `${share(MINIMUMS.middle, PAIR)}%`,
+      ),
+    );
+  });
+
+  it("moves with the arrow keys, and gives the default back on a double-click", async () => {
+    remember(all({ pair: 55 }), PAIR);
+
+    const { container, frame } = pair("two panes");
+
+    fireEvent.keyDown(dividers(container)[0]!, { key: "ArrowLeft" });
+
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--pane-pair")).toBe("54%"),
+    );
+    expect(localStorage.getItem(PAIR_KEY)).toBe("54");
+
+    fireEvent.dblClick(dividers(container)[0]!);
+
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--pane-pair")).toBe(
+        `${DEFAULTS.pair}%`,
+      ),
+    );
+    expect(localStorage.getItem(PAIR_KEY)).toBeNull();
+  });
+
+  /// What the handle is, for anything reading the page rather than looking at
+  /// it: a separator named for the pane it moves, carrying the share of the
+  /// frame that pane is worth and how far it may be taken.
+  it("says what it is and where it stands", () => {
+    const { container } = pair("two panes");
+    const [divider] = dividers(container);
+
+    expect(divider!.getAttribute("role")).toBe("separator");
+    expect(divider!.getAttribute("aria-orientation")).toBe("vertical");
+    expect(divider!.getAttribute("aria-valuenow")).toBe(String(DEFAULTS.pair));
+    expect(divider!.getAttribute("aria-valuemin")).toBe(
+      String(Math.round(share(MINIMUMS.middle, PAIR))),
+    );
+    expect(divider!.getAttribute("aria-valuemax")).toBe(
+      String(Math.round(100 - share(MINIMUMS.details, PAIR))),
+    );
+  });
+
+  /// A share is opened off a disk as often as off a server, and some of those
+  /// contexts have no storage to be had at all. The divider still moves; the
+  /// width simply lasts as long as the tab.
+  it("drags all the same where the browser refuses storage", async () => {
+    const refused = () => {
+      throw new Error("storage is not available");
+    };
+
+    vi.stubGlobal("localStorage", {
+      getItem: refused,
+      setItem: refused,
+      removeItem: refused,
+      clear() {},
+    });
+
+    const { container, frame } = pair("two panes");
+    expect(frame.style.getPropertyValue("--pane-pair")).toBe(
+      `${DEFAULTS.pair}%`,
+    );
+
+    dragTo(dividers(container)[0]!, FRAME * 0.5);
+
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--pane-pair")).toBe("50%"),
+    );
+
+    // And a double-click, which is the other half of what a divider writes.
+    fireEvent.dblClick(dividers(container)[0]!);
+
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--pane-pair")).toBe(
+        `${DEFAULTS.pair}%`,
+      ),
+    );
   });
 });
 

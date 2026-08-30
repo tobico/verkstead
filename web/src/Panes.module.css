@@ -444,8 +444,14 @@
 /* Two panes rather than three: the frame a share is drawn in, which has one
    Conversation and no list of them to pick out of. `Panes.tsx` puts this name
    on the frame when it is handed no conversations pane, and there is then no
-   such pane in the document and no divider anywhere — nothing can be dragged,
-   so nothing about widths is read.
+   such pane in the document — and one divider rather than two, between the
+   record and whatever it has open.
+
+   Which is a width of its own, named here as the others are named above: the
+   pane it is the far edge of starts at the frame's edge rather than after a
+   sidebar, so the same percentage would not be the same column, and a reader
+   dragging a share about has said nothing about the workbench's own. It is the
+   pair's, and `widths.ts` calls it that.
 
    After every rule it overrides, which is what it takes: the columns above are
    set on `.panes` at two widths, and the rules that show a pane are the same
@@ -462,7 +468,7 @@
 
 @media (min-width: 60rem) {
   .panes.two {
-    grid-template-columns: 40% 1fr;
+    grid-template-columns: var(--pane-pair, 40%) auto 1fr;
   }
 
   .panes.two > .middlePane,
