@@ -1042,6 +1042,19 @@ still working the answer out — changes nothing at all and is written down
 nowhere, exactly as a `gh` that will not answer about the checks is. So what
 stands about a pull request is the last thing GitHub actually said about it.
 
+**A conflicting pull request has a session sent at it**, the way a failed check
+does and through the same dispatch: one under the Conversation's implementation
+Pairing, inside the bundled addressing skill, told which pull request will not
+merge and which worktree to work in, and told to merge the base branch into the
+work branch, resolve the conflicts, run the repository's tests, commit and push.
+A merge rather than a rewrite of the branch — nothing here force-pushes, so
+nothing anybody has already read moves and nothing stacked on the branch breaks.
+Two goes per pull request, counted as each session is dispatched and kept across
+a restart; one out of goes waits for every other pull request's before the run
+stops, and the stop's Notice names the pull request that would not merge clean.
+Resume and a steer into Wrapping forget the count, exactly as they forget the
+checks'.
+
 *Can be merged* rather than *has been merged*: Verkstead never waits for the
 merge itself, which is the human's act and the one this pipeline is built
 around.

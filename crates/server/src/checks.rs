@@ -76,8 +76,23 @@
 //! — GitHub still working it out, which is most of the first moments after a
 //! push — does neither. So a conflicted pull request holds its Conversation in
 //! Wrapping, which is also what closes the race where a conflict appears just as
-//! the last suite goes green. Nothing is dispatched at one here: it waits, the
-//! way a red check with no goes left waits. See [`merging`].
+//! the last suite goes green. See [`merging`].
+//!
+//! **And a conflict gets a session of its own**, the check fixes' shape end to
+//! end: the same dispatch under the same Pairing, the Conversation's Turn taken
+//! before anything is counted, [`ATTEMPTS`] goes counted in the store as each
+//! session starts, and the same waiting for every other pull request before a
+//! stop is written. What it is told is to merge the base branch in, resolve the
+//! conflicts, run the tests and push — a merge rather than a rebase, so that
+//! nothing is force-pushed and nothing stacked on the branch breaks. See
+//! [`resolve`] and [`resolving`].
+//!
+//! A conflict is the whole of what such a poll *dispatches*. A branch nothing
+//! can land is not a branch worth getting a check green on, and the resolution's
+//! own push is what puts the suite in front of the next poll anyway. The suite
+//! is still read and still settled on either way, though — the two are different
+//! facts about the same branch, and a green one left unsettled through a
+//! conflict would be one another pull request's stop went on waiting for.
 //!
 //! A `gh` that cannot answer changes nothing at all — it does not settle, it
 //! does not unsettle, and it dispatches nothing. That is the only honest reading
@@ -331,13 +346,63 @@ async fn once(
     remember(state, conversation_id, &suite.checks).await;
 
     // And whether the pull request merges at all, which came back in the same
-    // answer. Before the checks are read rather than after, because it is a
-    // fact about the branch rather than about the suite: every way the reading
-    // of the checks below ends — green, red, still running, a rollup about the
-    // wrong commit — is one this has to have been said on, and a conflict is a
-    // reason to wait whatever the checks are doing.
-    merging(state, conversation_id, &watched, suite.mergeable).await;
+    // answer. Read before the checks rather than after, because it is a fact
+    // about the branch rather than about the suite: every way the reading of the
+    // checks below ends — green, red, still running, a rollup about the wrong
+    // commit — is one this has to have been said on.
+    let merges = merging(state, conversation_id, &watched, suite.mergeable).await;
 
+    // The suite read and settled on, and nothing dispatched about it yet.
+    // Settled whatever the merge said, because the two are different facts about
+    // the same branch: a green suite left unsettled through a conflict is one
+    // another pull request's stop would go on waiting for long after this
+    // pull request had run out of anywhere to go — see [`owed_elsewhere`].
+    let checked = checking(state, conversation_id, &watched, &suite, reported).await;
+
+    // And a conflict is the whole of what this look dispatches, whatever the
+    // suite turned out to be. A branch nothing can land is not one worth getting
+    // a check green on — that fix would be work nobody could use — and the
+    // resolution's own push is what puts the suite in front of the next poll
+    // anyway.
+    if merges == Some(store::Merging::Conflicting) {
+        return resolve(state, conversation_id, &watched, writing).await;
+    }
+
+    match checked {
+        Checking::NothingToDo => Watching::Again(writing),
+        Checking::Failed(failed) => fix(state, conversation_id, &watched, &failed, writing).await,
+    }
+}
+
+/// What one reading of the checks came to, once the wrap-up has been settled or
+/// unsettled on it.
+///
+/// Reading the suite and acting on it are two steps rather than one so that a
+/// conflicted pull request gets the first without the second: its checks are
+/// read and written down like any other pull request's, and what is dispatched
+/// at it is a resolution rather than a fix.
+enum Checking {
+    /// Nothing to dispatch about: green, still running, or a rollup about a
+    /// commit that is not what origin is holding.
+    NothingToDo,
+
+    /// These checks are red.
+    Failed(Vec<Check>),
+}
+
+/// Read how the suite is getting on and settle the wrap-up on it, without
+/// dispatching anything.
+///
+/// `reported` is whether this pull request has ever reported a check, which the
+/// watcher remembers across polls and this updates — see the green branch below,
+/// which is the one place it changes an answer.
+async fn checking(
+    state: &AppState,
+    conversation_id: i64,
+    watched: &Watched,
+    suite: &crate::github::Suite,
+    reported: &mut bool,
+) -> Checking {
     // Whether anything has ever run against this pull request, which is the one
     // thing that tells a repository with no CI from a run that has not been
     // created yet — see the green branch below.
@@ -386,8 +451,8 @@ async fn once(
                  run for the last push has not been created yet",
             );
 
-            unsettle(state, conversation_id, &watched).await;
-            return Watching::Again(writing);
+            unsettle(state, conversation_id, watched).await;
+            return Checking::NothingToDo;
         }
 
         // And a rollup is a fact about one commit, which is not always the one
@@ -429,19 +494,19 @@ async fn once(
                      not been reported yet",
                 );
 
-                unsettle(state, conversation_id, &watched).await;
-                return Watching::Again(writing);
+                unsettle(state, conversation_id, watched).await;
+                return Checking::NothingToDo;
             }
         }
 
-        settle(state, conversation_id, &watched, suite.checks.len()).await;
-        return Watching::Again(writing);
+        settle(state, conversation_id, watched, suite.checks.len()).await;
+        return Checking::NothingToDo;
     }
 
     // Not green, whether that is a red check or a suite that has not finished.
     // Said before anything is dispatched, because a fix session pushes a commit
     // and a commit is a new run to wait on.
-    unsettle(state, conversation_id, &watched).await;
+    unsettle(state, conversation_id, watched).await;
 
     if failed.is_empty() {
         tracing::debug!(
@@ -450,10 +515,10 @@ async fn once(
             number = watched.number,
             "the checks are still running, which is nothing to do",
         );
-        return Watching::Again(writing);
+        return Checking::NothingToDo;
     }
 
-    fix(state, conversation_id, &watched, &failed, writing).await
+    Checking::Failed(failed)
 }
 
 /// What origin is holding `worktree`'s branch on, asked as part of the poll.
@@ -644,6 +709,11 @@ async fn fix(
 /// it, which is what a pull request out of goes waits for before the run is
 /// stopped over it.
 ///
+/// A go of either kind. A pull request is out of goes when the machine has
+/// nothing left to try on it at all — neither a fix for a check that will not go
+/// green nor a resolution for a base it will not merge — and one that is still
+/// owed a resolution is as much a reason to hold a stop as one owed a fix.
+///
 /// The attempts are counted per pull request because the same check name red on
 /// two of them is two different failures, and one spending the other's would
 /// stop a run that still had somewhere to go. A stop is the Conversation's
@@ -689,8 +759,8 @@ async fn owed_elsewhere(state: &AppState, conversation_id: i64, repo_id: i64) ->
     };
 
     for (repo, opened) in opened {
-        // This one, and one that has gone green: neither has a go coming.
-        if repo.id == repo_id || settled.contains(&store::WaitingOn::Checks(repo.id)) {
+        // This one, whose goes are what the caller has just run out of.
+        if repo.id == repo_id {
             continue;
         }
 
@@ -702,11 +772,25 @@ async fn owed_elsewhere(state: &AppState, conversation_id: i64, repo_id: i64) ->
             continue;
         }
 
-        match store::most_fix_attempts(&state.pool, conversation_id, repo.id).await {
-            Ok(spent) if spent < ATTEMPTS => return true,
-            Ok(_) => {}
-            Err(error) => {
-                tracing::error!(error = ?error, conversation_id, repo = repo.name, "reading what a pull request had been given failed");
+        // Its checks, where they have not gone green.
+        if !settled.contains(&store::WaitingOn::Checks(repo.id)) {
+            match store::most_fix_attempts(&state.pool, conversation_id, repo.id).await {
+                Ok(spent) if spent < ATTEMPTS => return true,
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id, repo = repo.name, "reading what a pull request had been given failed");
+                }
+            }
+        }
+
+        // And its conflict, where GitHub has not said it merges.
+        if !settled.contains(&store::WaitingOn::Mergeable(repo.id)) {
+            match store::conflict_fix_attempts(&state.pool, conversation_id, repo.id).await {
+                Ok(spent) if spent < ATTEMPTS => return true,
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id, repo = repo.name, "reading what a pull request's conflict had been given failed");
+                }
             }
         }
     }
@@ -862,9 +946,14 @@ async fn unsettle(state: &AppState, conversation_id: i64, watched: &Watched) {
 /// would not answer is a red check. So it writes nothing down either, and what
 /// stands is the last thing GitHub did say.
 ///
-/// Nothing is dispatched at a conflict here. A conflicted pull request simply
-/// waits, the way a red check with no goes left does.
-async fn merging(state: &AppState, conversation_id: i64, watched: &Watched, mergeable: Mergeable) {
+/// What GitHub said, for the caller to act on — and `None` where it said
+/// *UNKNOWN*, which is nothing to act on at all.
+async fn merging(
+    state: &AppState,
+    conversation_id: i64,
+    watched: &Watched,
+    mergeable: Mergeable,
+) -> Option<store::Merging> {
     let merging = match mergeable {
         Mergeable::Cleanly => store::Merging::Cleanly,
         Mergeable::Conflicting => store::Merging::Conflicting,
@@ -877,7 +966,7 @@ async fn merging(state: &AppState, conversation_id: i64, watched: &Watched, merg
                  nothing to conclude",
             );
 
-            return;
+            return None;
         }
     };
 
@@ -915,6 +1004,162 @@ async fn merging(state: &AppState, conversation_id: i64, watched: &Watched, merg
     if let Err(error) = written {
         tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "recording whether the wrap-up was waiting on a conflict failed");
     }
+
+    Some(merging)
+}
+
+/// Dispatch a resolution session at a pull request that will not merge, or ask
+/// the human where it has had its goes.
+///
+/// The check fixes' shape end to end, and deliberately so: the same dispatch,
+/// the same Turn, the same two goes counted as the session starts, and the same
+/// waiting for every other pull request before a stop is written. What differs
+/// is what the session is told to do — see [`resolving`].
+///
+/// **The Turn is tried rather than waited for**, exactly as it is for a check.
+/// What else is in the Worktree is the review session or a finding the human
+/// accepted, and a resolution queued behind one would be dispatched about a base
+/// nobody has looked at since. Coming back in half a minute costs nothing and
+/// asks GitHub afresh — and nothing is counted for a poll that could not get in,
+/// the count being of sessions dispatched rather than of conflicts seen.
+async fn resolve(
+    state: &AppState,
+    conversation_id: i64,
+    watched: &Watched,
+    writing: Option<i64>,
+) -> Watching {
+    let spent = match store::conflict_fix_attempts(&state.pool, conversation_id, watched.repo.id)
+        .await
+    {
+        Ok(spent) => spent,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "reading what a conflict had been given failed");
+            return Watching::Again(writing);
+        }
+    };
+
+    // The machine has had its goes at this one, so nothing further is dispatched
+    // for it — and the human is asked once there is nothing left to try
+    // anywhere. See [`owed_elsewhere`], which is what keeps a pull request out of
+    // goes from spending another's.
+    if spent >= ATTEMPTS {
+        if owed_elsewhere(state, conversation_id, watched.repo.id).await {
+            tracing::debug!(
+                conversation_id,
+                repo = watched.repo.name,
+                number = watched.number,
+                "this pull request has had its goes at the conflict and another still \
+                 has one, so the run is not stopped over it yet",
+            );
+
+            return Watching::Again(writing);
+        }
+
+        return unmergeable(state, conversation_id, watched, writing).await;
+    }
+
+    let Some(_turn) = state.sessions.try_turn(conversation_id) else {
+        tracing::debug!(
+            conversation_id,
+            repo = watched.repo.name,
+            "something else is working in the Worktree, so the conflict is looked at again later",
+        );
+        return Watching::Again(writing);
+    };
+
+    // Counted as the session is dispatched rather than as it ends, so that an
+    // attempt spent by a server that then restarted is one the next server does
+    // not spend again.
+    if let Err(error) =
+        store::record_conflict_fix_attempt(&state.pool, conversation_id, watched.repo.id).await
+    {
+        tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "counting a resolution session failed");
+        return Watching::Again(writing);
+    }
+
+    tracing::info!(
+        conversation_id,
+        repo = watched.repo.name,
+        number = watched.number,
+        "the pull request will not merge, so a session is starting on the conflict",
+    );
+
+    let said = crate::runner::address(state, conversation_id, &resolving(watched)).await;
+
+    Watching::Again(said.or(writing))
+}
+
+/// Stop asking the machine about a pull request that will not merge, and say so
+/// on the Timeline.
+///
+/// [`ask`]'s twin, and it names the pull request in the step for the same
+/// reason: a Conversation has more than one, and what stopped is *this* branch
+/// against *its* base rather than merging in general.
+///
+/// The evidence is the tail of what the last session said, which
+/// [`crate::stopping::stop`] reads off `writing` — a resolution that could not
+/// be made is usually a session saying why.
+async fn unmergeable(
+    state: &AppState,
+    conversation_id: i64,
+    watched: &Watched,
+    writing: Option<i64>,
+) -> Watching {
+    let how = format!(
+        "{} still conflicts with its base branch after {ATTEMPTS} resolution sessions. \
+         Nothing lands until the conflict is resolved by hand.",
+        named(watched),
+    );
+
+    if let Err(error) = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
+        conversation_id,
+        crate::stopping::Decided::Verkstead,
+        &format!("resolving the conflicts on {}", named(watched)),
+        &how,
+        writing,
+    )
+    .await
+    {
+        tracing::error!(
+            error = ?error,
+            conversation_id,
+            "the pull request would not merge and the stop saying so could not be recorded"
+        );
+    }
+
+    Watching::Done("the pull request would not merge, so the human is being asked")
+}
+
+/// What a resolution session is told: which pull request will not merge, where
+/// to work, and what to do about it.
+///
+/// Where to work for [`feedback`]'s reason, and named the same way whichever
+/// repository it is: `git` reads its repository from wherever it runs, so a
+/// merge made in the wrong checkout is a change to work nobody asked about.
+///
+/// **Merge rather than rebase.** A rebase rewrites the branch and would have to
+/// be force-pushed, which throws away whatever the pull request's reviewers have
+/// already read and breaks anything stacked on top of it. A merge commit is
+/// ugly and safe, and safe is what an unattended session should be. The strategy
+/// is settled here rather than asked about — task 03 is what makes it
+/// configurable.
+fn resolving(watched: &Watched) -> String {
+    format!(
+        "GitHub cannot merge {} into its base branch: the branch and the base have both \
+         changed the same lines since they parted. Work in that repository's worktree, at \
+         `{}` — `git` reads the repository from wherever it is run, so a merge made anywhere \
+         else is a different repository's.\n\nMerge the pull request's base branch into the \
+         branch that worktree is on, resolve every conflict, run the repository's tests, then \
+         commit the merge and push it. A merge rather than a rebase: nothing here \
+         force-pushes, so whatever has been read or stacked on this branch goes on \
+         standing.\n\nA conflict is two changes to reconcile. Neither side is the one to keep \
+         — taking the branch's hunk or the base's wholesale would throw away work somebody \
+         did, so read both and write what they both meant.",
+        named(watched),
+        watched.worktree.display(),
+    )
 }
 
 /// How often the checks are asked about.
@@ -988,6 +1233,41 @@ mod tests {
             told.contains("/state/worktrees/rate-limiting-askance"),
             "and the worktree to work in, `gh` reading its repository from wherever \
              it is run: {told}",
+        );
+    }
+
+    /// What a resolution session is told: which pull request will not merge,
+    /// which repository's worktree to do it in, and what *resolving* means here
+    /// — merge the base in, and neither side thrown away.
+    #[test]
+    fn a_resolution_session_is_told_which_pull_request_will_not_merge_and_how_to_fix_it() {
+        let told = resolving(&watched());
+
+        assert!(
+            told.contains("#7") && told.contains("askance"),
+            "which pull request, in which repository: {told}",
+        );
+        assert!(
+            told.contains("/state/worktrees/rate-limiting-askance"),
+            "and the worktree to do the merge in, `git` reading its repository from \
+             wherever it is run: {told}",
+        );
+        assert!(
+            told.contains("Merge the pull request's base branch"),
+            "the strategy is the one that does not rewrite the branch: {told}",
+        );
+        assert!(
+            told.contains("rather than a rebase") && told.contains("force-push"),
+            "said as what it is not, because a rebase would have to be force-pushed: \
+             {told}",
+        );
+        assert!(
+            told.contains("push"),
+            "and the resolution has to reach the pull request: {told}",
+        );
+        assert!(
+            told.contains("two changes to reconcile"),
+            "and neither side is the one to keep: {told}",
         );
     }
 

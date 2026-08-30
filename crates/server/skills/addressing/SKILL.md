@@ -1,18 +1,20 @@
 ---
 name: addressing
-description: Take one piece of feedback about work that is already on a pull request and land a fix for it. Use when a session has been dispatched with a failing check, a review finding or a pull request comment as its feedback.
+description: Take one piece of feedback about work that is already on a pull request and land a fix for it. Use when a session has been dispatched with a failing check, a review finding, a pull request comment or a merge conflict as its feedback.
 ---
 
 Take the feedback in the prompt and land a fix for it. One piece of feedback,
 one session, one fix: this session has none of the context of the ones that
 wrote the work, and the next one will have none of yours.
 
-The feedback is one of three things, and the job is the same for all three:
+The feedback is one of four things, and the job is the same for all four:
 
 - **a check that failed** on the pull request, with what it said;
 - **a finding from the review** of the branch, which the human has agreed is
   worth fixing;
-- **a comment somebody left** on the pull request.
+- **a comment somebody left** on the pull request;
+- **a merge conflict** between the pull request and its base branch, which
+  nobody has touched the branch to cause and which nothing can land over.
 
 Each of them is somebody — or something — telling you that work already pushed
 is not right yet. None of them is a fresh piece of work, and none of them is an
@@ -44,6 +46,13 @@ Read the feedback whole before changing anything, then go and see for yourself.
 - **A review finding or a comment**: read the code it is about, and the code
   around it. What is being asked for is usually smaller than it sounds and
   occasionally larger.
+- **A merge conflict**: fetch first, so the base you merge is the one GitHub is
+  looking at, then do the merge and let git show you where the two sides
+  disagree. Read both of them — this branch's change and what has landed on the
+  base since it parted — before you write anything, and read what each was for
+  rather than only what each says. A merge that comes through clean is still a
+  merge to commit and push: it is what puts the base's work on the branch, and
+  it is what GitHub reads next.
 
 If it is already fixed — a check that failed on a commit the branch has since
 moved past, a comment answered by work that landed after it — say so and stop.
@@ -61,8 +70,20 @@ being sure about before you touch either.
 piece of feedback and not this session's: a fix that also refactored two modules
 is one nobody can review against the thing that was asked for.
 
+**A conflict is two changes to reconcile**, and resolving it means keeping both.
+Taking one side's hunk wholesale — `--ours`, `--theirs`, or the same thing done
+by hand — is not a resolution: it throws away work somebody did, and it throws
+it away silently, because the merge then looks exactly like one that went
+cleanly. Write what the two changes together were meant to do. Where they
+genuinely cannot both stand, that is a question for the human rather than a call
+to make on their behalf — see *When you need the human* below. And do not undo
+the merge to escape it: a `git merge --abort` leaves the pull request exactly as
+conflicted as it was.
+
 Then run the repository's tests — the whole of the check that failed, where
-there was one — and make sure what you did works before it goes anywhere.
+there was one, and the whole suite after a merge — and make sure what you did
+works before it goes anywhere. A merge that compiles is not a merge that
+reconciled anything.
 
 ## 3. Commit it and push it
 
@@ -76,6 +97,18 @@ this terminal to ask for one.
 In the worktree the feedback named, which is where the fix was made: those three
 are one repository's, and a commit made in the wrong directory is a change to
 work nobody asked about.
+
+A resolved conflict commits the same way — the merge left everything staged, so
+`git add -A` and `git commit` are what finish it. **Push it, never force-push
+it**: the branch keeps every commit it had, so nothing anybody has already read
+moves and nothing stacked on it breaks. That is why the feedback asks for a
+merge rather than a rebase, and a rebase done anyway would undo the reason.
+
+**The merge commit that resolves a conflict is bookkeeping**, so it carries no
+message body under the rule below: what it puts on the branch is the base branch
+arriving rather than anything you set out to build, and its diff against either
+parent is the other parent's work. Say what you reconciled in the subject line
+and leave it at that.
 
 Push, unlike every other session here: this branch is already on a pull request,
 and a fix that stays local is a fix nobody can see and nothing re-runs. The push

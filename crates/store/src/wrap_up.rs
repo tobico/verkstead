@@ -186,7 +186,7 @@ pub enum Finished {
     NoSuchConversation,
 }
 
-/// The four tables wrap-up keeps its bookkeeping in.
+/// The five tables wrap-up keeps its bookkeeping in.
 ///
 /// All of them hang off a Conversation rather than off a Timeline Event, unlike
 /// nearly everything else here, and that is the point: none of them is something
@@ -238,6 +238,30 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the check fix attempts table")?;
+
+    // And what has been tried at getting a pull request to merge, counted per
+    // pull request rather than per anything on it: a conflict is one fact about
+    // one branch and its base, and there is nothing on it to key by the way a
+    // suite has check names.
+    //
+    // A table of its own beside the checks' rather than a row among them, for
+    // the reason the merges table sits beside the rollup: what a resolution
+    // session is dispatched about is not a check, and a check name borrowed to
+    // sit here under would be one GitHub could one day report for real.
+    //
+    // Written down for the checks' attempts' reason as well: an attempt spent by
+    // a server that then restarted is one the next server must not spend again.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS conflict_fix_attempts (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             attempts        INTEGER NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the conflict fix attempts table")?;
 
     // Keyed by what GitHub calls the comment, which is what survives a restart:
     // a server that came back up and read every comment as new would dispatch a
@@ -748,6 +772,69 @@ pub async fn record_fix_attempt(
     Ok(attempts)
 }
 
+/// How many resolution sessions the pull request opened in `repo_id` has already
+/// had at its conflict.
+///
+/// Zero for a pull request nothing has been dispatched about, which is every one
+/// of them the first time GitHub says it will not merge.
+///
+/// Per pull request and nothing finer, unlike the checks beside it: a suite is
+/// many checks and a branch has one base, so *this pull request conflicts* is
+/// the whole of what there is to count.
+pub async fn conflict_fix_attempts(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+) -> Result<i64> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT attempts FROM conflict_fix_attempts
+         WHERE conversation_id = ? AND repo_id = ?",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "reading what has been tried about the conflict in Repo {repo_id} on Conversation \
+             {conversation_id}"
+        )
+    })?;
+
+    Ok(row.map(|(attempts,)| attempts).unwrap_or(0))
+}
+
+/// Count one more, and say how many that makes.
+///
+/// Counted as the session is dispatched rather than as it ends, for
+/// [`record_fix_attempt`]'s reason: an attempt that was spent and not written
+/// down would be one the next server spends again.
+pub async fn record_conflict_fix_attempt(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+) -> Result<i64> {
+    let (attempts,): (i64,) = sqlx::query_as(
+        "INSERT INTO conflict_fix_attempts (conversation_id, repo_id, attempts)
+         VALUES (?, ?, 1)
+         ON CONFLICT (conversation_id, repo_id)
+             DO UPDATE SET attempts = attempts + 1
+         RETURNING attempts",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .fetch_one(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "counting a resolution session for the conflict in Repo {repo_id} on Conversation \
+             {conversation_id}"
+        )
+    })?;
+
+    Ok(attempts)
+}
+
 /// Which of the comments on the pull request opened in `repo_id` have already
 /// had a session dispatched about them.
 ///
@@ -1019,6 +1106,16 @@ pub(crate) async fn forget_the_round(
             format!("forgetting what has been tried about Conversation {conversation_id}'s checks")
         })?;
 
+    sqlx::query("DELETE FROM conflict_fix_attempts WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!(
+                "forgetting what has been tried about Conversation {conversation_id}'s conflicts"
+            )
+        })?;
+
     // And the mark that says a narrowing was said out loud, so a second round
     // that gets down to its checks says so on its own account. The watcher takes
     // this one off itself the moment the condition ends — see [`narrowing`] —
@@ -1029,12 +1126,18 @@ pub(crate) async fn forget_the_round(
     Ok(())
 }
 
-/// Forget what a Conversation's checks have already been given, so they start
-/// again from nothing.
+/// Forget what a Conversation's checks and conflicts have already been given, so
+/// they start again from nothing.
 ///
-/// What Resume does. The human has read the Notice of what stopped and asked
-/// for another go, and a count left standing would be a watcher that stopped all
-/// over again on its next poll without dispatching anything.
+/// What Resume does, and a steer into Wrapping with it. The human has read the
+/// Notice of what stopped and asked for another go, and a count left standing
+/// would be a watcher that stopped all over again on its next poll without
+/// dispatching anything.
+///
+/// Both counts, because either of them is what the Notice they read could have
+/// been about: a wrap-up stops on the checks that would not go green or on the
+/// pull request that would not merge, and a press that only forgave one of them
+/// would be a Resume that stopped again on the other.
 pub async fn forget_fix_attempts(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
     sqlx::query("DELETE FROM check_fix_attempts WHERE conversation_id = ?")
         .bind(conversation_id)
@@ -1042,6 +1145,16 @@ pub async fn forget_fix_attempts(pool: &SqlitePool, conversation_id: i64) -> Res
         .await
         .with_context(|| {
             format!("forgetting what has been tried about Conversation {conversation_id}'s checks")
+        })?;
+
+    sqlx::query("DELETE FROM conflict_fix_attempts WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(pool)
+        .await
+        .with_context(|| {
+            format!(
+                "forgetting what has been tried about Conversation {conversation_id}'s conflicts"
+            )
         })?;
 
     Ok(())
