@@ -82,14 +82,14 @@ impl Server {
         }
     }
 
-    /// Where the server is, whole — the viewer's namespace hangs off this, and
-    /// it is nobody's Conversation.
     /// The database this server keeps its Sets in, for a test that wants to
     /// read one back through a pool of its own.
     pub fn database(&self) -> &Path {
         &self.database
     }
 
+    /// Where the server is, whole — the viewer's namespace hangs off this, and
+    /// it is nobody's Conversation.
     pub fn base(&self) -> String {
         format!("http://{}", self.addr)
     }

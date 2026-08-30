@@ -118,9 +118,6 @@ function theCard(name: string): HTMLElement {
 
 /// Fill the form in, whichever profile it is about.
 ///
-/// The account's fields are the ones its agent type has, which is a Claude
-/// pair here — the form draws them off the type, and this fills in what it
-/// drew.
 /// The pair an account is, where it is a Claude one — which every fixture here
 /// is. The account is a union now, so reading a path off one is narrowing to
 /// the type that keeps it, and a fixture of another type would be a different
@@ -135,6 +132,9 @@ function pair(account: ProfileAccount) {
   return account;
 }
 
+/// The account's fields are the ones its agent type has, which is a Claude
+/// pair here — the form draws them off the type, and this fills in what it
+/// drew.
 function fillIn(profile: ProfileEdit) {
   fireEvent.input(screen.getByLabelText("Name"), {
     target: { value: profile.name },
