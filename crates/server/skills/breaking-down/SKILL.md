@@ -31,10 +31,10 @@ settled. The direction is settled and the breakdown is what is left.
 ## 1. Ground the plan in the code
 
 Read the codebase before drafting anything. Task titles and descriptions should
-use the project's own vocabulary — its `CLAUDE.md`, its `CONTEXT.md` glossary if
-it has one, the ADRs under `docs/adr/` covering what you are touching — and the
-breakdown should match how the code is actually laid out rather than how the
-plan imagined it.
+use the project's own vocabulary — its `CLAUDE.md` or `AGENTS.md`, its
+`CONTEXT.md` glossary if it has one, the ADRs under `docs/adr/` covering what
+you are touching — and the breakdown should match how the code is actually
+laid out rather than how the plan imagined it.
 
 Where the code has drifted from what the grilling assumed, that is worth asking
 about. Don't ask as you find it: finish grounding, then put the drift alongside
@@ -134,13 +134,12 @@ machine of its own and they answer on a phone, so a question printed here is one
 nobody will ever see.
 
 - **Read `verkstead guide` before the first ask.** It is everything the binary
-  knows about asking well — how a Set is labelled, how much belongs in one, and
-  the shape it goes over the wire in — and it ships inside the binary, so
-  nothing else has to be found.
+  knows about asking well — how a Set is labelled, how much belongs in one, the
+  shape it goes over the wire in, and how to run an ask that blocks for hours —
+  and it ships inside the binary, so nothing else has to be found.
 - **Put every round through `verkstead ask`.** It blocks until the answers come
   back, which may be hours. Idling is this working rather than this failing, so
-  run it as a background command and do only work the answers cannot invalidate
-  while you wait.
+  do only work the answers cannot invalidate while you wait.
 - **Never answer on their behalf.** If the ask itself fails — the server
   unreachable, any non-zero exit that is not a refused Set — say so and stop.
   Approving your own breakdown decides in their place the very thing worth

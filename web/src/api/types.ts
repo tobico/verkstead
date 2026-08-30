@@ -205,14 +205,6 @@ profile: string | null,
 model: string | null, };
 
 /**
- * Which coding agent a Profile runs.
- *
- * One value. It is on the wire so that a second backend is a variant added
- * beside `Claude` rather than a field the viewer has to start being told about.
- */
-export type AgentType = "Claude";
-
-/**
  * One question's slot in a Response: either an Answer — a selected Option
  * and/or free text — or the Unanswered marker, saying the human chose to
  * leave the question open.
@@ -1530,6 +1522,23 @@ export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
 export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
 /**
+ * The account a Profile names, in the shape the agent type running it keeps
+ * one.
+ *
+ * Flat on the wire — `{"agent_type": "Claude", "claude_dir": "…",
+ * "config_file": "…"}` — so the type is a field the viewer can read and narrow
+ * on rather than a name it has to unwrap the account out of. Which is what the
+ * form draws its fields off: a shape per type, and adding a backend adds a
+ * variant here and the fields beside it.
+ *
+ * One shape for both directions. A Profile as the viewer receives it carries
+ * the resolved paths the server recorded and a Profile as the human has just
+ * written it carries what they typed, but they are the same fields either way,
+ * and two types for one shape would be two opinions about what an account is.
+ */
+export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, config_file: string, };
+
+/**
  * Which Profile and model a Conversation is pairing for one of its roles.
  */
 export type ProfileChoice = { profile_id: number, 
@@ -1552,19 +1561,16 @@ export type ProfileDeleted = "Removed" | "NoSuchProfile" | "InUse";
 /**
  * A Profile as the human has just written it, for saving or for rewriting.
  *
- * No agent type: there is one, and offering a choice of one is theatre. The
- * server records `Claude`, and the field arrives here when there is something
- * to choose between.
+ * The account says which type it is, because the fields beside it are that
+ * type's. The form still offers no choice of one — there is one type — so what
+ * arrives here is always `Claude`; what makes the discriminator real is that
+ * the shape hangs off it, not that anything picks it.
  */
 export type ProfileEdit = { name: string, 
 /**
- * The absolute path of the directory bind-mounted over `~/.claude`.
+ * The absolute paths this Profile's account is, in its type's shape.
  */
-claude_dir: string, 
-/**
- * The absolute path of the file bind-mounted over `~/.claude.json`.
- */
-config_file: string, 
+account: ProfileAccount, 
 /**
  * The models this account can run a session on, in the order they were
  * typed. The form takes them a line apiece; blank lines and repeated
@@ -1576,19 +1582,25 @@ models: Array<string>, };
 /**
  * One row of the Profile list.
  *
- * The paths are the resolved ones the server recorded rather than whatever was
- * typed to save them: those are what will be bind-mounted, so those are what is
- * worth showing.
+ * The account's paths are the resolved ones the server recorded rather than
+ * whatever was typed to save them: those are what will be bind-mounted, so
+ * those are what is worth showing.
  */
-export type ProfileEntry = { id: number, name: string, claude_dir: string, config_file: string, 
+export type ProfileEntry = { id: number, name: string, 
+/**
+ * Which agent this Profile runs, and the account it runs as — one field,
+ * because the type is what says which fields the account has.
+ */
+account: ProfileAccount, 
 /**
  * Every model this account can run a session on. At least one, and none of
  * them preferred over the others: the list says what is available and
  * nothing more.
  */
-models: Array<string>, agent_type: AgentType, 
+models: Array<string>, 
 /**
- * `null` while the pair is where it was left, which is the ordinary case.
+ * `null` while the account is where it was left, which is the ordinary
+ * case.
  */
 broken: Broken | null, };
 

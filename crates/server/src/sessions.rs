@@ -215,6 +215,10 @@ impl Agents {
     /// and the flag is then left off entirely rather than passed empty: an agent
     /// told to run under no name at all would refuse to start, where one not
     /// told anything picks its own.
+    ///
+    /// Last of all come the flags the backend itself needs — see [`flags`] —
+    /// which is the one part of this line that reads differently for one agent
+    /// type than for another.
     fn argv(&self, pairing: &store::Pairing, prompt: &str, session: Option<&str>) -> Vec<String> {
         let mut argv = self.agent.clone();
 
@@ -230,7 +234,34 @@ impl Agents {
             argv.push(session.to_owned());
         }
 
+        argv.extend(
+            flags(pairing.profile.agent_type())
+                .iter()
+                .map(|flag| (*flag).to_owned()),
+        );
+
         argv
+    }
+}
+
+/// The flags a backend needs on its own launch line, beyond the model, the
+/// prompt and the session name every one of them is given.
+///
+/// Claude's is `--dangerously-skip-permissions`. Running unattended is what
+/// Verkstead promises rather than something the account's own configuration is
+/// trusted to have been left holding: a session that stopped to ask for
+/// approval would be asking it in front of nobody, with the whole backlog
+/// behind it waiting on an answer that is not coming. What stops a session
+/// doing harm is the Sandbox, which this does not touch and which is still the
+/// boundary.
+///
+/// A later backend adds one arm here and nothing else, which is the whole
+/// reason this is a mapping rather than a flag pushed straight onto the line.
+/// The type comes off the Pairing's Profile, so nothing has to be plumbed
+/// through to say which agent is being launched.
+fn flags(agent_type: store::AgentType) -> &'static [&'static str] {
+    match agent_type {
+        store::AgentType::Claude => &["--dangerously-skip-permissions"],
     }
 }
 
@@ -1542,10 +1573,11 @@ mod tests {
         store::Profile {
             id: 1,
             name: "fable".to_owned(),
-            claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
-            config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
+            account: store::Account::Claude {
+                claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
+                config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
+            },
             models: vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()],
-            agent_type: store::AgentType::Claude,
         }
     }
 
@@ -1597,6 +1629,7 @@ mod tests {
                 "--model".to_owned(),
                 "claude-opus-5".to_owned(),
                 "# Rate limiting\n".to_owned(),
+                "--dangerously-skip-permissions".to_owned(),
             ]
         );
     }
@@ -1624,6 +1657,7 @@ mod tests {
                 "--model".to_owned(),
                 "claude-fable-5".to_owned(),
                 "# Rate limiting\n".to_owned(),
+                "--dangerously-skip-permissions".to_owned(),
             ]
         );
     }
@@ -1648,6 +1682,7 @@ mod tests {
                 "# Rate limiting\n".to_owned(),
                 "--session-id".to_owned(),
                 "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
+                "--dangerously-skip-permissions".to_owned(),
             ]
         );
     }

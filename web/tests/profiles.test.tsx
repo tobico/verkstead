@@ -25,7 +25,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ProfileEntry } from "../src/api/types";
+import type { ProfileEdit, ProfileEntry } from "../src/api/types";
 import { KNOWN_MODELS, prettify } from "../src/models";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
@@ -133,12 +133,11 @@ function theCard(name: string): HTMLElement {
 }
 
 /// Fill the form in, whichever profile it is about.
-function fillIn(profile: {
-  name: string;
-  models: string[];
-  claude_dir: string;
-  config_file: string;
-}) {
+///
+/// The account's fields are the ones its agent type has, which is a Claude
+/// pair here — the form draws them off the type, and this fills in what it
+/// drew.
+function fillIn(profile: ProfileEdit) {
   fireEvent.input(screen.getByLabelText("Name"), {
     target: { value: profile.name },
   });
@@ -146,18 +145,21 @@ function fillIn(profile: {
     fireEvent.click(screen.getByLabelText(prettify(model)));
   }
   fireEvent.input(screen.getByLabelText(/Claude directory/), {
-    target: { value: profile.claude_dir },
+    target: { value: profile.account.claude_dir },
   });
   fireEvent.input(screen.getByLabelText(/Config file/), {
-    target: { value: profile.config_file },
+    target: { value: profile.account.config_file },
   });
 }
 
-const NEW = {
+const NEW: ProfileEdit = {
   name: "personal",
   models: ["claude-sonnet-5"],
-  claude_dir: "/home/you/accounts/personal/.claude",
-  config_file: "/home/you/accounts/personal/.claude.json",
+  account: {
+    agent_type: "Claude",
+    claude_dir: "/home/you/accounts/personal/.claude",
+    config_file: "/home/you/accounts/personal/.claude.json",
+  },
 };
 
 describe("the cards", () => {
@@ -205,9 +207,9 @@ describe("the cards", () => {
     await waitFor(() => screen.getByText(FABLE.name));
 
     const face = theCard(FABLE.name);
-    expect(face.textContent).not.toContain(FABLE.claude_dir);
-    expect(face.textContent).not.toContain(FABLE.config_file);
-    expect(face.textContent).not.toContain(FABLE.agent_type);
+    expect(face.textContent).not.toContain(FABLE.account.claude_dir);
+    expect(face.textContent).not.toContain(FABLE.account.config_file);
+    expect(face.textContent).not.toContain(FABLE.account.agent_type);
   });
 
   /// It is a card like every other card in the app: pressed to open the pane
@@ -307,7 +309,8 @@ describe("the plus that adds one", () => {
 
 describe("the pane a card opens", () => {
   /// Editing one is filling the same form in with what it already says: a
-  /// profile is four fields with nothing built from them yet.
+  /// profile is a name, a list of models and an account, with nothing built from
+  /// them yet.
   it("fills the form in with what the profile already says", async () => {
     theProfiles();
     mountPane(FABLE.id);
@@ -320,10 +323,35 @@ describe("the pane a card opens", () => {
     expect(ticked()).toEqual(FABLE.models);
     expect(
       (screen.getByLabelText(/Claude directory/) as HTMLInputElement).value,
-    ).toBe(FABLE.claude_dir);
+    ).toBe(FABLE.account.claude_dir);
     expect(
       (screen.getByLabelText(/Config file/) as HTMLInputElement).value,
-    ).toBe(FABLE.config_file);
+    ).toBe(FABLE.account.config_file);
+  });
+
+  /// The form asks for what this profile's agent type keeps an account in, and
+  /// nothing beside it: the fields come off the discriminator, so a profile of
+  /// another type would be asked for that type's paths instead — and the stage
+  /// adding one adds fields rather than restructuring this.
+  it("asks only for the fields its agent type's account has", async () => {
+    theProfiles();
+    const { container } = mountPane(FABLE.id);
+
+    await waitFor(() => screen.getByLabelText(/Claude directory/));
+
+    // The ticks name themselves rather than carrying a `for`, so what is listed
+    // here is every field the form names: the profile's own, the way past the
+    // model list, and the account's paths.
+    expect(
+      [...container.querySelectorAll("form label[for]")].map((label) =>
+        label.getAttribute("for"),
+      ),
+    ).toEqual([
+      "profile-name",
+      "profile-model",
+      "profile-claude_dir",
+      "profile-config_file",
+    ]);
   });
 
   /// The paths shown are the resolved ones the server recorded rather than
@@ -335,7 +363,7 @@ describe("the pane a card opens", () => {
     const { container } = mountPane(FABLE.id);
 
     const standing = await drawn(container, `.${styles.standing}`);
-    expect(standing.textContent).toContain(FABLE.agent_type);
+    expect(standing.textContent).toContain(FABLE.account.agent_type);
     expect(container.querySelector("select")).toBeNull();
   });
 
@@ -368,8 +396,7 @@ describe("the pane a card opens", () => {
       expect(sent(fetching, `/api/ui/profiles/${FABLE.id}`)).toEqual({
         name: FABLE.name,
         models: ["claude-opus-5"],
-        claude_dir: FABLE.claude_dir,
-        config_file: FABLE.config_file,
+        account: FABLE.account,
       }),
     );
   });
@@ -436,7 +463,10 @@ describe("the pane the plus opens", () => {
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
   });
 
-  it("sends the four fields that were typed", async () => {
+  /// The account among them, saying which type it is: what the server is sent
+  /// is a profile of a type with that type's own fields, rather than a pair
+  /// every profile is assumed to have.
+  it("sends the name, the models and the account that were typed", async () => {
     const fetching = theProfiles(json("Saved"));
     mountPane("new");
 
@@ -666,8 +696,7 @@ describe("the models a profile lists", () => {
       expect(sent(fetching, `/api/ui/profiles/${MIXED.id}`)).toEqual({
         name: MIXED.name,
         models: MIXED.models,
-        claude_dir: MIXED.claude_dir,
-        config_file: MIXED.config_file,
+        account: MIXED.account,
       }),
     );
   });

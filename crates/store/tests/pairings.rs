@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    AgentType, Deleting, Picked, Profile, ProfileFacts, Repo, create_profile, delete_profile,
+    Account, Deleting, Picked, Profile, ProfileFacts, Repo, create_profile, delete_profile,
     open_database, register_repo, remembered_pairings, set_grilling_pairing,
     set_implementation_pairing, set_review_pairing, skip_grilling, skip_review, start_building,
     start_conversation, start_grilling, update_profile,
@@ -30,10 +30,11 @@ const MODEL: &str = "claude-opus-5";
 fn facts(name: &str, models: &[&str]) -> ProfileFacts {
     ProfileFacts {
         name: name.to_owned(),
-        claude_dir: PathBuf::from(format!("/watched/accounts/{name}/.claude")),
-        config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
+        account: Account::Claude {
+            claude_dir: PathBuf::from(format!("/watched/accounts/{name}/.claude")),
+            config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
+        },
         models: models.iter().map(|model| (*model).to_owned()).collect(),
-        agent_type: AgentType::Claude,
     }
 }
 
