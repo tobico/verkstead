@@ -79,7 +79,7 @@ git_author:
 rust_build_cache:
   enabled: true
   size: 30G
-share_viewer_url: https://tobico.github.io/verkstead-shares/
+share_viewer_url: https://ada.github.io/verkstead-shares/
 ```
 
 Every session started after that gets the token as `GH_TOKEN`, which `gh`
@@ -106,13 +106,13 @@ $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
          "rust_build_cache":{"enabled":true,"size":""},
-         "share_viewer_url":"https://tobico.github.io/verkstead-shares/"}' \
+         "share_viewer_url":"https://ada.github.io/verkstead-shares/"}' \
     http://127.0.0.1:8422/api/ui/settings
 {"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
     "compiles_cached":true},
-  "share_viewer_url":"https://tobico.github.io/verkstead-shares/"},
+  "share_viewer_url":"https://ada.github.io/verkstead-shares/"},
  "verified":{"Account":{"login":"tobico","missing":["gist"]}}}
 ```
 
