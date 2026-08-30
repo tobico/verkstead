@@ -101,6 +101,28 @@ pub(crate) const SYSTEM: [&str; 7] = [
 /// executable and nothing else, and goes first on [`PATH`].
 const VERKSTEAD_INSIDE: &str = "/verkstead/bin/verkstead";
 
+/// Where each agent type's account lands in HOME.
+///
+/// Claude's pair, and the one directory Codex keeps its whole account under.
+/// Written out rather than derived, because they are the paths those programs
+/// look in and not a scheme either of them follows — and named apart from
+/// [`skills::CLAUDE_INSIDE_HOME`], which is the directory *inside* the first of
+/// them that a sandbox covers.
+const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
+const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
+const CODEX_INSIDE_HOME: &str = ".codex";
+
+/// Which backend a session is running, in its own environment.
+///
+/// Set for the Guide alone. Nothing else inside a sandbox needs to know — the
+/// asking channel and the idle judgement are both decided server-side — but
+/// `verkstead guide` prints the asking instructions for the backend reading it,
+/// and there is nothing else inside a sandbox that says which one that is.
+///
+/// A Guide printed where this is unset is the blocking one, which is what a
+/// `verkstead` run outside a sandbox altogether gets.
+pub const AGENT_TYPE: &str = "VERKSTEAD_AGENT";
+
 /// And where the sccache the shared build cache compiles through is mounted,
 /// beside it.
 ///
@@ -508,12 +530,15 @@ pub struct Sandbox {
     /// database and the refs, which is what a commit and a push need.
     git_dir: PathBuf,
 
-    /// The Profile's claude directory, mounted over `~/.claude`.
-    claude_dir: PathBuf,
-
-    /// And its config file, over `~/.claude.json`. The pair is what keeps
-    /// accounts apart, so the two travel together or not at all.
-    config_file: PathBuf,
+    /// The Profile's account, in the shape its agent type keeps one — what is
+    /// mounted into HOME, and where.
+    ///
+    /// Claude's pair goes over `~/.claude` and `~/.claude.json`, and travels
+    /// together or not at all: the pair is what keeps accounts apart. Every type
+    /// after it is one home over the one directory that backend keeps its whole
+    /// account under. Which arm this is also says which backend a session is
+    /// running, which is what [`AGENT_TYPE`] carries inside.
+    account: store::Account,
 
     /// The bundled skills, mounted read-only at [`skills::INSIDE`] — see
     /// [`crate::skills`] for why they are Verkstead's rather than the account's,
@@ -632,19 +657,10 @@ impl Sandbox {
         let mut binds = companion_binds(conversation)?;
         binds.extend(extra);
 
-        // One arm per agent type: what is bound over where is that type's own
-        // shape, and a backend arriving with an account of its own lands here
-        // rather than in whatever the pair happened to mean.
-        let store::Account::Claude {
-            claude_dir,
-            config_file,
-        } = &profile.account;
-
         Some(Sandbox {
             worktree,
             git_dir,
-            claude_dir: claude_dir.clone(),
-            config_file: config_file.clone(),
+            account: profile.account.clone(),
             skills: skills.path().to_owned(),
             nothing: skills.nothing().to_owned(),
             verkstead: verkstead.path().to_owned(),
@@ -702,13 +718,32 @@ impl Sandbox {
             .arg(&self.worktree)
             .arg("--bind")
             .arg(&self.git_dir)
-            .arg(&self.git_dir)
-            .arg("--bind")
-            .arg(&self.claude_dir)
-            .arg(self.home.path.join(".claude"))
-            .arg("--bind")
-            .arg(&self.config_file)
-            .arg(self.home.path.join(".claude.json"));
+            .arg(&self.git_dir);
+
+        // And the account, in the shape its agent type keeps one: what is bound
+        // over where is that type's own business, and a backend arriving with an
+        // account of its own lands here rather than in whatever the pair
+        // happened to mean.
+        match &self.account {
+            store::Account::Claude {
+                claude_dir,
+                config_file,
+            } => {
+                bwrap
+                    .arg("--bind")
+                    .arg(claude_dir)
+                    .arg(self.home.path.join(CLAUDE_DIR_INSIDE_HOME))
+                    .arg("--bind")
+                    .arg(config_file)
+                    .arg(self.home.path.join(CLAUDE_CONFIG_INSIDE_HOME));
+            }
+            store::Account::Codex { home } => {
+                bwrap
+                    .arg("--bind")
+                    .arg(home)
+                    .arg(self.home.path.join(CODEX_INSIDE_HOME));
+            }
+        }
 
         // After `/tmp` is made, and inside it: the tmpfs above would otherwise
         // land over this and leave the session writing its handoff into memory
@@ -729,10 +764,18 @@ impl Sandbox {
         // applied in the order it is given and the one that lands second is the
         // one that wins. Read-only as the mount that used to stand here was, so
         // a session cannot fill the directory in and then read from it.
-        bwrap
-            .arg("--ro-bind")
-            .arg(&self.nothing)
-            .arg(self.home.path.join(skills::CLAUDE_INSIDE_HOME));
+        //
+        // Claude's, because Claude's is the account that has one here. Each
+        // backend after it has a discovery path of its own, covered the same way
+        // by the stage that lands it — a bind into a home no session of that
+        // type is running under would cover nothing and make a directory the
+        // account never had.
+        if matches!(self.account, store::Account::Claude { .. }) {
+            bwrap
+                .arg("--ro-bind")
+                .arg(&self.nothing)
+                .arg(self.home.path.join(skills::CLAUDE_INSIDE_HOME));
+        }
 
         // And the binary the session asks with, in a directory of its own that
         // goes first on `PATH` — see [`Executable`]. The bind makes the
@@ -793,7 +836,14 @@ impl Sandbox {
             // either.
             .arg("--setenv")
             .arg("VERKSTEAD_SERVER")
-            .arg(&self.server);
+            .arg(&self.server)
+            // And which backend this session is, which is what tailors the
+            // Guide it reads — see [`AGENT_TYPE`]. Off the account's own shape,
+            // so nothing has to be plumbed through to say which agent is being
+            // launched.
+            .arg("--setenv")
+            .arg(AGENT_TYPE)
+            .arg(self.account.agent_type().word());
 
         // Where a Rust build inside puts what it downloads and what it
         // compiles. Nothing but a Rust build ever reads any of them, which is

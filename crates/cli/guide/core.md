@@ -14,24 +14,12 @@ where an agent starts, and it is the whole of it. Nothing else has to be found.
 Every Set lands on its conversation's timeline, notifies the human's devices and
 waits there to be answered. What differs is this end.
 
-- **Blocking** — `verkstead ask`. The session idles until the Response comes
-  back, so the Answers are in front of it when it goes on.
-- **Deferred** — `verkstead ask --deferred`. The Set is stored, the command
-  returns at once, and the session carries on without it. The human answers in
-  their own time, and their Answers are folded into the prompt of a later
-  session of the same conversation — so nothing *this* session does will ever
-  see them.
-
-**Block only on Questions whose Answers affect the work about to be done.** That
-is the whole rule. "Which of these two shapes should the config take?" blocks,
-when the config is what is being written now. "Is the wording of this error
-message right?" does not: it is worth asking, the work does not turn on it, and
-the answer reaches whoever picks the work up next.
+<!-- the two kinds of ask, per channel -->
 
 The rule decides a Question at a time, and a Set is one kind or the other — so
-Questions of both kinds go in two Sets: what the work turns on in the blocking
-one, and everything else in a deferred one sent alongside it. Budget each of
-them as a Set in its own right, by **Pacing** below.
+Questions of both kinds go in two Sets: what the work turns on in the one that
+comes back, and everything else in a deferred one sent alongside it. Budget each
+of them as a Set in its own right, by **Pacing** below.
 
 A deferred ask is a foreground call: it returns as soon as the Set is stored,
 and there is nothing to wait for. What it prints is the stored Set rather than a
@@ -53,7 +41,7 @@ created_at: 2026-08-24T09:12:03.114Z
 ```
 
 Everything below is about writing a Set and holds for both kinds. **Running the
-ask** is where the blocking one's own mechanics are.
+ask** is where this end's own mechanics are.
 
 ## Question labels
 
@@ -331,30 +319,7 @@ That is a property of the writing rather than of the Questions:
 
 ## Running the ask
 
-**Run `verkstead ask` as a background shell command** — in Claude Code, a Bash
-call with `run_in_background: true`. The call blocks until the human answers,
-with no timeout, and that may be hours: the whole point is that they are not at
-the terminal. A foreground tool call here hangs the session. The harness wakes
-the agent when the Response arrives.
-
-The whole of this section is the blocking ask's. A deferred one waits for
-nothing, so it is an ordinary foreground call and there is no Response to read
-— see **Two kinds of ask**. Everything below about a failure that isn't the Set
-holds for both.
-
-Pipe the Set in on stdin — no file to name, and nothing left behind:
-
-```
-verkstead ask <<'YAML'
-title: …
-questions:
-  - label: Q1
-    text: …
-YAML
-```
-
-Quote the heredoc delimiter (`<<'YAML'`, not `<<YAML`) so the shell leaves the
-Set alone — backticks and `$` are ordinary characters in prose and in a diff.
+<!-- running the ask, per channel -->
 
 There is no health probe — the attempt is the probe. If the ask fails for a
 reason that isn't the Set — the server down, the connection refused, any other
@@ -368,10 +333,6 @@ A Set refused as malformed is not the transport breaking: the server is up and
 answering, and the fault is in what was sent. Fix the Set and send it again —
 the refusal names the Question at fault, and the server is local, so the round
 trip costs almost nothing.
-
-While waiting, do any work that does not depend on the answers. Don't speculate
-about what the human will say, and don't start work the answers might throw
-away.
 
 ## Reading the Response
 

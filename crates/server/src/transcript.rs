@@ -52,7 +52,12 @@ pub(crate) struct Tail {
     conversation: i64,
 
     /// Where the Agent Profile keeps its logs, one directory per project.
-    projects: PathBuf,
+    ///
+    /// `None` on a backend whose log this binary does not know how to find yet:
+    /// there is nowhere to look, so nothing is looked for and the Capture is
+    /// the whole record — which is ADR-0006's rule for a session with no log,
+    /// unchanged.
+    projects: Option<PathBuf>,
 
     /// What Verkstead named this session, which is what the file is called.
     session: String,
@@ -113,12 +118,16 @@ impl Tail {
         // Where Claude Code keeps its logs, under the directory the account is.
         // Each backend after it names its own place under its own account, so
         // this is one arm per type rather than one path every type is assumed
-        // to keep.
-        let store::Account::Claude { claude_dir, .. } = &profile.account;
+        // to keep — and Codex names none yet, its log being found rather than
+        // named and the finding being its own stage's.
+        let projects = match &profile.account {
+            store::Account::Claude { claude_dir, .. } => Some(claude_dir.join("projects")),
+            store::Account::Codex { .. } => None,
+        };
 
         Tail {
             conversation,
-            projects: claude_dir.join("projects"),
+            projects,
             session: session.to_owned(),
             log: None,
             read: 0,
@@ -160,22 +169,24 @@ impl Tail {
     /// Look for the log, and hand back where it is.
     ///
     /// `None` is the ordinary answer for most of a session's life: it is a
-    /// session that has not written anything yet, a backend that keeps no log,
-    /// and a Profile directory that has never been used. None of the three is
-    /// worth saying anything about, which is why nothing here is logged.
+    /// session that has not written anything yet, a backend whose log is not
+    /// looked for, and a Profile directory that has never been used. None of the
+    /// three is worth saying anything about, which is why nothing here is
+    /// logged.
     async fn find(&self) -> Option<PathBuf> {
+        let projects = self.projects.as_ref()?;
         let named = format!("{}.jsonl", self.session);
 
         // Beside the project directories as well as inside one of them, because
         // which of the two the backend chooses is the backend's business — what
         // Verkstead knows is the directory it keeps them under and the name it
         // gave the session.
-        let beside = self.projects.join(&named);
+        let beside = projects.join(&named);
         if is_file(&beside).await {
             return Some(beside);
         }
 
-        let mut projects = tokio::fs::read_dir(&self.projects).await.ok()?;
+        let mut projects = tokio::fs::read_dir(projects).await.ok()?;
 
         while let Ok(Some(project)) = projects.next_entry().await {
             let inside = project.path().join(&named);

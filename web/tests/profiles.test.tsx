@@ -25,7 +25,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ProfileEdit, ProfileEntry } from "../src/api/types";
+import type {
+  ProfileAccount,
+  ProfileEdit,
+  ProfileEntry,
+} from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
 import { ProfileList, ProfilePane } from "../src/profiles/ProfileList";
@@ -117,6 +121,20 @@ function theCard(name: string): HTMLElement {
 /// The account's fields are the ones its agent type has, which is a Claude
 /// pair here — the form draws them off the type, and this fills in what it
 /// drew.
+/// The pair an account is, where it is a Claude one — which every fixture here
+/// is. The account is a union now, so reading a path off one is narrowing to
+/// the type that keeps it, and a fixture of another type would be a different
+/// test rather than the same one read past its discriminator.
+function pair(account: ProfileAccount) {
+  if (account.agent_type !== "Claude") {
+    throw new Error(
+      `this fixture should be a Claude account, not ${account.agent_type}`,
+    );
+  }
+
+  return account;
+}
+
 function fillIn(profile: ProfileEdit) {
   fireEvent.input(screen.getByLabelText("Name"), {
     target: { value: profile.name },
@@ -125,10 +143,10 @@ function fillIn(profile: ProfileEdit) {
     target: { value: profile.models.join("\n") },
   });
   fireEvent.input(screen.getByLabelText(/Claude directory/), {
-    target: { value: profile.account.claude_dir },
+    target: { value: pair(profile.account).claude_dir },
   });
   fireEvent.input(screen.getByLabelText(/Config file/), {
-    target: { value: profile.account.config_file },
+    target: { value: pair(profile.account).config_file },
   });
 }
 
@@ -187,8 +205,8 @@ describe("the cards", () => {
     await waitFor(() => screen.getByText(FABLE.name));
 
     const face = theCard(FABLE.name);
-    expect(face.textContent).not.toContain(FABLE.account.claude_dir);
-    expect(face.textContent).not.toContain(FABLE.account.config_file);
+    expect(face.textContent).not.toContain(pair(FABLE.account).claude_dir);
+    expect(face.textContent).not.toContain(pair(FABLE.account).config_file);
     expect(face.textContent).not.toContain(FABLE.account.agent_type);
   });
 
@@ -306,10 +324,10 @@ describe("the pane a card opens", () => {
     ).toBe(FABLE.models.join("\n"));
     expect(
       (screen.getByLabelText(/Claude directory/) as HTMLInputElement).value,
-    ).toBe(FABLE.account.claude_dir);
+    ).toBe(pair(FABLE.account).claude_dir);
     expect(
       (screen.getByLabelText(/Config file/) as HTMLInputElement).value,
-    ).toBe(FABLE.account.config_file);
+    ).toBe(pair(FABLE.account).config_file);
   });
 
   /// The form asks for what this profile's agent type keeps an account in, and
@@ -567,18 +585,23 @@ describe("removing a profile", () => {
   });
 });
 
-describe("a profile whose pair has gone", () => {
-  /// The pair was there when it was saved, and a directory can be moved
+describe("a profile whose account has gone", () => {
+  /// The account was there when it was saved, and a directory can be moved
   /// afterwards. The server reports it on every read; the card is where it is
   /// said, because a list is scanned before it is read.
   ///
   /// Built from the real payload rather than served as one of its own: whether
   /// the server reports it, and when, is `crates/server/tests/profiles.rs`'s
-  /// subject — what is being read here is that the page says which half it was.
+  /// subject — what is being read here is that the page says which part of the
+  /// account it was.
   it.each([
     ["DirMissing", "Its claude directory is gone."],
     ["ConfigMissing", "Its config file is gone."],
-    ["OutsideWatchedPaths", "Its pair now points outside the watched paths."],
+    ["HomeMissing", "The home it kept its account under is gone."],
+    [
+      "OutsideWatchedPaths",
+      "Its account now points outside the watched paths.",
+    ],
   ])("says of %s what is wrong with it", async (broken, said) => {
     const gone: ProfileEntry[] = [
       { ...FABLE, broken: broken as ProfileEntry["broken"] },

@@ -229,9 +229,21 @@ fi
         cache: &BuildCache,
         extra: Vec<Bind>,
     ) -> Sandbox {
+        self.sandbox_under(&self.profile, listening, cache, extra)
+    }
+
+    /// And one around a Profile that is not the fixture's own, which is how the
+    /// second agent type gets a sandbox to be probed inside.
+    fn sandbox_under(
+        &self,
+        profile: &store::Profile,
+        listening: SocketAddr,
+        cache: &BuildCache,
+        extra: Vec<Bind>,
+    ) -> Sandbox {
         Sandbox::for_conversation(
             &self.conversation,
-            &self.profile,
+            profile,
             self.home(),
             &Reachable::at(listening),
             &self.skills,
@@ -258,6 +270,30 @@ fi
     /// shared build cache is set.
     fn configure(&self, yaml: &str) {
         std::fs::write(self.settings.config_path(), yaml).unwrap();
+    }
+
+    /// A Profile of the second agent type, whose whole account is one home.
+    ///
+    /// Saved into the same store the fixture's own was, with a home inside the
+    /// Watched Path holding something of the account's — so that "the home is
+    /// bound" is a claim about a directory with contents rather than about an
+    /// empty one.
+    async fn codex_profile(&self) -> store::Profile {
+        let home = self.watched.path().join("codex-account/.codex");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("config.toml"), "# the account's own\n").unwrap();
+
+        store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: "codex".to_owned(),
+                account: store::Account::Codex { home },
+                models: vec!["gpt-5-codex".to_owned()],
+            },
+        )
+        .await
+        .unwrap()
+        .expect("nothing is called that yet")
     }
 
     /// The host home a sandbox is built around — the fixture's rather than
@@ -959,6 +995,71 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
     assert_eq!(
         reported["home"], ".claude .claude.json ",
         "everything else in HOME is simply not there"
+    );
+}
+
+/// And for a backend whose whole account is one home, that home is the whole of
+/// what HOME holds — bound where that backend looks for it, and nothing of
+/// Claude's beside it.
+///
+/// Two accounts of different shapes cannot both be right about `~`, so what is
+/// mounted is the account's own type's and only that: a `~/.claude` inside a
+/// Codex session would be an account nothing is running as.
+#[tokio::test]
+async fn a_home_account_is_bound_where_its_backend_looks_for_it() {
+    let fixture = grilling().await;
+    let profile = fixture.codex_profile().await;
+    let sandbox = fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]);
+
+    let reported = probe(
+        &sandbox,
+        r#"
+            dir "$HOME/.codex" codex-home
+            file "$HOME/.codex/config.toml" codex-config
+            dir "$HOME/.claude" claude-dir
+            file "$HOME/.claude.json" claude-config
+            say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+        "#,
+    );
+
+    assert_eq!(
+        reported["codex-home"], "write",
+        "a session writes its own logs and settings under the home it runs as"
+    );
+    assert_eq!(
+        reported["codex-config"], "write",
+        "and what the account already kept there is there to be read"
+    );
+    assert_eq!(reported["claude-dir"], "absent");
+    assert_eq!(reported["claude-config"], "absent");
+    assert_eq!(
+        reported["home"], ".codex ",
+        "everything else in HOME is simply not there, this account's own included"
+    );
+}
+
+/// Which backend a session is running is in its environment, and it is there for
+/// the Guide: `verkstead guide` inside a sandbox prints the asking instructions
+/// for the backend reading them, and nothing else inside says which that is.
+#[tokio::test]
+async fn a_session_is_told_which_backend_it_is_running() {
+    let fixture = grilling().await;
+    let codex = fixture.codex_profile().await;
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        r#"say agent "${VERKSTEAD_AGENT-unset}""#,
+    );
+    assert_eq!(reported["agent"], "claude");
+
+    let reported = probe(
+        &fixture.sandbox_under(&codex, LISTENING, &BuildCache::none(), vec![]),
+        r#"say agent "${VERKSTEAD_AGENT-unset}""#,
+    );
+    assert_eq!(
+        reported["agent"], "codex",
+        "off the account's own shape, so nothing has to be plumbed through to \
+         say which agent is being launched"
     );
 }
 

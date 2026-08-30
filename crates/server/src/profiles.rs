@@ -192,14 +192,15 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// refusals are: a Profile whose config file has gone and one whose directory
 /// has gone are two different things to go and put right.
 fn broken(watched: &WatchedPaths, profile: &store::Profile) -> Option<Broken> {
-    let paths = match &profile.account {
+    let paths: Vec<(&std::path::PathBuf, Broken)> = match &profile.account {
         store::Account::Claude {
             claude_dir,
             config_file,
-        } => [
+        } => vec![
             (claude_dir, Broken::DirMissing),
             (config_file, Broken::ConfigMissing),
         ],
+        store::Account::Codex { home } => vec![(home, Broken::HomeMissing)],
     };
 
     for (path, missing) in paths {
@@ -269,37 +270,54 @@ fn inspect(
     watched: &WatchedPaths,
     account: &ProfileAccount,
 ) -> Result<store::Account, ProfileSaved> {
-    let ProfileAccount::Claude {
-        claude_dir,
-        config_file,
-    } = account;
+    match account {
+        ProfileAccount::Claude {
+            claude_dir,
+            config_file,
+        } => {
+            let dir = match watched.admit(Path::new(claude_dir.trim())) {
+                Admission::Inside(path) => path,
+                Admission::NotAbsolute => return Err(ProfileSaved::DirNotAbsolute),
+                Admission::Missing => return Err(ProfileSaved::DirMissing),
+                Admission::Outside => return Err(ProfileSaved::DirOutsideWatchedPaths),
+            };
 
-    let dir = match watched.admit(Path::new(claude_dir.trim())) {
-        Admission::Inside(path) => path,
-        Admission::NotAbsolute => return Err(ProfileSaved::DirNotAbsolute),
-        Admission::Missing => return Err(ProfileSaved::DirMissing),
-        Admission::Outside => return Err(ProfileSaved::DirOutsideWatchedPaths),
-    };
+            if !dir.is_dir() {
+                return Err(ProfileSaved::NotADirectory);
+            }
 
-    if !dir.is_dir() {
-        return Err(ProfileSaved::NotADirectory);
+            let config = match watched.admit(Path::new(config_file.trim())) {
+                Admission::Inside(path) => path,
+                Admission::NotAbsolute => return Err(ProfileSaved::ConfigNotAbsolute),
+                Admission::Missing => return Err(ProfileSaved::ConfigMissing),
+                Admission::Outside => return Err(ProfileSaved::ConfigOutsideWatchedPaths),
+            };
+
+            if !config.is_file() {
+                return Err(ProfileSaved::NotAFile);
+            }
+
+            Ok(store::Account::Claude {
+                claude_dir: dir,
+                config_file: config,
+            })
+        }
+
+        ProfileAccount::Codex { home } => {
+            let home = match watched.admit(Path::new(home.trim())) {
+                Admission::Inside(path) => path,
+                Admission::NotAbsolute => return Err(ProfileSaved::HomeNotAbsolute),
+                Admission::Missing => return Err(ProfileSaved::HomeMissing),
+                Admission::Outside => return Err(ProfileSaved::HomeOutsideWatchedPaths),
+            };
+
+            if !home.is_dir() {
+                return Err(ProfileSaved::HomeNotADirectory);
+            }
+
+            Ok(store::Account::Codex { home })
+        }
     }
-
-    let config = match watched.admit(Path::new(config_file.trim())) {
-        Admission::Inside(path) => path,
-        Admission::NotAbsolute => return Err(ProfileSaved::ConfigNotAbsolute),
-        Admission::Missing => return Err(ProfileSaved::ConfigMissing),
-        Admission::Outside => return Err(ProfileSaved::ConfigOutsideWatchedPaths),
-    };
-
-    if !config.is_file() {
-        return Err(ProfileSaved::NotAFile);
-    }
-
-    Ok(store::Account::Claude {
-        claude_dir: dir,
-        config_file: config,
-    })
 }
 
 /// Choose the Pairing a Conversation's grilling session will run under — or the
@@ -432,6 +450,9 @@ fn account(account: &store::Account) -> ProfileAccount {
         } => ProfileAccount::Claude {
             claude_dir: claude_dir.to_string_lossy().into_owned(),
             config_file: config_file.to_string_lossy().into_owned(),
+        },
+        store::Account::Codex { home } => ProfileAccount::Codex {
+            home: home.to_string_lossy().into_owned(),
         },
     }
 }

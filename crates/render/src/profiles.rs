@@ -42,12 +42,17 @@ pub enum ProfileAccount {
         claude_dir: String,
         config_file: String,
     },
+
+    /// Codex's one home: what is bind-mounted over `~/.codex`, and the whole of
+    /// what a Codex Profile names.
+    Codex { home: String },
 }
 
 /// Why a saved Profile cannot be run under as things stand.
 ///
 /// Not a way of being saved: every Profile here passed the same checks when it
-/// was written down. This is what has become of its pair since.
+/// was written down. This is what has become of its account since — the pair
+/// for a Claude Profile, and the one home for every type that keeps one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Broken {
@@ -57,8 +62,11 @@ pub enum Broken {
     /// The config file is not there any more.
     ConfigMissing,
 
-    /// One of the pair now resolves outside every Watched Path — the directory
-    /// was replaced by a symlink, or the boundary itself was reconfigured.
+    /// The home the account was kept under is not there any more.
+    HomeMissing,
+
+    /// The account now resolves outside every Watched Path — a directory was
+    /// replaced by a symlink, or the boundary itself was reconfigured.
     OutsideWatchedPaths,
 }
 
@@ -90,9 +98,10 @@ pub struct ProfileEntry {
 /// A Profile as the human has just written it, for saving or for rewriting.
 ///
 /// The account says which type it is, because the fields beside it are that
-/// type's. The form still offers no choice of one — there is one type — so what
-/// arrives here is always `Claude`; what makes the discriminator real is that
-/// the shape hangs off it, not that anything picks it.
+/// type's. The form offers no choice of one — a type that cannot launch the real
+/// binary yet would be a lie in a picker — so what arrives from it is always
+/// `Claude`; what makes the discriminator real is that the shape hangs off it,
+/// not that a form picks it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileEdit {
@@ -161,6 +170,20 @@ pub enum ProfileSaved {
     /// Something is there and it is not a file — the pair is a directory and a
     /// file, and this is the file half.
     NotAFile,
+
+    /// The home was named relatively. There is nothing to resolve it against
+    /// that would mean the same thing twice.
+    HomeNotAbsolute,
+
+    /// Nothing is at the home's path.
+    HomeMissing,
+
+    /// The home resolves to somewhere outside every Watched Path.
+    HomeOutsideWatchedPaths,
+
+    /// Something is there and it is not a directory — a home is a directory
+    /// bind-mounted over, so a file cannot stand in for it.
+    HomeNotADirectory,
 }
 
 /// What became of removing a Profile.

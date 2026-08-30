@@ -69,6 +69,23 @@ fn edit(name: &str, claude_dir: &Path, config_file: &Path, models: &[&str]) -> s
     })
 }
 
+/// A home at `root`, which is the whole of what a Codex account is.
+fn home(root: &Path, account: &str) -> PathBuf {
+    let home = root.join(account).join(".codex");
+    std::fs::create_dir_all(&home).unwrap();
+    home
+}
+
+/// And the body that saves a Profile of that type: the same fields around a
+/// different account, because the type is what says which fields there are.
+fn codex_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "account": { "agent_type": "Codex", "home": home },
+        "models": models,
+    })
+}
+
 async fn save(app: &Router, body: &serde_json::Value) -> ProfileSaved {
     post(app, "/api/ui/profiles", body).await
 }
@@ -564,6 +581,112 @@ async fn a_profile_whose_pair_has_disappeared_reads_as_broken() {
     std::fs::create_dir_all(watched.path().join("work/.claude")).unwrap();
     std::fs::remove_file(watched.path().join("work/.claude.json")).unwrap();
     assert_eq!(listed(&app).await[0].broken, Some(Broken::ConfigMissing));
+}
+
+/// A Profile whose account is one home goes over the same endpoints and comes
+/// back with the resolved home it was saved with.
+///
+/// The account is a shape rather than a pair every Profile is assumed to have,
+/// so the whole of what differs is which fields the account carries — the name,
+/// the models and every judgement about the path are the same either way.
+#[tokio::test]
+async fn a_profile_whose_account_is_one_home_saves_and_reads_back_with_it() {
+    let (watched, _dir, app) = workbench().await;
+
+    assert_eq!(
+        save(
+            &app,
+            &codex_edit("codex", &home(watched.path(), "codex"), &MODELS)
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+
+    let profile = &listed(&app).await[0];
+    let resolved = watched.path().canonicalize().unwrap();
+
+    assert_eq!(profile.name, "codex");
+    assert_eq!(profile.models, MODELS);
+    assert_eq!(
+        profile.account,
+        ProfileAccount::Codex {
+            home: resolved.join("codex/.codex").to_str().unwrap().to_owned(),
+        }
+    );
+    assert_eq!(profile.broken, None);
+}
+
+/// And its home is judged the way a pair's halves are: named by what it is when
+/// it has gone, and against the boundary rather than only against the
+/// filesystem.
+#[tokio::test]
+async fn a_home_that_has_gone_or_left_the_watched_paths_reads_as_broken() {
+    let (watched, _dir, app) = workbench().await;
+    let kept = home(watched.path(), "codex");
+
+    assert_eq!(
+        save(&app, &codex_edit("codex", &kept, &MODELS)).await,
+        ProfileSaved::Saved
+    );
+    assert_eq!(listed(&app).await[0].broken, None);
+
+    std::fs::remove_dir_all(&kept).unwrap();
+    assert_eq!(listed(&app).await[0].broken, Some(Broken::HomeMissing));
+
+    // Back, but as a symlink to somewhere outside: it exists, and mounting it
+    // would be reaching around the boundary with a path admitted once.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let outside = home(elsewhere.path(), "escape");
+    std::os::unix::fs::symlink(&outside, &kept).unwrap();
+
+    assert_eq!(
+        listed(&app).await[0].broken,
+        Some(Broken::OutsideWatchedPaths)
+    );
+}
+
+/// Every way a home is refused a save, each named for the home rather than for
+/// one of Claude's two paths — the refusal is what the human is shown, and a
+/// Codex Profile has no config file to be told about.
+#[tokio::test]
+async fn a_home_is_refused_by_its_own_name() {
+    let (watched, _dir, app) = workbench().await;
+
+    assert_eq!(
+        save(
+            &app,
+            &codex_edit("codex", Path::new("accounts/.codex"), &MODELS)
+        )
+        .await,
+        ProfileSaved::HomeNotAbsolute
+    );
+    assert_eq!(
+        save(
+            &app,
+            &codex_edit("codex", &watched.path().join("nowhere"), &MODELS)
+        )
+        .await,
+        ProfileSaved::HomeMissing
+    );
+
+    let elsewhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        save(
+            &app,
+            &codex_edit("codex", &home(elsewhere.path(), "outside"), &MODELS)
+        )
+        .await,
+        ProfileSaved::HomeOutsideWatchedPaths
+    );
+
+    // A file where the home goes: a home is a directory bind-mounted over, so
+    // nothing else can stand in for one.
+    let file = watched.path().join("a-file");
+    std::fs::write(&file, "not a home\n").unwrap();
+    assert_eq!(
+        save(&app, &codex_edit("codex", &file, &MODELS)).await,
+        ProfileSaved::HomeNotADirectory
+    );
 }
 
 /// Broken is asked of the boundary and not only of the filesystem: a directory

@@ -104,6 +104,12 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   ConfigOutsideWatchedPaths:
     "That config file is outside the watched paths, so Verkstead will not touch it.",
   NotAFile: "That is not a file — `~/.claude.json` is mounted from one.",
+  HomeNotAbsolute: "Give the home's absolute path, starting with a slash.",
+  HomeMissing: "There is nothing at the home's path.",
+  HomeOutsideWatchedPaths:
+    "That home is outside the watched paths, so Verkstead will not touch it.",
+  HomeNotADirectory:
+    "That is not a directory — an account's home is mounted from one.",
 };
 
 /// And what each way of being refused a removal says.
@@ -118,7 +124,8 @@ export const PROFILE_REMOVAL_REFUSAL: Record<ProfileDeleted, string> = {
 export const BROKEN: Record<Broken, string> = {
   DirMissing: "Its claude directory is gone.",
   ConfigMissing: "Its config file is gone.",
-  OutsideWatchedPaths: "Its pair now points outside the watched paths.",
+  HomeMissing: "The home it kept its account under is gone.",
+  OutsideWatchedPaths: "Its account now points outside the watched paths.",
 };
 
 /// Which agent a profile runs, which is the discriminator its account is shaped
@@ -135,10 +142,14 @@ type AccountField = {
 
 /// What a profile of each agent type is asked for.
 ///
-/// The whole of the per-type half of the form. There is one type, so there is
-/// one row — and the stage that lands a backend adds another beside it, which is
-/// the point of the account being a shape rather than a pair every profile is
-/// assumed to have.
+/// The whole of the per-type half of the form: a row apiece, and the stage that
+/// lands a backend adds one, which is the point of the account being a shape
+/// rather than a pair every profile is assumed to have.
+///
+/// A row here is what a saved profile of that type is *drawn* with, and it says
+/// nothing about whether one can be written: the form offers no choice of type
+/// — see [`BLANK`] — so a codex profile is one saved over the API, and this is
+/// what it reads back as.
 const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
   Claude: [
     {
@@ -160,14 +171,25 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
       placeholder: "/home/you/accounts/work/.claude.json",
     },
   ],
+  Codex: [
+    {
+      key: "home",
+      label: (
+        <>
+          Home directory, mounted at <code>~/.codex</code>
+        </>
+      ),
+      placeholder: "/home/you/accounts/work/.codex",
+    },
+  ],
 };
 
 /// An empty form: what "add a profile" starts from.
 ///
-/// A Claude account, because there is one agent type and the form offers no
-/// choice of one — a select with a single option is theatre, and a type that
-/// cannot launch would be a lie in a picker. What it is not is a hard-coded
-/// pair: the fields drawn under it come off the type this names.
+/// A Claude account, because the form offers no choice of type — a type that
+/// cannot launch the real binary yet would be a lie in a picker, and the stage
+/// that makes one launch is the stage that offers it. What this is not is a
+/// hard-coded pair: the fields drawn under it come off the type this names.
 const BLANK: ProfileEdit = {
   name: "",
   account: { agent_type: "Claude", claude_dir: "", config_file: "" },

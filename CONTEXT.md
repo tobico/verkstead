@@ -383,10 +383,12 @@ the account itself, and the models that account can run. **The account's shape
 is its type's**, rather than one shape every Profile is assumed to have — Claude
 Code's is the directory and config file pair bind-mounted at `~/.claude` /
 `~/.claude.json` inside the sandbox, and every backend after it keeps its whole
-account under one relocatable home. Whichever it is, mounting it is what keeps
-accounts separate. The type is not offered while there is one of it: a picker
-with a single option is theatre, and one naming a backend that cannot launch yet
-would be a lie. The models are a list and the list is the Profile's own, because
+account under one relocatable home — Codex's at `~/.codex`. Whichever it is,
+mounting it is what keeps accounts separate. A type is offered to the human only
+once it can launch the real thing: one that cannot would be a lie in a picker,
+so the form still writes Claude alone and a Profile of a later type is one saved
+over the API until its stage lands. The models are a list and the list is the
+Profile's own, because
 different Profiles reach different accounts and each can launch different
 things; none of them is a default, so which one a session runs is always picked
 — as a Pairing, alongside the Profile itself.
@@ -1176,7 +1178,12 @@ _Avoid_: margin, sidebar, left rail
 The agent-facing usage instructions shipped inside the CLI and printed by
 it, so an agent needs nothing beyond the binary to learn how to ask. A core
 that every ask needs, plus any Topics fetched when their task arises — since
-the gates Topic was retired the core is the whole of it.
+the gates Topic was retired the core is the whole of it. **One document,
+tailored at print time**: how an ask is run and what comes back from it is the
+backend's own, so those two sections come one per channel and everything about
+writing a Set is written once. Which channel is the reader's own comes off the
+agent type Verkstead sets in every sandbox; a Guide printed outside one is the
+blocking Guide.
 _Avoid_: help, manual, docs
 
 **Topic**:

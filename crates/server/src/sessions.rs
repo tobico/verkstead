@@ -259,9 +259,16 @@ impl Agents {
 /// reason this is a mapping rather than a flag pushed straight onto the line.
 /// The type comes off the Pairing's Profile, so nothing has to be plumbed
 /// through to say which agent is being launched.
+///
+/// Codex's is empty, and empty rather than absent: what it needs — the approval
+/// bypass, the trust pre-seed, where its model and its prompt go — is the stage
+/// that makes it launch the real binary, and a line guessed at here would be
+/// one that stage has to find and undo. What it launches until then is a stub,
+/// which takes the line every stub takes.
 fn flags(agent_type: store::AgentType) -> &'static [&'static str] {
     match agent_type {
         store::AgentType::Claude => &["--dangerously-skip-permissions"],
+        store::AgentType::Codex => &[],
     }
 }
 

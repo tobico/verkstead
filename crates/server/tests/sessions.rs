@@ -1325,6 +1325,28 @@ async fn grilling(stub: &str) -> Grilling {
     grilling_spilling(tempfile::tempdir().unwrap(), stub, PULL_REQUEST).await
 }
 
+/// The same, grilled under an account of the second agent type — one home
+/// rather than Claude's pair.
+///
+/// The stub stands where that backend's binary goes, as it stands where claude
+/// does: what these fixtures are for is what Verkstead does around a session,
+/// and a second backend's own program is the one thing they never run.
+async fn grilling_on_codex(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::GrillingOnCodex,
+        Origin::None,
+    )
+    .await
+}
+
+/// The model that Profile lists, which is what its sessions are launched on.
+const CODEX_MODEL: &str = "gpt-5-codex";
+
 /// The same, with a second repository registered beside this one and added to
 /// the Conversation as a companion before the press — which is a companion in
 /// the mode one is added in, read-only.
@@ -1414,7 +1436,7 @@ async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> 
         gh,
         *BRISKLY,
         &[],
-        Skipping::Unreviewed,
+        Pickers::Unreviewed,
         Origin::None,
     )
     .await
@@ -1430,20 +1452,21 @@ async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> G
         gh,
         *BRISKLY,
         &[],
-        Skipping::Ungrilled,
+        Pickers::Ungrilled,
         Origin::None,
     )
     .await
 }
 
-/// Which of its two pickers' *no session* rows the Conversation a fixture builds
-/// was moved onto, neither being every fixture but the ones about picking one.
+/// How the Conversation a fixture builds was left on the setup card: every
+/// picker under a Pairing, one of them moved onto its *no session* row, or the
+/// grilling one moved onto an account of the second agent type.
 ///
-/// The one thing the builders below differ over, and it is settled on the setup
-/// card while the Brief drafts — which is why it is a parameter of the build
-/// rather than something a test does afterwards.
+/// The one thing the builders below differ over, and all of it is settled while
+/// the Brief drafts — which is why it is a parameter of the build rather than
+/// something a test does afterwards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Skipping {
+enum Pickers {
     /// Every role under a Pairing of its own.
     UnderEveryPairing,
 
@@ -1452,6 +1475,10 @@ enum Skipping {
 
     /// The human picked *No review*, so the wrap-up runs none.
     Unreviewed,
+
+    /// The grilling role runs on a Profile whose whole account is one home,
+    /// which is every agent type after Claude — see [`Bench::grilling_on_codex`].
+    GrillingOnCodex,
 }
 
 /// The same with a read-write companion beside it, for the tests about a
@@ -1489,7 +1516,7 @@ async fn grilling_at_pace(
         gh,
         pace,
         companions,
-        Skipping::UnderEveryPairing,
+        Pickers::UnderEveryPairing,
         Origin::None,
     )
     .await
@@ -1508,7 +1535,7 @@ async fn grilling_pushing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gri
         gh,
         *BRISKLY,
         &[],
-        Skipping::UnderEveryPairing,
+        Pickers::UnderEveryPairing,
         Origin::Cloned,
     )
     .await
@@ -1528,7 +1555,7 @@ enum Origin {
     Cloned,
 }
 
-/// And the whole of it, `skipping` included — which is the setup card pressed
+/// And the whole of it, the pickers included — which is the setup card pressed
 /// the way the human presses it, every picker filled and then one of them moved.
 async fn grilling_however_started(
     spill: tempfile::TempDir,
@@ -1536,7 +1563,7 @@ async fn grilling_however_started(
     gh: &str,
     pace: Pace,
     companions: &[(&str, CompanionMode)],
-    skipping: Skipping,
+    pickers: Pickers,
     origin: Origin,
 ) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace).await;
@@ -1578,10 +1605,11 @@ async fn grilling_however_started(
 
     bench.under_every_pairing(id).await;
 
-    match skipping {
-        Skipping::UnderEveryPairing => {}
-        Skipping::Ungrilled => bench.ungrilled(id).await,
-        Skipping::Unreviewed => bench.unreviewed(id).await,
+    match pickers {
+        Pickers::UnderEveryPairing => {}
+        Pickers::Ungrilled => bench.ungrilled(id).await,
+        Pickers::Unreviewed => bench.unreviewed(id).await,
+        Pickers::GrillingOnCodex => bench.grilling_on_codex(id).await,
     }
 
     // While it is still drafting, which is the only time a companion can be
@@ -1684,6 +1712,47 @@ impl Bench {
             .await;
             assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
         }
+    }
+
+    /// And pick the grilling role under an account of the second agent type,
+    /// whose whole account is one home rather than Claude's pair.
+    ///
+    /// Pressed after [`Bench::under_every_pairing`] for the reason
+    /// [`Bench::unreviewed`] is: it is the picker moved off what it was filled
+    /// with, which is what the human does on the setup card.
+    async fn grilling_on_codex(&self, id: i64) {
+        let home = self.watched.path().join("codex/.codex");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let saved: ProfileSaved = post(
+            &self.app,
+            "/api/ui/profiles",
+            &serde_json::json!({
+                "name": "codex",
+                "account": { "agent_type": "Codex", "home": home },
+                "models": [CODEX_MODEL],
+            }),
+        )
+        .await;
+        assert_eq!(saved, ProfileSaved::Saved);
+
+        let profiles: Vec<verkstead_render::ProfileEntry> =
+            get(&self.app, "/api/ui/profiles").await;
+        let profile_id = profiles
+            .into_iter()
+            .find(|profile| profile.name == "codex")
+            .expect("the Profile just saved should be on the list")
+            .id;
+
+        let chosen: verkstead_render::ProfileChosen = post(
+            &self.app,
+            &format!("/api/ui/conversations/{id}/grilling-pairing"),
+            &serde_json::json!({
+                "pairing": { "profile_id": profile_id, "model": CODEX_MODEL },
+            }),
+        )
+        .await;
+        assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
     }
 
     /// And pick the Grilling picker's other row instead: this Conversation is
@@ -2575,6 +2644,60 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
 /// that is a fault: it is every stub agent the test suite runs, and every
 /// backend that keeps no such record. What those sessions said is the Capture,
 /// which is a complete record on its own.
+/// A session on the second agent type runs the same way: launched into a
+/// sandbox with its Profile's one home bound where that backend looks for it,
+/// on the model its Pairing names, told which backend it is.
+///
+/// And its record is the Capture. Codex's log is found rather than named, and
+/// the finding is its own stage's — so until then nothing is looked for, which
+/// is ADR-0006's rule for a session with no log and not a new one.
+#[tokio::test]
+async fn a_session_on_a_second_backend_runs_from_its_home_with_the_capture_as_its_record() {
+    let fixture = grilling_on_codex(
+        r#"
+        printf 'model=%s\n' "$1"
+        printf 'agent=%s\n' "${VERKSTEAD_AGENT-unset}"
+        printf 'home=%s\n' "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+        printf 'prompt=%s' "$2"
+        "#,
+    )
+    .await;
+
+    let summary = fixture
+        .until(|view| output(view).filter(|output| !output.running).cloned())
+        .await;
+
+    let said = fixture.capture(summary.id).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(&format!("model={CODEX_MODEL}\n")),
+        "the grilling Pairing's model is what the session runs on: {said:?}"
+    );
+    assert!(
+        said.contains("agent=codex\n"),
+        "and the session is told which backend it is, which is what tailors the \
+         Guide it reads: {said:?}"
+    );
+    assert!(
+        said.contains("home=.codex \n"),
+        "and its one home is the whole of what HOME holds, bound where that \
+         backend looks for it: {said:?}"
+    );
+    assert!(
+        said.contains(BRIEF),
+        "and the Brief is what the grilling starts from, as on any backend: {said:?}"
+    );
+
+    assert!(
+        fixture.transcript(summary.id).await.is_empty(),
+        "no log is looked for on this backend yet, so there is no Transcript"
+    );
+    assert_eq!(
+        summary.turns, None,
+        "and its row shows no metric rather than a count of none"
+    );
+}
+
 #[tokio::test]
 async fn a_session_that_keeps_no_log_leaves_no_transcript() {
     let fixture = grilling(r#"printf 'Nothing to say.\n'"#).await;

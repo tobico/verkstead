@@ -79,8 +79,8 @@ pub use pairings::{RepoPairings, remembered_pairings};
 pub use pauses::Pause;
 pub use placements::place_conversations;
 pub use profiles::{
-    Account, AgentType, Deleting, Pairing, Picked, Profile, ProfileFacts, Saving, create_profile,
-    delete_profile, load_profile, profiles, update_profile,
+    Account, AgentType, Channel, Deleting, Pairing, Picked, Profile, ProfileFacts, Saving,
+    create_profile, delete_profile, load_profile, profiles, update_profile,
 };
 pub use pull_requests::{
     PullRequest, Rollup, Wrapping, check_rollup, pull_request, pull_request_repo, pull_requests,

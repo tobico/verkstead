@@ -26,12 +26,12 @@
 //! rather than what somebody typed. Whether they are inside a Watched Path is
 //! decided above the store, where the boundary lives.
 //!
-//! The agent type is a column with one value in it, and it is what says which
-//! shape a row's account is written in — the launch line's flags are keyed on
-//! it already. The point is that a second backend slots in beside `claude`
-//! rather than having to be migrated in underneath it: it adds an arm to
-//! [`Account`] and keeps its home in `profile_homes`, which is made here and
-//! stays empty until there is a type with one.
+//! The agent type is a column, and it is what says which shape a row's account
+//! is written in — the launch line's flags and the asking channel are keyed on
+//! it. A second backend slots in beside `claude` rather than having to be
+//! migrated in underneath it: it adds an arm to [`Account`] and keeps its home
+//! in `profile_homes`, which is a table hung off `profiles` for the reason
+//! `profile_models` is one.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -41,27 +41,67 @@ use sqlx::SqlitePool;
 
 /// Which coding agent a Profile runs.
 ///
-/// One value, spelled out in the column so the table reads as something. A word
-/// this does not know is a database written by a Verkstead that has a backend
-/// this one does not, which is worth saying rather than guessing past.
+/// One word apiece, spelled out in the column so the table reads as something.
+/// A word this does not know is a database written by a Verkstead that has a
+/// backend this one does not, which is worth saying rather than guessing past.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentType {
     Claude,
+    Codex,
 }
 
 impl AgentType {
-    fn stored(self) -> &'static str {
+    /// The word this type is written down as.
+    ///
+    /// The `agent_type` column's, and the same word a sandbox carries in its
+    /// environment so that `verkstead guide` printed inside one knows which
+    /// backend it is being printed for. One spelling for both, because a second
+    /// vocabulary would be a second thing to keep in step.
+    pub fn word(self) -> &'static str {
         match self {
             Self::Claude => "claude",
+            Self::Codex => "codex",
         }
     }
 
-    fn read(word: &str) -> Result<Self> {
+    /// And back again, which is the only way one is ever read.
+    pub fn read(word: &str) -> Result<Self> {
         Ok(match word {
             "claude" => Self::Claude,
+            "codex" => Self::Codex,
             other => bail!("a Profile names the unknown agent type {other:?}"),
         })
     }
+
+    /// How a session of this type puts a Question Set to the human.
+    ///
+    /// A fact about the backend rather than about the Set (ADR-0011): the CLI
+    /// asks the same way everywhere, and what differs is whether the backend can
+    /// afford to hold a shell command open for hours. Kept beside the type
+    /// itself so that the Guide a session reads and the server that takes its
+    /// Set answer the question the same way.
+    pub fn channel(self) -> Channel {
+        match self {
+            Self::Claude => Channel::Blocking,
+            Self::Codex => Channel::StoreAndNudge,
+        }
+    }
+}
+
+/// How a backend's sessions ask, which is one of two things.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Channel {
+    /// `verkstead ask` idles until the Response comes back, so the Answers are
+    /// in front of the session when it goes on. What a backend that can hold a
+    /// shell command open for hours does.
+    Blocking,
+
+    /// `verkstead ask` stores the Set and returns at once, the session ends its
+    /// turn, and Verkstead types a line into its terminal when the Response
+    /// lands — which the session answers by fetching with `verkstead answers`.
+    /// What a backend whose shell tool yields after seconds does: an ask held
+    /// open there is a paid model turn spent on every poll of it.
+    StoreAndNudge,
 }
 
 /// The account a Profile runs as, in the shape the agent type running it keeps
@@ -87,6 +127,12 @@ pub enum Account {
         /// The file bind-mounted over `~/.claude.json`, resolved.
         config_file: PathBuf,
     },
+
+    /// Codex's one relocatable home, bind-mounted over `~/.codex`, resolved.
+    ///
+    /// The whole account: the credentials and the configuration are files inside
+    /// it, so there is nothing beside it to travel with.
+    Codex { home: PathBuf },
 }
 
 impl Account {
@@ -94,6 +140,18 @@ impl Account {
     pub fn agent_type(&self) -> AgentType {
         match self {
             Self::Claude { .. } => AgentType::Claude,
+            Self::Codex { .. } => AgentType::Codex,
+        }
+    }
+
+    /// The one directory this account is kept under, where its type keeps one.
+    ///
+    /// `None` for Claude, whose account is the pair in the row itself — see
+    /// `profile_homes` in [`apply_schema`] for what the rest keep there.
+    fn home(&self) -> Option<&Path> {
+        match self {
+            Self::Claude { .. } => None,
+            Self::Codex { home } => Some(home),
         }
     }
 }
@@ -296,11 +354,11 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .context("creating the profile_models table")?;
 
     // And where a Profile whose account is one relocatable home keeps it —
-    // every backend but Claude, none of which has landed yet, so this table is
-    // made and left empty. It is made now rather than with the first of them
-    // for the reason `profile_models` is a table at all: `profiles` is STRICT,
-    // there is no migration machinery, and a new fact about a Profile is a new
-    // table hung off it by id. One home per Profile, so the id is the key.
+    // every backend but Claude, whose account is the pair in the row itself. A
+    // table rather than a column for the reason `profile_models` is one:
+    // `profiles` is STRICT and there is no migration machinery, so a new fact
+    // about a Profile is a new table hung off it by id. One home per Profile,
+    // so the id is the key.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS profile_homes (
              profile_id INTEGER PRIMARY KEY REFERENCES profiles(id),
@@ -333,7 +391,7 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
     .bind(claude_dir)
     .bind(config_file)
     .bind(legacy_model(facts))
-    .bind(facts.account.agent_type().stored())
+    .bind(facts.account.agent_type().word())
     .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("saving the Profile {:?}", facts.name))?;
@@ -343,6 +401,7 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
     };
 
     write_models(&mut tx, id, &facts.models).await?;
+    write_home(&mut tx, id, &facts.account).await?;
 
     tx.commit()
         .await
@@ -388,7 +447,7 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
     .bind(claude_dir)
     .bind(config_file)
     .bind(legacy_model(facts))
-    .bind(facts.account.agent_type().stored())
+    .bind(facts.account.agent_type().word())
     .bind(id)
     .execute(&mut *tx)
     .await
@@ -409,6 +468,7 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
     // shape, so a rewrite that changed the type would otherwise leave the old
     // type's home sitting behind it.
     forget_home(&mut tx, id).await?;
+    write_home(&mut tx, id, &facts.account).await?;
 
     tx.commit()
         .await
@@ -493,10 +553,21 @@ pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
         models.entry(profile_id).or_default().push(model);
     }
 
+    // And the homes the same way, for the types whose whole account is one.
+    // Empty for a list of Claude Profiles, which is what most installations
+    // hold.
+    let kept: Vec<(i64, String)> = sqlx::query_as("SELECT profile_id, home FROM profile_homes")
+        .fetch_all(pool)
+        .await
+        .context("listing the homes the Agent Profiles keep their accounts under")?;
+
+    let mut homes: HashMap<i64, String> = kept.into_iter().collect();
+
     rows.into_iter()
         .map(|row| {
             let listed = models.remove(&row.0).unwrap_or_default();
-            read_row(row, listed)
+            let home = homes.remove(&row.0);
+            read_row(row, listed, home)
         })
         .collect()
 }
@@ -524,19 +595,36 @@ pub async fn load_profile(pool: &SqlitePool, id: i64) -> Result<Option<Profile>>
             .await
             .with_context(|| format!("loading the models Profile {id} runs"))?;
 
-    read_row(row, listed.into_iter().map(|(model,)| model).collect()).map(Some)
+    let home: Option<(String,)> =
+        sqlx::query_as("SELECT home FROM profile_homes WHERE profile_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("loading the home Profile {id} keeps its account under"))?;
+
+    read_row(
+        row,
+        listed.into_iter().map(|(model,)| model).collect(),
+        home.map(|(home,)| home),
+    )
+    .map(Some)
 }
 
 /// A row of the profiles table as a [`Profile`].
 type Row = (i64, String, String, String, String, String);
 
-/// One row and whatever `profile_models` holds for it.
+/// One row, whatever `profile_models` holds for it, and the home in
+/// `profile_homes` where its type keeps one.
 ///
 /// An empty list is a Profile written before the list existed: what it holds is
 /// the one model in the old column, which becomes the sole entry of its list
 /// without anybody having to retype it. A Profile saved since always has its
 /// rows, so the old column is never read for one.
-fn read_row(row: Row, listed: Vec<String>) -> Result<Profile> {
+///
+/// A type whose account is one home and no home row is a Profile something
+/// edited by hand: refused rather than read as a home of the empty string,
+/// because an account of nowhere is a bind that would land on `/`.
+fn read_row(row: Row, listed: Vec<String>, home: Option<String>) -> Result<Profile> {
     let (id, name, claude_dir, config_file, model, agent_type) = row;
 
     let models = match (listed.is_empty(), model.is_empty()) {
@@ -544,10 +632,15 @@ fn read_row(row: Row, listed: Vec<String>) -> Result<Profile> {
         _ => listed,
     };
 
-    let account = match AgentType::read(&agent_type)? {
+    let agent_type = AgentType::read(&agent_type)?;
+
+    let account = match agent_type {
         AgentType::Claude => Account::Claude {
             claude_dir: PathBuf::from(claude_dir),
             config_file: PathBuf::from(config_file),
+        },
+        AgentType::Codex => Account::Codex {
+            home: PathBuf::from(kept(agent_type, id, home)?),
         },
     };
 
@@ -556,6 +649,16 @@ fn read_row(row: Row, listed: Vec<String>) -> Result<Profile> {
         name,
         account,
         models,
+    })
+}
+
+/// The home a Profile of a type that keeps one was recorded with.
+fn kept(agent_type: AgentType, id: i64, home: Option<String>) -> Result<String> {
+    home.ok_or_else(|| {
+        anyhow!(
+            "Profile {id} runs {} and has no home recorded to run it under",
+            agent_type.word()
+        )
     })
 }
 
@@ -571,6 +674,7 @@ fn pair(account: &Account) -> Result<(&str, &str)> {
             claude_dir,
             config_file,
         } => (text(claude_dir)?, text(config_file)?),
+        Account::Codex { .. } => ("", ""),
     })
 }
 
@@ -604,6 +708,30 @@ async fn forget_models(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, id: i64) ->
     Ok(())
 }
 
+/// Put down the one directory a Profile of a type that keeps one is kept under.
+///
+/// Nothing at all for Claude, whose account is the pair in the row itself — so
+/// an installation with no Profile of a later type has an empty table, exactly
+/// as it did before there was a type with a home.
+async fn write_home(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    id: i64,
+    account: &Account,
+) -> Result<()> {
+    let Some(home) = account.home() else {
+        return Ok(());
+    };
+
+    sqlx::query("INSERT INTO profile_homes (profile_id, home) VALUES (?, ?)")
+        .bind(id)
+        .bind(text(home)?)
+        .execute(&mut **tx)
+        .await
+        .with_context(|| format!("saving the home Profile {id} keeps its account under"))?;
+
+    Ok(())
+}
+
 /// And the same for the home a Profile of a type that keeps one has.
 ///
 /// `profile_homes` references `profiles(id)` and foreign keys are enforced, so
@@ -611,10 +739,6 @@ async fn forget_models(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, id: i64) ->
 /// removed at all. Called wherever the models are and for the same reasons: a
 /// removal takes the whole of a Profile with it, and a rewrite replaces the
 /// account rather than reconciling it.
-///
-/// Nothing writes a home yet — Claude's account is the pair in the row itself —
-/// so today this clears nothing. The stage that lands a type with a home writes
-/// it beside this, exactly as `write_models` sits beside `forget_models`.
 async fn forget_home(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, id: i64) -> Result<()> {
     sqlx::query("DELETE FROM profile_homes WHERE profile_id = ?")
         .bind(id)
