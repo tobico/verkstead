@@ -48,6 +48,7 @@ use sqlx::SqlitePool;
 pub enum AgentType {
     Claude,
     Codex,
+    Grok,
 }
 
 impl AgentType {
@@ -61,6 +62,7 @@ impl AgentType {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Grok => "grok",
         }
     }
 
@@ -69,6 +71,7 @@ impl AgentType {
         Ok(match word {
             "claude" => Self::Claude,
             "codex" => Self::Codex,
+            "grok" => Self::Grok,
             other => bail!("a Profile names the unknown agent type {other:?}"),
         })
     }
@@ -83,7 +86,7 @@ impl AgentType {
     pub fn channel(self) -> Channel {
         match self {
             Self::Claude => Channel::Blocking,
-            Self::Codex => Channel::StoreAndNudge,
+            Self::Codex | Self::Grok => Channel::StoreAndNudge,
         }
     }
 }
@@ -133,6 +136,15 @@ pub enum Account {
     /// The whole account: the credentials and the configuration are files inside
     /// it, so there is nothing beside it to travel with.
     Codex { home: PathBuf },
+
+    /// Grok Build's one relocatable home, bind-mounted over `~/.grok`,
+    /// resolved.
+    ///
+    /// Codex's shape, for the reason Codex's is that shape: a subscription
+    /// login writes its `auth.json` inside the home and an API key arrives by
+    /// environment, so the directory is the whole of what a Profile names
+    /// either way.
+    Grok { home: PathBuf },
 }
 
 impl Account {
@@ -141,6 +153,7 @@ impl Account {
         match self {
             Self::Claude { .. } => AgentType::Claude,
             Self::Codex { .. } => AgentType::Codex,
+            Self::Grok { .. } => AgentType::Grok,
         }
     }
 
@@ -151,7 +164,7 @@ impl Account {
     fn home(&self) -> Option<&Path> {
         match self {
             Self::Claude { .. } => None,
-            Self::Codex { home } => Some(home),
+            Self::Codex { home } | Self::Grok { home } => Some(home),
         }
     }
 }
@@ -642,6 +655,9 @@ fn read_row(row: Row, listed: Vec<String>, home: Option<String>) -> Result<Profi
         AgentType::Codex => Account::Codex {
             home: PathBuf::from(kept(agent_type, id, home)?),
         },
+        AgentType::Grok => Account::Grok {
+            home: PathBuf::from(kept(agent_type, id, home)?),
+        },
     };
 
     Ok(Profile {
@@ -674,7 +690,7 @@ fn pair(account: &Account) -> Result<(&str, &str)> {
             claude_dir,
             config_file,
         } => (text(claude_dir)?, text(config_file)?),
-        Account::Codex { .. } => ("", ""),
+        Account::Codex { .. } | Account::Grok { .. } => ("", ""),
     })
 }
 

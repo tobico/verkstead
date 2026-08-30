@@ -103,14 +103,15 @@ const VERKSTEAD_INSIDE: &str = "/verkstead/bin/verkstead";
 
 /// Where each agent type's account lands in HOME.
 ///
-/// Claude's pair, and the one directory Codex keeps its whole account under.
-/// Written out rather than derived, because they are the paths those programs
-/// look in and not a scheme either of them follows — and named apart from
-/// [`skills::CLAUDE_INSIDE_HOME`], which is the directory *inside* the first of
-/// them that a sandbox covers.
+/// Claude's pair, and the one directory each backend after it keeps its whole
+/// account under. Written out rather than derived, because they are the paths
+/// those programs look in and not a scheme any of them follows — and named
+/// apart from [`skills::CLAUDE_INSIDE_HOME`], which is the directory *inside*
+/// the first of them that a sandbox covers.
 const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
 const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
 const CODEX_INSIDE_HOME: &str = ".codex";
+const GROK_INSIDE_HOME: &str = ".grok";
 
 /// Which backend a session is running, in its own environment.
 ///
@@ -742,6 +743,12 @@ impl Sandbox {
                     .arg("--bind")
                     .arg(home)
                     .arg(self.home.path.join(CODEX_INSIDE_HOME));
+            }
+            store::Account::Grok { home } => {
+                bwrap
+                    .arg("--bind")
+                    .arg(home)
+                    .arg(self.home.path.join(GROK_INSIDE_HOME));
             }
         }
 

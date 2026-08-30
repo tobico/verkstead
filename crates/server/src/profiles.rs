@@ -15,7 +15,7 @@
 //! will later be run under; the bind-mounting arrives with the stage that runs
 //! one.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
@@ -200,7 +200,9 @@ fn broken(watched: &WatchedPaths, profile: &store::Profile) -> Option<Broken> {
             (claude_dir, Broken::DirMissing),
             (config_file, Broken::ConfigMissing),
         ],
-        store::Account::Codex { home } => vec![(home, Broken::HomeMissing)],
+        store::Account::Codex { home } | store::Account::Grok { home } => {
+            vec![(home, Broken::HomeMissing)]
+        }
     };
 
     for (path, missing) in paths {
@@ -303,21 +305,34 @@ fn inspect(
             })
         }
 
-        ProfileAccount::Codex { home } => {
-            let home = match watched.admit(Path::new(home.trim())) {
-                Admission::Inside(path) => path,
-                Admission::NotAbsolute => return Err(ProfileSaved::HomeNotAbsolute),
-                Admission::Missing => return Err(ProfileSaved::HomeMissing),
-                Admission::Outside => return Err(ProfileSaved::HomeOutsideWatchedPaths),
-            };
+        ProfileAccount::Codex { home } => Ok(store::Account::Codex {
+            home: kept(watched, home)?,
+        }),
 
-            if !home.is_dir() {
-                return Err(ProfileSaved::HomeNotADirectory);
-            }
-
-            Ok(store::Account::Codex { home })
-        }
+        ProfileAccount::Grok { home } => Ok(store::Account::Grok {
+            home: kept(watched, home)?,
+        }),
     }
+}
+
+/// The one directory a type whose whole account is one home named, judged the
+/// way each of Claude's pair is.
+///
+/// One check for every such type rather than one apiece: what differs between
+/// them is which account the directory is, and that is the arm above, not this.
+fn kept(watched: &WatchedPaths, home: &str) -> Result<PathBuf, ProfileSaved> {
+    let home = match watched.admit(Path::new(home.trim())) {
+        Admission::Inside(path) => path,
+        Admission::NotAbsolute => return Err(ProfileSaved::HomeNotAbsolute),
+        Admission::Missing => return Err(ProfileSaved::HomeMissing),
+        Admission::Outside => return Err(ProfileSaved::HomeOutsideWatchedPaths),
+    };
+
+    if !home.is_dir() {
+        return Err(ProfileSaved::HomeNotADirectory);
+    }
+
+    Ok(home)
 }
 
 /// Choose the Pairing a Conversation's grilling session will run under — or the
@@ -452,6 +467,9 @@ fn account(account: &store::Account) -> ProfileAccount {
             config_file: config_file.to_string_lossy().into_owned(),
         },
         store::Account::Codex { home } => ProfileAccount::Codex {
+            home: home.to_string_lossy().into_owned(),
+        },
+        store::Account::Grok { home } => ProfileAccount::Grok {
             home: home.to_string_lossy().into_owned(),
         },
     }

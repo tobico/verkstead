@@ -46,6 +46,10 @@ pub enum ProfileAccount {
     /// Codex's one home: what is bind-mounted over `~/.codex`, and the whole of
     /// what a Codex Profile names.
     Codex { home: String },
+
+    /// And Grok Build's, bind-mounted over `~/.grok`: the same one-home shape
+    /// Codex's is, under the directory grok keeps an account in.
+    Grok { home: String },
 }
 
 /// Why a saved Profile cannot be run under as things stand.
@@ -98,10 +102,9 @@ pub struct ProfileEntry {
 /// A Profile as the human has just written it, for saving or for rewriting.
 ///
 /// The account says which type it is, because the fields beside it are that
-/// type's. The form offers no choice of one — a type that cannot launch the real
-/// binary yet would be a lie in a picker — so what arrives from it is always
-/// `Claude`; what makes the discriminator real is that the shape hangs off it,
-/// not that a form picks it.
+/// type's. The form picks one from the types whose stage has landed — a type
+/// that cannot launch the real binary yet would be a lie in a picker — so a
+/// type this knows about may still be one nothing arrives as.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileEdit {

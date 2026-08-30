@@ -296,6 +296,34 @@ fi
         .expect("nothing is called that yet")
     }
 
+    /// And one of the third, whose account is one home as the second's is.
+    ///
+    /// With skills of its own inside it, because grok discovers them there and
+    /// the home is the whole of what the Profile names: nothing is bound over
+    /// anything inside such a home (ADR-0011), and what would be hidden if
+    /// something were is the skills grok itself ships.
+    async fn grok_profile(&self) -> store::Profile {
+        let home = self.watched.path().join("grok-account/.grok");
+        std::fs::create_dir_all(home.join("skills/the-accounts-own")).unwrap();
+        std::fs::write(
+            home.join("skills/the-accounts-own/SKILL.md"),
+            "# what grok found there\n",
+        )
+        .unwrap();
+
+        store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: "grok".to_owned(),
+                account: store::Account::Grok { home },
+                models: vec!["grok-4.6".to_owned()],
+            },
+        )
+        .await
+        .unwrap()
+        .expect("nothing is called that yet")
+    }
+
     /// The host home a sandbox is built around — the fixture's rather than
     /// whoever is running the tests, so what `~` holds is decided here.
     fn home(&self) -> Home {
@@ -1036,6 +1064,43 @@ async fn a_home_account_is_bound_where_its_backend_looks_for_it() {
         reported["home"], ".codex ",
         "everything else in HOME is simply not there, this account's own included"
     );
+}
+
+/// And a Grok Build account is bound where grok looks for it, with everything
+/// the account keeps inside still there.
+///
+/// The skills among them: grok discovers them inside the home the Profile
+/// names, so nothing is bound over anything in there (ADR-0011) — covering that
+/// directory would hide the skills grok itself ships as well as the ones the
+/// account added.
+#[tokio::test]
+async fn a_grok_account_is_bound_over_the_directory_grok_keeps_one_in() {
+    let fixture = grilling().await;
+    let profile = fixture.grok_profile().await;
+    let sandbox = fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]);
+
+    let reported = probe(
+        &sandbox,
+        r#"
+            dir "$HOME/.grok" grok-home
+            file "$HOME/.grok/skills/the-accounts-own/SKILL.md" the-accounts-own
+            dir "$HOME/.claude" claude-dir
+            say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+            say agent "${VERKSTEAD_AGENT-unset}"
+        "#,
+    );
+
+    assert_eq!(
+        reported["grok-home"], "write",
+        "a session writes its own sessions and settings under the home it runs as"
+    );
+    assert_eq!(
+        reported["the-accounts-own"], "write",
+        "and what the account keeps inside it is left where grok looks for it"
+    );
+    assert_eq!(reported["claude-dir"], "absent");
+    assert_eq!(reported["home"], ".grok ");
+    assert_eq!(reported["agent"], "grok");
 }
 
 /// Which backend a session is running is in its environment, and it is there for

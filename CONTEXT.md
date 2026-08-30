@@ -426,12 +426,12 @@ Code's is the directory and config file pair bind-mounted at `~/.claude` /
 account under one relocatable home — Codex's at `~/.codex`. Whichever it is,
 mounting it is what keeps accounts separate. A type is offered to the human only
 once it can launch the real thing: one that cannot would be a lie in a picker,
-so the form offers Claude and Codex, and a Profile of a type whose stage has not
-landed is one saved over the API until it does. Picking a type on the form asks
-for that type's own account paths. The models are a list and the list is the
-Profile's own, because different Profiles reach different accounts and each can
-launch different things; none of them is a default, so which one a session runs
-is always picked — as a Pairing, alongside the Profile itself.
+so the form offers Claude, Codex and Grok Build, and a Profile of a type whose
+stage has not landed is one saved over the API until it does. Picking a type on
+the form asks for that type's own account paths. The models are a list and the
+list is the Profile's own, because different Profiles reach different accounts
+and each can launch different things; none of them is a default, so which one a
+session runs is always picked — as a Pairing, alongside the Profile itself.
 _Avoid_: account, identity, persona, agent config
 
 **Pairing**:

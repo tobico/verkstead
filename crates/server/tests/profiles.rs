@@ -71,7 +71,16 @@ fn edit(name: &str, claude_dir: &Path, config_file: &Path, models: &[&str]) -> s
 
 /// A home at `root`, which is the whole of what a Codex account is.
 fn home(root: &Path, account: &str) -> PathBuf {
-    let home = root.join(account).join(".codex");
+    made(root.join(account).join(".codex"))
+}
+
+/// And the same for a Grok Build one, under the directory grok keeps an account
+/// in.
+fn grok_home(root: &Path, account: &str) -> PathBuf {
+    made(root.join(account).join(".grok"))
+}
+
+fn made(home: PathBuf) -> PathBuf {
     std::fs::create_dir_all(&home).unwrap();
     home
 }
@@ -82,6 +91,15 @@ fn codex_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
         "account": { "agent_type": "Codex", "home": home },
+        "models": models,
+    })
+}
+
+/// And a Grok Build one, whose account is the same shape under a different word.
+fn grok_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "account": { "agent_type": "Grok", "home": home },
         "models": models,
     })
 }
@@ -614,6 +632,52 @@ async fn a_profile_whose_account_is_one_home_saves_and_reads_back_with_it() {
         }
     );
     assert_eq!(profile.broken, None);
+}
+
+/// Two types keeping one home apiece stay two types over the wire.
+///
+/// The account carries the type it is, and both of these carry the same field
+/// under it — so what this settles is that a Grok Profile saved as one is
+/// listed as one, rather than coming back as the other type that keeps a home.
+#[tokio::test]
+async fn a_grok_profile_saves_and_reads_back_as_a_grok_account() {
+    let (watched, _dir, app) = workbench().await;
+
+    assert_eq!(
+        save(
+            &app,
+            &codex_edit("codex", &home(watched.path(), "codex"), &MODELS)
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+    assert_eq!(
+        save(
+            &app,
+            &grok_edit("grok", &grok_home(watched.path(), "grok"), &MODELS)
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+
+    let listed = listed(&app).await;
+    let resolved = watched.path().canonicalize().unwrap();
+
+    assert_eq!(
+        listed
+            .iter()
+            .map(|profile| profile.account.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ProfileAccount::Codex {
+                home: resolved.join("codex/.codex").to_str().unwrap().to_owned(),
+            },
+            ProfileAccount::Grok {
+                home: resolved.join("grok/.grok").to_str().unwrap().to_owned(),
+            },
+        ]
+    );
+    assert!(listed.iter().all(|profile| profile.broken.is_none()));
 }
 
 /// And its home is judged the way a pair's halves are: named by what it is when

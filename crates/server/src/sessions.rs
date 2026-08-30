@@ -323,6 +323,12 @@ impl Agents {
                     .clone()
                     .unwrap_or_else(|| Signature::AtWork(CODEX_AT_WORK.to_owned())),
             ),
+
+            // Grok Build's own has not been read off its screen yet, so what
+            // stands here is whatever the suite handed in and nothing
+            // otherwise: a constant nobody has seen stand is the drift the
+            // long-stop exists to catch, arriving on the day it was written.
+            store::AgentType::Grok => self.signature.clone(),
         }
     }
 
@@ -353,6 +359,7 @@ fn binary(agent_type: store::AgentType) -> &'static str {
     match agent_type {
         store::AgentType::Claude => "claude",
         store::AgentType::Codex => "codex",
+        store::AgentType::Grok => "grok",
     }
 }
 
@@ -391,9 +398,19 @@ struct Line {
 /// still the boundary — and codex's own sandbox is off rather than nested,
 /// because it will not start inside bwrap and bwrap is already the boundary.
 ///
-/// Codex draws a full-screen TUI, and `--no-alt-screen` keeps it drawing inline
-/// instead: the Capture and the Screen are the record of what a session did, and
-/// an alternate screen is a record that is thrown away as the program leaves it.
+/// Codex and grok both draw a full-screen TUI, and `--no-alt-screen` keeps each
+/// drawing inline instead: the Capture and the Screen are the record of what a
+/// session did, and an alternate screen is a record that is thrown away as the
+/// program leaves it.
+///
+/// **Grok Build is the one backend after Claude that takes the session id.** It
+/// takes it under the spelling [`Agents::argv`] writes, it insists on a valid
+/// UUID and it refuses one it already has a session for — all three of which
+/// Verkstead's own names satisfy, being version-4 UUIDs drawn fresh per session.
+/// So its log is named at launch rather than found afterwards, which is
+/// Claude's shape and the opposite of Codex's. Its own sandbox is off for the
+/// reason codex's is, and nothing about its account is said on the line: grok
+/// reads its whole configuration out of the home the Profile named.
 ///
 /// **What its account needs is said on the line rather than written into it.**
 /// Codex takes `-c key=value` overrides, which is how the home is configured
@@ -443,6 +460,16 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
                 tail,
             }
         }
+        store::AgentType::Grok => Line {
+            model: "-m",
+            names_the_session: true,
+            tail: vec![
+                "--always-approve".to_owned(),
+                "--sandbox".to_owned(),
+                "off".to_owned(),
+                "--no-alt-screen".to_owned(),
+            ],
+        },
     }
 }
 
@@ -2145,6 +2172,21 @@ mod tests {
         }
     }
 
+    /// And on the third, whose account is one home as the second's is.
+    fn grok_pairing() -> store::Pairing {
+        store::Pairing {
+            profile: store::Profile {
+                id: 3,
+                name: "xai".to_owned(),
+                account: store::Account::Grok {
+                    home: PathBuf::from("/srv/accounts/work/.grok"),
+                },
+                models: vec!["grok-4.6".to_owned()],
+            },
+            model: Some("grok-4.6".to_owned()),
+        }
+    }
+
     /// The Worktree a session of either fixture is launched in, which is the
     /// directory codex is told to trust.
     ///
@@ -2289,6 +2331,13 @@ mod tests {
                 .map(String::as_str),
             Some("codex")
         );
+        assert_eq!(
+            agents
+                .argv(&grok_pairing(), "# Rate limiting\n", None, worktree())
+                .first()
+                .map(String::as_str),
+            Some("grok")
+        );
     }
 
     /// And the whole of codex's line: the model as `-m`, the prompt as the one
@@ -2350,6 +2399,42 @@ mod tests {
         );
     }
 
+    /// And the whole of grok's line: the model as `-m`, the prompt as the one
+    /// positional, the session id it is named by after it, and the two bypasses
+    /// and the inline screen last.
+    ///
+    /// The session id because grok is the one backend after Claude that takes
+    /// one at launch — which is what makes its log named rather than found —
+    /// and it takes it after the positional prompt, which is where this line
+    /// builder puts it. Verified against grok 1.0.13, which parsed this line
+    /// and got as far as wanting a terminal.
+    #[test]
+    fn a_grok_session_takes_the_line_grok_takes() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["grok".to_owned()], state.path()).argv(
+            &grok_pairing(),
+            "# Rate limiting\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "grok".to_owned(),
+                "-m".to_owned(),
+                "grok-4.6".to_owned(),
+                "# Rate limiting\n".to_owned(),
+                "--session-id".to_owned(),
+                "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
+                "--always-approve".to_owned(),
+                "--sandbox".to_owned(),
+                "off".to_owned(),
+                "--no-alt-screen".to_owned(),
+            ]
+        );
+    }
+
     /// The stub the suite stands where an agent goes stands there for every
     /// type, and reads the line it reads today: the model first and the prompt
     /// after it, whichever backend's line that is.
@@ -2369,10 +2454,12 @@ mod tests {
         assert_eq!(argv[stub.len() + 2], "# Rate limiting\n".to_owned());
     }
 
-    /// A name claude will take as a session id, which is a version 4 UUID and
-    /// nothing else — a malformed one is refused, and the session never starts.
+    /// A name every backend that takes a session id will take, which is a
+    /// version 4 UUID and nothing else — claude refuses a malformed one and so
+    /// does grok, and the session then never starts. Fresh each time, which is
+    /// grok's other condition: it refuses an id it already has a session for.
     #[test]
-    fn a_session_is_named_something_claude_will_accept() {
+    fn a_session_is_named_something_a_backend_will_accept() {
         let mut seen = std::collections::HashSet::new();
 
         for _ in 0..64 {

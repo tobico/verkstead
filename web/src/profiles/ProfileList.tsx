@@ -197,6 +197,17 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
       placeholder: "/home/you/accounts/work/.codex",
     },
   ],
+  Grok: [
+    {
+      key: "home",
+      label: (
+        <>
+          Home directory, mounted at <code>~/.grok</code>
+        </>
+      ),
+      placeholder: "/home/you/accounts/work/.grok",
+    },
+  ],
 };
 
 /// An account of each type with nothing typed into it: what picking that type
@@ -208,6 +219,7 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
 const BLANK_ACCOUNT: Record<AgentType, ProfileAccount> = {
   Claude: { agent_type: "Claude", claude_dir: "", config_file: "" },
   Codex: { agent_type: "Codex", home: "" },
+  Grok: { agent_type: "Grok", home: "" },
 };
 
 /// And what each type is called over its picker.
@@ -217,6 +229,7 @@ const BLANK_ACCOUNT: Record<AgentType, ProfileAccount> = {
 const AGENT_NAME: Record<AgentType, string> = {
   Claude: "Claude Code",
   Codex: "Codex",
+  Grok: "Grok Build",
 };
 
 /// An empty form: what "add a profile" starts from.
@@ -244,7 +257,7 @@ const BLANK: ProfileEdit = {
 /// So the stage that lands a backend adds it here, last, as the last thing it
 /// does — and a discriminator that arrives ahead of its stage is drawable
 /// without being offered, which is what it was always meant to be.
-const AGENT_TYPES: AgentType[] = ["Claude", "Codex"];
+const AGENT_TYPES: AgentType[] = ["Claude", "Codex", "Grok"];
 
 /// One of an account's paths, by the key the table above named it with.
 ///

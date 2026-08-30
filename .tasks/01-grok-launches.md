@@ -63,3 +63,27 @@ enough.
 - [ ] A launched session's own directory appears under the home's `sessions/`
       store, named by the id Verkstead gave it — which is what task 03 looks
       it up by.
+
+## What is still waiting
+
+There is no `grok` on the system profile and no xAI account on this machine, so
+the two criteria that need the real thing are **outstanding rather than met**:
+
+- a Grok Profile paired and launched, with its Capture showing grok running
+  under that Profile's home;
+- a launched session's own directory under the home's `sessions/` store, named
+  by the id Verkstead gave it — which is what task 03 looks up.
+
+What was proved instead, against grok 1.0.13 pulled down and run outside the
+sandbox:
+
+- the line parses in the order this builder writes it — `-m` and the model, the
+  prompt as the positional, `--session-id` *after* the prompt, then
+  `--always-approve --sandbox off --no-alt-screen` — and grok gets as far as
+  wanting a terminal;
+- `--session-id` is the spelling, it refuses a malformed UUID by name, and its
+  help says it refuses one it already has a session for;
+- `~/.grok/sessions/<encoded working directory>/<session id>/updates.jsonl` is
+  the layout, off grok's own shipped user guide;
+- an unauthenticated grok draws its welcome screen and starts no session, so the
+  session directory needs the account rather than only the binary.

@@ -58,6 +58,13 @@ fn codex(name: &str) -> Account {
     }
 }
 
+/// And a Grok Build one, which is the same shape under a directory of its own.
+fn grok(name: &str) -> Account {
+    Account::Grok {
+        home: PathBuf::from(format!("/watched/accounts/{name}/.grok")),
+    }
+}
+
 async fn saved(pool: &SqlitePool, name: &str) -> Profile {
     create_profile(pool, &facts(name))
         .await
@@ -214,6 +221,48 @@ async fn a_profile_whose_account_is_one_home_round_trips_with_it() {
         profiles(&pool).await.unwrap(),
         vec![saved],
         "and so is the same Profile read off the list"
+    );
+}
+
+/// And two types that both keep one home are told apart by the column rather
+/// than by the shape they share.
+///
+/// What is written down is the same in both — nothing in the pair columns, one
+/// row in `profile_homes` — so the word in `agent_type` is the whole of what
+/// says which account a home is. A Grok Profile read back as a Codex one would
+/// be a session launched on the wrong binary under the right directory.
+#[tokio::test]
+async fn two_types_that_each_keep_one_home_read_back_as_themselves() {
+    let (_dir, pool) = fresh_pool().await;
+
+    create_profile(&pool, &facts_for("work", codex("work")))
+        .await
+        .unwrap()
+        .expect("nothing is called that yet");
+
+    let saved = create_profile(&pool, &facts_for("xai", grok("xai")))
+        .await
+        .unwrap()
+        .expect("nothing is called that yet");
+
+    assert_eq!(saved.account, grok("xai"));
+    assert_eq!(saved.agent_type(), AgentType::Grok);
+
+    let loaded = load_profile(&pool, saved.id)
+        .await
+        .unwrap()
+        .expect("the Profile was just saved");
+    assert_eq!(loaded, saved, "one Profile read back is the one written");
+
+    assert_eq!(
+        profiles(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|profile| profile.agent_type())
+            .collect::<Vec<_>>(),
+        vec![AgentType::Codex, AgentType::Grok],
+        "and each of them off the list is its own type"
     );
 }
 

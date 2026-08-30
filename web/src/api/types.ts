@@ -1501,7 +1501,7 @@ export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageLi
  * written it carries what they typed, but they are the same fields either way,
  * and two types for one shape would be two opinions about what an account is.
  */
-export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, config_file: string, } | { "agent_type": "Codex", home: string, };
+export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, config_file: string, } | { "agent_type": "Codex", home: string, } | { "agent_type": "Grok", home: string, };
 
 /**
  * Which Profile and model a Conversation is pairing for one of its roles.
@@ -1527,10 +1527,9 @@ export type ProfileDeleted = "Removed" | "NoSuchProfile" | "InUse";
  * A Profile as the human has just written it, for saving or for rewriting.
  *
  * The account says which type it is, because the fields beside it are that
- * type's. The form offers no choice of one — a type that cannot launch the real
- * binary yet would be a lie in a picker — so what arrives from it is always
- * `Claude`; what makes the discriminator real is that the shape hangs off it,
- * not that a form picks it.
+ * type's. The form picks one from the types whose stage has landed — a type
+ * that cannot launch the real binary yet would be a lie in a picker — so a
+ * type this knows about may still be one nothing arrives as.
  */
 export type ProfileEdit = { name: string, 
 /**

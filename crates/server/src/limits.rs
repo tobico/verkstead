@@ -79,6 +79,7 @@ fn exhausted_phrase(agent_type: store::AgentType) -> &'static str {
     match agent_type {
         store::AgentType::Claude => CLAUDE_EXHAUSTED,
         store::AgentType::Codex => CODEX_EXHAUSTED,
+        store::AgentType::Grok => GROK_EXHAUSTED,
     }
 }
 
@@ -97,6 +98,14 @@ const CLAUDE_EXHAUSTED: &str = "usage limit reached";
 /// honest about it: a line of prose quoting the phrase opens with a quotation
 /// mark, and ASCII punctuation is not decoration there.
 const CODEX_EXHAUSTED: &str = "you've hit your usage limit";
+
+/// And what grok 1.0.13 gives a free account, the rest of the line being the
+/// upgrade pitch.
+///
+/// A free account's wording is the one that has been seen. A paid account's is
+/// xAI's own per plan and nobody here has watched one run out, so a paid stop
+/// lands as the ordinary stall until somebody does.
+const GROK_EXHAUSTED: &str = "you've reached your free grok build usage limit";
 
 /// How much of a session's printing is held between looks.
 ///

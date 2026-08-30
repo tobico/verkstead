@@ -132,11 +132,12 @@ function pair(account: ProfileAccount) {
   return account;
 }
 
-/// And the same narrowing for the second type, whose whole account is one home.
+/// And the same narrowing for the types whose whole account is one home, which
+/// is every type after the first.
 function home(account: ProfileAccount) {
-  if (account.agent_type !== "Codex") {
+  if (account.agent_type === "Claude") {
     throw new Error(
-      `this fixture should be a Codex account, not ${account.agent_type}`,
+      `this fixture should be an account kept under one home, not ${account.agent_type}`,
     );
   }
 
@@ -191,6 +192,17 @@ const NEW_CODEX: ProfileEdit = {
   account: {
     agent_type: "Codex",
     home: "/home/you/accounts/work/.codex",
+  },
+};
+
+/// And one of the third, which keeps its account the same way under a directory
+/// of its own.
+const NEW_GROK: ProfileEdit = {
+  name: "xai",
+  models: ["grok-4.6"],
+  account: {
+    agent_type: "Grok",
+    home: "/home/you/accounts/xai/.grok",
   },
 };
 
@@ -450,10 +462,12 @@ describe("the pane a card opens", () => {
     expect([...picker.options].map((option) => option.value)).toEqual([
       "Claude",
       "Codex",
+      "Grok",
     ]);
     expect([...picker.options].map((option) => option.textContent)).toEqual([
       "Claude Code",
       "Codex",
+      "Grok Build",
     ]);
   });
 
@@ -604,31 +618,38 @@ describe("the pane the plus opens", () => {
     await waitFor(() => expect(done).toHaveBeenCalled());
   });
 
-  /// A profile of the second backend is written here rather than over the API:
-  /// the type is picked from the form, the one home is asked for under it, and
-  /// what goes over is that type's own account.
-  it("saves a profile of the type that was picked", async () => {
-    const fetching = theProfiles(json("Saved"));
-    mountPane("new");
+  /// A profile of a backend after the first is written here rather than over the
+  /// API: the type is picked from the form, the one home is asked for under it,
+  /// and what goes over is that type's own account.
+  ///
+  /// Both of the types that keep one, because the shape they share is the whole
+  /// of what could make the form send one of them as the other.
+  it.each([NEW_CODEX, NEW_GROK])(
+    "saves a $account.agent_type profile of the type that was picked",
+    async (profile) => {
+      const fetching = theProfiles(json("Saved"));
+      mountPane("new");
 
-    fireEvent.input(screen.getByLabelText("Name"), {
-      target: { value: NEW_CODEX.name },
-    });
-    fireEvent.input(screen.getByLabelText("Models, one per line"), {
-      target: { value: NEW_CODEX.models.join("\n") },
-    });
-    fireEvent.change(screen.getByLabelText("Agent"), {
-      target: { value: "Codex" },
-    });
-    fireEvent.input(await waitFor(() => screen.getByLabelText(/Home directory/)), {
-      target: { value: home(NEW_CODEX.account).home },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      fireEvent.input(screen.getByLabelText("Name"), {
+        target: { value: profile.name },
+      });
+      fireEvent.input(screen.getByLabelText("Models, one per line"), {
+        target: { value: profile.models.join("\n") },
+      });
+      fireEvent.change(screen.getByLabelText("Agent"), {
+        target: { value: profile.account.agent_type },
+      });
+      fireEvent.input(
+        await waitFor(() => screen.getByLabelText(/Home directory/)),
+        { target: { value: home(profile.account).home } },
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() =>
-      expect(sent(fetching, "/api/ui/profiles")).toEqual(NEW_CODEX),
-    );
-  });
+      await waitFor(() =>
+        expect(sent(fetching, "/api/ui/profiles")).toEqual(profile),
+      );
+    },
+  );
 
   /// Each refusal is a different sentence, and each names which of the two paths
   /// it is about: pointing the config field at a directory is an easy mistake,

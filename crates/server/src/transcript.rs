@@ -189,6 +189,13 @@ impl Tail {
             // cannot happen rather than one that is given up on, and it is
             // given up on rather than guessed at.
             (store::Account::Codex { .. }, None) => Search::Nowhere,
+
+            // Grok Build names its session at launch, so its log is named
+            // rather than found — under a directory of its own inside the
+            // account's session store. Nothing looks for it yet, and a session
+            // with no log has its Capture as the whole record, which is
+            // ADR-0006's rule doing its job rather than a gap.
+            (store::Account::Grok { .. }, _) => Search::Nowhere,
         };
 
         Tail {
