@@ -120,7 +120,11 @@ covers nothing, and a Claude session would find the human's own skills again
 — including an older fork of the ones Verkstead ships, which is the case the
 hiding was for. So an **empty directory is bound read-only over
 `~/.claude/skills`** beside the new mount, and each new backend's own
-discovery path is covered the same way as its stage lands.
+discovery path is covered the same way as its stage lands — except where that
+path is inside the account home itself, as Codex's is. Covering `~/.codex/skills`
+would hide the skills codex ships as well as the ones the account added, and the
+home is the whole of what a Codex Profile names, so a Codex home is left as the
+account keeps it.
 
 ## A Profile is one home directory, except Claude's pair
 
@@ -135,9 +139,11 @@ launch would be a lie in a picker.
 
 ## Unattended is the product's promise
 
-Verkstead passes each backend's approval-bypass flags itself: `--yolo` for
-Codex, `--always-approve --sandbox off` for Grok Build (its own sandbox
-refuses to start inside bwrap, and bwrap is already the boundary), the
+Verkstead passes each backend's approval-bypass flags itself:
+`--dangerously-bypass-approvals-and-sandbox` for Codex (its own sandbox
+refuses to start inside bwrap, and bwrap is already the boundary — the flag
+was `--yolo` when this was written and codex has since dropped that spelling),
+`--always-approve --sandbox off` for Grok Build for the same reason, the
 permission configuration for OpenCode — and Claude Code moves to the same
 rule, carrying `--dangerously-skip-permissions`, rather than the Profile's
 own settings being what keeps a run unattended. What stops a session doing
