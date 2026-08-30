@@ -430,10 +430,16 @@ describe("the pane a card opens", () => {
     ).toBe(FABLE.account.agent_type);
   });
 
-  /// Every type the form can ask the account of, and no other: a picker offering
-  /// one whose paths it could not then ask for would be a choice leading
-  /// nowhere, and one offering a backend that cannot launch would be a lie.
-  it("offers every agent type there is, by the backend's own name", async () => {
+  /// Every backend that can launch, by its own name, and no other.
+  ///
+  /// The list written down rather than every type there is, which is the point
+  /// of writing it down: a picker offering a backend that cannot launch would
+  /// be a lie, and a discriminator lands in the wire types before the stage
+  /// that makes it run. So a type added to the record alone leaves this passing
+  /// — it is drawable and not offered, which is right — and widening the picker
+  /// fails it, which is what makes offering a backend a thing somebody decided
+  /// rather than a thing that happened.
+  it("offers every backend that can launch, by its own name", async () => {
     theProfiles();
     mountPane(FABLE.id);
 

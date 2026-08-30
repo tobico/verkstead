@@ -53,8 +53,15 @@
 //! nothing in another's.
 //!
 //! A type is offered only once it can launch the real binary, which is what
-//! keeps the picker from being a lie: [`ACCOUNT_FIELDS`] is the one list, and a
-//! row in it is a type the form offers as well as one it can draw.
+//! keeps the picker from being a lie — and offering is said apart from drawing,
+//! in [`AGENT_TYPES`], because the two are not the same list. What a saved
+//! profile can be *drawn* with is every type there is, since a profile of one
+//! whose stage has not landed is one saved over the API and it still has to
+//! read back; what the picker *offers* is the types that can launch, which is
+//! written down rather than derived. Derived is what would make the picker a
+//! lie again: [`ACCOUNT_FIELDS`] has to name every type to compile, so a
+//! discriminator arriving in the wire types would put its own row in the picker
+//! the same day, with no backend behind it.
 //!
 //! A section of the settings page rather than a page of its own: which accounts
 //! a session may be run under is settled once and then left alone, which is the
@@ -152,10 +159,12 @@ type AccountField = {
 /// lands a backend adds one, which is the point of the account being a shape
 /// rather than a pair every profile is assumed to have.
 ///
-/// It is also the list the type picker is drawn from, so a row here is a type
-/// the human can pick as well as one a saved profile reads back as. Both at
-/// once, deliberately: a picker offering a type the form could not then ask the
-/// paths of would be a choice that led nowhere.
+/// Every type there is, and it has to be: a saved profile of a type whose stage
+/// has not landed — one written over the API — is still a profile this pane has
+/// to draw. What the picker offers is the shorter list beside it, in
+/// [`AGENT_TYPES`], and it is this table that makes offering one safe: the type
+/// checker will not let a row go missing, so a type the picker offers is always
+/// one the form can then ask the paths of.
 const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
   Claude: [
     {
@@ -212,17 +221,30 @@ const AGENT_NAME: Record<AgentType, string> = {
 
 /// An empty form: what "add a profile" starts from.
 ///
-/// A Claude account because it is the first row of the list the picker offers,
-/// rather than because it is the only one. What this is not is a hard-coded
-/// pair: the fields drawn under it come off the type this names.
+/// A Claude account because it is the first of [`AGENT_TYPES`], rather than
+/// because it is the only one. What this is not is a hard-coded pair: the
+/// fields drawn under it come off the type this names.
 const BLANK: ProfileEdit = {
   name: "",
   account: BLANK_ACCOUNT.Claude,
   models: [],
 };
 
-/// The types the picker offers, in the order they are written above.
-const AGENT_TYPES = Object.keys(ACCOUNT_FIELDS) as AgentType[];
+/// The types the picker offers, in the order it offers them.
+///
+/// **Written down rather than derived, and that is the whole of what keeps the
+/// picker honest.** A type is offered only once it can launch the real binary
+/// (ADR-0011) — one that cannot would be a lie in a picker — and every list
+/// this could have been read off names types by a rule that has nothing to do
+/// with launching. [`ACCOUNT_FIELDS`] names every type there is, because it has
+/// to compile; so does the [`AgentType`] the wire types generate. Either would
+/// put a backend in front of the human the day its discriminator landed, which
+/// is the day before the stage that makes it run.
+///
+/// So the stage that lands a backend adds it here, last, as the last thing it
+/// does — and a discriminator that arrives ahead of its stage is drawable
+/// without being offered, which is what it was always meant to be.
+const AGENT_TYPES: AgentType[] = ["Claude", "Codex"];
 
 /// One of an account's paths, by the key the table above named it with.
 ///
