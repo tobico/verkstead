@@ -354,8 +354,8 @@ backend wrote it, and rendered readable in the details pane. What summaries and 
 stop Notice's evidence draw from, falling back to the Capture when a session
 left none.
 
-**Which log it is read from is the backend's to say.** A backend that takes a
-session id at launch — Claude Code and Grok Build both do — is told the name
+**Which record it is read from is the backend's to say.** A backend that takes
+a session id at launch — Claude Code and Grok Build both do — is told the name
 Verkstead chose, so its log is looked up under it rather than searched for; grok
 keeps a directory per session under one per working directory, and the outer
 name being grok's own encoding of that path is why the store is walked for the
@@ -363,8 +363,22 @@ session's name rather than the path worked out. A backend that takes none —
 Codex is the first — writes a log of its own choosing, so the session's is
 *found* rather than named: the one that appeared in the account's own session
 store after this session was launched and whose opening line names this
-Conversation's Worktree. A session whose log never appears has the Capture as
-its whole record, which is what a session with no log has always had.
+Conversation's Worktree.
+
+**And a backend may keep no file of lines at all.** opencode writes its
+sessions into one database under its account — a row per session and a row per
+record within it — so the session is found by the same rule as a rollout asked
+of a store instead of a directory: the row recording this Conversation's
+Worktree that was created after this session was launched, the newest where
+more than one matches. What is followed is the sequence number of the last
+record taken rather than a byte offset into a file, and each record still
+reaches the Transcript verbatim, with the kind opencode filed it under and its
+place in that sequence around it.
+
+A session whose record never appears has the Capture as its whole record, which
+is what a session with no log has always had — and so does a session whose store
+is of a shape this Verkstead cannot read, which is what a backend free to move
+its own layout between releases costs.
 _Avoid_: messages, chat log, session log (the backend's file, not Verkstead's
 record), transcript-as-bytes (that is the Capture)
 

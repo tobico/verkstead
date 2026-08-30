@@ -145,7 +145,8 @@ pub(crate) const OPENCODE_DATA_INSIDE_HOME: &str = ".local/share/opencode";
 /// beside a stable build's `opencode.db`. Whichever channel the host installed,
 /// a session under Verkstead writes the one file Verkstead named, so the reader
 /// that follows a session's Transcript opens a path this chose rather than
-/// guessing which of several is this session's.
+/// guessing which of several is this session's — see [`crate::records`], which
+/// reads this very constant.
 ///
 /// A bare filename rather than a path: opencode resolves a relative
 /// `OPENCODE_DB` against its own data directory, which is the account.
@@ -156,7 +157,7 @@ pub(crate) const OPENCODE_DATA_INSIDE_HOME: &str = ".local/share/opencode";
 /// install of that names the file `opencode.db` on its own, so what this is
 /// worth is the day the host installs a beta.
 const OPENCODE_DB: &str = "OPENCODE_DB";
-const OPENCODE_DB_FILE: &str = "opencode.db";
+pub(crate) const OPENCODE_DB_FILE: &str = "opencode.db";
 
 /// And how long a command opencode's shell tool will run before it kills it,
 /// where the model passed no timeout of its own.

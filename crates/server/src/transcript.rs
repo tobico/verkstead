@@ -1,11 +1,16 @@
-//! Following the log a session keeps of its own conversation, and putting every
-//! line of it on the Transcript as it is written.
+//! Following the record a session keeps of its own conversation, and putting
+//! every line of it on the Transcript as it is written.
 //!
-//! The log is the agent's own file, in the agent's own format, and Verkstead is
-//! a reader of it rather than a party to it. So it is found rather than
-//! computed: working out where the backend would have put it means
-//! reimplementing a private algorithm belonging to somebody else's program
-//! (ADR 0006).
+//! The record is the agent's own, in the agent's own format, and Verkstead is a
+//! reader of it rather than a party to it. So it is found rather than computed:
+//! working out where the backend would have put it means reimplementing a
+//! private algorithm belonging to somebody else's program (ADR 0006).
+//!
+//! **Three of the four backends keep a file of lines, and the fourth keeps a
+//! database** — see [`Following`]. What that changes is the bookkeeping and
+//! nothing else: a file is followed by remembering how far into it the reading
+//! got, a store by remembering the last record taken, and both take what has
+//! arrived since the last poll. opencode's half of it is [`crate::records`].
 //!
 //! **How it is found is the backend's own** — see [`Search`]. Claude Code takes
 //! the name Verkstead gave the session before it started it (see
@@ -17,10 +22,15 @@
 //! appeared after this session was launched. Grok Build takes one too, so its
 //! log is a lookup again — of a directory called the name, inside a directory
 //! grok named by encoding the working directory, which is why the store is
-//! walked rather than the encoding reproduced.
+//! walked rather than the encoding reproduced. opencode takes none either and
+//! keeps no file: the session to follow is the row of its account's database
+//! that records this Worktree and was created after this session was launched,
+//! which is Codex's rule against a store of another shape.
 //!
 //! Lines go to the store exactly as they were written, and nothing here parses
-//! one. That is what holds the coupling to somebody else's file format down to
+//! one — a database's records included, which reach it as their payload
+//! verbatim with the kind and the sequence the store filed them under around
+//! it. That is what holds the coupling to somebody else's file format down to
 //! whoever renders it: a format that changes can leave a line nothing knows how
 //! to draw, and it can never lose what was said. What is read back out of a
 //! batch on its way past is the two things the Timeline row is summarised by —
@@ -38,10 +48,11 @@
 //! — the relay is awake on that interval anyway, and a file watcher would be a
 //! second mechanism to get wrong for a file the same loop is already waiting on.
 //!
-//! A session that writes no log is followed the same way and stores nothing.
+//! A session that writes no record is followed the same way and stores nothing.
 //! That is the stub agents the test suite runs, every backend that keeps no such
-//! record, and every session Verkstead could not name: all of them are read back
-//! off the Capture instead, which is a complete record on its own.
+//! record, every session Verkstead could not name, and every store of a shape
+//! this build cannot read: all of them are read back off the Capture instead,
+//! which is a complete record on its own.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -51,12 +62,13 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use verkstead_schema::Nudge;
 
 use crate::nudge::Nudges;
+use crate::records;
 use crate::store;
 
-/// One session's log, read as far as it has been written.
+/// One session's record, read as far as it has been written.
 ///
-/// The whole of what following means is remembering where it got to: the log is
-/// appended to while a session runs, and each poll takes what has arrived since
+/// The whole of what following means is remembering where it got to: the record
+/// is added to while a session runs, and each poll takes what has arrived since
 /// the last one.
 pub(crate) struct Tail {
     /// Whose session it is. Kept because what a Nudge about the Transcript has
@@ -64,28 +76,14 @@ pub(crate) struct Tail {
     /// about that.
     conversation: i64,
 
-    /// How this session's log is found — see [`Search`].
+    /// How this session's record is found — see [`Search`].
     search: Search,
 
-    /// The log itself, once it has been found. A session writes its log when it
-    /// starts talking rather than when it starts, so the first few polls of a
-    /// real session ordinarily find nothing.
-    log: Option<PathBuf>,
-
-    /// How much of it has been read.
-    read: u64,
-
-    /// The beginning of a line whose end has not been written yet.
-    ///
-    /// A poll lands wherever the session had got to, which is regularly the
-    /// middle of a line — and half a line is not something to keep, because a
-    /// reader would take it for a whole one. Held in bytes rather than text
-    /// because the same cut goes through characters as well as lines.
-    ///
-    /// Nothing bounds it but the line itself. A cap would have to either lose
-    /// bytes or store a torn line, and both are worse than holding one line of
-    /// a file the agent wrote.
-    partial: Vec<u8>,
+    /// The record itself, once it has been found, and how far it has been
+    /// followed — see [`Following`]. A session writes its record when it starts
+    /// talking rather than when it starts, so the first few polls of a real
+    /// session ordinarily find nothing.
+    following: Following,
 
     /// Lines that are whole and not yet stored. Kept rather than dropped where
     /// the store refuses them, for the reason the Capture's flush keeps its own:
@@ -116,9 +114,9 @@ pub(crate) struct Tail {
     turns: Option<i64>,
 }
 
-/// How a session's log is found.
+/// How a session's own record of itself is found.
 ///
-/// Three backends, three answers, and the difference between them is not an
+/// Four backends, four answers, and the difference between them is not an
 /// implementation detail. Claude takes the name Verkstead gave the session and
 /// writes a file called that, so its log is a lookup. Codex takes no session id
 /// at launch at all — so nothing Verkstead knows before the session starts
@@ -127,6 +125,9 @@ pub(crate) struct Tail {
 /// was launched. Grok Build takes one as Claude does, so its log is named again
 /// — but it is a file of a fixed name inside a directory called the name, and
 /// what that directory sits in is grok's own encoding of the working directory.
+/// opencode takes none either, and keeps no log at all: it writes its sessions
+/// into a database, and the one to follow is found in it the way a rollout is —
+/// see [`crate::records`].
 enum Search {
     /// Claude's: the Profile's directory of projects, and the name Verkstead
     /// gave the session, which is what the file is called.
@@ -144,6 +145,15 @@ enum Search {
     /// gave this one, which is what the directory holding its log is called —
     /// see [`updates`].
     Updates { sessions: PathBuf, session: String },
+
+    /// OpenCode's: the database its account keeps its sessions in, the Worktree
+    /// this session is working in, and the moment it was launched. Codex's rule
+    /// against a store that is not a file of lines — see [`crate::records`].
+    Records {
+        database: PathBuf,
+        worktree: PathBuf,
+        launched: SystemTime,
+    },
 
     /// And nowhere at all, for a session there is nothing to look for. Nothing
     /// is looked for and the Capture is the whole record, which is ADR-0006's
@@ -175,13 +185,13 @@ const SESSIONS: &str = "sessions";
 const UPDATES: &str = "updates.jsonl";
 
 impl Tail {
-    /// Follow the log of the session named `session`, run under `profile` for
-    /// `conversation` in `worktree`, and started at `launched`.
+    /// Follow the record of the session named `session`, run under `profile`
+    /// for `conversation` in `worktree`, and started at `launched`.
     ///
-    /// The last two are Codex's and are nothing to the two backends that name
-    /// their own session: they are what a rollout is found *by*, and a Codex
-    /// session with neither is a session with nothing to look for — see
-    /// [`Search`].
+    /// The last two are what the two backends that take no session id are found
+    /// *by*, and are nothing to the two that name their own: a Codex or an
+    /// OpenCode session with neither is a session with nothing to look for —
+    /// see [`Search`].
     pub(crate) fn of(
         conversation: i64,
         profile: &store::Profile,
@@ -190,8 +200,8 @@ impl Tail {
         launched: SystemTime,
     ) -> Tail {
         // One arm per agent type rather than one path every type is assumed to
-        // keep: where a backend puts the log, and what it calls it, is that
-        // backend's own business, and a backend arriving with a third answer
+        // keep: where a backend puts its record, and what it calls it, is that
+        // backend's own business, and a backend arriving with a fourth answer
         // lands here.
         let search = match (&profile.account, worktree) {
             // Where Claude Code keeps its logs, under the directory the account
@@ -225,20 +235,30 @@ impl Tail {
                 session: session.to_owned(),
             },
 
-            // And OpenCode's store is not looked in at all yet: it takes no
-            // session id at launch, so its log is found rather than named, and
-            // the task that finds it is a later one of this stage's. Until then
-            // an OpenCode session's Capture is its whole record, which is what
-            // ADR-0006 gives a session with no log.
-            (store::Account::OpenCode { .. }, _) => Search::Nowhere,
+            // And where opencode keeps its sessions, which is one database
+            // under the data half of the two directories its account is. The
+            // name of the file is the one the sandbox pinned rather than the
+            // one opencode would have chosen for itself — see
+            // [`crate::sandbox`].
+            (store::Account::OpenCode { home }, Some(worktree)) => Search::Records {
+                database: home
+                    .join(crate::sandbox::OPENCODE_DATA_INSIDE_HOME)
+                    .join(crate::sandbox::OPENCODE_DB_FILE),
+                worktree: worktree.to_owned(),
+                launched,
+            },
+
+            // And an OpenCode session with no Worktree has nothing to match a
+            // session in that store against, which is the Codex case above word
+            // for word: it cannot happen, and it is given up on rather than
+            // guessed at.
+            (store::Account::OpenCode { .. }, None) => Search::Nowhere,
         };
 
         Tail {
             conversation,
             search,
-            log: None,
-            read: 0,
-            partial: Vec::new(),
+            following: Following::Looking,
             pending: Vec::new(),
             latest: None,
             turns: None,
@@ -262,45 +282,117 @@ impl Tail {
     /// Whether [`Tail::latest`] moved on, so that whoever is summarising the
     /// session writes a row only where there is a new one to write.
     pub(crate) async fn poll(&mut self, pool: &SqlitePool, nudges: &Nudges, event_id: i64) -> bool {
-        if self.log.is_none() {
-            self.log = self.find().await;
+        if matches!(self.following, Following::Looking) {
+            self.following = self.find().await;
         }
 
-        if let Some(log) = self.log.clone() {
-            self.take(&log).await;
-        }
+        let arrived = match &mut self.following {
+            Following::Looking => Vec::new(),
+            Following::Log(log) => log.take().await,
+            Following::Records(records) => records.take().await,
+        };
+
+        self.pending.extend(arrived);
 
         self.store(pool, nudges, event_id).await
     }
 
-    /// Look for the log, and hand back where it is.
+    /// Look for the session's own record, and hand back the following of it.
     ///
-    /// `None` is the ordinary answer for most of a session's life: it is a
-    /// session that has not written anything yet, a backend whose log is not
-    /// looked for, and a Profile directory that has never been used. None of the
-    /// three is worth saying anything about, which is why nothing here is
-    /// logged.
-    async fn find(&self) -> Option<PathBuf> {
+    /// [`Following::Looking`] is the ordinary answer for most of a session's
+    /// life: it is a session that has not written anything yet, a backend whose
+    /// record is not looked for, and a Profile directory that has never been
+    /// used. None of the three is worth saying anything about, which is why
+    /// nothing here is logged.
+    ///
+    /// A store is the exception, and it is not one: there is nothing to look
+    /// for, because what is looked for is inside the database rather than
+    /// beside it, and the reader does its own finding on every poll until it
+    /// finds its session — see [`crate::records`].
+    async fn find(&self) -> Following {
         match &self.search {
-            Search::Nowhere => None,
-            Search::Named { projects, session } => named(projects, session).await,
+            Search::Nowhere => Following::Looking,
+            Search::Named { projects, session } => following(named(projects, session).await),
             Search::Rollout {
                 sessions,
                 worktree,
                 launched,
-            } => rollout(sessions, worktree, *launched).await,
-            Search::Updates { sessions, session } => updates(sessions, session).await,
+            } => following(rollout(sessions, worktree, *launched).await),
+            Search::Updates { sessions, session } => following(updates(sessions, session).await),
+            Search::Records {
+                database,
+                worktree,
+                launched,
+            } => Following::Records(records::Reader::of(
+                database.clone(),
+                worktree.clone(),
+                *launched,
+            )),
         }
     }
+}
 
-    /// Read what has been appended to the log since last time, and split off the
-    /// lines of it that are finished.
-    async fn take(&mut self, log: &Path) {
-        let Ok(mut file) = tokio::fs::File::open(log).await else {
+/// What a session's own record turned out to be, and how far it has been
+/// followed.
+///
+/// The two shapes a backend keeps one in. Three of the four write a file of
+/// lines and are followed by remembering how far into it the reading got; the
+/// fourth writes a database and is followed by remembering which record was the
+/// last taken. Both are the same bargain — take what has arrived since last
+/// time — and neither's bookkeeping means anything to the other.
+enum Following {
+    /// Nothing found yet, which every poll looks again for.
+    Looking,
+
+    /// A log file, and how far into it has been read.
+    Log(Log),
+
+    /// A session inside a store, and how far its records have been taken.
+    Records(records::Reader),
+}
+
+/// A found log, read as far as it has been written.
+struct Log {
+    /// The file itself.
+    log: PathBuf,
+
+    /// How much of it has been read.
+    read: u64,
+
+    /// The beginning of a line whose end has not been written yet.
+    ///
+    /// A poll lands wherever the session had got to, which is regularly the
+    /// middle of a line — and half a line is not something to keep, because a
+    /// reader would take it for a whole one. Held in bytes rather than text
+    /// because the same cut goes through characters as well as lines.
+    ///
+    /// Nothing bounds it but the line itself. A cap would have to either lose
+    /// bytes or store a torn line, and both are worse than holding one line of
+    /// a file the agent wrote.
+    partial: Vec<u8>,
+}
+
+/// A log that was looked for, as something to follow.
+fn following(found: Option<PathBuf>) -> Following {
+    match found {
+        Some(log) => Following::Log(Log {
+            log,
+            read: 0,
+            partial: Vec::new(),
+        }),
+        None => Following::Looking,
+    }
+}
+
+impl Log {
+    /// Read what has been appended since last time, and hand back the lines of
+    /// it that are finished.
+    async fn take(&mut self) -> Vec<String> {
+        let Ok(mut file) = tokio::fs::File::open(&self.log).await else {
             // The file was there when it was found and is not now, which is a
             // Profile directory something else is tidying. The next poll looks
             // again.
-            return;
+            return Vec::new();
         };
 
         if file
@@ -308,18 +400,24 @@ impl Tail {
             .await
             .is_err()
         {
-            return;
+            return Vec::new();
         }
 
         let mut arrived = Vec::new();
 
         if let Err(error) = file.read_to_end(&mut arrived).await {
-            tracing::warn!(error = ?error, log = %log.display(), "reading a session's log failed");
-            return;
+            tracing::warn!(
+                error = ?error,
+                log = %self.log.display(),
+                "reading a session's log failed",
+            );
+            return Vec::new();
         }
 
         self.read += arrived.len() as u64;
         self.partial.extend_from_slice(&arrived);
+
+        let mut lines = Vec::new();
 
         // A line ends at its newline, and the newline is the framing rather than
         // anything the agent said — so it is what the line is split on and the
@@ -328,11 +426,14 @@ impl Tail {
         while let Some(ends) = self.partial.iter().position(|byte| *byte == b'\n') {
             let line: Vec<u8> = self.partial.drain(..=ends).collect();
 
-            self.pending
-                .push(String::from_utf8_lossy(&line[..ends]).into_owned());
+            lines.push(String::from_utf8_lossy(&line[..ends]).into_owned());
         }
-    }
 
+        lines
+    }
+}
+
+impl Tail {
     /// Put the finished lines on the Transcript, and tell whoever is watching
     /// that they are there.
     ///

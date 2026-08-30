@@ -55,6 +55,8 @@ mod nudge;
 mod nudging;
 mod profiles;
 mod push;
+/// The store an OpenCode session keeps of itself, followed while it runs.
+mod records;
 /// Following a Conversation's branch to the name a session renamed it to,
 /// rather than repairing a checkout that has not come adrift after all.
 mod renames;

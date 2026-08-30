@@ -295,6 +295,31 @@ named in the Capture.
   session's worktree after launch, matched on working directory and start
   time. ADR-0006's rules are unchanged — lines stored verbatim, parsed at
   render time, the Capture the complete record wherever no log is found.
+
+  **Amended: OpenCode's store is a database, not a file of lines**, read off
+  opencode 1.18.25. The account keeps one SQLite database under its data
+  directory — the file whose name Verkstead pins, so a beta install's is not
+  a second guess — in write-ahead-log mode, with a row per session and a row
+  per record within it, and every record's payload JSON text. The plan above
+  expected JSON files appended to; they are gone.
+
+  What survives is every rule and none of the mechanism. *Which* session is
+  Codex's question asked in SQL rather than off a first line: the row whose
+  recorded directory is this Conversation's Worktree and which was created at
+  or after launch, newest first, and the session opencode started for itself
+  rather than one it started under that. *Following* is the same bargain in
+  the store's own terms — the cursor is the highest record sequence already
+  taken, and each poll takes what has arrived past it. And *storing* is
+  ADR-0006 unchanged: the payload reaches the Transcript byte for byte, with
+  opencode's own kind and the sequence around it, parsed at render time.
+
+  The database is opened read-only while opencode writes it, and a poll that
+  cannot read is a poll that looks again — the store is not there for a
+  session's first seconds, and the writer holds the lock from time to time
+  after that. **A store this build cannot read leaves the session
+  Capture-only**, said in the log rather than silently: the layout is
+  opencode's own and moves between releases, and none of that may fail a
+  session when the Capture is a complete record on its own.
 - **Usage limits.** The phrases ship as known — Codex's is confirmed, and so
   is the wording Grok Build gives a free account — and the rest are filled in
   when first observed; until then such a stop lands as an ordinary stall,

@@ -41,6 +41,7 @@ use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
+use sqlx::{Executor, SqlitePool};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -185,6 +186,16 @@ impl Grilling {
     /// the bench rather than something to thread through.
     fn repo(&self) -> PathBuf {
         self._watched.path().join("verkstead")
+    }
+
+    /// And the home the OpenCode Profile this bench saved keeps its account in.
+    ///
+    /// [`Bench::on_one_home`] puts that Profile's home at one place under the
+    /// same directory, so where opencode's account is is a fact about the bench
+    /// rather than something to thread through — the same bargain
+    /// [`Grilling::repo`] makes.
+    fn opencode_account(&self) -> PathBuf {
+        self._watched.path().join("opencode").join(".opencode")
     }
 
     /// The Conversation as the workbench reads it.
@@ -1478,6 +1489,24 @@ async fn grilling_on_grok(stub: &str) -> Grilling {
 async fn grilling_on_opencode(stub: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnOpenCode,
+        Origin::None,
+        None,
+    )
+    .await
+}
+
+/// The same with every role on that Profile, spilling what its sessions were
+/// told somewhere that outlives their worktrees — which is what the tests about
+/// opencode's own store need, the store being written for a session from
+/// outside the sandbox it is running in.
+async fn grilling_spilling_on_opencode(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    grilling_however_started(
+        spill,
         stub,
         PULL_REQUEST,
         *BRISKLY,
@@ -3372,6 +3401,267 @@ async fn a_grok_session_follows_the_log_it_was_named_for() {
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// An OpenCode session's record is found rather than named, and it is not a
+/// file: opencode takes no session id, and it keeps its sessions in one database
+/// under its account. So what says a session in there is this one is the
+/// directory it recorded opening in and its having been created after this
+/// session was launched — Codex's rule, against a store of another shape.
+///
+/// The store is written from outside the sandbox, because there is no `sqlite3`
+/// on the system profile for a stub to write one with — and it is written the
+/// way a machine running more than one session at a time actually has it: this
+/// session's own, one belonging to a session in another Worktree created a
+/// moment before it, and an older one of this very Worktree. Only the first is
+/// the record of this session, and the two beside it say so in the only way a
+/// test can — by being followed instead if the finder gets it wrong.
+///
+/// What lands is each record whole: opencode's own kind, its place in the
+/// session's sequence, and the payload byte for byte. Nothing draws one yet.
+#[tokio::test]
+async fn an_opencode_session_follows_the_records_of_the_session_it_opened_in_its_worktree() {
+    let spill = tempfile::tempdir().unwrap();
+    let ran_in = spill.path().join("ran-in");
+
+    let fixture = grilling_spilling_on_opencode(
+        spill,
+        &format!(
+            r#"
+            printf '%s' "$(pwd)" > {ran_in}
+            printf 'Reading the brief.\n'
+            sleep 300
+            "#,
+            ran_in = ran_in.display(),
+        ),
+    )
+    .await;
+
+    // Where the session is actually sitting, read off what it wrote rather than
+    // worked out here — which is what makes the row below a match rather than a
+    // restatement.
+    let worktree = until_written(&ran_in).await;
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+
+    let store = opencode_store(&fixture.opencode_account()).await;
+
+    // A session of another Conversation, in the same account's store, created
+    // at the same moment as this one.
+    opencode_session(&store, "ses_elsewhere", "/srv/worktrees/tables", 0).await;
+    opencode_record(
+        &store,
+        "ses_elsewhere",
+        0,
+        "session.created.1",
+        r#"{"info":{"title":"Another Conversation."}}"#,
+    )
+    .await;
+
+    // And this Worktree's own work from an hour ago, which is the same
+    // Conversation resumed and not this session.
+    opencode_session(&store, "ses_before", &worktree, -3_600_000).await;
+    opencode_record(
+        &store,
+        "ses_before",
+        0,
+        "session.created.1",
+        r#"{"info":{"title":"An hour ago."}}"#,
+    )
+    .await;
+
+    // And this session's own.
+    opencode_session(&store, "ses_mine", &worktree, 0).await;
+    opencode_record(
+        &store,
+        "ses_mine",
+        0,
+        "session.created.1",
+        &format!(r#"{{"info":{{"title":"Rate limiting","directory":"{worktree}"}}}}"#),
+    )
+    .await;
+
+    let first = fixture.transcript_of(event, 1).await;
+
+    assert_eq!(
+        first,
+        [
+            r#"{"kind":"session.created.1","seq":0,"record":{"info":{"title":"Rate limiting","directory":"WORKTREE"}}}"#,
+        ]
+        .map(|line| line.replace("WORKTREE", &worktree)),
+        "the session in the store that opened in this Worktree after this session \
+         started is the one followed, and its record should reach the Transcript \
+         whole — opencode's own kind and its place in the sequence around the \
+         payload as the store holds it",
+    );
+
+    // And a second poll takes what arrived since and only that, which is what a
+    // cursor into a store means where a byte offset into a file meant it before.
+    opencode_record(
+        &store,
+        "ses_mine",
+        1,
+        "message.part.updated.1",
+        r#"{"part":{"type":"text","text":"Where does the counter live?"}}"#,
+    )
+    .await;
+
+    let both = fixture.transcript_of(event, 2).await;
+
+    assert_eq!(
+        both,
+        [
+            first[0].clone(),
+            r#"{"kind":"message.part.updated.1","seq":1,"record":{"part":{"type":"text","text":"Where does the counter live?"}}}"#.to_owned(),
+        ],
+        "and the record that arrived after it should be added rather than the \
+         whole of the session read again",
+    );
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("Reading the brief.\n"),
+        "following the store should not cost the Capture anything: {said:?}"
+    );
+
+    let view = fixture.view().await;
+    let printed = output(&view).expect("the session is on the Timeline");
+
+    assert!(
+        matches!(printed.turns, Some(turns) if turns > 0),
+        "and the row shows a Transcript rather than nothing: {:?}",
+        printed.turns
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// And a store this build cannot read leaves the session Capture-only, which is
+/// what ADR-0006 gives every session with no record of its own. opencode's
+/// layout is its own and moves between releases — a table renamed, a column gone
+/// — and none of that may fail a session.
+#[tokio::test]
+async fn an_opencode_store_this_build_cannot_read_leaves_the_session_capture_only() {
+    let spill = tempfile::tempdir().unwrap();
+    let ran_in = spill.path().join("ran-in");
+
+    let fixture = grilling_spilling_on_opencode(
+        spill,
+        &format!(
+            r#"
+            printf '%s' "$(pwd)" > {ran_in}
+            printf 'Reading the brief.\n'
+            "#,
+            ran_in = ran_in.display(),
+        ),
+    )
+    .await;
+
+    until_written(&ran_in).await;
+
+    // A release that renamed the column the directory is recorded under, which
+    // stands for the whole class: the database is there and readable, and the
+    // question Verkstead asks of it has no answer.
+    let store = opencode_store(&fixture.opencode_account()).await;
+
+    store
+        .execute("ALTER TABLE session RENAME COLUMN directory TO cwd")
+        .await
+        .unwrap();
+
+    let summary = fixture
+        .until(|view| output(view).filter(|output| !output.running).cloned())
+        .await;
+
+    assert!(
+        fixture.transcript(summary.id).await.is_empty(),
+        "a session whose store this build cannot read has no Transcript"
+    );
+    assert_eq!(
+        summary.turns, None,
+        "and its row shows no metric rather than a count of none"
+    );
+    assert_eq!(
+        fixture.capture(summary.id).await,
+        "Reading the brief.\r\n",
+        "and what it said is on the Capture, which is a complete record on its own"
+    );
+}
+
+/// opencode's store, made where opencode would have made it — under the data
+/// half of the account, in the file whose name the sandbox pinned.
+///
+/// Only the columns Verkstead reads, for the reason the reader's own fixtures
+/// hold only those: what the rest of that database holds is opencode's business,
+/// and a fixture that copied it would be this suite claiming to know more of
+/// somebody else's schema than Verkstead reads.
+async fn opencode_store(account: &Path) -> SqlitePool {
+    let data = account.join(".local/share/opencode");
+    std::fs::create_dir_all(&data).unwrap();
+
+    let store = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(data.join("opencode.db"))
+            .create_if_missing(true)
+            // The mode opencode keeps its own store in, which is what a reader
+            // of it has to be able to read.
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+    )
+    .await
+    .unwrap();
+
+    store
+        .execute(
+            "CREATE TABLE session (
+                 id           TEXT PRIMARY KEY,
+                 parent_id    TEXT,
+                 directory    TEXT NOT NULL,
+                 time_created INTEGER NOT NULL
+             );
+             CREATE TABLE event (
+                 id           TEXT PRIMARY KEY,
+                 aggregate_id TEXT NOT NULL,
+                 seq          INTEGER NOT NULL,
+                 type         TEXT NOT NULL,
+                 data         TEXT NOT NULL
+             );",
+        )
+        .await
+        .unwrap();
+
+    store
+}
+
+/// A session in that store, opened in `directory` `when` milliseconds from now.
+async fn opencode_session(store: &SqlitePool, session: &str, directory: &str, when: i64) {
+    let created = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+        + when;
+
+    sqlx::query(
+        "INSERT INTO session (id, parent_id, directory, time_created) VALUES (?, NULL, ?, ?)",
+    )
+    .bind(session)
+    .bind(directory)
+    .bind(created)
+    .execute(store)
+    .await
+    .unwrap();
+}
+
+/// And a record it wrote inside one.
+async fn opencode_record(store: &SqlitePool, session: &str, seq: i64, kind: &str, data: &str) {
+    sqlx::query("INSERT INTO event (id, aggregate_id, seq, type, data) VALUES (?, ?, ?, ?, ?)")
+        .bind(format!("{session}-{seq}"))
+        .bind(session)
+        .bind(seq)
+        .bind(kind)
+        .bind(data)
+        .execute(store)
+        .await
+        .unwrap();
 }
 
 /// A session that keeps no log of itself leaves no Transcript, and nothing about
