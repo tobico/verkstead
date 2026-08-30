@@ -984,11 +984,15 @@ finish flag
 
 **Waiting on checks**:
 What a wrap-up has narrowed to when the review is answered, nothing said on the
-pull request is left unaddressed, the checks alone are outstanding and nothing
-is running in the Worktree. A **Notice** says so on the Timeline, once per
-narrowing; the status button reads the words where its status word goes, and
-the sidebar row reads them in place of the state word, Wrapping being what has
-narrowed.
+pull request is left unaddressed, every pull request merges, the checks alone
+are outstanding and nothing is running in the Worktree. A **Notice** says so on
+the Timeline, once per narrowing; the status button reads the words where its
+status word goes, and the sidebar row reads them in place of the state word,
+Wrapping being what has narrowed.
+
+A pull request that is not **mergeable** is not this, and says nothing: what
+that one is waiting on is somebody resolving a conflict rather than GitHub
+finishing something.
 
 A condition of Wrapping rather than a state, exactly as *blocked on you* is a
 condition of an active state: the Lifecycle is untouched, and the only thing
@@ -1023,6 +1027,26 @@ beside green and red, exactly as it is for the watcher meeting a `gh` that will
 not answer, and what a card with no rollup draws is no icon.
 _Avoid_: status, CI (the word here is checks), green as a state name, one check
 (the rollup is the whole suite)
+
+**Mergeable**:
+Whether GitHub can merge a pull request into its base as it stands, asked of the
+same `gh` call the **check rollup** comes back in and written down per pull
+request. A branch its base has moved under conflicts without anybody having
+touched it, and nothing lands after that — so being mergeable is one of the
+things a wrap-up waits on before it reaches Done, one settlement per pull
+request beside the checks and the comments.
+
+Three answers and each is its own thing: *mergeable* settles it, *conflicting*
+puts it back to waiting, and *unknown* — which is what GitHub says while it is
+still working the answer out — changes nothing at all and is written down
+nowhere, exactly as a `gh` that will not answer about the checks is. So what
+stands about a pull request is the last thing GitHub actually said about it.
+
+*Can be merged* rather than *has been merged*: Verkstead never waits for the
+merge itself, which is the human's act and the one this pipeline is built
+around.
+_Avoid_: merged, landed, mergeability, clean (the words here are mergeable and
+conflicting), rebase (that is one way of resolving one)
 
 **Rescue**:
 The canned line Verkstead types into a session that has gone quiet without

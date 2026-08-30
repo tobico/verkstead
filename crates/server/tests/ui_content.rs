@@ -2620,6 +2620,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let waiting_on = verkstead_store::WAITED_ON.into_iter().chain([
         verkstead_store::WaitingOn::Checks(repos[0].id),
         verkstead_store::WaitingOn::Comments(repos[0].id),
+        verkstead_store::WaitingOn::Mergeable(repos[0].id),
     ]);
 
     for waiting_on in waiting_on {

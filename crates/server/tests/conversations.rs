@@ -7093,12 +7093,13 @@ async fn a_wrap_up_down_to_its_checks_says_so_on_the_card_and_in_the_sidebar() {
     assert_eq!(view.state, Lifecycle::Wrapping);
     assert!(
         !view.waiting_on_checks,
-        "a wrap-up nobody has read yet is waiting on all three of them",
+        "a wrap-up nobody has read yet is waiting on all four of them",
     );
 
     for waiting_on in [
         store::WaitingOn::Review,
         store::WaitingOn::Comments(repo_id),
+        store::WaitingOn::Mergeable(repo_id),
     ] {
         store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
     }
@@ -7180,6 +7181,16 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
 
     assert_eq!(
         store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::NotNarrowed,
+        "a pull request nothing has said merges is not one waiting on its checks",
+    );
+
+    store::settle_wrap_up(&pool, id, store::WaitingOn::Mergeable(repo_id))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
         store::Narrowing::Narrowed,
         "the first look is the one that owes the Timeline a line",
     );
@@ -7218,6 +7229,17 @@ async fn a_wrap_up_that_narrows_twice_is_worth_saying_so_twice() {
         store::narrowing(&pool, id, false).await.unwrap(),
         store::Narrowing::Narrowed,
         "and dealing with it narrows the wrap-up a second time, which is a second line",
+    );
+
+    store::unsettle_wrap_up(&pool, id, store::WaitingOn::Mergeable(repo_id))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::narrowing(&pool, id, false).await.unwrap(),
+        store::Narrowing::NotNarrowed,
+        "and a pull request that has fallen into conflict is not waiting on GitHub \
+         to finish anything: what it needs is a resolution",
     );
 
     pool.close().await;

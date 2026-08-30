@@ -964,6 +964,13 @@ static SWEEPING: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// watcher asks about them on their own and this answers that with the pull
 /// request itself, which reads as a suite of nothing. Which is what makes the
 /// pane's own freshening visible — nothing else writes a rollup down.
+///
+/// That one answer carries the `mergeable` the same watcher reads, because a
+/// wrap-up waits on that as much as on the checks: a pull request nothing has
+/// said merges is one Verkstead is still waiting to hear about, and every
+/// fixture here that reaches Done would sit in Wrapping for ever. The pull
+/// request lookup ignores the extra field, as every `gh` answer ignores the
+/// fields nobody asked it for.
 const PULL_REQUEST: &str = r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
 case "$5" in
@@ -974,7 +981,7 @@ case "$5" in
     printf '{"comments":[],"reviews":[]}'
     ;;
 *)
-    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
+    printf '{"mergeable":"MERGEABLE","number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
     ;;
 esac
 "#;
@@ -991,7 +998,7 @@ fn gh_checking(how: &str) -> String {
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
 case "$5" in
 *statusCheckRollup*)
-    printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "{how}"
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "{how}"
     ;;
 *commits*)
     printf '{{"commits":[],"comments":[]}}'
@@ -1072,7 +1079,16 @@ esac
 }
 
 /// A green suite, as [`gh_about`]'s answer about the checks.
-const GREEN: &str = r#"    printf '{"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
+const GREEN: &str = r#"    printf '{"mergeable":"MERGEABLE","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
+
+/// And a suite that never finishes, which is how a test holds a wrap-up down to
+/// its checks for as long as it cares to look: nothing is red, so nothing is
+/// dispatched, and nothing is green either.
+///
+/// The pull request merges throughout, that being another of the things a
+/// wrap-up waits on: one GitHub said nothing about would be a wrap-up waiting on
+/// more than its suite, which is not the condition these are about.
+const STILL_RUNNING: &str = r#"    printf '{"mergeable":"MERGEABLE","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"IN_PROGRESS","conclusion":"","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
 
 /// A rollup that says its suite is still running until `head` is there, and then
 /// a green one belonging to whichever commit that file names.
@@ -1083,9 +1099,9 @@ const GREEN: &str = r#"    printf '{"statusCheckRollup":[{"__typename":"CheckRun
 fn green_for(head: &Path) -> String {
     format!(
         r#"    if [ -s {head} ]; then
-        printf '{{"headRefOid":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$(cat {head})"
+        printf '{{"mergeable":"MERGEABLE","headRefOid":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$(cat {head})"
     else
-        printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"IN_PROGRESS","conclusion":"","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}'
+        printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"IN_PROGRESS","conclusion":"","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}'
     fi"#,
         head = quoted(head),
     )
@@ -1101,7 +1117,7 @@ fn green_for(head: &Path) -> String {
 fn green_until_nothing_is_reported(landed: &Path) -> String {
     format!(
         r#"    if [ -e {landed} ]; then
-        printf '{{"statusCheckRollup":[]}}'
+        printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
     else
 {GREEN}
     fi"#,
@@ -1115,8 +1131,23 @@ fn green_until_nothing_is_reported(landed: &Path) -> String {
 fn green_until(landed: &Path) -> String {
     format!(
         r#"    if [ -e {landed} ]; then how=IN_PROGRESS; else how=COMPLETED; fi
-    printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$how""#,
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$how""#,
         landed = quoted(landed),
+    )
+}
+
+/// A green suite on a pull request GitHub will not merge until `resolved` is
+/// there, and one it will merge afterwards.
+///
+/// Which is how a test says *the base has moved under this branch*. The rollup
+/// and the merge come back in one answer because they are one answer — the
+/// watcher asks for both in the same call — so a suite that is green throughout
+/// leaves the conflict as the only thing between the wrap-up and Done.
+fn green_but_conflicting_until(resolved: &Path) -> String {
+    format!(
+        r#"    if [ -e {resolved} ]; then merges=MERGEABLE; else merges=CONFLICTING; fi
+    printf '{{"mergeable":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$merges""#,
+        resolved = quoted(resolved),
     )
 }
 
@@ -1127,7 +1158,7 @@ fn green_until(landed: &Path) -> String {
 fn green_after(started: &Path) -> String {
     format!(
         r#"    if [ -s {started} ]; then status=COMPLETED; how=SUCCESS; else status=IN_PROGRESS; how=; fi
-    printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$status" "$how""#,
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$status" "$how""#,
         started = quoted(started),
     )
 }
@@ -1171,7 +1202,7 @@ if [ "$1" = api ]; then printf '[]'; exit 0; fi
 if [ -s {started} ]; then status=COMPLETED; how=FAILURE; else status=IN_PROGRESS; how=; fi
 case "$5" in
 *statusCheckRollup*)
-    printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$status" "$how"
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$status" "$how"
     ;;
 *commits*)
     printf '{{"commits":[],"comments":[]}}'
@@ -1233,7 +1264,7 @@ if [ ! -f {opened} ]; then
 fi
 case "$5" in
 *statusCheckRollup*)
-    printf '{{"statusCheckRollup":[]}}'
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
     ;;
 *commits*)
     printf '{{"commits":[],"comments":[]}}'
@@ -1300,7 +1331,7 @@ esac
 }
 
 /// What that companion says when the finish opened a pull request in it.
-const COMPANION_PULL_REQUEST: &str = r#"    printf '{"number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}'
+const COMPANION_PULL_REQUEST: &str = r#"    printf '{"mergeable":"MERGEABLE","number":7,"title":"The other half","url":"https://github.com/tobico/askance/pull/7"}'
     exit 0"#;
 
 /// And what it says when the finish left it without one, in the words the real
@@ -4745,11 +4776,31 @@ async fn checks_settled(fixture: &Grilling) -> bool {
     .await
 }
 
+/// And whether Verkstead has recorded that GitHub can merge it, which is the
+/// other thing one poll of the checks watcher settles.
+async fn merge_settled(fixture: &Grilling) -> bool {
+    settled(
+        fixture,
+        verkstead_server::store::WaitingOn::Mergeable(own_repo(fixture).await),
+    )
+    .await
+}
+
 /// And whether the pull request opened in the companion beside it is green.
 async fn companion_checks_settled(fixture: &Grilling) -> bool {
     settled(
         fixture,
         verkstead_server::store::WaitingOn::Checks(companion_repo(fixture).await),
+    )
+    .await
+}
+
+/// And whether that one merges, a conflict in a companion being as much a reason
+/// to wait as one in the Conversation's own repository.
+async fn companion_merge_settled(fixture: &Grilling) -> bool {
+    settled(
+        fixture,
+        verkstead_server::store::WaitingOn::Mergeable(companion_repo(fixture).await),
     )
     .await
 }
@@ -5034,9 +5085,9 @@ async fn checks_gh_cannot_answer_about_leave_the_wrap_up_waiting() {
 /// nothing new is stored on the Conversation, so what the card and the sidebar
 /// draw it from is the wrap-up's own settle facts read alongside the register of
 /// what is running. The review read the branch and found nothing to raise,
-/// nothing has been said on the pull request, and here the checks cannot be
-/// asked about at all — which is a wrap-up that will wait for as long as this
-/// test cares to look.
+/// nothing has been said on the pull request, the pull request merges, and here
+/// the suite never finishes — which is a wrap-up that will wait for as long as
+/// this test cares to look.
 ///
 /// The Notice is written once per narrowing and not once per poll: the settling
 /// loop asks on a cadence, and a Timeline that grew a line every half second
@@ -5050,7 +5101,7 @@ async fn a_wrap_up_down_to_its_checks_reads_as_waiting_on_them_and_says_so_once(
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(CHECKS_UNANSWERABLE, "", ""),
+        &gh_about(STILL_RUNNING, "", ""),
     )
     .await;
 
@@ -5071,7 +5122,7 @@ async fn a_wrap_up_down_to_its_checks_reads_as_waiting_on_them_and_says_so_once(
     );
     assert!(
         !checks_settled(&fixture).await,
-        "the checks are the one thing left, and nothing can even ask about them",
+        "the checks are the one thing left, and they have not finished",
     );
     assert!(
         review_settled(&fixture).await,
@@ -8547,6 +8598,85 @@ async fn checks_that_have_gone_from_a_pull_request_that_had_them_settle_nothing(
     );
 }
 
+/// A pull request GitHub cannot merge keeps its Conversation in Wrapping,
+/// however green the suite on it is — and the wrap-up finishes the moment the
+/// conflict is gone.
+///
+/// A base that moves under a branch puts it in conflict without anybody touching
+/// it, and nothing lands after that. A Conversation carried to Done over one
+/// would be work Verkstead had called finished that the human could not merge,
+/// so being conflict-free is one of the things a wrap-up waits on — read off the
+/// same poll the checks are, GitHub saying both in one answer.
+///
+/// And it is not **Waiting on checks**. That is the wrap-up down to the one
+/// thing nothing here can hurry, and a conflict is not that: what this needs is
+/// a resolution rather than a suite, and a card sending the human off to watch
+/// GitHub finish would send them to the wrong place.
+#[tokio::test]
+async fn a_pull_request_that_conflicts_keeps_the_wrap_up_out_of_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let resolved = spill.path().join("conflict-resolved");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(&green_but_conflicting_until(&resolved), "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    // Long enough for many polls of a green suite on a pull request that will
+    // not merge.
+    pause(Duration::from_millis(1500)).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "nothing can land a conflicted pull request, so the work is not finished with",
+    );
+    assert!(
+        checks_settled(&fixture).await,
+        "the suite itself is green and settled, which is what leaves the conflict \
+         as the only thing outstanding",
+    );
+    assert!(
+        !merge_settled(&fixture).await,
+        "and the conflict is what the wrap-up is waiting on",
+    );
+    assert!(
+        !view.waiting_on_checks,
+        "which is not waiting on checks: the checks came in",
+    );
+    assert!(
+        waiting_on_checks(&view).is_empty(),
+        "and nothing said it was on the Timeline either: {:?}",
+        waiting_on_checks(&view),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped over it either — a conflict waits, exactly as a red \
+         check with no goes left does: {:?}",
+        notices(&view),
+    );
+
+    // The conflict resolved, which is the next poll's answer.
+    std::fs::write(&resolved, "").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert!(
+        merge_settled(&fixture).await,
+        "a pull request GitHub says it can merge settles the last of it",
+    );
+}
+
 /// What a server that comes back up owes a batch's proposal nobody is behind: the
 /// same thing it owes the review's.
 ///
@@ -8900,14 +9030,17 @@ async fn comments_already_dispatched_for_are_not_dispatched_for_again_after_a_re
     );
 }
 
-/// The rule that ends a wrap-up: the checks green, the review answered and
-/// nothing said left unaddressed, all three together. Verkstead decides it
-/// itself — there is nobody at the workbench to press anything.
+/// The rule that ends a wrap-up: the checks green, the review answered, nothing
+/// said left unaddressed and the pull request merging, all four together.
+/// Verkstead decides it itself — there is nobody at the workbench to press
+/// anything.
 ///
-/// And what it does not wait for is the merge. The pull request is open the whole
-/// time and nothing here ever asks GitHub whether it is: stages stack on unmerged
-/// predecessors, so a Conversation that waited would hold up every stage behind
-/// it.
+/// And what it does not wait for is the merge itself. Whether GitHub *can* merge
+/// the pull request is asked on every poll, one conflicted being one nothing
+/// could land; whether anybody *has* merged it is never asked at all. The pull
+/// request is open the whole time here — stages stack on unmerged predecessors,
+/// so a Conversation that waited for one to land would hold up every stage
+/// behind it.
 #[tokio::test]
 async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_merge() {
     let spill = tempfile::tempdir().unwrap();
@@ -8960,9 +9093,15 @@ async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_
 
     let asked = std::fs::read_to_string(&questions).unwrap();
 
+    let fields = || asked.lines().flat_map(|asked| asked.split(','));
+
     assert!(
-        !asked.contains("merge"),
-        "nothing ever asked GitHub whether the pull request had been merged: {asked}",
+        fields().any(|field| field == "mergeable"),
+        "whether it can be merged is asked on every poll: {asked}",
+    );
+    assert!(
+        !fields().any(|field| field == "merged" || field == "mergedAt"),
+        "and whether it has been merged is never asked at all: {asked}",
     );
 }
 
@@ -18642,14 +18781,14 @@ esac
 /// The same check name in both, which is the whole point of asking twice: `Rust`
 /// red on two pull requests is two different failures, and neither of them
 /// spends the other's attempts.
-const RED: &str = r#"    printf '{"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
+const RED: &str = r#"    printf '{"mergeable":"MERGEABLE","statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
 
 /// One that is red until `fixed` is there and green once it is, which is what a
 /// fix session that reached the right pull request does to it.
 fn red_until(fixed: &Path) -> String {
     format!(
         r#"    if [ -s {fixed} ]; then how=SUCCESS; else how=FAILURE; fi
-    printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$how""#,
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$how""#,
         fixed = quoted(fixed),
     )
 }
@@ -18936,6 +19075,73 @@ async fn a_wrap_up_waits_for_every_pull_requests_checks() {
 
     // And now the companion's finishes, green.
     std::fs::write(&running, "x").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+}
+
+/// And it waits on every pull request *merging* the same way, a companion's
+/// conflict being as much a reason to wait as the Conversation's own.
+///
+/// Both suites are green from the first poll and the companion's pull request is
+/// the one its base has moved under, so the only thing between this wrap-up and
+/// Done is a conflict in a repository the Conversation is not even in. A rule
+/// that read the Conversation's own pull request alone would have finished here,
+/// over work half of which nobody could land.
+#[tokio::test]
+async fn a_wrap_up_waits_for_every_pull_request_to_merge() {
+    let spill = tempfile::tempdir().unwrap();
+    let dispatched = spill.path().join("fix-prompts");
+    let busy = spill.path().join("busy");
+    let own = spill.path().join("fixed-own");
+    let companion = spill.path().join("fixed-companion");
+    let resolved = spill.path().join("conflict-resolved");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
+        "askance",
+        &gh_alongside_checking(GREEN, &green_but_conflicting_until(&resolved)),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !companion_checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the companion's checks never settled: {}",
+            standing(&fixture.view().await),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Long enough for many polls of two green suites, one of them on a pull
+    // request that will not merge.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(
+        merge_settled(&fixture).await,
+        "the Conversation's own pull request merges, and settles",
+    );
+    assert!(
+        !companion_merge_settled(&fixture).await,
+        "and the companion's is the conflict the wrap-up is waiting on",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "so the Conversation waits, green as its own pull request is",
+    );
+    assert!(
+        !fixture.view().await.waiting_on_checks,
+        "and it is not waiting on checks: both suites came in",
+    );
+
+    // And now somebody resolves it.
+    std::fs::write(&resolved, "x").unwrap();
 
     fixture
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
@@ -19688,8 +19894,8 @@ async fn a_conversation_with_no_review_wraps_up_without_one_and_reaches_done() {
 ///
 /// With no review there is nothing to fold the comments into, so every one of
 /// them is a batch's from the moment it lands. The wrap-up then narrows to
-/// waiting on its checks, which here can never be asked about — the same
-/// condition a reviewed wrap-up down to its suite is in.
+/// waiting on its checks, which here never finish — the same condition a
+/// reviewed wrap-up down to its suite is in.
 #[tokio::test]
 async fn a_wrap_up_with_no_review_answers_what_was_said_and_narrows_to_its_checks() {
     let spill = tempfile::tempdir().unwrap();
@@ -19700,7 +19906,7 @@ async fn a_wrap_up_with_no_review_answers_what_was_said_and_narrows_to_its_check
     let fixture = grilling_unreviewed(
         spill,
         &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
-        &gh_about(CHECKS_UNANSWERABLE, THREE_COMMENTS, ""),
+        &gh_about(STILL_RUNNING, THREE_COMMENTS, ""),
     )
     .await;
 
@@ -19733,7 +19939,7 @@ async fn a_wrap_up_with_no_review_answers_what_was_said_and_narrows_to_its_check
     );
     assert!(
         !checks_settled(&fixture).await,
-        "and the checks are the one thing left, which nothing can even ask about",
+        "and the checks are the one thing left, which have not finished",
     );
 }
 

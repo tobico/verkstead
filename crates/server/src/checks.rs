@@ -68,10 +68,22 @@
 //! after that push is red in front of a free Worktree, and the flow below is
 //! the flow it meets.
 //!
+//! **The same poll reads whether the pull request merges at all.** GitHub says
+//! it in the answer the rollup comes back in, so it costs no second call — and
+//! a branch its base has moved under conflicts however green its suite is. Three
+//! words again, and three different things: *MERGEABLE* settles one of the
+//! things wrap-up waits on, *CONFLICTING* puts it back to waiting, and *UNKNOWN*
+//! — GitHub still working it out, which is most of the first moments after a
+//! push — does neither. So a conflicted pull request holds its Conversation in
+//! Wrapping, which is also what closes the race where a conflict appears just as
+//! the last suite goes green. Nothing is dispatched at one here: it waits, the
+//! way a red check with no goes left waits. See [`merging`].
+//!
 //! A `gh` that cannot answer changes nothing at all — it does not settle, it
 //! does not unsettle, and it dispatches nothing. That is the only honest reading
 //! of it: Verkstead does not know how the checks are, and neither *green* nor
-//! *red* is a thing to conclude from not knowing.
+//! *red* is a thing to conclude from not knowing. Nor whether it merges: that is
+//! the same *UNKNOWN* by another route.
 //!
 //! **And a green suite is only ever green about one commit.** GitHub answers a
 //! pull request as its own record stands, and that record runs behind the branch
@@ -95,7 +107,7 @@ use std::time::Duration;
 use verkstead_schema::Nudge;
 
 use crate::AppState;
-use crate::github::{Check, Checked};
+use crate::github::{Check, Checked, Mergeable};
 use crate::repos::git;
 use crate::store;
 use crate::wrapping::{Watched, named};
@@ -317,6 +329,14 @@ async fn once(
     // GitHub how the checks are while a wrap-up is running, and what it learned
     // would otherwise go no further than the settle below.
     remember(state, conversation_id, &suite.checks).await;
+
+    // And whether the pull request merges at all, which came back in the same
+    // answer. Before the checks are read rather than after, because it is a
+    // fact about the branch rather than about the suite: every way the reading
+    // of the checks below ends — green, red, still running, a rollup about the
+    // wrong commit — is one this has to have been said on, and a conflict is a
+    // reason to wait whatever the checks are doing.
+    merging(state, conversation_id, &watched, suite.mergeable).await;
 
     // Whether anything has ever run against this pull request, which is the one
     // thing that tells a repository with no CI from a run that has not been
@@ -828,6 +848,72 @@ async fn unsettle(state: &AppState, conversation_id: i64, watched: &Watched) {
     .await
     {
         tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "putting the checks back to waiting failed");
+    }
+}
+
+/// Write down whether GitHub can merge this pull request, and settle or unsettle
+/// the wrap-up on the strength of it.
+///
+/// Three answers and three different things, exactly as the checks are three:
+/// **MERGEABLE** settles one of the things the wrap-up waits on, **CONFLICTING**
+/// puts it back to waiting, and **UNKNOWN** does neither. GitHub says the third
+/// while it is still working the answer out, which is most of the first moments
+/// after a push — and *not yet computed* is no more a conflict than a `gh` that
+/// would not answer is a red check. So it writes nothing down either, and what
+/// stands is the last thing GitHub did say.
+///
+/// Nothing is dispatched at a conflict here. A conflicted pull request simply
+/// waits, the way a red check with no goes left does.
+async fn merging(state: &AppState, conversation_id: i64, watched: &Watched, mergeable: Mergeable) {
+    let merging = match mergeable {
+        Mergeable::Cleanly => store::Merging::Cleanly,
+        Mergeable::Conflicting => store::Merging::Conflicting,
+        Mergeable::Unknown => {
+            tracing::debug!(
+                conversation_id,
+                repo = watched.repo.name,
+                number = watched.number,
+                "GitHub has not worked out whether the pull request merges, which is \
+                 nothing to conclude",
+            );
+
+            return;
+        }
+    };
+
+    // Written down before it is acted on, for the reason the rollup is: the
+    // watching stops when the wrap-up is over and this is the one place that
+    // asks, so a reading that went no further than the settle would be one
+    // nothing could draw afterwards.
+    if let Err(error) =
+        store::record_merging(&state.pool, conversation_id, watched.repo.id, merging).await
+    {
+        tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "recording whether the pull request merges failed");
+    }
+
+    let waiting_on = store::WaitingOn::Mergeable(watched.repo.id);
+
+    let written = match merging {
+        store::Merging::Cleanly => {
+            store::settle_wrap_up(&state.pool, conversation_id, waiting_on).await
+        }
+        store::Merging::Conflicting => {
+            // Said on every poll for as long as the conflict stands, which is
+            // why it is not an `info!`: what a human reads a conflict off is the
+            // record rather than the log.
+            tracing::debug!(
+                conversation_id,
+                repo = watched.repo.name,
+                number = watched.number,
+                "the pull request conflicts with its base, so the wrap-up goes on waiting",
+            );
+
+            store::unsettle_wrap_up(&state.pool, conversation_id, waiting_on).await
+        }
+    };
+
+    if let Err(error) = written {
+        tracing::error!(error = ?error, conversation_id, repo = watched.repo.name, "recording whether the wrap-up was waiting on a conflict failed");
     }
 }
 

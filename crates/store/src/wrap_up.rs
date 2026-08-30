@@ -27,12 +27,14 @@
 //! yesterday; one that had forgotten it had already said a wrap-up was down to
 //! its checks would say it a second time on the same Timeline.
 //!
-//! What is *settled* is written down and what is outstanding is not: the checks
-//! and the comments are asked of GitHub on every poll, so a red suite needs no
-//! memory. The row is deleted again the moment one of them stops being true —
-//! see [`unsettle_wrap_up`] — which is what makes a commit pushed to the pull
-//! request put its checks back to waiting rather than leaving yesterday's green
-//! standing, and a comment landing after a quiet spell something to deal with.
+//! What is *settled* is written down and what is outstanding is not: the checks,
+//! the comments and whether the branch merges are asked of GitHub on every poll,
+//! so a red suite needs no memory. The row is deleted again the moment one of
+//! them stops being true — see [`unsettle_wrap_up`] — which is what makes a
+//! commit pushed to the pull request put its checks back to waiting rather than
+//! leaving yesterday's green standing, a comment landing after a quiet spell
+//! something to deal with, and a base moving under the branch a conflict to
+//! resolve.
 
 use anyhow::{Context, Result, bail};
 use sqlx::SqlitePool;
@@ -41,14 +43,16 @@ use super::conversations::{Lifecycle, moved};
 
 /// One of the things a Conversation has to have settled before wrap-up is over.
 ///
-/// Three kinds of thing and nothing else, though not three settlements: the
-/// checks and what has been said are one each per pull request, and a
-/// Conversation ends on one pull request per repository it was worked in, so a
-/// wrap-up with a companion is waiting on five things rather than three. What is
-/// *not* here is the merge: stages stack on unmerged predecessors, so a
-/// Conversation that stayed in Wrapping until its pull request landed would hold
-/// up every stage behind it — and merging is the human act this pipeline is
-/// built around rather than a step in it.
+/// Four kinds of thing and nothing else, though not four settlements: the
+/// checks, what has been said and whether the branch merges are one each per
+/// pull request, and a Conversation ends on one pull request per repository it
+/// was worked in, so a wrap-up with a companion is waiting on seven things
+/// rather than four. What is *not* here is the merge itself: stages stack on
+/// unmerged predecessors, so a Conversation that stayed in Wrapping until its
+/// pull request landed would hold up every stage behind it — and merging is the
+/// human act this pipeline is built around rather than a step in it. *Can be
+/// merged* and *has been merged* are different facts, and only the first is
+/// something Verkstead waits for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitingOn {
     /// The checks are green on the pull request opened in this Repo.
@@ -87,6 +91,20 @@ pub enum WaitingOn {
     /// where a quiet companion stood for a busy one, and the pull request that
     /// went quiet is the one that has nothing outstanding on it.
     Comments(i64),
+
+    /// GitHub can merge the pull request opened in this Repo into its base.
+    ///
+    /// Like the checks in every way that matters: per pull request, because a
+    /// conflict is a fact about one branch and its base; settled by GitHub
+    /// saying so and unsettled by GitHub saying otherwise, because a base that
+    /// moves under a branch puts a pull request in conflict long after anybody
+    /// touched it.
+    ///
+    /// What it is here for is Done. A Conversation that finished over a
+    /// conflicted pull request would be one Verkstead had called done and
+    /// nobody could land — and waiting on it is also what closes the race where
+    /// a conflict appears just as the last suite goes green.
+    Mergeable(i64),
 }
 
 impl WaitingOn {
@@ -97,6 +115,7 @@ impl WaitingOn {
             Self::Checks(_) => "checks",
             Self::Review => "review",
             Self::Comments(_) => "comments",
+            Self::Mergeable(_) => "mergeable",
         }
     }
 
@@ -108,7 +127,7 @@ impl WaitingOn {
     /// request the Conversation ended on.
     fn repo(self) -> i64 {
         match self {
-            Self::Checks(repo_id) | Self::Comments(repo_id) => repo_id,
+            Self::Checks(repo_id) | Self::Comments(repo_id) | Self::Mergeable(repo_id) => repo_id,
             Self::Review => NO_PULL_REQUEST,
         }
     }
@@ -121,6 +140,7 @@ impl WaitingOn {
             "checks" => Self::Checks(repo_id),
             "review" => Self::Review,
             "comments" => Self::Comments(repo_id),
+            "mergeable" => Self::Mergeable(repo_id),
             other => bail!("a wrap-up is waiting on the unknown thing {other:?}"),
         })
     }
@@ -358,9 +378,9 @@ pub async fn wrap_up_settled(pool: &SqlitePool, conversation_id: i64) -> Result<
         .collect()
 }
 
-/// Whether a wrap-up has narrowed to its checks: the review answered and the
-/// comments dealt with, the checks alone left outstanding, and the Conversation
-/// still Wrapping.
+/// Whether a wrap-up has narrowed to its checks: the review answered, the
+/// comments dealt with, every pull request merging, the checks alone left
+/// outstanding, and the Conversation still Wrapping.
 ///
 /// Half of the condition the human reads as **Waiting on checks**. The other
 /// half is that nothing is running in the Worktree, which is a fact about a
@@ -424,14 +444,25 @@ async fn narrowed(tx: &mut sqlx::SqliteConnection, conversation_id: i64) -> Resu
     // wrap-up having got down to the one thing nothing here can hurry, which is
     // why it is worth saying out loud rather than leaving as plain Wrapping.
     //
-    // Read off the same two facts [`finish_wrap_up`] reads, and asked the same
-    // way: the review once for the whole of the work, and the comments once per
-    // pull request the Conversation ended on. One suite outstanding is enough —
-    // a wrap-up down to a companion's red checks is as narrowed as one down to
-    // its own, and both are waiting on the same thing.
+    // Read off the same facts [`finish_wrap_up`] reads, and asked the same way:
+    // the review once for the whole of the work, and the comments and the merge
+    // once per pull request the Conversation ended on. One suite outstanding is
+    // enough — a wrap-up down to a companion's red checks is as narrowed as one
+    // down to its own, and both are waiting on the same thing.
+    //
+    // The merge is one of the things that has to have settled, rather than
+    // something to narrow to: a wrap-up whose pull request conflicts is not
+    // waiting on GitHub to finish anything, and saying it was waiting on its
+    // checks would send the human off to watch a suite that was never the
+    // problem.
     let everything_else = WAITED_ON
         .into_iter()
-        .chain(opened.iter().map(|repo_id| WaitingOn::Comments(*repo_id)))
+        .chain(opened.iter().flat_map(|repo_id| {
+            [
+                WaitingOn::Comments(*repo_id),
+                WaitingOn::Mergeable(*repo_id),
+            ]
+        }))
         .all(|one| settled.contains(&one));
 
     let a_suite_outstanding = opened
@@ -873,13 +904,14 @@ pub async fn forget_every_addressed_comment(pool: &SqlitePool, conversation_id: 
 /// the workbench to press anything, which is the whole of what running unattended
 /// means. Any one of [`WAITED_ON`] still outstanding leaves it where it is.
 ///
-/// And every pull request's checks and comments beside it, which is the part
-/// that is read off the record rather than written out: a Conversation ends on
-/// one pull request per repository it was worked in, each with a suite of its
-/// own and a conversation of its own, and one still red or one with something
-/// said on it that nobody has been sent to answer is a wrap-up still going. Read
-/// inside the transaction with the settlements, so that a companion's pull
-/// request recorded while this was deciding is one the decision waits for.
+/// And every pull request's checks, comments and merge beside it, which is the
+/// part that is read off the record rather than written out: a Conversation ends
+/// on one pull request per repository it was worked in, each with a suite of its
+/// own, a conversation of its own and a base of its own to merge into, and one
+/// still red, one with something said on it that nobody has been sent to answer,
+/// or one GitHub cannot merge is a wrap-up still going. Read inside the
+/// transaction with the settlements, so that a companion's pull request recorded
+/// while this was deciding is one the decision waits for.
 ///
 /// One transaction, as every move is, and the settlements are read inside it so
 /// that the answer still holds when the update acts on it — which is what makes
@@ -928,11 +960,15 @@ pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<F
                 format!("reading which pull requests Conversation {conversation_id} is on")
             })?;
 
-    let waiting_on = WAITED_ON.into_iter().chain(
-        opened
-            .into_iter()
-            .flat_map(|(repo_id,)| [WaitingOn::Checks(repo_id), WaitingOn::Comments(repo_id)]),
-    );
+    let waiting_on = WAITED_ON
+        .into_iter()
+        .chain(opened.into_iter().flat_map(|(repo_id,)| {
+            [
+                WaitingOn::Checks(repo_id),
+                WaitingOn::Comments(repo_id),
+                WaitingOn::Mergeable(repo_id),
+            ]
+        }));
 
     if !waiting_on.into_iter().all(|one| settled.contains(&one)) {
         return Ok(Finished::StillWaiting);

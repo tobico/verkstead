@@ -698,8 +698,15 @@ pub(crate) enum Checked {
 /// was a green suite belonging to the head before them. A green rollup is only
 /// evidence about the commit it names, so the commit it names comes back too —
 /// see [`crate::checks`], where it is compared with what origin is holding.
+///
+/// **And whether it can be merged at all**, which rides this call rather than a
+/// poll of its own: a pull request whose base has moved under it conflicts, and
+/// a conflict is as much a reason for a wrap-up to wait as a red check is.
+/// GitHub says it in the same answer for no second call — see [`Mergeable`], and
+/// [`crate::checks`], where each of the three words it says it in is its own
+/// thing to do.
 pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Suite, Trouble> {
-    /// What `--json statusCheckRollup,headRefOid` comes back as.
+    /// What `--json statusCheckRollup,headRefOid,mergeable` comes back as.
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Rollup {
@@ -707,6 +714,8 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Suite, Trouble
         head_ref_oid: String,
         #[serde(default)]
         status_check_rollup: Vec<Reported>,
+        #[serde(default)]
+        mergeable: String,
     }
 
     let said = gh.ask(
@@ -716,7 +725,7 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Suite, Trouble
             "view",
             &number.to_string(),
             "--json",
-            "statusCheckRollup,headRefOid",
+            "statusCheckRollup,headRefOid,mergeable",
         ],
     )?;
 
@@ -726,7 +735,46 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Suite, Trouble
     Ok(Suite {
         head: rollup.head_ref_oid,
         checks: read_checks(rollup.status_check_rollup),
+        mergeable: Mergeable::read(&rollup.mergeable),
     })
+}
+
+/// Whether GitHub can merge the pull request into its base as it stands.
+///
+/// Three answers, and each of them is its own thing to a wrap-up: a conflicting
+/// pull request is one nothing can land, and one GitHub has not made its mind up
+/// about yet is neither that nor a clean merge — see [`crate::checks`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mergeable {
+    /// It merges: `MERGEABLE`.
+    Cleanly,
+
+    /// It does not: `CONFLICTING`, which is the branch and its base having
+    /// changed the same lines since they parted.
+    Conflicting,
+
+    /// GitHub has not worked it out — `UNKNOWN`, which is what it answers while
+    /// it is still computing, and what an answer carrying no `mergeable` at all
+    /// comes to.
+    ///
+    /// A word this does not know is read as *not known* rather than as a
+    /// conflict, which is the way round that matters: not knowing changes
+    /// nothing at all, and a conflict holds a wrap-up up. The opposite of
+    /// [`read_check`], where green is the reading that has to be earned — the
+    /// two are different questions, and the honest answer to each is the one
+    /// that concludes nothing from a word nobody here has seen before.
+    Unknown,
+}
+
+impl Mergeable {
+    /// The one GitHub's word names.
+    fn read(said: &str) -> Self {
+        match said.to_ascii_uppercase().as_str() {
+            "MERGEABLE" => Self::Cleanly,
+            "CONFLICTING" => Self::Conflicting,
+            _ => Self::Unknown,
+        }
+    }
 }
 
 /// What GitHub says about a pull request's checks, and which commit it is
@@ -748,6 +796,15 @@ pub(crate) struct Suite {
     /// Every check GitHub reported against that commit, which is empty for a
     /// commit nothing has run against.
     pub(crate) checks: Vec<Check>,
+
+    /// And whether GitHub can merge the pull request into its base, which is a
+    /// fact about the branch rather than about the commit above: a base that has
+    /// moved under a branch nobody has touched is what puts a pull request in
+    /// conflict.
+    ///
+    /// Here rather than in an answer of its own because it rides the same call —
+    /// see [`checks`].
+    pub(crate) mergeable: Mergeable,
 }
 
 /// One entry of `statusCheckRollup`, which is one of two different things.
@@ -1540,6 +1597,48 @@ mod tests {
         assert!(checks(&gh, dir.path(), 41).unwrap().checks.is_empty());
     }
 
+    /// Whether the pull request merges comes back in the same answer the checks
+    /// do, in the three words GitHub says it in — and each of them reads as
+    /// itself.
+    #[test]
+    fn whether_the_pull_request_merges_is_read_off_the_answer_the_checks_are_in() {
+        for (said, read) in [
+            ("MERGEABLE", Mergeable::Cleanly),
+            ("CONFLICTING", Mergeable::Conflicting),
+            ("UNKNOWN", Mergeable::Unknown),
+        ] {
+            let (dir, gh) = stub(
+                &format!(r#"{{"mergeable":"{said}","statusCheckRollup":[]}}"#),
+                "",
+            );
+
+            assert_eq!(checks(&gh, dir.path(), 41).unwrap().mergeable, read);
+        }
+    }
+
+    /// And a word this does not know is not knowing rather than a conflict —
+    /// an answer with no `mergeable` on it at all included.
+    ///
+    /// The way round that matters: not knowing changes nothing, where a
+    /// conflict holds a wrap-up up. A GitHub that invented a fourth word would
+    /// otherwise stop every wrap-up there is.
+    #[test]
+    fn a_word_about_merging_this_does_not_know_is_not_a_conflict() {
+        for said in [
+            r#"{"mergeable":"MERGEABLE_BUT_DIRTY","statusCheckRollup":[]}"#,
+            r#"{"mergeable":"","statusCheckRollup":[]}"#,
+            r#"{"statusCheckRollup":[]}"#,
+        ] {
+            let (dir, gh) = stub(said, "");
+
+            assert_eq!(
+                checks(&gh, dir.path(), 41).unwrap().mergeable,
+                Mergeable::Unknown,
+                "{said}",
+            );
+        }
+    }
+
     /// And the reason the checks are asked for this way at all: a `gh` that
     /// cannot answer has to arrive as [`Trouble`], because *Verkstead could not
     /// ask* is a third thing beside green and red.
@@ -1725,7 +1824,7 @@ mod tests {
                    case "$5" in
                      number,title,url)
                        printf '{"number":41,"title":"%s","url":"u"}' "$token" ;;
-                     statusCheckRollup,headRefOid)
+                     statusCheckRollup,headRefOid,mergeable)
                        printf '{"statusCheckRollup":[{"name":"%s","status":"COMPLETED","conclusion":"SUCCESS"}]}' "$token" ;;
                      comments,reviews)
                        printf '{"comments":[{"id":"IC_1","url":"u","author":{"login":"%s"},"body":"b","createdAt":"t"}],"reviews":[]}' "$token" ;;

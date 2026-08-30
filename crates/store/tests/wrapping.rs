@@ -16,10 +16,11 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Lifecycle, PullRequest, Rebuilding, Rollup, Wrapping, check_rollup, close_conversation,
-    implement_again, load_conversation, open_database, pick_direction, pull_request,
-    pull_request_repo, record_another_pull_request, record_check_rollup, record_pull_request,
-    register_repo, save_brief, start_conversation, start_grilling, timeline,
+    Event, Lifecycle, Merging, PullRequest, Rebuilding, Rollup, Wrapping, check_rollup,
+    close_conversation, implement_again, load_conversation, merging, open_database, pick_direction,
+    pull_request, pull_request_repo, record_another_pull_request, record_check_rollup,
+    record_merging, record_pull_request, register_repo, save_brief, start_conversation,
+    start_grilling, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -577,4 +578,88 @@ async fn how_the_checks_are_outlives_the_server_that_asked() {
     let pool = open_database(&database).await.unwrap();
 
     assert_eq!(check_rollup(&pool, id).await.unwrap(), Some(Rollup::Passed));
+}
+
+/// And whether it merges, which is the other reading of GitHub written down
+/// here — kept per pull request rather than per Conversation, because a conflict
+/// is a fact about one branch and its base.
+///
+/// A Conversation with a read-write companion has one clean and one conflicted
+/// as easily as two of either: the base moved in one repository and not in the
+/// other. So what these ask is that the two are told apart, and that the last
+/// word written is the word read back.
+#[tokio::test]
+async fn whether_each_pull_request_merges_is_written_down_and_read_back() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    let beside = companion(&pool).await;
+
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+    record_another_pull_request(&pool, id, beside, &beside_it())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        merging(&pool, id, own).await.unwrap(),
+        None,
+        "nothing has asked GitHub yet, which is not the same as merging cleanly",
+    );
+
+    record_merging(&pool, id, own, Merging::Conflicting)
+        .await
+        .unwrap();
+    record_merging(&pool, id, beside, Merging::Cleanly)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        merging(&pool, id, own).await.unwrap(),
+        Some(Merging::Conflicting),
+    );
+    assert_eq!(
+        merging(&pool, id, beside).await.unwrap(),
+        Some(Merging::Cleanly),
+        "the companion's own base has not moved, and its pull request says so",
+    );
+
+    // And the conflict resolved: written over rather than added to, a conflict
+    // that has been dealt with not being a conflict.
+    record_merging(&pool, id, own, Merging::Cleanly)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        merging(&pool, id, own).await.unwrap(),
+        Some(Merging::Cleanly)
+    );
+}
+
+/// And it survives a restart, for the reason the rollup beside it does: the
+/// watching stops when the wrap-up is over, and what is drawn on a Done
+/// Conversation afterwards is the last thing anybody asked GitHub.
+#[tokio::test]
+async fn whether_a_pull_request_merges_outlives_the_server_that_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("verkstead.db");
+
+    let pool = open_database(&database).await.unwrap();
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+    record_merging(&pool, id, own, Merging::Conflicting)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let pool = open_database(&database).await.unwrap();
+
+    assert_eq!(
+        merging(&pool, id, own).await.unwrap(),
+        Some(Merging::Conflicting),
+    );
 }

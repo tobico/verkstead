@@ -116,6 +116,48 @@ impl Rollup {
     }
 }
 
+/// Whether a pull request merges into its base, as the last look at GitHub found
+/// it.
+///
+/// Two words rather than GitHub's three, and the missing one is the point: a
+/// GitHub that has not worked the answer out yet — which is what it says for a
+/// while after every push — is *not known*, and not knowing is the absence of a
+/// row here rather than a word in it. The same spirit the rollup beside it is
+/// written in, and the same one the watcher reads a `gh` that will not answer
+/// in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Merging {
+    /// GitHub says it merges.
+    Cleanly,
+
+    /// GitHub says it does not: the branch and its base have both changed the
+    /// same lines since they parted, and nothing lands until somebody resolves
+    /// it.
+    Conflicting,
+}
+
+impl Merging {
+    /// The word the column holds. Lowercase and spelled out, so a database
+    /// opened by hand says something.
+    fn stored(self) -> &'static str {
+        match self {
+            Self::Cleanly => "cleanly",
+            Self::Conflicting => "conflicting",
+        }
+    }
+
+    /// The one a stored word names. An unknown word is a database written by a
+    /// Verkstead this one does not understand, exactly as an unknown lifecycle
+    /// state is.
+    fn read(word: &str) -> Result<Self> {
+        Ok(match word {
+            "cleanly" => Self::Cleanly,
+            "conflicting" => Self::Conflicting,
+            other => bail!("a pull request merges the unknown {other:?}"),
+        })
+    }
+}
+
 /// What became of recording one.
 ///
 /// The mirror of [`super::Implementing`] one state along, and refused for the
@@ -191,6 +233,33 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the pull request checks table")?;
+
+    // And whether GitHub can merge it, which is the other thing about a pull
+    // request that is written down here and moves — asked of the same `gh` call
+    // the rollup above comes from.
+    //
+    // A table of its own rather than a column beside the rollup, because the two
+    // are not about the same thing: the rollup predates a Conversation ending on
+    // more than one pull request and is keyed by the Conversation alone, and
+    // whether a branch merges is a fact about one pull request. A Conversation
+    // with a read-write companion has one clean and one conflicted as easily as
+    // two of either.
+    //
+    // Written down for the rollup's reason as well: the watching stops when the
+    // wrap-up is over, and what a card draws about a Done Conversation is the
+    // last thing anybody asked GitHub.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS pull_request_merges (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             merging         TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the pull request merges table")?;
 
     Ok(())
 }
@@ -631,4 +700,74 @@ pub async fn check_rollup(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
             .with_context(|| format!("reading how Conversation {conversation_id}'s checks are"))?;
 
     row.map(|(word,)| Rollup::read(&word)).transpose()
+}
+
+/// Write down whether the pull request opened in `repo_id` merges into its base.
+///
+/// Per pull request rather than per Conversation, unlike the rollup above: a
+/// Conversation ends on one pull request per repository it was worked in, and
+/// whether a branch conflicts with its base is a fact about the branch. One of
+/// them conflicting while another merges is the ordinary shape of it, a base
+/// having moved in one repository and not in the other.
+///
+/// Written over rather than appended to: this is how the pull request merges
+/// now, and a conflict that has been resolved is not a conflict.
+///
+/// Only ever the two definite readings. A GitHub that has not worked the answer
+/// out is not written down at all, so what stands is the last thing it did say —
+/// see [`Merging`], and [`crate::checks`] in the server, where not knowing is
+/// what changes nothing.
+pub async fn record_merging(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+    merging: Merging,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO pull_request_merges (conversation_id, repo_id, merging, at)
+         VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (conversation_id, repo_id)
+         DO UPDATE SET merging = excluded.merging, at = excluded.at",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .bind(merging.stored())
+    .execute(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "recording whether the pull request Conversation {conversation_id} opened in \
+             Repo {repo_id} merges"
+        )
+    })?;
+
+    Ok(())
+}
+
+/// And how it merged the last time anything asked, or `None` where nothing has.
+///
+/// It may be stale, and on a Conversation nothing is watching any more it will
+/// be — the rollup's trade exactly: the watching stops when the wrap-up is over,
+/// and what is read after that is the last thing anybody asked GitHub.
+pub async fn merging(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+) -> Result<Option<Merging>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT merging FROM pull_request_merges
+         WHERE conversation_id = ? AND repo_id = ?",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "reading whether the pull request Conversation {conversation_id} opened in \
+             Repo {repo_id} merges"
+        )
+    })?;
+
+    row.map(|(word,)| Merging::read(&word)).transpose()
 }
