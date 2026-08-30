@@ -3221,10 +3221,13 @@ async fn save_settings(
 
     let saved = tokio::task::spawn_blocking(move || {
         // What the file already holds, carried through untouched. The page has
-        // no Sandbox Configuration on it yet, and a save that wrote the field it
-        // does not know about as empty would take a hand-written bind away every
-        // time somebody corrected their own email address.
-        let sandbox_binds = settings.config().sandbox_binds().to_vec();
+        // no Sandbox Configuration and no Watched Paths on it yet, and a save
+        // that wrote a field it does not know about as empty would take a
+        // hand-written bind — or the boundary itself — away every time somebody
+        // corrected their own email address.
+        let held = settings.config();
+        let sandbox_binds = held.sandbox_binds().to_vec();
+        let watched_paths = held.watched_paths().to_vec();
 
         settings.save_config(&Config::of(
             GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
@@ -3239,6 +3242,7 @@ async fn save_settings(
             // field is nowhere, which is how it is taken away again.
             Some(edit.share_viewer_url),
             sandbox_binds,
+            watched_paths,
         ))?;
 
         let verifying = match &edit.github_token {

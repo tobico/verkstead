@@ -261,14 +261,19 @@ pub struct Config {
     ///
     /// This is a security boundary and not a convenience: nothing outside these
     /// directories is ever touched, and a Repo is registered only from within
-    /// one. There is no default and no scan — the server refuses to start
-    /// without at least one, because guessing at what a machine's owner meant to
-    /// expose is not a guess worth making.
+    /// one. There is no default and no scan — guessing at what a machine's owner
+    /// meant to expose is not a guess worth making.
+    ///
+    /// Nor is there a requirement. The workbench settings say Watched Paths too,
+    /// and the boundary is the union of the two — see [`WatchedPaths`] — so a
+    /// standalone install comes up with none of these, admits nothing at all,
+    /// and is pointed at its first directory from its own settings page. A
+    /// service unit goes on saying them here, where a directory that is not
+    /// there still refuses to start.
     #[arg(
         long = "watched-path",
         env = "VERKSTEAD_WATCHED_PATHS",
         value_delimiter = ':',
-        required = true,
         value_name = "DIR"
     )]
     pub watched_paths: Vec<PathBuf>,
@@ -462,9 +467,11 @@ fn routed(
     sessions: sessions::Sessions,
     github: Gh,
 ) -> Router {
+    let settings = settings::Settings::in_data_dir(&data_dir);
+
     let state = AppState {
         pool,
-        settings: settings::Settings::in_data_dir(&data_dir),
+        settings: settings.clone(),
         nudges: nudge::Nudges::new(),
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
@@ -472,7 +479,12 @@ fn routed(
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
         updates,
-        watched,
+
+        // The boundary the installation drew, widened by whatever the human has
+        // put in `config.yaml` — read at each admission rather than here, so a
+        // directory added on the settings page admits from the next request on.
+        watched: watched.reading(settings),
+
         github,
         data_dir,
     };
@@ -552,10 +564,12 @@ pub fn router_with_viewer<V: Embed + 'static>(pool: SqlitePool) -> Router {
 
 /// Open the database and serve until the process is stopped.
 ///
-/// The Watched Paths are resolved before anything else: a server that cannot say
-/// what it is permitted to touch has no business coming up, and a directory that
-/// is not there is a misconfiguration to report at startup rather than one to
-/// discover as a refusal weeks later.
+/// The installation's Watched Paths are resolved before anything else: a
+/// directory that is not there is a misconfiguration to report at startup,
+/// where it can be fixed, rather than one to discover as a refusal weeks later.
+/// Being given none of them is not a misconfiguration — the settings file says
+/// Watched Paths too, and a standalone install starts with nothing configured
+/// anywhere and admits nothing until it is.
 pub async fn run(config: Config) -> Result<()> {
     let watched = WatchedPaths::resolve(&config.watched_paths)?;
 
@@ -636,6 +650,7 @@ pub async fn run(config: Config) -> Result<()> {
         data_dir = %data_dir.display(),
         update_check = config.releases().is_some(),
         watched = ?watched.paths(),
+        settings_watched = ?settings.config().watched_paths(),
         home = %home.path.display(),
         sandbox_binds = binds.count(),
         build_cache = ?cache.dir(),

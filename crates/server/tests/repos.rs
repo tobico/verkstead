@@ -42,6 +42,34 @@ async fn app_and_pool_watching(watched: &Path) -> (tempfile::TempDir, SqlitePool
     (dir, pool.clone(), router_watching(pool, watched, data_dir))
 }
 
+/// A router the installation gave nothing to watch, plus the Data Directory its
+/// `config.yaml` goes in — which is what a standalone install is before anybody
+/// has been to its settings page.
+async fn app_watching_what_the_settings_say() -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let data_dir = dir.path().to_owned();
+
+    (dir, router_watching(pool, WatchedPaths::none(), data_dir))
+}
+
+/// Write `config.yaml` in `data_dir` saying `paths` are the Watched Paths.
+///
+/// The file rather than the type that writes it: what a hand-edit and a save
+/// both leave behind is this text, and a test that went through the type would
+/// not be reading the key.
+fn watch_in_the_settings(data_dir: &Path, paths: &[&Path]) {
+    let mut yaml = String::from("watched_paths:\n");
+    for path in paths {
+        yaml.push_str(&format!("  - {}\n", path.display()));
+    }
+
+    std::fs::write(data_dir.join("config.yaml"), yaml).unwrap();
+}
+
 /// A git repository at `path`, with one commit on `main` so it has a branch to
 /// call its default.
 fn repository(path: PathBuf) -> PathBuf {
@@ -287,9 +315,9 @@ async fn a_repo_already_registered_is_refused_however_its_path_is_spelled() {
     assert_eq!(listed(&app).await.len(), 1);
 }
 
-/// The closed state the server refuses to start in, asked of the router
-/// directly: with no Watched Path there is nowhere a Repo could be registered
-/// from, and every path is outside.
+/// The closed state a standalone install comes up in: with no Watched Path said
+/// at the installation and none said in the settings, there is nowhere a Repo
+/// could be registered from, and every path is outside.
 #[tokio::test]
 async fn a_server_watching_nothing_registers_nothing() {
     let dir = tempfile::tempdir().unwrap();
@@ -301,6 +329,64 @@ async fn a_server_watching_nothing_registers_nothing() {
     let repo = repository(dir.path().join("verkstead"));
 
     assert_eq!(register(&app, &repo).await, Registered::OutsideWatchedPaths);
+}
+
+/// The settings side of the boundary, and the whole of what makes a standalone
+/// install possible: the server was given nothing to watch, the human writes a
+/// directory into `config.yaml`, and the next request admits from it — no
+/// restart anywhere.
+#[tokio::test]
+async fn a_watched_path_written_into_the_settings_admits_from_the_next_request() {
+    let (dir, app) = app_watching_what_the_settings_say().await;
+    let src = tempfile::tempdir().unwrap();
+    let repo = repository(src.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::OutsideWatchedPaths);
+
+    watch_in_the_settings(dir.path(), &[src.path()]);
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    assert_eq!(listed(&app).await.len(), 1);
+}
+
+/// And nothing in the file is ever fatal: an entry naming a directory that is
+/// not there covers nothing, and the one written beside it goes on covering
+/// what it covers.
+#[tokio::test]
+async fn a_settings_watched_path_that_is_not_there_costs_the_others_nothing() {
+    let (dir, app) = app_watching_what_the_settings_say().await;
+    let src = tempfile::tempdir().unwrap();
+    let repo = repository(src.path().join("verkstead"));
+
+    watch_in_the_settings(dir.path(), &[&src.path().join("never-made"), src.path()]);
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+}
+
+/// Taking one out again is free. Admission is asked at registration and never
+/// again, so a Repo already on the list goes on being one — it only stops being
+/// somewhere a *new* Repo can be registered from.
+#[tokio::test]
+async fn taking_a_watched_path_out_of_the_settings_leaves_what_is_registered() {
+    let (dir, app) = app_watching_what_the_settings_say().await;
+    let src = tempfile::tempdir().unwrap();
+    let repo = repository(src.path().join("verkstead"));
+
+    watch_in_the_settings(dir.path(), &[src.path()]);
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+
+    watch_in_the_settings(dir.path(), &[]);
+
+    let repos = listed(&app).await;
+    assert_eq!(repos.len(), 1);
+    assert_eq!(branches(&app, repos[0].id).await, ["main"]);
+
+    // And the boundary is closed behind it: the next one is outside.
+    let another = repository(src.path().join("askance"));
+    assert_eq!(
+        register(&app, &another).await,
+        Registered::OutsideWatchedPaths
+    );
 }
 
 /// What a Conversation branches from: the remote's idea of the default branch

@@ -429,6 +429,29 @@ async fn a_hand_edit_to_either_file_is_what_the_next_read_says() {
     assert_eq!(settings.git_author.email, "hand@tobico.net");
 }
 
+/// The page has no Paths on it yet, and a save that wrote the keys it does not
+/// know about as empty would take the boundary away every time somebody
+/// corrected their own email address.
+#[tokio::test]
+async fn saving_the_author_leaves_the_paths_the_file_holds() {
+    let (dir, app) = app().await;
+
+    hand_edit(
+        dir.path(),
+        "config.yaml",
+        "sandbox_binds:\n  - /var/cache/verkstead-node\nwatched_paths:\n  - /home/ada/src\n",
+    );
+
+    save_author(&app, "Tobias Cohen", "tobi@tobico.net").await;
+
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+
+    assert!(
+        written.contains("/var/cache/verkstead-node") && written.contains("/home/ada/src"),
+        "the save should have carried both lists through, got:\n{written}"
+    );
+}
+
 fn hand_edit(data_dir: &Path, name: &str, text: &str) {
     std::fs::write(data_dir.join(name), text).unwrap();
 }
