@@ -11239,10 +11239,21 @@ async fn a_backlog_entry_with_no_task_file_stops_the_run() {
 /// what it costs is the reading behind it, twice a second for as long as the
 /// wait lasts.
 fn out_of_window(sentence: &str) -> String {
+    out_of_window_marked("'✻' '✽' '✳' '✢'", sentence)
+}
+
+/// And the same for a backend that puts something else in front of its own
+/// sentence: `marks` is the shell word list the stub draws the banner with, one
+/// repaint apiece and the whole list twice over.
+///
+/// A list of one is a display that redraws the *same* string, which is the other
+/// half of what the latch is for: claude's spinner turns, and a backend that
+/// draws a still mark repeats itself exactly. Neither is a second wait.
+fn out_of_window_marked(marks: &str, sentence: &str) -> String {
     format!(
         r#"
         case "$1" in
-        claude-grilling-5)
+        claude-grilling-5|gpt-5-codex-grilling)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             mkdir -p .tasks
             printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
@@ -11267,11 +11278,12 @@ fn out_of_window(sentence: &str) -> String {
                 if [ "$next" = 01-count.md ]; then
                     # The wait itself, in miniature: the task lands, the account
                     # runs out before the next one, and the agent holds with its
-                    # banner up. Redrawn eight times over a second — more than
-                    # the half a second Verkstead writes down what a session
-                    # printed on, so the banner is looked at more than once —
-                    # with claude's own spinner turning in front of it, which is
-                    # what makes each repaint a different line.
+                    # banner up. Redrawn twice over the caller's marks — more
+                    # than the half a second Verkstead writes down what a
+                    # session printed on, so the banner is looked at more than
+                    # once — with whatever that backend draws in front of it,
+                    # which is what makes each repaint a different line where
+                    # the mark turns and the same line where it does not.
                     # The glyphs themselves rather than `\xe2\x9c\xbb` and its
                     # kind. `\xNN` is bash's extension to `printf` and not
                     # POSIX: a `/bin/sh` that is dash — which is what Debian and
@@ -11283,7 +11295,7 @@ fn out_of_window(sentence: &str) -> String {
                     # is UTF-8 and the shell passes the bytes through, which
                     # needs no escape at either end.
                     for pass in 1 2; do
-                        for turning in '✻' '✽' '✳' '✢'
+                        for turning in {marks}
                         do
                             printf "$turning {sentence}\r\n"
                             sleep 0.125
@@ -11442,6 +11454,156 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
         git(&worktree, &["status", "--porcelain"]),
         "",
         "the Worktree is exactly as the session left it",
+    );
+}
+
+/// The wording is the backend's, so a Codex session is stopped by codex's own
+/// sentence — and by that one alone.
+///
+/// One phrase per backend, matched off the Capture exactly as claude's is: the
+/// stop is the ordinary stop, naming the Profile whose account ran out and
+/// keeping the line the session drew. What follows codex's phrase is the plan's
+/// — an upgrade, credits to buy, an admin to ask — so the sentence here carries
+/// decoration the matcher has never seen and the stop lands all the same.
+///
+/// The mark in front is still rather than turning, which is the other half of
+/// what the latch is for: eight repaints of the *same* string are still one
+/// wait.
+#[tokio::test]
+async fn a_codex_account_out_of_window_stops_the_run_on_codexs_own_sentence() {
+    let fixture = grilling_spilling_on_codex(
+        tempfile::tempdir().unwrap(),
+        &out_of_window_marked(
+            "'▌'",
+            "You've hit your usage limit. Upgrade to Plus to continue using Codex \
+             (https://chatgpt.com/explore/plus)",
+        ),
+        PULL_REQUEST,
+    )
+    .await;
+
+    running_out(&fixture).await;
+
+    let notice = fixture.stopped().await;
+
+    assert!(
+        notice
+            .html
+            .contains("the account <strong>codex</strong> was being spent is out of window"),
+        "naming the Profile whose account ran out, which is the Codex one every \
+         role of this run is on: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice.html.contains("▌ You've hit your usage limit."),
+        "with codex's own sentence kept as it was drawn, the plan's decoration and \
+         all: {:?}",
+        notice.html,
+    );
+
+    let stop = fixture.stop_on_the_record().await;
+
+    assert_eq!(
+        stop.decision,
+        Decision::Verkstead,
+        "Verkstead pulled the brake, exactly as it does on the other backend",
+    );
+    assert_eq!(
+        stop.resets, None,
+        "and codex names no reset, so the stop carries none: what the sentence \
+         does not say, nothing here invents",
+    );
+
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(notice.id),
+        "a run that has stopped carries *blocked on you*, whatever backend it was on",
+    );
+
+    let sessions = outputs(&fixture.view().await).len();
+
+    // Long enough for several more turns of a runner that was still turning.
+    pause(Duration::from_secs(3)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        sessions,
+        "while it is stopped the run does not advance: no next Step, no fresh session",
+    );
+    assert_eq!(
+        notices(&fixture.view().await).len(),
+        1,
+        "and the same line redrawn is the same wait, however many times it is drawn",
+    );
+    assert!(
+        outputs(&fixture.view().await)
+            .iter()
+            .all(|session| !session.running),
+        "and no session is running behind the stop",
+    );
+}
+
+/// And the other record a session leaves behind: a Codex session that says its
+/// account is spent in its own rollout and never on its display is stopped off
+/// the Transcript.
+///
+/// Both records are read, on either backend and for the same reason — a backend
+/// that says so in one and not the other would otherwise go unnoticed until the
+/// terminal happened to speak. Nothing of codex's limit line reaches the
+/// Capture here, so the Transcript is the only thing that could have stopped it.
+#[tokio::test]
+async fn a_codex_session_saying_so_only_in_its_rollout_is_stopped_off_the_transcript() {
+    let fixture = grilling_on_codex(
+        r#"
+        day=$HOME/.codex/sessions/$(date +%Y/%m/%d)
+        mkdir -p "$day"
+        log=$day/rollout-2026-08-30T17-47-02-cccc.jsonl
+
+        printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$(pwd)" > "$log"
+        printf 'reading the brief\n'
+        printf '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"m-1","content":[{"type":"Text","text":"You'"'"'ve hit your usage limit. Upgrade to Plus to continue using Codex."}]}}}\n' >> "$log"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let notice = fixture.stopped().await;
+
+    assert!(
+        notice
+            .html
+            .contains("the account <strong>codex</strong> was being spent is out of window"),
+        "the stop is the same stop, named for the same Profile: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice
+            .html
+            .contains("You've hit your usage limit. Upgrade to Plus"),
+        "carrying the sentence as the rollout held it: {:?}",
+        notice.html,
+    );
+
+    let event = fixture
+        .until(|view| output(view).map(|output| output.id))
+        .await;
+
+    assert!(
+        !fixture.capture(event).await.contains("usage limit"),
+        "and the terminal never said a word about it, so the Transcript is the \
+         only record that could have stopped this run",
+    );
+
+    assert_eq!(
+        fixture.stop_on_the_record().await.decision,
+        Decision::Verkstead,
+        "Verkstead pulled the brake",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(notice.id),
+        "and the run is blocked on the human until they press Resume",
     );
 }
 

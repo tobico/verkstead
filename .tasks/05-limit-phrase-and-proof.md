@@ -43,11 +43,32 @@ declared done without it.
 
 ## Acceptance criteria
 
-- [ ] A Codex session printing its limit line stops the run with a Notice
+- [x] A Codex session printing its limit line stops the run with a Notice
       naming the Profile, read off the Capture and off the Transcript both, and
       Claude's phrase and stop are unchanged.
-- [ ] A grilling under a Codex Profile asks by store-and-nudge, ends its turn,
-      is nudged when the Response lands, fetches its Answers and carries on
-      from them.
-- [ ] A Conversation is grilled, built and wrapped end to end under a Codex
-      Profile, and CONTEXT.md says what this stage changed.
+- [ ] **Waiting on a logged-in Codex account.** A grilling under a Codex
+      Profile asks by store-and-nudge, ends its turn, is nudged when the
+      Response lands, fetches its Answers and carries on from them.
+- [ ] **Waiting on the same.** A Conversation is grilled, built and wrapped end
+      to end under a Codex Profile. CONTEXT.md says what this stage changed,
+      which is done.
+
+## What is waiting, and what is not
+
+There is still no Codex account on the machine, and the human was asked: their
+answer was to land the stage proved against the stub and record the run as
+outstanding rather than hold the branch for a login.
+
+Half of what the two criteria above were watching for *is* settled, against
+codex 0.149.0 on a pseudo-terminal reaching the composer on a placeholder key:
+**the nudge lands in codex's composer as a send.** The line goes in as one
+burst, the carriage return 250 ms behind it, and codex's own rollout records a
+submitted `UserMessage` and a turn started — so burst detection stays off the
+launch line, which is what this task said to do if it landed. The same run
+re-confirmed the launch line as committed: no trust prompt through a path with
+dots in it, the screen inline, the rollout written where the finder looks, and
+its `session_meta` carrying the cwd.
+
+What is left needs a real model turn, so it needs the account: that a Codex
+session reads the store-and-nudge Guide, ends its turn on an ask and comes back
+for its Answers when the line arrives — and the whole run end to end behind it.

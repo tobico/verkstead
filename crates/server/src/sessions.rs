@@ -1458,10 +1458,16 @@ impl Sessions {
         // And the same output watched for the one thing a session says that is
         // about the account rather than about the work: that its window is
         // spent. The Profile is taken now because that is what the stop names,
-        // and a Profile renamed while a session runs was not the account this
-        // one is on — see [`crate::limits`].
-        let limits =
-            crate::limits::Watch::on(conversation_id, event_id, pairing.profile.name.clone());
+        // and its agent type because that is what says which sentence to read
+        // for — one per backend, as the idle signature is. A Profile renamed
+        // while a session runs was not the account this one is on — see
+        // [`crate::limits`].
+        let limits = crate::limits::Watch::on(
+            conversation_id,
+            event_id,
+            pairing.profile.name.clone(),
+            pairing.profile.agent_type(),
+        );
 
         let (stop, stopping) = oneshot::channel();
 

@@ -28,13 +28,20 @@
 //! devices are told, and there is a press to start again — instead of a session
 //! that has gone quiet for no stated reason.
 //!
-//! **Recognition is one sentence, said once.** [`EXHAUSTED`] is the whole of what
-//! is matched, because the wording is the backend's and will move: claude 2.1.234
-//! draws it as `Usage limit reached · continuing automatically at 3pm · esc to
-//! cancel`, and every part of that but the phrase itself is decoration this build
-//! has no business depending on. It is read off what the session leaves behind —
-//! the Capture of what it printed and the Transcript its backend wrote — rather
-//! than out of anything the agent is asked.
+//! **Recognition is one sentence per backend, said once.** [`exhausted_phrase`]
+//! is the whole of what is matched, because the wording is the backend's and will
+//! move: claude 2.1.234 draws it as `Usage limit reached · continuing
+//! automatically at 3pm · esc to cancel`, and codex 0.149.0 opens with `You've
+//! hit your usage limit` and decorates what follows by plan. Every part of either
+//! but the phrase itself is decoration this build has no business depending on.
+//! It is read off what the session leaves behind — the Capture of what it printed
+//! and the Transcript its backend wrote — rather than out of anything the agent
+//! is asked.
+//!
+//! One phrase apiece, kept in the one place, so a wording that moves is one edit
+//! rather than a search — the same bargain the idle signature makes, and for the
+//! same reason. Which phrase a session is read against is a fact about its
+//! Profile's agent type, which is what the Watch is told when it is made.
 //!
 //! A line that *says* it rather than one that mentions it: the phrase has to open
 //! the line, once the terminal's own decoration is off the front of it — and
@@ -58,12 +65,38 @@ use sqlx::SqlitePool;
 use crate::nudge::Nudges;
 use crate::store;
 
-/// The sentence a session prints when its account is out of window.
+/// The sentence a session of `agent_type` prints when its account is out of
+/// window.
 ///
-/// Matched without regard to case and to nothing around it. One phrase is the
-/// whole of the coupling to somebody else's display, and it is here so that a
-/// wording that moves is one edit rather than a search.
-const EXHAUSTED: &str = "usage limit reached";
+/// Matched without regard to case and to nothing around it. One phrase per
+/// backend is the whole of the coupling to somebody else's display, and they are
+/// here together so that a wording that moves is one edit rather than a search.
+///
+/// A backend whose phrase this build has never seen would take an arm of its own
+/// here; until it has one, its limit lands as the ordinary stall it would have
+/// been anyway (ADR-0011).
+fn exhausted_phrase(agent_type: store::AgentType) -> &'static str {
+    match agent_type {
+        store::AgentType::Claude => CLAUDE_EXHAUSTED,
+        store::AgentType::Codex => CODEX_EXHAUSTED,
+    }
+}
+
+/// What claude 2.1.234 opens its banner with, the rest of the line being the
+/// reset words and the key to press.
+const CLAUDE_EXHAUSTED: &str = "usage limit reached";
+
+/// And what codex 0.149.0 opens its own with.
+///
+/// The stable prefix and no more: what follows it is the plan's — an upgrade to
+/// Plus, an upgrade to Pro, credits to buy, an admin to ask — and every one of
+/// those sentences carries this one in front of it. Read off the binary rather
+/// than guessed at.
+///
+/// The apostrophe is the ASCII one codex writes, which is what keeps [`says_so`]
+/// honest about it: a line of prose quoting the phrase opens with a quotation
+/// mark, and ASCII punctuation is not decoration there.
+const CODEX_EXHAUSTED: &str = "you've hit your usage limit";
 
 /// How much of a session's printing is held between looks.
 ///
@@ -84,20 +117,28 @@ pub(crate) struct Exhausted {
     pub(crate) said: String,
 }
 
-/// The sentence in `text` that says an account is out of window, or `None`.
+/// The sentence in `text` that says an account of `agent_type` is out of window,
+/// or `None`.
+///
+/// The agent type rather than nothing, because the phrase is the backend's: a
+/// session is read against the wording its own backend draws and against no
+/// other, so a line one backend would stop on is a line another prints in the
+/// middle of its work.
 ///
 /// Pure and cheap on purpose: this runs on every flush of every session, twice a
 /// second while an agent talks, so everything the stop needs beyond *whether* —
 /// the words the reset is in — is worked out afterwards and only on a hit.
-pub(crate) fn exhausted(text: &str) -> Option<Exhausted> {
+pub(crate) fn exhausted(text: &str, agent_type: store::AgentType) -> Option<Exhausted> {
+    let phrase = exhausted_phrase(agent_type);
+
     text.lines()
         .map(crate::capture::plain)
-        .find(|line| says_so(line))
+        .find(|line| says_so(line, phrase))
         .map(|said| Exhausted { said })
 }
 
-/// Whether one tidied line *says* an account is out of window, rather than
-/// mentioning that such a thing exists.
+/// Whether one tidied line *says* an account is out of window in `phrase`, rather
+/// than mentioning that such a thing exists.
 ///
 /// The phrase has to open the line once the decoration is off the front — the box
 /// border, the spinner, the bullet, the spaces. That is the difference between a
@@ -109,16 +150,16 @@ pub(crate) fn exhausted(text: &str) -> Option<Exhausted> {
 /// reaches for. ASCII punctuation is not decoration, because it is what *code*
 /// opens a line with — a quotation mark, a backtick, a dash, a hash. Verkstead
 /// builds this repository, so a session grepping the file this matcher lives in
-/// prints a dozen lines that quote the phrase, and reading one of those as its
+/// prints a dozen lines that quote either phrase, and reading one of those as its
 /// own account running out would stop the run it was in the middle of.
-fn says_so(line: &str) -> bool {
+fn says_so(line: &str, phrase: &str) -> bool {
     let said: String = line
         .trim_start_matches(DECORATION)
         .chars()
-        .take(EXHAUSTED.len())
+        .take(phrase.chars().count())
         .collect();
 
-    said.eq_ignore_ascii_case(EXHAUSTED)
+    said.eq_ignore_ascii_case(phrase)
 }
 
 /// What a terminal puts in front of a status line, and nothing else.
@@ -234,6 +275,11 @@ pub(crate) struct Watch {
     /// that is what the stop names — see [`crate::stopping::Decided`].
     profile: String,
 
+    /// And which agent that Profile runs, kept because that is what says which
+    /// sentence this session is read against — see [`exhausted_phrase`]. Taken
+    /// with the name and for the same reason: the Profile a session was launched
+    /// under is the one it is watched as, whatever is edited while it runs.
+    agent_type: store::AgentType,
     /// What the session has printed since the last look, less whatever has
     /// already been looked at.
     ///
@@ -270,17 +316,23 @@ pub(crate) struct Watch {
 }
 
 impl Watch {
-    /// Watch the session printing into `event_id`, run under `profile`.
-    pub(crate) fn on(conversation_id: i64, event_id: i64, profile: String) -> Watch {
+    /// Watch the session printing into `event_id`, run under `profile`, which
+    /// runs `agent_type`.
+    pub(crate) fn on(
+        conversation_id: i64,
+        event_id: i64,
+        profile: String,
+        agent_type: store::AgentType,
+    ) -> Watch {
         Watch {
             conversation_id,
             event_id,
             profile,
+            agent_type,
             printed: String::new(),
             raised: false,
         }
     }
-
     /// Take a chunk of what the session printed.
     ///
     /// Cheap on purpose: this is called with everything that comes off the
@@ -317,7 +369,8 @@ impl Watch {
         // twice a second for ever.
         let printed_something = !self.printed.is_empty();
 
-        let found = exhausted(&self.printed).or_else(|| exhausted(said.unwrap_or_default()));
+        let found = exhausted(&self.printed, self.agent_type)
+            .or_else(|| exhausted(said.unwrap_or_default(), self.agent_type));
 
         // Everything up to the last newline has been looked at now. What is kept
         // is the line still being printed, which is where the next chunk carries
@@ -463,6 +516,8 @@ async fn out_of_window(
 mod tests {
     use super::*;
 
+    use store::AgentType::{Claude, Codex};
+
     /// The line claude 2.1.234 draws, decoration and all: the phrase opens it
     /// once the terminal's own marks are off the front.
     #[test]
@@ -470,11 +525,53 @@ mod tests {
         let printed = "\u{1b}[2m✻\u{1b}[0m Usage limit reached · continuing automatically at 3pm · esc to cancel\n";
 
         assert_eq!(
-            exhausted(printed).map(|found| found.said),
+            exhausted(printed, Claude).map(|found| found.said),
             Some(
                 "✻ Usage limit reached · continuing automatically at 3pm · esc to cancel"
                     .to_owned()
             ),
+        );
+    }
+
+    /// And the lines codex 0.149.0 draws, which are one sentence with four
+    /// endings: what follows the phrase is the plan's, so what is matched stops
+    /// where the plans stop agreeing.
+    ///
+    /// Read off the binary rather than guessed at.
+    #[test]
+    fn the_lines_codex_draws_when_its_account_runs_out_are_recognised() {
+        for line in [
+            "You've hit your usage limit.",
+            "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus)",
+            "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits",
+            "You've hit your usage limit. To get more access now, send a request to your admin",
+            "▌ You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro)",
+        ] {
+            assert!(
+                exhausted(line, Codex).is_some(),
+                "{line:?} was not recognised",
+            );
+        }
+    }
+
+    /// Each backend is read against its own sentence and against no other.
+    ///
+    /// Which matters both ways round. A Codex session that printed claude's
+    /// wording would be a session quoting somebody else's display in the middle
+    /// of its work — and codex has a `Usage limit reached` heading of its own,
+    /// drawn over an offer to ask an admin rather than over a wait — while
+    /// claude never says anything about hitting a limit at all.
+    #[test]
+    fn a_session_is_read_against_its_own_backends_sentence() {
+        assert_eq!(
+            exhausted("Usage limit reached · continuing shortly", Codex),
+            None,
+            "claude's banner is not codex's account running out",
+        );
+        assert_eq!(
+            exhausted("You've hit your usage limit.", Claude),
+            None,
+            "nor codex's sentence claude's",
         );
     }
 
@@ -488,7 +585,10 @@ mod tests {
             "usage limit reached — check plan",
             "  │ USAGE LIMIT REACHED",
         ] {
-            assert!(exhausted(line).is_some(), "{line:?} was not recognised");
+            assert!(
+                exhausted(line, Claude).is_some(),
+                "{line:?} was not recognised",
+            );
         }
     }
 
@@ -503,17 +603,36 @@ mod tests {
             "reading whether the usage limit reached the account",
             "No limit was reached.",
         ] {
-            assert_eq!(exhausted(line), None, "{line:?} stopped a run");
+            assert_eq!(exhausted(line, Claude), None, "{line:?} stopped a run");
+        }
+    }
+
+    /// And the same for codex's, whose phrase opens with a word rather than with
+    /// one this repository writes about limits — so the lines that could be
+    /// mistaken for it are the ones that quote it.
+    #[test]
+    fn a_line_about_codexs_phrase_is_not_a_line_saying_it() {
+        for line in [
+            "The phrase to match is \"You've hit your usage limit\", said once.",
+            "matching on `You've hit your usage limit` in one place",
+            "- Codex opens with You've hit your usage limit, and decorates after it",
+            "> You've hit your usage limit, says codex",
+            "# You've hit your usage limit",
+        ] {
+            assert_eq!(exhausted(line, Codex), None, "{line:?} stopped a run");
         }
     }
 
     /// And this repository's own lines, quoted exactly as they sit in it.
     ///
-    /// Verkstead builds this repository: a session that greps for the phrase, or
+    /// Verkstead builds this repository: a session that greps for a phrase, or
     /// opens the file the matcher lives in, prints these on its terminal. Reading
     /// one as its own account running out would stop the run it was in the middle
     /// of — a false alarm this build could not have anywhere else, and the one it
     /// is most likely to hit.
+    ///
+    /// Every line against both backends, because a session grepping for one
+    /// phrase prints the lines that hold the other beside it.
     #[test]
     fn this_repositorys_own_fixtures_do_not_pause_the_session_reading_them() {
         for line in [
@@ -524,12 +643,22 @@ mod tests {
             // The tests at the foot of this very file.
             r#"            "usage limit reached — check plan","#,
             r#"            "  │ USAGE LIMIT REACHED","#,
-            // And a line of prose about it, in a document or a commit message.
+            r#"            "You've hit your usage limit.","#,
+            r#"            "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus)","#,
+            // And a line of prose about either, in a document or a commit
+            // message.
             "- Usage limit reached is the phrase, and only the phrase",
             "# Usage limit reached",
             "> Usage limit reached, said the display",
+            "- You've hit your usage limit is codex's, and only that much of it",
         ] {
-            assert_eq!(exhausted(line), None, "{line:?} stopped the run reading it");
+            for agent_type in [Claude, Codex] {
+                assert_eq!(
+                    exhausted(line, agent_type),
+                    None,
+                    "{line:?} stopped the run reading it",
+                );
+            }
         }
     }
 
@@ -537,17 +666,17 @@ mod tests {
     /// wherever the kernel put it.
     #[test]
     fn a_sentence_split_across_two_chunks_is_still_one_sentence() {
-        let mut watch = Watch::on(1, 2, "fable".to_owned());
+        let mut watch = Watch::on(1, 2, "fable".to_owned(), Claude);
 
         watch.printed("Usage limit reac");
         assert_eq!(
-            exhausted(&watch.printed),
+            exhausted(&watch.printed, Claude),
             None,
             "half a sentence is not one"
         );
 
         watch.printed("hed · continuing shortly\n");
-        assert!(exhausted(&watch.printed).is_some());
+        assert!(exhausted(&watch.printed, Claude).is_some());
     }
 
     /// The reset is kept in the words the display drew it in. A clock time is

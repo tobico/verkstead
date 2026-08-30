@@ -353,6 +353,15 @@ use, its reasoning, and what was put to it — kept word for word as the agent's
 backend wrote it, and rendered readable in the details pane. What summaries and a
 stop Notice's evidence draw from, falling back to the Capture when a session
 left none.
+
+**Which log it is read from is the backend's to say.** A backend that takes a
+session id at launch is told the name Verkstead chose, so its log is looked up
+under it. A backend that takes none — Codex is the first — writes a log of its
+own choosing, so the session's is *found* rather than named: the one that
+appeared in the account's own session store after this session was launched and
+whose opening line names this Conversation's Worktree. A session whose log never
+appears has the Capture as its whole record, which is what a session with no log
+has always had.
 _Avoid_: messages, chat log, session log (the backend's file, not Verkstead's
 record), transcript-as-bytes (that is the Capture)
 
@@ -388,11 +397,16 @@ the proof that a line it typed arrived.
 while it works, so three seconds with nothing printed is a session that has
 stopped. A backend that draws a full-screen interface is never reliably silent —
 it repaints while it works and may go on repainting its prompt after it has
-stopped — so what says one has stopped is that backend's own at-the-prompt line
-standing on the **Screen**. One signature per backend, kept in one place and
-accepted to drift the way the usage-limit phrase does. A silence mid-turn is not
-idle there: a TUI that stops to think would otherwise be reaped out from under
-its own work.
+stopped — so what says one has stopped is a line on its **Screen**, read one of
+two ways: an at-the-prompt line *standing* there, or an at-work line *gone* from
+it. Which way is a fact about the backend, and Codex is the second — the frame
+it leaves when its turn is over and the frame it draws mid-turn are the same
+screen but for the line saying it is working. One signature per backend, kept in
+one place and accepted to drift the way the usage-limit phrase does. The
+at-work reading asks for the ordinary silence beside it, because the line is
+equally missing from a session that has drawn nothing yet; the at-the-prompt one
+does not, and a silence mid-turn is not idle either way — a TUI that stops to
+think would otherwise be reaped out from under its own work.
 
 **With a long silence behind it as the long-stop.** A signature that has drifted
 reads as a session that never stops, and nothing else here would catch one: the
@@ -412,12 +426,12 @@ Code's is the directory and config file pair bind-mounted at `~/.claude` /
 account under one relocatable home — Codex's at `~/.codex`. Whichever it is,
 mounting it is what keeps accounts separate. A type is offered to the human only
 once it can launch the real thing: one that cannot would be a lie in a picker,
-so the form still writes Claude alone and a Profile of a later type is one saved
-over the API until its stage lands. The models are a list and the list is the
-Profile's own, because
-different Profiles reach different accounts and each can launch different
-things; none of them is a default, so which one a session runs is always picked
-— as a Pairing, alongside the Profile itself.
+so the form offers Claude and Codex, and a Profile of a type whose stage has not
+landed is one saved over the API until it does. Picking a type on the form asks
+for that type's own account paths. The models are a list and the list is the
+Profile's own, because different Profiles reach different accounts and each can
+launch different things; none of them is a default, so which one a session runs
+is always picked — as a Pairing, alongside the Profile itself.
 _Avoid_: account, identity, persona, agent config
 
 **Pairing**:
@@ -707,12 +721,15 @@ that tells it apart is what it carries: the Profile that ran out, and — where
 the sentence the session printed carried a time this build could read — when the
 window comes back, as words to show beside the **Resume**. Information rather
 than a timer: nothing counts down to it, and nothing starts when it passes.
-Recognition is one phrase read off the Capture and the Transcript, kept in one
-place because the wording is the backend's and will move. The session is ended
-along with the stop, the agent's own wait for the same reset being no reason to
-have work going on inside a Conversation that reads as stopped. And **no
-auto-switching between Profiles**: an exhausted account is a wait, never a
-reason to spend a different one.
+Recognition is one phrase per backend, read off the Capture and the Transcript,
+kept in one place because the wording is the backend's and will move — the same
+bargain the idle signature makes. A session is read against its own backend's
+sentence and against no other, so a wording one of them stops on is one another
+may print in the middle of its work. The session is ended along with the stop,
+the agent's own wait for the same reset being no reason to have work going on
+inside a Conversation that reads as stopped. And **no auto-switching between
+Profiles**: an exhausted account is a wait, never a reason to spend a different
+one.
 _Avoid_: halt and pause (the two names this had before there was one of it),
 hold (gone, and nothing replaced it), interruption, error, failure, crash,
 incident, alert, block, rate limit, throttle
