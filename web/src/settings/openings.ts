@@ -9,9 +9,10 @@
 //! Three shapes under the settings, because there are three kinds of thing the
 //! pane draws:
 //!
-//! - `github`, `build-cache` and `share-viewer` — the credentials, the shared
-//!   Rust build cache and where the share viewer is hosted, each named by a
-//!   word. There is one of each of them, and a word says so.
+//! - `github`, `build-cache`, `share-viewer` and `paths` — the credentials, the
+//!   shared Rust build cache, where the share viewer is hosted, and the
+//!   directories Verkstead may work in, each named by a word. There is one of
+//!   each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
 //! - `repos/:id` — a registered Repo, opened; and `repos/new` for the path
@@ -34,8 +35,9 @@
 //! picked rather than a promise that it is still there.
 
 /// The openings named by a word rather than by an id: the credentials, the
-/// shared Rust build cache, and where the share viewer is hosted — the things
-/// there is exactly one of on this page.
+/// shared Rust build cache, where the share viewer is hosted, and the paths
+/// Verkstead has been told about — the things there is exactly one of on this
+/// page.
 ///
 /// A list rather than a word written wherever one is needed, because three
 /// separate things read it and all three have to agree: the [`Opening`] below is
@@ -48,7 +50,12 @@
 ///
 /// So the app writes those routes from this — see `panes` in `SettingsPage.tsx`
 /// — and a word added here arrives with the route that reaches it.
-export const WORDS = ["github", "build-cache", "share-viewer"] as const;
+export const WORDS = [
+  "github",
+  "build-cache",
+  "share-viewer",
+  "paths",
+] as const;
 
 /// What the details pane on the settings page is showing.
 ///

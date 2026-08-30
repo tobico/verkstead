@@ -56,7 +56,11 @@ import { GithubCard, GithubPane } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
 import buildCache from "../src/settings/BuildCache.module.css";
 import shareViewer from "../src/settings/ShareViewer.module.css";
-import { SettingsPage } from "../src/settings/SettingsPage";
+import paths from "../src/settings/Paths.module.css";
+import {
+  SettingsPage,
+  panes as settingsPanes,
+} from "../src/settings/SettingsPage";
 import {
   openingAt,
   opensProfile,
@@ -708,16 +712,15 @@ function thePage(at = "/settings") {
     ...render(() => (
       <QueryClientProvider client={queries}>
         <MemoryRouter history={history}>
-          {/* Nested exactly as `App.tsx` nests them: the nesting is what keeps
+          {/* Nested exactly as `App.tsx` nests them, out of the page's own
+              `panes()` rather than written out again: the nesting is what keeps
               the middle pane up while the leaf under it changes, so a mount that
-              flattened them would be testing a page the app does not build. */}
+              flattened them would be testing a page the app does not build —
+              and a list spelled out here would be a second opinion about where
+              a card leads, which is the drift that left the share viewer's card
+              opening the catch-all. */}
           <Route path="/settings" component={SettingsPage}>
-            <Route path="/" />
-            <Route path="/github" />
-            <Route path="/build-cache" />
-            <Route path="/share-viewer" />
-            <Route path="/profiles/:profile" />
-            <Route path="/repos/:repo" />
+            {settingsPanes()}
           </Route>
           <Route path="*" component={() => <p>somewhere else</p>} />
         </MemoryRouter>
@@ -757,7 +760,7 @@ describe("the settings page", () => {
   /// One page for everything the human configures: what Verkstead itself was
   /// told, and the two things a Conversation is settled against — in the reading
   /// order a fresh install needs them in.
-  it("holds the credentials, the build cache, the profiles and the repos", async () => {
+  it("holds the credentials, the build cache, the paths, the profiles and the repos", async () => {
     const { container } = thePage();
 
     const settings = panes(container)[1]!;
@@ -766,6 +769,7 @@ describe("the settings page", () => {
     // so each list is waited for inside the pane it belongs to.
     await drawn(settings, `.${styles.githubCard}`);
     await drawn(settings, `.${buildCache.buildCacheCard}`);
+    await drawn(settings, `.${paths.pathsCard}`);
     await drawn(settings, `.${profileList.profiles} .${profileList.profile}`);
     await drawn(settings, `.${repoList.repos} .${repoList.repo}`);
 
@@ -901,6 +905,30 @@ describe("the path a details pane stands at", () => {
 
     history.back();
     await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// And the fourth: the paths Verkstead may work inside, and what a sandbox is
+  /// given beyond its worktree.
+  it("opens the paths at /settings/paths, replacing", async () => {
+    const { container, history } = thePage();
+
+    const face = await drawn<HTMLElement>(container, `.${paths.pathsCard}`);
+    fireEvent.click(face);
+
+    await waitFor(() => expect(history.get()).toBe("/settings/paths"));
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("draws the two lists in the details pane, and reads the paths card as open", async () => {
+    const { container } = thePage("/settings/paths");
+
+    await waitFor(() => screen.getByLabelText("Add a watched path"));
+
+    const face = await drawn<HTMLElement>(container, `.${paths.pathsCard}`);
+    expect(face.getAttribute("aria-pressed")).toBe("true");
+    expect(face.classList).toContain(card.open);
   });
 
   it("draws the viewer's field in the details pane, and reads its card as open", async () => {
