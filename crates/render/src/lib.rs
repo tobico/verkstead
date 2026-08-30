@@ -58,7 +58,9 @@ pub use profiles::{
     ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
 };
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
-pub use repos::{Registered, Registration, RepoEntry, RepoRemoved, RepoView, ResolutionEdit};
+pub use repos::{
+    ConflictResolutionEdit, Registered, Registration, RepoEntry, RepoRemoved, RepoView,
+};
 pub use settings::{
     Author, BindEntry, BuildCacheEdit, BuildCacheView, ConflictResolution, PathResolution,
     PathSource, PathsView, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved,

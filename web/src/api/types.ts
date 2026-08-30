@@ -807,6 +807,17 @@ base_commit: string | null, };
 export type ConflictResolution = "Merge" | "Rebase";
 
 /**
+ * How one Repo is to resolve a conflict from now on, which is the one thing
+ * there is to *say* to a registered Repo besides taking it away.
+ *
+ * `null` takes the override back rather than writing the global's word down:
+ * what *use the global setting* means is that this Repo says nothing, and a
+ * Repo holding a copy of today's global would go on holding it after the global
+ * moved.
+ */
+export type ConflictResolutionEdit = { resolution: ConflictResolution | null, };
+
+/**
  * And what became of archiving one: putting a Closed Conversation away, so the
  * sidebar stops drawing it.
  *
@@ -2133,17 +2144,6 @@ roadmaps: Array<AbandonedRoadmap>,
  * themselves — see [`crate::SettingsView::conflict_resolution`].
  */
 conflict_resolution: ConflictResolution | null, };
-
-/**
- * How one Repo is to resolve a conflict from now on, which is the one thing
- * there is to *say* to a registered Repo besides taking it away.
- *
- * `null` takes the override back rather than writing the global's word down:
- * what *use the global setting* means is that this Repo says nothing, and a
- * Repo holding a copy of today's global would go on holding it after the global
- * moved.
- */
-export type ResolutionEdit = { resolution: ConflictResolution | null, };
 
 /**
  * The **Resolve conflicts** press as the page receives it: when, and nothing

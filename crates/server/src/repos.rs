@@ -169,7 +169,7 @@ pub(crate) async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView
 /// it now stands.
 ///
 /// `None` takes the override back rather than writing the global's word down —
-/// see [`verkstead_render::ResolutionEdit`]. Nothing is refused: there is no
+/// see [`verkstead_render::ConflictResolutionEdit`]. Nothing is refused: there is no
 /// work this could be taken out from under, unlike an unregistering, and the
 /// next conflict is simply resolved the new way.
 ///

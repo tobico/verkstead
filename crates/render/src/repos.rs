@@ -169,6 +169,6 @@ pub struct RepoView {
 /// moved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct ResolutionEdit {
+pub struct ConflictResolutionEdit {
     pub resolution: Option<ConflictResolution>,
 }

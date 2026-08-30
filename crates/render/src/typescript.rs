@@ -20,15 +20,15 @@ use crate::{
     AbandonedRepo, Adopted, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename,
     BranchRenamed, BriefEdit, BriefSaved, Capture, CommitPane, CompanionAdded,
     CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen,
-    CompanionRemoved, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
-    GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RepoEntry, RepoRemoved, RepoView, ResolutionEdit, Resolved,
-    Resumed, RoadmapPane, RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved,
-    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowingArchived, Shown,
-    Started, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView,
-    Unsubscribe, UpdateNotice, Watching,
+    CompanionRemoved, ConflictResolutionEdit, ConversationArchived, ConversationClosed,
+    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
+    ConversationView, GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation,
+    NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry, RepoRemoved,
+    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, SetReading, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
+    ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -66,7 +66,7 @@ fn the_viewers_types_are_written_from_these() {
     // And the one thing there is to say to a registered Repo: how it resolves a
     // conflict, which is an override of the global setting or nothing at all.
     // Its own type rather than a field of a view, being what a press sends.
-    ResolutionEdit::export_all(&config).unwrap();
+    ConflictResolutionEdit::export_all(&config).unwrap();
 
     // The workbench: the sidebar, one Conversation with its Timeline, and the
     // three things the human changes about a drafting one. Each edit brings its

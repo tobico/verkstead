@@ -32,14 +32,14 @@ use verkstead_render::{
     Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup,
     CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
-    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
-    Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, ResolutionEdit,
-    Resolved, Resumed, RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit,
-    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
+    GrillingStarted, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RepoEntry, Resolved, Resumed, RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -673,7 +673,7 @@ async fn remove_repo(State(state): State<AppState>, Path(id): Path<String>) -> H
 async fn set_repo_resolution(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(edit): Json<ResolutionEdit>,
+    Json(edit): Json<ConflictResolutionEdit>,
 ) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return no_such_repo(&id);
