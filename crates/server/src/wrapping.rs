@@ -254,19 +254,26 @@ pub(crate) fn named(watched: &Watched) -> String {
 
 /// Which review a wrap-up's watchers start.
 ///
-/// The one thing that differs between the two ways of starting a wrap-up's
-/// watchers, and it differs because a press is the human saying something. The
-/// other three watchers each read the record and decide for themselves either
-/// way.
+/// The one thing that differs between the ways of starting a wrap-up's watchers,
+/// and it differs because Resume is the human saying *have another go at all of
+/// it*. The other three watchers each read the record and decide for themselves
+/// whichever way this falls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Reviewing {
     /// Whatever there is to see to: a branch nobody has read, or a review whose
-    /// session is gone, which is a stop. What the finish step and a server
-    /// coming back up both mean — see [`crate::review::run`].
+    /// session is gone, which is a stop. What the finish step, a server coming
+    /// back up and the resolve press all mean — see [`crate::review::run`].
+    ///
+    /// The press means it for a reason the other two do not, and deliberately:
+    /// the branch *was* read, the human read the review, and the work was
+    /// carried to Done on the strength of it. A base that moved underneath it
+    /// since is not a reason to read the same branch twice, so what the wrap-up
+    /// finds is a review already settled and runs nothing for it. See
+    /// [`crate::resolving`].
     AsFound,
 
     /// The branch read from the start, whatever the last review left behind.
-    /// What a press means — see [`crate::review::afresh`].
+    /// What Resume means — see [`crate::review::afresh`].
     Afresh,
 }
 
@@ -277,9 +284,11 @@ pub(crate) enum Reviewing {
 ///
 /// One place that says what a wrap-up *is*, because everything that starts one
 /// has to start the whole of it: the finish step opening the pull request, a
-/// server coming back up over a Conversation it left wrapping, and a Resume
-/// pressed on a wrap-up that stopped — which stopped the rest too, since nothing
-/// advances past an open one. See [`crate::resume`] for the last two.
+/// server coming back up over a Conversation it left wrapping, a Resume pressed
+/// on a wrap-up that stopped — which stopped the rest too, since nothing
+/// advances past an open one — and the press that sends a Done Conversation back
+/// here to have a conflict resolved. See [`crate::resume`] for the middle two
+/// and [`crate::resolving`] for the last.
 ///
 /// Each of them decides for itself whether there is anything to do, so starting
 /// them twice is not starting two of anything: a review that has already settled
@@ -296,10 +305,12 @@ pub(crate) enum Reviewing {
 /// looking at rather than being told — see [`covering`], [`crate::review::run`]
 /// and [`crate::responding::unattended`].
 ///
-/// `reviewing` is the one thing the two ways of starting them differ over, and
-/// it is the human's press that makes the difference: a review already asking is
-/// something to stop over where a server found it, and something to read past
-/// where they have read the Notice and asked for another go.
+/// `reviewing` is the one thing the ways of starting them differ over, and it is
+/// a Resume that makes the difference: a review already asking is something to
+/// stop over where a server found it, and something to read past where the human
+/// has read the Notice and asked for another go. Every other way in — the finish
+/// step, a restart, the resolve press — takes the review as found, each for a
+/// reason of its own.
 pub(crate) fn watching(state: &AppState, conversation_id: i64, reviewing: Reviewing) {
     driving(state, conversation_id, crate::checks::watching);
     driving(state, conversation_id, crate::comments::watching);

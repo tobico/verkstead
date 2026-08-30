@@ -219,22 +219,29 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64, repo_id: i64) {
     }
 }
 
-/// Forget what a Conversation's checks have already been tried, and watch them
-/// again.
+/// Forget what a Conversation's checks and conflicts have already been tried,
+/// and watch them again.
 ///
-/// What Resume does to a Conversation that stopped on its checks. The attempts
-/// go first: the human has read the Notice of what stopped and asked for another
-/// go, and a count left standing would be a watcher that stopped all over again on
-/// its next poll without dispatching anything.
+/// What Resume does to a wrap-up that stopped. The attempts go first: the human
+/// has read the Notice of what stopped and asked for another go, and a count
+/// left standing would be a watcher that stopped all over again on its next poll
+/// without dispatching anything.
+///
+/// **Both counts**, because either of them is what the Notice they read could
+/// have been about: a wrap-up stops on the checks that would not go green or on
+/// the pull request that would not merge, and a press that forgave only one of
+/// them would be a Resume that stopped again on the other. See
+/// [`store::forget_fix_attempts`], which is where the two are taken away
+/// together.
 pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
     if let Err(error) = store::forget_fix_attempts(&state.pool, conversation_id).await {
-        tracing::error!(error = ?error, conversation_id, "forgetting what a Conversation's checks had been given failed");
+        tracing::error!(error = ?error, conversation_id, "forgetting what a Conversation's checks and conflicts had been given failed");
         return;
     }
 
     tracing::info!(
         conversation_id,
-        "the checks are being tried again from no attempts spent"
+        "the checks and the conflicts are being tried again from no attempts spent"
     );
 
     // The whole wrap-up rather than the checks alone: the review stopped being
