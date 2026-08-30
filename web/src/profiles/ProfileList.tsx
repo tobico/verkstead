@@ -41,9 +41,11 @@
 //!
 //! The models are one of those four fields, and a profile carries the whole list
 //! of them: a profile reaches one account with one configuration, so what it can
-//! launch is its own rather than a list every profile shares. They are typed as
-//! free text a line apiece, because a list of the models there are goes stale
-//! the week another one ships.
+//! launch is its own rather than a list every profile shares. They are picked
+//! off the models this build knows, with a field beside the picks for an id it
+//! does not — the list goes stale the week another model ships, which is why it
+//! is the ordinary way in rather than the only one. The line-a-piece textarea
+//! this replaces was the whole of it, and made every profile a spelling test.
 //!
 //! The agent type is not offered. There is one, and a select with a single
 //! option is theatre; the discriminator is real because it is on the record, so
@@ -76,6 +78,7 @@ import type {
   ProfileSaved,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { KNOWN_MODELS, known, prettify } from "../models";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import app from "../App.module.css";
@@ -352,6 +355,10 @@ export function ProfilePane(props: {
   // matters here because the pane is built before the read that fills it lands.
   const [edited, setEdited] = createSignal<ProfileEdit | null>(null);
   const [refused, setRefused] = createSignal<ProfileSaved | null>(null);
+  // What is in the field beside the picks: an id this build has not learned,
+  // while it is being typed. Its own signal rather than one of the form's
+  // fields, because it is not part of the profile until it is added.
+  const [typing, setTyping] = createSignal("");
   const [refusedRemoval, setRefusedRemoval] =
     createSignal<ProfileDeleted | null>(null);
 
@@ -428,14 +435,46 @@ export function ProfilePane(props: {
     setRefused(null);
   };
 
-  /// And the models, which are that same typing split at its newlines.
+  /// Every model the form draws a tick for: the ones this build knows, and any
+  /// this profile carries that it does not — one saved while the field was free
+  /// text, or one added by hand since.
   ///
-  /// Split and nothing else: the empty line under the one being written is part
-  /// of writing the next, so trimming here would fight the human. What is blank
-  /// is dropped by the server at the moment of saving.
-  const typedModels = (value: string) => {
-    setEdited({ ...form(), models: value.split("\n") });
+  /// The unknown ones after the known ones rather than in the profile's own
+  /// order, because the known list stands in the same order on every profile and
+  /// one that shuffled itself per profile would be a list nobody could scan.
+  const offered = (): string[] => [
+    ...KNOWN_MODELS.map((model) => model.id),
+    ...form().models.filter((model) => !known(model)),
+  ];
+
+  /// A model ticked or unticked.
+  ///
+  /// A tick appends and nothing else moves, so a profile opened and saved with
+  /// nothing touched sends back exactly the list it arrived with — order and
+  /// all, whatever was typed into the field this replaces.
+  const pick = (model: string, on: boolean) => {
+    const models = form().models;
+    setEdited({
+      ...form(),
+      models: on
+        ? models.includes(model)
+          ? models
+          : [...models, model]
+        : models.filter((listed) => listed !== model),
+    });
     setRefused(null);
+  };
+
+  /// And an id typed into the field beside them, added as a pick of its own.
+  ///
+  /// Trimmed, this one being typed: a stray space would make an id no agent can
+  /// be launched with. An empty field adds nothing.
+  const add = () => {
+    const model = typing().trim();
+    if (model !== "") {
+      pick(model, true);
+      setTyping("");
+    }
   };
 
   const submit = (ev: SubmitEvent) => {
@@ -471,20 +510,78 @@ export function ProfilePane(props: {
               onInput={(ev) => typedName(ev.currentTarget.value)}
             />
 
-            {/* One per line, and no default among them: the list says what this
-                account can launch, and which of them a session runs is picked
-                when the session is set up. */}
-            <label for="profile-models">Models, one per line</label>
-            <textarea
-              id="profile-models"
-              rows={3}
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck={false}
-              placeholder={"claude-opus-5\nclaude-fable-5"}
-              value={form().models.join("\n")}
-              onInput={(ev) => typedModels(ev.currentTarget.value)}
-            />
+            {/* Ticked rather than typed, and no default among them: the list
+                says what this account can launch, and which of them a session
+                runs is picked when the session is set up.
+
+                A fieldset with a legend rather than a label, because this is one
+                question with several answers and a `<label for>` names one
+                control. */}
+            <fieldset class={styles.models}>
+              <legend>Models</legend>
+
+              <ul class={styles.picks}>
+                <For each={offered()}>
+                  {(model) => (
+                    <li>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={form().models.includes(model)}
+                          onChange={(ev) =>
+                            pick(model, ev.currentTarget.checked)
+                          }
+                        />
+                        {prettify(model)}
+                      </label>
+                      {/* The id beside the name, for whoever is checking: the
+                          name is this viewer's word and the id is what the
+                          session is launched with. Outside the label so it is
+                          not read out as part of the tick's name, and not drawn
+                          at all beside one the list does not know — there the id
+                          is the name already. */}
+                      <Show when={known(model)}>
+                        <code>{model}</code>
+                      </Show>
+                    </li>
+                  )}
+                </For>
+              </ul>
+
+              {/* The way past the list. It goes stale the week another model
+                  ships, and a profile that could not be given the new one until
+                  Verkstead was rebuilt would be a form standing in front of the
+                  work. What is added here is a pick like any other: it joins the
+                  ticks above, ticked, and unticking it takes it away again. */}
+              <label for="profile-model">Another model id</label>
+              <div class={styles.byHand}>
+                <input
+                  id="profile-model"
+                  type="text"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck={false}
+                  placeholder="claude-opus-6"
+                  value={typing()}
+                  onInput={(ev) => setTyping(ev.currentTarget.value)}
+                  // Return adds the id rather than saving the profile, which is
+                  // what a return in a text field does to a form left alone.
+                  onKeyDown={(ev) => {
+                    if (ev.key === "Enter") {
+                      ev.preventDefault();
+                      add();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={typing().trim() === ""}
+                  onClick={add}
+                >
+                  Add
+                </button>
+              </div>
+            </fieldset>
 
             {/* The account, in whatever shape its agent type keeps one: the
                 fields come off the type rather than being written here, so a

@@ -1,6 +1,6 @@
 /* What can be done to a Conversation as a whole — see `Actions.tsx`, which
-   draws these rows in two menus: the ⋯ at the head of the Conversation pane,
-   and the right-click on a card in the sidebar.
+   draws these rows in two menus: the status button at the head of the
+   Conversation pane, and the right-click on a card in the sidebar.
 
    One module for both, which is the point of there being one component: the
    rows are the same rows wherever they are opened from, so the card they come
@@ -27,6 +27,12 @@
 .says {
   font-size: 0.85rem;
   color: var(--ink-soft);
+}
+
+/* Getting Verkstead driving again, at the head of the card: the one row here
+   that starts something rather than ending it. Drawn like every other row and
+   named here so it can be found. */
+.resume {
 }
 
 /* Stopping after the current task, and stopping now. Drawn like every other row
@@ -65,10 +71,11 @@
   color: #b3382c;
 }
 
-/* The ⋯ at the head of the pane is drawn by the menu itself — see `mark` in
-   `Menu.module.css` — so nothing of the button is here, and the right-click has
-   no button at all. What is left of this menu's own paint is the card it comes
-   down as, which is the same card either way it was opened.
+/* The button at the head of the pane is the StatusButton's — it is a button
+   about the Conversation before it is a trigger, so it is painted where it is
+   built, in `StatusButton.module.css` — and the right-click has no button at
+   all. What is left of this menu's own paint is the card it comes down as,
+   which is the same card either way it was opened.
 
    Wider than a menu of bare words needs, because every row of this one carries
    a sentence. */
@@ -80,8 +87,51 @@
    menu reads the conversation it is about, and there is nothing to press until
    it comes back. A size down on the failures out on the page: the menu is a
    card of its own and the sentence under each row sets the type it is read at.
-   Nothing a *press* does is said here; see `Actions.tsx`. */
+   What a *press* comes to is the card below rather than a line here; see
+   `Actions.tsx`. */
 .conversationActions .failure {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
+}
+
+/* And what a press that did nothing is answered with: the refusal's sentence,
+   drawn over the page through the same `Modal` the steer form is. The card and
+   where it sits are the modal's; what is here is the three things inside it —
+   the heading, the sentence, and the one way out.
+
+   One way out rather than two, which is the whole of what tells this card from
+   a confirm sheet: nothing is being decided here. The press has already been
+   refused, and reading why is all there is left to do. */
+.refused .refusedTitle {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.refused .refusedWhy {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+.refused .refusedOut {
+  display: flex;
+  margin-top: 1rem;
+}
+
+.refused .refusedOut button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .refused .refusedOut button:hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
 }

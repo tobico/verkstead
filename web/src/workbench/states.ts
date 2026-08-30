@@ -25,7 +25,10 @@ export const STATE: Record<Lifecycle, string> = {
 
 /// The states the work has ended in: the ladder's last rung, and the way off
 /// the ladder. Neither has anything running or anything to come, which is what
-/// makes them worth saying in a header where the states on the way say nothing.
+/// makes them the two the status button says on their own — no status word
+/// beside the state, because the word for where a finished Conversation got to
+/// *is* the state, and saying it twice with a colour between would be the
+/// button repeating itself.
 export const ENDED: ReadonlySet<Lifecycle> = new Set<Lifecycle>([
   "Done",
   "Closed",

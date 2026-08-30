@@ -62,7 +62,7 @@ async fn talking(said: usize) -> (tempfile::TempDir, SqlitePool, Router, i64, i6
         .await
         .unwrap()
         .unwrap();
-    let event = store::start_capture(&pool, conversation, None)
+    let event = store::start_capture(&pool, conversation, None, None)
         .await
         .unwrap();
 

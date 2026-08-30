@@ -309,10 +309,14 @@ flowchart LR
   account out of usage window, a Stop the human pressed —
   Verkstead records the one stop on the conversation and writes a stop notice
   on its timeline saying what stopped, why, and what the evidence was. Nothing
-  advances past a stop, and the badge points at the notice. Getting going again
-  is one standing **Resume** in the start-work menu, recomputed from the
-  lifecycle and the branch rather than replaying whatever failed; steering the
-  work is what **Steer** is for, so Resume carries nothing. A follow-up is
+  advances past a stop, and the status button says the conversation is waiting.
+  Getting going again is one standing **Resume**, recomputed from the lifecycle
+  and the branch rather than replaying whatever failed; steering the work is
+  what **Steer** is for, so Resume carries nothing. It is the first row of the
+  conversation actions menu (*refined 2026-08-30, building status-button*),
+  above the stops because it is the one go among them — so it is reached from
+  the button that says nothing is driving this, and from the sidebar's
+  right-click, which drops the same rows. A follow-up is
   recomputed like everything else: a fresh session on the brief its steer
   opened it with and the rounds already answered, read off the timeline the way
   a relaunched grilling reads what it settled (*refined 2026-08-27, building
@@ -321,10 +325,12 @@ flowchart LR
   already standing, and abort is **Close**.
 - **Usage limits.** When a claude account exhausts its window mid-run, the
   conversation stops the way every other stopped conversation does — one
-  notice, one badge, one Resume — and push-notifies. The reset time rides on
-  the stop as words to read beside that button rather than as a moment
-  anything acts on: no stop resumes itself, so this one waits for the same
-  press (*refined 2026-08-25, building one-stop*).
+  notice, one status, one Resume — and push-notifies. The reset time rides on
+  the stop as words to read rather than as a moment anything acts on: no stop
+  resumes itself, so this one waits for the same press (*refined 2026-08-25,
+  building one-stop*). The words are on the status button's second line, where
+  what is running is said — this being a stop with nothing running and a reason
+  of its own for it (*refined 2026-08-30, building status-button*).
 - **No cap on concurrent sessions** across conversations.
 
 ## Execution and sandboxing
@@ -542,7 +548,7 @@ Timeline events:
   worktree as git saw it, and the tail of what the last session said — written
   as one markdown notice on the timeline. There is nothing on it to press,
   because there is nothing to decide about it: what the conversation is waiting
-  on is the stop beside it, and Resume at the foot of the timeline is what
+  on is the stop beside it, and Resume in the status button's menu is what
   answers that.
 - **Pinning is the fixed set** (task list, stage list, PR) with a floating
   summary box at the top of the timeline; no manual pin/unpin. More than one
@@ -618,8 +624,15 @@ Timeline events:
   settings-redesign*): a menu of one way out and one switch is a press with a
   press in front of it, and the gear is the same kind of thing the cards below
   it are — something in this pane that is selected and opened into the pane
-  beside it. The ⋯ at the head of a Conversation's timeline is a different menu
-  and stays.
+  beside it. The ⋯ at the head of a Conversation's timeline went the same way in
+  the end, into the status button under the title: what there is to do about a
+  Conversation is reached from the thing that says what it is doing (*settled
+  2026-08-30, building status-button*). **And the timeline's own header says
+  the Repo understated beside the branch it is titled by**, in the pattern the
+  card that opened it draws its name and its Repo in — so the card and the
+  header read as the one name said twice, and two drafts, both titled *Draft*,
+  are told apart on the header by the only thing that differs (*settled
+  2026-08-30, building status-button*).
 - **Push notifications** for needs-you — a blocking question set, a stop
   Verkstead decided on, an exhausted usage window among them — **and
   milestones** (PR opened, stage complete, conversation done). A stop nobody

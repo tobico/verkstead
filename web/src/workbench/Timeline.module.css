@@ -8,12 +8,12 @@
    selector says only what it is about — the card an entry belongs to, and
    nothing about the rest of the app.
 
-   The block the header and the pinned cards are wrapped in is the Workbench's:
-   what a pane sticks to its top edge is the frame's business, so `Timeline.tsx`
-   wears `paneChrome` out of `Panes.module.css` rather than naming a block of
-   its own. The ⋯ at the head of the pane is `Menu`'s chrome and this file's
-   paint — its trigger and its drop are that component's own elements, so they
-   are reached by what they are rather than by a class this module cannot spell.
+   The block the header, the status button and the pinned cards are wrapped in
+   is the Workbench's: what a pane sticks to its top edge is the frame's
+   business, so `Timeline.tsx` wears `paneChrome` out of `Panes.module.css`
+   rather than naming a block of its own. The status button standing in it is
+   painted where it is built, in `StatusButton.module.css`, and nothing this
+   pane says about where the Conversation stands is drawn from here any more.
 
    Two components draw into this vocabulary from their own files: `Pause`, whose
    card is one of the record's, and `Mark`, which is handed the class that says
@@ -29,6 +29,45 @@
    the pane and watch a different one light up. What is left in this file is what
    stands on a card, and the events that are not one: the moves and steers drawn
    as lines between the cards, and the manual task nothing writes another of. */
+
+/* What the pane is called: the branch, and the Repo the work is in understated
+   beside it. The title/subtitle pattern the sidebar's card draws the same two
+   facts in — see `.conversationRow .title` and `.meta` in
+   `Conversations.module.css` — so the card and the header of the pane it opens
+   read as the one name said twice, and the status button under them says its
+   own two lines in the same voice.
+
+   Inside the `<h1>` rather than under it, because the Repo is part of what this
+   pane is called rather than a caption on it: on a Draft the title is the word
+   *Draft* and the Repo is the whole of what tells one draft from another.
+
+   Wrapping and baseline-aligned, since the header row is also where the way
+   back and the way on stand at phone widths: a long branch beside a long Repo
+   name puts the Repo on a line of its own rather than pushing either control
+   off the edge. `min-width: 0` so the wrapping happens inside the heading
+   instead of the heading growing past the row. */
+.paneName {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.5rem;
+  min-width: 0;
+}
+
+.paneName .paneTitle {
+  overflow-wrap: anywhere;
+}
+
+/* The step down the sidebar's card takes to say which Repo it is in, and the
+   one the status button's state takes beside its status word. Its weight is
+   said out loud because it is inside a heading, which would otherwise lend it
+   the title's bold. */
+.paneName .paneRepo {
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
 
 /* The way on to the next level, which only the timeline has one of: the details
    pane holds the selected Event, so this is the way into it on a window too
@@ -53,51 +92,6 @@
   .paneForward {
     display: none;
   }
-}
-
-/* What the conversation has stopped on, said where the conversation is named. A
-   button rather than a badge, because it goes to the event that stopped it — a
-   timeline is long by the time a run gets far enough to stop. */
-.blocked {
-  padding: 0.15rem 0.5rem;
-  font: inherit;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--stopped);
-  border: 0;
-  border-radius: 0.3rem;
-  cursor: pointer;
-}
-
-/* And the quiet mark, in the same place and drawn the same way: an outline in
-   the edge grey rather than a filled red, which is what a condition worth
-   reading looks like beside one worth shouting.
-
-   Three of them wear it. What a wrap-up that has narrowed to its checks says is
-   a label and nothing to press — the checks are GitHub's to finish and there is
-   nowhere to go about them. A stop the human pressed themselves is a button
-   like the badge above, going to the same notice: they know why it stopped, so
-   the word is worth reading rather than worth shouting, but the way to what
-   stopped it is worth keeping. And the word an ended conversation says about
-   itself is a label too: Done and Closed are where the work got to rather than
-   something to go and look at. */
-.waitingOnChecks,
-.stopped,
-.ended {
-  padding: 0.15rem 0.5rem;
-  font: inherit;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--ink-soft);
-  background: none;
-  border: 1px solid var(--edge);
-  border-radius: 0.3rem;
-}
-
-/* And the one of the three that is a button carries the pointer that says so. */
-.stopped {
-  cursor: pointer;
 }
 
 /* The pinned events, above the timeline and inside the chrome that holds the top
@@ -718,9 +712,9 @@
   margin-bottom: 0;
 }
 
-/* And the one of them a conversation is blocked on, which the badge in the
-   header marks. No additional styles are needed here since it will always
-  be the last item. */
+/* And the one of them a conversation is blocked on, which the status button at
+   the head of the pane has said in words. No additional styles are needed here
+   since it will always be the last item. */
 .notice.blocking {
 }
 
@@ -762,31 +756,6 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.85rem;
   color: var(--ink-soft);
-}
-
-/* And that same session again, held against the foot of the pane for as long as
-   it is running: the title and the mark on one line, pressed to open what the
-   card on the record opens. A line over it to say where the record ends.
-
-   What holds it down there is the pane's rather than this card's, as what holds
-   the header up there is: the strip wears `paneFoot` out of
-   `Panes.module.css` and the frame says what a pane does about something
-   stuck to its bottom edge. Here is the paint alone. */
-.session {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  border: 0;
-  border-top: 1px solid var(--edge);
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.session .what {
-  font-size: 1rem;
-  font-weight: 600;
 }
 
 /* A Question Set the session put to the human, read as the interview it was: a
@@ -1045,52 +1014,6 @@
   font-size: 0.9rem;
 }
 
-/* Starting Verkstead driving again, above the way to move the conversation by
-   hand: the two are the same kind of thing — offered whenever nothing is
-   running rather than in one state — and each is set off by a rule of its own,
-   so the end of the record is still visible as an end. */
-.resume {
-  margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--edge);
-}
-
-.resume h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
-}
-
-.resume .resumeConversation {
-  padding: 0.5rem 1rem;
-  font: inherit;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
-.resume .resumeConversation:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-/* And when the account that ran out comes back, where the stop carries it.
-   Beside the button rather than in the note under it, and in the ink of the
-   note's siblings rather than the note's own: it is the one fact this stop has
-   that the others do not, and the human reads it to decide when to press. */
-.resume .resets {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-.resume .failure {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-
 /* Under the pointer, everything on this pane that can be pressed. Together at
    the foot of the file rather than each beside its own card: a hover state has
    to be inside a query like this one — see `styles/base.css`, where the scheme
@@ -1110,36 +1033,19 @@
    pointer darkens by a step of ink — the accent is what says which card is
    showing, and a dot that took it under the pointer would be saying that.
 
-   The filled buttons deepen their accent, and the badge saying where the work
-   stopped deepens its red the same way. Neither while it is refusing the press:
-   the start has two ways of doing that and this excludes both. */
+   The one filled button left here deepens its accent. Never while it is
+   refusing the press: the start has two ways of doing that and this excludes
+   both. */
 @media (hover: hover) {
   .paneForward:hover {
     text-decoration: underline;
-  }
-
-  .blocked:hover {
-    background: color-mix(in srgb, var(--stopped) 88%, var(--ink));
-  }
-
-  /* And the quiet one deepens its ink instead, having no fill to deepen. */
-  .stopped:hover {
-    color: var(--ink);
   }
 
   .dots button:not([aria-current]):hover::before {
     background: var(--ink-soft);
   }
 
-  /* The running session held against the foot of the pane, which is the one card
-     here drawn on the paper rather than on the card colour — so its step is the
-     other way round. */
-  .session:hover {
-    background: var(--card);
-  }
-
-  .startGrilling .start:not(:disabled):not(.inert):hover,
-  .resume .resumeConversation:not(:disabled):hover {
+  .startGrilling .start:not(:disabled):not(.inert):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }
