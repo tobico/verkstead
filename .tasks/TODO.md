@@ -26,7 +26,7 @@ Roadmap stage: [04: Grok Build](docs/roadmaps/agent-backends/04-grok-build.md)
 ## Tasks
 
 - [x] 01: The `grok` type launches — [details](01-grok-launches.md)
-- [ ] 02: Grok Build judged idle by its screen — [details](02-idle-by-its-screen.md)
+- [x] 02: Grok Build judged idle by its screen — [details](02-idle-by-its-screen.md)
 - [ ] 03: The named session's log follows — [details](03-the-log-follows.md)
 - [ ] 04: The updates renderer — [details](04-updates-renderer.md)
 - [ ] 05: Grok Build's usage limit, and the whole stage proved — [details](05-limit-and-proof.md)

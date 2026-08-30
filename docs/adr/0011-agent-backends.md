@@ -131,6 +131,27 @@ different screen: a moment's silence mid-turn says nothing about a session
 whose at-work line is standing, and it is only ever consulted once that line
 has gone.
 
+Amended again: **Grok Build reads the same way round as codex**, measured
+against grok 1.0.13 on a hundred-column terminal with a stand-in API behind it.
+
+- **Its waiting frame is its working frame.** The composer, its `❯`, the
+  `grok-4.6 · always-approve` label on its border and the `Shift+Tab:mode` and
+  `Ctrl+x:shortcuts` hints beside it stand in both. What is there only while a
+  turn runs is the live status line — `⠧ Responding… 5.7s … [stop]` — and the
+  `Esc:cancel` hint on the row under the composer, which go and come together:
+  across a turn sampled once a second, both were in every working frame and in
+  none of the resting ones. The constant is the hint, the hints being the row
+  grok draws at the foot of every frame where the status line is drawn only
+  mid-turn.
+- **It is byte-silent at its prompt**, and emphatically: not one byte in ninety
+  seconds of sitting there. Mid-turn the widest gap between reads was 208 ms
+  once it had drawn its first frame, so the three-second quiet asked for beside
+  the hint is never met while it works.
+
+So both backends that ship a signature so far read by an at-work line, and the
+at-the-prompt reading stands unused for the backends that will draw a prompt of
+their own.
+
 ## The skills move to a neutral path
 
 The bundled skills mount at **`/verkstead/skills`** for every backend, Claude

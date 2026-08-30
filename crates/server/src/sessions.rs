@@ -310,11 +310,12 @@ impl Agents {
     /// rather than repainting a screen, so there is no frame to read a prompt
     /// off, and three seconds of silence is an answer that works.
     ///
-    /// Codex's is [`CODEX_AT_WORK`], and it is the other of the two readings —
-    /// see [`Signature`]. What stands here instead is whatever the suite handed
-    /// in, which is the prompt drawn by the stub it stands where an agent goes:
-    /// the backends after this one draw a prompt of their own, and the suite
-    /// proves that reading against a stub rather than against an account.
+    /// Codex's is [`CODEX_AT_WORK`] and Grok Build's is [`GROK_AT_WORK`], and
+    /// both are the same one of the two readings — see [`Signature`]. What
+    /// stands where either goes instead is whatever the suite handed in, which
+    /// is the prompt drawn by the stub it stands where an agent goes: no
+    /// backend here draws a prompt of its own, so the reading for the ones that
+    /// will is proved against a stub rather than against an account.
     fn signature(&self, agent_type: store::AgentType) -> Option<Signature> {
         match agent_type {
             store::AgentType::Claude => None,
@@ -323,12 +324,11 @@ impl Agents {
                     .clone()
                     .unwrap_or_else(|| Signature::AtWork(CODEX_AT_WORK.to_owned())),
             ),
-
-            // Grok Build's own has not been read off its screen yet, so what
-            // stands here is whatever the suite handed in and nothing
-            // otherwise: a constant nobody has seen stand is the drift the
-            // long-stop exists to catch, arriving on the day it was written.
-            store::AgentType::Grok => self.signature.clone(),
+            store::AgentType::Grok => Some(
+                self.signature
+                    .clone()
+                    .unwrap_or_else(|| Signature::AtWork(GROK_AT_WORK.to_owned())),
+            ),
         }
     }
 
@@ -499,6 +499,34 @@ const CODEX_CREDENTIAL_STORE: &str = "cli_auth_credentials_store";
 /// the usage-limit phrase makes: the wording is codex's and it will move, and
 /// moving it costs one edit here.
 const CODEX_AT_WORK: &str = "esc to interrupt";
+
+/// What grok has on its Screen while it is working, and nothing of what it has
+/// there when it is waiting for a human — see [`Signature::AtWork`].
+///
+/// Read off grok 1.0.13 driven on a hundred-column terminal rather than guessed
+/// at, and it comes out where codex came out: the frame grok leaves when its
+/// turn is over and the frame it draws mid-turn are the same screen but for the
+/// live status line — `⠧ Responding… 5.7s … [stop]` — and this hint on the row
+/// under the composer. The composer itself, its `❯`, the `grok-4.6 ·
+/// always-approve` label on its border and the `Shift+Tab:mode` and
+/// `Ctrl+x:shortcuts` hints beside this one stand in both, so none of them says
+/// whether the session has stopped.
+///
+/// The hint rather than the `[stop]` chip, which goes and comes with it: the
+/// hints are the row grok draws at the foot of every frame, where the status
+/// line is there only while a turn runs, and a keybinding label is a harder
+/// thing to find by accident in what the session printed than a bracketed word
+/// is.
+///
+/// The fragment rather than the whole row, because the rest of it moves while
+/// this does not: a turn that has backgrounded something adds `Ctrl+b:send to
+/// bg` beside it, and the hints at rest change with what the composer is
+/// offering.
+///
+/// Named for the same reason [`CODEX_AT_WORK`] is, and it is the same bargain
+/// the usage-limit phrase makes: the wording is grok's and it will move, and
+/// moving it costs one edit here.
+const GROK_AT_WORK: &str = "Esc:cancel";
 
 /// The sessions this server has running, by the Conversation each belongs to.
 ///

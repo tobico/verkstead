@@ -52,3 +52,46 @@ a constant nobody has seen stand.
 - [ ] With the signature deliberately wrong, the session reads as busy until
       the byte-quiet long-stop, and what the human then gets is the ordinary
       would-not-ask stop rather than a session that runs for ever.
+
+## What was read off the real thing
+
+Grok Build comes out where codex came out: **an at-work reading**, not the
+at-the-prompt one this task expected it might be. Measured against grok 1.0.13,
+driven on a hundred-column terminal through the same virtual terminal the
+Screen is — a throwaway probe on `avt`, so what was read is what
+`Screen::showing` reads.
+
+- **Its waiting frame is its working frame.** The composer, its `❯`, the
+  `grok-4.6 · always-approve` label on its border and the `Shift+Tab:mode` and
+  `Ctrl+x:shortcuts` hints beside it stand in both. What is there only while a
+  turn runs is the live status line — `⠧ Responding… 5.7s … [stop]` — and the
+  `Esc:cancel` hint on the row under the composer. Across a turn sampled once a
+  second — a tool call and then a streamed reply, 27 working frames and 16
+  resting ones — both were in every working frame and in none of the resting
+  ones, and in neither of the two frames before grok had drawn anything.
+- **The constant is the hint**, `Esc:cancel`: the hints are the row grok draws
+  at the foot of every frame, where the status line is drawn only mid-turn, and
+  a keybinding label is a harder thing to hit by accident in what a session
+  printed than a bracketed word is.
+- **It is byte-silent at its prompt**: not one byte in ninety seconds of
+  sitting there. Mid-turn the widest gap between reads was 208 ms once it had
+  drawn its first frame — 2.0 s once, between its first escape sequence and
+  that first frame — so the three-second quiet asked for beside the hint is
+  never met while it works.
+
+## What is still waiting
+
+There is no xAI account on this machine and no `grok` on the system profile, so
+the frames above were read off a grok run **outside Verkstead**: installed under
+a `GROK_HOME` of its own from `@xai-official/grok`, and pointed by
+`GROK_XAI_API_BASE_URL` and `XAI_API_KEY` at a stand-in xAI Responses API that
+streams replies slowly and calls `run_terminal_command`, so that a turn could be
+held open and looked at. Everything on the screen is grok's own; only the model
+behind it was not.
+
+What that leaves outstanding is one criterion's real half:
+
+- a Grok session **launched by Verkstead** under a real account, judged idle at
+  its prompt within a round of the pace by the running server rather than by the
+  suite's stubs. The signature itself is settled and the reading is proved, so
+  what is left is the account.

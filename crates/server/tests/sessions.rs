@@ -1446,6 +1446,27 @@ async fn grilling_at_work(stub: &str) -> Grilling {
     .await
 }
 
+/// And the same again on the third backend, whose stub draws the way grok
+/// draws — nothing handed in here either.
+///
+/// A fixture of its own rather than a flag on the one above, because what these
+/// two prove is one thing apiece: that Verkstead carries the right line for
+/// *this* backend. A session run under the wrong type's Profile would be read
+/// by the wrong type's constant and prove nothing about either.
+async fn grilling_at_work_on_grok(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnGrok,
+        Origin::None,
+        None,
+    )
+    .await
+}
+
 /// What Verkstead is told this backend has on its Screen when it is sitting at
 /// its prompt — one line, the whole of the coupling to somebody else's display.
 const AT_THE_PROMPT: &str = "▌ ready for anything";
@@ -1466,6 +1487,14 @@ const CODEX_MODEL: &str = "gpt-5-codex";
 /// [`A_BACKLOG_OF_ONE`] — and a Conversation whose roles all ran the same model
 /// would be one where no stub could tell what it had been sent to do.
 const CODEX_GRILLING_MODEL: &str = "gpt-5-codex-grilling";
+
+/// The model a Grok Build Profile lists, and the one its grilling role runs on
+/// where every role is on that Profile — the pair [`CODEX_MODEL`] and
+/// [`CODEX_GRILLING_MODEL`] are, and for the same reason.
+const GROK_MODEL: &str = "grok-4.6";
+
+/// See [`GROK_MODEL`].
+const GROK_GRILLING_MODEL: &str = "grok-4.6-grilling";
 
 /// The same, with a second repository registered beside this one and added to
 /// the Conversation as a companion before the press — which is a companion in
@@ -1605,6 +1634,9 @@ enum Pickers {
     /// And every role on that Profile, which is a Conversation whose whole run
     /// is on the second backend — see [`Bench::everything_on_codex`].
     EverythingOnCodex,
+
+    /// The same on the third backend — see [`Bench::everything_on_grok`].
+    EverythingOnGrok,
 }
 
 /// The same with a read-write companion beside it, for the tests about a
@@ -1741,6 +1773,7 @@ async fn grilling_however_started(
         Pickers::Unreviewed => bench.unreviewed(id).await,
         Pickers::GrillingOnCodex => bench.grilling_on_codex(id).await,
         Pickers::EverythingOnCodex => bench.everything_on_codex(id).await,
+        Pickers::EverythingOnGrok => bench.everything_on_grok(id).await,
     }
 
     // While it is still drafting, which is the only time a companion can be
@@ -1877,19 +1910,66 @@ impl Bench {
         .await;
     }
 
-    /// The Profile both of them pick, and the pressing of the pickers named,
-    /// each on the model it is paired with.
+    /// And every role on a Grok Build Profile, which is the same again on the
+    /// third backend.
+    ///
+    /// Every role for the reason [`Bench::everything_on_codex`] is, and the
+    /// grilling one on a model of its own for the reason it is there: one
+    /// Profile runs the lot, and the stubs tell the session that breaks the
+    /// work down from the ones that build it by the model.
+    async fn everything_on_grok(&self, id: i64) {
+        self.on_one_home(
+            id,
+            "Grok",
+            "grok",
+            &[GROK_MODEL, GROK_GRILLING_MODEL],
+            &[
+                ("grilling", GROK_GRILLING_MODEL),
+                ("implementation", GROK_MODEL),
+                ("review", GROK_MODEL),
+            ],
+        )
+        .await;
+    }
+
+    /// The Profile both of the Codex pickers pick, and the pressing of the
+    /// pickers named, each on the model it is paired with.
     async fn on_codex(&self, id: i64, roles: &[(&str, &str)]) {
-        let home = self.watched.path().join("codex/.codex");
+        self.on_one_home(
+            id,
+            "Codex",
+            "codex",
+            &[CODEX_MODEL, CODEX_GRILLING_MODEL],
+            roles,
+        )
+        .await;
+    }
+
+    /// Saving a Profile of an agent type whose whole account is one home, and
+    /// pressing the pickers named onto it.
+    ///
+    /// One body for every such type — which is every one after Claude — because
+    /// what differs between them is the word in the type and the directory the
+    /// account keeps, and a second copy of this would be a second place to
+    /// forget one of them.
+    async fn on_one_home(
+        &self,
+        id: i64,
+        agent_type: &str,
+        name: &str,
+        models: &[&str],
+        roles: &[(&str, &str)],
+    ) {
+        let home = self.watched.path().join(name).join(format!(".{name}"));
         std::fs::create_dir_all(&home).unwrap();
 
         let saved: ProfileSaved = post(
             &self.app,
             "/api/ui/profiles",
             &serde_json::json!({
-                "name": "codex",
-                "account": { "agent_type": "Codex", "home": home },
-                "models": [CODEX_MODEL, CODEX_GRILLING_MODEL],
+                "name": name,
+                "account": { "agent_type": agent_type, "home": home },
+                "models": models,
             }),
         )
         .await;
@@ -1899,7 +1979,7 @@ impl Bench {
             get(&self.app, "/api/ui/profiles").await;
         let profile_id = profiles
             .into_iter()
-            .find(|profile| profile.name == "codex")
+            .find(|profile| profile.name == name)
             .expect("the Profile just saved should be on the list")
             .id;
 
@@ -18073,14 +18153,19 @@ const AT_WORK_IN_OTHER_WORDS: &str = "◦ Thinking (12s • press escape to stop
 /// through it: a TUI that stops to think is not a TUI that has finished, and on
 /// this reading the line standing is what says so.
 ///
-/// `at_work` is what it draws while it works — codex's own where the test is
-/// about Verkstead knowing it, and something else where it is about a wording
+/// `at_work` is what it draws while it works — the backend's own where the test
+/// is about Verkstead knowing it, and something else where it is about a wording
 /// that has moved on. `resting` is the frame it leaves when its turn is over.
+///
+/// `grilling_model` is the model the session that breaks the work down is
+/// launched on, which is how these stubs tell it from the ones that build it —
+/// so it is the caller's, one backend's Profile listing different models from
+/// another's.
 ///
 /// `commits` is whether the step does what its task asked, as it is there: one
 /// that does is ended on its landing and its judgement together, and one that
 /// does not is a run nobody can move, which is the rescue's.
-fn a_backlog_at_work(at_work: &str, resting: &str, commits: bool) -> String {
+fn a_backlog_at_work(grilling_model: &str, at_work: &str, resting: &str, commits: bool) -> String {
     let working = if commits {
         r#"
     number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
@@ -18120,7 +18205,7 @@ resting() {{
     sleep 300
 }}
 case "$1" in
-gpt-5-codex-grilling)
+{grilling_model})
     working 10
     mkdir -p .tasks
     printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
@@ -18162,7 +18247,13 @@ esac
 /// doing.
 #[tokio::test]
 async fn codex_sessions_are_ended_on_the_at_work_line_going_rather_than_on_the_frame_they_leave() {
-    let fixture = grilling_at_work(&a_backlog_at_work(AT_WORK, AT_ITS_PROMPT, true)).await;
+    let fixture = grilling_at_work(&a_backlog_at_work(
+        CODEX_GRILLING_MODEL,
+        AT_WORK,
+        AT_ITS_PROMPT,
+        true,
+    ))
+    .await;
 
     worked_to_empty(&fixture).await;
 
@@ -18190,7 +18281,13 @@ async fn codex_sessions_are_ended_on_the_at_work_line_going_rather_than_on_the_f
 /// says this one has stopped is the at-work line no longer on its Screen.
 #[tokio::test]
 async fn a_codex_step_that_stops_without_committing_is_told_and_then_stopped() {
-    let fixture = grilling_at_work(&a_backlog_at_work(AT_WORK, AT_ITS_PROMPT, false)).await;
+    let fixture = grilling_at_work(&a_backlog_at_work(
+        CODEX_GRILLING_MODEL,
+        AT_WORK,
+        AT_ITS_PROMPT,
+        false,
+    ))
+    .await;
 
     picked(&fixture, "task-list").await;
 
@@ -18231,6 +18328,7 @@ async fn a_codex_step_that_stops_without_committing_is_told_and_then_stopped() {
 #[tokio::test]
 async fn an_at_work_line_that_has_moved_on_leaves_the_run_on_the_byte_clock() {
     let fixture = grilling_at_work(&a_backlog_at_work(
+        CODEX_GRILLING_MODEL,
         AT_WORK_IN_OTHER_WORDS,
         AT_ITS_PROMPT,
         true,
@@ -18268,7 +18366,13 @@ async fn an_at_work_line_that_has_moved_on_leaves_the_run_on_the_byte_clock() {
 /// is out is it idle.
 #[tokio::test]
 async fn an_at_work_line_that_never_goes_is_caught_by_the_long_stop() {
-    let fixture = grilling_at_work(&a_backlog_at_work(AT_WORK, AT_WORK, false)).await;
+    let fixture = grilling_at_work(&a_backlog_at_work(
+        CODEX_GRILLING_MODEL,
+        AT_WORK,
+        AT_WORK,
+        false,
+    ))
+    .await;
 
     picked(&fixture, "task-list").await;
 
@@ -18290,6 +18394,118 @@ async fn an_at_work_line_that_never_goes_is_caught_by_the_long_stop() {
         fell_silent.elapsed() >= BRISKLY.proposing * 2,
         "and what caught it was the long-stop rather than the grace, which \
          would have had it in under half the time",
+    );
+    assert!(
+        said[0].contains("summarize your status"),
+        "the ordinary line, this being the ordinary rules arriving late: \
+         {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and the ordinary stop under them: {:?}",
+        stopped.html,
+    );
+}
+
+/// What the real grok has at the foot of every frame while it is working, which
+/// is the whole of what says a Grok session has not stopped — see the server's
+/// `sessions` module, where Verkstead's own copy of this wording is kept.
+///
+/// Written out here rather than reached for out of the server, and deliberately,
+/// the way codex's is: what these prove is that Verkstead already knows grok's
+/// row, so the stub draws what grok draws and nothing is handed in to meet it.
+const GROK_AT_WORK: &str = "Shift+Tab:mode  │  Esc:cancel  │  Ctrl+x:shortcuts";
+
+/// And the row it leaves when its turn is over: the same hints but for the one
+/// that says the turn can be cancelled.
+///
+/// That is the reason a Grok session is read the same way round as a Codex one:
+/// grok's composer, the model on its border and the rest of these hints are
+/// drawn exactly the same while it works, and this row is where the two states
+/// differ.
+const GROK_AT_ITS_PROMPT: &str = "Shift+Tab:mode  │  Ctrl+x:shortcuts";
+
+/// A backlog worked by sessions that draw grok's at-work hint is worked to the
+/// end, on that hint going.
+///
+/// The same claim as the Codex one above, on the other backend's own wording and
+/// with nothing handed in to read it by. What it covers is the shape — a Grok
+/// session ended where it stood, and not one prodded through the silence it
+/// leaves mid-turn with the hint standing. What pins the wording itself is the
+/// test below: a hint Verkstead does not know costs a run nothing here, because
+/// the quiet behind the screen carries it either way.
+#[tokio::test]
+async fn grok_sessions_are_ended_on_their_own_at_work_hint_rather_than_on_codexs() {
+    let fixture = grilling_at_work_on_grok(&a_backlog_at_work(
+        GROK_GRILLING_MODEL,
+        GROK_AT_WORK,
+        GROK_AT_ITS_PROMPT,
+        true,
+    ))
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: every session was ended where it stood, its at-work \
+         hint gone and its terminal quiet: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into any of them: the silence each left in the \
+         middle of its turn is longer than the grace, and its at-work hint was \
+         standing through the whole of it",
+    );
+}
+
+/// And a grok hint that never goes is caught by the long-stop, as codex's is.
+///
+/// The dangerous drift on this reading, and the one worth proving per backend
+/// rather than once: a release draws the hint at the prompt as well, or the row
+/// Verkstead reads is not the row it thought, and the session then reads as one
+/// that never stops working. Nothing else here would catch it — the rescue's
+/// precondition is idle and every ender waits on the same judgement — so the
+/// byte clock stays behind it, and what the human gets is the ordinary
+/// would-not-ask stop.
+#[tokio::test]
+async fn a_grok_at_work_hint_that_never_goes_is_caught_by_the_long_stop() {
+    let fixture = grilling_at_work_on_grok(&a_backlog_at_work(
+        GROK_GRILLING_MODEL,
+        GROK_AT_WORK,
+        GROK_AT_WORK,
+        false,
+    ))
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    // The step session has drawn its at-work hint for a window longer than the
+    // grace, and has now stopped printing altogether — which is where the
+    // long-stop starts.
+    until_written(&handoff_directory(&fixture).join("silent-step")).await;
+    let fell_silent = Instant::now();
+
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "nothing was typed into it while it was drawing: a Grok session drawing \
+         that it is at work is at work, however long it sits there saying so",
+    );
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        fell_silent.elapsed() >= BRISKLY.long_stop,
+        "and what caught it was the long-stop rather than the grace or the \
+         three seconds behind the screen — which is the whole of what says \
+         Verkstead is reading grok's own hint here: a hint it did not know \
+         would have had this session in half the time",
     );
     assert!(
         said[0].contains("summarize your status"),

@@ -399,9 +399,9 @@ stopped. A backend that draws a full-screen interface is never reliably silent �
 it repaints while it works and may go on repainting its prompt after it has
 stopped — so what says one has stopped is a line on its **Screen**, read one of
 two ways: an at-the-prompt line *standing* there, or an at-work line *gone* from
-it. Which way is a fact about the backend, and Codex is the second — the frame
-it leaves when its turn is over and the frame it draws mid-turn are the same
-screen but for the line saying it is working. One signature per backend, kept in
+it. Which way is a fact about the backend, and Codex and Grok Build are both the
+second — the frame each leaves when its turn is over and the frame it draws
+mid-turn are the same screen but for the line saying it is working. One signature per backend, kept in
 one place and accepted to drift the way the usage-limit phrase does. The
 at-work reading asks for the ordinary silence beside it, because the line is
 equally missing from a session that has drawn nothing yet; the at-the-prompt one
