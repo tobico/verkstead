@@ -264,17 +264,55 @@ describe("the card", () => {
 
   /// And the other thing the browser can see and the human cannot: an entry that
   /// is saved, is in the file, and does nothing.
-  it("says how many entries the server cannot see", async () => {
+  ///
+  /// Every one of them, wherever it is drawn. A bind written for a Repo is read
+  /// on that Repo's pane rather than here, and it goes stale unwatched exactly
+  /// the same way — so a count that stopped at this section's own rows would put
+  /// the only warning there is on a pane nobody opens unprompted.
+  it("counts every entry the server cannot see, wherever it is drawn", async () => {
     theSettings(TOLD);
     const { container } = mountCard();
 
     await theCard(container);
 
-    // The watched path and the bind every sandbox gets. The Repo's own bind is
-    // unresolved too and is not this card's to count.
+    // The watched path, the bind every sandbox gets, and the one written for a
+    // Repo — which this section does not list and does count.
+    await waitFor(() => screen.getByText(/3 entries the server cannot see/));
+  });
+
+  /// And it says which pane to open, because one of the three is not on this
+  /// one: sending somebody to a list the row is not in is the warning that
+  /// wastes the trip.
+  it("sends the human to the repo's pane where one of them is a repo's", async () => {
+    theSettings(TOLD);
+    const { container } = mountCard();
+
+    await theCard(container);
+
     await waitFor(() =>
-      screen.getByText(/2 entries the server cannot see/),
+      screen.getByText(/the repo a bind is written for, to read why/),
     );
+  });
+
+  /// And says nothing of the sort where every unseen entry is one of its own.
+  it("sends them only here where none of them is a repo's", async () => {
+    const noneScoped: SettingsView = {
+      ...TOLD,
+      paths: {
+        ...TOLD.paths,
+        binds: TOLD.paths.binds.filter((entry) => entry.repo === null),
+      },
+    };
+
+    theSettings(noneScoped);
+    const { container } = mountCard();
+
+    await theCard(container);
+
+    await waitFor(() =>
+      screen.getByText(/2 entries the server cannot see\. Open this section/),
+    );
+    expect(screen.queryByText(/the repo a bind is written for/)).toBeNull();
   });
 
   it("says nothing of the kind where every entry resolves", async () => {

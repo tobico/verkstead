@@ -691,7 +691,10 @@ Timeline events:
   list; a Repo's own pane carries the binds said for its name under a **Sandbox
   configuration** heading, the same rows out of the same read and the same
   save, because a page listing every path would carry a column of `name=…`
-  entries nobody could scan. What is on a card is what a list is scanned for
+  entries nobody could scan. The Paths card's count of entries the server cannot
+  see spans a Repo's pane as well as its own, and says which to open: a bind that
+  has quietly stopped resolving is what nobody goes looking for, and a warning
+  only on the pane nobody opens is no warning. What is on a card is what a list is scanned for
   and the rest is in the pane — a Profile's mounted paths, agent type and
   Remove; a Repo's branches, how much work is on it, what it is holding that
   nothing is driving and its own binds; the cache's switch and the size of its

@@ -24,6 +24,12 @@
 //! that sentence is how somebody learns the installer has to widen the unit
 //! before what they saved can work.
 //!
+//! The card counts every one of those, including the ones on a Repo's pane
+//! rather than on this one. A bind that has quietly stopped resolving is exactly
+//! what nobody goes looking for, so the one warning there is has to be where
+//! somebody scanning the settings will meet it — and it says which pane to open,
+//! because sending them to a list the row is not in would waste the trip.
+//!
 //! Only the global binds are here. A bind scoped to one Repo belongs on that
 //! Repo's own pane — see `repos/RepoBinds.tsx`, which draws the same rows out of
 //! the same read — and its rows are not drawn in this list. They still ride
@@ -68,13 +74,37 @@ function global(paths: PathsView | undefined): Row<BindEntry>[] {
   return rowed(paths?.binds ?? []).filter((row) => row.entry.repo === null);
 }
 
-/// How many of the rows drawn on this page name something the server cannot
+/// How many entries either list holds that name something the server cannot
 /// currently see — whoever said them, because the installation's own go stale
 /// the same way a settings row does.
+///
+/// Every bind, including the ones this section's own pane does not list. A bind
+/// written for a Repo is read on that Repo's pane rather than here, and a saved
+/// entry that quietly does nothing is the one thing a human cannot check from a
+/// phone — so a count that skipped it would leave the only warning there is on a
+/// pane nobody opens unless they already suspect something.
 function unseen(paths: PathsView | undefined): number {
-  const rows = [...(paths?.watched ?? []), ...global(paths).map((r) => r.entry)];
+  const rows = [...(paths?.watched ?? []), ...(paths?.binds ?? [])];
 
   return rows.filter((entry) => unresolved(entry.resolution)).length;
+}
+
+/// What the card says about them: how many, and where to go and read why.
+///
+/// Where is not always this section, which is why it is a sentence rather than
+/// a count with a fixed line after it: a bind written for a Repo says why on
+/// that Repo's own pane, and sending somebody to a list the row is not in would
+/// be the one warning that wastes the trip.
+function unseenSays(paths: PathsView | undefined): string {
+  const many = counted(unseen(paths), "entry", "entries");
+
+  const onARepo = (paths?.binds ?? []).some(
+    (entry) => entry.repo !== null && unresolved(entry.resolution),
+  );
+
+  return onARepo
+    ? `${many} the server cannot see. Open this section, or the repo a bind is written for, to read why.`
+    : `${many} the server cannot see. Open this section to read why.`;
 }
 
 /// A count with the word it counts, so that a line reads as English rather than
@@ -128,12 +158,11 @@ export function PathsCard(props: {
 
             {/* And the other thing the browser can see and the human cannot: a
                 row that is saved, is in the file, and does nothing, because what
-                it names is not where the server is looking. */}
+                it names is not where the server is looking. Counted wherever it
+                is drawn, because a bind on a Repo's pane goes stale unwatched
+                the same way one here does. */}
             <Show when={unseen(paths()) > 0}>
-              <p class={styles.warning}>
-                {counted(unseen(paths()), "entry", "entries")} the server cannot
-                see. Open this section to read why.
-              </p>
+              <p class={styles.warning}>{unseenSays(paths())}</p>
             </Show>
 
             <p class={styles.standing}>
