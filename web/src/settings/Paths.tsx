@@ -25,9 +25,10 @@
 //! before what they saved can work.
 //!
 //! Only the global binds are here. A bind scoped to one Repo belongs on that
-//! Repo's own pane, and its rows are not drawn in this list — but they still
-//! ride along on every save this pane makes, because one request writes the
-//! whole of `config.yaml` and a list sent short is a list emptied.
+//! Repo's own pane — see `repos/RepoBinds.tsx`, which draws the same rows out of
+//! the same read — and its rows are not drawn in this list. They still ride
+//! along on every save this pane makes, because one request writes the whole of
+//! `config.yaml` and a list sent short is a list emptied.
 //!
 //! Two halves in two panes, like every other section: a card in the middle pane
 //! saying how the two lists stand and whether anything is wrong with them, and
@@ -36,73 +37,27 @@
 //!
 //! A row saves on its own press. Adding one is the Add beside the field and
 //! taking one away is the Remove on the row, and each is a save of the whole
-//! file with the rest of it riding along as it stands: there is nothing to
-//! commit afterwards, and — the point of doing it this way — the answer to the
-//! save is what says whether the new entry resolves. Only the server can know
-//! that, so a row typed and left uncommitted could never report it.
+//! file with the rest of it riding along as it stands — see `PathEditor.tsx`,
+//! which is what both places paths are edited make that save with.
 
-import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import {
-  For,
-  Match,
-  Show,
-  Switch as Choose,
-  createSignal,
-  type JSX,
-} from "solid-js";
+import { Match, Show, Switch as Choose, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
-import { QuietButton } from "../QuietButton";
-import { loadSettings, saveSettings } from "../api/client";
-import type {
-  BindEntry,
-  PathSource,
-  PathsView,
-  Resolution,
-  SettingsSaved,
-  SettingsView,
-  WatchedPathEntry,
-} from "../api/types";
-import { useReading } from "../freshness";
+import type { BindEntry, PathsView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldPaths } from "./held";
+import {
+  Adding,
+  Rows,
+  type Row,
+  rowed,
+  unresolved,
+  useSettings,
+  useWritingPaths,
+  without,
+} from "./PathEditor";
 import styles from "./Paths.module.css";
-
-/// The settings as they stand, read once for the two panes that draw them — the
-/// same read, by the same key, that every other section of this page makes.
-function useSettings() {
-  return useReading(() => ({
-    queryKey: ["settings"],
-    queryFn: loadSettings,
-    freshness: { reconcile: "id" },
-  }));
-}
-
-/// One entry of either list as this pane draws it: what the server said about
-/// it, and where it stands among the settings' *own* entries of that list.
-///
-/// The second is what a Remove sends, and it is not where the row stands on the
-/// page: the installation's entries are interleaved with them, and a Repo's own
-/// binds sit in the file between binds that are not drawn here at all. Counted
-/// rather than looked up by path, because nothing stops a file naming the same
-/// directory twice and a removal that took both would be taking away something
-/// nobody pressed. `-1` for a row the settings do not own, which is a row with
-/// no Remove on it.
-type Row<Entry> = { entry: Entry; held: number };
-
-/// The entries of one list, each told where it stands among the settings' own.
-function rowed<Entry extends { source: PathSource }>(
-  entries: Entry[],
-): Row<Entry>[] {
-  let held = 0;
-
-  return entries.map((entry) => ({
-    entry,
-    held: entry.source === "Settings" ? held++ : -1,
-  }));
-}
 
 /// The binds every sandbox gets, which are the ones this pane edits.
 ///
@@ -111,11 +66,6 @@ function rowed<Entry extends { source: PathSource }>(
 /// why it lands in this list: it is a row somebody has to be able to correct.
 function global(paths: PathsView | undefined): Row<BindEntry>[] {
   return rowed(paths?.binds ?? []).filter((row) => row.entry.repo === null);
-}
-
-/// Why the server cannot see what an entry names, or `null` where it can.
-function unresolved(resolution: Resolution): string | null {
-  return resolution === "Resolves" ? null : resolution.Unresolved.why;
 }
 
 /// How many of the rows drawn on this page name something the server cannot
@@ -207,55 +157,8 @@ export function PathsPane(props: {
   /// The way back to the settings, which is the pane this one was entered from.
   back: () => void;
 }): JSX.Element {
-  const queries = useQueryClient();
-  const settings = useSettings();
-
-  const told = (): SettingsView | undefined => settings.data;
-
-  /// The settings' own entries of both lists, as the strings a save sends back
-  /// — the same ones every other section of this page rides along untouched.
-  const held = () => heldPaths(told());
-
-  const save = useMutation(() => ({
-    mutationFn: (lists: {
-      watched_paths: string[];
-      sandbox_binds: string[];
-    }) => {
-      const standing = told();
-
-      return saveSettings({
-        // The rest of both files as they stand: the endpoint writes them whole,
-        // and this pane has no business with any of it.
-        git_author: standing?.git_author ?? { name: "", email: "" },
-        github_token: "Keep",
-        rust_build_cache: {
-          enabled: standing?.rust_build_cache.enabled ?? true,
-          size: standing?.rust_build_cache.size_configured
-            ? (standing?.rust_build_cache.size ?? "")
-            : "",
-        },
-        share_viewer_url: standing?.share_viewer_url ?? "",
-        ...lists,
-      });
-    },
-    onSuccess: (saved: SettingsSaved) => {
-      // The save's answer *is* a fresh read of both files, and it is the only
-      // thing that knows whether what was just added resolves.
-      queries.setQueryData(["settings"], saved.settings);
-    },
-  }));
-
-  /// One list rewritten and the other ridden along as it stands, which is every
-  /// press on this pane.
-  const writeWatched = (watched_paths: string[]) =>
-    save.mutate({ watched_paths, sandbox_binds: held().sandbox_binds });
-
-  const writeBinds = (sandbox_binds: string[]) =>
-    save.mutate({ watched_paths: held().watched_paths, sandbox_binds });
-
-  /// A list with the entry standing at `at` taken out of it.
-  const without = (entries: string[], at: number): string[] =>
-    entries.filter((_, which) => which !== at);
+  const { settings, told, held, save, writeWatched, writeBinds } =
+    useWritingPaths();
 
   return (
     <>
@@ -354,110 +257,5 @@ export function PathsPane(props: {
         </Match>
       </Choose>
     </>
-  );
-}
-
-/// One list's rows, or the line that says it has none.
-function Rows(props: {
-  rows: Row<WatchedPathEntry | BindEntry>[];
-  /// What is said where the list is empty.
-  none: string;
-  /// Whether a save is in flight, which is what stops a second press landing on
-  /// a list the first one is still rewriting.
-  saving: boolean;
-  /// Take one away, by where it stands among the settings' own.
-  remove: (held: number) => void;
-}): JSX.Element {
-  return (
-    <Show when={props.rows.length > 0} fallback={<Empty>{props.none}</Empty>}>
-      <ul class={styles.rows}>
-        <For each={props.rows}>
-          {(row) => (
-            <li class={styles.row}>
-              <div class={styles.what}>
-                <span class={styles.path}>{row.entry.path}</span>
-
-                {/* Whose the entry is, said only on the ones nothing here can
-                    change: the settings' own are the ordinary case, and a
-                    label on every row would say nothing. */}
-                <Show when={row.entry.source === "Installation"}>
-                  <span class={styles.source}>the installation's</span>
-                </Show>
-              </div>
-
-              {/* The one thing a human cannot check from a phone, in the
-                  server's own words. */}
-              <Show when={unresolved(row.entry.resolution)}>
-                {(why) => <p class={styles.unresolved}>{why()}</p>}
-              </Show>
-
-              <Show when={row.held >= 0}>
-                <QuietButton
-                  class={styles.remove}
-                  onClick={() => {
-                    if (!props.saving) {
-                      props.remove(row.held);
-                    }
-                  }}
-                >
-                  Remove
-                </QuietButton>
-              </Show>
-            </li>
-          )}
-        </For>
-      </ul>
-    </Show>
-  );
-}
-
-/// And the field another is written into, with the press that saves it.
-///
-/// Typed rather than picked out of a browser, for the reason the Repos' form is
-/// typed: nothing here scans a filesystem to offer choices from it, and what the
-/// server makes of the path is the only thing that decides what it does.
-function Adding(props: {
-  /// What the field is called on the page, and what its label points at.
-  id: string;
-  label: string;
-  placeholder: string;
-  saving: boolean;
-  add: (path: string) => void;
-}): JSX.Element {
-  const [typed, setTyped] = createSignal("");
-
-  const commit = (ev: SubmitEvent) => {
-    ev.preventDefault();
-
-    const path = typed().trim();
-    if (path === "") {
-      return;
-    }
-
-    // Cleared on the press rather than on the answer: what was in the box has
-    // gone to the server, and the row it becomes is what the answer draws.
-    setTyped("");
-    props.add(path);
-  };
-
-  return (
-    <form class={styles.adding} onSubmit={commit}>
-      <label for={props.id}>{props.label}</label>
-      <div class={styles.field}>
-        <input
-          id={props.id}
-          type="text"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
-          placeholder={props.placeholder}
-          value={typed()}
-          onInput={(ev) => setTyped(ev.currentTarget.value)}
-        />
-        <button type="submit" disabled={props.saving}>
-          Add
-        </button>
-      </div>
-    </form>
   );
 }

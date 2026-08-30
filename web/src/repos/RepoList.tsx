@@ -30,6 +30,11 @@
 //! git read or a count, and a list that carried them would pay for all of them
 //! on every visit to this page.
 //!
+//! The one thing on that pane that is written rather than read is the Repo's own
+//! Sandbox Configuration — the binds only its sessions get — which is a section
+//! of its own, out of the settings the rest of this page is edited through. See
+//! `RepoBinds.tsx`.
+//!
 //! Taking one away is in the pane that opened it, and it is an unregistering
 //! rather than a delete: Verkstead stops offering the repository and leaves the
 //! directory where it is, so every Conversation ever worked in it goes on saying
@@ -63,6 +68,7 @@ import type { Registered, RepoEntry, RepoRemoved } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
+import { RepoBinds } from "./RepoBinds";
 import app from "../App.module.css";
 import styles from "./RepoList.module.css";
 
@@ -213,11 +219,17 @@ function RepoCard(props: {
 
 /// One registered Repo opened, which is the details pane a card leads to.
 ///
-/// Everything on it but one press is the repository's own answer or the store's
-/// count of what has been done in it. The press is Remove, which is the one
-/// thing there is to *do* to a Repo — and it is an unregistering rather than a
-/// delete: Verkstead stops offering it, the directory is left where it is, and
-/// every Conversation ever worked in it goes on saying so.
+/// Everything on it but one section and one press is the repository's own answer
+/// or the store's count of what has been done in it. The section is its Sandbox
+/// Configuration, which is settings rather than facts — see `RepoBinds.tsx` —
+/// and it is here because a bind written for this repository is about this
+/// repository, and a page listing every path on the machine is not where
+/// somebody would look for one.
+///
+/// The press is Remove, which is the one thing there is to *do* to a Repo — and
+/// it is an unregistering rather than a delete: Verkstead stops offering it, the
+/// directory is left where it is, and every Conversation ever worked in it goes
+/// on saying so.
 ///
 /// That press stands under the facts and behind a rule, the way the Profile
 /// pane's does: a press that undoes something, set among the things it would
@@ -384,6 +396,12 @@ export function RepoDetails(props: {
                   </ul>
                 </Show>
               </section>
+
+              {/* And what only this repository's sessions are given, which is
+                  the one thing on this pane that is written rather than read:
+                  the binds scoped to its name. Drawn whether or not it has any,
+                  because the pane is where somebody learns the section exists. */}
+              <RepoBinds repo={repo().name} />
 
               {/* And the one press there is to make about a Repo, under
                   everything it is about. What the line says is what the press

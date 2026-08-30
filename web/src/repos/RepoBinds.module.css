@@ -1,0 +1,20 @@
+/* One Repo's own sandbox binds, on the pane the Repo is opened at — see
+   `RepoBinds.tsx`.
+
+   Only what stands around the rows: what a row itself looks like is
+   `settings/PathEditor.module.css`'s, shared with the Paths pane that draws the
+   same rows for the watched paths and the global binds. The heading is the one
+   the sections beside it on that pane wear — a copy rather than a rule held in
+   common with them, because a section that is drawn from another module is still
+   its own section. */
+
+.binds h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+}
+
+.binds .failure {
+  margin: 0.85rem 0 0;
+  font-size: 0.9rem;
+}

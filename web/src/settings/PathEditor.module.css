@@ -1,0 +1,134 @@
+/* The rows a configured path is drawn as, and the field another is written into
+   — see `PathEditor.tsx`.
+
+   Its own module rather than the Paths section's, because two panes draw these:
+   the watched paths and the global binds on `/settings/paths`, and one Repo's
+   own binds on that Repo's pane. What a row looks like is the same question in
+   both places, and one sheet is what keeps it one answer. What is around them —
+   the card, the headings, the notices a pane says beside its lists — belongs to
+   whichever pane is drawing them. */
+
+.rows {
+  margin: 0.85rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One entry: what it names on its own line, why it does nothing under that where
+   there is a reason, and the press that takes it away. Boxed, because the rows
+   are the thing being read here and a run of bare lines would not say where one
+   entry ended and the next began. */
+.row {
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  background: var(--paper);
+}
+
+.row + .row {
+  margin-top: 0.5rem;
+}
+
+/* The path and whose it is, on one line — the label after the path rather than
+   before it, because the path is what is being scanned for. */
+.what {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.path {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.source {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* Why the server cannot see it, in the server's own words. Quiet under the path
+   rather than a whole line of red: the path above it is what the human is
+   reading, and this says which of the rows to look at. */
+.unresolved {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.row .remove {
+  margin-top: 0.5rem;
+  color: var(--removed);
+  background: none;
+  border-color: var(--edge);
+}
+
+/* And the field another entry is written into, under the rows it is added to. */
+.adding {
+  margin-top: 0.85rem;
+}
+
+.adding label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* The box and its press on one line, as the build cache's size is — though this
+   one takes a whole path, so the field takes what is left of the line. */
+.field {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.field button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.field button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.field input:focus-visible {
+  border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .field input:hover {
+    border-color: var(--ink-soft);
+  }
+
+  .field button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+
+  .row .remove:hover {
+    background: none;
+    border-color: var(--removed);
+  }
+}

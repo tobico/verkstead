@@ -1,9 +1,15 @@
 //! The paths on the settings page: what the card says of the two lists, what the
-//! pane draws of each row, and what adding or taking one away puts on the wire.
+//! pane draws of each row, and what adding or taking one away puts on the wire —
+//! and the same rows on one Repo's own pane, which is where a bind scoped to a
+//! Repo is drawn.
 //!
-//! Two halves mounted apart, because that is what they are: a card in the middle
-//! pane saying how the lists stand and whether anything is wrong with them, and
-//! the rows that rewrite them in the details pane it opens.
+//! Three things mounted apart, because that is what they are: a card in the
+//! middle pane saying how the lists stand and whether anything is wrong with
+//! them, the rows that rewrite them in the details pane it opens, and one Repo's
+//! own binds in a section of the pane that Repo is opened at. All three read the
+//! one settings query and all three save through the one endpoint, which is what
+//! the last group below is about: a press on one of them must not cost what the
+//! others are drawn from.
 //!
 //! Three things are worth a test rather than a reading of the source, and they
 //! are what most of this file is:
@@ -33,7 +39,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SettingsSaved, SettingsView } from "../src/api/types";
 import card from "../src/CardButton.module.css";
+import { RepoBinds } from "../src/repos/RepoBinds";
 import { PathsCard, PathsPane } from "../src/settings/Paths";
+import rowStyles from "../src/settings/PathEditor.module.css";
 import styles from "../src/settings/Paths.module.css";
 import { json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -49,6 +57,11 @@ const UNSET = unset as SettingsView;
 const WATCHED = "/home/ada/src";
 const BIND = "/var/cache/verkstead-node";
 const SCOPED = "verkstead=/var/cache/verkstead-cargo";
+
+/// The Repo that last one is written against, and the directory it names — the
+/// two halves of it, because the pane that draws it knows them apart.
+const REPO = "verkstead";
+const OWN = "/var/cache/verkstead-cargo";
 
 /// The rest of the settings as every save from this pane sends them: the author
 /// as it stands, the token untouched, and the two the sections above own.
@@ -85,6 +98,26 @@ function installed(standing: SettingsView): SettingsView {
         {
           path: "/etc/verkstead/certs",
           repo: null,
+          source: "Installation",
+          resolution: "Resolves",
+        },
+        ...standing.paths.binds,
+      ],
+    },
+  };
+}
+
+/// And the same settings with the installation having said a bind for one Repo
+/// as well, which is the row that draws read-only on that Repo's pane.
+function installedFor(standing: SettingsView, repo: string): SettingsView {
+  return {
+    ...standing,
+    paths: {
+      ...standing.paths,
+      binds: [
+        {
+          path: "/var/cache/the-units-cargo",
+          repo,
           source: "Installation",
           resolution: "Resolves",
         },
@@ -142,6 +175,13 @@ function mountPane() {
   return { ...mounting(() => <PathsPane back={back} />), back };
 }
 
+/// One Repo's own binds, as the section of that Repo's pane draws them. Given
+/// the name rather than the Repo, because the name is what a bind is written
+/// against and the pane around this is what knows which Repo it is on.
+function mountOwn(repo = REPO) {
+  return mounting(() => <RepoBinds repo={repo} />);
+}
+
 function theSettings(
   standing: SettingsView,
   ...answers: Array<() => Promise<Response>>
@@ -184,12 +224,12 @@ async function lists(container: ParentNode): Promise<HTMLElement[]> {
 
 /// One list's rows.
 function rows(list: ParentNode): HTMLElement[] {
-  return [...list.querySelectorAll<HTMLElement>(`.${styles.row}`)];
+  return [...list.querySelectorAll<HTMLElement>(`.${rowStyles.row}`)];
 }
 
 /// What a row names.
 function path(row: ParentNode): string {
-  return row.querySelector(`.${styles.path}`)!.textContent ?? "";
+  return row.querySelector(`.${rowStyles.path}`)!.textContent ?? "";
 }
 
 describe("the card", () => {
@@ -319,14 +359,14 @@ describe("the pane", () => {
     const [watched] = await lists(container);
     const [installation, settings] = rows(watched!);
 
-    expect(installation!.querySelector(`.${styles.source}`)!.textContent).toBe(
+    expect(installation!.querySelector(`.${rowStyles.source}`)!.textContent).toBe(
       "the installation's",
     );
-    expect(installation!.querySelector(`.${styles.remove}`)).toBeNull();
+    expect(installation!.querySelector(`.${rowStyles.remove}`)).toBeNull();
 
     // And the settings' own, which are the ones there is something to do to.
-    expect(settings!.querySelector(`.${styles.source}`)).toBeNull();
-    expect(settings!.querySelector(`.${styles.remove}`)).not.toBeNull();
+    expect(settings!.querySelector(`.${rowStyles.source}`)).toBeNull();
+    expect(settings!.querySelector(`.${rowStyles.remove}`)).not.toBeNull();
   });
 
   /// The one thing a human cannot check from a phone, in the server's own words
@@ -338,7 +378,7 @@ describe("the pane", () => {
 
     const [watched] = await lists(container);
 
-    expect(rows(watched!)[0]!.querySelector(`.${styles.unresolved}`)!.textContent)
+    expect(rows(watched!)[0]!.querySelector(`.${rowStyles.unresolved}`)!.textContent)
       .toBe(
         "the server cannot see it: No such file or directory (os error 2)",
       );
@@ -350,7 +390,7 @@ describe("the pane", () => {
 
     const [watched] = await lists(container);
 
-    expect(rows(watched!)[0]!.querySelector(`.${styles.unresolved}`)).toBeNull();
+    expect(rows(watched!)[0]!.querySelector(`.${rowStyles.unresolved}`)).toBeNull();
   });
 
   /// The state a fresh standalone install opens in, with what it costs said
@@ -527,7 +567,7 @@ describe("taking a row away", () => {
     const [watched] = await lists(container);
     fireEvent.click(
       rows(watched!)[0]!.querySelector<HTMLButtonElement>(
-        `.${styles.remove}`,
+        `.${rowStyles.remove}`,
       )!,
     );
 
@@ -549,7 +589,7 @@ describe("taking a row away", () => {
 
     const [, binds] = await lists(container);
     fireEvent.click(
-      rows(binds!)[0]!.querySelector<HTMLButtonElement>(`.${styles.remove}`)!,
+      rows(binds!)[0]!.querySelector<HTMLButtonElement>(`.${rowStyles.remove}`)!,
     );
 
     await waitFor(() =>
@@ -572,7 +612,7 @@ describe("taking a row away", () => {
     // The second row, which is the only one the settings own.
     fireEvent.click(
       rows(watched!)[1]!.querySelector<HTMLButtonElement>(
-        `.${styles.remove}`,
+        `.${rowStyles.remove}`,
       )!,
     );
 
@@ -583,5 +623,184 @@ describe("taking a row away", () => {
         sandbox_binds: [BIND, SCOPED],
       }),
     );
+  });
+});
+
+/// And the same rows on one Repo's own pane, which is where a bind written
+/// against a Repo's name is drawn.
+///
+/// The section is mounted on its own, as the two above it are: what it is drawn
+/// from is the settings read, and which Repo it is about is the name the pane
+/// around it hands down. That the Repo's pane hands it down is `repos.test.tsx`'s.
+describe("a repo's own binds", () => {
+  /// The whole of what makes this a section rather than a filter on the Paths
+  /// pane: a Repo is shown its own and nobody else's, and the bind every sandbox
+  /// gets is the other pane's.
+  it("draws the binds written against that repo and no others", async () => {
+    theSettings(TOLD);
+    const { container } = mountOwn();
+
+    await waitFor(() => expect(rows(container)).toHaveLength(1));
+    expect(rows(container).map(path)).toEqual([OWN]);
+    expect(screen.queryByText(BIND)).toBeNull();
+  });
+
+  /// The same settings read on another Repo's pane, which is the other half of
+  /// that: what is written for one Repo reaches no other, and the page says so
+  /// by not drawing it.
+  it("draws none of them on another repo's pane", async () => {
+    theSettings(TOLD);
+    const { container } = mountOwn("askance");
+
+    await waitFor(() => screen.getByText("No binds of its own."));
+    expect(rows(container)).toHaveLength(0);
+  });
+
+  /// A Repo with none is shown the empty editor rather than nothing at all: the
+  /// pane is where somebody looks to learn that a repository can be given a
+  /// directory of its own, and a section that appeared only once one existed
+  /// would be a section nobody could find the first time.
+  it("offers the field to a repo that has none", async () => {
+    theSettings(TOLD);
+    mountOwn("askance");
+
+    await waitFor(() => screen.getByLabelText("Add a bind for this repo"));
+    expect(screen.getByText(/Each entry widens what those sessions/)).toBeTruthy();
+  });
+
+  /// The installation's entries are a unit's word here as everywhere: labelled,
+  /// and with nothing on them to press.
+  it("draws the installation's own labelled and read-only", async () => {
+    theSettings(installedFor(TOLD, REPO));
+    const { container } = mountOwn();
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+    const [installation, settings] = rows(container);
+
+    expect(installation!.querySelector(`.${rowStyles.source}`)!.textContent).toBe(
+      "the installation's",
+    );
+    expect(installation!.querySelector(`.${rowStyles.remove}`)).toBeNull();
+
+    expect(settings!.querySelector(`.${rowStyles.source}`)).toBeNull();
+    expect(settings!.querySelector(`.${rowStyles.remove}`)).not.toBeNull();
+  });
+
+  /// And resolution is reported per row here as it is on the Paths pane, in the
+  /// server's own words.
+  it("says on a row why the server cannot see it", async () => {
+    theSettings(TOLD);
+    const { container } = mountOwn();
+
+    await waitFor(() => expect(rows(container)).toHaveLength(1));
+    expect(
+      rows(container)[0]!.querySelector(`.${rowStyles.unresolved}`)!.textContent,
+    ).toBe("the server cannot see it: there is nothing at that path");
+  });
+
+  it("says nothing on a row the server can see", async () => {
+    theSettings(seen(TOLD));
+    const { container } = mountOwn();
+
+    await waitFor(() => expect(rows(container)).toHaveLength(1));
+    expect(
+      rows(container)[0]!.querySelector(`.${rowStyles.unresolved}`),
+    ).toBeNull();
+  });
+
+  /// What the field on this section writes: the directory typed, against the
+  /// name of the Repo whose pane it was typed on — and everything else in the
+  /// file exactly as it stood, the watched path and the global bind included.
+  it("saves a bind against this repo's name", async () => {
+    const fetching = theSettings(TOLD, json(answering(TOLD)));
+    mountOwn();
+
+    const field = await waitFor(() =>
+      screen.getByLabelText("Add a bind for this repo"),
+    );
+    fireEvent.input(field, { target: { value: "/var/cache/npm" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        ...REST,
+        watched_paths: [WATCHED],
+        sandbox_binds: [BIND, SCOPED, `${REPO}=/var/cache/npm`],
+      }),
+    );
+  });
+
+  /// And the installation's own is not sent back, on this pane as on the other:
+  /// it was never in this file, and sending one would be asking the server to
+  /// write down a flag.
+  it("sends back none of the installation's own", async () => {
+    const standing = installedFor(TOLD, REPO);
+    const fetching = theSettings(standing, json(answering(standing)));
+    mountOwn();
+
+    const field = await waitFor(() =>
+      screen.getByLabelText("Add a bind for this repo"),
+    );
+    fireEvent.input(field, { target: { value: "/var/cache/npm" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        ...REST,
+        watched_paths: [WATCHED],
+        sandbox_binds: [BIND, SCOPED, `${REPO}=/var/cache/npm`],
+      }),
+    );
+  });
+
+  /// Where the row stands on this section is not where it stands in the file:
+  /// the global bind sits in front of it and is drawn on the other pane, so a
+  /// removal counted off this section alone would take the wrong one away.
+  it("takes one away without disturbing the global binds", async () => {
+    const fetching = theSettings(TOLD, json(answering(TOLD)));
+    const { container } = mountOwn();
+
+    await waitFor(() => expect(rows(container)).toHaveLength(1));
+    fireEvent.click(
+      rows(container)[0]!.querySelector<HTMLButtonElement>(
+        `.${rowStyles.remove}`,
+      )!,
+    );
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        ...REST,
+        watched_paths: [WATCHED],
+        sandbox_binds: [BIND],
+      }),
+    );
+  });
+
+  it("says so when the save fails", async () => {
+    theSettings(TOLD, () =>
+      Promise.resolve(
+        new Response("nope", { status: 503, statusText: "Unavailable" }),
+      ),
+    );
+    mountOwn();
+
+    const field = await waitFor(() =>
+      screen.getByLabelText("Add a bind for this repo"),
+    );
+    fireEvent.input(field, { target: { value: "/var/cache/npm" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => screen.getByText(/could not be saved/));
+  });
+
+  it("says so when the settings could not be read at all", async () => {
+    serving(() =>
+      Promise.resolve(
+        new Response("nope", { status: 500, statusText: "Server Error" }),
+      ),
+    );
+    mountOwn();
+
+    await waitFor(() => screen.getByText(/Could not read the settings/));
   });
 });
