@@ -257,8 +257,11 @@ function actions(): {
   /// saying why opens over the page.
   ///
   /// The menu goes first because the card is drawn over it — a dropdown left
-  /// hanging behind a modal is a menu nobody can see to close, and the row that
-  /// was pressed is where the focus goes back to when the card is answered.
+  /// hanging behind a modal is a menu nobody can see to close. And because the
+  /// row that was pressed goes with it: shutting the menu hands the focus back
+  /// to the button it was dropped from, which is then where the card hands it
+  /// back to when it is answered. Opened the other way round, the card would
+  /// come up over a document body with the focus on it and put it back there.
   const refuse = (sentence: string): void => {
     shut();
     setRefused(sentence);
@@ -328,8 +331,11 @@ function actions(): {
         return;
       }
 
-      setSteering({ conversation, working: outcome.Opened.working });
+      // The menu first, as a refusal does it: shutting hands the focus back to
+      // the button the press came from, and the modal opening after that is
+      // what makes that button where the focus lands again when it is closed.
       shut();
+      setSteering({ conversation, working: outcome.Opened.working });
 
       // The conversation has stopped, whatever the human goes on to decide, so
       // the page behind the modal is already out of date.

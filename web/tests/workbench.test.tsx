@@ -11758,6 +11758,31 @@ describe("what a refused press says", () => {
     ).toBeNull();
   });
 
+  /// And takes the focus back to the status button with it. The row that was
+  /// pressed goes when the menu does, so a shut that left the focus where it
+  /// was would put it on the document body — and a card drawn over the page
+  /// hands the focus back to whatever had it when it opened, which would send
+  /// somebody working by keyboard to the top of the document once they had read
+  /// the sentence.
+  it("leaves the focus on the button the press came from", async () => {
+    theWrapping(
+      {},
+      whenever(
+        `/api/ui/conversations/${WRAPPING.id}/close`,
+        json("NoSuchConversation" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(await drawn(await openActions(container), `.${actions.close}`));
+
+    await drawn(document.body, `.${actions.refused}`);
+    expect(document.activeElement).toBe(
+      container.querySelector(`.${statusButton.status} > .${dropdown.trigger}`),
+    );
+  });
+
   /// And the one way out takes it back, leaving the page as it was.
   it("goes when the one way out is pressed", async () => {
     theWrapping(

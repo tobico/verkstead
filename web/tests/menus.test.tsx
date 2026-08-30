@@ -143,6 +143,61 @@ describe("a dropdown menu", () => {
     await waitFor(() => expect(drop(container)).toBeNull());
   });
 
+  /// And gives the trigger back the focus on the way, exactly as Escape does.
+  ///
+  /// The row the press was made in goes with the menu — the rows are built when
+  /// it opens and thrown away when it closes — so a shut that said nothing
+  /// about the focus would drop whoever is working by keyboard onto the
+  /// document body, and anything the press opens over the page would hand them
+  /// back there when they closed it.
+  it("gives the trigger back the focus when it is shut that way", async () => {
+    let shut = (): void => {};
+    const { container } = render(() => (
+      <Menu class="example" trigger="⋯" closer={(close) => (shut = close)}>
+        {() => <button type="button">Do the thing</button>}
+      </Menu>
+    ));
+
+    fireEvent.click(trigger(container));
+    const row = drop(container)!.querySelector("button")!;
+    row.focus();
+    expect(document.activeElement).toBe(row);
+
+    shut();
+
+    await waitFor(() => expect(drop(container)).toBeNull());
+    expect(document.activeElement).toBe(trigger(container));
+  });
+
+  /// But not where the menu has already gone. A press on the backdrop leaves
+  /// the focus where the hand put it, and a shut arriving after that — the
+  /// answer to a press that was still in flight — is not a reason to send
+  /// somebody who has moved on back to the trigger.
+  it("leaves the focus alone where the menu has already gone", async () => {
+    let shut = (): void => {};
+    const { container } = render(() => (
+      <>
+        <Menu class="example" trigger="⋯" closer={(close) => (shut = close)}>
+          {() => <button type="button">Do the thing</button>}
+        </Menu>
+        <button type="button" class="elsewhere">
+          Something else
+        </button>
+      </>
+    ));
+
+    fireEvent.click(trigger(container));
+    fireEvent.click(container.querySelector(`.${menu.backdrop}`)!);
+    await waitFor(() => expect(drop(container)).toBeNull());
+
+    const elsewhere = container.querySelector<HTMLButtonElement>(".elsewhere")!;
+    elsewhere.focus();
+
+    shut();
+
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
   /// The rows are built on the way open and thrown away on the way shut, which
   /// is what a row that takes the focus as it appears depends on.
   it("builds its rows afresh on every opening", () => {
