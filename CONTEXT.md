@@ -109,9 +109,16 @@ out again on the branch that was worked, which is one of the two times a
 Worktree is made without a branch being made with it — a read-only companion's,
 checked out detached, is the other.
 A removal git refuses — a directory it no longer reads as a Worktree — does not
-hold the close up: it is logged with its path and left on disk, closing being
+hold the close up: it is logged with its path and closed around, closing being
 what the human asked for and a directory nobody can be rid of being what they
-were trying to escape.
+were trying to escape. **Nothing under the Data Directory outlives the record
+that named it, though.** Every close ends by sweeping the whole worktrees
+directory, and a server sweeps it again as it comes up: a directory there that
+no live Conversation names is deleted, git's own removal where git still knows
+it and outright where git does not. Which is what reclaims the ones a close was
+refused over, and the ones a crash left behind. A Conversation that is Done
+keeps its checkouts like any other — Done is not Closed, and a Follow-up steer
+works in them.
 Named for the Repo and what the checkout holds — the branch, or the base a
 detached one stands at — and it lives in the Data Directory rather than inside
 a Watched Path: Verkstead made it, so it goes among Verkstead's own things.
@@ -387,12 +394,17 @@ plain text a browser refuses to draw — so the page closes the gap: the gist's 
 rides in the **URL fragment**, the Share is fetched from GitHub by the reader's
 own browser, and it is drawn in a **sandboxed frame** with scripts allowed and
 same-origin withheld.
-**Verkstead ships it and the human hosts it**, once, on a public site of their
-own — a GitHub Pages repository is what it was written for. It is offered as a
-download on the settings page, and the **share viewer URL** beside it records
-where it went; that is configuration rather than a secret, and it reads back as
-it was written. A Verkstead with none configured links a Published Share as the
-gist itself, which is a worse read rather than a failure.
+**Verkstead hosts one and the human may host their own.** Verkstead's copy is
+published to this project's GitHub Pages from the page in the repository, and it
+is what every link is composed through unless the human says otherwise — so a
+Verkstead nobody has configured hands out links that draw. The page is also
+offered as a download on the settings page, and the **share viewer URL** beside
+it is where the human put a copy of their own; that is configuration rather than
+a secret, it reads back as it was written, and an empty one means Verkstead's
+hosted copy rather than no viewer at all.
+**The link is composed as it is drawn**, off the gist URL the record keeps: a
+Published Share taken before a viewer was configured is linked through one now,
+and a viewer that moves retargets every link there is without republishing.
 It learns nothing about what passes through it: a fragment is never sent to a
 server, so the host sees only that somebody opened the page, and the frame keeps
 the Share's own scripts off that host's origin.
@@ -405,11 +417,12 @@ Share, publishes it, and leaves **one comment on every pull request the
 Conversation holds** — its own Repo's and every Companion Repo's alike. Offered
 only where the record holds a pull request, because a Conversation on none has
 nowhere for it to go.
-The comment carries **the link** — through the Share Viewer where one is
-configured, at the gist itself where none is — and the **itemized summary** of
-what is in the file: the Brief's first line, the Question Sets by title, and the
-commits by subject with how much each moved. Itemized off the Share rather than
-off the Conversation, so what is listed is what a reader will find in it.
+The comment carries **the link** — through the Share Viewer, the human's own
+where they host one and Verkstead's hosted copy where they do not — and the
+**itemized summary** of what is in the file: the Brief's first line, the
+Question Sets by title, and the commits by subject with how much each moved.
+Itemized off the Share rather than off the Conversation, so what is listed is
+what a reader will find in it.
 **Comments only, and nothing is ever rewritten**: a pull request's description is
 not touched, and sharing again is a fresh snapshot, a fresh publish and a fresh
 comment on each — what was said before goes on standing where it was said.

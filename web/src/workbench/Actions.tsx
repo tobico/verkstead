@@ -238,11 +238,16 @@ function published(outcome: SharePublished): JSX.Element {
   // And the link it just made, because the menu it was pressed from is shut by
   // the time this is read: the row that draws where the last share went is
   // there when the menu is next opened, and this is the moment itself.
+  //
+  // Through the share viewer, which is what the server composed it as — see
+  // `link` in `crates/server/src/sharing.rs`. The gist itself is what was
+  // published; a link that draws it as a conversation is what is worth handing
+  // to somebody, so that is what this opens and what the human copies.
   return (
     <>
       The share is published.{" "}
       <a href={outcome.Published.share.url} target="_blank" rel="noreferrer">
-        Open it on GitHub.
+        Open it.
       </a>
     </>
   );
@@ -708,7 +713,13 @@ function actions(): {
         {/* Where the last one went, on a Conversation somebody has published
             one of. A link out rather than a row that does anything: what the
             human came for is the URL, and a share already published is one they
-            can send again without publishing a second snapshot. */}
+            can send again without publishing a second snapshot.
+
+            The URL is the share viewer's, composed by the server off the gist
+            it recorded — so this row upgrades on its own where the viewer moved
+            or arrived after the publish, and a share taken before there was one
+            still opens as a conversation. See `link` in
+            `crates/server/src/sharing.rs`. */}
         <Show when={conversation().shared}>
           {(shared) => (
             <a
@@ -720,7 +731,7 @@ function actions(): {
             >
               <span class={styles.title}>Published share</span>
               <span class={styles.says}>
-                Taken {utcStamp(shared().at)}. Opens the gist on GitHub.
+                Taken {utcStamp(shared().at)}. Opens it in the share viewer.
               </span>
             </a>
           )}

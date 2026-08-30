@@ -2346,9 +2346,9 @@ export type SettingsEdit = { git_author: Author, github_token: TokenEdit,
  */
 rust_build_cache: BuildCacheEdit, 
 /**
- * And where the share viewer is hosted, as a value for the same reason:
- * an empty one is nothing configured, which is what clearing the field
- * means.
+ * And where the human hosts a share viewer of their own, as a value for
+ * the same reason: an empty one is nothing configured, which is what
+ * clearing the field means and what puts Verkstead's own hosted copy back.
  */
 share_viewer_url: string, 
 /**
@@ -2408,12 +2408,17 @@ github_token: TokenSaved | null,
  */
 rust_build_cache: BuildCacheView, 
 /**
- * Where the human hosts the share viewer, or empty where they host it
- * nowhere.
+ * Where the human hosts a share viewer of their own, or empty where they
+ * host none.
  *
  * A string rather than an optional, empty for nothing configured, the way
  * the author's two halves are: the field on the page holds it either way,
  * and clearing the box is how it is taken away.
+ *
+ * Empty is not *no viewer*. Links are then composed through the copy
+ * Verkstead hosts, and this field is the override — which is why nothing
+ * fills it in on the human's behalf: a field holding an address nobody
+ * typed is a setting they cannot tell they have not chosen.
  *
  * Configuration rather than a secret — it is a public page, and its URL
  * goes in a comment on a pull request — so unlike the token it reads back
@@ -2454,7 +2459,14 @@ export type SharePublished = { "Published": { share: ShareView, } } | "NoToken" 
  */
 export type ShareView = { 
 /**
- * The page to send somebody to, as GitHub gave it.
+ * The page to send somebody to: the gist's id in the share viewer's
+ * fragment, which is what draws the share as the conversation rather than
+ * as source.
+ *
+ * Composed by the server on the way out rather than read off the record —
+ * what the record holds is the gist as GitHub gave it, and which viewer a
+ * reader goes through is a fact about the settings at the moment the page
+ * is drawn. See `link` in `crates/server/src/sharing.rs`.
  */
 url: string, 
 /**

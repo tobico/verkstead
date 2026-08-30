@@ -21,10 +21,11 @@
 //!
 //! How wide they stand is the frame's, because a width is a property of the
 //! frame rather than of anything drawn in it. They are percentages kept per
-//! device (`widths.ts`) — one pair for the device rather than one per page —
-//! and the dividers that set them exist only in the layouts that stand panes
-//! side by side: below that breakpoint the page is walked through one pane at a
-//! time, so there is no border to drag and nothing remembered is read.
+//! device (`widths.ts`) — one set for the device rather than one per page, with
+//! a width of its own for the frame that has no list in it — and the dividers
+//! that set them exist only in the layouts that stand panes side by side: below
+//! that breakpoint the page is walked through one pane at a time, so there is no
+//! border to drag and nothing remembered is read.
 //!
 //! The floors under those percentages are lengths rather than shares, because
 //! what makes a pane too narrow is what stands in it. So this is the one part
@@ -34,6 +35,7 @@
 
 import {
   Show,
+  children,
   createSignal,
   onCleanup,
   onMount,
@@ -45,7 +47,6 @@ import styles from "./Panes.module.css";
 import {
   ALL_THREE,
   BESIDE,
-  DEFAULTS,
   clamped,
   dragged,
   nudged,
@@ -133,11 +134,11 @@ export function Panes(props: {
   ///
   /// The first of them is absent in the one frame that has nothing to pick
   /// from: a share, which is one Conversation and no list of them. Then the
-  /// frame is two panes — the record and what it opens — the dividers go with
-  /// the pane that is not there, and the two stand side by side from the width
-  /// the sidebar used to arrive at. Nothing else changes: the panes are the same
-  /// panes, drawn by the same components, walked through one at a time on a
-  /// phone.
+  /// frame is two panes — the record and what it opens — standing side by side
+  /// from the width the sidebar used to arrive at, with one divider between
+  /// them where the sidebar's and the middle pane's were. Nothing else changes:
+  /// the panes are the same panes, drawn by the same components, walked through
+  /// one at a time on a phone.
   conversations?: JSX.Element;
   middle: JSX.Element;
   details: JSX.Element;
@@ -147,10 +148,21 @@ export function Panes(props: {
   /// The other two are the same thing on every page and name themselves.
   middleLabel: string;
 }): JSX.Element {
+  /// The list itself, resolved once — because a prop holding JSX is a getter,
+  /// and asking it twice builds what it holds twice. The frame asks whether
+  /// there is a list whenever it works out its columns and again from inside
+  /// every drag, and a conversations pane built afresh each time is a pane's
+  /// worth of queries thrown away — or, from a pointer's own handler, a query
+  /// with no page around it to belong to. Resolved, it is one pane, asked after
+  /// as often as the frame likes and drawn where the frame draws it.
+  const list = children(() => props.conversations);
+
   /// Whether there is a list to pick from at all — see `conversations` above.
-  /// Where there is not, the frame is two panes and none of the widths below
-  /// are read: nothing can be dragged, so there is nothing to remember.
-  const picking = () => props.conversations !== undefined;
+  /// Where there is not, the frame is two panes with one border between them,
+  /// and the width that border decides is the pair's own: what a reader settles
+  /// a share's panes at says nothing about how wide this device stands the
+  /// workbench's columns, and the other way about.
+  const picking = () => list() !== undefined;
 
   /// Which layout is standing, which decides how many dividers there are and
   /// how much room each pane is allowed to leave the others.
@@ -209,12 +221,16 @@ export function Panes(props: {
 
   /// The frame as the arithmetic asks about it: how much room there is, and how
   /// many panes are sharing it.
-  const frame = (): Frame => ({ rem: across(), three: allThree() });
+  const frame = (): Frame => ({
+    rem: across(),
+    three: allThree(),
+    picking: picking(),
+  });
 
-  /// And the widths as they may actually be drawn: a sidebar dragged wide in
-  /// the two-pane layout is not allowed to squeeze the middle pane out of the
-  /// three-pane one, so the minimums are met against the frame in front of the
-  /// human rather than against the one the width was settled in.
+  /// And the widths as they may actually be drawn: a sidebar dragged wide while
+  /// two panes stand is not allowed to squeeze the middle pane out of the
+  /// three-pane layout, so the minimums are met against the frame in front of
+  /// the human rather than against the one the width was settled in.
   const shown = () => clamped(settled(), frame());
 
   /// Dragging one. The listeners go on the window rather than on the handle,
@@ -243,7 +259,7 @@ export function Panes(props: {
       window.removeEventListener("pointermove", moved);
       window.removeEventListener("pointerup", dropped);
       window.removeEventListener("pointercancel", dropped);
-      remember(settled());
+      remember(settled(), frame());
     };
 
     window.addEventListener("pointermove", moved);
@@ -255,30 +271,33 @@ export function Panes(props: {
   /// go of an arrow key.
   const nudge = (divider: Divider, by: number) => {
     setSettled((was) => nudged(was, divider, by, frame()));
-    remember(settled());
+    remember(settled(), frame());
   };
 
-  /// And putting them back, which is what a double-click on either divider
-  /// does: both widths, because what it restores is the defaults rather than
-  /// one of them.
-  const defaults = () => {
-    restore();
-    setSettled(DEFAULTS);
-  };
+  /// And putting them back, which is what a double-click on any divider does:
+  /// every width the frame has, because what it restores is the defaults rather
+  /// than one of them. What another frame's dividers settled is left where it
+  /// is — see `restore` in `widths.ts`.
+  const defaults = () => setSettled((was) => restore(was, frame()));
 
   /// What the frame carries the widths as. Only where a layout stands panes
   /// side by side: below that the page is walked through one pane at a time,
   /// and what this device remembers about a desktop's columns is nothing a
-  /// phone should be reading. The stylesheet has a default of its own behind
-  /// each name, so an absent pair is the untouched frame rather than a broken
-  /// one.
-  const columns = () =>
-    beside() && picking()
+  /// phone should be reading. And the names are the standing layout's own: the
+  /// stylesheet has a default behind each of them, so a name the frame does not
+  /// carry is the untouched frame rather than a broken one.
+  const columns = () => {
+    if (!beside()) {
+      return undefined;
+    }
+
+    return picking()
       ? {
           "--pane-sidebar": `${shown().sidebar}%`,
           "--pane-middle": `${shown().middle}%`,
         }
-      : undefined;
+      : { "--pane-pair": `${shown().pair}%` };
+  };
 
   return (
     <div
@@ -294,16 +313,15 @@ export function Panes(props: {
           class={`${styles.pane} ${styles.conversationsPane}`}
           aria-label="Conversations"
         >
-          {props.conversations}
+          {list()}
         </section>
       </Show>
 
       {/* One divider per border there is: the sidebar's wherever the sidebar
           stands beside something, the middle pane's only where all three panes
-          are up. Each sits between the two panes it parts, so the grid places
-          it without being told where. None at all in the two-pane frame: there
-          is no list to trade room with, and the two panes it does have are the
-          record and the one thing it has open. */}
+          are up, and the pair's where there is no list and so no sidebar. Each
+          sits between the two panes it parts, so the grid places it without
+          being told where. */}
       <Show when={beside() && picking()}>
         <Handle
           divider="sidebar"
@@ -329,6 +347,23 @@ export function Panes(props: {
           label={`Resize the ${props.middleLabel.toLowerCase()} pane`}
           share={shown().middle}
           travel={range("middle", shown(), frame())}
+          drag={drag}
+          nudge={nudge}
+          restore={defaults}
+        />
+      </Show>
+
+      {/* And the pair's, which stands in the same place for the same reason:
+          the middle pane is what it is the far edge of. It arrives with the
+          panes themselves rather than with a third one, there being no third
+          one to wait for — the two are side by side from the width the sidebar
+          used to arrive at. */}
+      <Show when={beside() && !picking()}>
+        <Handle
+          divider="pair"
+          label={`Resize the ${props.middleLabel.toLowerCase()} pane`}
+          share={shown().pair}
+          travel={range("pair", shown(), frame())}
           drag={drag}
           nudge={nudge}
           restore={defaults}

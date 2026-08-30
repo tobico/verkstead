@@ -69,11 +69,11 @@ pub use conversations::{
     asked_from, closable, close_conversation, conversation_branch, conversations, follow_branch,
     follow_up_over, implement_again, last_batch_proposal, last_proposal, load_conversation, note,
     open_set, opened_at, pick_direction, record_backlog, record_handoff, record_roadmap,
-    rename_branch, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_review_pairing, set_state, settle_naming, skip_grilling,
-    skip_review, stacks_on, start_adoption, start_building, start_conversation, start_grilling,
-    start_implementing, start_stage, start_unnamed_conversation, state, steer_conversation,
-    timeline, unanswered_set_since, waiting, work_on_repo,
+    recorded_worktrees, rename_branch, save_brief, set_asked_from, set_base_commit,
+    set_grilling_pairing, set_implementation_pairing, set_review_pairing, set_state, settle_naming,
+    skip_grilling, skip_review, stacks_on, start_adoption, start_building, start_conversation,
+    start_grilling, start_implementing, start_stage, start_unnamed_conversation, state,
+    steer_conversation, timeline, unanswered_set_since, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
 pub use endings::{ended_on, nothing_else};
@@ -93,8 +93,8 @@ pub use push::{
     store_subscription, vapid_keys,
 };
 pub use repos::{
-    Repo, Unregistering, load_repo, register_repo, registered_repo, registered_repos,
-    unregister_repo,
+    Repo, Unregistering, load_repo, recorded_repos, register_repo, registered_repo,
+    registered_repos, unregister_repo,
 };
 pub use session_names::session_id;
 pub use session_pairings::RanUnder;

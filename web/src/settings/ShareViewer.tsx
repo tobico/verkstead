@@ -1,18 +1,24 @@
-//! The share viewer on the settings page: the page Verkstead ships, and where
-//! the human has hosted it.
+//! The share viewer on the settings page: where a published share is read
+//! through, and how to make that somewhere of your own.
 //!
 //! A Share downloads as one file and opens off a disk, which is the whole of
 //! what an emailed one needs. A **published** one is a secret gist, and a gist
 //! link on its own draws nothing — GitHub renders a gist as source, and its raw
 //! URL is served as plain text a browser refuses to draw. The gap between a
-//! link and a read is one small static page, and this section is where that
-//! page is collected and where the human says what they did with it.
+//! link and a read is one small static page, and this section is about where
+//! that page is.
 //!
-//! So the two halves here are one job read in order: take the file away, put it
-//! on a public site of your own, and say where it went. The card carries the
-//! last of those, because that is the part that can be looked up later and the
-//! part that has consequences — a Verkstead that does not know where the viewer
-//! is comments on a pull request with the gist itself.
+//! **It is somewhere already.** Verkstead keeps a copy on its own GitHub Pages
+//! — [`HOSTED`] — and every link it hands out is composed through that unless
+//! this field says otherwise, so a Verkstead nobody has been to the settings
+//! page of still hands out links that draw. The field is an override: the same
+//! page, served by the human, for anybody who would rather nothing about their
+//! shares went past a site of Verkstead's.
+//!
+//! So the pane is the file, what to do with it, and the field — a job for
+//! whoever wants it rather than a job everybody has to do. The card says which
+//! of the two viewers this Verkstead is using, because that is the part that
+//! has consequences and the part that can be looked up later.
 //!
 //! Nothing here is a secret. The URL is a public page's, and it goes into a
 //! comment the moment a share is published through it, so it reads back exactly
@@ -33,6 +39,16 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import { heldPaths } from "./held";
 import styles from "./ShareViewer.module.css";
+
+/// The copy of the viewer Verkstead hosts, which is what a published share is
+/// read through while this field stands empty.
+///
+/// `HOSTED` in `crates/server/src/sharing.rs` is the other spelling of it, and
+/// the server's is the one that composes the links — this is only what the page
+/// *says* is happening. Nothing composes the two, so `tests/viewing.test.ts` is
+/// what holds them together, the way `tests/template.test.ts` holds the share's
+/// slots to the server's.
+export const HOSTED = "https://tobico.github.io/verkstead/share-viewer.html";
 
 /// The settings as they stand, read once for the two panes that draw them —
 /// the same read, by the same key, that the sections above this one make.
@@ -73,24 +89,18 @@ export function ShareViewerCard(props: {
           >
             <h2>Share viewer</h2>
 
-            {/* What is lost by leaving this alone, said here rather than found
-                out by whoever opens the link on a pull request. Not an error:
-                the share is published either way, and what suffers is the
-                read. */}
-            <Show when={told().share_viewer_url === ""}>
-              <p class={styles.warning}>
-                No share viewer is hosted, so a published share is linked as the
-                gist itself — which GitHub draws as source rather than as the
-                conversation.
-              </p>
-            </Show>
-
-            <Show when={told().share_viewer_url !== ""}>
-              <p class={styles.standing}>
-                Published shares are read through{" "}
-                <span class={styles.hosted}>{told().share_viewer_url}</span>.
-              </p>
-            </Show>
+            {/* Which of the two viewers this Verkstead is using, said the same
+                way either way: an address, because that is what somebody
+                scanning the page came to check. Nothing here is a warning —
+                a blank field is a working Verkstead rather than a job left
+                undone. */}
+            <p class={styles.standing}>
+              Published shares are read through{" "}
+              <span class={styles.hosted}>
+                {told().share_viewer_url || HOSTED}
+              </span>
+              {told().share_viewer_url === "" ? ", which Verkstead hosts." : "."}
+            </p>
           </CardButton>
         )}
       </Match>
@@ -171,12 +181,21 @@ export function ShareViewerPane(props: {
               source. The share viewer is a small page that draws it as the
               conversation instead: it fetches the share from GitHub in the
               reader's own browser, and it is the whole of what stands between a
-              link and a read.
+              link and a read. Verkstead hosts one at{" "}
+              <span class={styles.hosted}>{HOSTED}</span>, and links are
+              composed through it while the field below is empty.
             </Note>
 
-            {/* The steps, in the order they are done, because this is a job
-                rather than a setting: the file, the site, and then the field
-                below. */}
+            {/* And the steps for hosting your own, which is what the field is
+                for. A job rather than a setting, so it reads in the order it is
+                done: the file, the site, and then the field. Nobody has to —
+                the address above is a page that works — so this says who would
+                want to before it says how. */}
+            <p class={styles.instead}>
+              To serve it yourself instead — so that nothing about your shares
+              goes past a site of Verkstead's:
+            </p>
+
             <ol class={styles.steps}>
               <li>
                 <a
@@ -215,19 +234,17 @@ export function ShareViewerPane(props: {
               </div>
             </form>
 
-            {/* What the setting buys, spelled out with the address in it: the
-                link a pull request comment carries once a share is published.
+            {/* What a link looks like, spelled out with whichever address is in
+                force: the one a comment, a toast and the Share row all carry.
                 The gist's id goes after the `#`, where no server ever sees
                 it. */}
-            <Show when={told()?.share_viewer_url !== ""}>
-              <p class={styles.linking}>
-                A published share is linked as{" "}
-                <code class={styles.link}>
-                  {told()?.share_viewer_url}#the-gist-id
-                </code>
-                .
-              </p>
-            </Show>
+            <p class={styles.linking}>
+              A published share is linked as{" "}
+              <code class={styles.link}>
+                {told()?.share_viewer_url || HOSTED}#the-gist-id
+              </code>
+              .
+            </p>
 
             <Show when={save.isError}>
               <ErrorLine class={styles.failure}>

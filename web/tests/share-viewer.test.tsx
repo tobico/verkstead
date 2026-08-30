@@ -23,7 +23,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SettingsSaved, SettingsView } from "../src/api/types";
 import card from "../src/CardButton.module.css";
-import { ShareViewerCard, ShareViewerPane } from "../src/settings/ShareViewer";
+import {
+  HOSTED,
+  ShareViewerCard,
+  ShareViewerPane,
+} from "../src/settings/ShareViewer";
 import styles from "../src/settings/ShareViewer.module.css";
 import { json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -44,9 +48,9 @@ const PATHS = {
 };
 const UNSET = unset as SettingsView;
 
-/// Where the fixture says the viewer is hosted, which is what the card draws and
-/// what the field is filled with.
-const HOSTED = TOLD.share_viewer_url;
+/// Where the fixture says the human hosted their own, which is what the card
+/// draws and what the field is filled with on a Verkstead that has been told.
+const THEIRS = TOLD.share_viewer_url;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -127,19 +131,23 @@ describe("the card", () => {
     await waitFor(() => screen.getByText(/Published shares are read through/));
 
     expect(container.querySelector(`.${styles.hosted}`)!.textContent).toBe(
-      HOSTED,
+      THEIRS,
     );
   });
 
-  /// What leaving this alone costs, said where somebody scanning the page reads
-  /// it — rather than found out by whoever opens the link on a pull request and
-  /// is shown the file as source.
-  it("says what a share is linked as while nobody has hosted one", async () => {
+  /// And that a Verkstead nobody has told anything is reading its shares
+  /// through the one Verkstead hosts — which is a working install rather than a
+  /// job left undone, so it is said in the same quiet line and not as a warning.
+  it("names the hosted viewer while nobody has hosted their own", async () => {
     theSettings(UNSET);
     const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/No share viewer is hosted/));
-    expect(container.querySelector(`.${styles.warning}`)).not.toBeNull();
+    await waitFor(() => screen.getByText(/Published shares are read through/));
+
+    expect(container.querySelector(`.${styles.hosted}`)!.textContent).toBe(
+      HOSTED,
+    );
+    expect(screen.getByText(/which Verkstead hosts/)).toBeTruthy();
   });
 
   it("opens the pane when it is pressed", async () => {
@@ -192,7 +200,7 @@ describe("the pane", () => {
     theSettings(TOLD);
     mountPane();
 
-    await waitFor(() => expect(theField().value).toBe(HOSTED));
+    await waitFor(() => expect(theField().value).toBe(THEIRS));
   });
 
   it("stands empty where nobody has hosted one", async () => {
@@ -212,7 +220,7 @@ describe("the pane", () => {
     const fetching = theSettings(TOLD, json(answering(now)));
     mountPane();
 
-    await waitFor(() => expect(theField().value).toBe(HOSTED));
+    await waitFor(() => expect(theField().value).toBe(THEIRS));
 
     fireEvent.input(theField(), {
       target: { value: "https://ada.github.io/elsewhere/" },
@@ -245,7 +253,7 @@ describe("the pane", () => {
     const fetching = theSettings(TOLD, json(answering(hosting(TOLD, ""))));
     mountPane();
 
-    await waitFor(() => expect(theField().value).toBe(HOSTED));
+    await waitFor(() => expect(theField().value).toBe(THEIRS));
 
     fireEvent.input(theField(), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -257,11 +265,25 @@ describe("the pane", () => {
     );
   });
 
-  /// What the setting buys, with the address in it: the link a comment on a
-  /// pull request carries, and the `#` that keeps the gist out of the host's
-  /// logs.
+  /// What a link looks like, with the address in it: what a comment on a pull
+  /// request, the toast and the Share row all carry, and the `#` that keeps the
+  /// gist out of the host's logs.
   it("shows what a published share will be linked as", async () => {
     theSettings(TOLD);
+    const { container } = mountPane();
+
+    await waitFor(() => screen.getByText(/A published share is linked as/));
+
+    expect(container.querySelector(`.${styles.link}`)!.textContent).toBe(
+      `${THEIRS}#the-gist-id`,
+    );
+  });
+
+  /// And the same line with the hosted address in it where nobody has hosted
+  /// their own: a link is composed either way, so what changes is which page it
+  /// goes through rather than whether there is one.
+  it("shows the hosted address in that line while nobody has hosted one", async () => {
+    theSettings(UNSET);
     const { container } = mountPane();
 
     await waitFor(() => screen.getByText(/A published share is linked as/));
@@ -271,12 +293,19 @@ describe("the pane", () => {
     );
   });
 
-  it("shows no such line while nobody has hosted one", async () => {
+  /// And the note above the steps says where that page is, so that somebody
+  /// deciding whether to host their own can see what they would be replacing.
+  it("names the hosted viewer above the steps for replacing it", async () => {
     theSettings(UNSET);
-    mountPane();
+    const { container } = mountPane();
 
-    await waitFor(() => screen.getByLabelText(/Where you hosted it/));
-    expect(screen.queryByText(/A published share is linked as/)).toBeNull();
+    await waitFor(() => screen.getByText(/To serve it yourself instead/));
+
+    expect(
+      [...container.querySelectorAll(`.${styles.hosted}`)].map(
+        (said) => said.textContent,
+      ),
+    ).toContain(HOSTED);
   });
 
   it("says so when the save fails", async () => {
@@ -287,7 +316,7 @@ describe("the pane", () => {
     );
     mountPane();
 
-    await waitFor(() => expect(theField().value).toBe(HOSTED));
+    await waitFor(() => expect(theField().value).toBe(THEIRS));
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 

@@ -1212,16 +1212,28 @@ pub(crate) async fn conversation_view(
     };
 
     // And where the latest share of it was published, where anybody has
-    // published one — the link the workbench draws beside the Share row, and
-    // what a comment on a pull request is written from. Read the way the archive
-    // mark is: a row beside the Conversation rather than a column on it.
+    // published one — the link the workbench draws beside the Share row. Read
+    // the way the archive mark is: a row beside the Conversation rather than a
+    // column on it.
+    //
+    // Composed through the share viewer here rather than written down that way,
+    // which is what makes the row a *drawing* of the record: the store keeps the
+    // gist's URL as GitHub gave it, so a share published before there was a
+    // viewer links through one now, and a viewer moved later retargets every row
+    // there is without republishing anything — see [`crate::sharing::link`].
     //
     // A read that fails reads as *never published*, which is a link missing from
     // a page rather than a page that will not draw: the record itself is
     // untouched, and the next publish writes over whatever is there.
+    let viewer = state
+        .settings
+        .config()
+        .share_viewer_url()
+        .map(str::to_owned);
+
     let shared = match store::share(&state.pool, id).await {
         Ok(shared) => shared.map(|shared| verkstead_render::ShareView {
-            url: shared.url,
+            url: crate::sharing::link(&shared.url, viewer.as_deref()),
             at: shared.at,
         }),
         Err(error) => {
@@ -1614,7 +1626,9 @@ async fn comment_share(State(state): State<AppState>, Path(id): Path<String>) ->
     let body = verkstead_render::itemized(
         &bundle,
         crate::sharing::titled(&bundle.conversation),
-        &crate::sharing::link(&published.share.url, published.viewer.as_deref()),
+        // The link as the publish composed it, which is the same one the toast
+        // and the Share row carry: one press, one address.
+        &published.share.url,
     );
 
     let gh = state.github.clone();
@@ -1673,19 +1687,20 @@ async fn comment_share(State(state): State<AppState>, Path(id): Path<String>) ->
 }
 
 /// One composed share published: the gist made, the file pushed into it and the
-/// link written down beside the Conversation.
+/// gist written down beside the Conversation.
 ///
 /// Its own function because both presses that publish do exactly this — the
 /// **Publish** row, which stops here, and the one-click share, which goes on to
 /// comment the link. A second copy of it would be a second opinion about what
 /// publishing a share is.
 ///
-/// What comes back beside the recorded share is what the comment after it needs:
-/// the token it was published as, and where the human has hosted the share
-/// viewer. Both are read on the blocking thread the publish already needed, and
-/// read once — a token read a second time could be a different token, and a
-/// comment left as somebody other than whoever the gist belongs to would be the
-/// two halves of one press disagreeing about who made it.
+/// What comes back beside the link is the token it was published as, which is
+/// what the comment after it needs. Read on the blocking thread the publish
+/// already needed, and read once — a token read a second time could be a
+/// different token, and a comment left as somebody other than whoever the gist
+/// belongs to would be the two halves of one press disagreeing about who made
+/// it. Where the viewer is hosted is read on that same hop and for the same
+/// reason, and is spent here: what comes out is the link itself.
 async fn publishing(
     state: &AppState,
     bundle: &SharedConversation,
@@ -1755,9 +1770,15 @@ async fn publishing(
     // Written down after it is up, and the row is what says when: a share is a
     // snapshot, and the moment on it should be the moment the record was taken
     // rather than a second reading of the clock.
+    //
+    // The gist's own URL is what is recorded, and the link is composed off it on
+    // the way out — here for the toast and the comment, and again in the page
+    // that draws the Share row. What is written down is where the file went;
+    // where a reader is sent is a fact about the viewer, and the viewer may move
+    // after this.
     let share = match store::record_share(&state.pool, conversation_id, &url).await {
         Ok(share) => verkstead_render::ShareView {
-            url: share.url,
+            url: crate::sharing::link(&share.url, viewer.as_deref()),
             at: share.at,
         },
         Err(error) => {
@@ -1773,7 +1794,6 @@ async fn publishing(
         // There is one: a publish with nothing configured refuses above rather
         // than falling back to the host's login.
         token: token.unwrap_or_default(),
-        viewer,
     })
 }
 
@@ -1785,11 +1805,6 @@ struct Published {
     /// The token it was published as, which is the one a comment about it is
     /// left as.
     token: String,
-
-    /// And where the share viewer is hosted, where the human has hosted one —
-    /// what turns a gist's id into a link that draws — see
-    /// [`crate::sharing::link`].
-    viewer: Option<String>,
 }
 
 /// And a share that is not: GitHub's own answer, or something the server could
@@ -3406,9 +3421,13 @@ fn last_four(token: &str) -> String {
 /// `GET /api/ui/share-viewer.html` — the share viewer, to take away and host.
 ///
 /// The one file Verkstead hands over that is nobody's record: a small static
-/// page that draws a Published Share in a browser, which the human puts on a
-/// public site of their own once and never touches again — see
+/// page that draws a Published Share in a browser — see
 /// [`crate::sharing::VIEWER`], where what it does and why is written down.
+///
+/// Offered rather than required. Links are composed through the copy Verkstead
+/// hosts unless the human says otherwise ([`crate::sharing::HOSTED`]), so this
+/// is for whoever would rather put the page on a public site of their own once
+/// and point the setting at it.
 ///
 /// An attachment rather than a page, for the reason a share is one: what the
 /// press is for is getting the file, and a viewer that opened here would be a

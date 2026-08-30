@@ -24,7 +24,7 @@
 //! rust_build_cache:
 //!   enabled: true
 //!   size: 30G
-//! share_viewer_url: https://tobico.github.io/verkstead-share-viewer/
+//! share_viewer_url: https://ada.github.io/verkstead-share-viewer/
 //! sandbox_binds:
 //!   - /var/cache/verkstead-node
 //!   - verkstead=/var/cache/verkstead-cargo
@@ -354,15 +354,15 @@ pub struct Config {
     #[serde(default)]
     rust_build_cache: RustBuildCache,
 
-    /// Where the human put the **share viewer** — the small page Verkstead
-    /// ships that draws a Published Share in a browser, hosted once on a public
-    /// site of their own.
+    /// Where the human put a **share viewer** of their own — the small page
+    /// Verkstead ships that draws a Published Share in a browser, hosted on a
+    /// public site of theirs.
     ///
     /// Configuration rather than a secret, and the plainest thing in either
     /// file: a URL, or nothing. Nothing is a Verkstead that has never been to
-    /// that section, and what it costs is a comment linking the gist itself
-    /// rather than a page that renders it — which is a worse read and not a
-    /// failure, so nothing here insists on it.
+    /// that section, and it costs nothing — links are composed through the copy
+    /// Verkstead itself hosts, `HOSTED` in [`crate::sharing`]. This is an
+    /// override for a human who would rather serve the page themselves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     share_viewer_url: Option<String>,
 
@@ -459,9 +459,14 @@ impl Config {
         &self.rust_build_cache
     }
 
-    /// And where the share viewer is hosted, or `None` where nobody has put it
-    /// anywhere. There is no default: nobody but the human knows where their
-    /// own site is.
+    /// And where the human hosts a share viewer of their own, or `None` where
+    /// they host none.
+    ///
+    /// `None` rather than the address links are actually composed through, and
+    /// deliberately: this is what the settings page draws back into its field,
+    /// and a field filled in with something nobody typed is a setting the human
+    /// cannot tell they have not chosen. What a blank one *means* is
+    /// [`crate::sharing::link`]'s to say.
     pub fn share_viewer_url(&self) -> Option<&str> {
         self.share_viewer_url.as_deref()
     }
