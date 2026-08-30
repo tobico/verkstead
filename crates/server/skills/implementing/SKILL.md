@@ -16,7 +16,7 @@ the job.
 so under its Brief. There is no handoff then because there was no interview to
 write one: nothing is missing, and the Brief is the whole of the agreement.
 Which makes it thinner than a handoff by design, so what it leaves genuinely
-open is put to the human as a blocking ask rather than guessed at — a session
+open is put to the human as an ordinary ask rather than guessed at — a session
 that guesses builds the wrong thing quietly, and one that asks reaches them on
 their phone. That instruction is the prompt's own, under the Brief. Everything
 else here is the same either way: the committing, the pull request and the
@@ -158,10 +158,11 @@ expensive to unpick.
 
 - **Read `verkstead guide` before the first ask**, and put the Question Set
   through `verkstead ask`. It ships inside the binary, so nothing else has to be
-  found, and it says how to run an ask that blocks for hours.
-- **It blocks until they answer, which may be hours.** They are on a phone, not
-  at this terminal, so a question printed here reaches nobody. Idling is the ask
-  working rather than the ask failing, so do only work their answer cannot
-  invalidate while you wait.
+  found, and it says how this backend runs an ask and what comes back from it.
+- **The human answers in their own time, which may be hours.** They are on a
+  phone, not at this terminal, so a question printed here reaches nobody.
+  Waiting is the ask working rather than the ask failing, and how to wait is the
+  Guide's — hold the ask open where it says to, end the turn where it says to —
+  so either way, do only work their answer cannot invalidate.
 - **Never answer on their behalf.** If the ask itself fails — the server
   unreachable, any non-zero exit that is not a refused Set — say so and stop.

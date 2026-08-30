@@ -20987,7 +20987,7 @@ async fn no_grilling_builds_from_the_brief_alone_and_carries_it_to_a_pull_reques
          there: {sent}",
     );
     assert!(
-        sent.contains("blocking ask"),
+        sent.contains("ordinary ask"),
         "with what to do about what the Brief leaves open: {sent}",
     );
 
