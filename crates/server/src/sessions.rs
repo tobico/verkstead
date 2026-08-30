@@ -26,7 +26,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
@@ -1404,6 +1404,13 @@ impl Sessions {
             }
         };
 
+        // The moment the session started, taken before it starts. A backend
+        // whose log is found rather than named is looking for a file that
+        // appeared after this — and a moment read afterwards could be later
+        // than the log it is meant to be earlier than, which would be a session
+        // that never found its own record. See [`crate::transcript`].
+        let at_launch = SystemTime::now();
+
         let child = match terminal.spawn(&mut captured(&sandbox, &argv)) {
             Ok(child) => child,
             Err(error) => {
@@ -1433,13 +1440,20 @@ impl Sessions {
 
         let event_id = store::start_capture(pool, conversation_id, session.as_deref()).await?;
 
-        // The log the agent keeps of itself is followed under the name Verkstead
-        // gave the session, inside the directory of the Profile it is running
-        // under. A session with no name has no log to look for — see
-        // [`crate::transcript`].
-        let tail = session
-            .as_deref()
-            .map(|session| Tail::of(conversation_id, &pairing.profile, session));
+        // The log the agent keeps of itself is followed inside the directory of
+        // the Profile it is running under — under the name Verkstead gave the
+        // session on a backend that takes one, and by the Worktree it opened in
+        // and the moment it started on a backend that does not. A session with
+        // no name has no log to look for — see [`crate::transcript`].
+        let tail = session.as_deref().map(|session| {
+            Tail::of(
+                conversation_id,
+                &pairing.profile,
+                session,
+                conversation.worktree.as_deref(),
+                at_launch,
+            )
+        });
 
         // And the same output watched for the one thing a session says that is
         // about the account rather than about the work: that its window is

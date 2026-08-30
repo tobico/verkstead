@@ -2829,9 +2829,11 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
 /// sandbox with its Profile's one home bound where that backend looks for it,
 /// on the model its Pairing names, told which backend it is.
 ///
-/// And its record is the Capture. Codex's log is found rather than named, and
-/// the finding is its own stage's — so until then nothing is looked for, which
-/// is ADR-0006's rule for a session with no log and not a new one.
+/// And its record is the Capture. This stub writes no rollout, and a Codex
+/// session whose log never appears is a session with nothing to follow — which
+/// is ADR-0006's rule for a session with no log and not a new one. Nothing is
+/// said about it either: a log that has not turned up is the ordinary state of
+/// a session's first seconds.
 #[tokio::test]
 async fn a_session_on_a_second_backend_runs_from_its_home_with_the_capture_as_its_record() {
     let fixture = grilling_on_codex(
@@ -2871,7 +2873,7 @@ async fn a_session_on_a_second_backend_runs_from_its_home_with_the_capture_as_it
 
     assert!(
         fixture.transcript(summary.id).await.is_empty(),
-        "no log is looked for on this backend yet, so there is no Transcript"
+        "a Codex session that wrote no rollout has no Transcript"
     );
     assert_eq!(
         summary.turns, None,
@@ -2955,6 +2957,81 @@ async fn a_codex_session_is_launched_with_the_line_codex_takes() {
         said.contains("account=\n"),
         "and Verkstead writes nothing into the Profile's own directory: {said:?}"
     );
+}
+
+/// A Codex session's log is found rather than named: codex takes no session id,
+/// so what says a rollout is this session's is the Worktree its own first line
+/// names and its having appeared after this session was launched.
+///
+/// The stub writes three logs into the one store its account keeps, which is
+/// what a machine running more than one session at a time actually has in
+/// there: the session's own rollout, one belonging to a session in another
+/// Worktree written a moment before it, and a compressed older one of this very
+/// Worktree. Only the first is the record of this session, and the two beside
+/// it say so in the only way a test can — by being followed instead if the
+/// finder gets it wrong.
+///
+/// And the following itself is stage 02's, unchanged: the lines reach the
+/// Transcript exactly as codex wrote them, in order, with a line caught
+/// half-written held until the rest of it arrives.
+#[tokio::test]
+async fn a_codex_session_follows_the_rollout_that_names_its_own_worktree() {
+    let fixture = grilling_on_codex(
+        r#"
+        day=$HOME/.codex/sessions/$(date +%Y/%m/%d)
+        mkdir -p "$day"
+
+        # A session of another Conversation, writing into the same account's
+        # store at the same moment.
+        printf '{"type":"session_meta","payload":{"cwd":"/srv/worktrees/tables"}}\n' \
+            > "$day/rollout-2026-08-30T17-47-00-aaaa.jsonl"
+
+        # And this Worktree's own work from a week ago, compressed where codex
+        # leaves the older ones.
+        printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$(pwd)" \
+            > "$day/rollout-2026-08-30T17-47-01-bbbb.jsonl.zst"
+
+        printf 'where=%s\n' "$(pwd)"
+
+        log=$day/rollout-2026-08-30T17-47-02-cccc.jsonl
+        printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$(pwd)" > "$log"
+        printf 'Reading the brief.\n'
+
+        printf '{"type":"response_item","payload":{"type":"mess' >> "$log"
+        sleep 2
+        printf 'age","role":"assistant"}}\n' >> "$log"
+        printf 'Asking.\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 2).await;
+
+    // The directory the session was actually sitting in, read off what it
+    // printed rather than worked out here — which is what makes the first line
+    // below a match rather than a restatement.
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+    let worktree = said
+        .lines()
+        .find_map(|line| line.strip_prefix("where="))
+        .expect("the session says where it ran");
+
+    assert_eq!(
+        transcript,
+        vec![
+            format!(r#"{{"type":"session_meta","payload":{{"cwd":"{worktree}"}}}}"#),
+            r#"{"type":"response_item","payload":{"type":"message","role":"assistant"}}"#
+                .to_owned(),
+        ],
+        "the rollout naming this session's own Worktree is the one followed, and its \
+         lines should be kept exactly as codex wrote them — a line caught half-written \
+         waiting for the rest of itself"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// that is a fault: it is every stub agent the test suite runs, and every

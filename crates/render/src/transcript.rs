@@ -364,6 +364,30 @@ pub fn turns(lines: &[String]) -> usize {
     reading.turns.len()
 }
 
+/// The directory a Codex rollout's opening line says its session was working
+/// in — and `None` for any other line, and for anything that is not one.
+///
+/// The one thing about a rollout that is read anywhere but here, and it is read
+/// here for the reason everything else about somebody else's file format is:
+/// this crate is the one place that knows the shape of it (ADR 0006). What
+/// wants it is the finder, because a Codex session's log is found rather than
+/// named — codex takes no session id at launch, so what identifies its log is
+/// the `cwd` it wrote in its own first line.
+pub fn rollout_cwd(line: &str) -> Option<String> {
+    let line: Value = serde_json::from_str(line).ok()?;
+
+    if line.get("type")?.as_str()? != SESSION_META {
+        return None;
+    }
+
+    Some(line.get("payload")?.get("cwd")?.as_str()?.to_owned())
+}
+
+/// What codex calls the line it opens a rollout with. Named because it is
+/// somebody else's spelling, the same bargain the usage-limit phrase and the
+/// idle signature make: one place to edit when it moves.
+const SESSION_META: &str = "session_meta";
+
 /// The Transcript's lines, read into the conversation they record.
 ///
 /// One line can be more than one turn — an agent that wrote prose and then
@@ -1186,5 +1210,39 @@ mod tests {
             .collect();
 
         assert!(statements(&lines).is_empty(), "{:?}", statements(&lines));
+    }
+
+    /// A Codex rollout's opening line, as codex 0.149.0 writes one — cut off
+    /// after the field the finder is after, because the rest of it is the
+    /// session's whole system prompt and eighteen kilobytes of it.
+    const SESSION_META_LINE: &str = r#"{"timestamp":"2026-08-30T07:47:01.017Z","ordinal":0,"type":"session_meta","payload":{"session_id":"01a051a2-d4e0-7f03-8839-d771ca4d0e73","cwd":"/srv/worktrees/rate-limiting","originator":"codex_exec"}}"#;
+
+    /// What says a rollout is this session's: the directory codex says it was
+    /// launched in, which for a Verkstead session is the Conversation's
+    /// Worktree.
+    #[test]
+    fn a_rollouts_opening_line_says_where_its_session_was_working() {
+        assert_eq!(
+            rollout_cwd(SESSION_META_LINE).as_deref(),
+            Some("/srv/worktrees/rate-limiting")
+        );
+    }
+
+    /// And every other line of the file says nothing about it. The rest of a
+    /// rollout carries a `cwd` of its own in places — a `turn_context` does —
+    /// and reading one of those would be identifying a session by a directory
+    /// it happened to be in for a turn.
+    #[test]
+    fn no_other_line_of_a_rollout_says_where_the_session_was_working() {
+        for line in [
+            r#"{"type":"turn_context","payload":{"cwd":"/srv/worktrees/rate-limiting"}}"#,
+            r#"{"type":"session_meta","payload":{"session_id":"01a051a2"}}"#,
+            r#"{"type":"session_meta"}"#,
+            r#"{"payload":{"cwd":"/srv/worktrees/rate-limiting"}}"#,
+            "not JSON at all",
+            "",
+        ] {
+            assert_eq!(rollout_cwd(line), None, "{line:?}");
+        }
     }
 }
