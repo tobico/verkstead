@@ -189,6 +189,14 @@ impl Agents {
         Agents { pace, ..self }
     }
 
+    /// What the installation configured as Sandbox Configuration, for the
+    /// settings page rather than for a session: the page draws every bind there
+    /// is and says which of the two places said each one, and these are the ones
+    /// it may only show — see [`crate::paths`].
+    pub fn binds(&self) -> &SandboxConfig {
+        &self.config
+    }
+
     /// What a session under `pairing` on `prompt`, named `session`, runs.
     ///
     /// The model is the Pairing's, said on the command line rather than left to

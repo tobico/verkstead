@@ -10,7 +10,8 @@
 //! fresh install needs them: credentials first, because without them nothing a
 //! session does with a Repo can be pushed, then the shared Rust build cache
 //! every session builds into, then where the share viewer is hosted, then the
-//! Agent Profiles and the Repos a Conversation is settled against.
+//! paths Verkstead may work inside at all, then the Agent Profiles and the Repos
+//! a Conversation is settled against.
 //!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
@@ -52,6 +53,7 @@ import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
 import { BuildCacheCard, BuildCachePane } from "./BuildCache";
 import { GithubCard, GithubPane } from "./Credentials";
+import { PathsCard, PathsPane } from "./Paths";
 import { ShareViewerCard, ShareViewerPane } from "./ShareViewer";
 import {
   SETTINGS,
@@ -212,8 +214,10 @@ function Settings(props: {
         />
         {/* Under the credentials and above the lists: it is the other thing
             Verkstead itself was told rather than anything a Conversation is
-            settled against, and the one setting on this page about what a
-            session runs inside. */}
+            settled against. One of the two sections about what a session runs
+            inside, and the one that is on without anybody having been here —
+            which is why it reads beside the credentials rather than down with
+            the Paths, where everything is somebody's own typing. */}
         <BuildCacheCard
           open={props.opening === "build-cache"}
           press={() => props.select("build-cache")}
@@ -226,6 +230,15 @@ function Settings(props: {
         <ShareViewerCard
           open={props.opening === "share-viewer"}
           press={() => props.select("share-viewer")}
+        />
+        {/* The last of what Verkstead itself was told, and the one thing under
+            the lists rather than beside them: where Verkstead may work at all,
+            and what a session is given beyond its worktree. It stands directly
+            above the Repos because it is what they are registered from — a
+            machine with no watched path has nothing to put on that list. */}
+        <PathsCard
+          open={props.opening === "paths"}
+          press={() => props.select("paths")}
         />
         {/* Told which of its own things is open rather than the whole opening:
             where a Profile's pane stands is this page's arithmetic, and a
@@ -293,6 +306,9 @@ function Details(props: {
       </Match>
       <Match when={props.opening === "share-viewer"}>
         <ShareViewerPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "paths"}>
+        <PathsPane back={props.back} />
       </Match>
       {/* The Repos' two panes are two components rather than one asked about a
           Repo that does not exist yet, the way the Profiles' one form is: what

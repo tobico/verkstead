@@ -51,9 +51,19 @@ flowchart LR
 
 ## Domain model
 
-- **Watched paths** are configured in the environment at installation. They
-  double as a security boundary: Verkstead refuses to operate on any file
-  outside them. Repos are registered from within the watched paths.
+- **Watched paths** are said in two places and the boundary is the union of the
+  two — the environment at installation, and the workbench settings (*revised
+  2026-08-30, grilling configurable-paths*: this said "configured in the
+  environment at installation", full stop). The installation's own are resolved
+  once at startup and fail loudly, because a directory a unit named and has not
+  got is a misconfiguration to report where it can be fixed; the settings' own
+  are re-read at the moment an admission is decided and never fail at all, an
+  entry that will not resolve simply covering nothing, with a word in the log.
+  That is what lets a bare binary come up configured by nobody and be pointed at
+  its first directory from its own settings page. They double as a security
+  boundary either way: Verkstead refuses to operate on any file outside them,
+  and watching nothing admits nothing. Repos are registered from within the
+  watched paths.
 - A **conversation** is the core entity: attached to a repo and a base commit,
   starting from a **brief** (an editable markdown document). The base commit
   defaults to the default branch's tip at grill start; overriding it is picking
@@ -156,28 +166,42 @@ flowchart LR
   every picker filled — a prefill the human may change, kept server-side so a
   phone and a desk share it.
 - **Sandbox configuration** (extra read-write binds such as build caches,
-  network policy) lives in global defaults with per-repo overrides. *Settled
-  2026-08-20, building stage 02*: it is configured where the watched paths are —
-  `--sandbox-bind DIR` for every sandbox, `--sandbox-bind NAME=DIR` for the repo
-  registered under that name — because each bind is a hole in the boundary and
-  widening one is the installer's to do. Letting a **conversation** allow another
-  repository into its own sandbox is the companion-repos bullet below (*settled
-  2026-08-27, staging companion-repos*; this said "wanted and is not built"):
-  the sandbox takes a composed list, so it was a source to add rather than
-  anything to undo.
-- **The shared Rust build cache is the one deliberate exception** to the line
-  above (*settled 2026-08-29, grilling shared-rust-build-cache*). It is a hole
-  the **server** opens in every sandbox by default, and the switch that closes
-  it is in the workbench settings — the first sandbox-affecting control the web
-  UI has. The exception was raised explicitly and taken anyway, on the rule that
-  *a human should never have a worse experience for not having checked the
-  settings*: every conversation cold-built otherwise, because `target/` is
-  inside a worktree that is deleted on close and the cargo registry landed in a
-  per-session tmpfs `$HOME`. What makes it safe to reach from a browser is that
-  the hole is not the installer's to justify — it is one directory of
-  Verkstead's own making, holding nothing but build output, and the control is
-  the one that *takes it away*. The installer-only rule still holds for
-  `sandboxBinds`, which are somebody else's directories.
+  network policy) lives in global defaults with per-repo overrides. It is
+  configured where the watched paths are — `--sandbox-bind DIR` for every
+  sandbox, `--sandbox-bind NAME=DIR` for the repo registered under that name,
+  and the same two grammars in the workbench settings (*revised 2026-08-30,
+  grilling configurable-paths*; *settled 2026-08-20, building stage 02*, this
+  was the installer's alone, because each bind is a hole in the boundary and
+  widening one was held to be theirs). The two sets union the way the watched
+  paths do, and each keeps its own answer to a bind that is not there: the
+  flag's refuses startup, the setting's is skipped for that session with a line
+  in the log. What makes the browser half safe is not that a bind stopped being
+  a hole but that reaching the page is already reaching the machine — the
+  tailnet is the perimeter and there is one human behind it — while a *phone* is
+  no place to be told a typo cost every session in a repository its start. On a
+  hardened nix install the unit's namespace still binds what the module was
+  given, so a settings entry outside it saves, says on the page that the server
+  cannot see it, and does nothing until the installer widens the unit. Letting a
+  **conversation** allow another repository into its own sandbox is the
+  companion-repos bullet below (*settled 2026-08-27, staging companion-repos*;
+  this said "wanted and is not built"): the sandbox takes a composed list, so it
+  was a source to add rather than anything to undo.
+- **The shared Rust build cache was the first of these controls** and is still
+  the only one that is on with nothing configured (*settled 2026-08-29,
+  grilling shared-rust-build-cache*; it was written up as "the one deliberate
+  exception" to an installer-only rule the bullet above no longer states —
+  *revised 2026-08-30, grilling configurable-paths*). It is a hole the
+  **server** opens in every sandbox by default, and the switch that closes it is
+  in the workbench settings. It was taken on the rule that *a human should never
+  have a worse experience for not having checked the settings*: every
+  conversation cold-built otherwise, because `target/` is inside a worktree that
+  is deleted on close and the cargo registry landed in a per-session tmpfs
+  `$HOME`. What sets it apart from a `sandboxBinds` entry is still worth saying
+  and is now about defaults rather than about who may configure it: this hole is
+  one directory of Verkstead's own making, holding nothing but build output, so
+  it can be opened for somebody who never asked and the only control over it is
+  the one that *takes it away*. Every bind on the Paths pane is somebody else's
+  directory, and is opened only because it was typed there.
 - **Companion repos** (*settled 2026-08-27, staging companion-repos — being
   built by that roadmap*): a conversation may add other registered repos to its
   sandbox, each read-only or read-write. Configured while the brief drafts — an
@@ -658,16 +682,30 @@ Timeline events:
 - **The page is read as cards and panes** (*settled 2026-08-29, building
   settings-redesign*). Everything on it that used to open a modal is a card in
   the middle pane and a details pane beside it: the credentials as one github
-  card, each Agent Profile, each registered Repo — and the shared Rust build
-  cache, whose card says how it stands and whose pane holds the switch and the
-  size. What is on a card is what a list is scanned for and the rest is in the
-  pane — a Profile's mounted paths, agent type and Remove; a Repo's branches,
-  how much work is on it and what it is holding that nothing is driving; the
-  cache's switch and the size of its compiled half. Adding one is a plus icon on
-  the section's heading line, which opens the same pane blank and reads as open
-  while it stands. The two switches that are about the device and the server
-  rather than about anything configured stay as they were: notifications on the
-  pane head's line, and the update banner above everything.
+  card, each Agent Profile, each registered Repo — the shared Rust build cache,
+  whose card says how it stands and whose pane holds the switch and the size,
+  and **Paths**, whose card counts the watched paths and the global binds and
+  whose pane edits both (*added 2026-08-30, grilling configurable-paths*). The
+  Paths card sits directly above the Repos, because a watched path is what a
+  Repo is registered from and a machine with none has nothing to put on that
+  list; a Repo's own pane carries the binds said for its name under a **Sandbox
+  configuration** heading, the same rows out of the same read and the same
+  save, because a page listing every path would carry a column of `name=…`
+  entries nobody could scan. **A bind written for a name no Repo is registered
+  under goes back on the Paths pane**, because that split leaves it no pane of
+  its own and a row drawn nowhere is a row nobody can take away — which is what
+  unregistering a Repo makes of every bind said for it. The Paths card's count
+  of entries the server cannot see spans a Repo's pane as well as its own, and
+  says which to open: a bind that has quietly stopped resolving is what nobody
+  goes looking for. What is on a card is what a list is scanned for
+  and the rest is in the pane — a Profile's mounted paths, agent type and
+  Remove; a Repo's branches, how much work is on it, what it is holding that
+  nothing is driving and its own binds; the cache's switch and the size of its
+  compiled half. Adding one is a plus icon on the section's heading line, which
+  opens the same pane blank and reads as open while it stands. The two switches
+  that are about the device and the server rather than about anything
+  configured stay as they were: notifications on the pane head's line, and the
+  update banner above everything.
 - **A Repo can be taken off the registry** from its own pane (*settled
   2026-08-29, building settings-redesign*) — an unregistering rather than a
   delete, refused while live work is on it. See **Repo** in `CONTEXT.md` for

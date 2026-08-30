@@ -1,10 +1,18 @@
 //! The Watched Paths: the directories Verkstead is permitted to operate inside.
 //!
-//! A security boundary rather than a convenience. They are configured in the
-//! environment at installation and never discovered by scanning, and the
-//! decision about whether a path is inside one is taken here — on the server,
-//! below every route — so that no request can reach around it by asking
-//! differently.
+//! A security boundary rather than a convenience. They are said rather than
+//! discovered by scanning, and the decision about whether a path is inside one
+//! is taken here — on the server, below every route — so that no request can
+//! reach around it by asking differently.
+//!
+//! They are said in two places and the boundary is the union of both. The
+//! installation says its own with `--watched-path`, which are resolved once at
+//! startup and fail loudly: a directory that is not there is a misconfiguration
+//! to report where it can be fixed. The human says theirs in `config.yaml`,
+//! which are read and resolved at the moment an admission is decided and never
+//! fail at all: an entry that will not resolve simply covers nothing, with a
+//! word in the log. That is what lets a standalone install come up configured by
+//! nobody and be set up from its own settings page.
 //!
 //! Everything is decided on the *resolved* path: `..` taken out, every symlink
 //! followed, as the filesystem itself would. A path that merely reads as inside
@@ -12,18 +20,29 @@
 //! how a boundary gets walked through.
 //!
 //! Watching nothing is a legal state and a closed one: with no Watched Path
-//! configured every path is outside, so nothing is admitted. The server refuses
-//! to start that way — see [`crate::Config`] — but the type fails closed
-//! regardless, because a boundary whose empty case admits everything is a
-//! boundary that opens itself the moment configuration goes missing.
+//! configured anywhere every path is outside, so nothing is admitted. That is
+//! what a fresh standalone install is, and it is also what a boundary whose
+//! configuration went missing has to be — a boundary whose empty case admitted
+//! everything would open itself the moment a file did not read.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-/// The directories Verkstead may operate inside, resolved once at startup.
+use crate::settings::Settings;
+
+/// The directories Verkstead may operate inside: what the installation said,
+/// resolved once at startup, and a handle on the file the human says the rest in.
 #[derive(Debug, Clone, Default)]
-pub struct WatchedPaths(Vec<PathBuf>);
+pub struct WatchedPaths {
+    /// The installation's own, resolved and checked at startup.
+    configured: Vec<PathBuf>,
+
+    /// And where to read the human's own from, or `None` for a boundary with no
+    /// settings file behind it at all — which is what the routers that watch
+    /// nothing are, and what every test of the type below is.
+    settings: Option<Settings>,
+}
 
 /// What the boundary made of a path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,20 +64,19 @@ pub enum Admission {
 }
 
 impl WatchedPaths {
-    /// The Watched Paths as configured, resolved and checked.
+    /// The installation's Watched Paths as configured, resolved and checked.
     ///
     /// Resolving here rather than per request is what makes the check cheap and
     /// what makes a misconfiguration loud: a Watched Path that does not exist is
     /// refused at startup, where it can be fixed, rather than silently covering
     /// nothing and refusing every repo inside it.
+    ///
+    /// None of them is a legal thing to be given. A standalone install has no
+    /// unit and no flags to be started with, and it has to be able to reach its
+    /// own settings page before it has been configured at all — so an empty set
+    /// here is a Verkstead that admits nothing yet rather than one that refuses
+    /// to come up.
     pub fn resolve(paths: &[PathBuf]) -> Result<Self> {
-        if paths.is_empty() {
-            bail!(
-                "no watched path is configured: Verkstead operates only inside the \
-                 directories it is given, so it has nothing it may touch"
-            );
-        }
-
         let mut resolved = Vec::with_capacity(paths.len());
         for path in paths {
             if !path.is_absolute() {
@@ -80,24 +98,147 @@ impl WatchedPaths {
             resolved.push(real);
         }
 
-        Ok(Self(resolved))
+        Ok(Self {
+            configured: resolved,
+            settings: None,
+        })
+    }
+
+    /// The same boundary, widened by whatever `settings` holds at the moment
+    /// each admission is decided.
+    ///
+    /// Attached rather than passed in at [`WatchedPaths::resolve`] because the
+    /// settings file lives in the Data Directory, and the router is where the
+    /// two are already in the same room — see [`crate::routed`].
+    pub(crate) fn reading(self, settings: Settings) -> Self {
+        Self {
+            settings: Some(settings),
+            ..self
+        }
     }
 
     /// Watching nothing, which admits nothing.
     pub fn none() -> Self {
-        Self(Vec::new())
+        Self::default()
     }
 
-    /// The paths themselves, for the line the server logs about what it may
-    /// touch.
+    /// The installation's own paths, for the line the server logs about what it
+    /// may touch. Empty on a standalone install, which is a true thing to log.
     pub fn paths(&self) -> &[PathBuf] {
-        &self.0
+        &self.configured
+    }
+
+    /// The boundary as it stands at this moment, with the settings' half read
+    /// and resolved once.
+    ///
+    /// What a caller with more than one path to decide about asks for. Both
+    /// halves are questions of the filesystem — the file, and a `canonicalize`
+    /// per entry written in it — and asking them per path would ask them once
+    /// per Agent Profile a list draws, which is the batch a caller went off the
+    /// runtime to make in the first place.
+    ///
+    /// One moment, and deliberately: every path in a batch is decided against
+    /// the same boundary, rather than against whatever the file happened to say
+    /// as each one came up. A save landing mid-list moves what the *next* batch
+    /// sees, which is the same as everything else read out of the settings.
+    ///
+    /// Blocking: reading the file, and resolving what it names.
+    pub(crate) fn standing(&self) -> Boundary<'_> {
+        Boundary {
+            configured: &self.configured,
+            said: self.settings_paths(),
+        }
     }
 
     /// Whether `path` is inside a Watched Path, and where it really is if so.
     ///
-    /// Blocking: resolving a path is a filesystem read.
+    /// The settings file is read here, so a Watched Path added to it admits from
+    /// the next request on and one taken out of it stops admitting — which costs
+    /// nothing already registered, because admission is asked at registration and
+    /// never again.
+    ///
+    /// The one-path form of [`WatchedPaths::standing`], which is what a caller
+    /// deciding a whole list wants instead: this reads the file for the one
+    /// answer it gives.
+    ///
+    /// Blocking: resolving a path is a filesystem read, and so is reading the
+    /// file.
     pub fn admit(&self, path: &Path) -> Admission {
+        self.standing().admit(path)
+    }
+
+    /// What `config.yaml` holds now, resolved, with whatever will not resolve
+    /// left out.
+    ///
+    /// **Nothing here is ever an error.** A relative entry, one naming a
+    /// directory that was never made, and one naming a file are each skipped
+    /// with a line in the log, and every other entry goes on covering what it
+    /// covers. That is the settings side of the line the whole of
+    /// [`crate::settings`] is on: the file is edited from a phone, a save lands
+    /// whatever it was told, and a typo in it is a directory Verkstead cannot
+    /// see rather than a server that will not come up. The flag keeps the other
+    /// answer, because a flag is the installation's own word and nobody is
+    /// watching when it is wrong.
+    ///
+    /// The boundary only ever widens from what is here, so a skipped entry
+    /// admits nothing and refuses nothing: fail-closed is the failure mode, and
+    /// it is the safe one.
+    fn settings_paths(&self) -> Vec<PathBuf> {
+        let Some(settings) = &self.settings else {
+            return Vec::new();
+        };
+
+        settings
+            .config()
+            .watched_paths()
+            .iter()
+            .filter_map(|written| {
+                let path = PathBuf::from(written);
+
+                match resolved_dir(&path) {
+                    Ok(real) => Some(real),
+                    Err(error) => {
+                        tracing::warn!(
+                            watched_path = written,
+                            error = %error,
+                            "a watched path in the settings could not be resolved, so it \
+                             covers nothing"
+                        );
+
+                        None
+                    }
+                }
+            })
+            .collect()
+    }
+}
+
+/// The boundary at one moment: the installation's Watched Paths and whatever
+/// the settings held when this was taken, both resolved.
+///
+/// What [`WatchedPaths::standing`] hands back, and what decides an admission.
+/// Nothing here touches the settings file — that was done once, when this was
+/// taken — so a caller with a list of paths to decide about pays for the file
+/// once rather than once per path.
+///
+/// Borrowed from the [`WatchedPaths`] it was taken off, which is what keeps it
+/// to the batch it was taken for: it cannot outlive the boundary it is a moment
+/// of, and a caller wanting a fresh moment asks for one.
+pub(crate) struct Boundary<'a> {
+    /// The installation's own, resolved at startup and unchanged since.
+    configured: &'a [PathBuf],
+
+    /// And the settings' own as they stood when this was taken, resolved, with
+    /// whatever would not resolve already left out.
+    said: Vec<PathBuf>,
+}
+
+impl Boundary<'_> {
+    /// Whether `path` is inside a Watched Path, and where it really is if so.
+    ///
+    /// Blocking: resolving a path is a filesystem read. Only the one, though —
+    /// the file behind this was read when the moment was taken.
+    pub(crate) fn admit(&self, path: &Path) -> Admission {
         if !path.is_absolute() {
             return Admission::NotAbsolute;
         }
@@ -106,14 +247,47 @@ impl WatchedPaths {
             return Admission::Missing;
         };
 
-        // Component by component, which `starts_with` is: `/watched-elsewhere`
-        // begins with the text of `/watched` and is not inside it.
-        if self.0.iter().any(|watched| real.starts_with(watched)) {
+        if self.covers(&real) {
             Admission::Inside(real)
         } else {
             Admission::Outside
         }
     }
+
+    /// Whether any Watched Path, from either side, holds `real` — which is
+    /// already resolved.
+    fn covers(&self, real: &Path) -> bool {
+        // Component by component, which `starts_with` is: `/watched-elsewhere`
+        // begins with the text of `/watched` and is not inside it.
+        self.configured
+            .iter()
+            .chain(&self.said)
+            .any(|watched| real.starts_with(watched))
+    }
+}
+
+/// `path` as the filesystem has it, or what is wrong with it.
+///
+/// The same three questions [`WatchedPaths::resolve`] asks of the flag's own —
+/// absolute, there, a directory — asked here so that the two sides of the
+/// boundary agree about what a Watched Path is and disagree only about what to
+/// do when one is not.
+///
+/// What is wrong with it is said in words a human can act on rather than in a
+/// programmer's: this is what the log says about a skipped entry, and it is also
+/// what the settings page draws on the row — see [`crate::paths`].
+pub(crate) fn resolved_dir(path: &Path) -> Result<PathBuf> {
+    if !path.is_absolute() {
+        bail!("it is relative, and a boundary has to name one directory");
+    }
+
+    let real = path.canonicalize().context("the server cannot see it")?;
+
+    if !real.is_dir() {
+        bail!("{} is not a directory", real.display());
+    }
+
+    Ok(real)
 }
 
 #[cfg(test)]
@@ -241,9 +415,16 @@ mod tests {
         assert_eq!(WatchedPaths::none().admit(dir.path()), Admission::Outside);
     }
 
+    /// The standalone case: nothing said at the installation is a boundary
+    /// around nothing rather than a refusal, because a server that would not
+    /// start unconfigured could never be reached to configure.
     #[test]
-    fn resolving_no_watched_paths_at_all_is_refused() {
-        assert!(WatchedPaths::resolve(&[]).is_err());
+    fn resolving_no_watched_paths_at_all_watches_nothing() {
+        let dir = tempdir();
+        let watched = WatchedPaths::resolve(&[]).unwrap();
+
+        assert!(watched.paths().is_empty());
+        assert_eq!(watched.admit(dir.path()), Admission::Outside);
     }
 
     #[test]
@@ -256,5 +437,136 @@ mod tests {
         let dir = tempdir();
 
         assert!(WatchedPaths::resolve(&[dir.path().join("never-made")]).is_err());
+    }
+
+    /// The settings side. A `config.yaml` in `data_dir` saying `written`, and a
+    /// boundary reading it — which is what every router has, and what the tests
+    /// above deliberately do not.
+    fn settings_watching(data_dir: &Path, written: &[&Path]) -> WatchedPaths {
+        write_watched(data_dir, written);
+
+        WatchedPaths::none().reading(Settings::in_data_dir(data_dir))
+    }
+
+    fn write_watched(data_dir: &Path, written: &[&Path]) {
+        let paths = written
+            .iter()
+            .map(|path| path.to_str().unwrap().to_owned())
+            .collect();
+
+        Settings::in_data_dir(data_dir)
+            .save_config(&crate::settings::Config::of(
+                crate::settings::GitAuthor::default(),
+                crate::settings::RustBuildCache::default(),
+                None,
+                vec![],
+                paths,
+            ))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_watched_path_in_the_settings_admits_what_is_inside_it() {
+        let data_dir = tempdir();
+        let dir = tempdir();
+        let repo = dir.path().join("verkstead");
+        std::fs::create_dir(&repo).unwrap();
+
+        let watched = settings_watching(data_dir.path(), &[dir.path()]);
+
+        assert_eq!(
+            watched.admit(&repo),
+            Admission::Inside(repo.canonicalize().unwrap())
+        );
+    }
+
+    /// The union: the flag's set and the file's are both the boundary, and
+    /// neither stands in for the other.
+    #[test]
+    fn the_two_sides_are_one_boundary() {
+        let data_dir = tempdir();
+        let configured = tempdir();
+        let said = tempdir();
+
+        let watched = watching(configured.path()).reading(Settings::in_data_dir(data_dir.path()));
+        write_watched(data_dir.path(), &[said.path()]);
+
+        assert!(matches!(
+            watched.admit(configured.path()),
+            Admission::Inside(_)
+        ));
+        assert!(matches!(watched.admit(said.path()), Admission::Inside(_)));
+    }
+
+    /// Read per admission rather than held: a directory added to the file
+    /// admits from the next question on, and one taken out of it stops
+    /// admitting.
+    #[test]
+    fn the_file_is_read_at_every_admission() {
+        let data_dir = tempdir();
+        let dir = tempdir();
+        let watched = settings_watching(data_dir.path(), &[]);
+
+        assert_eq!(watched.admit(dir.path()), Admission::Outside);
+
+        write_watched(data_dir.path(), &[dir.path()]);
+        assert!(matches!(watched.admit(dir.path()), Admission::Inside(_)));
+
+        write_watched(data_dir.path(), &[]);
+        assert_eq!(watched.admit(dir.path()), Admission::Outside);
+    }
+
+    /// Nothing in the file is ever fatal, and an entry that will not resolve
+    /// costs the ones beside it nothing: it simply covers nothing.
+    #[test]
+    fn a_settings_watched_path_that_will_not_resolve_covers_nothing() {
+        let data_dir = tempdir();
+        let dir = tempdir();
+        let file = dir.path().join("notes.md");
+        std::fs::write(&file, "not a directory\n").unwrap();
+
+        let watched = settings_watching(
+            data_dir.path(),
+            &[
+                &dir.path().join("never-made"),
+                Path::new("src"),
+                &file,
+                dir.path(),
+            ],
+        );
+
+        assert_eq!(
+            watched.admit(&dir.path().join("never-made")),
+            Admission::Missing
+        );
+        assert_eq!(watched.admit(Path::new("src")), Admission::NotAbsolute);
+
+        // The one that resolves goes on covering what it covers.
+        assert!(matches!(watched.admit(dir.path()), Admission::Inside(_)));
+    }
+
+    /// A boundary taken as a moment decides every path in the batch against
+    /// that moment, and reads the file no further: what a caller with a list to
+    /// judge asks for, so a list's worth of looks is one reading of the file
+    /// rather than one per look.
+    #[test]
+    fn a_boundary_taken_is_the_moment_it_was_taken_at() {
+        let data_dir = tempdir();
+        let first = tempdir();
+        let second = tempdir();
+
+        let watched = settings_watching(data_dir.path(), &[first.path()]);
+        let boundary = watched.standing();
+
+        // Written after the moment was taken, so this boundary has never heard
+        // of it — while the one taken next does, which is what makes it a
+        // moment rather than a cache.
+        write_watched(data_dir.path(), &[second.path()]);
+
+        assert!(matches!(boundary.admit(first.path()), Admission::Inside(_)));
+        assert_eq!(boundary.admit(second.path()), Admission::Outside);
+
+        assert_eq!(watched.admit(first.path()), Admission::Outside);
+        assert!(matches!(watched.admit(second.path()), Admission::Inside(_)));
     }
 }

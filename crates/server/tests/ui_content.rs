@@ -2855,6 +2855,18 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // configured half of this too, and `settings-unset.json` is where
             // nobody has hosted one.
             "share_viewer_url": "https://ada.github.io/verkstead-shares/",
+            // And the paths this Verkstead was told about, which come back
+            // labelled as the settings' own — the router behind this fixture was
+            // started with none of its own, the way a standalone install is.
+            //
+            // None of them is on the machine writing the fixture, so each comes
+            // back unresolved, which is the row the page has the most to draw:
+            // an entry that is saved, is in the file, and does nothing until the
+            // directory is there. Fixed paths rather than a temporary
+            // directory's, because a fixture that changed with the machine that
+            // wrote it would be a diff on every run.
+            "watched_paths": ["/home/ada/src"],
+            "sandbox_binds": ["/var/cache/verkstead-node", "verkstead=/var/cache/verkstead-cargo"],
         }),
     )
     .await;

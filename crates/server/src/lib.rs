@@ -53,6 +53,10 @@ mod grillings;
 pub mod handoffs;
 mod limits;
 mod nudge;
+/// Every Watched Path and every Sandbox Configuration bind as the settings page
+/// reads them: which of the two places said each one, and whether the server can
+/// see it.
+mod paths;
 mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.
@@ -206,6 +210,12 @@ pub(crate) struct AppState {
     updates: updates::Updates,
     watched: WatchedPaths,
 
+    /// And the Sandbox Configuration the installation was started with, which is
+    /// here for the settings page rather than for a session: a session's binds
+    /// are composed where its sandbox is built, and this page draws every bind
+    /// there is and says which of the two places said each one — see [`paths`].
+    binds: sandbox::SandboxConfig,
+
     /// How Verkstead itself asks GitHub about a pull request — the host's `gh`,
     /// authenticating as the configured token.
     github: Gh,
@@ -292,14 +302,19 @@ pub struct Config {
     ///
     /// This is a security boundary and not a convenience: nothing outside these
     /// directories is ever touched, and a Repo is registered only from within
-    /// one. There is no default and no scan — the server refuses to start
-    /// without at least one, because guessing at what a machine's owner meant to
-    /// expose is not a guess worth making.
+    /// one. There is no default and no scan — guessing at what a machine's owner
+    /// meant to expose is not a guess worth making.
+    ///
+    /// Nor is there a requirement. The workbench settings say Watched Paths too,
+    /// and the boundary is the union of the two — see [`WatchedPaths`] — so a
+    /// standalone install comes up with none of these, admits nothing at all,
+    /// and is pointed at its first directory from its own settings page. A
+    /// service unit goes on saying them here, where a directory that is not
+    /// there still refuses to start.
     #[arg(
         long = "watched-path",
         env = "VERKSTEAD_WATCHED_PATHS",
         value_delimiter = ':',
-        required = true,
         value_name = "DIR"
     )]
     pub watched_paths: Vec<PathBuf>,
@@ -311,10 +326,14 @@ pub struct Config {
     /// This is the Sandbox Configuration: the package registries and the caches
     /// a session needs beyond its own worktree that Verkstead does not provide
     /// itself. Each names a directory of somebody else's and is a hole in the
-    /// boundary a sandbox is, which is why they are configured here beside the
-    /// Watched Paths rather than anywhere a session or a browser could reach —
-    /// and why a bind that is not there refuses startup rather than being
-    /// skipped.
+    /// boundary a sandbox is, which is why a bind that is not there refuses
+    /// startup rather than being skipped: a flag is the installation's own word,
+    /// and nobody is watching when it is wrong.
+    ///
+    /// Not a requirement either, and not the only place they are said. The
+    /// workbench settings take the same two grammars, a session gets the union
+    /// of the two, and the settings' own are the ones that are never fatal — see
+    /// [`sandbox::SandboxConfig`].
     ///
     /// A Rust build cache is not one of them: the server provides that one — see
     /// `--build-cache-dir` — and the switch that turns it off is in the
@@ -338,10 +357,11 @@ pub struct Config {
     /// own choice unless this says otherwise, and a feature that is on by
     /// default cannot ask for a `mkdir` first.
     ///
-    /// Unlike a Sandbox Configuration bind this is not a hole the installer
-    /// opened in the boundary: it is the server's own directory, holding
-    /// nothing but build output, and the switch that closes it is in the
-    /// workbench settings beside the size it may grow to.
+    /// Unlike a Sandbox Configuration bind this is not a hole somebody typed
+    /// into the boundary: it is the server's own directory, holding nothing but
+    /// build output, which is why it is opened for a human who never asked and
+    /// the only control over it — in the workbench settings, beside the size it
+    /// may grow to — is the one that closes it.
     #[arg(long, env = "VERKSTEAD_BUILD_CACHE_DIR", value_name = "DIR")]
     pub build_cache_dir: Option<PathBuf>,
 
@@ -392,6 +412,7 @@ pub fn router(pool: SqlitePool) -> Router {
         pool,
         updates::Updates::nothing_learned(),
         WatchedPaths::none(),
+        nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
@@ -409,9 +430,36 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBu
         pool,
         updates::Updates::nothing_learned(),
         watched,
+        nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
         Gh::on_path(),
+    )
+}
+
+/// The same, over the whole of what the *installation* configured — the Watched
+/// Paths its flags named and the Sandbox Configuration binds beside them — and
+/// reaching GitHub through `gh`.
+///
+/// What the settings endpoints are stood up over where the question is about
+/// paths: the page draws both sources at once and says which of the two said
+/// each entry, so a test of that labelling needs a router that was configured by
+/// an installation as well as by a file — see [`paths`].
+pub fn router_installed(
+    pool: SqlitePool,
+    watched: WatchedPaths,
+    binds: sandbox::SandboxConfig,
+    data_dir: PathBuf,
+    gh: Gh,
+) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        watched,
+        binds,
+        data_dir,
+        sessions::Sessions::none(),
+        gh,
     )
 }
 
@@ -429,10 +477,16 @@ pub fn router_running_sessions(
     agents: Agents,
     gh: Gh,
 ) -> Router {
+    // Taken off the agents rather than asked for again: the binds a session gets
+    // and the binds the settings page draws as the installation's are the one
+    // set, and two ways of saying it would be two things to keep in step.
+    let binds = agents.binds().clone();
+
     routed(
         pool,
         updates::Updates::nothing_learned(),
         watched,
+        binds,
         data_dir,
         sessions::Sessions::under(agents),
         gh,
@@ -451,10 +505,18 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
         pool,
         updates::Updates::nothing_learned(),
         WatchedPaths::none(),
+        nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
         gh,
     )
+}
+
+/// The Sandbox Configuration of a router the installation configured none for,
+/// which is every one of them but the served router and the test that is about
+/// what an installation said.
+fn nothing_bound() -> sandbox::SandboxConfig {
+    sandbox::SandboxConfig::default()
 }
 
 /// The data directory of a router that has no use for one.
@@ -479,6 +541,7 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
         pool,
         updates::watching(releases),
         WatchedPaths::none(),
+        nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
         Gh::on_path(),
@@ -489,13 +552,16 @@ fn routed(
     pool: SqlitePool,
     updates: updates::Updates,
     watched: WatchedPaths,
+    binds: sandbox::SandboxConfig,
     data_dir: PathBuf,
     sessions: sessions::Sessions,
     github: Gh,
 ) -> Router {
+    let settings = settings::Settings::in_data_dir(&data_dir);
+
     let state = AppState {
         pool,
-        settings: settings::Settings::in_data_dir(&data_dir),
+        settings: settings.clone(),
         nudges: nudge::Nudges::new(),
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
@@ -503,7 +569,17 @@ fn routed(
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
         updates,
-        watched,
+
+        // The boundary the installation drew, widened by whatever the human has
+        // put in `config.yaml` — read at each admission rather than here, so a
+        // directory added on the settings page admits from the next request on.
+        watched: watched.reading(settings),
+
+        // And what the installation asked every sandbox to bind, kept whole for
+        // the settings page: what a session gets is this composed with whatever
+        // the file holds at the moment it spawns — see [`sandbox`].
+        binds,
+
         github,
         data_dir,
         checkouts: Arc::new(tokio::sync::Mutex::new(())),
@@ -571,10 +647,15 @@ pub fn router_with_ui(
     agents: Agents,
     gh: Gh,
 ) -> Router {
+    // Off the agents, for the reason [`router_running_sessions`] takes it off
+    // them: one configured set, said once.
+    let binds = agents.binds().clone();
+
     routed(
         pool,
         updates::watching(releases),
         watched,
+        binds,
         data_dir,
         sessions::Sessions::under(agents),
         gh,
@@ -590,10 +671,12 @@ pub fn router_with_viewer<V: Embed + 'static>(pool: SqlitePool) -> Router {
 
 /// Open the database and serve until the process is stopped.
 ///
-/// The Watched Paths are resolved before anything else: a server that cannot say
-/// what it is permitted to touch has no business coming up, and a directory that
-/// is not there is a misconfiguration to report at startup rather than one to
-/// discover as a refusal weeks later.
+/// The installation's Watched Paths are resolved before anything else: a
+/// directory that is not there is a misconfiguration to report at startup,
+/// where it can be fixed, rather than one to discover as a refusal weeks later.
+/// Being given none of them is not a misconfiguration — the settings file says
+/// Watched Paths too, and a standalone install starts with nothing configured
+/// anywhere and admits nothing until it is.
 pub async fn run(config: Config) -> Result<()> {
     let watched = WatchedPaths::resolve(&config.watched_paths)?;
 
@@ -674,6 +757,7 @@ pub async fn run(config: Config) -> Result<()> {
         data_dir = %data_dir.display(),
         update_check = config.releases().is_some(),
         watched = ?watched.paths(),
+        settings_watched = ?settings.config().watched_paths(),
         home = %home.path.display(),
         sandbox_binds = binds.count(),
         build_cache = ?cache.dir(),
