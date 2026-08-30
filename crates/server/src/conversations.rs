@@ -844,17 +844,12 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch)
     });
 
-    // From here to the record naming what this makes, held against the sweep of
-    // orphaned worktrees: everything below makes directories the store does not
-    // know about yet, and a sweep reading in between would find live checkouts
-    // no record names. See [`crate::AppState::checkouts`].
-    let making = state.checkouts.lock().await;
-
     // The filesystem and git halves together, off the runtime: a worktree of a
     // large repository is not a quick call, and every part of this blocks.
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
         let branch = branch.clone();
+        let checkouts = state.checkouts.clone();
         move || {
             // A Conversation that has a worktree resolves the commit its branch
             // was cut from and stops there: the branch is taken because this
@@ -866,7 +861,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 let named = picked.unwrap_or(default);
 
                 return worktrees::resolve(&repo, &named)
-                    .map(|commit| (commit, Vec::new()))
+                    .map(|commit| (commit, Vec::new(), None))
                     .ok_or(GrillingStarted::NoBaseCommit);
             }
 
@@ -919,14 +914,29 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 planned.push(beside);
             }
 
+            // And only now, held from the first directory this makes to the
+            // record naming it: a sweep of orphaned worktrees reading in
+            // between would find live checkouts no record names. See
+            // [`crate::AppState::checkouts`].
+            //
+            // Here rather than around the whole of this, which is where it
+            // would read as belonging: everything above only asks questions,
+            // and the fetch among them has no deadline to answer within — so a
+            // remote dropping packets would hold this lock indefinitely, and
+            // every close in the workbench behind it, a close being the one
+            // thing that must never be held. Taken inside the blocking half and
+            // handed back out of it, because the record it has to reach is on
+            // the other side.
+            let making = checkouts.blocking_lock_owned();
+
             make(&planned).map_err(Unmade::grilling)?;
 
-            Ok((commit, recorded(&planned)))
+            Ok((commit, recorded(&planned), Some(making)))
         }
     })
     .await?;
 
-    let (commit, checkouts) = match made {
+    let (commit, checkouts, making) = match made {
         Ok(made) => made,
         Err(refusal) => return Ok(refusal),
     };
@@ -944,7 +954,9 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 
     // The record names them now, so the sweep would keep them: released here
     // rather than at the end, because what follows is a launch and holding a
-    // lock across one would hold every other start behind it.
+    // lock across one would hold every other start behind it. Nothing to
+    // release where the Conversation already had its checkouts — that made no
+    // directory, so there was no window to hold.
     drop(making);
 
     // From here the Conversation says it is being worked on, and the thing that
@@ -1412,17 +1424,13 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // stage's own branch: a read-write companion mirrors that where its row
     // names nothing, so the branch cut beside the stage is the stage's own.
 
-    // From here to the record naming what this makes, as a grill start holds it
-    // and for its reason: a directory made and not yet recorded is one a sweep
-    // would read as nobody's. See [`crate::AppState::checkouts`].
-    let making = state.checkouts.lock().await;
-
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
         let branch = branch.clone();
         let commit = commit.clone();
         let data_dir = state.data_dir.clone();
         let companions = conversation.companions.clone();
+        let checkouts = state.checkouts.clone();
 
         move || {
             let mut planned = vec![Checkout {
@@ -1440,15 +1448,23 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
                 planned.push(beside);
             }
 
+            // And only now, held from the first directory this makes to the
+            // record naming it, as a grill start holds it and for its reason: a
+            // directory made and not yet recorded is one a sweep would read as
+            // nobody's. Here rather than around the whole of this, because
+            // [`plan`] fetches once per companion and a fetch has no deadline
+            // to answer within. See [`crate::AppState::checkouts`].
+            let making = checkouts.blocking_lock_owned();
+
             make(&planned).map_err(Unmade::adopting)?;
 
-            Ok(recorded(&planned))
+            Ok((recorded(&planned), making))
         }
     })
     .await?;
 
-    let checkouts = match made {
-        Ok(checkouts) => checkouts,
+    let (checkouts, making) = match made {
+        Ok(made) => made,
         Err(refusal) => return Ok(refusal),
     };
 

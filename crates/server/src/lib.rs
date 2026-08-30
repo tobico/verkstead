@@ -238,6 +238,16 @@ pub(crate) struct AppState {
     /// Nothing is inside it. What it protects is a window rather than a value,
     /// and the value that window is about is the store.
     ///
+    /// **The window is the making, and nothing before it.** A start asks git
+    /// plenty before it makes anything — a fetch per repository above all,
+    /// which has no deadline to answer within — and a lock held around the
+    /// asking as well would let one unreachable remote hold every close in the
+    /// workbench behind it, a close being the one thing that must never be
+    /// held. So each of these takes it as late as it can. The three that plan
+    /// inside a blocking half take it in there, past the fetches, and hand the
+    /// guard back out to the record; a steer plans before it takes anything,
+    /// so it holds it from its own [`steering::make`] onwards.
+    ///
     /// A rebuild does not take it. What that remakes is a directory the record
     /// already names, so the keep-set holds it whenever the sweep looks.
     checkouts: Arc<tokio::sync::Mutex<()>>,
