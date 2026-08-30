@@ -7,13 +7,27 @@
 //! nothing here recognises is still on the Transcript, and is still shown — as
 //! the JSON it is.
 //!
-//! **Two backends, and the line says which.** Claude Code writes a line per
+//! **Three backends, and the line says which.** Claude Code writes a line per
 //! thing said; codex writes a rollout, whose lines are a timestamp, an ordinal
-//! and a `type` around a payload. Nothing has to be told which is which: the
-//! kinds are disjoint, so a line falls to the reader that knows its own kind
-//! and to the fold below both where neither does. The same lines are rendered
-//! in three places and none of them carries the agent type, which is what makes
-//! reading it off the line the only answer that works everywhere.
+//! and a `type` around a payload; grok writes the session updates its own
+//! protocol is made of, keyed on `sessionUpdate` and carrying no `type` at all.
+//! Nothing has to be told which is which: the kinds are disjoint, so a line
+//! falls to the reader that knows its own kind and to the fold below all three
+//! where none does. The same lines are rendered in three places and none of
+//! them carries the agent type, which is what makes reading it off the line the
+//! only answer that works everywhere.
+//!
+//! **Grok writes what the agent said whole, and the name of the kind says
+//! otherwise.** Its `agent_message_chunk` is a chunk of the stream by name and
+//! a finished message in the file: grok's store writes one line when the
+//! message is over, however slowly the model streamed it — driven for real
+//! against grok 1.0.13, in its TUI and headless, with a second and a half
+//! between one fragment of a sentence and the next, and one line landed at the
+//! end of it every time. So a chunk is a turn, the count is the count of them,
+//! and nothing here holds a turn open waiting for the rest of it to arrive. A
+//! release that starts writing the fragments would show as a Transcript of
+//! fragments rather than as a hole, which is the failure worth having: it is
+//! visible, and it is one reading away from fixed.
 //!
 //! **A rollout writes every turn down twice, and one of the two is the
 //! conversation.** Its `response_item` lines are what the model was sent — the
@@ -53,8 +67,8 @@
 //! which is what ADR 0006's treatment is there to prevent. A line that is not
 //! JSON at all, and a line that does not say what type it is, stay inline for
 //! the same reason — neither has a name to be filed under. A rollout's item is
-//! a block by this reckoning: it is one thing the screen drew inside the event
-//! that says it was drawn.
+//! a block by this reckoning, and so is the content a Grok chunk carries: each
+//! is one thing said inside the line that says it was.
 //!
 //! **A reading can be carried on.** A running session's Transcript is re-read
 //! every time it says anything, which late in a session is megabytes twice a
@@ -331,6 +345,30 @@ const ROLLOUT: &[&str] = &[
     "world_state",
 ];
 
+/// And the same for grok's session updates: the kinds it writes that are not
+/// the conversation it kept.
+///
+/// Grok's own record of the session rather than anything anybody said — the
+/// hooks it ran, the plan it is keeping, the usage a finished turn cost, the
+/// commands and modes and options its client is offered, and the retries it
+/// made of a request that failed.
+///
+/// A closed list and a fall-back past it, for the third time: grok's own
+/// extensions to the protocol are a long tail — compaction, memory, recovery,
+/// diff review — and every one of them folds away under its own name rather
+/// than standing in the conversation (ADR 0006).
+const GROK: &[&str] = &[
+    "available_commands_update",
+    "config_option_update",
+    "current_mode_update",
+    "hook_execution",
+    "plan",
+    "retry_state",
+    "session_info_update",
+    "turn_completed",
+    "usage_update",
+];
+
 /// The keys of a tool's input that say what the call was about, best first.
 ///
 /// Keys rather than tools. Verkstead does not know what tools a session has —
@@ -603,9 +641,14 @@ fn read(line: &str, into: &mut Reading) {
         // folded under the name the log gave it rather than stood in the
         // conversation — see [`BOOKKEEPING`].
         Some(kind) => into.keep(kind.to_owned(), raw(&entry, reads)),
-        // A line that does not say what it is has no name to file it under, so
-        // it is shown, the way a line that is not JSON at all is.
-        None => into.take(unread(&entry, reads)),
+        // And a line with no type at all is grok's, which keys its own updates
+        // on what kind of update they are. A line that says neither has no name
+        // to file it under, so it is shown, the way a line that is not JSON at
+        // all is.
+        None => match entry["params"]["update"][SESSION_UPDATE].as_str() {
+            Some(kind) => updated(kind, &entry, into),
+            None => into.take(unread(&entry, reads)),
+        },
     }
 }
 
@@ -1074,6 +1117,166 @@ fn words(value: &Value, between: &str) -> String {
         })
         .unwrap_or_default()
 }
+
+/// One of grok's session updates, put where it belongs.
+///
+/// The kinds are the agent protocol's, and grok's own past them. The three
+/// chunks are the conversation — the turn put to it, its thinking, its prose —
+/// a `tool_call` is a call, and a `tool_call_update` is the answer to one once
+/// the call has finished. Everything else is grok keeping its own record, and
+/// folds away under the name grok gave it.
+fn updated(kind: &str, entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+    let update = &entry["params"]["update"];
+
+    match kind {
+        "user_message_chunk" => chunk(update, into, |html| Turn::Put(Put { id: UNPLACED, html })),
+        "agent_message_chunk" => chunk(update, into, |html| {
+            Turn::Prose(Prose { id: UNPLACED, html })
+        }),
+        "agent_thought_chunk" => chunk(update, into, |html| {
+            Turn::Reasoning(Reasoning { id: UNPLACED, html })
+        }),
+        "tool_call" => into.take(Turn::ToolUse(calling(update, reads))),
+        // An update to a call that has not finished is the call still running —
+        // the title its own screen drew for it, the input as its tool parsed it
+        // — and drawing one as an answer would put two answers under a call
+        // that was answered once.
+        "tool_call_update" => match settled(update) {
+            Some(failed) => into.take(Turn::ToolResult(answering(update, failed, reads))),
+            None => into.keep(kind.to_owned(), raw(entry, reads)),
+        },
+        // Grok's own record of the session, and — the arm below it — a kind
+        // nobody here has heard of, folded the same way and for the same
+        // reason: see [`GROK`].
+        kind if GROK.contains(&kind) => into.keep(kind.to_owned(), raw(entry, reads)),
+        kind => into.keep(kind.to_owned(), raw(entry, reads)),
+    }
+}
+
+/// One chunk of what somebody said, drawn as whichever turn it is.
+///
+/// What the chunk carries is one content block, and a block of a kind nothing
+/// here can draw stays in the conversation as the JSON it is rather than
+/// folding away — a chunk is part of a turn, so one folded silently would leave
+/// a hole where somebody spoke (ADR 0006).
+fn chunk(update: &Value, into: &mut Reading, said: impl FnOnce(String) -> Turn) {
+    let reads = into.reads;
+    let content = &update["content"];
+
+    match content["type"].as_str() {
+        Some("text") => {
+            if let Some(Prose { html, .. }) = prose(content, "text", reads) {
+                into.take(said(html));
+            }
+        }
+        _ => into.take(unread(content, reads)),
+    }
+}
+
+/// A tool call as grok writes one: the name grok's own metadata gives the tool,
+/// the id its answer names back, and the input as the model sent it.
+///
+/// The title is the fall-back for the name rather than the first choice. On the
+/// call itself the two are the same word, but grok rewrites the title as the
+/// call runs — `run_terminal_command` becomes ``Execute `ls .tasks` `` — so the
+/// name that stays the tool's is the one under `x.ai/tool`.
+fn calling(update: &Value, reads: Reads) -> ToolUse {
+    let input = &update["rawInput"];
+
+    ToolUse {
+        id: UNPLACED,
+        name: text(tool_name(update), reads),
+        call: text(update["toolCallId"].as_str().unwrap_or_default(), reads),
+        about: summarised(|| about(input), reads),
+        input: raw(input, reads),
+    }
+}
+
+/// What grok calls the tool a call is a call to.
+fn tool_name(update: &Value) -> &str {
+    update["_meta"][XAI_TOOL]["name"]
+        .as_str()
+        .or_else(|| update["title"].as_str())
+        .unwrap_or_default()
+}
+
+/// What a Grok tool answered: the content of the update that finished the call.
+fn answering(update: &Value, failed: bool, reads: Reads) -> ToolResult {
+    ToolResult {
+        id: UNPLACED,
+        call: text(update["toolCallId"].as_str().unwrap_or_default(), reads),
+        failed,
+        text: match reads {
+            Reads::Drawing => said_back(&update["content"]),
+            _ => String::new(),
+        },
+    }
+}
+
+/// The text of what a call answered with, out of the blocks it answered in.
+///
+/// A block that is not text says what it was instead — a diff, a terminal, a
+/// picture — the way a tool's answer does everywhere else here: something
+/// nobody can draw as text is still something that happened. Empty where the
+/// update carried no content at all, which is a call that answered its caller
+/// and had nothing to show for it.
+fn said_back(content: &Value) -> String {
+    content
+        .as_array()
+        .map(|blocks| {
+            blocks
+                .iter()
+                .map(|block| {
+                    // A content block wraps the thing itself; every other kind
+                    // is the thing.
+                    let said = match block.get("content") {
+                        Some(inside) if inside.is_object() => inside,
+                        _ => block,
+                    };
+
+                    match (said["text"].as_str(), said["type"].as_str()) {
+                        (Some(text), _) => text.to_owned(),
+                        (None, Some(kind)) => format!("[{kind}]"),
+                        (None, None) => String::new(),
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+}
+
+/// Whether an update to a tool call is the answer to it, and whether the call
+/// failed: `Some(true)` for one that ended badly, `Some(false)` for one that
+/// went through, and `None` for a call that is still running.
+fn settled(update: &Value) -> Option<bool> {
+    match update["status"].as_str()? {
+        GROK_COMPLETED => Some(false),
+        GROK_FAILED => Some(true),
+        // `pending` and `in_progress` are the two the protocol has, and a
+        // status this has never met is treated as the same thing: a call that
+        // has not answered yet. The line is on the Transcript either way.
+        _ => None,
+    }
+}
+
+/// What grok keys its session updates on, where the two backends before it key
+/// their lines on `type`.
+const SESSION_UPDATE: &str = "sessionUpdate";
+
+/// Where grok writes what it knows about a tool of its own, beside the
+/// protocol's own fields.
+const XAI_TOOL: &str = "x.ai/tool";
+
+/// What grok calls a tool call that ran to the end, and what it calls one that
+/// ended badly.
+///
+/// The first is the same word codex spells its own status with, and a constant
+/// of its own all the same: two backends that happen to agree on a word are two
+/// spellings rather than one, and either can move without the other.
+const GROK_COMPLETED: &str = "completed";
+const GROK_FAILED: &str = "failed";
 
 /// Whatever this is, shown as the JSON it is.
 fn unread(value: &Value, reads: Reads) -> Turn {
@@ -1890,6 +2093,294 @@ mod tests {
                     html: "<p>And the <em>rollout</em> was read too.</p>\n".to_owned()
                 }),
             ]
+        );
+    }
+
+    /// A Grok session's log as grok 1.0.13 wrote one — a turn put to it, its
+    /// thinking, its prose, a command run and what the command printed, the
+    /// plan it wrote itself, and the answer it finished on. Every line as grok
+    /// wrote it, but for the working directory, which is shortened throughout
+    /// so that the fixture reads, and the command's output as raw bytes, which
+    /// is cut to two of them.
+    ///
+    /// The shape to see in it is the pairing. A call is one line and the answer
+    /// to it is another, as Claude writes them — with grok's own middle line
+    /// between the two, the update that says the call has started and carries
+    /// the title its screen drew for it.
+    const UPDATES: &[&str] = &[
+        r#"{"timestamp":1788098123,"method":"_x.ai/session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"hook_execution","event_name":"session_start","runs":[{"name":"global/settings:session_start[0].hooks[0]","status":{"status":"success","elapsed_ms":5}}]},"_meta":{"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-2","agentTimestampMs":1788098123642}}}"#,
+        r#"{"timestamp":1788098123,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"What is in the task list?"},"_meta":{"modelId":"grok-4.6","promptIndex":0}},"_meta":{"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-3","agentTimestampMs":1788098123644}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"**Reading the task list**\n\nThe backlog is where to start."}},"_meta":{"totalTokens":1456,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-8","agentTimestampMs":1788098124127,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098123646,"turnStartMs":1788098123645,"updateType":"AgentThoughtChunk","chunkId":5}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I'll look at the **task list** first."}},"_meta":{"totalTokens":1456,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-12","agentTimestampMs":1788098124608,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098123646,"turnStartMs":1788098123645,"updateType":"AgentMessageChunk","chunkId":9}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call","toolCallId":"call_1","title":"run_terminal_command","rawInput":{"command":"ls .tasks","description":"List the task files"},"_meta":{"x.ai/tool":{"version":1,"name":"run_terminal_command","kind":"execute","namespace":"grok_build","label":"Run Command","read_only":false}}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-14","agentTimestampMs":1788098124849,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098123646,"turnStartMs":1788098123645,"updateType":"ToolCall","updateParams":{"toolCallId":"call_1","title":"run_terminal_command","kind":"Other","status":"Pending"}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","kind":"execute","title":"Execute `ls .tasks`","content":[{"type":"content","content":{"type":"text","text":"List the task files"}}],"locations":[],"rawInput":{"variant":"Bash","command":"ls .tasks","description":"List the task files","is_background":false},"_meta":{"x.ai/tool":{"version":1,"name":"run_terminal_command","kind":"execute","namespace":"grok_build","label":"Run Command","read_only":false,"input":{"command":"ls .tasks","description":"List the task files"}}}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-15","agentTimestampMs":1788098124849,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098123646,"turnStartMs":1788098123645,"updateType":"ToolCallUpdate","updateParams":{"toolCallId":"call_1","status":null}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"04-render.md\n05-summaries.md\n"}}],"rawOutput":{"type":"Bash","output":[48,52],"output_for_prompt":"exit: 0\n04-render.md\n05-summaries.md\n","exit_code":0,"command":"ls .tasks","truncated":false,"signal":null,"timed_out":false,"description":"List the task files","current_dir":"/srv/worktrees/tables","output_file":"/srv/worktrees/tables/.grok/terminal/call_1.log","total_bytes":29}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-16","agentTimestampMs":1788098124854,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098123646,"turnStartMs":1788098123645,"updateType":"ToolCallUpdate","updateParams":{"toolCallId":"call_1","status":"Completed"}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call","toolCallId":"call_2","title":"todo_write","rawInput":{"merge":false,"todos":[{"id":"1","content":"Read the renderer task","status":"in_progress"}]},"_meta":{"x.ai/tool":{"version":1,"name":"todo_write","kind":"plan","namespace":"grok_build","label":"Plan","read_only":false}}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-18","agentTimestampMs":1788098124976,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098124855,"turnStartMs":1788098123645,"updateType":"ToolCall","updateParams":{"toolCallId":"call_2","title":"todo_write","kind":"Other","status":"Pending"}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_2","kind":"think","title":"Updating plan","locations":[],"rawInput":{"variant":"TodoWrite","merge":false,"todos":[{"id":"1","content":"Read the renderer task","status":"in_progress"}]},"_meta":{"x.ai/tool":{"version":1,"name":"todo_write","kind":"plan","namespace":"grok_build","label":"Plan","read_only":false}}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-19","agentTimestampMs":1788098124976,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098124855,"turnStartMs":1788098123645,"updateType":"ToolCallUpdate","updateParams":{"toolCallId":"call_2","status":null}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_2","status":"completed","rawOutput":{"type":"Todo","TodosUpdated":{"summary_for_prompt":"- [in_progress] 1: Read the renderer task\n","todos":[{"content":"Read the renderer task","priority":"medium","status":"in_progress"}],"state":{"todos":{"1":{"content":"Read the renderer task","priority":"medium","status":"in_progress"}}}}}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-20","agentTimestampMs":1788098124977,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098124855,"turnStartMs":1788098123645,"updateType":"ToolCallUpdate","updateParams":{"toolCallId":"call_2","status":"Completed"}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"plan","entries":[{"content":"Read the renderer task","priority":"medium","status":"in_progress"}]},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-21","agentTimestampMs":1788098124977,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098124855,"turnStartMs":1788098123645,"updateType":"Plan","updateParams":{"planSteps":1}}}}"#,
+        r#"{"timestamp":1788098125,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Two files: `04-render.md` and `05-summaries.md`."}},"_meta":{"totalTokens":1250,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-26","agentTimestampMs":1788098125458,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098124977,"turnStartMs":1788098123645,"updateType":"AgentMessageChunk","chunkId":5}}}"#,
+        r#"{"timestamp":1788098125,"method":"_x.ai/session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"turn_completed","prompt_id":"03bb7bf2-5c2a-45cd-9047-52469bbde518","stop_reason":"end_turn","usage":{"inputTokens":3600,"outputTokens":120,"totalTokens":3720,"cachedReadTokens":0,"cacheCreationTokens":0,"reasoningTokens":36,"modelCalls":3,"apiDurationMs":1926,"modelUsage":{"grok-4.6":{"inputTokens":3600,"outputTokens":120,"totalTokens":3720,"cachedReadTokens":0,"cacheCreationTokens":0,"reasoningTokens":36,"modelCalls":3,"apiDurationMs":1926}},"numTurns":3},"elapsed_ms":1938},"_meta":{"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-28","agentTimestampMs":1788098125581}}}"#,
+    ];
+
+    fn updates() -> TranscriptView {
+        transcript_view(&lines(UPDATES))
+    }
+
+    /// The conversation grok kept: what was put to it, what it thought, what it
+    /// said, the two tools it called and what each of them answered.
+    #[test]
+    fn a_real_grok_session_draws_as_the_conversation_it_records() {
+        let view = updates();
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Put(Put {
+                    id: 1,
+                    html: "<p>What is in the task list?</p>\n".to_owned()
+                }),
+                Turn::Reasoning(Reasoning {
+                    id: 2,
+                    html: "<p><strong>Reading the task list</strong></p>\n<p>The backlog is where \
+                           to start.</p>\n"
+                        .to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 3,
+                    html: "<p>I'll look at the <strong>task list</strong> first.</p>\n".to_owned()
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 4,
+                    name: "run_terminal_command".to_owned(),
+                    call: "call_1".to_owned(),
+                    about: "List the task files".to_owned(),
+                    input: serde_json::to_string_pretty(&serde_json::json!({
+                        "command": "ls .tasks",
+                        "description": "List the task files",
+                    }))
+                    .unwrap(),
+                }),
+                Turn::ToolResult(ToolResult {
+                    id: 5,
+                    call: "call_1".to_owned(),
+                    failed: false,
+                    text: "04-render.md\n05-summaries.md\n".to_owned(),
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 6,
+                    name: "todo_write".to_owned(),
+                    call: "call_2".to_owned(),
+                    about: String::new(),
+                    input: serde_json::to_string_pretty(&serde_json::json!({
+                        "merge": false,
+                        "todos": [{
+                            "id": "1",
+                            "content": "Read the renderer task",
+                            "status": "in_progress",
+                        }],
+                    }))
+                    .unwrap(),
+                }),
+                Turn::ToolResult(ToolResult {
+                    id: 7,
+                    call: "call_2".to_owned(),
+                    failed: false,
+                    text: String::new(),
+                }),
+                Turn::Prose(Prose {
+                    id: 8,
+                    html: "<p>Two files: <code>04-render.md</code> and \
+                           <code>05-summaries.md</code>.</p>\n"
+                        .to_owned()
+                }),
+            ]
+        );
+    }
+
+    /// And what was not the conversation: the hooks grok ran, the update that
+    /// said each call had started, the plan it kept beside the call that wrote
+    /// it, and the usage the finished turn cost.
+    #[test]
+    fn what_grok_kept_for_itself_is_kept_out_of_the_conversation() {
+        let view = updates();
+        let folded: Vec<&str> = view
+            .bookkeeping
+            .iter()
+            .map(|line| line.kind.as_str())
+            .collect();
+
+        assert_eq!(
+            folded,
+            [
+                "hook_execution",
+                "tool_call_update",
+                "tool_call_update",
+                "plan",
+                "turn_completed",
+            ],
+            "every line of it on the Transcript, under the name grok gave it"
+        );
+    }
+
+    /// The count the Timeline row shows and the turns the pane draws are the
+    /// one reading on a Grok log too — and so is the last thing the session
+    /// said, which is the other half of what the row is summarised by.
+    #[test]
+    fn a_grok_rows_count_and_quote_are_the_reading_the_pane_draws() {
+        let said = lines(UPDATES);
+
+        assert_eq!(turns(&said), updates().turns.len());
+        assert_eq!(turns(&said), 8, "and grok's own bookkeeping is none of it");
+        assert_eq!(
+            statements(&said),
+            vec![
+                "I'll look at the **task list** first.",
+                "Two files: `04-render.md` and `05-summaries.md`.",
+            ],
+            "the agent's prose, as it wrote it"
+        );
+    }
+
+    /// A running session's Transcript is re-read a batch at a time, and a batch
+    /// ends wherever grok had got to — between a call and its answer, here.
+    /// What comes out has to be the record read whole, turn for turn and
+    /// numbering included.
+    #[test]
+    fn a_grok_record_read_in_two_goes_is_the_record_read_whole() {
+        let said = lines(UPDATES);
+
+        let whole = transcript_view(&said);
+        let first = transcript_view(&said[..5]);
+        let rest = transcript_after(first.cursor.parse().unwrap(), &said[5..]);
+
+        assert_eq!([first.turns.clone(), rest.turns].concat(), whole.turns);
+        assert_eq!(
+            [first.bookkeeping.clone(), rest.bookkeeping].concat(),
+            whole.bookkeeping
+        );
+        assert_eq!(rest.cursor, whole.cursor);
+    }
+
+    /// A call is answered once. The updates before that one are the call
+    /// running — the title grok's screen drew for it, the input as its own tool
+    /// parsed it — and one drawn as an answer would put two answers under a
+    /// call that answered once.
+    #[test]
+    fn a_call_that_has_not_finished_is_not_an_answer_to_it() {
+        let view = transcript_view(&lines(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","kind":"execute","title":"Execute `ls .tasks`","content":[{"type":"content","content":{"type":"text","text":"List the task files"}}]}}}"#,
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"in_progress"}}}"#,
+        ]));
+
+        assert!(view.turns.is_empty(), "{:?}", view.turns);
+        assert_eq!(view.bookkeeping.len(), 2);
+    }
+
+    /// A call that ended badly is an answer that says so, which is what the
+    /// pane draws the card in red on.
+    #[test]
+    fn a_grok_call_that_failed_is_an_answer_that_says_so() {
+        let view = transcript_view(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"failed","content":[{"type":"content","content":{"type":"text","text":"Failed to parse arguments for tool `run_terminal_command`"}}]}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolResult(answer)]
+                    if answer.failed
+                        && answer.call == "call_1"
+                        && answer.text.starts_with("Failed to parse arguments")
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// An answer that came back as something other than text says what it was
+    /// instead — a patch grok reviewed, a terminal it left running — the way
+    /// every other answer that cannot be drawn as text does here.
+    #[test]
+    fn a_grok_answer_that_is_not_text_says_what_it_was() {
+        let view = transcript_view(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_3","status":"completed","content":[{"type":"content","content":{"type":"text","text":"one file changed"}},{"type":"diff","path":"tables.rs","oldText":"a","newText":"b"}]}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolResult(answer)] if answer.text == "one file changed\n[diff]"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// Grok's own extensions to the protocol are a long tail — compaction,
+    /// memory, recovery, diff review — and it adds to them without announcing
+    /// it. A whole line of a kind nobody here knows folds away under its own
+    /// name rather than standing in the conversation (ADR 0006).
+    #[test]
+    fn a_session_update_of_a_kind_nobody_knows_folds_under_its_own_name() {
+        let view = transcript_view(&[
+            r#"{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"seance","heard":"a kind from a later version"}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(view.turns.is_empty(), "nobody said this: {:?}", view.turns);
+        assert_eq!(
+            view.bookkeeping.first().map(|line| line.kind.as_str()),
+            Some("seance")
+        );
+    }
+
+    /// …while the content of a chunk goes the other way: it is part of what
+    /// somebody said, so a kind nothing here can draw stays in the conversation
+    /// as the JSON it is rather than leaving a hole where they spoke.
+    #[test]
+    fn a_chunk_of_a_kind_nobody_knows_is_shown_where_it_was_said() {
+        let said = lines(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"image","data":"iVBOR","mimeType":"image/png"}}}}"#,
+        ]);
+        let view = transcript_view(&said);
+
+        assert!(
+            matches!(&view.turns[..], [Turn::Unread(unread)] if unread.line.contains("image/png")),
+            "{:?}",
+            view.turns
+        );
+        assert!(view.bookkeeping.is_empty());
+        assert_eq!(turns(&said), 1, "and the count does not drop it either");
+    }
+
+    /// Which reader a line gets is decided by the line, for the third backend
+    /// as for the first two: grok's lines carry no `type` at all, so they are
+    /// told apart by the kind of update they are, and the three read side by
+    /// side when they are put side by side.
+    #[test]
+    fn a_grok_line_is_told_apart_by_the_update_it_is() {
+        let view = transcript_view(&lines(&[
+            FIXTURE[2],
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"And the *rollout* was read too."}]}}}"#,
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"And so was the *update*."}}}}"#,
+        ]));
+
+        assert_eq!(
+            view.turns
+                .iter()
+                .map(|turn| matches!(turn, Turn::Prose(_)))
+                .collect::<Vec<bool>>(),
+            [true, true, true],
+            "{:?}",
+            view.turns
+        );
+        assert!(
+            matches!(&view.turns[2], Turn::Prose(prose) if prose.html.contains("<em>update</em>")),
+            "{:?}",
+            view.turns
         );
     }
 }

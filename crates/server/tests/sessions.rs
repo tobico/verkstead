@@ -3178,7 +3178,9 @@ async fn a_codex_sessions_row_is_summarised_from_the_rollout_the_pane_draws() {
 ///
 /// And the following is stage 02's, unchanged: the lines reach the Transcript
 /// exactly as grok wrote them, in order, with a line caught half-written held
-/// until the rest of it arrives.
+/// until the rest of it arrives. What is added here is the far end of that —
+/// the pane over those same lines, drawing the session updates grok wrote as
+/// the conversation they record.
 #[tokio::test]
 async fn a_grok_session_follows_the_log_it_was_named_for() {
     let fixture = grilling_on_grok(
@@ -3195,7 +3197,7 @@ async fn a_grok_session_follows_the_log_it_was_named_for() {
         # the directory grok grouped that Worktree's sessions in.
         elsewhere=$store/%2Fsrv%2Fworktrees%2Ftables/6f8b17c2-not-this-session
         mkdir -p "$elsewhere"
-        printf '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Another Conversation."}}\n' \
+        printf '{"method":"session/update","params":{"sessionId":"6f8b17c2-not-this-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Another Conversation."}}}}\n' \
             > "$elsewhere/updates.jsonl"
 
         # And this session's own, under grok's encoding of the directory it is
@@ -3212,12 +3214,12 @@ async fn a_grok_session_follows_the_log_it_was_named_for() {
         printf 'named=%s\n' "$name"
 
         log=$mine/updates.jsonl
-        printf '{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Rate limiting"}}\n' > "$log"
+        printf '{"method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Rate limiting"}}}}\n' "$name" > "$log"
         printf 'Reading the brief.\n'
 
-        printf '{"sessionUpdate":"agent_message_chunk","content":{"type":"te' >> "$log"
+        printf '{"method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"te' "$name" >> "$log"
         sleep 2
-        printf 'xt","text":"Where does the counter live?"}}\n' >> "$log"
+        printf 'xt","text":"Where does the counter live?"}}}}\n' >> "$log"
         printf 'Asking.\n'
 
         sleep 300
@@ -3228,26 +3230,26 @@ async fn a_grok_session_follows_the_log_it_was_named_for() {
     let event = fixture.until(|view| output(view).map(|o| o.id)).await;
     let transcript = fixture.transcript_of(event, 2).await;
 
-    assert_eq!(
-        transcript,
-        vec![
-            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Rate limiting"}}"#
-                .to_owned(),
-            r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Where does the counter live?"}}"#
-                .to_owned(),
-        ],
-        "the log under the name Verkstead gave this session is the one followed, \
-         and its lines should be kept exactly as grok wrote them — a line caught \
-         half-written waiting for the rest of itself"
-    );
-
     // The name it was actually run under, read off what it printed: what makes
-    // the log above this session's own rather than whatever else was in there.
+    // the log above this session's own rather than whatever else was in there,
+    // and what grok names the session inside every line of it.
     let said = fixture.capture(event).await.replace("\r\n", "\n");
     let name = said
         .lines()
         .find_map(|line| line.strip_prefix("named="))
         .expect("the session says what it was named");
+
+    assert_eq!(
+        transcript,
+        [
+            r#"{"method":"session/update","params":{"sessionId":"NAMED","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Rate limiting"}}}}"#,
+            r#"{"method":"session/update","params":{"sessionId":"NAMED","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Where does the counter live?"}}}}"#,
+        ]
+        .map(|line| line.replace("NAMED", name)),
+        "the log under the name Verkstead gave this session is the one followed, \
+         and its lines should be kept exactly as grok wrote them — a line caught \
+         half-written waiting for the rest of itself"
+    );
 
     let pool = open_database(&fixture.database).await.unwrap();
 
@@ -3284,17 +3286,19 @@ async fn a_grok_session_follows_the_log_it_was_named_for() {
         printed.turns
     );
 
-    // The details pane over the same lines. Nothing parses a Grok line yet, so
-    // each of them is drawn as the JSON it is — which is ADR 0006's rule for a
-    // format nothing has a reader for rather than a gap.
+    // The details pane over the same lines, which is where the following and
+    // the reading meet: the log grok wrote, followed under the name Verkstead
+    // gave it, drawn as the conversation it records.
     let drawn = fixture.spoken(event, 2).await;
 
     assert!(
-        drawn.turns.iter().any(|turn| matches!(
-            turn,
-            Turn::Unread(unread) if unread.line.contains("Where does the counter live?")
-        )),
-        "the pane should open what has been stored: {:?}",
+        matches!(
+            &drawn.turns[..],
+            [Turn::Put(put), Turn::Prose(prose)]
+                if put.html.contains("Rate limiting")
+                    && prose.html.contains("Where does the counter live?")
+        ),
+        "the pane should draw what has been stored: {:?}",
         drawn.turns
     );
 

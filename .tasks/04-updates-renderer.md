@@ -57,3 +57,37 @@ a turn with a hole in it. Claude's and codex's renderings do not move.
 - [ ] A line of a `sessionUpdate` nothing here knows folds into bookkeeping
       under its own name; a block of an unknown kind stays in the turn it was
       said in; Claude's and codex's renderings are unchanged.
+
+## What the real log turned out to be
+
+**Grok writes what the agent said whole.** The premise above — that a single
+thing the agent said is many `agent_message_chunk` lines — does not hold
+against grok 1.0.13. Driven for real, in its TUI and headless, with a second
+and a half between one fragment of a sentence and the next, grok's store wrote
+**one line when the message was over** every time: the file was watched as it
+grew, and it sat at two lines for eighteen seconds while the model streamed and
+then took the whole message at once. `chunkId` in a line's `_meta` counts the
+fragments grok saw; the line carries the message they made.
+
+So none of the machinery the premise called for was built. There is no link
+field on a turn, nothing joins anything in the pane, and a chunk is a turn —
+which leaves the count counting what the pane draws as one, and an incremental
+re-read the same as one read whole, because a line is still read on its own. A
+release that starts writing the fragments would show as a Transcript of
+fragments rather than as a hole: visible, and one reading away from fixed.
+
+The rest of the log is as the task has it, and the kinds are the protocol's:
+`user_message_chunk`, `agent_message_chunk` and `agent_thought_chunk` are the
+conversation, `tool_call` is a call and the `tool_call_update` carrying a
+finished status is the answer to it — the updates before that one are the call
+still running, and fold. Grok's lines carry no `type` at all, which is what
+tells them apart from Claude's and codex's.
+
+## What is still waiting
+
+There is no xAI account on this machine, so the log the fixture is taken from
+was written by a grok run **outside Verkstead**: grok 1.0.13 installed under a
+`GROK_HOME` of its own from `@xai-official/grok`, pointed by
+`GROK_XAI_API_BASE_URL` at a stand-in xAI Responses API that streams slowly and
+calls `run_terminal_command` and `todo_write`. Every line of the fixture is
+grok's own, written by grok's own store; only the model behind it was not.
