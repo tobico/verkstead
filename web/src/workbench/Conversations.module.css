@@ -49,20 +49,22 @@
 /* The one setting that is about this list rather than about the rest of
    Verkstead, at the foot of the pane under the conversations it is about.
 
-   `margin-top: auto` is the whole of what puts it there. The pane is a column —
-   see `.conversationsPane` in `Panes.module.css` — so the room the list
-   leaves over is taken above this rather than below it: a short list stands the
-   switch against the bottom of the screen, and a long one leaves it after the
-   last card, behind the scroll. Nothing is stuck and nothing is laid over the
-   rows, which is the difference between the foot of a pane and a strip across
-   it.
+   Where it sits and how it stays there are the frame's: it wears `paneFoot` —
+   see `Conversations.tsx` for the name and `Panes.module.css` for what a pane
+   does with it — so it takes the room the list leaves over, sticks to the
+   bottom edge once there is no room left, and carries the paper the cards pass
+   behind.
 
-   With a rule over its head, because a control at the end of a list is not the
-   next row of it — the same rule, from the same edge, that parts the roadmaps
-   from the repos above them. */
+   Stuck rather than left at the end of the list, because the list is the one
+   thing here with no end in sight: a human with a hundred conversations should
+   not have to reach the bottom of them to say whether the ones put away are
+   among them. What it costs is the strip of list behind it.
+
+   What is left here is the rule over its head, because a control at the end of
+   a list is not the next row of it — the same rule, from the same edge, that
+   parts the roadmaps from the repos above them. The room under that rule is the
+   foot's own padding. */
 .showArchived {
-  margin-top: auto;
-  padding-top: 0.75rem;
   border-top: 1px solid var(--edge);
 }
 

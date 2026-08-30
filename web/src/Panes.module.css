@@ -17,14 +17,14 @@
    have to be rebuilt — and its scroll position found again — every time the
    human walked back into it.
 
-   Three of the names here are worn by things this file does not draw:
-   `paneChrome` by whatever sticks to the top of a pane, `paneBack` by the way
-   out of one, and `paneScreen` by a
+   Four of the names here are worn by things this file does not draw:
+   `paneChrome` by whatever sticks to the top of a pane, `paneFoot` by whatever
+   sticks to its bottom, `paneBack` by the way out of one, and `paneScreen` by a
    terminal that takes a pane's whole height. The rules that read them are about
    what a *pane* does, and a pane is the frame's; so the frame writes the names
    and the components that have to be recognised by it wear them —
-   `PaneHead.tsx`, `Timeline.tsx` and `Screen.tsx` each import this module for
-   the ones they need. */
+   `PaneHead.tsx`, `Timeline.tsx`, `Conversations.tsx` and `Screen.tsx` each
+   import this module for the ones they need. */
 
 .panes {
   display: grid;
@@ -49,10 +49,10 @@
 
 /* Except that the conversations pane is a column rather than a block: the list
    takes the room it needs and whatever is left over is taken above the foot
-   under it — the archived switch, pushed down by a `margin-top: auto` of its
-   own in `Conversations.module.css`. So a list that does not fill the pane
-   leaves the switch against the bottom of it, and one that fills it leaves the
-   switch after the last card, behind the scroll.
+   under it — the archived switch, which wears the frame's own `paneFoot` and is
+   pushed down by the rule that name carries. So a list that does not fill the
+   pane leaves the switch against the bottom of it, and one that fills it keeps
+   the switch there while the cards go under it.
 
    Which way the column runs is said once, off the pane's own name and outside
    every rule that shows or hides it: the pane is shown by a different rule at
@@ -204,11 +204,65 @@
   pointer-events: none;
 }
 
-/* Nothing stays at the *bottom* of a pane. There was a mirror of the chrome
-   above — a `paneFoot` that the timeline's strip for the session running now
-   wore, sticky for the same reason the chrome is — and the strip went when the
-   status button took over saying what is running. A rule with nothing wearing
-   it is a rule nobody can read the reason for, so it went with the strip. */
+/* And what stays at the *bottom* of a pane while the pane goes down under it:
+   the archived switch, which wears this name in `Conversations.tsx`. The mirror
+   of the chrome above, and sticky for the same reason — a narrow window scrolls
+   the whole page and a wide one scrolls this pane, and one rule hugs the bottom
+   edge in both.
+
+   The name was the timeline's strip's until the status button took over saying
+   what is running, and went with it: a rule with nothing wearing it is a rule
+   nobody can read the reason for. It is back because something wears it again,
+   which is the same rule read the other way round.
+
+   Beneath the chrome in stacking terms, nought against its one: what is stuck
+   to the top of a pane is the pane's own name, and a menu coming down from it
+   passes over the foot rather than behind it. A layer all the same, so the
+   record goes under the foot rather than through it — which is what the paper
+   is for as well, out past the pane's own padding on both sides.
+
+   The bleed is the pane's own padding said again: what the paper has to cover
+   to reach the pane's edges. The room under the foot is not taken back the same
+   way — a negative bottom margin buys a stuck block nothing, because what a
+   sticky box may never be pushed past is its containing block, which ends where
+   the pane's content does. Pulled or not, it came to rest a padding above the
+   bottom edge with the record showing through the gap. So the pane stops paying
+   for that room instead, below. */
+.pane > .paneFoot {
+  position: sticky;
+  bottom: 0;
+  z-index: 0;
+  margin: 1rem -1.25rem 0;
+  padding: 0.75rem 1.25rem;
+  background: var(--paper);
+}
+
+/* Which is the mirror of the rule over the chrome's head, for the same reason
+   and in the same words: the room under a pane's last line is what the record
+   would otherwise end against the frame through, and something stuck across the
+   bottom is already that room. Nothing moves at rest — the foot pays for
+   exactly what the pane stopped paying for, in its own padding. A pane with no
+   foot to its name keeps its own, because there is nothing there to hand it
+   to. */
+.pane:has(> .paneFoot) {
+  padding-bottom: 0;
+}
+
+/* And in a pane that is a column, the foot takes whatever room the pane's
+   contents leave over. Sticking answers a pane with more in it than it can
+   show; this is the other half of the same question — a list too short to
+   scroll has nothing to stick against, and its foot belongs at the bottom of
+   the pane rather than under the last card with the rest of the pane empty
+   below it.
+
+   The room is taken here rather than by the switch itself, because what has it
+   to give is the pane: the column is the frame's doing, and a foot that asked
+   for the leftovers of a pane that is not one would be asking for nothing. In a
+   pane that is a block that is exactly what `auto` is worth, which is why
+   nothing else wearing this name would need a rule to ignore it. */
+.conversationsPane > .paneFoot {
+  margin-top: auto;
+}
 
 /* From 60rem the window holds the sidebar beside the level being read: the
    conversations stay, and the second column is the middle pane or the details.
