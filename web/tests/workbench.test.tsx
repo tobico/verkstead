@@ -1325,22 +1325,45 @@ describe("the order the human puts the sidebar in", () => {
     expect(await order(container)).toEqual(["third", "second", "first"]);
   });
 
-  /// A card can also go out from under the hand without either a release or a
-  /// cancel — the list re-rendering under it, or the browser taking the gesture
-  /// over. What says so is the capture going.
-  it("puts a card down when the capture is lost", async () => {
-    three();
+  /// The card loses the pointer the first time the list moves it — a card that
+  /// moves in the DOM has the capture taken back off it — so the browser says
+  /// so in the middle of every drag there is, one row in. It is not an ending:
+  /// the hand is still on the card, the drag goes on to the next row, and what
+  /// is sent is the whole of what the hand made rather than its first step.
+  it("carries on dragging the card the list moved under it", async () => {
+    const fetching = three();
     const { container } = mount();
 
     const rows = await cards(container);
     laidOut(rows);
 
     const open = pickUp(rows[2]!);
-    expect(await holding(container), "the drag is under way").toEqual(["third"]);
+    expect(await order(container), "one row so far").toEqual([
+      "third",
+      "first",
+      "second",
+    ]);
 
+    // What the browser says once the row it captured to has moved in the list.
     fireEvent.lostPointerCapture(open, { pointerId: 1 });
+    expect(await holding(container), "still under the hand").toEqual(["third"]);
 
-    expect(await holding(container), "and over, however it ended").toEqual([]);
+    // And the hand carries on, down to the second row of the list.
+    fireEvent.pointerMove(open, { pointerId: 1, clientX: 0, clientY: 70 });
+    expect(await order(container), "and on to the row below").toEqual([
+      "first",
+      "third",
+      "second",
+    ]);
+
+    fireEvent.pointerUp(window, { pointerId: 1 });
+
+    expect(await holding(container), "let go where the hand did").toEqual([]);
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
+        order: [1, 3, 2],
+      }),
+    );
   });
 
   /// And a cancel is a release as far as the drag is concerned, wherever it
