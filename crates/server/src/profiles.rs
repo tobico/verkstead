@@ -2,23 +2,26 @@
 //! the store, and the check that says whether a saved one can still be run
 //! under.
 //!
-//! The pair is judged against the filesystem and against the Watched Paths, and
-//! both are the server's: the boundary is a security boundary and a form that
-//! checked it would be a courtesy, since this endpoint is reachable without one.
-//! The same boundary governs a Profile's pair as governs a Repo's path, because
-//! it is one rule about what Verkstead may touch and not one rule per feature.
+//! The account is judged against the filesystem and against the Watched Paths,
+//! and both are the server's: the boundary is a security boundary and a form
+//! that checked it would be a courtesy, since this endpoint is reachable without
+//! one. The same boundary governs a Profile's account as governs a Repo's path,
+//! because it is one rule about what Verkstead may touch and not one rule per
+//! feature. What an account *is* — Claude's pair, and the single home each
+//! backend after it keeps one under — is the agent type's, and every judgement
+//! here is made per type for that reason.
 //!
 //! Nothing here mounts anything. A Profile is a record of an account a session
 //! will later be run under; the bind-mounting arrives with the stage that runs
 //! one.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Broken, PairingView, PickedView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
-    ProfileEntry, ProfileSaved, RoleChoice,
+    Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen, ProfileDeleted,
+    ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
 };
 
 use crate::store;
@@ -70,7 +73,7 @@ pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<ProfileDeleted>
     })
 }
 
-/// Every Profile, each with whether its pair is still where it was left.
+/// Every Profile, each with whether its account is still where it was left.
 pub(crate) async fn listed(pool: &SqlitePool, watched: &WatchedPaths) -> Result<Vec<ProfileEntry>> {
     entries(watched, store::profiles(pool).await?).await
 }
@@ -130,12 +133,8 @@ async fn entries(
                 id: profile.id,
                 broken: broken(&watched, &profile),
                 name: profile.name,
-                // Stored as UTF-8 in the first place — a path that is not cannot
-                // be saved — so nothing is lost putting them back on the wire.
-                claude_dir: profile.claude_dir.to_string_lossy().into_owned(),
-                config_file: profile.config_file.to_string_lossy().into_owned(),
+                account: account(&profile.account),
                 models: profile.models,
-                agent_type: agent_type(profile.agent_type),
             })
             .collect()
     })
@@ -183,16 +182,27 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 }
 
 /// Why this Profile cannot be run under as things stand, or `None` while its
-/// pair is where it was left.
+/// account is where it was left.
 ///
 /// Asked of the boundary and not only of the filesystem: a directory replaced by
 /// a symlink pointing out of the Watched Paths still exists, and mounting it
 /// would be reaching around the boundary with a path that was admitted once.
+///
+/// Each of an account's paths is named by what it is, for the reason the
+/// refusals are: a Profile whose config file has gone and one whose directory
+/// has gone are two different things to go and put right.
 fn broken(watched: &WatchedPaths, profile: &store::Profile) -> Option<Broken> {
-    for (path, missing) in [
-        (&profile.claude_dir, Broken::DirMissing),
-        (&profile.config_file, Broken::ConfigMissing),
-    ] {
+    let paths = match &profile.account {
+        store::Account::Claude {
+            claude_dir,
+            config_file,
+        } => [
+            (claude_dir, Broken::DirMissing),
+            (config_file, Broken::ConfigMissing),
+        ],
+    };
+
+    for (path, missing) in paths {
         match watched.admit(path) {
             Admission::Inside(_) => {}
             Admission::Missing | Admission::NotAbsolute => return Some(missing),
@@ -233,35 +243,38 @@ async fn checked(
     }
 
     let watched = watched.clone();
-    let claude_dir = PathBuf::from(edit.claude_dir.trim());
-    let config_file = PathBuf::from(edit.config_file.trim());
+    let account = edit.account.clone();
 
     Ok(
-        tokio::task::spawn_blocking(move || inspect(&watched, &claude_dir, &config_file))
+        tokio::task::spawn_blocking(move || inspect(&watched, &account))
             .await?
-            .map(|(claude_dir, config_file)| store::ProfileFacts {
+            .map(|account| store::ProfileFacts {
                 name,
-                claude_dir,
-                config_file,
+                account,
                 models,
-                // One type, and the form does not offer a choice of one. What
-                // makes the discriminator real is the column, not a picker.
-                agent_type: store::AgentType::Claude,
             }),
     )
 }
 
-/// The pair, resolved — or the reason it is refused.
+/// The account, resolved — or the reason it is refused.
 ///
-/// Each half is judged the same way and refused by its own name: pointing the
+/// One arm per agent type, because what a Profile names is that type's own
+/// shape: Claude's pair here, and the single home each backend after it keeps
+/// its whole account under when its stage lands.
+///
+/// Every path is judged the same way and refused by its own name: pointing the
 /// config field at the directory is an easy mistake, and "that path is wrong"
 /// would not say which one.
 fn inspect(
     watched: &WatchedPaths,
-    claude_dir: &Path,
-    config_file: &Path,
-) -> Result<(PathBuf, PathBuf), ProfileSaved> {
-    let dir = match watched.admit(claude_dir) {
+    account: &ProfileAccount,
+) -> Result<store::Account, ProfileSaved> {
+    let ProfileAccount::Claude {
+        claude_dir,
+        config_file,
+    } = account;
+
+    let dir = match watched.admit(Path::new(claude_dir.trim())) {
         Admission::Inside(path) => path,
         Admission::NotAbsolute => return Err(ProfileSaved::DirNotAbsolute),
         Admission::Missing => return Err(ProfileSaved::DirMissing),
@@ -272,7 +285,7 @@ fn inspect(
         return Err(ProfileSaved::NotADirectory);
     }
 
-    let config = match watched.admit(config_file) {
+    let config = match watched.admit(Path::new(config_file.trim())) {
         Admission::Inside(path) => path,
         Admission::NotAbsolute => return Err(ProfileSaved::ConfigNotAbsolute),
         Admission::Missing => return Err(ProfileSaved::ConfigMissing),
@@ -283,7 +296,10 @@ fn inspect(
         return Err(ProfileSaved::NotAFile);
     }
 
-    Ok((dir, config))
+    Ok(store::Account::Claude {
+        claude_dir: dir,
+        config_file: config,
+    })
 }
 
 /// Choose the Pairing a Conversation's grilling session will run under — or the
@@ -403,10 +419,19 @@ fn chosen(chosen: store::Chosen) -> ProfileChosen {
     }
 }
 
-/// The store's agent type as the viewer receives it, held to the wire's the same
-/// way.
-fn agent_type(agent_type: store::AgentType) -> verkstead_render::AgentType {
-    match agent_type {
-        store::AgentType::Claude => verkstead_render::AgentType::Claude,
+/// The store's account as the viewer receives it, held to the wire's the same
+/// way: one arm per agent type, and the paths that type has.
+///
+/// The paths are stored as UTF-8 in the first place — one that is not cannot be
+/// saved — so nothing is lost putting them back on the wire.
+fn account(account: &store::Account) -> ProfileAccount {
+    match account {
+        store::Account::Claude {
+            claude_dir,
+            config_file,
+        } => ProfileAccount::Claude {
+            claude_dir: claude_dir.to_string_lossy().into_owned(),
+            config_file: config_file.to_string_lossy().into_owned(),
+        },
     }
 }

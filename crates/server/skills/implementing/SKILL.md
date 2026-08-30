@@ -82,8 +82,8 @@ Trailers go at the end as usual; the workbench takes them off what it shows.
 
 ## Work the way the repository does
 
-Read what the repository says about itself before writing code — its
-`CLAUDE.md`, its `docs/`, the tests around what you are changing — and follow
+Read what the repository says about itself before writing code — its `CLAUDE.md`
+or `AGENTS.md`, its `docs/`, the tests around what you are changing — and follow
 it. Run its tests, and fix what you break: a green branch is part of the work
 rather than a bonus on top of it.
 
@@ -158,10 +158,10 @@ expensive to unpick.
 
 - **Read `verkstead guide` before the first ask**, and put the Question Set
   through `verkstead ask`. It ships inside the binary, so nothing else has to be
-  found.
+  found, and it says how to run an ask that blocks for hours.
 - **It blocks until they answer, which may be hours.** They are on a phone, not
-  at this terminal, so a question printed here reaches nobody. Run the ask as a
-  background command and do only work their answer cannot invalidate while you
-  wait.
+  at this terminal, so a question printed here reaches nobody. Idling is the ask
+  working rather than the ask failing, so do only work their answer cannot
+  invalidate while you wait.
 - **Never answer on their behalf.** If the ask itself fails — the server
   unreachable, any non-zero exit that is not a refused Set — say so and stop.

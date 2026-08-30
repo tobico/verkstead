@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
-    AgentType, Directing, Edited, Event, Lifecycle, ProfileFacts, Role, Settling, Steer, Steering,
+    Account, Directing, Edited, Event, Lifecycle, ProfileFacts, Role, Settling, Steer, Steering,
     WaitingOn, create_profile, fix_attempts, load_conversation, open_database, pick_direction,
     record_fix_attempt, register_repo, save_brief, settle_naming, settle_wrap_up,
     start_conversation, start_grilling, start_unnamed_conversation, steer_conversation, timeline,
@@ -137,10 +137,11 @@ async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> i64 {
         pool,
         &ProfileFacts {
             name: name.to_owned(),
-            claude_dir: PathBuf::from(format!("/state/profiles/{name}")),
-            config_file: PathBuf::from(format!("/state/profiles/{name}.json")),
+            account: Account::Claude {
+                claude_dir: PathBuf::from(format!("/state/profiles/{name}")),
+                config_file: PathBuf::from(format!("/state/profiles/{name}.json")),
+            },
             models: models.iter().map(|model| (*model).to_owned()).collect(),
-            agent_type: AgentType::Claude,
         },
     )
     .await
