@@ -168,8 +168,9 @@ pub(crate) async fn create_set(
 /// with no reader exactly as a blocking one is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Open {
-    /// The ones a session was idling on.
-    Blocking,
+    /// The ones a session was idling on — see [`store::Ask::idled`], which is
+    /// the one place that question is answered.
+    Idled,
 
     /// Every Set the human could still answer, whichever kind of ask it was.
     Either,
@@ -297,7 +298,7 @@ questions:
             on_timeline(12, store::Ask::Deferred, Some(locked(12))),
         ];
 
-        assert!(open(&timeline, Open::Blocking).is_empty());
+        assert!(open(&timeline, Open::Idled).is_empty());
         assert!(open(&timeline, Open::Either).is_empty());
     }
 
@@ -316,7 +317,7 @@ questions:
             on_timeline(13, store::Ask::StoreAndNudge, None),
         ];
 
-        assert_eq!(open(&timeline, Open::Blocking), vec![11, 13]);
+        assert_eq!(open(&timeline, Open::Idled), vec![11, 13]);
         assert_eq!(open(&timeline, Open::Either), vec![11, 12, 13]);
     }
 

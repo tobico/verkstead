@@ -168,14 +168,16 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
 /// more than one open at once is unusual, but they were all orphaned by the same
 /// thing and none of them has anybody waiting on it.
 ///
-/// **Blocking Asks alone.** A Deferred Ask is one nothing was ever waiting on,
-/// so the session dying takes nothing away from it and it is left where it is —
-/// see the module note.
+/// **The ones a session was idling on, and never a Deferred Ask.** A Deferred
+/// Ask is one nothing was ever waiting on, so the session dying takes nothing
+/// away from it and it is left where it is — see the module note. A
+/// store-and-nudge ask is locked with the blocking ones, stored though it is:
+/// the session that was idling on it is the one that has gone.
 async fn orphaned(state: &AppState, conversation_id: i64, timeline: &[store::TimelineEvent]) {
     crate::sets::lock(
         state,
         conversation_id,
-        &crate::sets::open(timeline, crate::sets::Open::Blocking),
+        &crate::sets::open(timeline, crate::sets::Open::Idled),
         "the grilling that asked it is gone",
     )
     .await;
@@ -405,7 +407,7 @@ comment: none of this is settled about the burst allowance
             "one of the three was answered, and it is the one that is said",
         );
         assert_eq!(
-            crate::sets::open(&timeline, crate::sets::Open::Blocking),
+            crate::sets::open(&timeline, crate::sets::Open::Idled),
             vec![12],
             "and the one still waiting on the human is the one to lock as orphaned",
         );
@@ -424,6 +426,6 @@ comment: none of this is settled about the burst allowance
 
         assert_eq!(settled(&timeline), "");
         assert_eq!(brief(&timeline), "# Rate limiting\n");
-        assert!(crate::sets::open(&timeline, crate::sets::Open::Blocking).is_empty());
+        assert!(crate::sets::open(&timeline, crate::sets::Open::Idled).is_empty());
     }
 }

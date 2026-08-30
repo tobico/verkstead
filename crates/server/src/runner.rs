@@ -2585,14 +2585,16 @@ async fn quiet_and_nothing_asked(
     }
 }
 
-/// Whether the session has a Blocking Ask of its own that nothing has answered.
+/// Whether the session is idling on an ask of its own that nothing has
+/// answered.
 ///
 /// Its own, which is what the Event id says: nothing on the record names the
 /// session a Set was asked by, and nothing has to — one Worktree holds one agent,
 /// so every Set that landed after this session's Event is this session's. A
 /// Deferred Ask is not one of them, and neither is a Set the human closed
-/// unanswered: both are Sets nobody is idling on. See
-/// [`store::unanswered_set_since`].
+/// unanswered: both are Sets nobody is idling on. A store-and-nudge one is,
+/// stored though it is — the session that sent it has its turn ended and is
+/// waiting to be nudged. See [`store::unanswered_set_since`].
 ///
 /// A store that will not answer reads as *asking*, which is the right way round
 /// for the one thing this decides: a session is ended on the strength of it, and
