@@ -24,11 +24,11 @@ use crate::{
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
     GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
     ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RepoEntry, RepoRemoved, RepoView, ResolutionEdit, Resumed,
-    RoadmapPane, RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedConversation, ShowingArchived, Shown, Started,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
-    UpdateNotice, Watching,
+    PushKey, Registered, Registration, RepoEntry, RepoRemoved, RepoView, ResolutionEdit, Resolved,
+    Resumed, RoadmapPane, RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowingArchived, Shown,
+    Started, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView,
+    Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -201,6 +201,12 @@ fn the_viewers_types_are_written_from_these() {
     // What comes back is the outcome — a start, or the named reason there was
     // nothing to start.
     Resumed::export_all(&config).unwrap();
+
+    // And the press that sends a finished Conversation back to a wrap-up over a
+    // pull request that has stopped merging. No request shape either: which
+    // Conversation it is is the whole of what it says, and what comes back is
+    // whether a resolution is going.
+    Resolved::export_all(&config).unwrap();
 
     // And the two presses that stop it, which take no request shape either and
     // answer with one outcome between them: the run is stopping, or the named

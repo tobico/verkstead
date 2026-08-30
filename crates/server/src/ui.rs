@@ -36,7 +36,7 @@ use verkstead_render::{
     ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
     Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
     ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, ResolutionEdit,
-    Resumed, RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    Resolved, Resumed, RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
     ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing,
     SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit,
     TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
@@ -255,6 +255,17 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // with no body at all — there is nothing to say about it beyond which
         // Conversation it is.
         .route("/api/ui/conversations/{id}/resume", post(resume))
+        // And the press on a finished Conversation's pull request that will not
+        // merge, which is the one press here that is not on the Conversation as
+        // a whole: it is offered on the pull request's own details pane, and it
+        // sends the Conversation back to its wrap-up to have the conflict
+        // resolved. No body either — which Conversation it is is the whole of
+        // what it says, and which pull requests conflict is the record's to
+        // know. See [`crate::resolving`].
+        .route(
+            "/api/ui/conversations/{id}/resolve-conflicts",
+            post(resolve_conflicts),
+        )
         // And the two presses that stop it, which are Resume's opposite number
         // and take a body for the same reason it does: none. Which Conversation
         // it is is the whole of what either says, and which press it was is the
@@ -2707,6 +2718,32 @@ async fn resume(State(state): State<AppState>, Path(id): Path<String>) -> HttpRe
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting to drive a Conversation again failed");
             unavailable("the conversation could not be resumed")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/resolve-conflicts` — send a finished
+/// Conversation back to its wrap-up to have its conflict resolved.
+///
+/// The press on a Done pull request's details pane, offered only while the
+/// recorded fact says the branch conflicts. What it starts is the wrap-up's own
+/// watchers, which dispatch the resolution session by the rules they always
+/// dispatch one under — with the review left settled, so nothing reads the
+/// branch again.
+///
+/// Answered as soon as the move is made rather than once anything is dispatched,
+/// as Resume is: the browser is waiting for *whether* the Conversation moved,
+/// and what follows the move takes as long as GitHub takes to answer.
+async fn resolve_conflicts(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(Resolved::NoSuchConversation).into_response();
+    };
+
+    match crate::resolving::resolve(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "sending a Conversation back to its wrap-up to resolve a conflict failed");
+            unavailable("the conflict could not be sent back to the wrap-up")
         }
     }
 }

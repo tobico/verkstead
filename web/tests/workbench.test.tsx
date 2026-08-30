@@ -37,6 +37,7 @@ import type {
   ProfileEntry,
   PinnedEvent,
   PullRequestDetails,
+  Resolved,
   Resumed,
   RoadmapPane,
   Screen,
@@ -129,6 +130,7 @@ import outputCss from "../src/workbench/Output.module.css?raw";
 import paneHead from "../src/workbench/PaneHead.module.css";
 import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The pause card, which is one of the record's and draws itself.
+import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
@@ -11642,6 +11644,118 @@ describe("the pinned pull request", () => {
       expect(
         container.querySelector(`.${shell.detailsPane} .${prPane.conflict}`),
       ).toBeNull();
+    }
+  });
+
+  /// And the one press that does something about it, on a conversation
+  /// Verkstead has finished with.
+  ///
+  /// Which is the only state it is drawn in. A wrapping conversation has the
+  /// watchers on it already and is resolving the conflict as fast as it can, so
+  /// a button there would offer what is happening anyway; and a pull request
+  /// that merges has nothing to resolve, which is the same rule the words above
+  /// it are drawn by.
+  it("offers the press only on a done conversation whose branch conflicts", async () => {
+    theWrapping({ ...whoseMerging("Conflicting"), state: "Done" });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+    );
+
+    const press = await drawn(
+      container,
+      `.${shell.detailsPane} .${prPane.resolve}`,
+    );
+
+    expect(press.textContent).toBe("Resolve conflicts");
+
+    for (const over of [
+      // The same conflict on a conversation the wrap-up is still running.
+      { ...whoseMerging("Conflicting"), state: "Wrapping" as const },
+      // And the same finished conversation with nothing to resolve — one that
+      // merges, and one nothing has asked GitHub about.
+      { ...whoseMerging("Cleanly"), state: "Done" as const },
+      { ...whoseMerging(null), state: "Done" as const },
+    ]) {
+      theWrapping(over);
+      const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+      fireEvent.click(
+        await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+      );
+
+      await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
+
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${prPane.resolve}`),
+      ).toBeNull();
+    }
+  });
+
+  /// The press posts to the conversation's own route with nothing in the body —
+  /// which conversation it is is the whole of what it says, and which of its
+  /// pull requests conflict is the server's own reading. And what it leaves
+  /// behind is a conversation that has moved into a wrap-up, so the page is
+  /// read again.
+  it("posts to the conversation's own resolve route and reads it again", async () => {
+    const route = `/api/ui/conversations/${WRAPPING.id}/resolve-conflicts`;
+    const fetching = theWrapping(
+      { ...whoseMerging("Conflicting"), state: "Done" },
+      whenever(route, json("Resolving" satisfies Resolved), "POST"),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+    );
+
+    const before = askedFor(fetching, `/api/ui/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${prPane.resolve}`),
+    );
+
+    await waitFor(() => expect(sent(fetching, route)).toEqual({}));
+
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, `/api/ui/conversations/${WRAPPING.id}`),
+      ).toBeGreaterThan(before),
+    );
+  });
+
+  /// And a press that was refused says which refusal it was. Both of them are
+  /// the record having moved on under a page somebody left open — the
+  /// conversation is not finished with any more, or the branch merges again —
+  /// and neither is anything to go and do, which is why the re-read behind the
+  /// sentence is as much of the answer.
+  it("says which refusal a press came back with", async () => {
+    for (const outcome of ["NotDone", "NothingConflicts"] satisfies Resolved[]) {
+      theWrapping(
+        { ...whoseMerging("Conflicting"), state: "Done" },
+        whenever(
+          `/api/ui/conversations/${WRAPPING.id}/resolve-conflicts`,
+          json(outcome),
+          "POST",
+        ),
+      );
+      const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+      fireEvent.click(
+        await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`),
+      );
+
+      fireEvent.click(
+        await drawn(container, `.${shell.detailsPane} .${prPane.resolve}`),
+      );
+
+      const said = await drawn(
+        container,
+        `.${shell.detailsPane} .${prPane.refused}`,
+      );
+
+      expect(said.textContent).toBe(RESOLVE_REFUSAL[outcome]);
     }
   });
 

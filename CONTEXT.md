@@ -42,14 +42,16 @@ The core entity: a Repo, a base commit, a Brief, one branch and one Worktree.
 Everything done about one piece of work hangs off it. Runs through Draft →
 Grilling → Implementing → Wrapping → Done — a roadmap Conversation passes
 straight from Grilling to Wrapping, its building belonging to its Stages — and
-can be closed from any of them, a **Steer** being the one way back into a
-Conversation that is closed or Done. There is one move back down the ladder: a
-wrap-up whose review split its findings out into a backlog returns to
-Implementing to build it, and its finish step wraps up again on the pull request
-it already had, reviewed afresh. **Follow-up** sits beside the ladder rather
-than on it, the way Closed does, and is the one state with no way in but a
-Steer: the human taking something up about work that is already on a pull
-request, and landing back in the wrap-up when they are finished with it.
+can be closed from any of them, a **Steer** being the way back into a
+Conversation that is closed and one of the two ways into one that is Done. There
+is one move back down the ladder: a wrap-up whose review split its findings out
+into a backlog returns to Implementing to build it, and its finish step wraps up
+again on the pull request it already had, reviewed afresh. And one back up it: a
+Done Conversation whose pull request has stopped merging returns to Wrapping at
+one press, reviewed no further — see **Mergeable**. **Follow-up** sits beside
+the ladder rather than on it, the way Closed does, and is the one state with no
+way in but a Steer: the human taking something up about work that is already on
+a pull request, and landing back in the wrap-up when they are finished with it.
 *Blocked on you* is a condition of an active state, never a state of its own,
 and *Waiting on checks* is a condition of Wrapping read the same way — where
 **Closed** is a state of its own, off the ladder rather than on it: every other
@@ -1053,8 +1055,8 @@ the branch by the configured **resolution strategy**, resolve the conflicts, run
 the repository's tests, commit and push. Two goes per pull request, counted as
 each session is dispatched and kept across a restart; one out of goes waits for
 every other pull request's before the run stops, and the stop's Notice names the
-pull request that would not merge clean. Resume and a steer into Wrapping forget
-the count, exactly as they forget the checks'.
+pull request that would not merge clean. Resume, a steer into Wrapping and the
+press below all forget the count, exactly as they forget the checks'.
 
 **And it goes on being asked after Done.** A wrap-up's watchers stop when the
 Conversation reaches Done, and the pull request goes on sitting there waiting to
@@ -1067,6 +1069,20 @@ Conversation is never asked about at all, and an **Archived** one with it, a
 human who has closed the work being finished with it. Nothing is dispatched from
 there and nothing moves: after Done a conflict is the human's to decide about,
 and the sweep's part is that the fact is there when they look.
+
+**And the human has one press for it.** A Done pull request's details pane
+offers **Resolve conflicts** while the recorded fact says the branch conflicts,
+and pressing it sends the Conversation back into Wrapping to have another go:
+the conflict is something the wrap-up waits on again, both counts of spent goes
+are forgotten the way Resume forgets them, and the watchers dispatch the
+resolution session by the rules above. The review's settle is deliberately left
+standing — the work was reviewed and carried to Done on the strength of it, and
+a base that has moved underneath it since is not a reason to read the branch
+again — so no review session runs anywhere in it, and the ordinary settling rule
+carries the work back to Done once the resolution pushes and the checks on it go
+green. A press rather than a **Steer**, which would read the branch afresh; the
+Timeline says so in a steer's shape all the same, the human's own line above the
+machine's move, because a long record should say who decided this.
 
 Opening a pull request's details pane asks GitHub the same two things on its way
 to listing the checks, so it freshens both wherever the Conversation has got to —

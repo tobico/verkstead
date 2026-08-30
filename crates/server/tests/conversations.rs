@@ -25,7 +25,7 @@ use verkstead_render::{
     CompanionRefusal, CompanionRemoved, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationUnarchived, ConversationView,
     GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen, ProfileSaved,
-    Registered, RoadmapPane, ShowingArchived, Standing, Started, SteerCompanionRefusal,
+    Registered, Resolved, RoadmapPane, ShowingArchived, Standing, Started, SteerCompanionRefusal,
     SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
@@ -7229,6 +7229,95 @@ async fn each_pull_request_carries_whether_its_own_branch_merges() {
     );
 }
 
+/// The press that gets a finished Conversation's conflict resolved is refused
+/// where there is nothing to resolve, and where the Conversation has moved since
+/// the pane was drawn.
+///
+/// Every refusal, because a press that quietly did nothing is what the named
+/// outcomes exist to prevent — and both of these are readings that have moved on
+/// rather than anything for the human to correct: the button is drawn off the
+/// record, and the record is what the press is answered from.
+///
+/// The press that *works* is not here. It starts the wrap-up's watchers, which
+/// go to GitHub — so what it does end to end is `sessions.rs`'s, over a `gh` of
+/// its own. What these ask is the reading in front of it.
+#[tokio::test]
+async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resolving(&app, 404).await,
+        Resolved::NoSuchConversation,
+        "there is nothing there to press anything on",
+    );
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+    store::record_merging(&pool, id, repo_id, store::Merging::Conflicting)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resolving(&app, id).await,
+        Resolved::NotDone,
+        "this one is wrapping up, so its own watchers have the conflict in hand",
+    );
+
+    // And on to Done, which is where the press is offered.
+    for waiting_on in store::WAITED_ON.into_iter().chain([
+        store::WaitingOn::Checks(repo_id),
+        store::WaitingOn::Comments(repo_id),
+        store::WaitingOn::Mergeable(repo_id),
+    ]) {
+        store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    store::finish_wrap_up(&pool, id).await.unwrap();
+
+    // Where somebody has resolved it in the meantime, or the freshening the pane
+    // does as it opens found the conflict gone.
+    store::record_merging(&pool, id, repo_id, store::Merging::Cleanly)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resolving(&app, id).await,
+        Resolved::NothingConflicts,
+        "and a press that found nothing to resolve moves nothing",
+    );
+
+    assert_eq!(
+        opened(&app, id).await.state,
+        Lifecycle::Done,
+        "so the Conversation is where the press found it",
+    );
+}
+
+/// Press **Resolve conflicts**, the way the button on a Done pull request's
+/// details pane does. Nothing goes with it: which Conversation it is is the
+/// whole of what it says.
+async fn resolving(app: &Router, id: i64) -> Resolved {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/resolve-conflicts"),
+        &serde_json::json!({}),
+    )
+    .await
+}
 /// A wrap-up that has narrowed to its checks says so where the human reads a
 /// Conversation: on its card, and on the row in the sidebar they find it by.
 ///

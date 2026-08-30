@@ -892,6 +892,45 @@ pub async fn merging(
     row.map(|(word,)| Merging::read(&word)).transpose()
 }
 
+/// Which of a Conversation's pull requests the last look at GitHub found
+/// conflicting with their base, by the Repo each was opened in.
+///
+/// What the resolve press reads to know there is anything to resolve, and which
+/// of the wrap-up's settlements it puts back to waiting — see
+/// [`super::resolve_conflicts`], whose transaction this runs in.
+///
+/// The record rather than GitHub, deliberately. The press is offered off the
+/// same written-down fact the card draws its mark from and the details pane says
+/// in words, so it is answered off that fact too: a button drawn from one
+/// reading and refused by another would be a press nobody could predict. What
+/// keeps the fact fresh is the sweep after Done and the pane's own asking as it
+/// opens — see [`crate::merges`] in the server.
+///
+/// A pull request nothing has ever asked GitHub about has no row at all and is
+/// not among these, exactly as it draws no mark: not knowing is not a conflict.
+pub(crate) async fn conflicted(
+    tx: &mut sqlx::SqliteConnection,
+    conversation_id: i64,
+) -> Result<Vec<i64>> {
+    let rows: Vec<(i64,)> = sqlx::query_as(
+        "SELECT p.repo_id
+         FROM pull_requests p
+         JOIN pull_request_merges m
+           ON m.conversation_id = p.conversation_id AND m.repo_id = p.repo_id
+         WHERE p.conversation_id = ? AND m.merging = ?
+         ORDER BY p.event_id",
+    )
+    .bind(conversation_id)
+    .bind(Merging::Conflicting.stored())
+    .fetch_all(&mut *tx)
+    .await
+    .with_context(|| {
+        format!("reading which of Conversation {conversation_id}'s pull requests conflict")
+    })?;
+
+    Ok(rows.into_iter().map(|(repo_id,)| repo_id).collect())
+}
+
 /// And every one of them a Conversation has, by the Timeline Event each pull
 /// request is.
 ///

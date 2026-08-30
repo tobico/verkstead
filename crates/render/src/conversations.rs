@@ -2714,6 +2714,44 @@ pub enum Resumed {
     NoFollowUpBrief,
 }
 
+/// What became of pressing **Resolve conflicts** on a finished Conversation's
+/// pull request.
+///
+/// Named the way [`Resumed`]'s refusals are, and for the same reason: the press
+/// either sets a resolution going or it does not, and a button that quietly did
+/// nothing would leave the human waiting on a session that was never dispatched.
+///
+/// Both refusals are readings that have moved on rather than anything for the
+/// human to correct — the button is drawn off the record, and the record is what
+/// this is answered from — so each says what has changed since the pane was
+/// drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Resolved {
+    /// The Conversation is wrapping up again: the press is on its Timeline, the
+    /// conflict is something the wrap-up waits on once more, the goes the
+    /// machine had already spent are forgotten, and the watchers are on it.
+    ///
+    /// What they find is a review already settled, which runs nothing, and a
+    /// pull request that will not merge, which dispatches a resolution session.
+    Resolving,
+
+    NoSuchConversation,
+
+    /// It is not Done any more: something else has moved it since the pane was
+    /// drawn. A Conversation that is wrapping up has the watchers on it already
+    /// and needs no press; one that has been closed is the human finished with
+    /// the work.
+    NotDone,
+
+    /// Nothing on it conflicts any more. The pull request merges again —
+    /// somebody resolved it, or the freshening the pane does as it opens found
+    /// the conflict gone — and a press that put the Conversation back to
+    /// Wrapping for it would be a round trip to Done with nothing done on the
+    /// way.
+    NothingConflicts,
+}
+
 /// What clicking Steer found, which is what the modal it opens is drawn from.
 ///
 /// The click is a press of its own rather than the first half of the submit: it

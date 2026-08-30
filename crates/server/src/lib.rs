@@ -68,6 +68,9 @@ mod reply;
 mod repos;
 /// Speaking to a session that has gone idle without asking anything.
 mod rescues;
+/// Getting a finished Conversation's merge conflict resolved, at the human's
+/// press.
+mod resolving;
 mod responding;
 mod responses;
 /// Starting to drive a Conversation again, from wherever it now stands.

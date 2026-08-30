@@ -43,6 +43,7 @@ import type {
   RepoRemoved,
   RepoView,
   Resolution,
+  Resolved,
   Response as Decided,
   Resumed,
   RoleChoice,
@@ -635,6 +636,21 @@ export async function seeConversation(id: string): Promise<void> {
 /// could: resume is never silent, and the refusals are what that means.
 export function resume(id: number): Promise<Resumed> {
   return post<Resumed>(`/api/ui/conversations/${id}/resume`, {});
+}
+
+/// Get a finished conversation's merge conflict resolved.
+///
+/// The press on a done pull request's details pane, offered only while the
+/// recorded fact says the branch conflicts. It sends the conversation back into
+/// its wrap-up, where the resolution session is dispatched at the pull request
+/// by the rules a wrap-up already resolves a conflict under — with the review's
+/// settle left standing, so nothing reads the branch a second time.
+///
+/// Nothing is sent, for the reason nothing goes with a resume: which
+/// conversation it is is the whole of it, and which of its pull requests
+/// conflict is the server's to know.
+export function resolveConflicts(id: number): Promise<Resolved> {
+  return post<Resolved>(`/api/ui/conversations/${id}/resolve-conflicts`, {});
 }
 
 /// Stop driving a conversation after the task it is on.

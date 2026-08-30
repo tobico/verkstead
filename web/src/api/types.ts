@@ -2088,6 +2088,21 @@ export type Resolution = "Merge" | "Rebase";
 export type ResolutionEdit = { resolution: Resolution | null, };
 
 /**
+ * What became of pressing **Resolve conflicts** on a finished Conversation's
+ * pull request.
+ *
+ * Named the way [`Resumed`]'s refusals are, and for the same reason: the press
+ * either sets a resolution going or it does not, and a button that quietly did
+ * nothing would leave the human waiting on a session that was never dispatched.
+ *
+ * Both refusals are readings that have moved on rather than anything for the
+ * human to correct — the button is drawn off the record, and the record is what
+ * this is answered from — so each says what has changed since the pane was
+ * drawn.
+ */
+export type Resolved = "Resolving" | "NoSuchConversation" | "NotDone" | "NothingConflicts";
+
+/**
  * The submitted collection of Answers and Unanswered markers for one Question
  * Set, plus an optional set-level comment — and, on a Set carrying a proposal,
  * the direction the human picked.

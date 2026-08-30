@@ -852,6 +852,29 @@ pub enum Ending {
     NoSuchConversation,
 }
 
+/// What became of pressing **Resolve conflicts** on a finished Conversation's
+/// pull request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resolving {
+    /// Recorded: the Conversation is wrapping up again, the press and the move
+    /// are on its Timeline, and every pull request the record says conflicts is
+    /// something the wrap-up waits on once more.
+    Wrapping,
+
+    /// It is not Done, so there is nothing here to send back to a wrap-up — it
+    /// is wrapping up already, with the watchers on it, or it has been closed
+    /// since the pane was drawn.
+    NotDone,
+
+    /// Nothing on it conflicts, so there is nothing to resolve. The button is
+    /// drawn off the same recorded fact, so this is a press made against a
+    /// reading that has moved on.
+    NothingConflicts,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
 /// What became of steering one.
 ///
 /// Nothing here is about the state the Conversation was in, and that is the
@@ -3394,6 +3417,106 @@ pub async fn follow_up_over(pool: &SqlitePool, id: i64, pushed: bool) -> Result<
     tx.commit().await.context("ending a follow-up")?;
 
     Ok(Ending::Wrapped)
+}
+
+/// Send a Done Conversation back to wrapping up, because the human pressed
+/// **Resolve conflicts** on a pull request that will not merge.
+///
+/// The one way back up the ladder that is not a steer. A wrap-up ends when
+/// GitHub can merge every pull request the work is on — and a base goes on
+/// moving under a branch nobody is working on, so a Conversation Verkstead
+/// finished with a week ago is a Conversation whose pull request conflicts
+/// today. The sweep after Done writes that fact down and dispatches nothing
+/// about it; this is the human reading it and asking for another round.
+///
+/// Refused for anything but Done, as every move here is refused outside the
+/// state it leaves: a Conversation already wrapping up has the watchers on it
+/// and needs no press, and one that has been closed since the pane was drawn is
+/// not one to start work in.
+///
+/// **And refused where nothing conflicts**, which is the refusal this move has
+/// and no other does. What is being asked for is a resolution, so a press that
+/// found nothing to resolve would put the Conversation back to Wrapping to sit
+/// there settled and sail to Done again — a round trip with a Notice's worth of
+/// noise on the Timeline and nothing done. The button is drawn off the same
+/// fact; this is the same rule asked again on arrival.
+///
+/// **The review's settle is left standing**, which is the whole difference
+/// between this and a steer into Wrapping. A steer deliberately opens the branch
+/// to be read again; this does not — the work was reviewed and carried to Done,
+/// and a base that moved underneath it is not a reason to read it a second time.
+/// So the wrap-up that starts here finds its review settled and runs no session
+/// for it.
+///
+/// **What goes back to waiting is the merge**, and only on the pull requests the
+/// record says conflict. A settle left standing over a conflict would be a
+/// wrap-up that reached Done again on the first turn of its settling loop,
+/// before the checks watcher's first poll had asked GitHub anything — so the
+/// fact the press was offered off is the fact the wrap-up waits on. The checks
+/// and the comments settle from the answers this round's own polls get, so
+/// neither is touched.
+///
+/// Two Events, in the order the moment happened in and in a steer's own shape:
+/// the human's line first, because somebody decided this, and the Moved line
+/// under it because that is what came of the deciding. A long Timeline that said
+/// only *Done → Wrapping* could never be read back for who put it there.
+///
+/// One transaction, as every move is: a Conversation that says Wrapping always
+/// has the move on its Timeline to say when it got there.
+pub async fn resolve_conflicts(pool: &SqlitePool, id: i64) -> Result<Resolving> {
+    let mut tx = super::writing(pool, "resolving a conflict on a finished Conversation").await?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Resolving::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Done {
+        return Ok(Resolving::NotDone);
+    }
+
+    let conflicted = super::pull_requests::conflicted(&mut tx, id).await?;
+
+    if conflicted.is_empty() {
+        return Ok(Resolving::NothingConflicts);
+    }
+
+    for repo_id in conflicted {
+        super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Mergeable(repo_id)).await?;
+    }
+
+    let steer = Event::Steer(Lifecycle::Wrapping, None);
+
+    sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
+    )
+    .bind(id)
+    .bind(steer.kind())
+    .bind(steer.body().into_owned())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("putting a resolve press on the Timeline of Conversation {id}"))?;
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Wrapping.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} back to wrapping up"))?;
+
+    moved(&mut tx, id, Lifecycle::Wrapping).await?;
+
+    tx.commit()
+        .await
+        .context("resolving a conflict on a finished Conversation")?;
+
+    Ok(Resolving::Wrapping)
 }
 
 /// Steer a Conversation into `target`: the human's own Event, the state, and

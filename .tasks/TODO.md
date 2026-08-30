@@ -25,4 +25,4 @@ own, not a steer, offered only while conflicted.
 - [x] 03: The resolution-strategy setting — [details](03-strategy-setting.md)
 - [x] 04: Watch Done Conversations' pull requests — [details](04-done-sweep.md)
 - [x] 05: Draw the conflict indicator — [details](05-indicator.md)
-- [ ] 06: The resolve button — [details](06-resolve-button.md)
+- [x] 06: The resolve button — [details](06-resolve-button.md)

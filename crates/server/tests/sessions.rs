@@ -49,8 +49,8 @@ use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, CompanionAdded,
     CompanionMode, CompanionModeChosen, CompanionView, ConversationClosed, ConversationSteered,
     ConversationStopped, ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PickedView,
-    PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resolution, Resumed, Shown, Size,
-    StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
+    PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resolution, Resolved, Resumed, Shown,
+    Size, StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
     TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
@@ -562,6 +562,19 @@ impl Grilling {
         post(
             &self.app,
             &format!("/api/ui/conversations/{}/resume", self.id),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// And press **Resolve conflicts**, the way the button on a finished
+    /// Conversation's pull request pane does. Nothing goes with it either:
+    /// which Conversation it is is the whole of what it says, and which of its
+    /// pull requests conflict is the record's to know.
+    async fn resolve_conflicts(&self) -> Resolved {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/resolve-conflicts", self.id),
             &serde_json::json!({}),
         )
         .await
@@ -1178,6 +1191,48 @@ async fn until_swept(asked: &Path) {
 
         pause(Duration::from_millis(25)).await;
     }
+}
+
+/// A `gh` whose every answer about merging is read out of the same two files, so
+/// that a base can move under the branch at the moment a test chooses and move
+/// back once a resolution has been pushed.
+///
+/// One reading behind all three questions, because there is one fact behind
+/// them: the wrap-up's own watcher reads whether the branch merges off the
+/// rollup's answer, the sweep after Done asks for it on its own, and the details
+/// pane asks for it beside the commits. A stub that let the three disagree would
+/// be a GitHub that could not exist.
+///
+/// Neither file being there is a pull request that merges, which is what the
+/// work is carried to Done on; `conflicting` is the base moving under it
+/// afterwards, and `resolved` — which the resolution session writes as it
+/// commits — is the merge that puts it right.
+fn gh_conflicting_between(conflicting: &Path, resolved: &Path) -> String {
+    format!(
+        r#"
+if [ -e {conflicting} ] && [ ! -e {resolved} ]; then merges=CONFLICTING; else merges=MERGEABLE; fi
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+case "$5" in
+mergeable,state)
+    printf '{{"mergeable":"%s","state":"OPEN"}}' "$merges"
+    ;;
+*statusCheckRollup*)
+    printf '{{"mergeable":"%s","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$merges"
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[],"mergeable":"%s","state":"OPEN"}}' "$merges"
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#,
+        conflicting = quoted(conflicting),
+        resolved = quoted(resolved),
+    )
 }
 
 /// A green suite, as [`gh_about`]'s answer about the checks.
@@ -6002,6 +6057,46 @@ esac
     )
 }
 
+/// The shortest whole backlog, a review that finds nothing, and a fix session
+/// that resolves the conflict it is sent at as soon as it arrives.
+///
+/// Both spills matter. `dispatched` is what says a resolution was sent at all,
+/// and `reviews` is what says how many times the branch has been read — which is
+/// the whole of what the resolve press is not allowed to do twice.
+///
+/// [`a_backlog_then_resolves`] is the same session held still by a release file,
+/// for the tests that want to look at a conflicted wrap-up standing there. This
+/// one has nothing to hold still for: what it is in aid of is the round after
+/// Done finishing.
+fn a_backlog_then_resolves_at_once(reviews: &Path, dispatched: &Path, resolved: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {reviews}
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*addressing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {dispatched}
+    printf 'merging the base branch in\n'
+    printf 'a merge\n' >> merged.md
+    git add -A
+    git commit --quiet -m 'fix: merge the base branch in and resolve the conflicts'
+    printf 'x' > {resolved}
+    sleep 300
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+        reviews = quoted(reviews),
+        dispatched = quoted(dispatched),
+        resolved = quoted(resolved),
+    )
+}
+
 /// The same, with the batch sessions' prompts spilled somewhere of their own and
 /// doing whatever `responding` says.
 fn a_backlog_then_answers_comments(
@@ -9235,6 +9330,130 @@ async fn a_conflict_that_arrives_after_done_is_written_down_and_nothing_else() {
         conflict_attempts_spent(&fixture).await,
         0,
         "so no go was spent on it either",
+    );
+}
+
+/// And the press that does something about one: **Resolve conflicts** on a Done
+/// pull request's details pane, which sends the Conversation back to its wrap-up
+/// with the review left settled.
+///
+/// The whole round trip, because the whole round trip is the point. A branch
+/// that merged cleanly all the way to Done starts conflicting, the sweep writes
+/// that down and dispatches nothing, the human presses the button — and what
+/// happens next is the wrap-up Verkstead already knows how to run: a resolution
+/// session sent at the pull request with fresh goes, and Done again once the
+/// merge lands and GitHub says it can merge.
+///
+/// **And no review session anywhere in it.** That is what makes this a press of
+/// its own rather than a steer into Wrapping: the work was reviewed, the human
+/// read the review, and a base that moved under the branch since is not a reason
+/// to read it a second time. The review's settle stands, so the wrap-up finds it
+/// settled and runs nothing for it.
+#[tokio::test]
+async fn pressing_resolve_on_a_conflicted_done_pull_request_gets_it_resolved() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let conflicting = spill.path().join("conflicting");
+    let resolved = spill.path().join("conflict-resolved");
+
+    let fixture = grilling_landing(
+        spill,
+        &a_backlog_then_resolves_at_once(&reviews, &dispatched, &resolved),
+        &gh_conflicting_between(&conflicting, &resolved),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let read_once = prompts(&std::fs::read_to_string(&reviews).unwrap()).len();
+    assert_eq!(read_once, 1, "the branch was read once on the way to Done");
+
+    // And then somebody merges something else, and the base moves out from under
+    // a branch nobody is working on any more. The sweep after Done writes that
+    // down and does nothing about it.
+    std::fs::write(&conflicting, "x").unwrap();
+
+    until_merging(&fixture, verkstead_server::store::Merging::Conflicting).await;
+
+    assert!(
+        !dispatched.exists(),
+        "nothing is dispatched after Done: the conflict is the human's to decide \
+         about",
+    );
+
+    // Which they do, on the pull request's own details pane.
+    assert_eq!(fixture.resolve_conflicts().await, Resolved::Resolving);
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "the press moves it back into the wrap-up itself, rather than leaving \
+         something to notice that it should",
+    );
+
+    // The resolution session, dispatched by the wrap-up's own watcher against
+    // the record's own reading of the conflict.
+    let told = until_written_by(&dispatched, 1).await;
+    let prompt = prompts(&told)[0];
+
+    assert!(
+        prompt.contains("addressing/SKILL.md") && prompt.contains("#41"),
+        "sent at the pull request that will not merge: {prompt}",
+    );
+    assert!(
+        prompt.contains("Merge the pull request's base branch"),
+        "and told what to do about it, by the strategy this repository resolves \
+         conflicts by: {prompt}",
+    );
+
+    // And then the merge lands, GitHub says the branch merges again, and the
+    // ordinary settling rule carries the work back to Done.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        merge_settled(&fixture).await,
+        "a pull request GitHub says it can merge settles the last of it",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped anywhere along the way: {:?}",
+        notices(&view),
+    );
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
+        read_once,
+        "and the branch was never read again: the review it was carried to Done \
+         on is the review of this work, and the press left its settle standing",
+    );
+
+    // Two moves and the human's own line between them, which is what a Timeline
+    // long enough to have forgotten this has to be readable back for.
+    assert_eq!(
+        view.timeline
+            .iter()
+            .filter_map(|event| match event {
+                verkstead_render::TimelineEvent::Moved(moved) => Some(Ok(moved.state)),
+                verkstead_render::TimelineEvent::Steer(steer) => Some(Err(steer.target)),
+                _ => None,
+            })
+            .skip_while(|event| event != &Ok(Lifecycle::Done))
+            .collect::<Vec<_>>(),
+        [
+            Ok(Lifecycle::Done),
+            Err(Lifecycle::Wrapping),
+            Ok(Lifecycle::Wrapping),
+            Ok(Lifecycle::Done),
+        ],
+        "somebody decided this, and the machine's move says what came of it",
     );
 }
 

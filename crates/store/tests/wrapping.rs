@@ -16,13 +16,13 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Finished, Lifecycle, Merging, PullRequest, Rebuilding, Rollup, Standing, WAITED_ON,
-    WaitingOn, Wrapping, check_rollup, close_conversation, finish_wrap_up, implement_again,
-    load_conversation, merges, merging, open_database, pick_direction, pull_request,
-    pull_request_repo, pull_requests, record_another_pull_request, record_check_rollup,
-    record_merging, record_pull_request, record_standing, register_repo, save_brief,
-    settle_wrap_up, standing, start_conversation, start_grilling, timeline,
-    unfinished_pull_requests,
+    Event, Finished, Lifecycle, Merging, PullRequest, Rebuilding, Resolving, Rollup, Standing,
+    WAITED_ON, WaitingOn, Wrapping, check_rollup, close_conversation, finish_wrap_up,
+    implement_again, load_conversation, merges, merging, open_database, pick_direction,
+    pull_request, pull_request_repo, pull_requests, record_another_pull_request,
+    record_check_rollup, record_merging, record_pull_request, record_standing, register_repo,
+    resolve_conflicts, save_brief, settle_wrap_up, standing, start_conversation, start_grilling,
+    timeline, unfinished_pull_requests, wrap_up_settled,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -952,5 +952,226 @@ async fn where_a_pull_request_has_got_to_outlives_the_server_that_asked() {
     assert_eq!(
         standing(&pool, id, own).await.unwrap(),
         Some(Standing::Merged),
+    );
+}
+
+/// The press that sends a Done Conversation back to a wrap-up, because the pull
+/// request it finished on has since stopped merging.
+///
+/// The whole of what the move writes: the state, the human's own line above the
+/// machine's move, and the merge back to being something the wrap-up waits on —
+/// with the review's settle deliberately left exactly where it was, which is the
+/// difference between this press and a steer into Wrapping.
+#[tokio::test]
+async fn resolving_a_conflict_sends_a_done_conversation_back_to_wrapping_up() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+
+    for waiting_on in waiting_on(&pool, id).await {
+        settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+
+    // The base moved under the branch while nobody was working on it, which is
+    // what the sweep after Done writes down and dispatches nothing about.
+    record_merging(&pool, id, own, Merging::Conflicting)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resolve_conflicts(&pool, id).await.unwrap(),
+        Resolving::Wrapping,
+    );
+
+    assert_eq!(
+        load_conversation(&pool, id).await.unwrap().unwrap().state,
+        Lifecycle::Wrapping,
+    );
+
+    assert_eq!(
+        events(&pool, id)
+            .await
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::Steer(target, said) => Some(Ok((target, said))),
+                Event::Moved(state) => Some(Err(state)),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        [
+            Err(Lifecycle::Grilling),
+            Err(Lifecycle::Wrapping),
+            Err(Lifecycle::Done),
+            // The press, in a steer's own shape and carrying nothing written:
+            // somebody decided this, and the move under it is what came of it.
+            Ok((Lifecycle::Wrapping, None)),
+            Err(Lifecycle::Wrapping),
+        ],
+        "the human's line lands above the machine's move",
+    );
+
+    let settled = wrap_up_settled(&pool, id).await.unwrap();
+
+    assert!(
+        !settled.contains(&WaitingOn::Mergeable(own)),
+        "the conflict the press was made over is something the wrap-up waits on \
+         again: {settled:?}",
+    );
+    assert!(
+        settled.contains(&WaitingOn::Review),
+        "and the review it was carried to Done on stands, so nothing reads the \
+         branch a second time: {settled:?}",
+    );
+    assert!(
+        settled.contains(&WaitingOn::Checks(own)) && settled.contains(&WaitingOn::Comments(own)),
+        "and so does everything this round's own polls settle for themselves: \
+         {settled:?}",
+    );
+
+    assert_eq!(
+        finish_wrap_up(&pool, id).await.unwrap(),
+        Finished::StillWaiting,
+        "so the wrap-up that starts here does not finish on the first turn of \
+         its settling loop",
+    );
+}
+
+/// Only the pull requests the record says conflict go back to being waited on.
+///
+/// A Conversation ends on one per repository it was worked in, and a base that
+/// moved in one of them did not move in the other — so a companion that still
+/// merges keeps its settle, and the wrap-up waits on the one branch that has
+/// stopped merging rather than on all of them.
+#[tokio::test]
+async fn only_the_pull_requests_that_conflict_go_back_to_being_waited_on() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    let beside = companion(&pool).await;
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+    record_another_pull_request(&pool, id, beside, &beside_it())
+        .await
+        .unwrap();
+
+    for waiting_on in waiting_on(&pool, id).await {
+        settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+
+    record_merging(&pool, id, own, Merging::Cleanly)
+        .await
+        .unwrap();
+    record_merging(&pool, id, beside, Merging::Conflicting)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resolve_conflicts(&pool, id).await.unwrap(),
+        Resolving::Wrapping,
+    );
+
+    let settled = wrap_up_settled(&pool, id).await.unwrap();
+
+    assert!(
+        !settled.contains(&WaitingOn::Mergeable(beside)),
+        "the companion's branch is the one that stopped merging: {settled:?}",
+    );
+    assert!(
+        settled.contains(&WaitingOn::Mergeable(own)),
+        "and the work's own still merges, so nothing about it was unsettled: \
+         {settled:?}",
+    );
+}
+
+/// A press made where nothing conflicts is refused rather than made.
+///
+/// The button is drawn off the recorded fact, so this is a press against a
+/// reading that has moved on — somebody else resolved it, or the freshening the
+/// pane does as it opens found the conflict gone. Putting the Conversation back
+/// to Wrapping for it would be a round trip to Done with nothing done on the
+/// way.
+#[tokio::test]
+async fn a_conversation_with_nothing_conflicting_is_left_where_it_is() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+
+    for waiting_on in waiting_on(&pool, id).await {
+        settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+
+    // Nothing has asked GitHub at all, which is not a conflict — not knowing
+    // never is.
+    assert_eq!(
+        resolve_conflicts(&pool, id).await.unwrap(),
+        Resolving::NothingConflicts,
+    );
+
+    record_merging(&pool, id, own, Merging::Cleanly)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resolve_conflicts(&pool, id).await.unwrap(),
+        Resolving::NothingConflicts,
+        "and a pull request GitHub says merges is not one either",
+    );
+
+    assert_eq!(
+        load_conversation(&pool, id).await.unwrap().unwrap().state,
+        Lifecycle::Done,
+        "so the Conversation is where the press found it",
+    );
+}
+
+/// And a Conversation that is not Done is not one to send back to a wrap-up,
+/// whatever its pull request says about merging.
+///
+/// One that is wrapping up already has the watchers on it and needs no press;
+/// one that has been closed since the pane was drawn is not one to start work
+/// in.
+#[tokio::test]
+async fn only_a_done_conversation_is_sent_back_to_wrapping_up() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+    record_merging(&pool, id, own, Merging::Conflicting)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resolve_conflicts(&pool, id).await.unwrap(),
+        Resolving::NotDone,
+        "a wrap-up is watching this already",
+    );
+
+    close_conversation(&pool, id).await.unwrap();
+
+    assert_eq!(
+        resolve_conflicts(&pool, id).await.unwrap(),
+        Resolving::NotDone,
+        "and the human is finished with this one",
+    );
+
+    assert_eq!(
+        resolve_conflicts(&pool, 404).await.unwrap(),
+        Resolving::NoSuchConversation,
     );
 }
