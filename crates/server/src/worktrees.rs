@@ -798,12 +798,12 @@ async fn swept(pool: &sqlx::SqlitePool, data: &Path) {
     // Where the registrations left behind are cleared afterwards. Read under the
     // same rule as the keep-set: a sweep that cannot say what it is working over
     // does not start.
-    let repos = match store::registered_repos(pool).await {
-        Ok(repos) => repos.into_iter().map(|repo| repo.path).collect::<Vec<_>>(),
+    let repos = match store::recorded_repos(pool).await {
+        Ok(repos) => repos,
         Err(error) => {
             tracing::error!(
                 error = ?error,
-                "listing the registered Repos failed, so the orphaned worktrees are not being swept",
+                "listing where the Repos are failed, so the orphaned worktrees are not being swept",
             );
             return;
         }
@@ -952,11 +952,13 @@ fn sweeping(data: &Path, kept: &[PathBuf], repos: &[PathBuf]) -> Vec<PathBuf> {
     }
 
     // And then the registrations git is still holding for directories that have
-    // gone. Every registered Repo rather than the ones this could name: a
+    // gone. Every Repo on record rather than the ones this could name: a
     // directory hollowed out no longer says which repository made it, and the
     // registration it leaves is what has git refusing to check that branch out
-    // anywhere later. Only where something went — a sweep that found nothing has
-    // left nothing stale.
+    // anywhere later. The ones taken away with them — see
+    // [`store::recorded_repos`], an unregistering leaving the repository and its
+    // registrations exactly where they were. Only where something went — a sweep
+    // that found nothing has left nothing stale.
     if !swept.is_empty() {
         for repo in repos {
             git(repo, &["worktree", "prune"]);
@@ -1648,6 +1650,46 @@ mod tests {
         assert!(!orphan.exists(), "and the orphan between them is gone");
 
         drop(beside);
+    }
+
+    /// A Repo the human took away is pruned like any other. Unregistering
+    /// leaves the repository exactly where it was, so a directory this deletes
+    /// out of one leaves git holding a registration — and nothing else would
+    /// ever clear it, while git goes on refusing that branch a checkout
+    /// anywhere.
+    ///
+    /// Hollowed out, because that is the state where the prune is the only
+    /// thing that would: a directory that cannot say which repository made it
+    /// is one [`discard`] deletes outright.
+    #[tokio::test]
+    async fn a_repo_that_was_taken_away_is_pruned_like_any_other() {
+        let (dir, repo) = repository();
+        let orphan = dir.path().join("worktrees/verkstead-abandoned");
+
+        assert!(add(&repo, &orphan, "abandoned", "HEAD"));
+        std::fs::remove_file(orphan.join(".git")).unwrap();
+
+        let pool = store::open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let registered = store::register_repo(&pool, &repo, "verkstead", "main")
+            .await
+            .unwrap()
+            .expect("nothing is registered at that path yet");
+
+        assert_eq!(
+            store::unregister_repo(&pool, registered.id).await.unwrap(),
+            store::Unregistering::Unregistered,
+        );
+
+        swept(&pool, dir.path()).await;
+
+        assert!(!orphan.exists(), "the orphan goes as it always did");
+        assert!(
+            !repo.join(".git/worktrees/verkstead-abandoned").exists(),
+            "and the registration goes with it, registry or no registry",
+        );
     }
 
     /// A router with no data directory sweeps nothing. The empty path would

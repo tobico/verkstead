@@ -6,8 +6,9 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Adding, Lifecycle, Unregistering, add_companion, load_repo, open_database, register_repo,
-    registered_repos, set_state, start_adoption, start_conversation, unregister_repo,
+    Adding, Lifecycle, Unregistering, add_companion, load_repo, open_database, recorded_repos,
+    register_repo, registered_repos, set_state, start_adoption, start_conversation,
+    unregister_repo,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -310,5 +311,32 @@ async fn an_unregistered_repo_is_no_companion() {
     assert_eq!(
         add_companion(&pool, conversation, beside.id).await.unwrap(),
         Adding::NoSuchRepo,
+    );
+}
+
+/// Taking a Repo away does not take it off the list of Repos there *are*. The
+/// directory is untouched by an unregistering, so git goes on holding whatever
+/// registrations it held — and the sweep of orphaned worktrees has to prune it
+/// like any other, whatever the settings list is offering now.
+#[tokio::test]
+async fn a_repo_taken_away_is_still_one_to_prune() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let kept = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let taken = register_repo(&pool, Path::new("/watched/askance"), "askance", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    unregister_repo(&pool, taken.id).await.unwrap();
+
+    assert_eq!(registered_repos(&pool).await.unwrap(), vec![kept.clone()]);
+    assert_eq!(
+        recorded_repos(&pool).await.unwrap(),
+        vec![kept.path, taken.path],
     );
 }

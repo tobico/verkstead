@@ -311,3 +311,29 @@ pub(crate) fn text(path: &Path) -> Result<&str> {
     path.to_str()
         .ok_or_else(|| anyhow!("the path {} is not valid UTF-8", path.display()))
 }
+
+/// Where every Repo on record is, taken away or not.
+///
+/// Not [`registered_repos`], which is the read everything *offering* Repos for
+/// new work goes through — and a Repo the human took away is not on offer. This
+/// is the other question, asked by the sweep of orphaned worktrees: where might
+/// git still be holding a registration for a directory that has gone? An
+/// unregistering leaves the repository exactly where it was, so its
+/// registrations go stale like anybody else's, and skipping it would leave one
+/// nothing ever prunes — git refusing to check that branch out anywhere later,
+/// and the same path registering again bringing the same Repo back to be
+/// refused in.
+///
+/// The paths alone, because pruning is all that is done with them and a name is
+/// nothing git is asked.
+pub async fn recorded_repos(pool: &SqlitePool) -> Result<Vec<PathBuf>> {
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT path FROM repos ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .context("listing where every Repo on record is")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(path,)| PathBuf::from(path))
+        .collect())
+}
