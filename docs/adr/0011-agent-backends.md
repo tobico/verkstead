@@ -153,10 +153,11 @@ covers nothing, and a Claude session would find the human's own skills again
 hiding was for. So an **empty directory is bound read-only over
 `~/.claude/skills`** beside the new mount, and each new backend's own
 discovery path is covered the same way as its stage lands — except where that
-path is inside the account home itself, as Codex's is. Covering `~/.codex/skills`
-would hide the skills codex ships as well as the ones the account added, and the
-home is the whole of what a Codex Profile names, so a Codex home is left as the
-account keeps it.
+path is inside the account home itself, as Codex's and Grok Build's both are.
+Covering `~/.codex/skills` or `~/.grok/skills` would hide the skills those
+programs ship as well as the ones the account added, and the home is the whole
+of what a Profile of either type names, so such a home is left as the account
+keeps it.
 
 ## A Profile is one home directory, except Claude's pair
 
@@ -195,10 +196,13 @@ named in the Capture.
   session's worktree after launch, matched on working directory and start
   time. ADR-0006's rules are unchanged — lines stored verbatim, parsed at
   render time, the Capture the complete record wherever no log is found.
-- **Usage limits.** The phrases ship as known — Codex's is confirmed — and
-  the rest are filled in when first observed; until then such a stop lands
-  as an ordinary stall, caught by the ordinary rules. OpenCode retries
-  provider limits internally before surfacing anything, so its phrase may
-  stay empty for a long time, and that is fine.
+- **Usage limits.** The phrases ship as known — Codex's is confirmed, and so
+  is the wording Grok Build gives a free account — and the rest are filled in
+  when first observed; until then such a stop lands as an ordinary stall,
+  caught by the ordinary rules. OpenCode retries provider limits internally
+  before surfacing anything, so its phrase may stay empty for a long time, and
+  that is fine. **A backend with no phrase is skipped rather than matched
+  against nothing**: the matcher compares the opening of a line against the
+  phrase, so an empty one matches every line there is.
 - **No account switching**, unchanged: an exhausted Profile is a wait on any
   backend, never a reason to spend a different one.
