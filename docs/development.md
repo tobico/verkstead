@@ -90,7 +90,18 @@ rust_build_cache:
   enabled: true
   size: 30G
 share_viewer_url: https://ada.github.io/verkstead-shares/
+sandbox_binds:
+  - /var/cache/verkstead-node
+  - verkstead=/var/cache/verkstead-cargo
+watched_paths:
+  - /home/tobi/src
 ```
+
+The two lists at the foot are the other place the Watched Paths and the Sandbox
+Configuration binds are said. A bind is a plain path where every session gets
+it, and `name=path` where only the sessions working in the Repo registered under
+that name do; and what the server goes by, for both lists, is the union of this
+file and the installation's own flags.
 
 Every session started after that gets the token as `GH_TOKEN`, which `gh`
 honours without being told to — as does the server's own `gh`, the one that
