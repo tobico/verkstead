@@ -2,9 +2,23 @@
 //!
 //! Widths are shares of the frame rather than lengths: a column fixed in `rem`
 //! is the same column on a laptop and on a thirty-inch screen, and the whole
-//! reason for dragging one is that those are not the same window. So everything
-//! here is a percentage, and the pane that is not named — the details — takes
-//! what the named two leave.
+//! reason for dragging one is that those are not the same window. So what a
+//! human settles on here is a percentage, and the pane that is not named — the
+//! details — takes what the named two leave.
+//!
+//! The floors under those widths are the other way about. What makes a pane too
+//! narrow is what stands in it, and a card, a Brief and a Diff are the same
+//! size on both of those screens: a floor written as a share is a floor that
+//! means something different at every width, and is either room wasted on the
+//! wide window or a pane too narrow to read on the small one. So [`MINIMUMS`] are
+//! lengths in `rem`, and what they are worth as shares is arithmetic against
+//! the frame they are shares of.
+//!
+//! Which is the one thing here that has to be told how wide the window actually
+//! stands. It arrives as [`Frame`], along with the layout in front of the human
+//! — the two queries below being the whole of what says which layout that is,
+//! and the stylesheet's own breakpoints said again here so that the page and
+//! the rules cannot come to disagree about which one is standing.
 //!
 //! Kept per device, beside the wrap setting and the answer sheets' drafts, and
 //! never sent to the server: how wide a phone draws a list has nothing to say
@@ -13,11 +27,9 @@
 //! dragged the conversations narrower has said how wide they want it.
 //!
 //! None of this knows what a pane holds or how many of them are drawn. It is
-//! arithmetic over two numbers, and the layout it is arithmetic *for* arrives
-//! as the one flag [`clamped`] takes — the two queries below being the whole of
-//! what answers that flag, and the stylesheet's own breakpoints said again here
-//! so that the page and the rules cannot come to disagree about which layout is
-//! standing.
+//! arithmetic over two numbers and the frame they are measured against; the
+//! measuring itself is the page's, in `Panes.tsx`, because a width is only ever
+//! a width of something drawn.
 
 import { forget, read, write } from "./device";
 
@@ -51,15 +63,30 @@ const KEYS: Record<Divider, string> = {
 /// a percentage of the frame.
 export type Widths = Record<Divider, number>;
 
+/// The frame those are shares *of*: how wide it stands in `rem`, and whether
+/// all three panes are standing in it.
+///
+/// Both are the page's to answer — the first by measuring the frame, the second
+/// by asking which breakpoint holds — and together they are the whole of what
+/// the arithmetic here needs to know about the window in front of the human.
+export type Frame = { rem: number; three: boolean };
+
 /// What they are worth with nobody having said otherwise — the 15rem and 25rem
 /// the columns used to be fixed at, as shares of the 80rem window the third
 /// pane arrives at, rounded to numbers a person could have chosen.
 export const DEFAULTS: Widths = { sidebar: 20, middle: 30 };
 
-/// And the least each pane may be left with. A divider dragged to the end of
-/// its travel leaves the pane beyond it narrow rather than gone: a pane with no
-/// width is a pane the human cannot find the divider of again.
-export const MINIMUMS = { sidebar: 10, middle: 15, details: 20 } as const;
+/// And the least each pane may be left with, in `rem`: the width below which
+/// what the pane holds stops being presented rather than merely being narrow.
+/// A card whose title has one word to a line, a Brief the size of a stamp, a
+/// Diff with no room for a line of code.
+///
+/// Lengths rather than shares, so that they mean the same thing on every window
+/// the frame is drawn on — which is the point of writing them here at all. They
+/// have to fit beside each other in the narrowest window that stands all three
+/// panes, which is the 80rem [`ALL_THREE`] names; what is left over after them
+/// is how far the dividers can travel there.
+export const MINIMUMS = { sidebar: 16, middle: 24, details: 24 } as const;
 
 /// The widths this device last settled on, or the defaults where it has settled
 /// on nothing.
@@ -67,8 +94,8 @@ export const MINIMUMS = { sidebar: 10, middle: 15, details: 20 } as const;
 /// Anything that is not a number strictly between nothing and the whole frame
 /// reads as unset — a storage somebody has edited by hand, or one written by a
 /// version of this page that meant something else by the key. Unclamped,
-/// deliberately: what a width is allowed to be depends on how many panes are
-/// standing, which is [`clamped`]'s question rather than this one's.
+/// deliberately: what a width is allowed to be depends on the frame it is being
+/// drawn in, which is [`clamped`]'s question rather than this one's.
 export function widths(): Widths {
   return { sidebar: held("sidebar"), middle: held("middle") };
 }
@@ -95,6 +122,15 @@ export function restore(): void {
   forget(KEYS.middle);
 }
 
+/// What `length` rem is worth as a share of this frame.
+///
+/// A frame nobody has measured yet is nought across, and nothing can be a share
+/// of nothing: the floors are worth nothing until the page has measured, which
+/// is a repaint away and leaves the widths as they were settled until then.
+function shareOf(length: number, frame: Frame): number {
+  return frame.rem > 0 ? (length / frame.rem) * 100 : 0;
+}
+
 /// How far a divider may travel: the least the pane on its left may be left
 /// with, and the most it may take.
 ///
@@ -109,38 +145,44 @@ export function restore(): void {
 export function range(
   divider: Divider,
   settled: Widths,
-  three: boolean,
+  frame: Frame,
 ): { least: number; most: number } {
-  if (divider === "sidebar") {
-    return {
-      least: MINIMUMS.sidebar,
-      most: three
-        ? 100 - MINIMUMS.middle - MINIMUMS.details
-        : 100 - MINIMUMS.details,
-    };
-  }
+  const least = shareOf(MINIMUMS[divider], frame);
 
-  return {
-    least: MINIMUMS.middle,
-    most: 100 - settled.sidebar - MINIMUMS.details,
-  };
+  // What has to be left standing to the right of this divider. Beyond the
+  // sidebar is everything the layout has after it, which is the details alone
+  // where only two panes stand; beyond the middle pane is the details, the
+  // sidebar being on the other side of it and so already spent.
+  const beyond =
+    divider === "sidebar"
+      ? shareOf(
+          frame.three ? MINIMUMS.middle + MINIMUMS.details : MINIMUMS.details,
+          frame,
+        )
+      : settled.sidebar + shareOf(MINIMUMS.details, frame);
+
+  // A frame too narrow to hold every floor at once is one where a floor has to
+  // give, and the one that gives is the room left for the panes beyond: a
+  // divider that cannot be dragged as far as its own least is a divider with
+  // nowhere to go, and its pane is the one with a handle to find it by.
+  return { least, most: Math.max(least, 100 - beyond) };
 }
 
-/// The widths as they may actually be drawn, given how many panes are standing.
+/// The widths as they may actually be drawn, given the frame they are drawn in.
 ///
-/// With two, the middle pane's width decides nothing, so it is passed through
-/// untouched rather than squeezed against a minimum it has no business meeting
-/// yet. That is what keeps a wide sidebar dragged in the two-pane layout from
-/// quietly rewriting the three-pane one.
-export function clamped(settled: Widths, three: boolean): Widths {
-  const sidebar = between(settled.sidebar, range("sidebar", settled, three));
+/// With two panes, the middle pane's width decides nothing, so it is passed
+/// through untouched rather than squeezed against a minimum it has no business
+/// meeting yet. That is what keeps a wide sidebar dragged in the two-pane
+/// layout from quietly rewriting the three-pane one.
+export function clamped(settled: Widths, frame: Frame): Widths {
+  const sidebar = between(settled.sidebar, range("sidebar", settled, frame));
 
-  return three
+  return frame.three
     ? {
         sidebar,
         middle: between(
           settled.middle,
-          range("middle", { ...settled, sidebar }, true),
+          range("middle", { ...settled, sidebar }, frame),
         ),
       }
     : { ...settled, sidebar };
@@ -156,14 +198,14 @@ export function dragged(
   settled: Widths,
   divider: Divider,
   share: number,
-  three: boolean,
+  frame: Frame,
 ): Widths {
   const moved: Widths =
     divider === "sidebar"
       ? { ...settled, sidebar: share }
       : { ...settled, middle: share - settled.sidebar };
 
-  return clamped(moved, three);
+  return clamped(moved, frame);
 }
 
 /// A width nudged by `by` percentage points, which is what an arrow key on a
@@ -172,12 +214,9 @@ export function nudged(
   settled: Widths,
   divider: Divider,
   by: number,
-  three: boolean,
+  frame: Frame,
 ): Widths {
-  return clamped(
-    { ...settled, [divider]: settled[divider] + by },
-    three,
-  );
+  return clamped({ ...settled, [divider]: settled[divider] + by }, frame);
 }
 
 function between(share: number, { least, most }: ReturnType<typeof range>): number {

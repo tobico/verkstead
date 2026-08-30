@@ -16,6 +16,7 @@
 
 import { Match, Show, Switch, createMemo, type JSX } from "solid-js";
 
+import { PaneSticky } from "../Panes";
 import { loadRoadmapPane } from "../api/client";
 import type { ConversationView, StageDocument } from "../api/types";
 import { useReading } from "../freshness";
@@ -88,7 +89,9 @@ export function Roadmap(props: {
 
   return (
     <>
-      <PaneHead back={{ to: "Timeline", go: props.back }} title="Roadmap" />
+      <PaneSticky>
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Roadmap" />
+      </PaneSticky>
 
       {/* Which roadmap this is, said the way the card says it: the heading
           `ROADMAP.md` wrote about itself, or the directory that is its identity
@@ -101,7 +104,7 @@ export function Roadmap(props: {
       </Show>
 
       <Show when={sections().length > 0}>
-        <Contents sections={sections()} watched={watched()} nav={nav} paned />
+        <Contents sections={sections()} watched={watched()} nav={nav} />
       </Show>
 
       <Switch>

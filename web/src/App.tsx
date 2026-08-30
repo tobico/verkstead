@@ -8,7 +8,6 @@ import styles from "./App.module.css";
 import { retrying } from "./api/client";
 import { Empty } from "./notices";
 import { listenForNudges } from "./nudge";
-import { SetPage } from "./set/SetPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { Workbench } from "./workbench/Workbench";
 
@@ -96,12 +95,6 @@ export function App(): JSX.Element {
               `/settings/repos/new`. */}
           <Route path="/repos/:repo" />
         </Route>
-        {/* One Set as a page of its own, which is what a push notification
-            opens: a phone woken by one is being asked about that Set and
-            nothing else, so it lands on the Set rather than on the workbench
-            around it. The same Set is reached in the workbench as the details
-            pane of the Timeline Event it landed on. */}
-        <Route path="/sets/:id" component={SetPage} />
         <Route path="*" component={NoSuchPage} />
       </Router>
     </QueryClientProvider>

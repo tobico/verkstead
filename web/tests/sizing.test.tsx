@@ -11,9 +11,11 @@
 //!
 //! jsdom lays nothing out, so two things are stood in for. Which breakpoints
 //! hold is `matchMedia`, which the page asks rather than infers — so a test can
-//! answer it. And the frame's own width is a `getBoundingClientRect` put on the
-//! element, because a drag is a point on the screen until something measures it
-//! against the thing it is a share of.
+//! answer it. And the frame's own width is a `getBoundingClientRect` put on
+//! every frame this file draws, because a drag is a point on the screen until
+//! something measures it against the thing it is a share of — and because the
+//! minimums under the widths are lengths, which are worth nothing as shares
+//! until the frame they are shares of has a width to be one of.
 
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -38,6 +40,7 @@ import {
   remember,
   restore,
   widths,
+  type Frame,
 } from "../src/widths";
 import { drawn, mount, theWorkbench } from "./bench";
 
@@ -51,15 +54,55 @@ import { drawn, mount, theWorkbench } from "./bench";
 const SIDEBAR = "verkstead.pane-sidebar";
 const MIDDLE = "verkstead.pane-timeline";
 
-/// How wide the frame is pretending to be, in the pixels a drag is reported in.
-/// Round, so that a share of it is a number worth reading in an assertion.
-const FRAME = 1000;
+/// How wide the frame is pretending to be, in the pixels a drag is reported in:
+/// 80rem at the 16px a rem is here, which is the window the third pane arrives
+/// at and so the narrowest one that stands all three.
+const FRAME = 1280;
+
+/// The same frame as the arithmetic is asked about it, and a two-pane window
+/// that is not the same width — a minimum is a length now, so what it is worth
+/// depends on which frame it is being met in.
+const THREE: Frame = { rem: FRAME / 16, three: true };
+const TWO: Frame = { rem: 70, three: false };
+
+/// And what one of those lengths is worth as a share of a frame, which is the
+/// whole of the conversion the widths do.
+function share(length: number, frame: Frame): number {
+  return (length / frame.rem) * 100;
+}
+
+/// The frames this file draws, given the width jsdom would otherwise leave
+/// every element in the document at: nought, which is a frame with no room in
+/// it to divide. Put on the element rather than passed in, because the page
+/// measures what it drew — and on the frames alone, so that everything else on
+/// the workbench is the unlaid-out nothing the rest of this suite reads.
+const measured = Element.prototype.getBoundingClientRect;
+
+/// And how wide, for the one test that stands the panes in a smaller window:
+/// [`bench`] sets it, and every test that says nothing gets the frame above.
+let across = FRAME;
 
 beforeEach(() => {
+  across = FRAME;
+
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    return this.matches(`.${shell.panes}`)
+      ? ({
+          left: 0,
+          right: across,
+          width: across,
+          top: 0,
+          bottom: 0,
+          height: 0,
+        } as DOMRect)
+      : measured.call(this);
+  };
+
   localStorage.clear();
 });
 
 afterEach(() => {
+  Element.prototype.getBoundingClientRect = measured;
   vi.unstubAllGlobals();
   localStorage.clear();
 });
@@ -76,16 +119,15 @@ function windowIs(width: "narrow" | "two panes" | "three panes"): void {
 }
 
 /// The workbench mounted on such a window, with a frame wide enough to measure
-/// a drag against.
-async function bench(width: Parameters<typeof windowIs>[0]) {
+/// a drag against — [`FRAME`] wide unless the test is about what a narrower one
+/// owes its panes.
+async function bench(width: Parameters<typeof windowIs>[0], wide = FRAME) {
+  across = wide;
   windowIs(width);
   theWorkbench();
 
   const { container } = mount();
   const frame = await drawn<HTMLElement>(container, `.${shell.panes}`);
-
-  frame.getBoundingClientRect = () =>
-    ({ left: 0, right: FRAME, width: FRAME, top: 0, bottom: 0, height: 0 }) as DOMRect;
 
   return { container, frame };
 }
@@ -142,14 +184,14 @@ describe("how far a divider goes", () => {
   /// every one of them keeps a floor — and with all three standing, each floor
   /// has to fit beside the others.
   it("leaves every pane something to be, with all three standing", () => {
-    expect(clamped({ sidebar: 90, middle: 90 }, true)).toEqual({
-      sidebar: 100 - MINIMUMS.middle - MINIMUMS.details,
-      middle: MINIMUMS.middle,
+    expect(clamped({ sidebar: 90, middle: 90 }, THREE)).toEqual({
+      sidebar: 100 - share(MINIMUMS.middle + MINIMUMS.details, THREE),
+      middle: share(MINIMUMS.middle, THREE),
     });
 
-    expect(clamped({ sidebar: 1, middle: 1 }, true)).toEqual({
-      sidebar: MINIMUMS.sidebar,
-      middle: MINIMUMS.middle,
+    expect(clamped({ sidebar: 1, middle: 1 }, THREE)).toEqual({
+      sidebar: share(MINIMUMS.sidebar, THREE),
+      middle: share(MINIMUMS.middle, THREE),
     });
   });
 
@@ -158,8 +200,8 @@ describe("how far a divider goes", () => {
   /// nothing — and a sidebar dragged wide here must not quietly rewrite the
   /// layout it is not in.
   it("leaves the middle pane's width alone while only two panes stand", () => {
-    expect(clamped({ sidebar: 95, middle: 30 }, false)).toEqual({
-      sidebar: 100 - MINIMUMS.details,
+    expect(clamped({ sidebar: 95, middle: 30 }, TWO)).toEqual({
+      sidebar: 100 - share(MINIMUMS.details, TWO),
       middle: 30,
     });
   });
@@ -170,39 +212,42 @@ describe("how far a divider goes", () => {
   it("reads a drop as the pane it is the far edge of", () => {
     const settled = { sidebar: 20, middle: 30 };
 
-    expect(dragged(settled, "sidebar", 34, true).sidebar).toBe(34);
-    expect(dragged(settled, "middle", 55, true).middle).toBe(35);
+    expect(dragged(settled, "sidebar", 34, THREE).sidebar).toBe(34);
+    expect(dragged(settled, "middle", 55, THREE).middle).toBe(35);
   });
 
   /// And the travel said out loud, which is what the handle carries: with all
   /// three up the sidebar has to leave room for the middle pane as well as the
   /// details, and with two it only has to leave room for what is being read.
   it("says how far it may go", () => {
-    expect(range("sidebar", DEFAULTS, true)).toEqual({
-      least: MINIMUMS.sidebar,
-      most: 100 - MINIMUMS.middle - MINIMUMS.details,
+    expect(range("sidebar", DEFAULTS, THREE)).toEqual({
+      least: share(MINIMUMS.sidebar, THREE),
+      most: 100 - share(MINIMUMS.middle + MINIMUMS.details, THREE),
     });
-    expect(range("sidebar", DEFAULTS, false)).toEqual({
-      least: MINIMUMS.sidebar,
-      most: 100 - MINIMUMS.details,
+    expect(range("sidebar", DEFAULTS, TWO)).toEqual({
+      least: share(MINIMUMS.sidebar, TWO),
+      most: 100 - share(MINIMUMS.details, TWO),
     });
-    expect(range("middle", DEFAULTS, true)).toEqual({
-      least: MINIMUMS.middle,
-      most: 100 - DEFAULTS.sidebar - MINIMUMS.details,
+    expect(range("middle", DEFAULTS, THREE)).toEqual({
+      least: share(MINIMUMS.middle, THREE),
+      most: 100 - DEFAULTS.sidebar - share(MINIMUMS.details, THREE),
     });
   });
 
   it("moves by a point at a time for a keyboard", () => {
-    expect(nudged(DEFAULTS, "sidebar", 1, true).sidebar).toBe(
+    expect(nudged(DEFAULTS, "sidebar", 1, THREE).sidebar).toBe(
       DEFAULTS.sidebar + 1,
     );
-    expect(nudged(DEFAULTS, "middle", -1, true).middle).toBe(
-      DEFAULTS.middle - 1,
+    expect(nudged({ sidebar: 20, middle: 40 }, "middle", -1, THREE).middle).toBe(
+      39,
     );
 
     // And stops where a drag stops.
-    expect(nudged({ sidebar: MINIMUMS.sidebar, middle: 30 }, "sidebar", -1, true))
-      .toEqual({ sidebar: MINIMUMS.sidebar, middle: 30 });
+    const floor = share(MINIMUMS.sidebar, THREE);
+
+    expect(
+      nudged({ sidebar: floor, middle: 30 }, "sidebar", -1, THREE),
+    ).toEqual({ sidebar: floor, middle: 30 });
   });
 });
 
@@ -228,11 +273,11 @@ describe("the dividers on the workbench", () => {
   /// breakpoint the page is walked through one pane at a time and what this
   /// device remembers about a desktop's columns is not read at all.
   it("names the widths on the frame only where panes stand together", async () => {
-    remember({ sidebar: 34, middle: 26 });
+    remember({ sidebar: 34, middle: 34 });
 
     const wide = await bench("three panes");
     expect(wide.frame.style.getPropertyValue("--pane-sidebar")).toBe("34%");
-    expect(wide.frame.style.getPropertyValue("--pane-middle")).toBe("26%");
+    expect(wide.frame.style.getPropertyValue("--pane-middle")).toBe("34%");
 
     const narrow = await bench("narrow");
     expect(narrow.frame.style.getPropertyValue("--pane-sidebar")).toBe("");
@@ -249,21 +294,21 @@ describe("the dividers on the workbench", () => {
   it("moves the border the pointer drags, and writes it down", async () => {
     const { container, frame } = await bench("three panes");
 
-    dragTo(dividers(container)[0]!, FRAME * 0.35);
+    dragTo(dividers(container)[0]!, FRAME * 0.25);
 
     await waitFor(() =>
-      expect(frame.style.getPropertyValue("--pane-sidebar")).toBe("35%"),
+      expect(frame.style.getPropertyValue("--pane-sidebar")).toBe("25%"),
     );
-    expect(localStorage.getItem(SIDEBAR)).toBe("35");
+    expect(localStorage.getItem(SIDEBAR)).toBe("25");
 
     // The second divider is the far edge of the middle pane rather than of
     // what is left of the frame, so the sidebar comes off where it was dropped.
     dragTo(dividers(container)[1]!, FRAME * 0.6);
 
     await waitFor(() =>
-      expect(frame.style.getPropertyValue("--pane-middle")).toBe("25%"),
+      expect(frame.style.getPropertyValue("--pane-middle")).toBe("35%"),
     );
-    expect(localStorage.getItem(MIDDLE)).toBe("25");
+    expect(localStorage.getItem(MIDDLE)).toBe("35");
   });
 
   it("holds the minimum however far the pointer goes", async () => {
@@ -273,7 +318,7 @@ describe("the dividers on the workbench", () => {
 
     await waitFor(() =>
       expect(frame.style.getPropertyValue("--pane-sidebar")).toBe(
-        `${100 - MINIMUMS.middle - MINIMUMS.details}%`,
+        `${100 - share(MINIMUMS.middle + MINIMUMS.details, THREE)}%`,
       ),
     );
 
@@ -281,8 +326,26 @@ describe("the dividers on the workbench", () => {
 
     await waitFor(() =>
       expect(frame.style.getPropertyValue("--pane-sidebar")).toBe(
-        `${MINIMUMS.sidebar}%`,
+        `${share(MINIMUMS.sidebar, THREE)}%`,
       ),
+    );
+  });
+
+  /// The floors are lengths rather than shares, which is the whole point of
+  /// them: a pane holds a card, a Brief or a Diff, and those are the same size
+  /// on every window. So the same minimum is a different percentage of every
+  /// frame, and a narrower window owes the sidebar more of itself.
+  it("keeps a pane's width, not its share, as the window narrows", async () => {
+    remember({ sidebar: 5, middle: 30 });
+
+    const wide = await bench("two panes");
+    expect(wide.frame.style.getPropertyValue("--pane-sidebar")).toBe(
+      `${share(MINIMUMS.sidebar, { rem: FRAME / 16, three: false })}%`,
+    );
+
+    const narrow = await bench("two panes", 960);
+    expect(narrow.frame.style.getPropertyValue("--pane-sidebar")).toBe(
+      `${share(MINIMUMS.sidebar, { rem: 60, three: false })}%`,
     );
   });
 
@@ -331,17 +394,21 @@ describe("the dividers on the workbench", () => {
       String(DEFAULTS.sidebar),
     );
     expect(sidebar!.getAttribute("aria-valuemin")).toBe(
-      String(MINIMUMS.sidebar),
+      String(Math.round(share(MINIMUMS.sidebar, THREE))),
     );
     expect(sidebar!.getAttribute("aria-valuemax")).toBe(
-      String(100 - MINIMUMS.middle - MINIMUMS.details),
+      String(
+        Math.round(100 - share(MINIMUMS.middle + MINIMUMS.details, THREE)),
+      ),
     );
 
     expect(middle!.getAttribute("aria-valuenow")).toBe(
       String(DEFAULTS.middle),
     );
     expect(middle!.getAttribute("aria-valuemax")).toBe(
-      String(100 - DEFAULTS.sidebar - MINIMUMS.details),
+      String(
+        Math.round(100 - DEFAULTS.sidebar - share(MINIMUMS.details, THREE)),
+      ),
     );
   });
 });
@@ -397,7 +464,7 @@ describe("the rules the widths are read by", () => {
   it("caps the details pane's content at the page's own measure", () => {
     expect(stylesheet).toContain(
       ".panes > .detailsPane {\n" +
-        "  padding-inline: max(1rem, (100% - 60rem) / 2);\n}",
+        "  padding-inline: max(1.25rem, (100% - 60rem) / 2);\n}",
     );
 
     // And the pane a terminal fills is still the pane that ends where the

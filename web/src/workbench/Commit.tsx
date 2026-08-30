@@ -60,6 +60,7 @@ import {
 
 import app from "../App.module.css";
 import { Card } from "../Card";
+import { PaneSticky } from "../Panes";
 import { Switch as Toggle } from "../Switch";
 import { loadCommitPane } from "../api/client";
 import type { CommitEvent, ConversationView } from "../api/types";
@@ -197,7 +198,9 @@ export function Commit(props: {
 
   return (
     <>
-      <PaneHead back={{ to: "Timeline", go: props.back }} title="Commit" />
+      <PaneSticky>
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Commit" />
+      </PaneSticky>
 
       <div class={styles.header}>
         <p class={styles.subject}>{props.commit.subject}</p>
@@ -222,7 +225,7 @@ export function Commit(props: {
           Message empty. A commit with neither a message nor a file changed has
           nothing to list, and gets no nav. */}
       <Show when={sections().length > 0}>
-        <Contents sections={sections()} watched={watched()} nav={nav} paned />
+        <Contents sections={sections()} watched={watched()} nav={nav} />
       </Show>
 
       {/* Between the header and the diff, which is the order it is read in:

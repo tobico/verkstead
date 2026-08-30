@@ -41,11 +41,10 @@ fn the_viewers_types_are_written_from_these() {
     // see `.cargo/config.toml`, which is where both are said once.
     let config = ts_rs::Config::from_env();
 
-    // One Set, whole — which is what both the standalone page and the details
-    // pane of the Timeline it landed on are drawn from. The whole reading
-    // rather than the `SetView` inside it: what comes back says whether this
-    // build could read the stored body at all, and the page has to be able to
-    // draw either answer.
+    // One Set, whole — which is what the details pane of the Timeline it
+    // landed on is drawn from. The whole reading rather than the `SetView`
+    // inside it: what comes back says whether this build could read the stored
+    // body at all, and the pane has to be able to draw either answer.
     SetReading::export_all(&config).unwrap();
 
     // Answering a Set, and closing it unanswered. What goes *in* to the first of

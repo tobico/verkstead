@@ -1812,9 +1812,9 @@ id: number, html: string, };
  * was asked from, and the Timeline is re-read every time an open page hears the
  * world moved.
  *
- * `set_id` is what the details pane fetches the document by — the same
- * `/api/ui/sets/{id}` the standalone page reads, because it is the same Set
- * reached another way.
+ * `set_id` is what the details pane fetches the document by, through
+ * `/api/ui/sets/{id}` — the Set's own id rather than this Event's, because a
+ * Set answered anywhere is the same Set here.
  */
 export type QuestionSetEvent = { id: number, 
 /**
@@ -1828,7 +1828,7 @@ at: string, set_id: number, title: string,
 rows: Array<SetRow>, 
 /**
  * Whether it is still waiting on the human, and what became of it if not.
- * The same verdict the Set's own page carries, from the same registry of
+ * The same verdict the Set's own sheet carries, from the same registry of
  * held waits — this is a Timeline the human answers from.
  */
 standing: Standing, };

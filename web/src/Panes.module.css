@@ -31,7 +31,7 @@
 }
 
 .pane {
-  padding: 1.25rem 1rem 3rem;
+  padding: 1.25rem;
   min-width: 0;
 }
 
@@ -136,10 +136,39 @@
   /* The paper behind it, out past the pane's own padding on both sides, so the
      record passes under it rather than beside it. Above it there is nothing to
      cover: pinned to `top: 0` the block sits against the pane's top edge, and
-     the padding that was over its head has gone up with everything else. */
-  margin: 0 -1rem 1rem;
-  padding: 1.25rem 1rem 0;
+     the padding that was over its head has gone up with everything else.
+
+     Nothing under it, either: the room between a header and what follows it is
+     the header's own — see `.head` in `PaneHead.module.css` — and a rem kept
+     here as well is that rem drawn twice. */
+  margin: 0 -1.25rem;
+  padding: 1.25rem 1.25rem 0;
   background: var(--paper);
+}
+
+/* The rem of pane above the block, kept as a thing to watch rather than as
+   room: while it is in view the block is where it was put, and once it has
+   scrolled away the block is stuck to the top edge. Which is what the fade
+   below is about, and the one question no stylesheet can answer for itself —
+   see `PaneSticky` in `Panes.tsx` for what does the watching, and why an
+   observer rather than a scroll listener.
+
+   A pixel tall and a pixel taken back, so that it is something to see without
+   being anything to look at: an element of no height at all is not reliably
+   reported as in view.
+
+   And not a pixel the pane may squeeze. The conversations pane is a flex
+   column, and a flex column with more in it than it has room for shrinks
+   whatever will shrink — which is this and nothing else, everything above it
+   being as short as its own contents already. Squeezed to nothing it keeps the
+   pixel it takes back, so the whole column stands a pixel high and the first
+   thing under the header goes under the paper instead of beside it. The
+   details pane says the same thing about a Screen further down, for the same
+   reason. */
+.pane > .paneEdge {
+  flex: none;
+  height: 1px;
+  margin-bottom: -1px;
 }
 
 /* Which is why the padding over its head is the block's own rather than the
@@ -152,18 +181,19 @@
   padding-top: 0;
 }
 
-/* The record thins out into what is stuck rather than being cut off against it.
-   The gradient hangs in the gap that was already below the chrome — the rem it
-   keeps under itself — which is why it costs nothing at rest: paper drawn over
-   paper, with nothing of the first event covered until the record is actually
-   passing beneath. So there is no scroll listener and no `scrolled` flag, and
-   nothing that would have to be answered twice over for the two ways a pane
-   scrolls.
+/* The record thins out into what is stuck rather than being cut off against it:
+   a rem of paper fading to nothing, over whatever is passing beneath.
 
-   Deaf to the pointer, because for most of a pane's life this is a rem of the
-   record it is lying over, and a fade that swallowed the presses meant for what
-   shows through it would be worse than the abrupt edge it replaced. */
-.pane > .paneChrome::after {
+   Only while the block is actually stuck, which is what `data-stuck` says. The
+   fade lies over the first rem of the record rather than in a gap kept for it —
+   a pane at rest has no record passing under anything, and a rem of paper over
+   the top of its first line is a rem of margin nobody asked for. It is the
+   passing that this draws, so it is drawn while there is passing to draw.
+
+   Deaf to the pointer, because what it is lying over is the record, and a fade
+   that swallowed the presses meant for what shows through it would be worse
+   than the abrupt edge it replaced. */
+.pane > .paneChrome[data-stuck]::after {
   content: "";
   position: absolute;
   top: 100%;
@@ -179,18 +209,6 @@
    wore, sticky for the same reason the chrome is — and the strip went when the
    status button took over saying what is running. A rule with nothing wearing
    it is a rule nobody can read the reason for, so it went with the strip. */
-
-/* Chrome inside the chrome — the timeline's header, wrapped with the status
-   button and the pinned block below it — takes the layer over what it is
-   wrapped with, so that anything the header hangs underneath itself comes down
-   over what follows it rather than behind it, where it could not be pressed.
-   The layer belongs to the header rather than to whatever wanted it, which is
-   why it outlived the ⋯ that did: the menu the status button drops is a
-   positioned card of its own and clears the pinned items on its own account. */
-.paneChrome > .paneChrome {
-  position: relative;
-  z-index: 1;
-}
 
 /* From 60rem the window holds the sidebar beside the level being read: the
    conversations stay, and the second column is the middle pane or the details.
@@ -291,10 +309,10 @@
 
    The percentage is of the pane, so below the first breakpoint — where the pane
    is the window and the window is narrower than the measure — the `max` picks
-   the rem the pane always had, and this rule costs nothing. No media query
+   the padding the pane always had, and this rule costs nothing. No media query
    needed to say so. */
 .panes > .detailsPane {
-  padding-inline: max(1rem, (100% - 60rem) / 2);
+  padding-inline: max(1.25rem, (100% - 60rem) / 2);
 }
 
 /* The one exception to that pane: the one with a Screen in it, which is the one

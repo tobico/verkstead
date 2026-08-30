@@ -51,6 +51,7 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { IconButton } from "../IconButton";
+import { PaneSticky } from "../Panes";
 import {
   RefusedError,
   listRepos,
@@ -295,10 +296,12 @@ export function RepoDetails(props: {
           one thing is named by that thing. What it falls back to is a word: the
           head is drawn before the read lands, and there is nothing else to call
           it until it does. */}
-      <PaneHead
-        back={{ to: "Settings", go: props.back }}
-        title={opened.data?.name ?? "Repo"}
-      />
+      <PaneSticky>
+        <PaneHead
+          back={{ to: "Settings", go: props.back }}
+          title={opened.data?.name ?? "Repo"}
+        />
+      </PaneSticky>
 
       <Switch>
         <Match when={opened.isPending}>
@@ -487,7 +490,9 @@ export function RepoPane(props: {
 
   return (
     <>
-      <PaneHead back={{ to: "Settings", go: props.back }} title="Add a repo" />
+      <PaneSticky>
+        <PaneHead back={{ to: "Settings", go: props.back }} title="Add a repo" />
+      </PaneSticky>
 
       {/* Every way it can be refused is said inside it, because a refusal is
           answered by correcting the path. */}

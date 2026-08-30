@@ -1,38 +1,31 @@
 //! The table of contents, and the reader's place in the page it describes.
 //!
-//! One nav for both of the shapes it takes: the sidebar in the wide margin, and
-//! the bar with the list under it below that width. The same entries, the same
-//! scroll-spy, and the same list of links either way — which of the two the
-//! reader gets is the stylesheet's answer to how wide their window is, and
-//! there is no second copy to fall out of step with the first.
+//! One nav for both of the shapes it takes: the sidebar in the pane's margin,
+//! and the bar with the list folded into it where the pane is too narrow to
+//! keep a margin. The same entries, the same scroll-spy, and the same list of
+//! links either way — there is no second copy to fall out of step with the
+//! first.
 //!
-//! The floating header is here too, because it reads the same signal: it names
-//! where the reader is, so it cannot be built from anything but the list the
-//! highlight moves along.
-//!
-//! A nav drawn inside a details pane is the same nav, and picks between the same
-//! two shapes — but from the pane's width rather than the window's, because a
-//! pane is a column the human drags and the window has nothing to say about how
-//! wide they left it. That is the one thing the stylesheet cannot answer on its
-//! own: a container query would make the pane a containing block for everything
-//! fixed inside it, and the confirm sheet and the standing menu are two of
-//! those. So the width is measured here and said as a class, and the rules for
-//! the two shapes stay where every other rule about them is.
+//! Which of the two the reader gets is the pane's width rather than the
+//! window's, because a pane is a column the human drags and the window has
+//! nothing to say about how wide they left it. That is the one thing the
+//! stylesheet cannot answer on its own: a container query would make the pane a
+//! containing block for everything fixed inside it, and the confirm sheet and
+//! the standing menu are two of those. So the width is measured here and said
+//! as a class, and the rules for the two shapes stay where every other rule
+//! about them is.
 
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import type { Accessor, JSX, Signal } from "solid-js";
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 
-import app from "../App.module.css";
 import { Icon } from "../Icon";
 import { BY_HAND, scroller } from "../scrolling";
-import { Switch } from "../Switch";
 import shell from "../Panes.module.css";
 import contents from "./Contents.module.css";
 import type { Entry, Section, Stands, Watched } from "./outline";
 import {
   face,
-  inside,
   just,
   lit,
   mark,
@@ -86,7 +79,6 @@ export function Contents(props: {
   sections: Section[];
   watched: Watched[];
   nav: Nav;
-  paned?: boolean;
 }): JSX.Element {
   const [open, setOpen] = props.nav.open;
 
@@ -94,7 +86,7 @@ export function Contents(props: {
   dismiss(props.nav);
 
   let element: HTMLElement | undefined;
-  const roomy = roominess(() => (props.paned === true ? element : undefined));
+  const roomy = roominess(() => element);
 
   return (
     <nav
@@ -102,11 +94,9 @@ export function Contents(props: {
       classList={{
         [contents.contents!]: true,
         [contents.open!]: open(),
-        // What the stylesheet keys the pane's own two shapes off, said only
-        // where the nav is in a pane: on a page there is nothing to measure
-        // and the window's own rules are the whole of the answer.
-        [contents.paned!]: props.paned === true,
-        [contents.roomy!]: props.paned === true && roomy(),
+        // Which of the two shapes the pane has room for, which is the one
+        // thing about this nav that is measured rather than written down.
+        [contents.roomy!]: roomy(),
       }}
       aria-label="On this page"
     >
@@ -325,133 +315,6 @@ function Bar(props: { watched: Watched[]; nav: Nav }): JSX.Element {
   );
 }
 
-/// The floating header: on a wide viewport, where the reader is and — while
-/// they are in the Diff — the switch that governs how it is drawn.
-///
-/// Its own element rather than the nav's bar let through at this width. The bar
-/// is a button whose whole job is opening the list, and here the list is
-/// already in the margin, so that button would be a control that does nothing —
-/// focusable, announced as a button, and inert. They share the signal and
-/// nothing else.
-///
-/// Not drawn until the page's first heading has been scrolled out of view: at
-/// the top of the page the header would be naming a heading the reader can see
-/// right under it, and saying nothing. It goes away again when scrolling back
-/// up brings the heading back. The narrow bar is not treated this way — it is
-/// the way into the table of contents, and keeps its place for that.
-///
-/// The naming is a breadcrumb rather than one line, because the sidebar beside
-/// it already says both halves with two highlights and one line would say less
-/// than what it is sitting next to. It reads from the same scroll-spy signal,
-/// so it cannot disagree with the sidebar about where the reader is.
-///
-/// The words are hidden from assistive tech: the sidebar's own line already
-/// carries `aria-current`, and a second copy of the answer is a second thing to
-/// hear. The switch is not hidden — it is a real control, and the one thing
-/// here that is not said somewhere else on screen; ungating it costs a jump
-/// no more than a scroll, since both put the heading out of view.
-///
-/// Nothing to say on a narrow viewport, where the bar is doing this; the
-/// stylesheet keeps it off, as it keeps the bar off here.
-export function PageHeader(props: {
-  watched: Watched[];
-  nav: Nav;
-  wrapped: boolean;
-  flip: (on: boolean) => void;
-}): JSX.Element {
-  const [here] = props.nav.here;
-
-  const named = () => props.watched[here()];
-
-  // Whether the wrap switch belongs here yet. Read off the section the reader
-  // is in rather than off which line exactly, so it stays put as they move from
-  // the Diff's heading down through its files instead of flickering per file.
-  //
-  // A Set with no Diff has no such section, so this is never true for one.
-  const inTheDiff = () => named()?.section === "diff";
-
-  const passed = headingPassed(() => props.watched);
-
-  return (
-    // The shell holds the pinned position and no height, so the header takes
-    // no room out of the flow whether or not it is drawn: one that did would
-    // shove the whole page down at the moment it appeared.
-    <div class={contents.header}>
-      <Show when={passed()}>
-        <div class={contents.headerChrome}>
-          <p class={contents.headerWhere} aria-hidden="true">
-            <Show when={named()}>
-              {(named) => (
-                <>
-                  <Show when={inside(named())}>
-                    {(section) => (
-                      <>
-                        <span class={contents.headerSection}>{section()}</span>
-                        <span class={contents.headerSep}>›</span>
-                      </>
-                    )}
-                  </Show>
-                  <span class={`${contents.headerName} ${named().kind}`}>
-                    <Show when={named().label}>
-                      {(label) => <span class={contents.label}>{label()}</span>}
-                    </Show>
-                    {named().text}
-                  </span>
-                </>
-              )}
-            </Show>
-          </p>
-          <Show when={inTheDiff()}>
-            <Switch label="Word wrap" on={props.wrapped} flip={props.flip} />
-          </Show>
-        </div>
-      </Show>
-    </div>
-  );
-}
-
-/// Whether the page's first heading has been scrolled out of view — which is
-/// when the floating header has something to add, and until which it would be
-/// naming a heading the reader can see.
-///
-/// Watched with an observer of its own rather than read off the scroll-spy:
-/// the spy says which section the reader is *in*, and they are in the first
-/// one, heading long gone, well before they leave it. The heading element is
-/// found from the first watched anchor — the section's own heading, or the
-/// anchor itself where the anchor is the heading, as it is on the Questions.
-function headingPassed(watched: Accessor<Watched[]>): Accessor<boolean> {
-  const [passed, setPassed] = createSignal(false);
-
-  createEffect(() => {
-    const first = watched()[0];
-    if (first === undefined || typeof IntersectionObserver !== "function") {
-      return;
-    }
-
-    const section = document.getElementById(first.anchor);
-    if (section === null) {
-      return;
-    }
-    const heading = section.matches(`.${app.sectionHeading}`)
-      ? section
-      : (section.querySelector(`.${app.sectionHeading}`) ?? section);
-
-    // Out of view in either direction reads as passed. In practice the first
-    // heading only ever leaves upward — it sits at the top of the page.
-    const observer = new IntersectionObserver((crossings) => {
-      const crossing = crossings.at(-1);
-      if (crossing !== undefined) {
-        setPassed(!crossing.isIntersecting);
-      }
-    });
-    observer.observe(heading);
-
-    onCleanup(() => observer.disconnect());
-  });
-
-  return passed;
-}
-
 /// How wide a details pane has to stand before its margin holds the sidebar, in
 /// rem.
 ///
@@ -467,9 +330,9 @@ const ROOM = 80;
 ///
 /// The pane is found from the nav rather than passed to it: what the nav has to
 /// know is how much margin there is around the column it is describing, and the
-/// pane is the one element that says. A nav with no pane above it — the page's —
-/// measures nothing and is never roomy: there the window's own rules are the
-/// whole of the answer.
+/// pane is the one element that says. A nav with no pane above it measures
+/// nothing and is never roomy, which is the bar — the shape that asks nothing
+/// of a margin.
 ///
 /// Rem rather than pixels because that is what the stylesheet's own widths are
 /// said in, and a reader who has made their text bigger has made the column

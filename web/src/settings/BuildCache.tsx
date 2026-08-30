@@ -39,6 +39,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { PaneSticky } from "../Panes";
 import { Switch } from "../Switch";
 import { loadSettings, saveSettings } from "../api/client";
 import type { BuildCacheView, SettingsSaved, SettingsView } from "../api/types";
@@ -203,10 +204,12 @@ export function BuildCachePane(props: {
 
   return (
     <>
-      <PaneHead
-        back={{ to: "Settings", go: props.back }}
-        title="Rust build cache"
-      />
+      <PaneSticky>
+        <PaneHead
+          back={{ to: "Settings", go: props.back }}
+          title="Rust build cache"
+        />
+      </PaneSticky>
 
       <Choose>
         <Match when={settings.isPending}>

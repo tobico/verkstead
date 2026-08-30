@@ -72,6 +72,7 @@ import pressableCss from "../src/CardButton.module.css?raw";
 // subpane: the gear at the head of the sidebar is one.
 import button from "../src/IconButton.module.css";
 import dropdown from "../src/Menu.module.css";
+import menuCss from "../src/Menu.module.css?raw";
 import notices from "../src/notices.module.css";
 // The set page as it is drawn inside a details pane: its nav, its sections, and
 // the record of a Set this build cannot read.
@@ -4290,9 +4291,11 @@ describe("the panes on a narrow window", () => {
   });
 
   /// And the record goes under it rather than being cut off against it: a rem of
-  /// paper fading to nothing, hung in the gap the header already kept below
-  /// itself so that at rest it covers no part of the first thing in the pane.
-  it("fades the record out under whatever is stuck", () => {
+  /// paper fading to nothing, over the first rem of whatever is passing beneath
+  /// — and only while something is passing, there being no gap below the block
+  /// for a fade to hang in. What says so is `data-stuck`, which the block puts
+  /// on itself off an observer of the rem of pane above it.
+  it("fades the record out under whatever is stuck, and only then", () => {
     const fade =
       '  content: "";\n' +
       "  position: absolute;\n" +
@@ -4303,7 +4306,32 @@ describe("the panes on a narrow window", () => {
       "  background: linear-gradient(var(--paper), transparent);\n" +
       "  pointer-events: none;\n}";
 
-    expect(shellCss).toContain(".pane > .paneChrome::after {\n" + fade);
+    expect(shellCss).toContain(
+      ".pane > .paneChrome[data-stuck]::after {\n" + fade,
+    );
+    // Nothing draws it otherwise: a pane at rest wears no paper over its first
+    // line.
+    expect(shellCss).not.toContain(".pane > .paneChrome::after");
+
+    // And the block keeps no room under itself for one, the room between a
+    // header and what follows it being the header's own — only the pane's own
+    // padding, given back either side so the paper reaches the pane's edges.
+    expect(shellCss).toContain("  margin: 0 -1.25rem;\n");
+  });
+
+  /// What says whether it is stuck: a pixel of pane above the block, watched.
+  /// The bug this fixed: the conversations pane is a flex column, and one with
+  /// a list too long for it shrinks whatever will shrink — which was this
+  /// pixel, taken to nothing while the pixel it gives back stayed, so the whole
+  /// column stood a pixel high and the top of the New conversation button was
+  /// drawn under the header's paper.
+  it("keeps the pixel it watches for the header being stuck", () => {
+    expect(shellCss).toContain(
+      ".pane > .paneEdge {\n" +
+        "  flex: none;\n" +
+        "  height: 1px;\n" +
+        "  margin-bottom: -1px;\n}",
+    );
   });
 });
 
@@ -8139,23 +8167,12 @@ describe("a question set on the timeline", () => {
       ),
     ).toEqual(["#preface", "#questions", "#q1", "#q2", "#q3", "#postscript"]);
 
-    // And it picks its shape from the pane rather than from the window.
-    expect(nav!.classList.contains(contents.paned!)).toBe(true);
+    // And it picks its shape from the pane rather than from the window: jsdom
+    // lays nothing out, so the pane measures nought and the nav takes the
+    // shape that asks nothing of a margin.
+    expect(nav!.classList.contains(contents.roomy!)).toBe(false);
   });
 
-  /// The floating header names where the reader is across the top of the column
-  /// it belongs to. The pane has a header of its own up there already.
-  it("leaves the floating header to the page", async () => {
-    theGrillingSets();
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    fireEvent.click(await drawn(container, `.${timeline.questionSet}`));
-
-    const pane = screen.getByLabelText("Details");
-    await drawn(pane, `nav.${contents.contents}`);
-
-    expect(pane.querySelector(`.${contents.header}`)).toBeNull();
-  });
 });
 
 describe("a question set the build cannot read", () => {
@@ -9059,7 +9076,6 @@ describe("the contents of a details pane", () => {
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
     const nav = await drawn(container, `.${shell.detailsPane} nav.${contents.contents}`);
-    expect(nav.classList.contains(contents.paned!)).toBe(true);
     expect(nav.classList.contains(contents.roomy!)).toBe(false);
   });
 
@@ -9389,11 +9405,18 @@ describe("the pinned task list", () => {
     const menu = await openActions(container);
 
     // Both are inside the one stuck block, so which is over which is settled
-    // between them rather than against the record.
+    // between them rather than against the record. And what settles it is the
+    // menu's own layer: what it drops carries one and the pinned deck carries
+    // none, so nothing about the header in between has to say anything.
     expect(menu.closest(`.${shell.paneChrome}`)).not.toBeNull();
-    expect(shellCss).toContain(
-      ".paneChrome > .paneChrome {\n  position: relative;\n  z-index: 1;\n}",
+    expect(menuCss).toContain(
+      ".drop {\n" +
+        "  position: absolute;\n" +
+        "  top: calc(100% + 0.3rem);\n" +
+        "  right: 0;\n" +
+        "  z-index: 3;\n",
     );
+    expect(timelineCss).not.toMatch(/\.carousel > \.deck \{[^}]*z-index/);
   });
 
   it("draws nothing at all where the worktree holds no backlog", async () => {

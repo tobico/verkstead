@@ -62,6 +62,7 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { IconButton } from "../IconButton";
+import { PaneSticky } from "../Panes";
 import {
   createProfile,
   deleteProfile,
@@ -483,10 +484,12 @@ export function ProfilePane(props: {
 
   return (
     <>
-      <PaneHead
-        back={{ to: "Settings", go: props.back }}
-        title={adding() ? "Add a profile" : "Edit profile"}
-      />
+      <PaneSticky>
+        <PaneHead
+          back={{ to: "Settings", go: props.back }}
+          title={adding() ? "Add a profile" : "Edit profile"}
+        />
+      </PaneSticky>
 
       {/* The blank form first, so that adding one never waits on a read it has
           no use for. Everything below it is about a Profile that is saved, and

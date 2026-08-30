@@ -34,14 +34,16 @@
   gap: 0.8rem;
   /* Over the 1.4rem `base.css` gives every `<h1>`: this one names the app
      rather than the pane, and it is read before any of them. */
-  font-size: 1.8rem;
+  font-size: 1.4rem;
 }
 
 /* The mark at the height of the header rather than of the word beside it, so
    what the eye lands on first is the thing rather than the name of it. */
 .wordmark img {
-  width: 3rem;
-  height: 3rem;
+  --size: 2rem;
+  width: var(--size);
+  height: var(--size);
+  margin-left: 0.2rem;
 }
 
 /* The one setting that is about this list rather than about the rest of

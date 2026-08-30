@@ -1,10 +1,10 @@
-//! The table of contents down a Set's margin: the way around a page whose Diff
+//! The table of contents down a Set's margin: the way around a Set whose Diff
 //! can run to thousands of lines.
 //!
-//! One nav in two shapes — the sidebar in the wide margin, and the bar with the
-//! list under it below that width — so which of the two the reader gets is the
-//! stylesheet's answer to how wide their window is. These tests ask about the
-//! one list both are drawn from, the jump that lands on a folded file, and the
+//! One nav in two shapes — the sidebar in the pane's margin, and the bar with
+//! the list under it where the pane is too narrow to keep one — so which of the
+//! two the reader gets is measured off the pane. These tests ask about the one
+//! list both are drawn from, the jump that lands on a folded file, and the
 //! highlight that follows the reader down the page.
 //!
 //! What the browser knows about where the page is scrolled to, jsdom has none
@@ -15,12 +15,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SetView } from "../src/api/types";
-// The wrap control, which is what the floating header makes room for.
-import toggle from "../src/Switch.module.css";
 // The nav's own names, which are the module's now rather than the page's.
 import contents from "../src/set/Contents.module.css";
-// And the Diff section the switch beside the heading belongs to.
-import diff from "../src/set/Diff.module.css";
 import { reading, texts } from "./reading";
 import { readable } from "./serving";
 import alongside from "./fixtures/set-alongside.json" with { type: "json" };
@@ -124,27 +120,12 @@ afterEach(() => {
   localStorage.clear();
 });
 
-/// The page makes two observers, told apart by the reading line: the
-/// scroll-spy watches with the margin that puts the line near the bottom of
-/// the window, and the floating header's watcher of the first heading watches
-/// with none.
-
-/// The page's scroll-spy — the last one made, since a test reads one page at a
-/// time.
+/// The nav's scroll-spy, told apart by the reading line it watches with — the
+/// margin that puts the line near the bottom of the window. The last one made,
+/// since a test reads one Set at a time.
 function spy(): Spy {
   const spying = spies.filter((made) => made.margin !== undefined).at(-1);
   expect(spying, "expected the page to be following the reader").toBeTruthy();
-  return spying as Spy;
-}
-
-/// The floating header's watcher of the page's first heading — the last one
-/// made.
-function headingSpy(): Spy {
-  const spying = spies.filter((made) => made.margin === undefined).at(-1);
-  expect(
-    spying,
-    "expected the header to be watching the first heading",
-  ).toBeTruthy();
   return spying as Spy;
 }
 
@@ -467,6 +448,13 @@ describe("a jump from the contents", () => {
   });
 });
 
+/// Whether the bar has its list down. The nav wears the shape it is in as well
+/// — a Set is read in a pane, so it is always `paned` — and this is the one
+/// class any of these tests is about.
+function down(nav: HTMLElement): boolean {
+  return nav.classList.contains(contents.open!);
+}
+
 describe("the bar", () => {
   it("names the line the nav has highlighted", async () => {
     const nav = navOf(await reading(WAITING));
@@ -497,7 +485,7 @@ describe("the bar", () => {
 
     expect(bar.getAttribute("aria-expanded")).toBe("false");
     expect(bar.getAttribute("aria-controls")).toBe("contents-list");
-    expect(nav.className, "nothing has opened it yet").toBe(contents.contents!);
+    expect(down(nav), "nothing has opened it yet").toBe(false);
     expect(
       nav.querySelector("#contents-list"),
       "the same list the sidebar draws, so opening the bar has nothing to fetch",
@@ -509,11 +497,11 @@ describe("the bar", () => {
     const bar = nav.querySelector<HTMLButtonElement>(`button.${contents.bar}`)!;
 
     bar.click();
-    expect(nav.className).toBe(`${contents.contents} ${contents.open}`);
+    expect(down(nav)).toBe(true);
     expect(bar.getAttribute("aria-expanded")).toBe("true");
 
     bar.click();
-    expect(nav.className).toBe(contents.contents!);
+    expect(down(nav)).toBe(false);
   });
 
   it("puts the list away on Escape", async () => {
@@ -523,9 +511,9 @@ describe("the bar", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 
     expect(
-      nav.className,
+      down(nav),
       "a list drawn over the page has to be dismissible from the keyboard",
-    ).toBe(contents.contents!);
+    ).toBe(false);
   });
 
   it("puts the list away on a tap beside it, and presses nothing", async () => {
@@ -541,7 +529,7 @@ describe("the bar", () => {
     expect(backdrop!.getAttribute("aria-hidden")).toBe("true");
 
     backdrop!.click();
-    expect(nav.className).toBe(contents.contents!);
+    expect(down(nav)).toBe(false);
     expect(nav.querySelector(`.${contents.backdrop}`)).toBeNull();
   });
 
@@ -551,107 +539,6 @@ describe("the bar", () => {
 
     line(nav, "q1").click();
 
-    expect(nav.className, "the list has done what it was opened for").toBe(
-      contents.contents!,
-    );
-  });
-});
-
-describe("the floating header", () => {
-  /// What the header says, which is a breadcrumb rather than one line: the
-  /// sidebar beside it already says both halves with two highlights.
-  function headerOf(page: ParentNode): HTMLElement {
-    const header = page.querySelector<HTMLElement>(`.${contents.header}`);
-    expect(header, "expected the floating header").toBeTruthy();
-    return header as HTMLElement;
-  }
-
-  it("stays out of the way until the first heading has been scrolled past", async () => {
-    const page = await reading(WAITING);
-    const header = headerOf(page);
-
-    // At the top of the page it would be naming a heading the reader can see
-    // right under it, and saying nothing.
-    expect(header.querySelector(`.${contents.headerChrome}`)).toBeNull();
-
-    headingSpy().cross({ preface: false });
-    expect(header.querySelector(`.${contents.headerChrome}`)).toBeTruthy();
-
-    // And scrolling back up puts it away again.
-    headingSpy().cross({ preface: true });
-    expect(header.querySelector(`.${contents.headerChrome}`)).toBeNull();
-  });
-
-  it("names where the reader is, and says it once", async () => {
-    const page = await reading(WAITING);
-    const header = headerOf(page);
-    headingSpy().cross({ preface: false });
-
-    expect(header.textContent).toContain("Preface");
-
-    spy().cross({ preface: true, diff: true, "diff-1": true });
-    expect(
-      texts(header, `.${contents.headerSection}`),
-      "a file is named under the section it is in",
-    ).toEqual(["Diff"]);
-    expect(header.querySelector(`.${contents.headerName}`)!.textContent).toBe(
-      "src/limits.rs",
-    );
-    expect(
-      header.querySelector(`.${contents.headerWhere}`)!.getAttribute("aria-hidden"),
-      "the sidebar's own line already carries aria-current, and a second copy " +
-        "of the answer is a second thing to hear",
-    ).toBe("true");
-  });
-
-  it("offers word wrap while the reader is in the Diff, and nowhere else", async () => {
-    const page = await reading(WAITING);
-    const header = headerOf(page);
-    headingSpy().cross({ preface: false });
-
-    expect(header.querySelector(`.${toggle.switch}`)).toBeNull();
-
-    spy().cross({ preface: true, diff: true });
-    expect(
-      header.querySelector(`.${toggle.switch}`),
-      "the switch follows the section, so it stays put from the Diff's heading " +
-        "down through its files",
-    ).toBeTruthy();
-
-    spy().cross({ "diff-1": true, "diff-2": true });
-    expect(header.querySelector(`.${toggle.switch}`)).toBeTruthy();
-
-    spy().cross({ questions: true, q1: true });
-    expect(header.querySelector(`.${toggle.switch}`)).toBeNull();
-  });
-
-  it("is two views of the one setting, with the switch beside the Diff", async () => {
-    const page = await reading(WAITING);
-    headingSpy().cross({ preface: false });
-    spy().cross({ preface: true, diff: true });
-
-    const beside = page.querySelector<HTMLInputElement>(
-      `section.${diff.diff} .${toggle.switch} input`,
-    )!;
-    const floating = page.querySelector<HTMLInputElement>(
-      `.${contents.header} .${toggle.switch} input`,
-    )!;
-
-    floating.click();
-
-    expect(page.querySelector(`section.${diff.diff}`)!.className).toBe(
-      `${diff.diff} ${diff.wrapped}`,
-    );
-    expect(
-      beside.checked,
-      "flipping either has to move the other: they are one setting",
-    ).toBe(true);
-  });
-
-  it("offers nothing on a Set with no Diff", async () => {
-    const page = await reading(BARE);
-    headingSpy().cross({ questions: false });
-
-    expect(headerOf(page).querySelector(`.${toggle.switch}`)).toBeNull();
+    expect(down(nav), "the list has done what it was opened for").toBe(false);
   });
 });

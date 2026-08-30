@@ -42,7 +42,7 @@
 import { useLocation, useNavigate } from "@solidjs/router";
 import { Match, Switch, createMemo, createSignal, type JSX } from "solid-js";
 
-import { Panes, type Pane } from "../Panes";
+import { Panes, PaneSticky, type Pane } from "../Panes";
 import { ProfileList, ProfilePane } from "../profiles/ProfileList";
 import { Notifications } from "../push/Notifications";
 import { RepoDetails, RepoList, RepoPane } from "../repos/RepoList";
@@ -152,9 +152,11 @@ function Settings(props: {
           whether this device is told about a Question Set is one switch, and a
           switch is small enough to live in the space the title was leaving
           empty anyway. */}
-      <PaneHead back={{ to: "Conversations", go: props.back }} title="Settings">
-        <Notifications />
-      </PaneHead>
+      <PaneSticky>
+        <PaneHead back={{ to: "Conversations", go: props.back }} title="Settings">
+          <Notifications />
+        </PaneHead>
+      </PaneSticky>
 
       <div class={styles.settings}>
         {/* Under the head and above everything else: it is about the server the
