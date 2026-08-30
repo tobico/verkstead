@@ -345,9 +345,11 @@ enum Reach {
 ///
 /// Two sets, composed. The global one every sandbox gets, and a per-Repo one so
 /// that a repository needing a build cache can say so without every repository
-/// getting it. A bind here is a hole in the one boundary a sandbox is, which is
-/// why they are configured where the Watched Paths are — in the environment, at
-/// installation — rather than anywhere a session or a browser could reach.
+/// getting it. This type is the *installation's* half of them: what
+/// `--sandbox-bind` was given, resolved once and kept. The settings file says
+/// binds too, in the same two grammars and composed the same way — see
+/// [`SandboxConfig::settings_binds`], which is where the two part company, in
+/// what a bind that will not resolve costs.
 ///
 /// A Repo is named by its *name*, which is the directory's own: the human writes
 /// what they call the repository rather than a path they would then have to keep
@@ -484,9 +486,10 @@ impl SandboxConfig {
     ///
     /// Writable, every one of them, and a companion's whatever its mode. A
     /// configured bind is a build cache or a package registry — somewhere a
-    /// build writes — and the installer opened the hole on purpose. They sit
-    /// outside the repository besides, so a read-only companion whose cache
-    /// could not be written to would fail on a cold cache for nothing gained.
+    /// build writes — and whoever configured it opened the hole on purpose.
+    /// They sit outside the repository besides, so a read-only companion whose
+    /// cache could not be written to would fail on a cold cache for nothing
+    /// gained.
     pub fn binds_for(&self, conversation: &store::Conversation) -> Vec<Bind> {
         let mut binds: Vec<Bind> = self.global.iter().cloned().map(Bind::writable).collect();
 

@@ -12,10 +12,16 @@ still holds word for word, because the asking half is unchanged.
 ## The workbench
 
 **Watched Path**:
-A directory Verkstead is permitted to operate inside, configured in the
-environment at installation. A security boundary rather than a convenience: any
+A directory Verkstead is permitted to operate inside, said either in the
+environment at installation or in the workbench settings, the boundary being
+the union of the two. A security boundary rather than a convenience: any
 filesystem operation on a path outside every Watched Path is refused, and Repos
-are registered only from within one.
+are registered only from within one. The installation's own are resolved once
+at startup and a missing one refuses to start; the settings' own are re-read
+whenever an admission is decided and never refuse anything — one that will not
+resolve covers nothing, with a line in the log — so a bare binary comes up
+watching nothing, admitting nothing, and is pointed at its first directory from
+the settings page's Paths section.
 _Avoid_: project root, workspace, scan path, allowed directory
 
 **Repo**:
@@ -156,9 +162,17 @@ _Avoid_: container, jail, isolation, environment
 The extra writable binds a Sandbox gets beyond that surface — a package
 registry's, a cache Verkstead does not provide — as one global set every Sandbox
 gets plus a per-Repo set composed over it. Configured where the Watched Paths
-are rather than anywhere the workbench can reach: every one of them is a
-directory of somebody else's and a hole in the boundary, and widening a boundary
-is the installer's to do. The **Build Cache** is not one of these and is not
+are, which is now the installation *and* the workbench: `--sandbox-bind DIR` or
+`--sandbox-bind NAME=DIR`, and the same two grammars on the settings page's
+Paths section and on a Repo's own pane. The two sets union, and each keeps its
+own answer to a bind that is not there — the installation's refuses startup, the
+settings' is skipped for that session with a line in the log, because a phone is
+no place to be told a typo cost every session in a Repo its start. Every one of
+them is a directory of somebody else's and a hole in the boundary, so the page
+says what each one costs beside the field that adds it. On a nix install the
+unit's own namespace is still the module's to widen: an entry outside it saves,
+is reported on the page as one the server cannot see, and does nothing until the
+installer widens the unit. The **Build Cache** is not one of these and is not
 configured here.
 _Avoid_: sandbox settings, mounts, extra paths
 
@@ -172,8 +186,9 @@ have a worse experience for not having checked the settings. Where it is is the
 installer's (`--build-cache-dir`, else the XDG cache directory; the packaged
 unit says `/var/cache/verkstead`); whether a Sandbox gets one at all, and how
 big its compiled half may grow, is the human's, in the workbench settings. The
-one control there that reaches inside a Sandbox, and it only ever closes the
-hole. Without an sccache it is still a cache — the crate downloads are shared —
+one control there that only ever *closes* a hole — the **Sandbox
+Configuration** beside it opens them, and does so only for what somebody typed.
+Without an sccache it is still a cache — the crate downloads are shared —
 and the setup card says so on a repository that builds Rust.
 _Avoid_: sccache, cargo cache, artifact cache, shared target dir
 

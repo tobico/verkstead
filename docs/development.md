@@ -30,12 +30,22 @@ $ cargo run -p verkstead-cli -- serve --watched-path ~/src
   INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 data_dir=. watched=["/home/you/src"]
 ```
 
-`--watched-path` is the one flag with no default. It names a directory
-Verkstead may operate inside, and it is a security boundary rather than a
-convenience: nothing outside the paths given is touched, and a repo is
-registered only from within one. Repeat the flag for more than one, or set
-`VERKSTEAD_WATCHED_PATHS` with them separated by `:`. The server refuses to
-start with none.
+`--watched-path` names a directory Verkstead may operate inside, and it is a
+security boundary rather than a convenience: nothing outside the paths given is
+touched, and a repo is registered only from within one. Repeat the flag for more
+than one, or set `VERKSTEAD_WATCHED_PATHS` with them separated by `:`. A path
+that is not there refuses startup, because a flag is the installation's own word
+and nobody is watching when it is wrong.
+
+It is not required, though, and neither is anything else here: `cargo run -p
+verkstead-cli -- serve` on its own comes up watching nothing, which admits
+nothing, and the settings page is where it is pointed at its first directory.
+Watched paths and sandbox binds are said in both places and what the server uses
+is the union — see the `"paths"` payload further down this section. The flag is
+the shape a service unit wants, where startup is the moment to hear about a
+typo; the settings are the shape a bare binary wants, where a save has to land
+whatever it was told and an entry that will not resolve is reported rather than
+fatal.
 
 Everything Verkstead makes goes in one place, the **Data Directory**: the
 database at `verkstead.db`, the worktrees, the installed skills, the handoff

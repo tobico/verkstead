@@ -1480,9 +1480,9 @@ async fn a_read_write_companion_takes_a_commit_on_its_own_branch() {
 /// What a companion repo's own Sandbox Configuration asks for is inside and
 /// writable, whatever the companion's mode.
 ///
-/// A build cache is the installer's own hole and it sits outside the repository:
-/// a read-only companion is a checkout not to be changed rather than a
-/// repository whose builds should fail on a cold cache.
+/// A build cache is a hole somebody opened on purpose, and it sits outside the
+/// repository: a read-only companion is a checkout not to be changed rather
+/// than a repository whose builds should fail on a cold cache.
 #[tokio::test]
 async fn a_read_only_companions_own_configured_binds_are_still_writable() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;

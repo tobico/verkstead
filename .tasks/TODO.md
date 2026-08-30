@@ -16,4 +16,4 @@ their fail-fast startup checks and show on the page read-only.
 - [x] 03: The settings API tells and takes Paths — [details](03-paths-settings-api.md)
 - [x] 04: The Paths card and pane — [details](04-paths-card-and-pane.md)
 - [x] 05: Per-repo binds on the Repo's pane — [details](05-per-repo-binds-pane.md)
-- [ ] 06: The record catches up — [details](06-record-catches-up.md)
+- [x] 06: The record catches up — [details](06-record-catches-up.md)

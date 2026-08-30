@@ -236,9 +236,7 @@ pub(crate) fn resolved_dir(path: &Path) -> Result<PathBuf> {
         bail!("it is relative, and a boundary has to name one directory");
     }
 
-    let real = path
-        .canonicalize()
-        .context("the server cannot see it")?;
+    let real = path.canonicalize().context("the server cannot see it")?;
 
     if !real.is_dir() {
         bail!("{} is not a directory", real.display());

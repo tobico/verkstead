@@ -214,8 +214,10 @@ function Settings(props: {
         />
         {/* Under the credentials and above the lists: it is the other thing
             Verkstead itself was told rather than anything a Conversation is
-            settled against, and the one setting on this page about what a
-            session runs inside. */}
+            settled against. One of the two sections about what a session runs
+            inside, and the one that is on without anybody having been here —
+            which is why it reads beside the credentials rather than down with
+            the Paths, where everything is somebody's own typing. */}
         <BuildCacheCard
           open={props.opening === "build-cache"}
           press={() => props.select("build-cache")}

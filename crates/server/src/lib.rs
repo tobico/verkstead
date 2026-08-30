@@ -295,10 +295,14 @@ pub struct Config {
     /// This is the Sandbox Configuration: the package registries and the caches
     /// a session needs beyond its own worktree that Verkstead does not provide
     /// itself. Each names a directory of somebody else's and is a hole in the
-    /// boundary a sandbox is, which is why they are configured here beside the
-    /// Watched Paths rather than anywhere a session or a browser could reach —
-    /// and why a bind that is not there refuses startup rather than being
-    /// skipped.
+    /// boundary a sandbox is, which is why a bind that is not there refuses
+    /// startup rather than being skipped: a flag is the installation's own word,
+    /// and nobody is watching when it is wrong.
+    ///
+    /// Not a requirement either, and not the only place they are said. The
+    /// workbench settings take the same two grammars, a session gets the union
+    /// of the two, and the settings' own are the ones that are never fatal — see
+    /// [`sandbox::SandboxConfig`].
     ///
     /// A Rust build cache is not one of them: the server provides that one — see
     /// `--build-cache-dir` — and the switch that turns it off is in the
@@ -322,10 +326,11 @@ pub struct Config {
     /// own choice unless this says otherwise, and a feature that is on by
     /// default cannot ask for a `mkdir` first.
     ///
-    /// Unlike a Sandbox Configuration bind this is not a hole the installer
-    /// opened in the boundary: it is the server's own directory, holding
-    /// nothing but build output, and the switch that closes it is in the
-    /// workbench settings beside the size it may grow to.
+    /// Unlike a Sandbox Configuration bind this is not a hole somebody typed
+    /// into the boundary: it is the server's own directory, holding nothing but
+    /// build output, which is why it is opened for a human who never asked and
+    /// the only control over it — in the workbench settings, beside the size it
+    /// may grow to — is the one that closes it.
     #[arg(long, env = "VERKSTEAD_BUILD_CACHE_DIR", value_name = "DIR")]
     pub build_cache_dir: Option<PathBuf>,
 

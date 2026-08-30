@@ -17,10 +17,11 @@
 //! [`SettingsSaved`].
 //!
 //! The build cache is the plain half of all this: a switch and a size, both
-//! values, both readable back. It is here because it is the one thing about a
-//! Sandbox the human sets rather than the installer, and one fact about it
-//! travels one way only — whether the server found an sccache to compile
-//! through, which is its own environment and nobody's setting.
+//! values, both readable back. It is the one thing about a Sandbox here that
+//! nobody has to configure — it is on with nothing said, and the switch is the
+//! one that takes it away, where the paths below are holes somebody typed. One
+//! fact about it travels one way only: whether the server found an sccache to
+//! compile through, which is its own environment and nobody's setting.
 //!
 //! The share viewer's URL is plainer still: one value, written and read back as
 //! itself. It is a public page the human hosts, and where a Published Share is
