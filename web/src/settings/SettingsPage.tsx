@@ -9,10 +9,10 @@
 //! folded together they are sections of one pane, read down in the order a
 //! fresh install needs them: credentials first, because without them nothing a
 //! session does with a Repo can be pushed, then the shared Rust build cache
-//! every session builds into, then where the share viewer is hosted, then how a
-//! conflicted pull request is resolved, then the paths Verkstead may work
-//! inside at all, then the Agent Profiles and the Repos a Conversation is
-//! settled against.
+//! every session builds into, then where the share viewer is hosted, then the
+//! paths Verkstead may work inside at all, then how a conflicted pull request
+//! is resolved, then the Agent Profiles and the Repos a Conversation is settled
+//! against.
 //!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
@@ -233,22 +233,22 @@ function Settings(props: {
           open={props.opening === "share-viewer"}
           press={() => props.select("share-viewer")}
         />
-        {/* And what a session sent at a pull request that will not merge is
-            told to do about it. Under the three above because it is the one
-            nobody has to read — what it does with nothing configured is the
-            safe half of the choice. */}
-        <ConflictsCard
-          open={props.opening === "conflicts"}
-          press={() => props.select("conflicts")}
-        />
-        {/* The last of what Verkstead itself was told, and the one thing under
-            the lists rather than beside them: where Verkstead may work at all,
-            and what a session is given beyond its worktree. It stands directly
-            above the Repos because it is what they are registered from — a
-            machine with no watched path has nothing to put on that list. */}
+        {/* The one thing here under the lists rather than beside them: where
+            Verkstead may work at all, and what a session is given beyond its
+            worktree. Under the three above because it is what a Repo is
+            registered from — a machine with no watched path has nothing to put
+            on that list. */}
         <PathsCard
           open={props.opening === "paths"}
           press={() => props.select("paths")}
+        />
+        {/* And the last thing Verkstead itself was told: what a session sent at
+            a pull request that will not merge is told to do about it. Last
+            because it is the one nobody has to read — what it does with nothing
+            configured is the safe half of the choice. */}
+        <ConflictsCard
+          open={props.opening === "conflicts"}
+          press={() => props.select("conflicts")}
         />
         {/* Told which of its own things is open rather than the whole opening:
             where a Profile's pane stands is this page's arithmetic, and a
@@ -317,11 +317,11 @@ function Details(props: {
       <Match when={props.opening === "share-viewer"}>
         <ShareViewerPane back={props.back} />
       </Match>
-      <Match when={props.opening === "conflicts"}>
-        <ConflictsPane back={props.back} />
-      </Match>
       <Match when={props.opening === "paths"}>
         <PathsPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "conflicts"}>
+        <ConflictsPane back={props.back} />
       </Match>
       {/* The Repos' two panes are two components rather than one asked about a
           Repo that does not exist yet, the way the Profiles' one form is: what
