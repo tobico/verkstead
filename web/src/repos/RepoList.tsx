@@ -102,7 +102,7 @@ export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
     "A conversation that is still going is on it. Finish or close that conversation first.",
 };
 
-/// The Repos as they stand, read once for the two panes that draw them.
+/// The Repos as they stand, read once for the panes that draw them.
 ///
 /// Read when the page opens, like the Profiles above them: nothing here changes
 /// on its own, and what does change is this section's own doing.
@@ -110,7 +110,13 @@ export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
 /// Merged by the id each entry carries flat, and not frozen: registering one
 /// reads the list again, and a frozen query is one invalidation cannot reach —
 /// the new repo would never appear behind the pane that added it.
-function useRepos() {
+///
+/// Exported because the Paths pane asks it too — see `settings/Paths.tsx`,
+/// which needs the registered names to tell a bind written for a Repo from one
+/// written for a name nothing is registered under. One query definition rather
+/// than a second saying the same thing: the two would share a key and have to
+/// agree about freshness anyway.
+export function useRepos() {
   return useReading(() => ({
     queryKey: ["repos"],
     queryFn: listRepos,

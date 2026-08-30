@@ -88,6 +88,15 @@ export function unresolved(resolution: Resolution): string | null {
   return resolution === "Resolves" ? null : resolution.Unresolved.why;
 }
 
+/// Which Repo an entry is written against, or `null` where it is written
+/// against none — a bind every sandbox gets, or a watched path, which is not
+/// written against a Repo at all.
+export function writtenFor(
+  entry: WatchedPathEntry | BindEntry,
+): string | null {
+  return "repo" in entry ? entry.repo : null;
+}
+
 /// A list with the entry standing at `at` taken out of it.
 export function without(entries: string[], at: number): string[] {
   return entries.filter((_, which) => which !== at);
@@ -158,6 +167,14 @@ export function Rows(props: {
   saving: boolean;
   /// Take one away, by where it stands among the settings' own.
   remove: (held: number) => void;
+  /// Whether a row naming a Repo names one nothing is registered under.
+  ///
+  /// Set by the pane that draws the binds every sandbox gets, where a row
+  /// naming a Repo can only be a stray — a bind for a registered Repo is drawn
+  /// on that Repo's own pane, and one for a name no Repo has would be drawn
+  /// nowhere. A Repo's own pane leaves this alone: every row there names that
+  /// Repo, and saying so on each of them would say nothing.
+  stray?: boolean;
 }): JSX.Element {
   return (
     <Show when={props.rows.length > 0} fallback={<Empty>{props.none}</Empty>}>
@@ -174,12 +191,31 @@ export function Rows(props: {
                 <Show when={row.entry.source === "Installation"}>
                   <span class={styles.source}>the installation's</span>
                 </Show>
+
+                {/* And which Repo it was written for, on a row that names one
+                    where every other row names none. */}
+                <Show when={props.stray ? writtenFor(row.entry) : null}>
+                  {(repo) => (
+                    <span class={styles.source}>written for {repo()}</span>
+                  )}
+                </Show>
               </div>
 
               {/* The one thing a human cannot check from a phone, in the
                   server's own words. */}
               <Show when={unresolved(row.entry.resolution)}>
                 {(why) => <p class={styles.unresolved}>{why()}</p>}
+              </Show>
+
+              {/* And the other thing it cannot do, which is reach a session: a
+                  bind is composed by the name a Repo is registered under, so
+                  one written for a name nothing holds is given to nobody. Said
+                  beside the reason it is drawn here at all. */}
+              <Show when={props.stray && writtenFor(row.entry) !== null}>
+                <p class={styles.unresolved}>
+                  No repo is registered under that name, so no session is given
+                  it.
+                </p>
               </Show>
 
               <Show when={row.held >= 0}>

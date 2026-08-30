@@ -37,18 +37,20 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { SettingsSaved, SettingsView } from "../src/api/types";
+import type { RepoEntry, SettingsSaved, SettingsView } from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import { RepoBinds } from "../src/repos/RepoBinds";
 import { PathsCard, PathsPane } from "../src/settings/Paths";
 import rowStyles from "../src/settings/PathEditor.module.css";
 import styles from "../src/settings/Paths.module.css";
-import { json, serving, whenever } from "./serving";
+import { hangs, json, serving, whenever } from "./serving";
+import repos from "./fixtures/repos.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
 
 const TOLD = told as SettingsView;
 const UNSET = unset as SettingsView;
+const REPOS = repos as RepoEntry[];
 
 /// The settings' own entries the fixture holds, as a save puts them back on the
 /// wire — one watched path, one bind every sandbox gets, and one a single Repo
@@ -182,12 +184,39 @@ function mountOwn(repo = REPO) {
   return mounting(() => <RepoBinds repo={repo} />);
 }
 
+/// The settings, and the registry the pane reads beside them.
+///
+/// Both, because which names are registered is what tells a bind written for a
+/// Repo from a stray — see `drawn` in `Paths.tsx`. The fixture's registry holds
+/// the Repo the fixture's scoped bind is written for, so the ordinary case is a
+/// pane with no stray on it.
 function theSettings(
   standing: SettingsView,
   ...answers: Array<() => Promise<Response>>
 ) {
-  return serving(whenever("/api/ui/settings", json(standing)), ...answers);
+  return registered(standing, REPOS, ...answers);
 }
+
+/// The same, over a registry a test says: what makes an entry a stray is that
+/// nothing on this list is called what it was written for.
+function registered(
+  standing: SettingsView,
+  repos: RepoEntry[] | (() => Promise<Response>),
+  ...answers: Array<() => Promise<Response>>
+) {
+  return serving(
+    whenever("/api/ui/settings", json(standing)),
+    whenever(
+      "/api/ui/repos",
+      typeof repos === "function" ? repos : json(repos),
+    ),
+    ...answers,
+  );
+}
+
+/// The registry with the Repo the fixture's scoped bind is written for taken
+/// off it, which is what unregistering one leaves behind.
+const WITHOUT_THE_REPO = REPOS.filter((repo) => repo.name !== REPO);
 
 /// What a save answers with, which is the settings as they now stand.
 function answering(standing: SettingsView): SettingsSaved {
@@ -385,6 +414,76 @@ describe("the pane", () => {
 
     expect(rows(binds!).map(path)).toEqual([BIND]);
     expect(screen.queryByText("/var/cache/verkstead-cargo")).toBeNull();
+  });
+
+  /// Unless nothing is registered under the name it was written for, which is
+  /// what unregistering a Repo leaves behind and what a misspelled name is from
+  /// the start. No Repo's pane can draw one of those, so this one does: it is in
+  /// the file, no session is given it, and a row nobody can reach is a row
+  /// nobody can take away.
+  it("draws a bind written for a repo nothing is registered under", async () => {
+    registered(TOLD, WITHOUT_THE_REPO);
+    const { container } = mountPane();
+
+    const [, binds] = await lists(container);
+
+    await waitFor(() => expect(rows(binds!)).toHaveLength(2));
+    expect(rows(binds!).map(path)).toEqual([BIND, OWN]);
+  });
+
+  /// And says both things about it: which name it was written for, and that
+  /// nothing holds that name — the second being why it is doing nothing.
+  it("says on a stray which repo it was written for, and that nothing is", async () => {
+    registered(TOLD, WITHOUT_THE_REPO);
+    const { container } = mountPane();
+
+    const [, binds] = await lists(container);
+    await waitFor(() => expect(rows(binds!)).toHaveLength(2));
+
+    const stray = rows(binds!)[1]!;
+
+    expect(stray.textContent).toContain(`written for ${REPO}`);
+    expect(stray.textContent).toContain("No repo is registered under that name");
+
+    // And the row beside it, which is nobody's, says neither.
+    expect(rows(binds!)[0]!.textContent).not.toContain("written for");
+  });
+
+  /// Nothing is a stray until the registry has been read. A row that appeared
+  /// and vanished as that read landed would be worse than one that arrives a
+  /// moment after the rest of the list.
+  it("calls nothing a stray before the repos have been read", async () => {
+    registered(TOLD, hangs());
+    const { container } = mountPane();
+
+    const [, binds] = await lists(container);
+
+    expect(rows(binds!).map(path)).toEqual([BIND]);
+  });
+
+  /// And it can be taken away, which is the whole point of drawing it. What a
+  /// Remove sends is where the row stands in the *file* — the stray sits behind
+  /// the global bind there, and taking it away leaves that one alone.
+  it("takes a stray away without disturbing the bind beside it", async () => {
+    const fetching = registered(
+      TOLD,
+      WITHOUT_THE_REPO,
+      json(answering(TOLD)),
+    );
+    const { container } = mountPane();
+
+    const [, binds] = await lists(container);
+    await waitFor(() => expect(rows(binds!)).toHaveLength(2));
+
+    fireEvent.click(rows(binds!)[1]!.querySelector("button")!);
+
+    await waitFor(() =>
+      expect(sent(fetching)).toMatchObject({
+        ...REST,
+        watched_paths: [WATCHED],
+        sandbox_binds: [BIND],
+      }),
+    );
   });
 
   /// The installation's entries are a unit's word, and there is nothing on a

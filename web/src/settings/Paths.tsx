@@ -30,11 +30,19 @@
 //! somebody scanning the settings will meet it — and it says which pane to open,
 //! because sending them to a list the row is not in would waste the trip.
 //!
-//! Only the global binds are here. A bind scoped to one Repo belongs on that
-//! Repo's own pane — see `repos/RepoBinds.tsx`, which draws the same rows out of
-//! the same read — and its rows are not drawn in this list. They still ride
-//! along on every save this pane makes, because one request writes the whole of
-//! `config.yaml` and a list sent short is a list emptied.
+//! Only the global binds are here, and the strays. A bind scoped to one Repo
+//! belongs on that Repo's own pane — see `repos/RepoBinds.tsx`, which draws the
+//! same rows out of the same read — and its rows are not drawn in this list.
+//! They still ride along on every save this pane makes, because one request
+//! writes the whole of `config.yaml` and a list sent short is a list emptied.
+//!
+//! A **stray** is the bind that rule would otherwise leave nowhere: one written
+//! against a name no registered Repo has, which unregistering a Repo leaves
+//! behind and a misspelled name creates outright. No Repo's pane can draw it,
+//! because no Repo of that name is there to have a pane, and a row drawn nowhere
+//! is a row nobody can correct or take away — the same reason an entry nothing
+//! can be read out of at all is a row here. So they are drawn among the global
+//! ones, each saying which name it was written for and that nothing holds it.
 //!
 //! Two halves in two panes, like every other section: a card in the middle pane
 //! saying how the two lists stand and whether anything is wrong with them, and
@@ -52,6 +60,7 @@ import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
 import type { BindEntry, PathsView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
+import { useRepos } from "../repos/RepoList";
 import { PaneHead } from "../workbench/PaneHead";
 import {
   Adding,
@@ -65,13 +74,37 @@ import {
 } from "./PathEditor";
 import styles from "./Paths.module.css";
 
-/// The binds every sandbox gets, which are the ones this pane edits.
+/// The binds every sandbox gets, which are the ones this pane is *about*.
 ///
-/// A bind scoped to a Repo is that Repo's pane's, so it is not a row here. An
+/// A bind scoped to a Repo is that Repo's pane's, so it is not one of these. An
 /// entry nothing could be read out of comes back scoped to nothing, which is
-/// why it lands in this list: it is a row somebody has to be able to correct.
+/// why it counts as one: it is a row somebody has to be able to correct.
 function global(paths: PathsView | undefined): Row<BindEntry>[] {
   return rowed(paths?.binds ?? []).filter((row) => row.entry.repo === null);
+}
+
+/// And the rows this pane actually draws: those, and the strays.
+///
+/// A **stray** is a bind written against a name no registered Repo has. It is
+/// nobody's pane by the rule above — no Repo's, because no Repo of that name is
+/// there to have one — and it has to be somewhere: it sits in `config.yaml`, no
+/// session will ever be given it, and a row that is drawn nowhere is a row
+/// nobody can take away. Unregistering a Repo leaves its binds like this, and so
+/// does a misspelled name. So they land here, beside the global ones, each
+/// saying which name it was written for.
+///
+/// `registered` is `undefined` until the Repos have been read, and nothing is
+/// called a stray before then: a row that appeared and vanished as that read
+/// landed would be worse than one that arrives a moment after the rest.
+function drawn(
+  paths: PathsView | undefined,
+  registered: Set<string> | undefined,
+): Row<BindEntry>[] {
+  return rowed(paths?.binds ?? []).filter(
+    (row) =>
+      row.entry.repo === null ||
+      (registered !== undefined && !registered.has(row.entry.repo)),
+  );
 }
 
 /// How many entries either list holds that name something the server cannot
@@ -189,6 +222,13 @@ export function PathsPane(props: {
   const { settings, told, held, save, writeWatched, writeBinds } =
     useWritingPaths();
 
+  // And which Repos are registered, which is the only thing that tells a bind
+  // written for one from a stray — see [`drawn`]. `undefined` while the read is
+  // in flight, which is not the same as none of them.
+  const repos = useRepos();
+  const registered = (): Set<string> | undefined =>
+    repos.data && new Set(repos.data.map((repo) => repo.name));
+
   return (
     <>
       <PaneSticky>
@@ -261,10 +301,14 @@ export function PathsPane(props: {
                 </Note>
 
                 <Rows
-                  rows={global(paths())}
+                  rows={drawn(paths(), registered())}
                   none="No binds every sandbox gets."
                   saving={save.isPending}
                   remove={(at) => writeBinds(without(held().sandbox_binds, at))}
+                  // Every row here that names a Repo is a stray, by the way this
+                  // list is drawn — so a row that names one says which name, and
+                  // says that nothing holds it.
+                  stray
                 />
 
                 <Adding

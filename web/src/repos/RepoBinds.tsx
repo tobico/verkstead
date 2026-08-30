@@ -15,6 +15,13 @@
 //! name — a collision the human can see on both panes and rename their way out
 //! of.
 //!
+//! And a name nothing is registered under has no pane to be drawn on, so it is
+//! drawn on the Paths pane instead — see `settings/Paths.tsx`, which calls one
+//! of those a stray. Unregistering a Repo makes one of every bind written for
+//! it, which is why it matters: the entries stay in the file, no session is
+//! given them any more, and registering the same path again brings the same Repo
+//! back and the binds with it.
+//!
 //! The rows are the Paths pane's own, out of the same read and saved by the same
 //! write — see `settings/PathEditor.tsx`. So the installation's entries draw
 //! labelled and without a press, because a unit's word is not something a phone
