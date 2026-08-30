@@ -206,6 +206,17 @@ const NEW_GROK: ProfileEdit = {
   },
 };
 
+/// And one of the fourth, whose one home is the directory opencode reads its
+/// XDG paths inside rather than a dot-directory of its own.
+const NEW_OPENCODE: ProfileEdit = {
+  name: "zen",
+  models: ["opencode/big-pickle"],
+  account: {
+    agent_type: "OpenCode",
+    home: "/home/you/accounts/zen/opencode",
+  },
+};
+
 describe("the cards", () => {
   it("lists what the server gave it, in that order", async () => {
     const fetching = theProfiles();
@@ -463,11 +474,13 @@ describe("the pane a card opens", () => {
       "Claude",
       "Codex",
       "Grok",
+      "OpenCode",
     ]);
     expect([...picker.options].map((option) => option.textContent)).toEqual([
       "Claude Code",
       "Codex",
       "Grok Build",
+      "OpenCode",
     ]);
   });
 
@@ -622,9 +635,9 @@ describe("the pane the plus opens", () => {
   /// API: the type is picked from the form, the one home is asked for under it,
   /// and what goes over is that type's own account.
   ///
-  /// Both of the types that keep one, because the shape they share is the whole
-  /// of what could make the form send one of them as the other.
-  it.each([NEW_CODEX, NEW_GROK])(
+  /// Every one of the types that keep one, because the shape they share is the
+  /// whole of what could make the form send one of them as another.
+  it.each([NEW_CODEX, NEW_GROK, NEW_OPENCODE])(
     "saves a $account.agent_type profile of the type that was picked",
     async (profile) => {
       const fetching = theProfiles(json("Saved"));

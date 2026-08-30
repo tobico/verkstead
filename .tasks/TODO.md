@@ -24,7 +24,7 @@ Roadmap stage: [05: OpenCode](docs/roadmaps/agent-backends/05-opencode.md)
 
 ## Tasks
 
-- [ ] 01: The `opencode` type launches — [details](01-opencode-launches.md)
+- [x] 01: The `opencode` type launches — [details](01-opencode-launches.md)
 - [ ] 02: OpenCode judged idle by its screen — [details](02-idle-by-its-screen.md)
 - [ ] 03: The blocking ask under OpenCode — [details](03-the-blocking-ask.md)
 - [ ] 04: The session store read and followed — [details](04-the-store-reader.md)

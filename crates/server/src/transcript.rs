@@ -224,6 +224,13 @@ impl Tail {
                 sessions: home.join(SESSIONS),
                 session: session.to_owned(),
             },
+
+            // And OpenCode's store is not looked in at all yet: it takes no
+            // session id at launch, so its log is found rather than named, and
+            // the task that finds it is a later one of this stage's. Until then
+            // an OpenCode session's Capture is its whole record, which is what
+            // ADR-0006 gives a session with no log.
+            (store::Account::OpenCode { .. }, _) => Search::Nowhere,
         };
 
         Tail {

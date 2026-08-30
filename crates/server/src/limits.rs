@@ -104,6 +104,13 @@ fn exhausted_phrase(agent_type: store::AgentType) -> Option<&'static str> {
         store::AgentType::Claude => Some(CLAUDE_EXHAUSTED),
         store::AgentType::Codex => Some(CODEX_EXHAUSTED),
         store::AgentType::Grok => Some(GROK_EXHAUSTED),
+
+        // And OpenCode has none. It retries a provider's limit internally
+        // before anything reaches the screen (ADR-0011), so nobody has watched
+        // one surface and there is no wording to be read against — which is
+        // this mapping's other answer rather than a gap in it, and leaves such
+        // a stop landing as the ordinary stall it would have been anyway.
+        store::AgentType::OpenCode => None,
     }
 }
 

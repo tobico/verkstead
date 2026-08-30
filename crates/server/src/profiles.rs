@@ -192,21 +192,29 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// refusals are: a Profile whose config file has gone and one whose directory
 /// has gone are two different things to go and put right.
 fn broken(watched: &WatchedPaths, profile: &store::Profile) -> Option<Broken> {
-    let paths: Vec<(&std::path::PathBuf, Broken)> = match &profile.account {
+    let paths: Vec<(PathBuf, Broken)> = match &profile.account {
         store::Account::Claude {
             claude_dir,
             config_file,
         } => vec![
-            (claude_dir, Broken::DirMissing),
-            (config_file, Broken::ConfigMissing),
+            (claude_dir.clone(), Broken::DirMissing),
+            (config_file.clone(), Broken::ConfigMissing),
         ],
         store::Account::Codex { home } | store::Account::Grok { home } => {
-            vec![(home, Broken::HomeMissing)]
+            vec![(home.clone(), Broken::HomeMissing)]
+        }
+
+        // An OpenCode home is judged by the two directories opencode keeps an
+        // account in rather than by the directory holding them: those are what
+        // is mounted, and a home that has never had opencode run in it has
+        // neither. See [`crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME`].
+        store::Account::OpenCode { home } => {
+            xdg(home).map(|path| (path, Broken::HomeMissing)).collect()
         }
     };
 
     for (path, missing) in paths {
-        match watched.admit(path) {
+        match watched.admit(&path) {
             Admission::Inside(_) => {}
             Admission::Missing | Admission::NotAbsolute => return Some(missing),
             Admission::Outside => return Some(Broken::OutsideWatchedPaths),
@@ -312,7 +320,39 @@ fn inspect(
         ProfileAccount::Grok { home } => Ok(store::Account::Grok {
             home: kept(watched, home)?,
         }),
+
+        // An OpenCode home is the directory the two opencode keeps an account
+        // in sit under, so both of those are judged as well as the home itself
+        // — they are what a session mounts, and a directory that has never had
+        // opencode run in it holds neither. Each is judged by the same rule and
+        // refused in the same words, because for this type they *are* the home
+        // the account is kept under.
+        ProfileAccount::OpenCode { home } => {
+            let home = kept(watched, home)?;
+
+            for path in xdg(&home) {
+                admitted(watched, &path)?;
+            }
+
+            Ok(store::Account::OpenCode { home })
+        }
     }
+}
+
+/// The two directories an OpenCode account is kept in, under the home a Profile
+/// names.
+///
+/// opencode reads the XDG base directories rather than keeping a dot-directory
+/// of its own, and a Profile's home is a home to resolve them inside — see
+/// [`crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME`], which is where the same two
+/// relative paths are bound from and to.
+fn xdg(home: &Path) -> impl Iterator<Item = PathBuf> {
+    [
+        crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME,
+        crate::sandbox::OPENCODE_DATA_INSIDE_HOME,
+    ]
+    .map(|inside| home.join(inside))
+    .into_iter()
 }
 
 /// The one directory a type whose whole account is one home named, judged the
@@ -321,7 +361,15 @@ fn inspect(
 /// One check for every such type rather than one apiece: what differs between
 /// them is which account the directory is, and that is the arm above, not this.
 fn kept(watched: &WatchedPaths, home: &str) -> Result<PathBuf, ProfileSaved> {
-    let home = match watched.admit(Path::new(home.trim())) {
+    admitted(watched, Path::new(home.trim()))
+}
+
+/// The same, of a path rather than of something typed into the form.
+///
+/// What an OpenCode home holds is judged this way: the two directories under it
+/// are derived rather than typed, so there is nothing to trim off either.
+fn admitted(watched: &WatchedPaths, home: &Path) -> Result<PathBuf, ProfileSaved> {
+    let home = match watched.admit(home) {
         Admission::Inside(path) => path,
         Admission::NotAbsolute => return Err(ProfileSaved::HomeNotAbsolute),
         Admission::Missing => return Err(ProfileSaved::HomeMissing),
@@ -470,6 +518,9 @@ fn account(account: &store::Account) -> ProfileAccount {
             home: home.to_string_lossy().into_owned(),
         },
         store::Account::Grok { home } => ProfileAccount::Grok {
+            home: home.to_string_lossy().into_owned(),
+        },
+        store::Account::OpenCode { home } => ProfileAccount::OpenCode {
             home: home.to_string_lossy().into_owned(),
         },
     }

@@ -80,6 +80,16 @@ fn grok_home(root: &Path, account: &str) -> PathBuf {
     made(root.join(account).join(".grok"))
 }
 
+/// And the same for an OpenCode one, whose home is judged by the two
+/// directories opencode keeps an account in — so the fixture makes them, which
+/// is what a `HOME=<it> opencode` run leaves behind.
+fn opencode_home(root: &Path, account: &str) -> PathBuf {
+    let home = root.join(account).join("opencode");
+    made(home.join(".config/opencode"));
+    made(home.join(".local/share/opencode"));
+    home
+}
+
 fn made(home: PathBuf) -> PathBuf {
     std::fs::create_dir_all(&home).unwrap();
     home
@@ -100,6 +110,15 @@ fn grok_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
         "account": { "agent_type": "Grok", "home": home },
+        "models": models,
+    })
+}
+
+/// And an OpenCode one, whose account is one home again under a third word.
+fn opencode_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "account": { "agent_type": "OpenCode", "home": home },
         "models": models,
     })
 }
@@ -634,13 +653,14 @@ async fn a_profile_whose_account_is_one_home_saves_and_reads_back_with_it() {
     assert_eq!(profile.broken, None);
 }
 
-/// Two types keeping one home apiece stay two types over the wire.
+/// Types keeping one home apiece stay the types they are over the wire.
 ///
-/// The account carries the type it is, and both of these carry the same field
-/// under it — so what this settles is that a Grok Profile saved as one is
-/// listed as one, rather than coming back as the other type that keeps a home.
+/// The account carries the type it is, and all three of these carry the same
+/// field under it — so what this settles is that a Profile saved as one of them
+/// is listed as that one, rather than coming back as another type that keeps a
+/// home.
 #[tokio::test]
-async fn a_grok_profile_saves_and_reads_back_as_a_grok_account() {
+async fn a_home_account_saves_and_reads_back_as_its_own_type() {
     let (watched, _dir, app) = workbench().await;
 
     assert_eq!(
@@ -655,6 +675,18 @@ async fn a_grok_profile_saves_and_reads_back_as_a_grok_account() {
         save(
             &app,
             &grok_edit("grok", &grok_home(watched.path(), "grok"), &MODELS)
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+    assert_eq!(
+        save(
+            &app,
+            &opencode_edit(
+                "opencode",
+                &opencode_home(watched.path(), "opencode"),
+                &MODELS
+            )
         )
         .await,
         ProfileSaved::Saved
@@ -675,9 +707,48 @@ async fn a_grok_profile_saves_and_reads_back_as_a_grok_account() {
             ProfileAccount::Grok {
                 home: resolved.join("grok/.grok").to_str().unwrap().to_owned(),
             },
+            ProfileAccount::OpenCode {
+                home: resolved
+                    .join("opencode/opencode")
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+            },
         ]
     );
     assert!(listed.iter().all(|profile| profile.broken.is_none()));
+}
+
+/// An OpenCode home is judged by what opencode keeps an account in rather than
+/// by the directory holding it: those two are what a session mounts, and a
+/// directory that has never had opencode run in it holds neither.
+///
+/// Refused when it is saved and read as broken afterwards, which is the same
+/// pair of answers every other account's paths get — the failure moved forward
+/// in time from the session that would otherwise fail to start with nobody
+/// watching.
+#[tokio::test]
+async fn an_opencode_home_without_the_directories_opencode_reads_is_refused() {
+    let (watched, _dir, app) = workbench().await;
+    let bare = made(watched.path().join("bare/opencode"));
+
+    assert_eq!(
+        save(&app, &opencode_edit("bare", &bare, &MODELS)).await,
+        ProfileSaved::HomeMissing
+    );
+
+    let kept = opencode_home(watched.path(), "opencode");
+    assert_eq!(
+        save(&app, &opencode_edit("opencode", &kept, &MODELS)).await,
+        ProfileSaved::Saved
+    );
+    assert_eq!(listed(&app).await[0].broken, None);
+
+    // The account itself taken away, with the home it sat under left where it
+    // was: the directory a Profile names is still there, and there is no
+    // account in it any more.
+    std::fs::remove_dir_all(kept.join(".local/share/opencode")).unwrap();
+    assert_eq!(listed(&app).await[0].broken, Some(Broken::HomeMissing));
 }
 
 /// And its home is judged the way a pair's halves are: named by what it is when

@@ -324,6 +324,43 @@ fi
         .expect("nothing is called that yet")
     }
 
+    /// And one of the fourth, whose account is one home holding the two
+    /// directories opencode keeps an account in.
+    ///
+    /// Made the way a human makes one — a `HOME=<it> opencode` run leaves
+    /// exactly these — with something inside each so the test can say which
+    /// landed where. The skills among them, because an OpenCode Profile binds
+    /// nothing over anything either: its own are inside the config directory
+    /// the Profile names, and its two global paths are under HOME, where a
+    /// fresh sandbox has nothing at all.
+    async fn opencode_profile(&self) -> store::Profile {
+        let home = self.watched.path().join("opencode-account/opencode");
+        let config = home.join(".config/opencode");
+        let data = home.join(".local/share/opencode");
+
+        std::fs::create_dir_all(config.join("skills/the-accounts-own")).unwrap();
+        std::fs::write(
+            config.join("skills/the-accounts-own/SKILL.md"),
+            "# what opencode found there\n",
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("auth.json"), "{}\n").unwrap();
+
+        store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: "opencode".to_owned(),
+                account: store::Account::OpenCode { home },
+                models: vec!["opencode/big-pickle".to_owned()],
+            },
+        )
+        .await
+        .unwrap()
+        .expect("nothing is called that yet")
+    }
+
     /// The host home a sandbox is built around — the fixture's rather than
     /// whoever is running the tests, so what `~` holds is decided here.
     fn home(&self) -> Home {
@@ -1101,6 +1138,74 @@ async fn a_grok_account_is_bound_over_the_directory_grok_keeps_one_in() {
     assert_eq!(reported["claude-dir"], "absent");
     assert_eq!(reported["home"], ".grok ");
     assert_eq!(reported["agent"], "grok");
+}
+
+/// And an OpenCode account lands as the two directories opencode reads, at the
+/// XDG defaults inside a fresh HOME — so nothing has to be said in the
+/// environment about where they are.
+///
+/// The two of them and no more: the cache and the state directories are the
+/// sandbox's own, made fresh and thrown away with it, because neither is part
+/// of the account. The skills the account keeps are inside its config
+/// directory, and nothing is bound over them (ADR-0011) — the two paths
+/// opencode reads globally are under HOME rather than under the account, and a
+/// fresh HOME has neither.
+///
+/// And the store's name is pinned in the environment, so a session writes the
+/// one file Verkstead named rather than whichever one the release channel the
+/// binary came from would have chosen.
+#[tokio::test]
+async fn an_opencode_account_lands_at_the_xdg_paths_opencode_reads() {
+    let fixture = grilling().await;
+    let profile = fixture.opencode_profile().await;
+    let sandbox = fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]);
+
+    let reported = probe(
+        &sandbox,
+        r#"
+            dir "$HOME/.config/opencode" config
+            dir "$HOME/.local/share/opencode" data
+            file "$HOME/.local/share/opencode/auth.json" auth
+            file "$HOME/.config/opencode/skills/the-accounts-own/SKILL.md" the-accounts-own
+            dir "$HOME/.claude" claude-dir
+            say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+            say cache "$(ls -A "$HOME/.cache" 2>/dev/null | tr '\n' ' ')"
+            say db "${OPENCODE_DB-unset}"
+            say agent "${VERKSTEAD_AGENT-unset}"
+        "#,
+    );
+
+    assert_eq!(
+        reported["config"], "write",
+        "a session writes the configuration of the account it runs as"
+    );
+    assert_eq!(
+        reported["data"], "write",
+        "and its store and its own session records beside them"
+    );
+    assert_eq!(
+        reported["auth"], "write",
+        "the account itself being the file in the second of the two"
+    );
+    assert_eq!(
+        reported["the-accounts-own"], "write",
+        "and the skills it keeps are left where opencode looks for them"
+    );
+    assert_eq!(reported["claude-dir"], "absent");
+    assert_eq!(
+        reported["home"], ".config .local ",
+        "and nothing else of HOME is there — the cache and the state opencode \
+         makes are the sandbox's own"
+    );
+    assert_eq!(
+        reported["cache"], "",
+        "the cache directory is not the account's, so nothing of it is bound"
+    );
+    assert_eq!(
+        reported["db"], "opencode.db",
+        "the store is named by Verkstead rather than by the release channel"
+    );
+    assert_eq!(reported["agent"], "opencode");
 }
 
 /// Which backend a session is running is in its environment, and it is there for

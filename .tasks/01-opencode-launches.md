@@ -90,9 +90,56 @@ changing this line, because the discovery task is where that would pay.
       than over the API — paired with a Conversation, and launched; its Capture
       shows opencode running, on the Pairing's model, under that Profile's own
       account rather than any of the host's.
-- [ ] The Brief reaches the session and it starts working on it with nothing
+- [x] The Brief reaches the session and it starts working on it with nothing
       typed into the terminal; the line carries `-m`, `--prompt` and `--auto`,
       and Claude's, Codex's and Grok Build's lines are unchanged with the
       suite's stub agents still reading what they read today.
-- [ ] A launched session leaves a store under the Profile's data directory, in
+- [x] A launched session leaves a store under the Profile's data directory, in
       the database whose name Verkstead pinned — which is what task 04 reads.
+
+## What was pinned, and what is still waiting
+
+**opencode 1.18.25**, `latest` on npm when this landed and the release
+everything below was read off. It was pulled down (`opencode-linux-x64`) and run
+on this machine, outside Verkstead; 1.18.25 is named in the constants read off
+it — the XDG paths the account lands at, and the store name Verkstead pins.
+
+**It is not on the system profile.** Putting it there is a change to the host's
+NixOS configuration and needs root, and neither is reachable from a session, so
+that half of the first criterion is **outstanding**: the host has to install
+`opencode` beside `claude`, `codex` and `grok`, and until it does an OpenCode
+Profile fails at session start with `opencode` not found, named in the Capture —
+which is what ADR-0011 says a missing binary is. It follows that the second
+criterion is outstanding too, in the half that needs the workbench: **a Profile
+saved from the form, paired and launched, with its Capture showing opencode** is
+not proved, because a session's `PATH` inside the sandbox is fixed and the
+binary is not on it.
+
+**What was proved instead, and it is the rest of the criteria.** The argv this
+builder writes, run under a bwrap sandbox shaped the way `Sandbox::command`
+shapes one — a fresh empty HOME, the Profile's `.config/opencode` and
+`.local/share/opencode` bound at the XDG defaults inside it, `OPENCODE_DB`
+pinned, the worktree bound and chdir'd into, and nothing else of the host's home:
+
+- `opencode -m opencode/big-pickle --prompt '<the Brief>' --auto` parses in that
+  order and starts the TUI;
+- **`--prompt` submits rather than prefilling.** The session read the file the
+  Brief named and answered it, with nothing typed into the terminal — so the
+  question this task was to settle on the real thing is settled, and Verkstead
+  types no submit;
+- `--auto` is enough for the approvals: the read ran with no prompt, and
+  opencode has no sandbox of its own to switch off;
+- the account written was the Profile's own — the store, the snapshots and the
+  logs all landed under the home the Profile named, and the sandbox's HOME held
+  `.config` and `.local` and nothing else;
+- the store is `<the Profile's home>/.local/share/opencode/opencode.db`, the
+  name `OPENCODE_DB` pinned, holding a `session` row whose `directory` is the
+  Worktree and whose `model` is the Pairing's — which is what task 04 reads.
+
+**And two cheap answers for the tasks after this one.** `--session` is
+*continue this one*, validated against the store before the TUI starts, so a
+fresh name is not one opencode takes and its log is found rather than named —
+the line is right as it stands. And opencode **does** enter the alternate
+screen, with no flag on its help to keep it inline: whatever tasks 02 and 04
+need of the Screen, `--no-alt-screen` is not the answer here, because there is
+no such flag.

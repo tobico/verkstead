@@ -65,6 +65,14 @@ fn grok(name: &str) -> Account {
     }
 }
 
+/// And an OpenCode one, which keeps one home too — the directory opencode's
+/// XDG paths resolve inside rather than a dot-directory of its own.
+fn opencode(name: &str) -> Account {
+    Account::OpenCode {
+        home: PathBuf::from(format!("/watched/accounts/{name}/opencode")),
+    }
+}
+
 async fn saved(pool: &SqlitePool, name: &str) -> Profile {
     create_profile(pool, &facts(name))
         .await
@@ -224,15 +232,16 @@ async fn a_profile_whose_account_is_one_home_round_trips_with_it() {
     );
 }
 
-/// And two types that both keep one home are told apart by the column rather
+/// And the types that each keep one home are told apart by the column rather
 /// than by the shape they share.
 ///
-/// What is written down is the same in both — nothing in the pair columns, one
-/// row in `profile_homes` — so the word in `agent_type` is the whole of what
-/// says which account a home is. A Grok Profile read back as a Codex one would
-/// be a session launched on the wrong binary under the right directory.
+/// What is written down is the same in all of them — nothing in the pair
+/// columns, one row in `profile_homes` — so the word in `agent_type` is the
+/// whole of what says which account a home is. A Grok Profile read back as a
+/// Codex one would be a session launched on the wrong binary under the right
+/// directory, and an OpenCode one is a third word over the same two columns.
 #[tokio::test]
-async fn two_types_that_each_keep_one_home_read_back_as_themselves() {
+async fn the_types_that_each_keep_one_home_read_back_as_themselves() {
     let (_dir, pool) = fresh_pool().await;
 
     create_profile(&pool, &facts_for("work", codex("work")))
@@ -245,14 +254,24 @@ async fn two_types_that_each_keep_one_home_read_back_as_themselves() {
         .unwrap()
         .expect("nothing is called that yet");
 
+    let latest = create_profile(&pool, &facts_for("zen", opencode("zen")))
+        .await
+        .unwrap()
+        .expect("nothing is called that yet");
+
     assert_eq!(saved.account, grok("xai"));
     assert_eq!(saved.agent_type(), AgentType::Grok);
 
-    let loaded = load_profile(&pool, saved.id)
-        .await
-        .unwrap()
-        .expect("the Profile was just saved");
-    assert_eq!(loaded, saved, "one Profile read back is the one written");
+    assert_eq!(latest.account, opencode("zen"));
+    assert_eq!(latest.agent_type(), AgentType::OpenCode);
+
+    for profile in [&saved, &latest] {
+        let loaded = load_profile(&pool, profile.id)
+            .await
+            .unwrap()
+            .expect("the Profile was just saved");
+        assert_eq!(&loaded, profile, "one Profile read back is the one written");
+    }
 
     assert_eq!(
         profiles(&pool)
@@ -261,7 +280,7 @@ async fn two_types_that_each_keep_one_home_read_back_as_themselves() {
             .into_iter()
             .map(|profile| profile.agent_type())
             .collect::<Vec<_>>(),
-        vec![AgentType::Codex, AgentType::Grok],
+        vec![AgentType::Codex, AgentType::Grok, AgentType::OpenCode],
         "and each of them off the list is its own type"
     );
 }

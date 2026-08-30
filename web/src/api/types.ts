@@ -1501,7 +1501,7 @@ export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageLi
  * written it carries what they typed, but they are the same fields either way,
  * and two types for one shape would be two opinions about what an account is.
  */
-export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, config_file: string, } | { "agent_type": "Codex", home: string, } | { "agent_type": "Grok", home: string, };
+export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, config_file: string, } | { "agent_type": "Codex", home: string, } | { "agent_type": "Grok", home: string, } | { "agent_type": "OpenCode", home: string, };
 
 /**
  * Which Profile and model a Conversation is pairing for one of its roles.

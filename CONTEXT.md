@@ -428,15 +428,18 @@ is its type's**, rather than one shape every Profile is assumed to have — Clau
 Code's is the directory and config file pair bind-mounted at `~/.claude` /
 `~/.claude.json` inside the sandbox, and every backend after it keeps its whole
 account under one relocatable home — Codex's at `~/.codex`, Grok Build's at
-`~/.grok`. Whichever it is, mounting it is what keeps accounts separate. A type
-is offered to the human only once it can launch the real thing: one that cannot
-would be a lie in a picker, so the form offers Claude, Codex and Grok Build, and
-a Profile of a type whose stage has not landed is one saved over the API until
-it does. Picking a type on the form asks for that type's own account paths. The
-models are a list and the list is the Profile's own, because different Profiles
-reach different accounts and each can launch different things; none of them is a
-default, so which one a session runs is always picked — as a Pairing, alongside
-the Profile itself.
+`~/.grok`, and OpenCode's at neither, opencode keeping no dot-directory of its
+own: its home is the directory its XDG config and data directories sit inside,
+and both are bound at those defaults in a HOME that is fresh enough for them to
+resolve there. Whichever it is, mounting it is what keeps accounts separate. A
+type is offered to the human only once it can launch the real thing: one that
+cannot would be a lie in a picker, so the form offers Claude, Codex, Grok Build
+and OpenCode, and a Profile of a type whose stage has not landed is one saved
+over the API until it does. Picking a type on the form asks for that type's own
+account paths. The models are a list and the list is the Profile's own, because
+different Profiles reach different accounts and each can launch different
+things; none of them is a default, so which one a session runs is always picked
+— as a Pairing, alongside the Profile itself.
 _Avoid_: account, identity, persona, agent config
 
 **Pairing**:
@@ -738,9 +741,11 @@ on is one another may print in the middle of its work. **Or against none**: a
 backend nobody has watched run out has no phrase, and is skipped rather than
 matched against nothing — the empty string would open every line there is and
 would stop such a session at its first flush, where skipping leaves its limit
-landing as the ordinary stall it would have been anyway. A phrase covering only
-some accounts of a backend comes to the same thing for the rest: Grok Build
-ships the heading of the card a free account gets, a paid plan's card is headed
+landing as the ordinary stall it would have been anyway. OpenCode is the first
+of those, and may be one for a long time: it retries a provider's limit
+internally before anything reaches the screen. A phrase covering only some
+accounts of a backend comes to the same thing for the rest: Grok Build ships
+the heading of the card a free account gets, a paid plan's card is headed
 differently, and its stop stalls until somebody has watched one drawn. The
 session is ended along with the stop, the agent's own wait for the same reset
 being no reason to have work going on inside a Conversation that reads as

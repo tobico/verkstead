@@ -239,8 +239,9 @@ impl Agents {
     /// chose its Profile before there was a model to choose beside it runs on
     /// the one that Profile carried — see [`store::Pairing::runs_on`]. What the
     /// flag is spelled is the backend's — see [`Line::model`]. The prompt
-    /// follows it as the one positional argument, which is where every
-    /// interactive agent here takes the thing it is to start on.
+    /// follows it: as the one positional argument for the three backends that
+    /// take it that way, and under the flag its own line names where a backend
+    /// takes it flagged instead — see [`Line::prompt`].
     ///
     /// A Profile listing no models is refused when it is saved, so the flag is
     /// only ever left off for a row somebody edited by hand — and left off
@@ -252,8 +253,9 @@ impl Agents {
     /// is run as its model and then its Brief, and a flag pushed in between the
     /// two would move the Brief under every stub agent the test suite stands
     /// where an agent goes. Options added here go on the end, so nothing that
-    /// was already there moves — which holds for every type, since one stub
-    /// stands where all of them go.
+    /// was already there moves — which holds for every type but the one that
+    /// asks for its prompt flagged, whose Brief the stub reads one place later
+    /// and which is not a type the suite stands a stub in front of.
     ///
     /// `None` is a session Verkstead could not name — see [`session_name`] —
     /// and the flag is then left off entirely rather than passed empty: an agent
@@ -282,6 +284,10 @@ impl Agents {
         if let Some(model) = pairing.runs_on() {
             argv.push(line.model.to_owned());
             argv.push(model.to_owned());
+        }
+
+        if let Some(flag) = line.prompt {
+            argv.push(flag.to_owned());
         }
 
         argv.push(prompt.to_owned());
@@ -329,6 +335,12 @@ impl Agents {
                     .clone()
                     .unwrap_or_else(|| Signature::AtWork(GROK_AT_WORK.to_owned())),
             ),
+
+            // And OpenCode has none of its own yet — the task that reads one
+            // off the real TUI is the next of this stage's. What stands here
+            // meanwhile is whatever the suite handed in, and silence otherwise,
+            // which is Claude's judgement rather than a signature guessed at.
+            store::AgentType::OpenCode => self.signature.clone(),
         }
     }
 
@@ -360,19 +372,31 @@ fn binary(agent_type: store::AgentType) -> &'static str {
         store::AgentType::Claude => "claude",
         store::AgentType::Codex => "codex",
         store::AgentType::Grok => "grok",
+        store::AgentType::OpenCode => "opencode",
     }
 }
 
-/// The rest of a backend's launch line: how it is told its model, whether it
-/// takes the session id Verkstead named, and what goes on the end.
+/// The rest of a backend's launch line: how it is told its model, how it is
+/// given the Brief, whether it takes the session id Verkstead named, and what
+/// goes on the end.
 ///
-/// One value rather than three mappings, because the three are one fact — what
+/// One value rather than a mapping apiece, because they are one fact — what
 /// this backend's command line looks like — and a stage that lands a backend
 /// writes it once here.
 struct Line {
     /// What the model is said with. `--model` reads as claude's own; codex
     /// takes `-m`.
     model: &'static str,
+
+    /// The flag the Brief goes under, or `None` where it is the one positional
+    /// argument.
+    ///
+    /// The positional is what every backend up to this one takes, and opencode
+    /// is the first that does not: its positional is the project to start in,
+    /// and the prompt is `--prompt`. Said here rather than assumed, so that a
+    /// backend taking either shape is one arm of the mapping below rather than
+    /// a branch in the builder.
+    prompt: Option<&'static str>,
 
     /// Whether the session Verkstead named is named on the line.
     ///
@@ -420,10 +444,25 @@ struct Line {
 /// Worktree pre-seeded as trusted, since some versions still put the trust
 /// prompt up despite the bypass and a session stopped at a prompt is a run
 /// waiting on nobody.
+///
+/// **OpenCode's is the shortest line here.** The model as `-m provider/model`
+/// — the whole string is what the human typed on the Profile — the Brief under
+/// `--prompt`, and `--auto` for the approvals, which is where the other three
+/// backends' bypasses sit. `--prompt` submits rather than only prefilling
+/// (checked against opencode 1.18.25: the home screen fills the prompt in and
+/// sends it as soon as the model store is ready), so nothing is typed into the
+/// terminal to start the session working. It has no sandbox of its own to
+/// switch off, and it takes no session id at launch: `--session` means
+/// *continue this one* and is validated against the store before the TUI
+/// starts, so a fresh name would be a session that never starts rather than a
+/// session named — which is why its log is found rather than named, as codex's
+/// is. Everything else about the account is in the directories the Profile
+/// named — see [`crate::sandbox`].
 fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
     match agent_type {
         store::AgentType::Claude => Line {
             model: "--model",
+            prompt: None,
             names_the_session: true,
             tail: vec!["--dangerously-skip-permissions".to_owned()],
         },
@@ -456,12 +495,14 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
 
             Line {
                 model: "-m",
+                prompt: None,
                 names_the_session: false,
                 tail,
             }
         }
         store::AgentType::Grok => Line {
             model: "-m",
+            prompt: None,
             names_the_session: true,
             tail: vec![
                 "--always-approve".to_owned(),
@@ -469,6 +510,12 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
                 "off".to_owned(),
                 "--no-alt-screen".to_owned(),
             ],
+        },
+        store::AgentType::OpenCode => Line {
+            model: "-m",
+            prompt: Some("--prompt"),
+            names_the_session: false,
+            tail: vec!["--auto".to_owned()],
         },
     }
 }
@@ -2225,6 +2272,23 @@ mod tests {
         }
     }
 
+    /// And on the fourth, whose model is the `provider/model` string the human
+    /// typed on the Profile and whose home is the directory opencode's XDG
+    /// paths resolve inside.
+    fn opencode_pairing() -> store::Pairing {
+        store::Pairing {
+            profile: store::Profile {
+                id: 4,
+                name: "zen".to_owned(),
+                account: store::Account::OpenCode {
+                    home: PathBuf::from("/srv/accounts/zen/opencode"),
+                },
+                models: vec!["opencode/big-pickle".to_owned()],
+            },
+            model: Some("opencode/big-pickle".to_owned()),
+        }
+    }
+
     /// The Worktree a session of either fixture is launched in, which is the
     /// directory codex is told to trust.
     ///
@@ -2376,6 +2440,13 @@ mod tests {
                 .map(String::as_str),
             Some("grok")
         );
+        assert_eq!(
+            agents
+                .argv(&opencode_pairing(), "# Rate limiting\n", None, worktree())
+                .first()
+                .map(String::as_str),
+            Some("opencode")
+        );
     }
 
     /// And the whole of codex's line: the model as `-m`, the prompt as the one
@@ -2469,6 +2540,41 @@ mod tests {
                 "--sandbox".to_owned(),
                 "off".to_owned(),
                 "--no-alt-screen".to_owned(),
+            ]
+        );
+    }
+
+    /// And the whole of opencode's line: the model as `-m provider/model`, the
+    /// Brief under `--prompt` rather than as a positional, and `--auto` for the
+    /// approvals.
+    ///
+    /// The flagged prompt is what makes this line a shape of its own — the
+    /// positional opencode takes is the project to start in, not the thing to
+    /// start on. No session id, because `--session` means *continue this one*
+    /// and is validated against the store before the TUI starts, so a fresh
+    /// name would be a session that never starts: opencode's log is found
+    /// rather than named, as codex's is. Verified against opencode 1.18.25,
+    /// which parsed this line on a pseudo-terminal, submitted the Brief without
+    /// anything being typed, and answered it.
+    #[test]
+    fn an_opencode_session_takes_the_line_opencode_takes() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["opencode".to_owned()], state.path()).argv(
+            &opencode_pairing(),
+            "# Rate limiting\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "opencode".to_owned(),
+                "-m".to_owned(),
+                "opencode/big-pickle".to_owned(),
+                "--prompt".to_owned(),
+                "# Rate limiting\n".to_owned(),
+                "--auto".to_owned(),
             ]
         );
     }

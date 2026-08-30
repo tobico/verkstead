@@ -49,6 +49,7 @@ pub enum AgentType {
     Claude,
     Codex,
     Grok,
+    OpenCode,
 }
 
 impl AgentType {
@@ -63,6 +64,7 @@ impl AgentType {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::Grok => "grok",
+            Self::OpenCode => "opencode",
         }
     }
 
@@ -72,6 +74,7 @@ impl AgentType {
             "claude" => Self::Claude,
             "codex" => Self::Codex,
             "grok" => Self::Grok,
+            "opencode" => Self::OpenCode,
             other => bail!("a Profile names the unknown agent type {other:?}"),
         })
     }
@@ -85,7 +88,7 @@ impl AgentType {
     /// Set answer the question the same way.
     pub fn channel(self) -> Channel {
         match self {
-            Self::Claude => Channel::Blocking,
+            Self::Claude | Self::OpenCode => Channel::Blocking,
             Self::Codex | Self::Grok => Channel::StoreAndNudge,
         }
     }
@@ -145,6 +148,19 @@ pub enum Account {
     /// environment, so the directory is the whole of what a Profile names
     /// either way.
     Grok { home: PathBuf },
+
+    /// OpenCode's one relocatable home, resolved — the same shape again, but
+    /// mounted as more than one directory.
+    ///
+    /// opencode keeps no single dot-directory: it reads the four XDG base
+    /// directories and appends `opencode` to each, so what a Profile names here
+    /// is a *home* those paths resolve inside, holding
+    /// `.config/opencode` and `.local/share/opencode` — the account being the
+    /// second of them, where `auth.json` and the session store are written. It
+    /// is the shape one `HOME=<the directory> opencode` leaves behind, which is
+    /// how such an account is made in the first place. Which of them are bound
+    /// where the sandbox says, as every other account's mounting is.
+    OpenCode { home: PathBuf },
 }
 
 impl Account {
@@ -154,6 +170,7 @@ impl Account {
             Self::Claude { .. } => AgentType::Claude,
             Self::Codex { .. } => AgentType::Codex,
             Self::Grok { .. } => AgentType::Grok,
+            Self::OpenCode { .. } => AgentType::OpenCode,
         }
     }
 
@@ -164,7 +181,7 @@ impl Account {
     fn home(&self) -> Option<&Path> {
         match self {
             Self::Claude { .. } => None,
-            Self::Codex { home } | Self::Grok { home } => Some(home),
+            Self::Codex { home } | Self::Grok { home } | Self::OpenCode { home } => Some(home),
         }
     }
 }
@@ -658,6 +675,9 @@ fn read_row(row: Row, listed: Vec<String>, home: Option<String>) -> Result<Profi
         AgentType::Grok => Account::Grok {
             home: PathBuf::from(kept(agent_type, id, home)?),
         },
+        AgentType::OpenCode => Account::OpenCode {
+            home: PathBuf::from(kept(agent_type, id, home)?),
+        },
     };
 
     Ok(Profile {
@@ -690,7 +710,7 @@ fn pair(account: &Account) -> Result<(&str, &str)> {
             claude_dir,
             config_file,
         } => (text(claude_dir)?, text(config_file)?),
-        Account::Codex { .. } | Account::Grok { .. } => ("", ""),
+        Account::Codex { .. } | Account::Grok { .. } | Account::OpenCode { .. } => ("", ""),
     })
 }
 

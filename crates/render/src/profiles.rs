@@ -50,6 +50,12 @@ pub enum ProfileAccount {
     /// And Grok Build's, bind-mounted over `~/.grok`: the same one-home shape
     /// Codex's is, under the directory grok keeps an account in.
     Grok { home: String },
+
+    /// And OpenCode's, which is one home again but not one mount: opencode
+    /// keeps no dot-directory of its own, so what this names is a home holding
+    /// `.config/opencode` and `.local/share/opencode`, each bound where
+    /// opencode's XDG defaults look for it inside the sandbox.
+    OpenCode { home: String },
 }
 
 /// Why a saved Profile cannot be run under as things stand.

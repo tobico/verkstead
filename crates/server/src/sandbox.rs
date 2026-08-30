@@ -113,6 +113,51 @@ const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
 const CODEX_INSIDE_HOME: &str = ".codex";
 const GROK_INSIDE_HOME: &str = ".grok";
 
+/// And OpenCode's, which is two of them rather than one: it keeps no
+/// dot-directory of its own and reads the XDG base directories instead,
+/// appending `opencode` to each — read off opencode 1.18.25, which is the
+/// release this backend is pinned at, and which makes all four at startup.
+///
+/// **These are the paths inside the Profile's home as well as inside HOME.**
+/// The sandbox's HOME is made fresh and empty, so the XDG defaults resolve
+/// inside it and nothing has to be set in the environment (ADR-0011 allowed
+/// either shape, and this is the cheaper one); and a Profile's home is an
+/// opencode home too, being the directory left behind by running
+/// `HOME=<it> opencode` once to log the account in. So one relative path
+/// serves both ends of each bind, which is what says the two homes are the
+/// same shape.
+///
+/// **The config and the data, and not the other two.** The data directory is
+/// the account — `auth.json` and the session store are in it — and the config
+/// directory is what the human configures that account with, so both travel
+/// with the Profile. The cache and the state directories are neither: the
+/// cache holds what opencode downloaded for this machine and the state holds
+/// the TUI's own furniture, and both are derived things that a session is
+/// welcome to make fresh in the HOME it is thrown away with. What that costs
+/// is a re-download of whatever tooling opencode fetches, once per session.
+pub(crate) const OPENCODE_CONFIG_INSIDE_HOME: &str = ".config/opencode";
+pub(crate) const OPENCODE_DATA_INSIDE_HOME: &str = ".local/share/opencode";
+
+/// What opencode is told to call the store it writes under the data directory.
+///
+/// Said rather than left to opencode, which names the file after the release
+/// channel the install came from — a beta build writes `opencode-beta.db`
+/// beside a stable build's `opencode.db`. Whichever channel the host installed,
+/// a session under Verkstead writes the one file Verkstead named, so the reader
+/// that follows a session's Transcript opens a path this chose rather than
+/// guessing which of several is this session's.
+///
+/// A bare filename rather than a path: opencode resolves a relative
+/// `OPENCODE_DB` against its own data directory, which is the account.
+///
+/// Named for the reason the idle signature and the usage-limit phrase are: it
+/// is somebody else's spelling, and moving it costs one edit here. Read off
+/// opencode 1.18.25, which is the release this backend is pinned at: a stable
+/// install of that names the file `opencode.db` on its own, so what this is
+/// worth is the day the host installs a beta.
+const OPENCODE_DB: &str = "OPENCODE_DB";
+const OPENCODE_DB_FILE: &str = "opencode.db";
+
 /// Which backend a session is running, in its own environment.
 ///
 /// Set for the Guide alone. Nothing else inside a sandbox needs to know — the
@@ -750,6 +795,22 @@ impl Sandbox {
                     .arg(home)
                     .arg(self.home.path.join(GROK_INSIDE_HOME));
             }
+            // Two binds rather than one, and the same relative path on both
+            // sides of each: an OpenCode Profile's home is an opencode home,
+            // and the XDG defaults resolve inside the fresh HOME — see
+            // [`OPENCODE_CONFIG_INSIDE_HOME`]. And the store named while the
+            // account is being said, since where opencode writes it is inside
+            // the second of the two.
+            store::Account::OpenCode { home } => {
+                for inside in [OPENCODE_CONFIG_INSIDE_HOME, OPENCODE_DATA_INSIDE_HOME] {
+                    bwrap
+                        .arg("--bind")
+                        .arg(home.join(inside))
+                        .arg(self.home.path.join(inside));
+                }
+
+                bwrap.arg("--setenv").arg(OPENCODE_DB).arg(OPENCODE_DB_FILE);
+            }
         }
 
         // After `/tmp` is made, and inside it: the tmpfs above would otherwise
@@ -779,8 +840,17 @@ impl Sandbox {
         // both are: covering one would hide the skills those programs ship as
         // well as the ones the account added, and the home is the whole of what
         // such a Profile names, so it is left as the account keeps it
-        // (ADR-0011). Which is both backends that have landed, so a stage that
-        // adds no bind here is following the rule rather than forgetting one.
+        // (ADR-0011).
+        //
+        // OpenCode adds none either, and for a reason of its own. Its two
+        // global paths — `~/.claude/skills` and `~/.agents/skills` — are
+        // Claude-shaped and sit under HOME rather than under its account, and
+        // an OpenCode Profile binds neither of them into the sandbox: HOME
+        // inside is fresh, so there is nothing at either to hide and an empty
+        // directory over one would cover nothing. Its own is inside the config
+        // directory the Profile names, which is the exception above. So every
+        // backend that has landed adds nothing here, and a stage that adds no
+        // bind is following the rule rather than forgetting one.
         //
         // And the account's type at all, rather than every home there is,
         // because a bind into a home no session is running under would cover
