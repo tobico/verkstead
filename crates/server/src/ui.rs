@@ -648,11 +648,11 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
     // between them any more meaningfully than it changes between reads.
     let working = state.sessions.working();
 
-    // And which of those have gone quiet, which is the other half of what the
+    // And which of those have stopped, which is the other half of what the
     // card's mark says. A second read of the same register rather than one
     // answer: `working` is what the whole sidebar is drawn from and this is a
     // fact about the few rows in it.
-    let quiet = state.sessions.quiet();
+    let idling = state.sessions.idle();
 
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
@@ -670,7 +670,7 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // Idle is a thing a running session is, and the two sets are
                 // read a moment apart — so the pair is made consistent here
                 // rather than left to the page that draws it.
-                idle: working && quiet.contains(&conversation.id),
+                idle: working && idling.contains(&conversation.id),
                 waiting: conversation.waiting,
                 // And the same pairing again for the wrap-up that has got down
                 // to its checks: the settle facts came out of the query above,

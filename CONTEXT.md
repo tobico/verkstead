@@ -358,8 +358,8 @@ record), transcript-as-bytes (that is the Capture)
 
 **Capture**:
 The terminal bytes of a session, kept byte for byte, escapes and all — how it
-looked rather than what it said. What quiet-detection listens to, what the
-Screen replays, and the record of last resort for a session that left no
+looked rather than what it said. What says a printing session has gone **Idle**,
+what the Screen replays, and the record of last resort for a session that left no
 Transcript.
 _Avoid_: transcript (that is the readable record), raw output, tape
 
@@ -376,6 +376,32 @@ hand presses **Stop** first, and the Conversation being **Stopped** is what
 holds the run off while they do; a session typed into while a run is still
 driving it is ended and advanced by the ordinary rules.
 _Avoid_: terminal, console, attach view, pane
+
+**Idle**:
+A running session that has stopped — not gone, but sitting there with its turn
+over and nothing to do. One judgement, read by everything that acts on one: the
+mark on the sidebar card and the Timeline row, the grace every ender waits out
+before it ends a session, and the **Rescue** — both the silence it waits on and
+the proof that a line it typed arrived.
+
+**How it is judged is the backend's.** Claude Code draws inline and repaints
+while it works, so three seconds with nothing printed is a session that has
+stopped. A backend that draws a full-screen interface is never reliably silent —
+it repaints while it works and may go on repainting its prompt after it has
+stopped — so what says one has stopped is that backend's own at-the-prompt line
+standing on the **Screen**. One signature per backend, kept in one place and
+accepted to drift the way the usage-limit phrase does. A silence mid-turn is not
+idle there: a TUI that stops to think would otherwise be reaped out from under
+its own work.
+
+**With a long silence behind it as the long-stop.** A signature that has drifted
+reads as a session that never stops, and nothing else here would catch one: the
+Rescue waits on idle, every ender waits on idle, and no session carries a cap on
+its life. So a session judged on its screen that has printed nothing at all for
+five minutes is idle whatever its screen says, and what the human gets is the
+ordinary would-not-ask stop — one slow round rather than never.
+_Avoid_: quiet (one backend's answer, not the question), silent, asleep, stalled
+(that is a Conversation nothing is driving)
 
 **Agent Profile**:
 A named coding-agent account Verkstead can run a session under: an agent type,
@@ -934,12 +960,13 @@ a watcher's keystrokes go through, and told the one thing it cannot see from
 inside: that nothing it prints reaches anybody, and that a Set is the whole of
 how the human is spoken to.
 
-**Three things at once**, and none of them is enough alone: idle for the grace,
-nothing open on the Conversation, and nothing landed. A session still printing
-is at work, one sitting on a Blocking Ask is waiting on the human — for as long
-as they take — and one that has landed what it was sent for is already being
-ended by the driver beside this. An answer arriving, or a line typed in, starts
-the grace again.
+**Three things at once**, and none of them is enough alone: **Idle** for the
+grace, nothing open on the Conversation, and nothing landed. A session still at
+work is at work — which is its backend's judgement rather than one rule for all
+of them — one sitting on a Blocking Ask is waiting on the human, for as long as
+they take, and one that has landed what it was sent for is already being ended by
+the driver beside this. An answer arriving, or a line typed in, starts the grace
+again, and the session being seen at work after it is what says the line landed.
 
 **Every session Verkstead launches**, one loop with the state's own
 done-indicator as its parameter: a grilling's artifact, a backlog Step's task

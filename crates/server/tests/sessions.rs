@@ -961,6 +961,13 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // as the wrap-up starts, and the tests that want the window before it hold
     // it open themselves.
     reviewing: Duration::ZERO,
+    // Three times the proposing grace above, where a server's is five minutes
+    // against sixty seconds. Nothing here is judged by it unless its stub draws
+    // a screen — see [`DRAWING`] — and the fixtures that are want it clear of
+    // the grace on both sides: a silence mid-turn has to be able to run past the
+    // grace without reaching this, and a session caught by this has to be one
+    // the grace alone would have caught much sooner.
+    long_stop: paced(Duration::from_millis(2700)),
 });
 
 /// And the same at a pace that does look, for the tests that are about the
@@ -1365,6 +1372,7 @@ async fn grilling_on_codex(stub: &str) -> Grilling {
         &[],
         Pickers::GrillingOnCodex,
         Origin::None,
+        None,
     )
     .await
 }
@@ -1381,9 +1389,44 @@ async fn grilling_spilling_on_codex(spill: tempfile::TempDir, stub: &str, gh: &s
         &[],
         Pickers::EverythingOnCodex,
         Origin::None,
+        None,
     )
     .await
 }
+
+/// And the same with every role on that Profile and a stub that draws a full
+/// screen where its binary goes, judged idle by the line it draws at its prompt
+/// rather than by its silence.
+///
+/// Every role, because what these are about is what happens *around* a session
+/// that repaints — the ender, the rescue, the stop — and those are the run's
+/// sessions rather than the grilling one alone.
+///
+/// The signature is the suite's rather than a backend's: none ships yet, and
+/// what stands where a backend goes here is a stub that draws whatever it is
+/// told to — see [`AT_THE_PROMPT`] and [`A_PROMPT_THAT_DRIFTED`].
+async fn grilling_drawing(stub: &str, signature: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnCodex,
+        Origin::None,
+        Some(signature),
+    )
+    .await
+}
+
+/// What Verkstead is told this backend has on its Screen when it is sitting at
+/// its prompt — one line, the whole of the coupling to somebody else's display.
+const AT_THE_PROMPT: &str = "▌ ready for anything";
+
+/// And what the stub draws where that wording has moved on without Verkstead: a
+/// prompt that is not the one being looked for, which is a backend that renamed
+/// its prompt in a release and a signature nobody has caught up with yet.
+const A_PROMPT_THAT_DRIFTED: &str = "◆ what would you like to do?";
 
 /// The model that Profile lists, which is what its sessions are launched on.
 const CODEX_MODEL: &str = "gpt-5-codex";
@@ -1488,6 +1531,7 @@ async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> 
         &[],
         Pickers::Unreviewed,
         Origin::None,
+        None,
     )
     .await
 }
@@ -1504,6 +1548,7 @@ async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> G
         &[],
         Pickers::Ungrilled,
         Origin::None,
+        None,
     )
     .await
 }
@@ -1572,6 +1617,7 @@ async fn grilling_at_pace(
         companions,
         Pickers::UnderEveryPairing,
         Origin::None,
+        None,
     )
     .await
 }
@@ -1591,6 +1637,7 @@ async fn grilling_pushing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gri
         &[],
         Pickers::UnderEveryPairing,
         Origin::Cloned,
+        None,
     )
     .await
 }
@@ -1611,6 +1658,7 @@ enum Origin {
 
 /// And the whole of it, the pickers included — which is the setup card pressed
 /// the way the human presses it, every picker filled and then one of them moved.
+#[allow(clippy::too_many_arguments)]
 async fn grilling_however_started(
     spill: tempfile::TempDir,
     stub: &str,
@@ -1619,8 +1667,9 @@ async fn grilling_however_started(
     companions: &[(&str, CompanionMode)],
     pickers: Pickers,
     origin: Origin,
+    signature: Option<&str>,
 ) -> Grilling {
-    let bench = bench_at_pace(spill, stub, gh, pace).await;
+    let bench = bench_at_pace(spill, stub, gh, pace, signature).await;
     let app = &bench.app;
 
     // Before the Conversation is started, so that every worktree cut from this
@@ -1947,13 +1996,19 @@ static ROOM: LazyLock<Arc<tokio::sync::Semaphore>> = LazyLock::new(|| {
 });
 
 async fn bench(spill: tempfile::TempDir, stub: &str, gh: &str) -> Bench {
-    bench_at_pace(spill, stub, gh, *BRISKLY).await
+    bench_at_pace(spill, stub, gh, *BRISKLY, None).await
 }
 
 /// The same, at a pace of the caller’s choosing — which is what the tests about
 /// the stall sweep need, that being the one thing [`BRISKLY`] deliberately keeps
 /// slow.
-async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pace) -> Bench {
+async fn bench_at_pace(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    pace: Pace,
+    signature: Option<&str>,
+) -> Bench {
     // Before anything is built, so that a bench queued behind the suite's
     // ceiling costs nothing while it waits — see [`ROOM`].
     let room = ROOM
@@ -1992,6 +2047,15 @@ async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pac
         Settings::in_data_dir(state.path()),
     )
     .at_pace(pace);
+
+    // And, where this fixture's stub draws a full screen rather than printing
+    // lines, the line it draws when its turn is over — which stands where the
+    // backend's own at-the-prompt signature goes. Nothing on Claude is judged by
+    // it whatever is handed in here; see the server's `sessions` module.
+    let agents = match signature {
+        Some(signature) => agents.drawing(signature),
+        None => agents,
+    };
 
     let app = router_running_sessions(
         pool,
@@ -17352,6 +17416,230 @@ async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_stopped() {
     assert!(
         stopped.html.contains("without asking you anything"),
         "and says why it stopped: {:?}",
+        stopped.html,
+    );
+    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// A backlog of one worked by sessions that draw a full screen rather than
+/// printing lines, which is what every backend after Claude does.
+///
+/// None of these is ever silent for long: a frame goes out every twentieth of a
+/// second, on the alternate screen an interface takes over, so the byte clock
+/// alone would never call one idle — nothing would end it, rescue it or mark it,
+/// and a run of them would sit there for ever. What says a turn is over here is
+/// `prompt` standing on the Screen.
+///
+/// And each of them leaves a silence in the middle of its turn that is longer
+/// than the grace a printing session is ended on, which is the other half of the
+/// same claim: a TUI that stops to think is not a TUI that has finished.
+///
+/// `frames` is how many times the prompt is drawn before the session falls
+/// silent, and `-1` is for ever — a backend that goes on repainting the prompt
+/// it is sitting at, which is the case the signature exists for. A bounded one
+/// says so in the handoff directory as it stops, so a test waiting for the
+/// silence to start has something to wait for.
+///
+/// `commits` is whether the step does what its task asked. One that does is
+/// ended on its landing and its judgement together; one that does not is a run
+/// nobody can move, which is the rescue's.
+fn a_backlog_drawing(prompt: &str, frames: i32, commits: bool) -> String {
+    let working = if commits {
+        r#"
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+    fi"#
+    } else {
+        ""
+    };
+
+    // A span of the suite's own, and one that has to sit between two of the
+    // Pace's: past the grace, so that a session ended inside it would be one
+    // ended by the byte clock, and well short of the long-stop, so that it is
+    // not the long-stop catching it either.
+    let thinking = (BRISKLY.proposing * 3 / 2).as_secs_f64();
+
+    format!(
+        r#"
+frame() {{ printf '\033[2J\033[H%s\n' "$1"; }}
+drawing() {{
+    printf '\033[?1049h'
+    LEFT={frames}
+    while [ "$LEFT" -ne 0 ]; do
+        frame '{prompt}'
+        sleep 0.05
+        if [ "$LEFT" -gt 0 ]; then LEFT=$((LEFT - 1)); fi
+    done
+    printf 'silent\n' > "/tmp/verkstead/silent-$1"
+    sleep 300
+}}
+case "$1" in
+gpt-5-codex-grilling)
+    frame 'breaking the work down'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    drawing grilling
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
+    frame 'reading the task'
+    sleep {thinking:.2}
+    frame 'still reading the task'{working}
+    drawing step &
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#
+    )
+}
+
+/// A backlog worked by sessions that never fall silent is worked to the end, on
+/// the prompt each of them draws when its turn is over.
+///
+/// The judgement moved off the byte clock and onto the Screen, and this is the
+/// whole of what that buys: every session here repaints for as long as it lives,
+/// so under the three-second mark not one of them would ever be idle and the run
+/// would stop at its first step for ever. What ends each of them is the frame it
+/// leaves standing.
+///
+/// **And the silence each leaves mid-turn ends nothing.** It is longer than the
+/// grace a printing session is ended on and longer than the one the rescue waits
+/// out, and on this backend it is not idle at all — a TUI that stops to think
+/// would otherwise be prodded, or reaped, in the middle of its work.
+#[tokio::test]
+async fn sessions_that_repaint_are_ended_on_the_prompt_they_draw_rather_than_on_silence() {
+    let fixture =
+        grilling_drawing(&a_backlog_drawing(AT_THE_PROMPT, -1, true), AT_THE_PROMPT).await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: every session was ended where it stood, on its own \
+         prompt: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into any of them: the silence each left in the \
+         middle of its turn is longer than the grace, and on this backend a \
+         session that has stopped printing has not stopped working",
+    );
+}
+
+/// And one that draws its prompt without doing what it was sent for is told and
+/// then stopped, on the same judgement.
+///
+/// The rescue's precondition is idle, so a backend judged only on its silence
+/// would be one the rescue never reached: this session repaints for ever, and
+/// what says it is sitting there with nothing to do is the prompt it is
+/// repainting.
+#[tokio::test]
+async fn a_step_that_draws_its_prompt_without_committing_is_told_and_then_stopped() {
+    let fixture =
+        grilling_drawing(&a_backlog_drawing(AT_THE_PROMPT, -1, false), AT_THE_PROMPT).await;
+
+    picked(&fixture, "task-list").await;
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        said[0].contains("summarize your status"),
+        "the same line as anywhere else, in the words somebody watching would \
+         have typed: {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("01-count.md"),
+        "the Notice names the step, a human wanting to know which task: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and says why it stopped: {:?}",
+        stopped.html,
+    );
+    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// And a prompt the signature no longer matches is caught by the long-stop,
+/// which is the whole reason there is one.
+///
+/// A signature drifts — the wording is the backend's and it will move in a
+/// release — and a session drawing a prompt Verkstead does not know reads as one
+/// that never stops working. Nothing else here would catch it: the rescue's
+/// precondition is idle, every ender waits on the same judgement, and no session
+/// carries a cap on its life. So the byte clock stays behind it as a long-stop,
+/// and what the human gets is the ordinary would-not-ask stop — one slow round
+/// rather than never.
+///
+/// **And it is slow**, deliberately: the session draws its unknown prompt for
+/// longer than the grace and nothing is typed into it, because on this backend a
+/// session that is printing is a session at work whatever it is printing. Only
+/// once it has stopped printing altogether does the long-stop start, and only
+/// once that is out is it idle.
+#[tokio::test]
+async fn a_prompt_the_signature_does_not_know_is_caught_by_the_long_stop() {
+    let fixture = grilling_drawing(
+        &a_backlog_drawing(A_PROMPT_THAT_DRIFTED, 40, false),
+        AT_THE_PROMPT,
+    )
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    // The step session has drawn its prompt for a window longer than the grace,
+    // and has now stopped printing altogether — which is where the long-stop
+    // starts.
+    until_written(&handoff_directory(&fixture).join("silent-step")).await;
+    let fell_silent = Instant::now();
+
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "nothing was typed into it while it was drawing: a prompt Verkstead \
+         does not know is a session still at work, however long it sits there",
+    );
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        fell_silent.elapsed() >= BRISKLY.proposing * 2,
+        "and what caught it was the long-stop rather than the grace, which \
+         would have had it in under half the time",
+    );
+    assert!(
+        said[0].contains("summarize your status"),
+        "the ordinary line, this being the ordinary rules arriving late: \
+         {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and the ordinary stop under them: {:?}",
         stopped.html,
     );
     assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");

@@ -39,8 +39,10 @@
 //! **And sessions legitimately waiting are never spoken to.** One sitting on a
 //! Blocking Ask has a Set open, which is the middle third of the condition —
 //! the Conversation's rather than the session's, because what the rescue is for
-//! is a human with nothing in front of them. One still printing is not idle, and
-//! anything it prints puts the whole grace back on the clock. And a session that
+//! is a human with nothing in front of them. One still at work is not idle —
+//! which is its backend's judgement rather than one rule for all of them, see
+//! [`crate::sessions::Idle`] — and anything that says it is working again puts
+//! the whole grace back on the clock. And a session that
 //! has landed what it was sent for is not spoken to either — the driver beside
 //! this is already ending it.
 //!
@@ -65,7 +67,7 @@ use std::time::Instant;
 
 use crate::AppState;
 use crate::runner::{Landing, Pace};
-use crate::sessions::Quiet;
+use crate::sessions::Idle;
 
 /// How many times one session is spoken to before Verkstead stops asking.
 ///
@@ -230,7 +232,7 @@ pub(crate) async fn until_it_will_not_ask(
     state: &AppState,
     conversation_id: i64,
     event_id: i64,
-    quiet: &Quiet,
+    idle: &Idle,
     pace: Pace,
     done: Done,
 ) {
@@ -271,23 +273,28 @@ pub(crate) async fn until_it_will_not_ask(
             continue;
         }
 
-        // Then the quiet, in poll-sized steps rather than in one sleep to the
-        // end of the grace: what is above has to be asked all the way through
-        // it, and a session talking its way past the grace is one this comes
-        // back to anyway.
-        let owed = pace.proposing.saturating_sub(quiet.for_how_long());
+        // Then how long it has been idle, in poll-sized steps rather than in one
+        // sleep to the end of the grace: what is above has to be asked all the
+        // way through it, and a session working its way past the grace is one
+        // this comes back to anyway. Which backend's reading of idle that is is
+        // the session's own — see [`crate::sessions::Idle`].
+        let owed = pace.proposing.saturating_sub(idle.for_how_long());
 
         if !owed.is_zero() {
             tokio::time::sleep(owed.min(pace.poll)).await;
             continue;
         }
 
-        // Quiet, and nothing open — but not a word out of it since it was last
+        // Idle, and nothing open — but not seen at work since it was last
         // stirred, so nothing yet says the stir ever arrived. Which is the
         // shape a session wears while the answer is still on its way to it, and
         // the shape it wears having died waiting for one. They are told apart
-        // by waiting: the first breaks the silence and the second does not.
-        if quiet.since() <= stirred {
+        // by waiting: the first goes back to work and the second does not.
+        //
+        // Seen at work rather than heard from, because a byte is free on a
+        // backend that repaints for ever: it is the same judgement the grace
+        // above is measured by, read as a moment.
+        if idle.since() <= stirred {
             let owed = pace.waking.saturating_sub(stirred.elapsed());
 
             if !owed.is_zero() {

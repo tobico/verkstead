@@ -113,6 +113,25 @@ impl Screen {
         self.vt.dump()
     }
 
+    /// Whether `signature` is drawn anywhere on the grid as it stands.
+    ///
+    /// The drawn frame rather than the bytes that drew it, which is the whole of
+    /// why this is asked here: what a session sent its terminal is escapes and
+    /// overwriting, and what says a backend is sitting at its prompt is the line
+    /// a human would read off the screen. See [`crate::sessions::Idle`], which
+    /// is what asks and why.
+    ///
+    /// The buffer in front, at that. A full-screen interface draws on the
+    /// alternate one, and the ordinary buffer under it holds whatever the
+    /// terminal was showing before that interface started.
+    ///
+    /// A line at a time, because a grid is lines: a signature that wrapped over
+    /// the edge is one this does not find, and a backend whose prompt needs a
+    /// hundred columns to say so is one whose signature is too long.
+    pub(crate) fn showing(&self, signature: &str) -> bool {
+        self.vt.view().any(|line| line.text().contains(signature))
+    }
+
     /// How wide the grid is, and how tall.
     pub(crate) fn size(&self) -> (u16, u16) {
         let (columns, rows) = self.vt.size();
@@ -214,6 +233,15 @@ impl Live {
     /// caught up — see [`WATCHER_BACKLOG`].
     pub(crate) fn painted(&self) -> Shown {
         self.held().painted()
+    }
+
+    /// Whether the session is drawing `signature` — see [`Screen::showing`].
+    ///
+    /// Under the same lock the relay writes the grid under, so what is asked
+    /// about is the frame the text just fed has landed on rather than the one
+    /// before it.
+    pub(crate) fn showing(&self, signature: &str) -> bool {
+        self.held().showing(signature)
     }
 
     /// A watcher put `input` in: put it in at the session's own terminal.

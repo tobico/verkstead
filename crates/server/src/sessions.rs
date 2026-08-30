@@ -58,7 +58,8 @@ const CHUNK: usize = 8 * 1024;
 /// delay and two orders of magnitude off what a redraw costs.
 const FLUSH_EVERY: Duration = Duration::from_millis(500);
 
-/// How long a session has to print nothing before it is called idle.
+/// How long a session judged on what it prints has to print nothing before it
+/// is called idle.
 ///
 /// Short, because what it measures is a terminal rather than an agent: claude
 /// repaints its spinner many times a second while it is working, so a session
@@ -66,7 +67,12 @@ const FLUSH_EVERY: Duration = Duration::from_millis(500);
 /// a Blocking Ask, or waiting for the human. Three seconds is clear
 /// of the longest gap a working session leaves, and short enough that the mark
 /// says so while it still matters.
-pub(crate) const IDLE_AFTER: Duration = Duration::from_secs(3);
+///
+/// Claude's, and calibrated on what claude draws. A backend that repaints a
+/// full screen for ever is never silent for three seconds while it works and
+/// need not be silent at all when it stops, so this says nothing about one —
+/// see [`Judged`], which is where a session's backend decides how it is read.
+const IDLE_AFTER: Duration = Duration::from_secs(3);
 
 /// How a Conversation's agents are run: the home a sandbox reads the machine's
 /// identity out of, where Verkstead itself is reachable from inside one, the
@@ -119,6 +125,22 @@ pub struct Agents {
     /// and everything from the sandbox outwards is the same code the server
     /// runs.
     agent: Vec<String>,
+
+    /// What a TUI backend's session has on its Screen when it is sitting at its
+    /// prompt, where anything is standing where that backend's binary goes — see
+    /// [`Agents::at_the_prompt`], whose answer this stands in for.
+    ///
+    /// A field for [`Agents::agent`]'s reason. What this module has to be able
+    /// to prove is that a session drawing a full screen is judged idle off the
+    /// frame rather than off its silence, and the backends that draw one are
+    /// exactly the ones no test can launch — so a test stands a program that
+    /// draws one where the backend goes, and hands its signature in here.
+    ///
+    /// `None` in a server, which is every signature a backend ships with — see
+    /// [`Agents::at_the_prompt`], where they are kept. Claude is judged on its
+    /// silence whatever this holds: three seconds is its answer, and it draws no
+    /// screen to read a prompt off.
+    signature: Option<String>,
 
     /// How fast the runner works the backlog these sessions are launched for.
     ///
@@ -180,6 +202,7 @@ impl Agents {
             handoffs,
             settings,
             agent,
+            signature: None,
             pace: Pace::default(),
         }
     }
@@ -187,6 +210,15 @@ impl Agents {
     /// The same, working the backlog at `pace` — see [`Agents::pace`].
     pub fn at_pace(self, pace: Pace) -> Agents {
         Agents { pace, ..self }
+    }
+
+    /// The same, with `signature` where a TUI backend's own goes — see
+    /// [`Agents::signature`].
+    pub fn drawing(self, signature: &str) -> Agents {
+        Agents {
+            signature: Some(signature.to_owned()),
+            ..self
+        }
     }
 
     /// What a session under `pairing` on `prompt`, named `session`, runs.
@@ -241,6 +273,42 @@ impl Agents {
         );
 
         argv
+    }
+
+    /// What a session of `agent_type` has on its Screen when it is at its
+    /// prompt, and `None` where its idle is the silence itself.
+    ///
+    /// **One constant per backend**, the same bargain the usage-limit phrase
+    /// makes — see [`crate::limits`]: the wording is the backend's and it will
+    /// move, so it is kept in one place and costs one edit when it does. What
+    /// puts a signature that has drifted in front of the human rather than
+    /// leaving a session nothing ever catches is the long-stop behind it — see
+    /// [`Judged::Drawing`].
+    ///
+    /// Claude has none, and none rather than an unknown one: it draws inline
+    /// rather than repainting a screen, so there is no frame to read a prompt
+    /// off, and three seconds of silence is an answer that works.
+    ///
+    /// Codex's is the stage that launches the real binary rather than this one.
+    /// What runs where it goes until then is a stub, which is judged on its
+    /// silence like anything else that prints line by line — and the suite hands
+    /// this one the signature the stub it stands there draws.
+    fn at_the_prompt(&self, agent_type: store::AgentType) -> Option<&str> {
+        match agent_type {
+            store::AgentType::Claude => None,
+            store::AgentType::Codex => self.signature.as_deref(),
+        }
+    }
+
+    /// And how a session of that type is judged idle — see [`Judged`].
+    fn judged(&self, agent_type: store::AgentType) -> Judged {
+        match self.at_the_prompt(agent_type) {
+            Some(signature) => Judged::Drawing {
+                signature: signature.to_owned(),
+                long_stop: self.pace.long_stop,
+            },
+            None => Judged::Printing,
+        }
     }
 }
 
@@ -312,8 +380,8 @@ pub(crate) struct Session {
     /// The Timeline Event it is printing into.
     pub(crate) event_id: i64,
 
-    /// How long it has been printing nothing.
-    pub(crate) quiet: Quiet,
+    /// Whether it has stopped, and how long ago — see [`Idle`].
+    pub(crate) idle: Idle,
 
     /// Word that it is over, and how it ended.
     ///
@@ -400,23 +468,73 @@ impl Session {
     }
 }
 
-/// How long a session has been printing nothing, and whether it has ever
-/// printed anything at all.
+/// Whether a session is idle, how long it has been, and whether it has ever
+/// said anything at all.
+///
+/// **One judgement, read by everything that has ever asked**: the mark on the
+/// sidebar and on the Conversation, every ender's grace, and Rescue — both the
+/// span it waits out and the moment it proves a stir by. What makes it one
+/// judgement rather than a rule per caller is that idle means different things
+/// on different backends, and a caller keeping its own reading of the clock
+/// would be a backend judged one way by the sidebar and another by the thing
+/// that ends it. See [`Judged`].
 ///
 /// Shared with the relay, which puts it back to now on everything that arrives.
 /// That is what makes a grace period safe to end a session on: a session still
-/// talking is never one to end, however long it goes on for, and the work a
+/// working is never one to end, however long it goes on for, and the work a
 /// session does after its commit — a message, a summary, a push — runs to
 /// completion rather than being cut off mid-sentence.
 ///
-/// The second half is for the driver that has nothing else to read. A session
+/// The last part is for the driver that has nothing else to read. A session
 /// ended on its own quiet is one being taken at its word, and a session that
-/// never said a word has given none: see [`Quiet::said_anything`].
+/// never said a word has given none: see [`Idle::said_anything`].
 #[derive(Debug, Clone)]
-pub(crate) struct Quiet(Arc<Mutex<Silence>>);
+pub(crate) struct Idle {
+    /// How this session's backend is read — the same for the whole of its life,
+    /// because it is a fact about which agent is running.
+    judged: Judged,
 
-/// What the clock holds: when the session last said anything, and whether that
-/// was ever it saying anything rather than it starting.
+    /// And what the relay has seen of it, which is what the judgement is made
+    /// of.
+    silence: Arc<Mutex<Silence>>,
+}
+
+/// How a session's backend says it has stopped.
+///
+/// Two readings of the one terminal, and which of them a session gets is its
+/// agent type's — see [`Agents::at_the_prompt`], which is where each backend's
+/// answer is kept.
+#[derive(Debug, Clone)]
+enum Judged {
+    /// By what it prints: [`IDLE_AFTER`] with nothing arriving. Claude's, and
+    /// the rule every session was read by before there was a second backend.
+    Printing,
+
+    /// By what it draws: this backend's at-the-prompt signature standing on the
+    /// Screen, with a long byte-quiet behind it.
+    ///
+    /// A full-screen interface is never reliably silent — it repaints while it
+    /// works and may go on repainting its prompt after it has stopped — so
+    /// silence says nothing about one either way, and what does is the frame it
+    /// leaves on the terminal.
+    ///
+    /// **The long-stop is what a drifted signature lands in.** The wording is
+    /// the backend's and will move, and a signature that no longer matches
+    /// reads as a session that never stops: Rescue's precondition is idle,
+    /// every ender waits on the same judgement, and no session carries a cap on
+    /// its life. So a session that has printed nothing for `long_stop` is idle
+    /// whatever its screen says, and what the human gets is the ordinary
+    /// would-not-ask stop — one slow round rather than never. See
+    /// [`crate::runner::Pace::long_stop`].
+    Drawing {
+        signature: String,
+        long_stop: Duration,
+    },
+}
+
+/// What the clock holds: when the session last printed anything, whether that
+/// was ever it saying anything rather than it starting, and when the judgement
+/// last turned to idle.
 #[derive(Debug)]
 struct Silence {
     /// The moment it was last put back — the session's last word, or the moment
@@ -425,26 +543,121 @@ struct Silence {
 
     /// Whether it has said anything since it started.
     spoke: bool,
+
+    /// When the judgement last said the session had stopped, and `None` while it
+    /// says the session is at work.
+    ///
+    /// Only ever moved by something arriving, because that is the only thing
+    /// that changes what is drawn: a prompt redrawn is the same silence going
+    /// on rather than a new one, so a signature already standing keeps the
+    /// moment it first stood.
+    ///
+    /// Never set at all under [`Judged::Printing`], where the silence itself is
+    /// the judgement and [`Silence::at`] is the whole of it.
+    idling_since: Option<Instant>,
 }
 
-impl Quiet {
-    fn started() -> Quiet {
-        Quiet(Arc::new(Mutex::new(Silence {
-            at: Instant::now(),
-            spoke: false,
-        })))
+impl Idle {
+    fn started(judged: Judged) -> Idle {
+        Idle {
+            judged,
+            silence: Arc::new(Mutex::new(Silence {
+                at: Instant::now(),
+                spoke: false,
+                idling_since: None,
+            })),
+        }
     }
 
-    /// The session said something, so it has been quiet for no time at all.
-    fn spoke(&self) {
-        let mut silence = self.held();
+    /// The session printed, and `screen` has what it printed on it: put the
+    /// clock back, and read the judgement off the frame it left.
+    ///
+    /// After the Screen has been fed rather than before it, which is the whole
+    /// of what makes the reading exact — the frame a backend's prompt appears on
+    /// is drawn by the very text this is being told about.
+    fn printed(&self, screen: &Live) {
+        // Outside the lock, because it takes the Screen's: two locks held at
+        // once are two locks that can be taken in two orders.
+        let at_the_prompt = match &self.judged {
+            Judged::Printing => false,
+            Judged::Drawing { signature, .. } => screen.showing(signature),
+        };
 
-        silence.at = Instant::now();
+        let mut silence = self.silence();
+        let now = Instant::now();
+
+        silence.at = now;
         silence.spoke = true;
+
+        if at_the_prompt {
+            silence.idling_since.get_or_insert(now);
+        } else {
+            silence.idling_since = None;
+        }
     }
 
+    /// Whether the session is idle as of now.
+    ///
+    /// What the sidebar and the Conversation's own row are drawn from, and the
+    /// mark the relay announces the crossing of.
+    pub(crate) fn idling(&self) -> bool {
+        let silence = self.silence();
+
+        match &self.judged {
+            Judged::Printing => silence.at.elapsed() >= IDLE_AFTER,
+            Judged::Drawing { long_stop, .. } => {
+                silence.idling_since.is_some() || silence.at.elapsed() >= *long_stop
+            }
+        }
+    }
+
+    /// And how long it has been, which is what every grace is measured against.
+    ///
+    /// [`Duration::ZERO`] where it is not idle at all: a backend judged on its
+    /// screen is at work however long it has been between frames, which is the
+    /// point of judging it that way — a TUI that falls silent for a moment
+    /// mid-turn would otherwise be reaped out from under its own work.
+    ///
+    /// Past the long-stop the whole silence counts, rather than the part of it
+    /// after the long-stop: the session *was* stopped for all of it, and this is
+    /// the moment Verkstead is willing to say so.
     pub(crate) fn for_how_long(&self) -> Duration {
-        self.held().at.elapsed()
+        let silence = self.silence();
+
+        match &self.judged {
+            Judged::Printing => silence.at.elapsed(),
+            Judged::Drawing { long_stop, .. } => {
+                let drawn = silence
+                    .idling_since
+                    .map(|since| since.elapsed())
+                    .unwrap_or_default();
+                let printed = silence.at.elapsed();
+
+                if printed >= *long_stop {
+                    drawn.max(printed)
+                } else {
+                    drawn
+                }
+            }
+        }
+    }
+
+    /// When it will be idle if nothing else arrives, for whoever wants to sleep
+    /// until it is rather than to keep asking.
+    ///
+    /// A moment already past where it is idle now, which is a sleep that is over
+    /// before it starts — exactly what a caller waiting for the crossing wants
+    /// of a session that has already crossed.
+    pub(crate) fn crossing(&self) -> Instant {
+        let silence = self.silence();
+
+        match &self.judged {
+            Judged::Printing => silence.at + IDLE_AFTER,
+            Judged::Drawing { long_stop, .. } => match silence.idling_since {
+                Some(since) => since,
+                None => silence.at + *long_stop,
+            },
+        }
     }
 
     /// Whether the session has said anything at all since it started.
@@ -454,30 +667,41 @@ impl Quiet {
     /// propose-then-fix rule. A session that reports through the repository has a
     /// commit or an artifact to be read as done; one that reports through nothing
     /// but its own words has said nothing, and *nothing* is not a report.
+    ///
+    /// Every byte counts here, whatever the judgement makes of it: what this
+    /// asks is whether the session ever got going, and a frame drawn is a
+    /// session that did.
     pub(crate) fn said_anything(&self) -> bool {
-        self.held().spoke
+        self.silence().spoke
     }
 
-    /// When it last said anything, for whoever wants to sleep until it has been
-    /// quiet long enough rather than to ask how long it has been.
+    /// When it was last seen at work, for whoever wants to know whether that was
+    /// *after* something else — an answer handed to the session, a line typed
+    /// into it — which is a question about the order of two moments rather than
+    /// about a span. See [`crate::rescues::until_it_will_not_ask`], where a
+    /// session seen working later than the stir is the proof that the stir
+    /// reached it at all.
     ///
-    /// And for whoever wants to know whether a word came *after* something else
-    /// — an answer handed to the session, a line typed into it — which is a
-    /// question about the order of two moments rather than about a span. See
-    /// [`crate::rescues::until_it_will_not_ask`], where a word later than the
-    /// stir is the proof that the stir reached the session at all.
+    /// The same judgement read as a moment rather than as a span, and it has to
+    /// be: a byte is free on a backend that repaints, so a session's last *word*
+    /// would prove nothing there.
     ///
-    /// The moment it was launched, where it has said nothing yet: a session
-    /// that never spoke has been quiet since it started, which is exactly what
-    /// both readers want of it.
+    /// The moment it was launched, where it has done nothing yet: a session that
+    /// never got going has been stopped since it started, which is exactly what
+    /// this reader wants of one.
     pub(crate) fn since(&self) -> Instant {
-        self.held().at
+        let silence = self.silence();
+
+        match &self.judged {
+            Judged::Printing => silence.at,
+            Judged::Drawing { .. } => silence.idling_since.unwrap_or(silence.at),
+        }
     }
 
-    fn held(&self) -> std::sync::MutexGuard<'_, Silence> {
-        self.0
+    fn silence(&self) -> std::sync::MutexGuard<'_, Silence> {
+        self.silence
             .lock()
-            .expect("a session's quiet clock is not poisoned")
+            .expect("a session's idle clock is not poisoned")
     }
 }
 
@@ -528,7 +752,7 @@ struct Running {
 
     /// The two halves a driver is handed, kept so that a session already running
     /// can be given one — see [`Sessions::following`].
-    quiet: Quiet,
+    idle: Idle,
     ended: watch::Receiver<Option<Ended>>,
 
     /// Whether the process has gone, set the moment the relay reads
@@ -638,23 +862,24 @@ impl Sessions {
             .unwrap_or(store::Channel::Blocking)
     }
 
-    /// Whether a Conversation's running session has stopped printing.
+    /// Whether a Conversation's running session has stopped — its backend's own
+    /// judgement of that, see [`Idle`].
     ///
     /// `false` for a Conversation with nothing running, which is the answer
     /// that reads right wherever it is asked: idle is a thing a *running*
     /// session is, and a session that has ended is neither.
     ///
     /// Read at the moment a Conversation is drawn rather than stored, as
-    /// [`Sessions::writing`] is and for the same reason — how long a process has
-    /// been quiet is a fact about a process. The crossing is announced as it
-    /// happens too, because a session going quiet is exactly when it stops
+    /// [`Sessions::writing`] is and for the same reason — whether a process has
+    /// stopped is a fact about a process. The crossing is announced as it
+    /// happens too, because a session going idle is exactly when it stops
     /// producing the Nudges an open page re-reads on; see [`relay`].
     pub(crate) fn idling(&self, conversation_id: i64) -> bool {
         self.running
             .lock()
             .expect("the sessions registry is not poisoned")
             .get(&conversation_id)
-            .is_some_and(|running| running.quiet.for_how_long() >= IDLE_AFTER)
+            .is_some_and(|running| running.idle.idling())
     }
 
     /// What a Conversation's running session is drawing, or `None` where the
@@ -711,7 +936,7 @@ impl Sessions {
             .get(&conversation_id)
             .map(|running| Session {
                 event_id: running.event_id,
-                quiet: running.quiet.clone(),
+                idle: running.idle.clone(),
                 ended: running.ended.clone(),
             })
     }
@@ -731,19 +956,19 @@ impl Sessions {
             .collect()
     }
 
-    /// And which of those have stopped printing — [`Sessions::idling`] for the
-    /// whole sidebar at once, and one lock rather than one per row for the same
-    /// reason [`Sessions::working`] is.
+    /// And which of those have stopped — [`Sessions::idling`] for the whole
+    /// sidebar at once, and one lock rather than one per row for the same reason
+    /// [`Sessions::working`] is.
     ///
     /// A subset of [`Sessions::working`] by construction, because both are the
     /// same register read: idle is a thing a running session is, and a
     /// Conversation with nothing in it is in neither set.
-    pub(crate) fn quiet(&self) -> HashSet<i64> {
+    pub(crate) fn idle(&self) -> HashSet<i64> {
         self.running
             .lock()
             .expect("the sessions registry is not poisoned")
             .iter()
-            .filter(|(_, running)| running.quiet.for_how_long() >= IDLE_AFTER)
+            .filter(|(_, running)| running.idle.idling())
             .map(|(conversation_id, _)| *conversation_id)
             .collect()
     }
@@ -976,11 +1201,14 @@ impl Sessions {
 
         let (stop, stopping) = oneshot::channel();
 
-        // The two halves of what a driver holds a session by: the clock the
+        // The two halves of what a driver holds a session by: the judgement the
         // relay keeps as it reads, and the word that the relay has finished. A
         // watch rather than a oneshot, because one session may be handed to more
         // than one driver over its life — see [`Sessions::following`].
-        let quiet = Quiet::started();
+        //
+        // How this one is read is settled here and never again: it is the
+        // backend's, and the backend is the Pairing's Profile.
+        let idle = Idle::started(agents.judged(pairing.profile.agent_type()));
         let (over, ended) = watch::channel(None);
 
         // And the third: whether the process itself has gone. Set the moment the
@@ -1014,7 +1242,7 @@ impl Sessions {
                 let sessions = self.clone();
                 let pool = pool.clone();
                 let nudges = nudges.clone();
-                let quiet = quiet.clone();
+                let idle = idle.clone();
                 let gone = gone.clone();
 
                 async move {
@@ -1048,7 +1276,7 @@ impl Sessions {
                             event_id,
                         },
                         &mut launched,
-                        &quiet,
+                        &idle,
                         tail,
                         limits,
                         stopping,
@@ -1127,7 +1355,7 @@ impl Sessions {
                     stop,
                     relay,
                     screen,
-                    quiet: quiet.clone(),
+                    idle: idle.clone(),
                     ended: ended.clone(),
                     gone,
                     agent_type: pairing.profile.agent_type(),
@@ -1146,7 +1374,7 @@ impl Sessions {
 
         Ok(Some(Session {
             event_id,
-            quiet,
+            idle,
             ended,
         }))
     }
@@ -1277,26 +1505,30 @@ struct Printing {
 /// amount of the session's talking. `tail` is `None` where there is no log to
 /// look for, which is every session Verkstead could not name.
 ///
-/// `quiet` is put back to now on everything read rather than on everything
-/// written down: what it is measuring is whether the session is still talking,
-/// and a redraw the summariser throws away is a session talking.
+/// `idle` is told about everything read rather than everything written down:
+/// what it is judging is whether the session is still working, and a redraw the
+/// summariser throws away is a session working.
 ///
 /// The session's Screen is fed the same text, and immediately rather than every
 /// [`FLUSH_EVERY`]. The store is a record and half a second is nothing to one;
 /// the Screen is a terminal somebody may be watching, and half a second is a
 /// long time to watch a terminal not move.
 ///
+/// And the Screen is fed *before* the judgement is told, because on a backend
+/// judged by what it draws the two are one act: the frame that says a session is
+/// back at its prompt is drawn by the very text that arrived.
+///
 /// And `limits` is fed the same text a third time, watching for the one thing a
 /// session says that is about the account rather than about the work — see
 /// [`crate::limits`].
 ///
 /// The one thing this loop announces that is not something it wrote down is the
-/// session falling quiet, and then waking: a page draws a session that has
-/// stopped differently from one getting on with it, and going quiet is
+/// session falling idle, and then waking: a page draws a session that has
+/// stopped differently from one getting on with it, and going idle is
 /// precisely when a session stops producing the Nudges that would carry the
 /// news. So both crossings are announced on the Conversation's own kind, once
-/// each — into idle [`IDLE_AFTER`] after the last thing read, and out of it on
-/// the first thing read after that. The waking one is for the sidebar alone:
+/// each — into idle when the judgement says so, and out of it on the first thing
+/// read that says it is working again. The waking one is for the sidebar alone:
 /// what a session prints is announced on the Screen's kind, which reaches the
 /// Conversation being watched and not the list of them.
 ///
@@ -1312,7 +1544,7 @@ async fn relay(
     nudges: &Nudges,
     printing: Printing,
     session: &mut Launched,
-    quiet: &Quiet,
+    idle: &Idle,
     mut tail: Option<Tail>,
     mut limits: crate::limits::Watch,
     mut stopping: oneshot::Receiver<()>,
@@ -1335,14 +1567,14 @@ async fn relay(
     let mut tailed = Instant::now();
     let mut ending = false;
 
-    // Whether the session has already been said to be quiet, so that it is said
-    // once per silence rather than every time round the loop.
-    let mut idle = false;
+    // Whether the session has already been said to have stopped, so that it is
+    // said once per silence rather than every time round the loop.
+    let mut announced = false;
 
     loop {
         let deadline = tokio::time::Instant::from_std(flushed + FLUSH_EVERY);
         let following = tokio::time::Instant::from_std(tailed + FLUSH_EVERY);
-        let idling = tokio::time::Instant::from_std(quiet.since() + IDLE_AFTER);
+        let idling = tokio::time::Instant::from_std(idle.crossing());
 
         tokio::select! {
             read = terminal.read(&mut buffer) => match read {
@@ -1350,22 +1582,29 @@ async fn relay(
                 // gone.
                 Ok(0) => break,
                 Ok(taken) => {
-                    quiet.spoke();
+                    let text = reading.take(&buffer[..taken]);
+
+                    // The grid first and the judgement off it, which on a
+                    // backend read by what it draws is one act — see [`Idle`].
+                    screen.printed(&text);
+                    idle.printed(screen);
+
                     // Coming back out of the silence is a crossing too, and the
                     // sidebar hears about it on nothing else: what a session
                     // prints is announced on the Screen's kind, which reaches
                     // the Conversation being watched rather than the list of
-                    // them. Said once, on the way out.
-                    if idle {
-                        idle = false;
+                    // them. Said once, on the way out — and only where what
+                    // arrived was the session going back to work, because a TUI
+                    // repainting the prompt it is sitting at has printed
+                    // without waking.
+                    if announced && !idle.idling() {
+                        announced = false;
 
                         nudges.announce(Nudge::Conversation {
                             conversation: printing.conversation_id,
                         });
                     }
 
-                    let text = reading.take(&buffer[..taken]);
-                    screen.printed(&text);
                     limits.printed(&text);
                     pending.push_str(&text);
                 }
@@ -1422,8 +1661,8 @@ async fn relay(
 
                 tailed = Instant::now();
             }
-            _ = tokio::time::sleep_until(idling), if !idle => {
-                idle = true;
+            _ = tokio::time::sleep_until(idling), if !announced => {
+                announced = true;
 
                 // The row on the Timeline and the sidebar card alike, which is
                 // what the Conversation's own kind reaches. Nothing was written
