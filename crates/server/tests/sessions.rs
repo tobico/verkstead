@@ -3034,6 +3034,55 @@ async fn a_codex_session_follows_the_rollout_that_names_its_own_worktree() {
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
+/// And what the row beside that session shows is read off the same rollout: how
+/// many turns its conversation has taken, and the last thing it said.
+///
+/// Both off the reading the Transcript pane draws, which is what keeps a Codex
+/// session's row saying what a Claude session's row says. The lines codex
+/// writes twice are what proves it: the turn the screen drew is counted once
+/// and quoted once, and the same turn again as the model was sent it is
+/// bookkeeping and neither.
+#[tokio::test]
+async fn a_codex_sessions_row_is_summarised_from_the_rollout_the_pane_draws() {
+    let fixture = grilling_on_codex(
+        r#"
+        day=$HOME/.codex/sessions/$(date +%Y/%m/%d)
+        mkdir -p "$day"
+        log=$day/rollout-2026-08-30T17-47-02-cccc.jsonl
+
+        printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$(pwd)" > "$log"
+        printf '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u-1","content":[{"type":"text","text":"Where should the counter live?"}]}}}\n' >> "$log"
+        printf '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"m-1","content":[{"type":"Text","text":"In the store, beside the window it counts over."}]}}}\n' >> "$log"
+        printf '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1240}}}}\n' >> "$log"
+        printf '{"type":"response_item","payload":{"type":"message","id":"m-1","role":"assistant","content":[{"type":"output_text","text":"In the store, beside the window it counts over."}]}}\n' >> "$log"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let summary = fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| !output.latest.is_empty())
+                .cloned()
+        })
+        .await;
+
+    assert_eq!(
+        summary.latest, "In the store, beside the window it counts over.",
+        "the row quotes what the agent said and not what a tool or the backend did"
+    );
+    assert_eq!(
+        summary.turns,
+        Some(2),
+        "the turn put to it and the turn it took — and neither the token count \
+         nor the same turn over again as the model was sent it"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
 /// that is a fault: it is every stub agent the test suite runs, and every
 /// backend that keeps no such record. What those sessions said is the Capture,
 /// which is a complete record on its own.

@@ -7,6 +7,23 @@
 //! nothing here recognises is still on the Transcript, and is still shown — as
 //! the JSON it is.
 //!
+//! **Two backends, and the line says which.** Claude Code writes a line per
+//! thing said; codex writes a rollout, whose lines are a timestamp, an ordinal
+//! and a `type` around a payload. Nothing has to be told which is which: the
+//! kinds are disjoint, so a line falls to the reader that knows its own kind
+//! and to the fold below both where neither does. The same lines are rendered
+//! in three places and none of them carries the agent type, which is what makes
+//! reading it off the line the only answer that works everywhere.
+//!
+//! **A rollout writes every turn down twice, and one of the two is the
+//! conversation.** Its `response_item` lines are what the model was sent — the
+//! developer preamble and the environment block among them — and its `event_msg`
+//! lines are what the TUI drew. The drawn one is what the pane draws, because it
+//! is what the human at that terminal would have seen; rendering both would
+//! double every turn and open every Transcript on pages of injected prompt. The
+//! other stream folds away under its own name, where nothing is hidden and it
+//! opens for whoever wants it.
+//!
 //! **Split on the content, not the line.** A tool's answer arrives inside a line
 //! the log types `user`, which is the same type a turn put by the human arrives
 //! under. Keying off the type alone would draw a directory listing as though a
@@ -35,7 +52,9 @@
 //! JSON it is. One folded away silently would be a turn with a hole in it,
 //! which is what ADR 0006's treatment is there to prevent. A line that is not
 //! JSON at all, and a line that does not say what type it is, stay inline for
-//! the same reason — neither has a name to be filed under.
+//! the same reason — neither has a name to be filed under. A rollout's item is
+//! a block by this reckoning: it is one thing the screen drew inside the event
+//! that says it was drawn.
 //!
 //! **A reading can be carried on.** A running session's Transcript is re-read
 //! every time it says anything, which late in a session is megabytes twice a
@@ -287,6 +306,31 @@ const BOOKKEEPING: &[&str] = &[
     "system",
 ];
 
+/// The same for a rollout: the kinds of line codex writes that are not the
+/// conversation it drew.
+///
+/// `response_item` is the largest of them and the one that matters most, since
+/// it is the whole of the talk over again as the model was sent it — see this
+/// module's own documentation. The rest are the session's own record of itself:
+/// the meta line it opens with, the context each turn ran under, the state of
+/// the world it was given, what it scored a command's risk at, what it said to
+/// another agent, and the summary it replaced a long conversation with.
+///
+/// A closed list and a fall-back past it, exactly as above: codex adds kinds
+/// without announcing them — `world_state` was not in the brief this backend was
+/// built from — and one nobody here has heard of folds away under its own name
+/// rather than standing in the conversation (ADR 0006).
+const ROLLOUT: &[&str] = &[
+    "compacted",
+    "inter_agent_communication",
+    "inter_agent_communication_metadata",
+    "response_item",
+    "security_risk_score",
+    "session_meta",
+    "turn_context",
+    "world_state",
+];
+
 /// The keys of a tool's input that say what the call was about, best first.
 ///
 /// Keys rather than tools. Verkstead does not know what tools a session has —
@@ -317,24 +361,27 @@ const ABOUT_LIMIT: usize = 120;
 /// its Timeline row and the evidence a stop's Notice carries, and both of those
 /// are asking what the session last *said*.
 ///
+/// The same reading the pane draws, as [`turns`] is: the lines go through
+/// [`read`], and [`Reads::Quoting`] takes the prose out of it unrendered.
+/// Reading it a second way would be a second answer to what counts as the
+/// agent's own words, and two backends' worth of that is two places for the two
+/// to come apart.
+///
 /// Markdown as it stands rather than rendered, because neither of those two
 /// draws HTML: a Timeline row is one line of text and evidence is a block of it.
 pub fn statements(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .filter(|entry| entry["type"].as_str() == Some("assistant"))
-        .flat_map(|entry| {
-            let Some(blocks) = entry["message"]["content"].as_array() else {
-                return Vec::new();
-            };
+    let mut reading = Reading::new(Cursor::default(), Reads::Quoting);
 
-            blocks
-                .iter()
-                .filter(|block| block["type"].as_str() == Some("text"))
-                .map(|block| block["text"].as_str().unwrap_or_default().trim().to_owned())
-                .filter(|said| !said.is_empty())
-                .collect()
+    for line in lines {
+        read(line, &mut reading);
+    }
+
+    reading
+        .turns
+        .into_iter()
+        .filter_map(|turn| match turn {
+            Turn::Prose(Prose { html, .. }) => Some(html),
+            _ => None,
         })
         .collect()
 }
@@ -455,6 +502,12 @@ enum Reads {
     /// The turns alone. Everything rendered comes out empty, and nothing else
     /// about the reading changes.
     Counting,
+
+    /// The prose as the agent wrote it, for the row and the Notice that quote
+    /// the session in a line. Markdown rather than HTML, and everything that is
+    /// not prose comes out empty the way counting leaves it — see
+    /// [`statements`].
+    Quoting,
 }
 
 impl Reading {
@@ -542,7 +595,10 @@ fn read(line: &str, into: &mut Reading) {
     match entry["type"].as_str() {
         Some("assistant") => said(&entry, into),
         Some("user") => put(&entry, into),
-        Some(kind) if BOOKKEEPING.contains(&kind) => into.keep(kind.to_owned(), raw(&entry, reads)),
+        Some(EVENT_MSG) => drawn(&entry, into),
+        Some(kind) if BOOKKEEPING.contains(&kind) || ROLLOUT.contains(&kind) => {
+            into.keep(kind.to_owned(), raw(&entry, reads))
+        }
         // And a whole line of a kind nobody here has heard of, the same way:
         // folded under the name the log gave it rather than stood in the
         // conversation — see [`BOOKKEEPING`].
@@ -639,6 +695,7 @@ fn rendered(markdown: &str, reads: Reads) -> Option<String> {
     match (markdown.trim().is_empty(), reads) {
         (true, _) => None,
         (false, Reads::Counting) => Some(String::new()),
+        (false, Reads::Quoting) => Some(markdown.trim().to_owned()),
         (false, Reads::Drawing) => Some(crate::markdown::to_html(markdown)),
     }
 }
@@ -653,7 +710,7 @@ fn called(block: &Value, reads: Reads) -> ToolUse {
         call: text(block["id"].as_str().unwrap_or_default(), reads),
         about: match reads {
             Reads::Drawing => about(input),
-            Reads::Counting => String::new(),
+            _ => String::new(),
         },
         input: raw(input, reads),
     }
@@ -688,7 +745,7 @@ fn one_line(text: &str) -> String {
 /// a screenshot arrives — keeps the text of it and says what the rest was,
 /// because a picture nobody can draw here is still something that happened.
 fn answered(block: &Value, reads: Reads) -> ToolResult {
-    if reads == Reads::Counting {
+    if reads != Reads::Drawing {
         return ToolResult {
             id: UNPLACED,
             call: String::new(),
@@ -717,6 +774,307 @@ fn answered(block: &Value, reads: Reads) -> ToolResult {
     }
 }
 
+/// What codex types the lines its TUI drew from, and what it types the event
+/// saying it finished drawing one item of a turn.
+///
+/// Somebody else's spellings, named for the reason [`SESSION_META`] is: one
+/// place to edit when they move.
+const EVENT_MSG: &str = "event_msg";
+const ITEM_COMPLETED: &str = "item_completed";
+
+/// What a tool item calls the status of a call that went through. Codex spells
+/// the rest of its statuses differently from item to item, and this is the one
+/// word all of them share.
+const COMPLETED: &str = "completed";
+
+/// One line of what codex drew: an item of the conversation, or the session's
+/// own bookkeeping about the turn it was drawing.
+///
+/// Filed under the event's own name rather than the line's. Every one of these
+/// lines is typed `event_msg`, so a group of them all called that would say
+/// nothing about any of them — where `token_count` and `task_complete` say what
+/// they are and are findable by it. A line whose payload never said what it was
+/// keeps the name the line had, which is the only name it has.
+fn drawn(entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+    let payload = &entry["payload"];
+
+    match payload["type"].as_str() {
+        Some(ITEM_COMPLETED) => match payload.get("item") {
+            Some(item) => completed(item, into),
+            // An event that says an item was drawn and names no item drew
+            // nothing, whatever else it is.
+            None => into.keep(ITEM_COMPLETED.to_owned(), raw(entry, reads)),
+        },
+        Some(event) => into.keep(event.to_owned(), raw(entry, reads)),
+        None => into.keep(EVENT_MSG.to_owned(), raw(entry, reads)),
+    }
+}
+
+/// One item of the conversation as the TUI drew it, put where it belongs.
+///
+/// The kinds are codex's own spellings, and an item of one nothing here knows
+/// stays where it was drawn as the JSON it is. That is the opposite of what a
+/// line of an unknown kind does, and deliberately: an item is part of a turn
+/// rather than a line beside it, and one folded away silently would leave a
+/// hole in the conversation (ADR 0006).
+fn completed(item: &Value, into: &mut Reading) {
+    let reads = into.reads;
+
+    match item["type"].as_str() {
+        Some("UserMessage") => {
+            if let Some(html) = rendered(&spoken(item), reads) {
+                into.take(Turn::Put(Put { id: UNPLACED, html }));
+            }
+        }
+        Some("AgentMessage") => {
+            if let Some(html) = rendered(&spoken(item), reads) {
+                into.take(Turn::Prose(Prose { id: UNPLACED, html }));
+            }
+        }
+        Some("Reasoning") => {
+            if let Some(html) = rendered(&thought(item), reads) {
+                into.take(Turn::Reasoning(Reasoning { id: UNPLACED, html }));
+            }
+        }
+        _ => match tool(item, reads) {
+            Some(called) => called.take(item, into),
+            None => into.take(unread(item, reads)),
+        },
+    }
+}
+
+/// The words of a message item, whichever of the two kinds it is.
+///
+/// What is read is the `text` an element of the content carries rather than
+/// what the element calls itself, because the two kinds spell that differently
+/// — codex types a person's element `text` and the agent's `Text` — and the
+/// words are in the same place either way. An element with no words in it says
+/// what it was instead, the way a tool's answer does: a picture nobody can draw
+/// here is still something that was said.
+fn spoken(item: &Value) -> String {
+    let Some(content) = item["content"].as_array() else {
+        return String::new();
+    };
+
+    content
+        .iter()
+        .map(
+            |element| match (element["text"].as_str(), element["type"].as_str()) {
+                (Some(said), _) => said.to_owned(),
+                (None, Some(kind)) => format!("[{kind}]"),
+                (None, None) => String::new(),
+            },
+        )
+        .collect::<Vec<String>>()
+        .join("")
+}
+
+/// The agent's thinking out of a reasoning item: the summary it wrote for the
+/// screen, and the raw chain where the model was asked for that instead and
+/// there is no summary to show.
+fn thought(item: &Value) -> String {
+    let summary = words(&item["summary_text"], "\n\n");
+
+    match summary.is_empty() {
+        true => words(&item["raw_content"], "\n\n"),
+        false => summary,
+    }
+}
+
+/// A tool item read into the two turns the pane draws it as.
+///
+/// Codex writes a call and the answer to it as one item — the command and what
+/// it printed, the tool and what it returned — where Claude Code writes two
+/// lines. The pane draws a card out of a call and an answer naming each other,
+/// so the one item becomes that pair, both carrying the item's own id as the
+/// name that joins them.
+struct Tool {
+    /// What the log calls the tool: the name it gives where it gives one, and
+    /// the item's own kind where the item *is* the tool.
+    name: String,
+
+    /// The one line about it, uncut — [`Tool::take`] cuts it to a row.
+    about: String,
+
+    /// What it was called with.
+    input: String,
+
+    /// What it said back.
+    answer: String,
+
+    /// Whether it failed.
+    failed: bool,
+}
+
+impl Tool {
+    /// The call and the answer to it, taken into the conversation in that
+    /// order.
+    fn take(self, item: &Value, into: &mut Reading) {
+        let call = text(item["id"].as_str().unwrap_or_default(), into.reads);
+
+        into.take(Turn::ToolUse(ToolUse {
+            id: UNPLACED,
+            name: self.name,
+            call: call.clone(),
+            about: one_line(&self.about),
+            input: self.input,
+        }));
+        into.take(Turn::ToolResult(ToolResult {
+            id: UNPLACED,
+            call,
+            failed: self.failed,
+            text: self.answer,
+        }));
+    }
+}
+
+/// A tool item read — and nothing at all for an item that is not a tool, which
+/// is what leaves everything else to be drawn as what it is.
+fn tool(item: &Value, reads: Reads) -> Option<Tool> {
+    let kind = item["type"].as_str()?;
+
+    // The first of `keys` the item carries, which is how an item that says the
+    // same thing under two names — a command's aggregated output and the
+    // formatted output beside it — is read without asking for both.
+    let first = |keys: &[&str]| {
+        text(
+            keys.iter()
+                .find_map(|key| item[*key].as_str())
+                .unwrap_or_default(),
+            reads,
+        )
+    };
+
+    let tool = match kind {
+        "CommandExecution" => Tool {
+            name: text(kind, reads),
+            about: summarised(|| ran(item), reads),
+            input: raw(&item["command"], reads),
+            answer: first(&["aggregated_output", "formatted_output", "stdout"]),
+            failed: failed(item),
+        },
+        "FileChange" => Tool {
+            name: text(kind, reads),
+            about: summarised(|| changed(item), reads),
+            input: raw(&item["changes"], reads),
+            answer: first(&["stdout", "stderr"]),
+            failed: failed(item),
+        },
+        "WebSearch" => Tool {
+            name: text(kind, reads),
+            about: first(&["query"]),
+            input: raw(&item["action"], reads),
+            answer: shown(&item["results"], reads),
+            failed: false,
+        },
+        "McpToolCall" => Tool {
+            name: qualified(item, "server", reads),
+            about: summarised(|| about(&item["arguments"]), reads),
+            input: raw(&item["arguments"], reads),
+            answer: answer(item, "result", reads),
+            failed: failed(item),
+        },
+        "DynamicToolCall" => Tool {
+            name: qualified(item, "namespace", reads),
+            about: summarised(|| about(&item["arguments"]), reads),
+            input: raw(&item["arguments"], reads),
+            answer: answer(item, "content_items", reads),
+            failed: failed(item),
+        },
+        _ => return None,
+    };
+
+    Some(tool)
+}
+
+/// A summary worked out only where somebody is going to read it, which is what
+/// keeps a reading that is only counting from walking a call's arguments.
+fn summarised(said: impl FnOnce() -> String, reads: Reads) -> String {
+    match reads {
+        Reads::Drawing => said(),
+        _ => String::new(),
+    }
+}
+
+/// The name a tool item gives itself: the two halves the log names it in, and
+/// the tool alone where the log named no first half.
+fn qualified(item: &Value, first: &str, reads: Reads) -> String {
+    let tool = item["tool"].as_str().unwrap_or_default();
+
+    summarised(
+        || match item[first].as_str() {
+            Some(prefix) if !prefix.is_empty() => format!("{prefix}.{tool}"),
+            _ => tool.to_owned(),
+        },
+        reads,
+    )
+}
+
+/// What a tool that answers in structure said back: its error where it failed
+/// with one, and what it returned under `key` where it did not.
+fn answer(item: &Value, key: &str, reads: Reads) -> String {
+    match item["error"]["message"].as_str() {
+        Some(message) => text(message, reads),
+        None => shown(&item[key], reads),
+    }
+}
+
+/// JSON laid out to be read, and nothing at all where there is nothing to read
+/// — which is what keeps a tool that answered with nothing from answering
+/// `null`.
+fn shown(value: &Value, reads: Reads) -> String {
+    match value.is_null() {
+        true => String::new(),
+        false => raw(value, reads),
+    }
+}
+
+/// Whether a tool item failed, which is anything the item did not call
+/// completed: a command that came back non-zero, a call the human declined, a
+/// tool that answered with an error.
+fn failed(item: &Value) -> bool {
+    item["status"].as_str() != Some(COMPLETED) || item["success"] == Value::Bool(false)
+}
+
+/// The one line a command execution is summarised by: the command as codex
+/// parsed it for its own screen, and the argv it actually ran where it parsed
+/// nothing — which is a shell, a flag, and the command as one string.
+fn ran(item: &Value) -> String {
+    if let Some(parsed) = item["parsed_cmd"][0]["cmd"].as_str() {
+        return parsed.to_owned();
+    }
+
+    words(&item["command"], " ")
+}
+
+/// And the one line a patch is summarised by: the files it changed.
+fn changed(item: &Value) -> String {
+    item["changes"]
+        .as_object()
+        .map(|changes| {
+            changes
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<&str>>()
+                .join(", ")
+        })
+        .unwrap_or_default()
+}
+
+/// The strings of an array, joined by `between`.
+fn words(value: &Value, between: &str) -> String {
+    value
+        .as_array()
+        .map(|said| {
+            said.iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<&str>>()
+                .join(between)
+        })
+        .unwrap_or_default()
+}
+
 /// Whatever this is, shown as the JSON it is.
 fn unread(value: &Value, reads: Reads) -> Turn {
     Turn::Unread(Unread {
@@ -731,7 +1089,7 @@ fn unread(value: &Value, reads: Reads) -> Turn {
 fn raw(value: &Value, reads: Reads) -> String {
     match reads {
         Reads::Drawing => serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()),
-        Reads::Counting => String::new(),
+        _ => String::new(),
     }
 }
 
@@ -740,7 +1098,7 @@ fn raw(value: &Value, reads: Reads) -> String {
 fn text(said: &str, reads: Reads) -> String {
     match reads {
         Reads::Drawing => said.to_owned(),
-        Reads::Counting => String::new(),
+        _ => String::new(),
     }
 }
 
@@ -1244,5 +1602,294 @@ mod tests {
         ] {
             assert_eq!(rollout_cwd(line), None, "{line:?}");
         }
+    }
+
+    /// A rollout codex 0.149.0 wrote of a session that was asked something,
+    /// thought about it, said what it was going to do, ran a command and
+    /// answered — every line of it as codex wrote it, but for the four bulky
+    /// ones, which are cut to what is read of them: the meta line's whole
+    /// system prompt, the world it was given, the turn's context and the
+    /// developer preamble each run to kilobytes, and the worktree's path is
+    /// shortened throughout so that the fixture reads.
+    ///
+    /// The shape to see in it is the doubling. Ordinals 7 to 19 are the turn
+    /// said twice — the `event_msg` lines are what the screen drew, and the
+    /// `response_item` lines beside them are the same turn as the model was
+    /// sent it, in among the preamble nobody said.
+    const ROLLOUT: &[&str] = &[
+        r#"{"timestamp":"2026-08-30T08:11:27.307Z","ordinal":0,"type":"session_meta","payload":{"session_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","cwd":"/srv/worktrees/tables","originator":"codex_exec"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.307Z","ordinal":1,"type":"event_msg","payload":{"type":"task_started","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","started_at":1788077487,"model_context_window":258400,"collaboration_mode_kind":"default"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":2,"type":"response_item","payload":{"type":"message","id":"msg_01a051b9-34cf-75b2-93a0-acaca50f73a3","role":"developer","content":[{"type":"input_text","text":"<skills_instructions>\n## Skills\nA skill is a set of instructions provided through a `SKILL.md` source."}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":3,"type":"response_item","payload":{"type":"message","id":"msg_01a051b9-34cf-75b2-93a0-acb06c799843","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/srv/worktrees/tables</cwd>\n  <shell>bash</shell>\n</environment_context>"}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":4,"type":"world_state","payload":{"full":true,"state":{"agents_md":{},"apps_instructions":false}}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":5,"type":"turn_context","payload":{"turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","cwd":"/srv/worktrees/tables"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.316Z","ordinal":6,"type":"response_item","payload":{"type":"message","id":"msg_01a051b9-34d4-7612-95dc-1001c4fb2884","role":"user","content":[{"type":"input_text","text":"What is in the task list?"}],"internal_chat_message_metadata_passthrough":{"turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","create_time":1788077487.3162456}}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.316Z","ordinal":7,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"UserMessage","id":"01a051b9-34d4-7612-95dc-10185af451bf","content":[{"type":"text","text":"What is in the task list?","text_elements":[]}]},"started_at_ms":1788077487316,"completed_at_ms":1788077487316}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.335Z","ordinal":8,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"Reasoning","id":"rs-1","summary_text":["**Reading the task list**\n\nThe backlog is where to start."],"raw_content":[]},"started_at_ms":1788077487335,"completed_at_ms":1788077487335}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.335Z","ordinal":9,"type":"response_item","payload":{"type":"reasoning","id":"rs-1","summary":[{"type":"summary_text","text":"**Reading the task list**\n\nThe backlog is where to start."}],"content":null,"encrypted_content":null}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.336Z","ordinal":10,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"I'll look at the **task list** first."}]},"started_at_ms":1788077487336,"completed_at_ms":1788077487336}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.336Z","ordinal":11,"type":"response_item","payload":{"type":"message","id":"msg-1","role":"assistant","content":[{"type":"output_text","text":"I'll look at the **task list** first."}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.337Z","ordinal":12,"type":"response_item","payload":{"type":"function_call","id":"fc_01a051b9-34e9-7e33-b5b0-7ec74bfd68c9","name":"exec_command","arguments":"{\"cmd\":\"ls .tasks\"}","call_id":"call-1"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.369Z","ordinal":13,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"CommandExecution","id":"call-1","process_id":"45936","command":["/bin/bash","-lc","ls .tasks"],"cwd":"file:///srv/worktrees/tables","parsed_cmd":[{"type":"list_files","cmd":"ls .tasks","path":".tasks"}],"source":"unified_exec_startup","status":"completed","stdout":"04-render.md\n05-summaries.md\n","stderr":"","aggregated_output":"04-render.md\n05-summaries.md\n","exit_code":0,"duration":{"secs":0,"nanos":2425},"formatted_output":"04-render.md\n05-summaries.md\n"},"started_at_ms":1788077487369,"completed_at_ms":1788077487369}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.370Z","ordinal":14,"type":"response_item","payload":{"type":"function_call_output","id":"fco_01a051b9-350a-7a20-932c-94ffaad12aba","call_id":"call-1","output":"Chunk ID: 57be28\nProcess exited with code 0\nOutput:\n04-render.md\n05-summaries.md\n"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.371Z","ordinal":15,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1200,"output_tokens":40,"total_tokens":1240},"model_context_window":258400}}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.388Z","ordinal":16,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"AgentMessage","id":"msg-2","content":[{"type":"Text","text":"Two files: `04-render.md` and `05-summaries.md`."}]},"started_at_ms":1788077487388,"completed_at_ms":1788077487388}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.388Z","ordinal":17,"type":"response_item","payload":{"type":"message","id":"msg-2","role":"assistant","content":[{"type":"output_text","text":"Two files: `04-render.md` and `05-summaries.md`."}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.390Z","ordinal":19,"type":"event_msg","payload":{"type":"task_complete","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","last_agent_message":"Two files: `04-render.md` and `05-summaries.md`.","started_at":1788077487,"completed_at":1788077487,"duration_ms":85}}"#,
+    ];
+
+    fn rollout() -> TranscriptView {
+        transcript_view(&lines(ROLLOUT))
+    }
+
+    /// What the human at that terminal saw, and only that: the turn put to it,
+    /// its thinking, its prose, the command it ran and what the command printed.
+    #[test]
+    fn a_real_rollout_draws_as_the_conversation_the_screen_drew() {
+        let view = rollout();
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Put(Put {
+                    id: 1,
+                    html: "<p>What is in the task list?</p>\n".to_owned()
+                }),
+                Turn::Reasoning(Reasoning {
+                    id: 2,
+                    html: "<p><strong>Reading the task list</strong></p>\n<p>The backlog is where \
+                           to start.</p>\n"
+                        .to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 3,
+                    html: "<p>I'll look at the <strong>task list</strong> first.</p>\n".to_owned()
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 4,
+                    name: "CommandExecution".to_owned(),
+                    call: "call-1".to_owned(),
+                    about: "ls .tasks".to_owned(),
+                    input: serde_json::to_string_pretty(&serde_json::json!([
+                        "/bin/bash",
+                        "-lc",
+                        "ls .tasks",
+                    ]))
+                    .unwrap(),
+                }),
+                Turn::ToolResult(ToolResult {
+                    id: 5,
+                    call: "call-1".to_owned(),
+                    failed: false,
+                    text: "04-render.md\n05-summaries.md\n".to_owned(),
+                }),
+                Turn::Prose(Prose {
+                    id: 6,
+                    html: "<p>Two files: <code>04-render.md</code> and \
+                           <code>05-summaries.md</code>.</p>\n"
+                        .to_owned()
+                }),
+            ]
+        );
+    }
+
+    /// The other half of the doubling: the turn as the model was sent it, which
+    /// is the same words again with pages of injected prompt around them.
+    /// Drawing both would draw every turn twice and open every Transcript on
+    /// the preamble.
+    #[test]
+    fn the_stream_the_model_was_sent_folds_away_under_its_own_name() {
+        let view = rollout();
+
+        assert!(
+            !view
+                .turns
+                .iter()
+                .any(|turn| format!("{turn:?}").contains("environment_context")),
+            "nobody said the environment block: {:?}",
+            view.turns
+        );
+
+        let folded: Vec<&str> = view
+            .bookkeeping
+            .iter()
+            .map(|line| line.kind.as_str())
+            .collect();
+
+        assert_eq!(
+            folded,
+            [
+                "session_meta",
+                "task_started",
+                "response_item",
+                "response_item",
+                "world_state",
+                "turn_context",
+                "response_item",
+                "response_item",
+                "response_item",
+                "response_item",
+                "response_item",
+                "token_count",
+                "response_item",
+                "task_complete",
+            ],
+            "and every line of it is on the Transcript, under the name codex gave it"
+        );
+    }
+
+    /// The count the Timeline row shows and the turns the pane draws are the
+    /// one reading on a rollout too — and so is the last thing the session said,
+    /// which is the other half of what the row is summarised by.
+    #[test]
+    fn a_rollouts_row_is_counted_and_quoted_off_the_reading_the_pane_draws() {
+        let said = lines(ROLLOUT);
+
+        assert_eq!(turns(&said), rollout().turns.len());
+        assert_eq!(turns(&said), 6, "and the bookkeeping is none of it");
+        assert_eq!(
+            statements(&said),
+            vec![
+                "I'll look at the **task list** first.",
+                "Two files: `04-render.md` and `05-summaries.md`.",
+            ],
+            "the agent's prose, as it wrote it"
+        );
+    }
+
+    /// A command that came back non-zero is an answer that failed, whatever
+    /// else it printed — which is what the pane draws the card in red on. And a
+    /// command codex parsed nothing out of is summarised by the argv it ran,
+    /// which is a shell, a flag and the command as one string.
+    #[test]
+    fn a_command_that_failed_is_an_answer_that_says_so() {
+        let view = transcript_view(&[
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"call-9","command":["/bin/bash","-lc","cargo test"],"status":"failed","aggregated_output":"error: could not compile","exit_code":101}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolUse(call), Turn::ToolResult(answer)]
+                    if call.about == "/bin/bash -lc cargo test"
+                        && call.call == answer.call
+                        && answer.failed
+                        && answer.text == "error: could not compile"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// A tool the log gives a name of its own is called by that name rather
+    /// than by the kind of item it arrived in, and what it answered with is
+    /// what it said — which for a call that failed is the error rather than the
+    /// nothing it returned.
+    #[test]
+    fn a_tool_the_log_names_is_called_what_the_log_calls_it() {
+        let view = transcript_view(&[
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"mcp-1","server":"github","tool":"list_issues","arguments":{"query":"is:open label:bug"},"status":"failed","error":{"message":"the token is not authorised"}}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolUse(call), Turn::ToolResult(answer)]
+                    if call.name == "github.list_issues"
+                        && call.about == "is:open label:bug"
+                        && answer.failed
+                        && answer.text == "the token is not authorised"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// Codex adds kinds without announcing them, and the two halves of ADR
+    /// 0006's rule are what that costs. A whole line of one folds away under its
+    /// own name…
+    #[test]
+    fn a_rollout_line_of_a_kind_nobody_knows_folds_under_its_own_name() {
+        let view = transcript_view(&[
+            r#"{"timestamp":"2026-08-30T08:11:27.390Z","ordinal":20,"type":"seance","payload":{"heard":"a kind from a later version"}}"#
+                .to_owned(),
+        ]);
+
+        assert!(view.turns.is_empty(), "nobody said this: {:?}", view.turns);
+        assert_eq!(
+            view.bookkeeping.first().map(|line| line.kind.as_str()),
+            Some("seance")
+        );
+    }
+
+    /// …and an event of one folds under the event's own name rather than the
+    /// line's, since every one of these lines is called `event_msg` and a group
+    /// of thirty rows all called that would say nothing about any of them.
+    #[test]
+    fn an_event_folds_under_its_own_name_rather_than_the_lines() {
+        let view = transcript_view(&[
+            r#"{"type":"event_msg","payload":{"type":"stream_error","message":"retrying"}}"#
+                .to_owned(),
+        ]);
+
+        assert!(view.turns.is_empty(), "{:?}", view.turns);
+        assert_eq!(
+            view.bookkeeping.first().map(|line| line.kind.as_str()),
+            Some("stream_error")
+        );
+    }
+
+    /// …while an item of one stays in the conversation as the JSON it is. An
+    /// item is part of a turn rather than a line beside it, and one folded away
+    /// silently would leave a hole where something was drawn.
+    #[test]
+    fn an_item_of_a_kind_nobody_knows_is_drawn_where_it_was_drawn() {
+        let view = transcript_view(&[
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Telepathy","id":"tp-1","thought":"a kind from a later version"}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(&view.turns[..], [Turn::Unread(unread)] if unread.line.contains("Telepathy")),
+            "{:?}",
+            view.turns
+        );
+        assert!(view.bookkeeping.is_empty());
+        assert_eq!(
+            turns(&lines(&[
+                r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Telepathy","id":"tp-1","thought":"a kind from a later version"}}}"#,
+            ])),
+            1,
+            "and the count does not drop it either"
+        );
+    }
+
+    /// Which reader a line gets is decided by the line. Nothing a Transcript
+    /// carries says which backend wrote it — the same lines are rendered in
+    /// three places and none of them is told the agent type — so the two kinds
+    /// are told apart by their own kinds, and read side by side when they are
+    /// put side by side.
+    #[test]
+    fn which_reader_a_line_gets_is_decided_by_what_the_line_is() {
+        let view = transcript_view(&lines(&[
+            FIXTURE[2],
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"And the *rollout* was read too."}]}}}"#,
+        ]));
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Prose(Prose {
+                    id: 1,
+                    html: "<p>I'll start with the <em>tables</em>.</p>\n".to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 2,
+                    html: "<p>And the <em>rollout</em> was read too.</p>\n".to_owned()
+                }),
+            ]
+        );
     }
 }
