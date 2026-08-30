@@ -321,6 +321,90 @@ Timeline and its full self in the details pane. Task lists, stage lists and PRs
 are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
 
+**Share**:
+A read-only copy of one Conversation as a single HTML file, for showing
+somebody what was asked, answered and built without giving them the workbench.
+It is the viewer built to one document with every byte it needs inside it, and
+the record written into it on the way out, so it opens off a disk with no
+network and nothing to install. Taken from the **Share** row in the
+Conversation's actions, and named for the branch and the day.
+**A curated record rather than the whole one**: the Brief, the Question Sets,
+the commits, the Steers and the lifecycle lines board; a session's output, the
+Notices, the Handoff and the pinned cards do not, and nothing marks where they
+would have been.
+**And nothing about the machine it was taken on.** Where the Worktrees sit on
+the disk and which Agent Profile and model each kind of session ran under are
+facts about this Verkstead rather than about the work, so they come off the
+record on the way out and the Brief's own pane draws neither — a Repo goes by
+its name and not by its path. What a share cannot give away is what it does not
+carry.
+**A snapshot as of the moment it was taken**, never a window onto a Conversation
+that goes on moving — sharing again makes another file. And privacy is
+possession: whoever holds the file can read it.
+_Avoid_: export, snapshot (the file is the Share; a snapshot is what it is *of*),
+report
+
+**Published Share**:
+A Share put where a link reaches it, rather than handed over as a file: a
+**secret gist**, made by Verkstead itself through the GitHub token on the
+settings page. Taken from the **Publish** row beside the download, and drawn
+back in the same menu as the link and the day it was taken. What the token needs
+for it is the **`gist` scope**, and a token without it is named on the settings
+page when it is saved rather than found by a press weeks later.
+**The API makes it and git fills it**: the Gists API's cap on what a gist may be
+created with is undocumented and reported at a megabyte, and a Share is several
+— so the gist is created holding a placeholder and the file arrives over a push,
+which has no such cap. A publish that falls over after the gist exists takes it
+back.
+**Publishing again is a fresh snapshot**, in a gist of its own: the record holds
+where to send somebody now, and whatever was already sent goes on standing where
+it was.
+This is Verkstead's own write to GitHub rather than a session's, so it happens as
+the configured token and never as whatever login the host's `gh` has — a
+Verkstead with no token configured refuses instead of falling back.
+_Avoid_: upload, hosting, sharing (the Share is the file; publishing is what is
+done with it), gist link (the gist is where it went, not what it is)
+
+**Share Viewer**:
+The small static page that turns a Published Share into a read. A gist link
+alone shows source — GitHub renders a gist as code, and its raw URL is served as
+plain text a browser refuses to draw — so the page closes the gap: the gist's id
+rides in the **URL fragment**, the Share is fetched from GitHub by the reader's
+own browser, and it is drawn in a **sandboxed frame** with scripts allowed and
+same-origin withheld.
+**Verkstead ships it and the human hosts it**, once, on a public site of their
+own — a GitHub Pages repository is what it was written for. It is offered as a
+download on the settings page, and the **share viewer URL** beside it records
+where it went; that is configuration rather than a secret, and it reads back as
+it was written. A Verkstead with none configured links a Published Share as the
+gist itself, which is a worse read rather than a failure.
+It learns nothing about what passes through it: a fragment is never sent to a
+server, so the host sees only that somebody opened the page, and the frame keeps
+the Share's own scripts off that host's origin.
+_Avoid_: proxy, server, renderer, gateway (nothing passes through it — the
+reader's browser fetches from GitHub itself)
+
+**Share to Pull Request**:
+The one press that hands the record to whoever is reviewing the work: it takes a
+Share, publishes it, and leaves **one comment on every pull request the
+Conversation holds** — its own Repo's and every Companion Repo's alike. Offered
+only where the record holds a pull request, because a Conversation on none has
+nowhere for it to go.
+The comment carries **the link** — through the Share Viewer where one is
+configured, at the gist itself where none is — and the **itemized summary** of
+what is in the file: the Brief's first line, the Question Sets by title, and the
+commits by subject with how much each moved. Itemized off the Share rather than
+off the Conversation, so what is listed is what a reader will find in it.
+**Comments only, and nothing is ever rewritten**: a pull request's description is
+not touched, and sharing again is a fresh snapshot, a fresh publish and a fresh
+comment on each — what was said before goes on standing where it was said.
+A pull request the comment could not land on — one that has gone, one the token
+may not write on — is **named against the ones that worked** rather than
+swallowed: the Share is published either way, so the human can paste the link
+there themselves.
+_Avoid_: announce, notify, post, broadcast (a comment is left, once, by a press
+the human made)
+
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose
 first, a delta Diagram after it — kept by the sweep of whichever repository it

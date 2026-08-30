@@ -569,6 +569,31 @@ pub struct ConversationView {
     /// state of something the work is against. Empty is the ordinary case — a
     /// Conversation with no backlog has nothing to pin.
     pub pinned: Vec<PinnedEvent>,
+
+    /// Where the latest share of this Conversation was published, and when.
+    ///
+    /// `null` on every Conversation nobody has published one of, which is most
+    /// of them: downloading a share leaves no trace, and this is only about the
+    /// one that was put somewhere a link can reach.
+    ///
+    /// Replaced rather than added to. Publishing again is a fresh snapshot of a
+    /// Conversation that has moved on, so what the workbench draws is where to
+    /// send somebody *now* — see the store's `shares`, which says what becomes
+    /// of the link it replaced.
+    pub shared: Option<ShareView>,
+}
+
+/// One published share, as the workbench draws it: the link, and the moment the
+/// snapshot was taken.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ShareView {
+    /// The page to send somebody to, as GitHub gave it.
+    pub url: String,
+
+    /// When it was published, RFC 3339 — drawn beside the link, because a link
+    /// with no date says nothing about how far the work has moved since.
+    pub at: String,
 }
 
 /// One companion repo of a Conversation: which Repo, how far into it a session

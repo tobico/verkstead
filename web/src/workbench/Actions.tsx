@@ -6,20 +6,23 @@
 //! away and a pane header is somewhere the human's cursor passes on the way to
 //! everything else.
 //!
-//! Resume is first, because it is the one *go* among them: everything under it
-//! ends the work or moves it, and what the human most often comes here for is a
-//! Conversation nothing is driving. It is drawn exactly where the server says it
-//! is worth drawing — see `ready_to_resume`, which is the state being one
-//! something ought to be driving and nothing driving it. The page cannot work
-//! that out for itself: what drives a Conversation is a register of running
-//! tasks, and a register lives in the server. It carries nothing, either: what
-//! to start is recomputed from where the work now stands at the moment of the
-//! press, which is the whole point of one row rather than one per way of
-//! stopping — saying something else should happen is what Steer is for.
+//! Resume is first, because it is the one *go* among them: what the human most
+//! often comes here for is a Conversation nothing is driving. It is drawn
+//! exactly where the server says it is worth drawing — see `ready_to_resume`,
+//! which is the state being one something ought to be driving and nothing
+//! driving it. The page cannot work that out for itself: what drives a
+//! Conversation is a register of running tasks, and a register lives in the
+//! server. It carries nothing, either: what to start is recomputed from where
+//! the work now stands at the moment of the press, which is the whole point of
+//! one row rather than one per way of stopping — saying something else should
+//! happen is what Steer is for.
 //!
-//! Then, in order of what each costs: stop, which waits for the task the run is
-//! on; force stop, which does not; steer, which moves the work somewhere else;
-//! and the two closes, which are not a stop at all but the end of the Conversation
+//! Then, in order of what each costs: share, which costs nothing and is a file
+//! to take away rather than a press at all; publish, which puts that file in a
+//! gist; share to pull request, which publishes it and says so in front of
+//! whoever is reviewing the work; stop, which waits for the task the run is on;
+//! force stop, which does not; steer, which moves the work somewhere else; and
+//! the two closes, which are not a stop at all but the end of the Conversation
 //! — one of them taking it off the list on the way out. Each carries what it
 //! does *inside* it, under its own name — because *stop* and *force stop* are
 //! two words apart and hours of work apart, and because a row that is one press
@@ -49,6 +52,13 @@
 //! is for — a Conversation nothing is driving, and the reason nothing is — and
 //! there was never a way to tell those sentences from the rest.
 //!
+//! The two that publish are the exception, and it is the reaching outside this
+//! machine that makes them one: what GitHub refused is a thing to go and do
+//! something about rather than a page out of date, and where a share went is
+//! worth being told. Both are said in a **toast** — see `Toasts.tsx` — because a
+//! publish that worked hands back a link to reach for, and a card with one way
+//! out is a sentence to dismiss rather than something to take up.
+//!
 //! Two menus and one set of rows. The pane's is about the Conversation that is
 //! open, and the sidebar's right-click is about the card under the pointer,
 //! which is very often a different one — but *what there is to do about a
@@ -62,6 +72,7 @@
 //! dragged — so on a phone this menu simply is not there, and the status button
 //! on the Conversation is the way to all of it.
 
+import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
   Match,
@@ -80,24 +91,33 @@ import {
   closeConversation,
   forceStopConversation,
   loadConversation,
+  publishShare,
   resume,
+  sharePath,
+  shareToPullRequests,
   steerConversation,
   stopConversation,
   unarchiveConversation,
 } from "../api/client";
 import type {
+  CommentedOn,
   ConversationArchived,
   ConversationClosed,
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  MissedOut,
   Resumed,
+  ShareCommented,
+  SharePublished,
   SteerOpened,
 } from "../api/types";
+import { toast } from "../Toasts";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { utcStamp } from "../set/when";
 import styles from "./Actions.module.css";
-import { Steer } from "./Steer";
+import { Steer, onAPullRequest } from "./Steer";
 
 /// Each way of being refused a stop, whichever of the two was pressed, in the
 /// words the human is told them in.
@@ -178,6 +198,101 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
     "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
 };
 
+/// What a publish came back with, as the toast it is said in.
+///
+/// The one press on this menu whose outcome is *not* a page drawn against a
+/// conversation that has moved: publishing writes to GitHub as the token on the
+/// settings page, and two of the three ways it can be refused are that token. So
+/// each is a sentence and a way to the page it is fixed on, and the one that
+/// worked is a sentence and the link it just made.
+///
+/// **A toast rather than the card the refusals around it open.** An outcome is a
+/// moment and a menu row is a drawing of the conversation it is about — and the
+/// link a publish just made is a thing to reach for rather than a sentence to
+/// dismiss, which is what a card with one way out asks for. See `Toasts.tsx`.
+function published(outcome: SharePublished): JSX.Element {
+  if (outcome === "NoToken") {
+    return (
+      <>
+        Verkstead has no GitHub token to publish as.{" "}
+        <A href="/settings/github">Put one in on the settings page.</A>
+      </>
+    );
+  }
+
+  if (outcome === "NoGistScope") {
+    return (
+      <>
+        The saved GitHub token may not write gists.{" "}
+        <A href="/settings/github">
+          Re-issue it with the gist scope and save it again.
+        </A>
+      </>
+    );
+  }
+
+  if ("Refused" in outcome) {
+    return <>GitHub would not take it: {outcome.Refused.why}</>;
+  }
+
+  // And the link it just made, because the menu it was pressed from is shut by
+  // the time this is read: the row that draws where the last share went is
+  // there when the menu is next opened, and this is the moment itself.
+  return (
+    <>
+      The share is published.{" "}
+      <a href={outcome.Published.share.url} target="_blank" rel="noreferrer">
+        Open it on GitHub.
+      </a>
+    </>
+  );
+}
+
+/// And what became of the one-click share, in a toast of its own.
+///
+/// Three shapes and one sentence each. A share that was never published says
+/// what the publish would have said — it is the same write to GitHub under the
+/// same token, and the settings page is where two of the three are fixed. A
+/// conversation on no pull request is a page drawn against one that has since
+/// moved. And a share that went says where it went, naming whatever missed out
+/// beside what worked: the file is up either way, and a human told which pull
+/// request it never reached can paste the link there themselves.
+function commented(outcome: ShareCommented): JSX.Element {
+  if (outcome === "NoPullRequest") {
+    return <>This conversation is on no pull request.</>;
+  }
+
+  if ("NotPublished" in outcome) {
+    // In the publish's own words rather than said again here. What it holds is
+    // always a refusal — a publish that worked is the other shape of this — so
+    // what comes back is the sentence and the way to fix it.
+    return published(outcome.NotPublished.why);
+  }
+
+  const { on, missed } = outcome.Commented;
+  const said: string[] = [];
+
+  if (on.length > 0) {
+    said.push(`Commented on ${on.map(named).join(", ")}.`);
+  }
+
+  for (const miss of missed) {
+    said.push(`Nothing could be said on ${named(miss)}: ${miss.why}`);
+  }
+
+  return <>{said.join(" ")}</>;
+}
+
+/// What one pull request is called in that sentence: its number, and the
+/// repository it is in where that is not the conversation's own.
+///
+/// The same rule its card draws by — an unlabeled number means the repo the
+/// work is in — because a conversation ends on one pull request per repository
+/// it was worked in, and `#7` means something else in each of them.
+function named(pull: CommentedOn | MissedOut): string {
+  return pull.repo ? `#${pull.number} in ${pull.repo}` : `#${pull.number}`;
+}
+
 /// One row of this menu: what the press is called, and under it the sentence
 /// saying what pressing it means.
 ///
@@ -194,8 +309,10 @@ export function Action(props: {
   /// What it reads as, and what it reads as while its press is in flight.
   label: string;
   pressing: string;
-  /// The sentence under the name.
-  says: string;
+  /// A node rather than a string: most rows say one sentence, and the one that
+  /// publishes says why it could not, with the way to the page that fixes it
+  /// inside the sentence — see [`refusal`].
+  says: JSX.Element;
   /// Whether that press is in flight, which is also what takes the row.
   working: boolean;
   press: () => void;
@@ -211,6 +328,34 @@ export function Action(props: {
       <span class={styles.title}>{props.working ? props.pressing : props.label}</span>
       <span class={styles.says}>{props.says}</span>
     </button>
+  );
+}
+
+/// The one row of this menu that is not a press: a file to take away.
+///
+/// A link rather than a button that fetches, because that is what a browser is
+/// for. The server answers as an attachment and names the file, so the whole of
+/// this row is where it points — nothing to hold in memory, nothing to fail
+/// half-way with a megabyte in flight, and a right-click that offers *Save link
+/// as* like every other download the human has ever made.
+///
+/// Which is also why it draws no failure, where the presses around it say
+/// theirs: what goes wrong with a link is the browser's to say, in the place it
+/// already says it.
+export function Download(props: {
+  /// Which row this is, for the paint and for the tests that look for it.
+  class?: string;
+  /// What it reads as, and the sentence under the name — as every row here has.
+  label: string;
+  says: string;
+  /// Where the file is.
+  href: string;
+}): JSX.Element {
+  return (
+    <a role="menuitem" class={props.class} href={props.href} download="">
+      <span class={styles.title}>{props.label}</span>
+      <span class={styles.says}>{props.says}</span>
+    </a>
   );
 }
 
@@ -371,6 +516,53 @@ function actions(): {
 
   const force = useMutation(() => pressing(forceStopConversation));
 
+  /// Publishing the share: the one press here that reaches outside this machine
+  /// and the one that costs somebody an account.
+  ///
+  /// The menu stays open while it is in flight — a publish is a `gh`, a clone
+  /// and a push, and the row saying *Publishing…* is the only thing that says
+  /// anything is happening — and shuts as the answer arrives, which is where the
+  /// toast takes over. See [`published`], and `Toasts.tsx` for why the outcome
+  /// does not stay in the row.
+  const publish = useMutation(() => ({
+    mutationFn: (id: number) => publishShare(id),
+    onSuccess: (outcome: SharePublished) => {
+      shut();
+      toast(() => published(outcome));
+      reread();
+    },
+    onError: (error: Error) => {
+      // The transport rather than the answer: a request that never landed has
+      // no named outcome, so it is said in GitHub's place.
+      shut();
+      toast(() => published({ Refused: { why: error.message } }));
+    },
+  }));
+
+  /// Sharing to the pull requests: the publish above and a comment on every one
+  /// of them, which is the press that says something in front of other people.
+  ///
+  /// The same arrangement, for the same reasons — and one more: what comes back
+  /// names each pull request it reached and each it did not, which is more than
+  /// a menu row has room for and worth reading after the menu has gone.
+  const comment = useMutation(() => ({
+    mutationFn: (id: number) => shareToPullRequests(id),
+    onSuccess: (outcome: ShareCommented) => {
+      shut();
+      toast(() => commented(outcome));
+      reread();
+    },
+    onError: (error: Error) => {
+      // The transport rather than the answer, exactly as the publish's is: a
+      // request that never landed has no named outcome, and the publish is what
+      // it would have failed at.
+      shut();
+      toast(() =>
+        commented({ NotPublished: { why: { Refused: { why: error.message } } } }),
+      );
+    },
+  }));
+
   /// Clicking Steer, which is a press before it is a modal: it stops the drive,
   /// so that nothing new is launched while the human composes and the world the
   /// modal is drawn against is the world the submit arrives in.
@@ -484,6 +676,73 @@ function actions(): {
             says="Work out what should be running from where the work stands, and start it."
             working={start.isPending}
             press={() => start.mutate(conversation().id)}
+          />
+        </Show>
+
+        {/* A copy of the record to send somebody, which is the one row here
+            that does nothing to the conversation at all — so it stands above
+            everything that costs something. Offered in every state and on every
+            conversation there is: a share is the record as it stands, and a
+            record stands from the moment there is one. */}
+        <Download
+          class={styles.share}
+          label="Share"
+          says="Download the conversation as one file to send."
+          href={sharePath(conversation().id)}
+        />
+
+        {/* And the same file put where a link reaches it, which is the other
+            way to hand it over: a secret gist, published as the token on the
+            settings page. Beside the download rather than instead of it — one
+            is a file to attach and the other is a link to paste, and which of
+            the two a colleague wants is not this menu's to decide. */}
+        <Action
+          class={styles.publish}
+          label={conversation().shared ? "Publish again" : "Publish"}
+          pressing="Publishing…"
+          says="Publish it as a secret gist and get a link to send."
+          working={publish.isPending}
+          press={() => publish.mutate(conversation().id)}
+        />
+
+        {/* Where the last one went, on a Conversation somebody has published
+            one of. A link out rather than a row that does anything: what the
+            human came for is the URL, and a share already published is one they
+            can send again without publishing a second snapshot. */}
+        <Show when={conversation().shared}>
+          {(shared) => (
+            <a
+              role="menuitem"
+              class={styles.published}
+              href={shared().url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span class={styles.title}>Published share</span>
+              <span class={styles.says}>
+                Taken {utcStamp(shared().at)}. Opens the gist on GitHub.
+              </span>
+            </a>
+          )}
+        </Show>
+
+        {/* And the whole of it in one press, on a conversation whose work is on
+            a pull request: the same publish, and a comment carrying the link
+            and what is in the file on every pull request it holds. Under the
+            two rows above rather than instead of them — it is the same share,
+            and this is the one that says something in front of other people.
+
+            Offered only where there is a pull request to say it on, which is
+            what the pinned cards already say: a conversation with none has
+            nowhere for this press to go. */}
+        <Show when={onAPullRequest(conversation())}>
+          <Action
+            class={styles.comment}
+            label="Share to pull request"
+            pressing="Sharing…"
+            says="Publish it and comment the link on every pull request."
+            working={comment.isPending}
+            press={() => comment.mutate(conversation().id)}
           />
         </Show>
 

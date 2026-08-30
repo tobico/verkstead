@@ -210,12 +210,15 @@ const TARGETS: {
 
 /// Whether this conversation's work is on a pull request.
 ///
-/// What decides whether wrapping up is offered at all. A wrapping conversation
-/// is defined by the pull request under it — the record holds the move and the
-/// pull request as one act — so a steer there is a move onto one that is already
-/// there rather than a way of opening one. Read off the pinned events, which is
-/// where the record's own pull request is drawn from.
-function onAPullRequest(conversation: ConversationView): boolean {
+/// What decides whether wrapping up is offered at all, and what decides whether
+/// the actions menu offers sharing to one — see `Actions.tsx`, which asks the
+/// same question of the same cards rather than keeping a second answer to it.
+///
+/// A wrapping conversation is defined by the pull request under it — the record
+/// holds the move and the pull request as one act — so a steer there is a move
+/// onto one that is already there rather than a way of opening one. Read off the
+/// pinned events, which is where the record's own pull request is drawn from.
+export function onAPullRequest(conversation: ConversationView): boolean {
   return conversation.pinned.some((pinned) => "PullRequest" in pinned);
 }
 

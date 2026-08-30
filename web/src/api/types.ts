@@ -501,6 +501,26 @@ export type CheckRollup = "Passed" | "Running" | "Failed";
 export type Checked = "Passed" | "Running" | "Failed";
 
 /**
+ * One pull request the comment landed on.
+ */
+export type CommentedOn = { 
+/**
+ * The number GitHub gave it, which is what a human calls it by.
+ */
+number: number, 
+/**
+ * Which repository that number is in, where it is not the Conversation's
+ * own — the same label a pull request's card draws, and `null` for the
+ * same reason: an unlabeled one means the repo the work is in.
+ */
+repo: string | null, 
+/**
+ * The comment itself, as GitHub gave it back, so the human can go and read
+ * what was left in their name.
+ */
+url: string, };
+
+/**
  * A commit as the Timeline shows it: what it was called, and how much of the
  * repository it moved.
  *
@@ -1260,7 +1280,20 @@ archived: boolean,
  * state of something the work is against. Empty is the ordinary case — a
  * Conversation with no backlog has nothing to pin.
  */
-pinned: Array<PinnedEvent>, };
+pinned: Array<PinnedEvent>, 
+/**
+ * Where the latest share of this Conversation was published, and when.
+ *
+ * `null` on every Conversation nobody has published one of, which is most
+ * of them: downloading a share leaves no trace, and this is only about the
+ * one that was put somewhere a link can reach.
+ *
+ * Replaced rather than added to. Publishing again is a fresh snapshot of a
+ * Conversation that has moved on, so what the workbench draws is where to
+ * send somebody *now* — see the store's `shares`, which says what becomes
+ * of the link it replaced.
+ */
+shared: ShareView | null, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -1368,6 +1401,17 @@ at: string,
  * markdown on this wire is.
  */
 html: string, };
+
+/**
+ * And one it did not.
+ */
+export type MissedOut = { number: number, repo: string | null, 
+/**
+ * What `gh` said about it, in its own words. A pull request that has gone
+ * and one the token may not write on are two afternoons apart, and neither
+ * is anything Verkstead can put right on the human's behalf.
+ */
+why: string, };
 
 /**
  * A move as the page receives it: when, and to what.
@@ -2242,7 +2286,13 @@ export type SettingsEdit = { git_author: Author, github_token: TokenEdit,
  * there is nothing secret about either, so a save says where they are to
  * stand and the server writes that down.
  */
-rust_build_cache: BuildCacheEdit, };
+rust_build_cache: BuildCacheEdit, 
+/**
+ * And where the share viewer is hosted, as a value for the same reason:
+ * an empty one is nothing configured, which is what clearing the field
+ * means.
+ */
+share_viewer_url: string, };
 
 /**
  * What became of a save.
@@ -2278,7 +2328,146 @@ github_token: TokenSaved | null,
 /**
  * And how the shared Rust build cache stands.
  */
-rust_build_cache: BuildCacheView, };
+rust_build_cache: BuildCacheView, 
+/**
+ * Where the human hosts the share viewer, or empty where they host it
+ * nowhere.
+ *
+ * A string rather than an optional, empty for nothing configured, the way
+ * the author's two halves are: the field on the page holds it either way,
+ * and clearing the box is how it is taken away.
+ *
+ * Configuration rather than a secret — it is a public page, and its URL
+ * goes in a comment on a pull request — so unlike the token it reads back
+ * exactly as it was written.
+ */
+share_viewer_url: string, };
+
+/**
+ * What became of sharing a Conversation to the pull requests its work is on.
+ *
+ * One press is three acts — the file, the publish, and a comment on every pull
+ * request the Conversation holds — so what comes back has to say how far it
+ * got. The two ways it stops before saying anything anywhere are the publish's
+ * own, carried in [`SharePublished`]'s words rather than said again here: a
+ * share nobody could publish is a comment with no link in it, and there is
+ * nothing to leave on a pull request.
+ */
+export type ShareCommented = { "Commented": { share: ShareView, on: Array<CommentedOn>, missed: Array<MissedOut>, } } | { "NotPublished": { why: SharePublished, } } | "NoPullRequest";
+
+/**
+ * What became of publishing a share: where it went, or why it did not go.
+ *
+ * A publish is Verkstead's own write to GitHub rather than a session's, and
+ * every way it can fail is something for the human to go and do — which is why
+ * each is named rather than folded into one refusal. Two of the three are about
+ * the token on the settings page, and the page is where they are answered.
+ */
+export type SharePublished = { "Published": { share: ShareView, } } | "NoToken" | "NoGistScope" | { "Refused": { why: string, } };
+
+/**
+ * One published share, as the workbench draws it: the link, and the moment the
+ * snapshot was taken.
+ */
+export type ShareView = { 
+/**
+ * The page to send somebody to, as GitHub gave it.
+ */
+url: string, 
+/**
+ * When it was published, RFC 3339 — drawn beside the link, because a link
+ * with no date says nothing about how far the work has moved since.
+ */
+at: string, };
+
+/**
+ * One commit as a share carries it: the pane the workbench would have fetched,
+ * beside the Event whose card opens it.
+ */
+export type SharedCommit = { 
+/**
+ * Which Timeline Event this is the pane of.
+ *
+ * The Event rather than the hash, because that is what the card opening it
+ * is known by — and a Conversation works in more than one repository, so a
+ * hash is not a name for one commit here either.
+ */
+id: number, 
+/**
+ * What the workbench's details pane draws: the Commit Summary rendered,
+ * and the diff with every fold and every colour already in it.
+ *
+ * The endpoint's own rendering rather than a second one, so that a
+ * colleague reading a patch and the human who reviewed it are reading one
+ * drawing of it.
+ */
+pane: CommitPane, 
+/**
+ * Whether the repository still had the commit when the share was taken.
+ *
+ * `false` is a commit git can no longer show — rebased away, collected, or
+ * in a repository that has moved out from under Verkstead — and the pane
+ * says the diff is not in the file rather than that the commit changed
+ * nothing. The workbench answers that case with a 404, which a share
+ * cannot: one commit nobody can read is no reason to refuse the export of
+ * everything around it, and what the Timeline says about it — the subject,
+ * the hash, how much it moved — is on the card either way.
+ */
+held: boolean, };
+
+/**
+ * One Conversation as a share carries it, which is what the shared file boots
+ * from.
+ *
+ * The Conversation whole rather than a shape of its own: the share is drawn by
+ * the workbench's own components, so what they are handed has to be what they
+ * are always handed. What differs is that this one has been through
+ * [`shared`].
+ */
+export type SharedConversation = { 
+/**
+ * The record, curated — see [`shared`].
+ */
+conversation: ConversationView, 
+/**
+ * The sheet of every Question Set on that Timeline, in its order.
+ *
+ * Carried rather than fetched, which is the difference between a share and
+ * the workbench: the live viewer asks for a Set when somebody opens one,
+ * and a share has nothing to ask. So the whole of every Set the record
+ * holds — the Preface, every Option of every Question, the Diff it was
+ * asked over and what was decided — rides in the file, rendered by the
+ * endpoint the workbench reads a Set through, so that a colleague's sheet
+ * and the human's are one rendering of one decision.
+ *
+ * Read-only regardless of how a Set stood when the share was taken: what
+ * makes it so is the sheet being drawn as a record — see the share's
+ * details pane — because a Set still waiting on somebody is part of the
+ * record too, and a reader with no server behind them cannot answer it.
+ */
+sets: Array<SetView>, 
+/**
+ * The pane behind every commit on that Timeline, in its order.
+ *
+ * Carried for the reason the sheets are: the workbench fetches a commit
+ * when somebody opens one, and a share has nothing to fetch with. So the
+ * whole of every one of them rides in the file — the Commit Summary
+ * rendered, and the diff parsed, highlighted and folded per file.
+ *
+ * No cap on any of it, and nothing summarised on the way out. What a
+ * colleague is being shown is the work, and a patch cut off at a size is
+ * a different document from the one the human reviewed.
+ */
+commits: Array<SharedCommit>, 
+/**
+ * When the share was taken, RFC 3339.
+ *
+ * A share is a snapshot of a moment rather than a window onto a
+ * Conversation that goes on moving, so the moment is on the file: the
+ * reader is owed the date of the thing in their hands, and sharing again
+ * makes another one rather than freshening this.
+ */
+exported_at: string, };
 
 /**
  * Whether the sidebar is drawing what the human has archived.
@@ -2957,7 +3146,26 @@ export type UpdateNotice = "Current" | { "Available": { version: string, } };
  * one: the token is written down, and this says what happened when it was
  * tried.
  */
-export type Verified = { "Account": { login: string, } } | { "Refused": { why: string, } };
+export type Verified = { "Account": { login: string, 
+/**
+ * The scopes Verkstead needs that GitHub says this token has not been
+ * given — empty on one that can do everything asked of it.
+ *
+ * `gist` is the whole of the list, and it is a list because the answer
+ * is *what to go and tick*: publishing a share writes a secret gist,
+ * which is Verkstead's own write to GitHub rather than a session's, and
+ * a token issued for reading repositories does not carry it. The
+ * scopes a *session* needs are not checked here — a session
+ * authenticates as this token too, but what it does with it is the
+ * repository's review process rather than anything this server asks
+ * for.
+ *
+ * Empty as well where GitHub said nothing about scopes at all, which is
+ * what a fine-grained token comes back as: it has permissions rather
+ * than scopes, and reporting the absence of a header as a missing scope
+ * would be sending the human to re-issue a token that works.
+ */
+missing: Array<string>, } } | { "Refused": { why: string, } };
 
 /**
  * One way a Set fails the question grammar.

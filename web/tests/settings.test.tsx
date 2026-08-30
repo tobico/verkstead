@@ -55,6 +55,7 @@ import card from "../src/CardButton.module.css";
 import { GithubCard, GithubPane } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
 import buildCache from "../src/settings/BuildCache.module.css";
+import shareViewer from "../src/settings/ShareViewer.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
 import {
   openingAt,
@@ -404,6 +405,7 @@ describe("saving", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
+        share_viewer_url: TOLD.share_viewer_url,
       }),
     );
   });
@@ -488,6 +490,50 @@ describe("saving", () => {
 
     await waitFor(() => screen.getByText(/GitHub says it is/));
     expect(container.querySelector(`.${styles.login}`)!.textContent).toBe("ada");
+  });
+
+  /// A token can be whose it should be and still not do what Verkstead needs of
+  /// it. Publishing a share writes a secret gist, which is the `gist` scope, and
+  /// a token issued for reading repositories does not carry it — so the pane
+  /// says so here, where the human already is, rather than leaving it to be
+  /// found by a press on a conversation weeks later.
+  it("says which scope a verified token is missing", async () => {
+    const unscoped: SettingsSaved = {
+      settings: SAVED.settings,
+      verified: { Account: { login: "ada", missing: ["gist"] } },
+    };
+    theSettings(UNSET, json(unscoped));
+    const { container } = mountPane();
+    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+
+    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+      target: { value: TOKEN },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Whose it is, and what it may not do: two lines, because they are two
+    // different things to do about it.
+    await waitFor(() => screen.getByText(/GitHub says it is/));
+    await waitFor(() => screen.getByText(/It cannot publish a share/));
+    expect(container.querySelector(`.${styles.scope}`)!.textContent).toBe(
+      "gist",
+    );
+  });
+
+  /// And a token that can do everything asked of it says nothing extra, which
+  /// is what most tokens are.
+  it("says nothing about scopes on a token that has them all", async () => {
+    theSettings(UNSET, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+
+    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+      target: { value: TOKEN },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => screen.getByText(/GitHub says it is/));
+    expect(screen.queryByText(/It cannot publish a share/)).toBeNull();
   });
 
   /// A token GitHub would not vouch for is saved all the same — it is pasted
@@ -581,8 +627,9 @@ describe("replacing and clearing the token", () => {
         git_author: TOLD.git_author,
         github_token: null,
         // Untouched by this form, and so untouched in what the save answers
-        // with — see the section below it for what does change these.
+        // with — see the sections below it for what does change these.
         rust_build_cache: TOLD.rust_build_cache,
+        share_viewer_url: TOLD.share_viewer_url,
       },
       verified: null,
     };
@@ -600,6 +647,7 @@ describe("replacing and clearing the token", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
+        share_viewer_url: TOLD.share_viewer_url,
       }),
     );
 
@@ -652,6 +700,7 @@ function thePage(at = "/settings") {
             <Route path="/" />
             <Route path="/github" />
             <Route path="/build-cache" />
+            <Route path="/share-viewer" />
             <Route path="/profiles/:profile" />
             <Route path="/repos/:repo" />
           </Route>
@@ -821,6 +870,35 @@ describe("the path a details pane stands at", () => {
 
     history.back();
     await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// And the third pane a word names: where the share viewer is hosted.
+  it("opens the share viewer at /settings/share-viewer, replacing", async () => {
+    const { container, history } = thePage();
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${shareViewer.shareViewerCard}`,
+    );
+    fireEvent.click(face);
+
+    await waitFor(() => expect(history.get()).toBe("/settings/share-viewer"));
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("draws the viewer's field in the details pane, and reads its card as open", async () => {
+    const { container } = thePage("/settings/share-viewer");
+
+    await waitFor(() => screen.getByLabelText(/Where you hosted it/));
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${shareViewer.shareViewerCard}`,
+    );
+    expect(face.getAttribute("aria-pressed")).toBe("true");
+    expect(face.classList).toContain(card.open);
   });
 
   it("draws the switch in the details pane, and reads the cache card as open", async () => {
@@ -1102,6 +1180,7 @@ describe("where a settings details pane stands", () => {
   it("puts an id behind a segment of its own, and a word beside it", () => {
     expect(pathTo("github")).toBe("/settings/github");
     expect(pathTo("build-cache")).toBe("/settings/build-cache");
+    expect(pathTo("share-viewer")).toBe("/settings/share-viewer");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
     expect(pathTo(opensRepo(7))).toBe("/settings/repos/7");
@@ -1112,6 +1191,7 @@ describe("where a settings details pane stands", () => {
     for (const opening of [
       "github",
       "build-cache",
+      "share-viewer",
       opensProfile(7),
       opensProfile("new"),
       opensRepo(7),

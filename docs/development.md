@@ -79,6 +79,7 @@ git_author:
 rust_build_cache:
   enabled: true
   size: 30G
+share_viewer_url: https://tobico.github.io/verkstead-shares/
 ```
 
 Every session started after that gets the token as `GH_TOKEN`, which `gh`
@@ -100,17 +101,19 @@ what the settings page saves through:
 $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-   "compiles_cached":true}}
+   "compiles_cached":true},"share_viewer_url":""}
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
-         "rust_build_cache":{"enabled":true,"size":""}}' \
+         "rust_build_cache":{"enabled":true,"size":""},
+         "share_viewer_url":"https://tobico.github.io/verkstead-shares/"}' \
     http://127.0.0.1:8422/api/ui/settings
 {"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-    "compiles_cached":true}},
- "verified":{"Account":{"login":"tobico"}}}
+    "compiles_cached":true},
+  "share_viewer_url":"https://tobico.github.io/verkstead-shares/"},
+ "verified":{"Account":{"login":"tobico","missing":["gist"]}}}
 ```
 
 The token goes one way. What comes back about it is its last four characters and
@@ -118,12 +121,39 @@ when `secrets.yaml` was written, never the token itself. Saving one asks GitHub
 who it authenticates as and answers with the account or with what went wrong —
 and writes it down either way, because a token is pasted once out of a page that
 will not show it again, and a network that was briefly down is no reason to send
-somebody back for another. `"github_token"` is `"Keep"` to leave the configured
-one alone, which is what a save of the author fields sends, and `"Clear"` to take
-it away. `"rust_build_cache"` is a pair of values rather than an action: an
-empty `"size"` is no size configured, which puts the default back, and
-`"compiles_cached"` is read-only — it says whether the server found an
-`sccache`, which is its own environment rather than anybody's setting.
+somebody back for another. `"missing"` beside the account is the scopes
+Verkstead needs that GitHub says the token has not been given — `gist`, which
+publishing a share writes with, and empty on a token that carries it or on a
+fine-grained one GitHub named no scopes for at all. `"github_token"` is `"Keep"`
+to leave the configured one alone, which is what a save of the author fields
+sends, and `"Clear"` to take it away. `"rust_build_cache"` is a pair of values
+rather than an action: an empty `"size"` is no size configured, which puts the
+default back, and `"compiles_cached"` is read-only — it says whether the server
+found an `sccache`, which is its own environment rather than anybody's setting.
+
+`"share_viewer_url"` is where the **share viewer** is hosted, and it is the
+plainest value here: written as it was typed, read back as itself, and empty
+where nobody has hosted one. The viewer is a small static page that draws a
+published share in a browser — a gist link on its own shows source — and
+Verkstead ships it rather than serving it:
+
+```console
+$ curl -O -J http://127.0.0.1:8422/api/ui/share-viewer.html
+```
+
+Put that file on a public site of your own, a GitHub Pages repository being what
+it was written for, and save its address here. A published share is then read at
+`<share-viewer-url>#<gist-id>`; with nothing configured, a share is linked as the
+gist itself. Nothing about it is secret: the page is public, and the id after the
+`#` is never sent to the host that serves it.
+
+That link is what **Share to pull request** leaves behind. One press on a
+conversation whose work is on a pull request publishes a share and comments on
+every pull request the conversation holds — its own repository's and each
+companion's — carrying the link and an itemized summary of what is in the file.
+Comments only: nothing edits a description, and sharing again leaves another
+comment rather than rewriting the one before it. A pull request the comment
+could not land on is named beside the ones that worked.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory
@@ -313,7 +343,7 @@ $ pnpm dev                # the viewer on :5173, /api proxied to the server
 $ pnpm test               # the vitest suite
 $ pnpm typecheck          # tsc, which the tests do not run
 $ pnpm lint               # the wall around the query hook, and nothing else
-$ pnpm build              # static assets, into web/dist
+$ pnpm build              # static assets into web/dist, and the share into web/dist-share
 ```
 
 `pnpm dev` serves the viewer alone and proxies everything under `/api` to a
@@ -326,6 +356,33 @@ it in; a debug build reads it off disk per request, so a `cargo run -p
 verkstead-cli -- serve` serves whatever `pnpm build` last wrote without a
 recompile — and a checkout that has never built the viewer still builds the
 server, which then says so on every page instead of serving one.
+
+`pnpm build` writes three times, out of the same sources. The site goes to
+`web/dist` as it always did; the **share** goes to `web/dist-share` as one HTML
+file with its script and its stylesheets inlined
+([`vite.share.config.ts`](../web/vite.share.config.ts)), which is the template
+the server writes a Conversation into and hands over as a download — see
+[`crates/server/src/sharing.rs`](../crates/server/src/sharing.rs). Both are
+embedded the same way and both are `allow_missing`, so a checkout that has built
+neither still builds the server; ask it for a share and it says the build is not
+in the binary. That config refuses to write a document that still points at a
+file beside it, which is what makes *no external requests* a property of the
+build rather than something to remember.
+
+The third is mermaid, on its own, into `web/dist-share/mermaid.js`
+([`vite.mermaid.config.ts`](../web/vite.mermaid.config.ts)). It is the one thing
+a Set's page draws for itself and it is three megabytes, so it is the one thing
+a share does not carry as a matter of course: the share build aliases the
+package to a stub that reaches for whatever the *document* is holding, and the
+server writes the library into a second slot only where something in the record
+has a Diagram on it — a Set's Preface or a Commit Summary alike. A Conversation
+nobody drew a picture in stays the size of its own record.
+
+The same file is what a **publish** puts in a secret gist — see
+[`crates/server/src/publishing.rs`](../crates/server/src/publishing.rs), where
+the API makes the gist and git fills it, because the Gists API will not take a
+file this size. So a publish wants the share build too, and a token with the
+`gist` scope on it.
 
 `cargo test` covers the round trip in-process. `nix flake check` runs the
 viewer's vitest suite from the pinned pnpm and node, and boots a VM with the

@@ -39,6 +39,8 @@ import type {
   Resumed,
   RoadmapPane,
   Screen,
+  ShareCommented,
+  SharePublished,
   Shown,
   ShowingArchived,
   StageListEvent,
@@ -74,6 +76,8 @@ import button from "../src/IconButton.module.css";
 import dropdown from "../src/Menu.module.css";
 import menuCss from "../src/Menu.module.css?raw";
 import notices from "../src/notices.module.css";
+// And the layer an outcome that reached outside this machine is said on.
+import toasts from "../src/Toasts.module.css";
 // The set page as it is drawn inside a details pane: its nav, its sections, and
 // the record of a Set this build cannot read.
 import contents from "../src/set/Contents.module.css";
@@ -1667,6 +1671,7 @@ describe("what a right-click on a card offers", () => {
       [...menu.querySelectorAll("button")].map((button) => button.className),
     ).toEqual([
       actions.resume,
+      actions.publish,
       actions.stop,
       actions.forceStop,
       actions.steer,
@@ -6737,9 +6742,10 @@ function theGrillingStanding(
 }
 
 describe("stopping a conversation", () => {
-  /// The two stops sit in the same menu as the resume, the steer and the close,
-  /// in the order of what each one costs: get going again, pause after this
-  /// task, stop now, move the work somewhere else, end the conversation. Each
+  /// The two stops sit in the same menu as the resume, the share, the steer and
+  /// the close, in the order of what each one costs: get going again, take a
+  /// copy away, pause after this task, stop now, move the work somewhere else,
+  /// end the conversation. Each
   /// says what it does, because *stop* and *force stop* are two words apart and
   /// hours of work apart — and each says it *inside* the row, so what the press
   /// is called and what it means are one thing to read and one thing to aim at.
@@ -6754,6 +6760,7 @@ describe("stopping a conversation", () => {
 
     expect(offered).toEqual([
       actions.resume,
+      actions.publish,
       actions.stop,
       actions.forceStop,
       actions.steer,
@@ -6797,9 +6804,13 @@ describe("stopping a conversation", () => {
     }
 
     // Nothing loose in the card: every element the menu holds is a row or
-    // something inside one.
+    // something inside one. Two shapes of row, because one of them is a file to
+    // take away rather than a press — Share is a link, and reads as the rows
+    // around it.
     expect(
-      [...menu.children].every((row) => row.tagName === "BUTTON"),
+      [...menu.children].every((row) =>
+        ["BUTTON", "A"].includes(row.tagName),
+      ),
     ).toBe(true);
   });
 
@@ -6945,6 +6956,313 @@ describe("stopping a conversation", () => {
     expect(
       container.querySelector(`.${actions.conversationActions} .${notices.error}`),
     ).toBeNull();
+  });
+});
+
+/// Where the share is published, which is the one press in this menu that
+/// reaches outside the machine.
+const PUBLISHING = `/api/ui/conversations/${GRILLING.id}/share/publish`;
+
+describe("publishing a share", () => {
+  /// Two rows and one thing: the file to attach, and the same file put where a
+  /// link reaches it. Both are offered on every conversation there is, because
+  /// a share is the record as it stands and a record stands from the moment
+  /// there is one.
+  it("offers publishing beside the download, with nothing to send", async () => {
+    const fetching = theGrillingStanding(
+      {},
+      whenever(
+        PUBLISHING,
+        json({
+          Published: {
+            share: {
+              url: "https://gist.github.com/tobico/9f1",
+              at: "2026-08-30T01:02:03Z",
+            },
+          },
+        } satisfies SharePublished),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    expect(
+      screen.getByText("Publish it as a secret gist and get a link to send."),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
+    );
+
+    await waitFor(() => expect(sent(fetching, PUBLISHING)).toEqual({}));
+  });
+
+  /// A published share is a link the human can send again without publishing a
+  /// second snapshot, so it stands in the menu with the day it was taken.
+  it("draws where the last one went, and when", async () => {
+    theGrillingStanding({
+      shared: {
+        url: "https://gist.github.com/tobico/9f1",
+        at: "2026-08-30T01:02:03Z",
+      },
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    const link = await drawn<HTMLAnchorElement>(
+      container,
+      `.${actions.conversationActions} .${actions.published}`,
+    );
+
+    expect(link.getAttribute("href")).toBe("https://gist.github.com/tobico/9f1");
+    expect(screen.getByText(/Taken .* Opens the gist on GitHub\./)).toBeTruthy();
+
+    // And the press says so: publishing again is a fresh snapshot rather than a
+    // second go at the same one.
+    expect(
+      (await drawn(container, `.${actions.conversationActions} .${actions.publish}`))
+        .textContent,
+    ).toContain("Publish again");
+  });
+
+  /// The one press here whose failures are the human's to read. A token that
+  /// cannot write gists is not a page drawn against a conversation that moved:
+  /// nothing moved, and a re-read would correct nothing — so what is wrong is
+  /// said, with the way to the page it is fixed on inside the sentence.
+  ///
+  /// In a toast rather than in the row that was pressed, and the menu shuts as
+  /// it arrives: an outcome is a moment, and a row here is a drawing of the
+  /// conversation it is about — see `Toasts.tsx`.
+  it("says which token trouble stopped it, and where to fix it", async () => {
+    theGrillingStanding(
+      {},
+      whenever(PUBLISHING, json("NoGistScope" satisfies SharePublished), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
+    );
+
+    const said = await waitFor(() =>
+      screen.getByText("The saved GitHub token may not write gists.", {
+        exact: false,
+      }),
+    );
+
+    expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
+    expect(
+      said.querySelector<HTMLAnchorElement>('a[href="/settings/github"]'),
+    ).toBeTruthy();
+
+    // And the menu it was pressed from has gone: what it said is on the toast,
+    // and a row still holding it would go on saying it over whatever
+    // conversation is opened next.
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${actions.conversationActions} .${actions.publish}`),
+      ).toBeNull(),
+    );
+  });
+
+  /// And nothing of it is left on the next conversation's menu, which is the
+  /// whole reason an outcome is not kept in a row: the sidebar's right-click is
+  /// one menu for the whole list, and the pane's own ⋯ outlives a walk from one
+  /// conversation to the next.
+  it("leaves nothing behind on the menu of another conversation", async () => {
+    theGrillingStanding(
+      {},
+      whenever(PUBLISHING, json("NoToken" satisfies SharePublished), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
+    );
+
+    const said = await waitFor(() =>
+      screen.getByText("Verkstead has no GitHub token to publish as.", {
+        exact: false,
+      }),
+    );
+
+    // Done with, the way the human is done with it.
+    fireEvent.click(
+      said.closest(`.${toasts.toast}`)!.querySelector("button")!,
+    );
+
+    await openActions(container);
+    expect(
+      (
+        await drawn(
+          container,
+          `.${actions.conversationActions} .${actions.publish}`,
+        )
+      ).textContent,
+    ).toBe("PublishPublish it as a secret gist and get a link to send.");
+  });
+
+  /// And a Verkstead nobody has given a token is the other half of the same
+  /// answer: there is nobody to publish as, and the settings page is where that
+  /// is said.
+  it("says so when there is no token to publish as", async () => {
+    theGrillingStanding(
+      {},
+      whenever(PUBLISHING, json("NoToken" satisfies SharePublished), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
+    );
+
+    await waitFor(() =>
+      screen.getByText("Verkstead has no GitHub token to publish as.", {
+        exact: false,
+      }),
+    );
+  });
+});
+
+/// And where the whole of it is done in one press: the same publish, and a
+/// comment on every pull request the conversation holds.
+const SHARING_TO_PRS = `/api/ui/conversations/${GRILLING.id}/share/comment`;
+
+/// One pull request the comment landed on, and one it did not — a conversation
+/// that was worked in a companion repository ends on one each.
+const ON_ITS_OWN = {
+  number: 41,
+  repo: null,
+  url: "https://github.com/tobico/verkstead/pull/41#issuecomment-1",
+};
+
+const MISSED = {
+  number: 7,
+  repo: "verkstead-site",
+  why: "`gh` said: Not Found (HTTP 404)",
+};
+
+describe("sharing a conversation to its pull requests", () => {
+  /// The press that says something in front of other people, offered only where
+  /// there is somewhere to say it: a conversation whose work is on no pull
+  /// request has nowhere for this to go, and the pinned cards are what say so.
+  it("is offered only where the work is on a pull request", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+
+    expect(menu.querySelector(`.${actions.comment}`)).toBeNull();
+  });
+
+  it("publishes and comments the link on every one of them", async () => {
+    const fetching = theGrillingStanding(
+      { pinned: WRAPPING.pinned },
+      whenever(
+        SHARING_TO_PRS,
+        json({
+          Commented: {
+            share: {
+              url: "https://gist.github.com/tobico/9f1",
+              at: "2026-08-30T01:02:03Z",
+            },
+            on: [ON_ITS_OWN, { ...MISSED, url: "https://github.com/x#1" }],
+            missed: [],
+          },
+        } satisfies ShareCommented),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    expect(
+      screen.getByText("Publish it and comment the link on every pull request."),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
+    );
+
+    await waitFor(() => expect(sent(fetching, SHARING_TO_PRS)).toEqual({}));
+
+    // And where each of them went, named the way its card is: an unlabeled
+    // number means the conversation's own repository.
+    await waitFor(() =>
+      screen.getByText("Commented on #41, #7 in verkstead-site."),
+    );
+  });
+
+  /// A pull request the comment could not land on is named against the ones
+  /// that worked. The share is published either way, so what the human needs is
+  /// to be told where to paste the link themselves.
+  it("names the pull request that missed out", async () => {
+    theGrillingStanding(
+      { pinned: WRAPPING.pinned },
+      whenever(
+        SHARING_TO_PRS,
+        json({
+          Commented: {
+            share: {
+              url: "https://gist.github.com/tobico/9f1",
+              at: "2026-08-30T01:02:03Z",
+            },
+            on: [ON_ITS_OWN],
+            missed: [MISSED],
+          },
+        } satisfies ShareCommented),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
+    );
+
+    await waitFor(() =>
+      screen.getByText(
+        "Commented on #41. Nothing could be said on #7 in verkstead-site: " +
+          "`gh` said: Not Found (HTTP 404)",
+      ),
+    );
+  });
+
+  /// A share that was never published says what the publish would have said:
+  /// it is the same write to GitHub under the same token, and the settings page
+  /// is where two of the three refusals are fixed.
+  it("says which token trouble stopped it before anything was said", async () => {
+    theGrillingStanding(
+      { pinned: WRAPPING.pinned },
+      whenever(
+        SHARING_TO_PRS,
+        json({
+          NotPublished: { why: "NoGistScope" },
+        } satisfies ShareCommented),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
+    );
+
+    const said = await waitFor(() =>
+      screen.getByText("The saved GitHub token may not write gists.", {
+        exact: false,
+      }),
+    );
+
+    expect(
+      said.querySelector<HTMLAnchorElement>('a[href="/settings/github"]'),
+    ).toBeTruthy();
   });
 });
 

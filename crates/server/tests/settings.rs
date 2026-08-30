@@ -1,6 +1,8 @@
 //! What Verkstead is told, over the viewer's namespace: reading the git author,
-//! the presence of a GitHub token and how the shared Rust build cache is set,
-//! and writing any of them.
+//! the presence of a GitHub token, how the shared Rust build cache is set and
+//! where the share viewer is hosted, and writing any of them. The viewer page
+//! itself is handed over from here as well, that being the other half of the
+//! setting recording where it went.
 //!
 //! Asked of the *server*, through the endpoints, rather than of the settings
 //! files underneath them. The one thing this half has to be trusted about is
@@ -39,6 +41,11 @@ const REFUSES: &str = r#"printf 'gh: Bad credentials (HTTP 401)\n' >&2; exit 1"#
 /// with — for the test that reads the body looking for the token, where a stub
 /// that repeated it back would be the one doing the leaking.
 const SAYS_AN_ACCOUNT: &str = r#"printf '{"login":"tobico"}'"#;
+
+/// And one that answers with headers, naming the token it was run with as the
+/// scopes GitHub gave it. What a test that is about scopes rather than about
+/// accounts hands a scope list where a token goes.
+const SAYS_ITS_SCOPES: &str = r#"printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: %s\r\n\r\n{"login":"tobico"}' "${GH_TOKEN-unset}""#;
 
 /// A server keeping its settings files in a directory of its own, reaching
 /// GitHub through `gh`.
@@ -79,6 +86,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "git_author": { "name": name, "email": email },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
+            "share_viewer_url": "",
         }),
     )
     .await
@@ -93,6 +101,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "git_author": { "name": "", "email": "" },
             "github_token": { "Set": { "token": token } },
             "rust_build_cache": { "enabled": true, "size": "" },
+            "share_viewer_url": "",
         }),
     )
     .await
@@ -105,6 +114,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "git_author": { "name": "", "email": "" },
             "github_token": "Clear",
             "rust_build_cache": { "enabled": true, "size": "" },
+            "share_viewer_url": "",
         }),
     )
     .await
@@ -216,6 +226,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
             "rust_build_cache": { "enabled": true, "size": "" },
+            "share_viewer_url": "",
         }),
     )
     .await;
@@ -261,6 +272,47 @@ async fn a_saved_token_is_verified_and_the_account_comes_back_with_the_save() {
             // The stub answers with the token it was run with, so this is the
             // proof that the token just saved is the one GitHub was asked about.
             login: "ghp_thetoken".to_owned(),
+            // And it names no scopes, which says nothing about what the token
+            // may do — see [`SAYS_ITS_SCOPES`] for the half that does.
+            missing: Vec::new(),
+        }),
+    );
+}
+
+/// And what a token that authenticates and cannot publish comes back as: the
+/// account, and the one scope to go and tick.
+///
+/// A settings-page answer rather than a failure found later by a human pressing
+/// Share. The `gist` scope is Verkstead's own — publishing a share is its own
+/// write to GitHub — and a token issued for reading repositories does not carry
+/// it.
+#[tokio::test]
+async fn a_token_that_cannot_write_a_gist_says_which_scope_is_missing() {
+    let (_dir, app) = app_asking(SAYS_ITS_SCOPES).await;
+
+    let saved = save_token(&app, "read:org, repo, workflow").await;
+
+    assert_eq!(
+        saved.verified,
+        Some(Verified::Account {
+            login: "tobico".to_owned(),
+            missing: vec!["gist".to_owned()],
+        }),
+    );
+}
+
+/// And one that does carry it comes back with nothing to do.
+#[tokio::test]
+async fn a_token_that_can_write_a_gist_is_missing_nothing() {
+    let (_dir, app) = app_asking(SAYS_ITS_SCOPES).await;
+
+    let saved = save_token(&app, "repo, gist").await;
+
+    assert_eq!(
+        saved.verified,
+        Some(Verified::Account {
+            login: "tobico".to_owned(),
+            missing: Vec::new(),
         }),
     );
 }
@@ -433,6 +485,7 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": false, "size": "5G" },
+            "share_viewer_url": "",
         }),
     )
     .await;
@@ -465,6 +518,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "5G" },
+            "share_viewer_url": "",
         }),
     )
     .await;
@@ -475,10 +529,160 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "  " },
+            "share_viewer_url": "",
         }),
     )
     .await;
 
     assert_eq!(saved.settings.rust_build_cache.size, "30G");
     assert!(!saved.settings.rust_build_cache.size_configured);
+}
+
+/// Where the human hosts the share viewer, which is the plainest setting on the
+/// page: written as it was typed and read back as itself.
+///
+/// It is not a secret — it is a public page, and its URL goes into a comment on
+/// a pull request the moment a share is published through it — so unlike the
+/// token there is nothing here that must not come back out.
+#[tokio::test]
+async fn where_the_share_viewer_is_hosted_goes_in_and_comes_back() {
+    let (dir, app) = app().await;
+
+    let saved = save_viewer(&app, "https://ada.github.io/verkstead-shares/").await;
+
+    assert_eq!(
+        saved.settings.share_viewer_url,
+        "https://ada.github.io/verkstead-shares/"
+    );
+
+    // In the file rather than only in the answer: what task 06 composes a
+    // comment from is the file, read at the moment it comments.
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(
+        written.contains("https://ada.github.io/verkstead-shares/"),
+        "the URL is in config.yaml: {written}"
+    );
+
+    assert_eq!(
+        settings(&app).await.share_viewer_url,
+        "https://ada.github.io/verkstead-shares/"
+    );
+}
+
+/// A Verkstead nobody has hosted one for says so as an empty field rather than
+/// as a guess: there is no default, because nobody but the human knows where
+/// their own site is.
+#[tokio::test]
+async fn a_share_viewer_nobody_has_hosted_comes_back_empty() {
+    let (_dir, app) = app().await;
+
+    assert_eq!(settings(&app).await.share_viewer_url, "");
+}
+
+/// And clearing the field takes it away, which is what an empty one means on the
+/// way in as well as on the way out.
+#[tokio::test]
+async fn clearing_the_share_viewer_url_takes_it_away() {
+    let (_dir, app) = app().await;
+
+    save_viewer(&app, "https://ada.github.io/verkstead-shares/").await;
+    let cleared = save_viewer(&app, "  ").await;
+
+    assert_eq!(cleared.settings.share_viewer_url, "");
+    assert_eq!(settings(&app).await.share_viewer_url, "");
+}
+
+/// Saving where the viewer is hosted must not disturb the credentials, for the
+/// reason saving the author must not: the page has one button and the server
+/// writes both files.
+#[tokio::test]
+async fn saving_the_share_viewer_url_leaves_the_token_where_it_was() {
+    let (_dir, app) = app().await;
+
+    save_token(&app, "ghp_thetoken").await;
+    let saved = save_viewer(&app, "https://ada.github.io/verkstead-shares/").await;
+
+    assert_eq!(
+        saved
+            .settings
+            .github_token
+            .expect("the token is still configured")
+            .last_four,
+        "oken",
+    );
+}
+
+/// Save where the share viewer is hosted, with everything else as it stands.
+async fn save_viewer(app: &Router, url: &str) -> SettingsSaved {
+    save(
+        app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "share_viewer_url": url,
+        }),
+    )
+    .await
+}
+
+/// The viewer itself, which is the other half of that setting: Verkstead ships
+/// the page and the human hosts it, so it has to be obtainable from here.
+///
+/// An attachment, because the point of the press is having the file — a viewer
+/// that opened in the browser would be one served off the tailnet, where nobody
+/// a share is sent to can reach it.
+#[tokio::test]
+async fn the_share_viewer_page_is_handed_over_to_be_hosted() {
+    let (_dir, app) = app().await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/ui/share-viewer.html")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .and_then(|value| value.to_str().ok()),
+        Some("attachment; filename=\"verkstead-share-viewer.html\""),
+    );
+
+    let page = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+    )
+    .unwrap();
+
+    // The three things the page is: a document, a fetch of the gist straight
+    // from GitHub, and a frame the share is drawn in without this page's origin.
+    assert!(page.starts_with("<!doctype html>"), "{page}");
+    assert!(page.contains("https://api.github.com/gists/"));
+    assert!(page.contains(r#"sandbox="allow-scripts""#));
+
+    // And what it is not: anything asked of any other host. Every URL in it is
+    // GitHub's, so a recipient reading a share tells the page's host nothing
+    // beyond that they opened it.
+    for line in page.lines() {
+        if let Some(at) = line.find("https://") {
+            let url = &line[at..];
+            assert!(
+                url.starts_with("https://api.github.com/"),
+                "the viewer reaches for something that is not GitHub: {line}"
+            );
+        }
+    }
 }

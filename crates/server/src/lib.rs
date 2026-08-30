@@ -22,6 +22,7 @@ pub mod build_cache;
 mod capture;
 mod checklist;
 mod checks;
+mod commenting;
 mod comments;
 mod commits;
 mod continuing;
@@ -52,6 +53,9 @@ pub mod handoffs;
 mod limits;
 mod nudge;
 mod profiles;
+/// Putting a share where a link reaches it, which is Verkstead's own write to
+/// GitHub.
+mod publishing;
 mod push;
 /// Following a Conversation's branch to the name a session renamed it to,
 /// rather than repairing a checkout that has not come adrift after all.
@@ -84,6 +88,7 @@ mod sets;
 /// a router up that runs sessions means saying where both are read from.
 pub mod settings;
 mod settling;
+mod sharing;
 /// What a session is grilled by: the skills Verkstead ships and installs into
 /// every sandbox.
 ///

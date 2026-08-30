@@ -5,10 +5,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { onCleanup, onMount, type JSX } from "solid-js";
 
 import styles from "./App.module.css";
+import { Toasts } from "./Toasts";
 import { retrying } from "./api/client";
 import { Empty } from "./notices";
 import { listenForNudges } from "./nudge";
-import { SettingsPage } from "./settings/SettingsPage";
+import { SettingsPage, panes } from "./settings/SettingsPage";
 import { Workbench } from "./workbench/Workbench";
 
 /// One client for the whole app, made once rather than per render: it is where
@@ -79,21 +80,14 @@ export function App(): JSX.Element {
             rather than read, nested for the reason the Conversation's are: the
             settings are one page across all of them, and a route the router
             swapped for another would take the middle pane down with it every
-            time a card was pressed. The leaves draw nothing — what they are is
-            what the path says, and the page reads that off the URL. */}
+            time a card was pressed.
+
+            Which panes there are is that page's own — see `panes` in
+            `SettingsPage.tsx`. Written out here, this list was a second opinion
+            about where a card leads, and a section added to the page without a
+            line added here answered its own path with the catch-all below. */}
         <Route path="/settings" component={SettingsPage}>
-          <Route path="/" />
-          <Route path="/github" />
-          <Route path="/build-cache" />
-          {/* The blank form rides in the same segment an id does, as
-              `/settings/profiles/new` — it is the same pane asked about a
-              Profile that does not exist yet, and no id the server issues is
-              the word `new`. */}
-          <Route path="/profiles/:profile" />
-          {/* And the Repos the same way: a registered one opened by its id, and
-              the path another is registered by riding in the same segment as
-              `/settings/repos/new`. */}
-          <Route path="/repos/:repo" />
+          {panes()}
         </Route>
         <Route path="*" component={NoSuchPage} />
       </Router>
@@ -104,8 +98,23 @@ export function App(): JSX.Element {
 /// What every page sits in. The column the stylesheets set its width on: the
 /// measure every page but one is read at is `main`'s own in `styles/base.css`,
 /// and the workbench's exception to it is this shell's, in `App.module.css`.
-function Shell(props: { children?: JSX.Element }): JSX.Element {
-  return <main class={styles.shell}>{props.children}</main>;
+///
+/// With the toast layer beside it rather than inside it: what a toast is drawn
+/// over is the page, so it belongs outside the column the page is read at — and
+/// it is here, once, because an outcome outlives the control that learned it and
+/// no page owns one. See [`Toasts`].
+///
+/// Exported so that a test mounting a page can mount the shell it really sits
+/// in: a press whose outcome is a toast has nowhere to say it otherwise, and a
+/// test that supplied its own layer would be asking about a layer the app does
+/// not have.
+export function Shell(props: { children?: JSX.Element }): JSX.Element {
+  return (
+    <>
+      <main class={styles.shell}>{props.children}</main>
+      <Toasts />
+    </>
+  );
 }
 
 function NoSuchPage(): JSX.Element {

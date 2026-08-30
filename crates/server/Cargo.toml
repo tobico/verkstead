@@ -64,6 +64,10 @@ serde.workspace = true
 serde-saphyr.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
+# A directory to clone a gist into on the way to publishing a share, cleaned up
+# by dropping it — see `publishing`. A dependency rather than a dev-dependency
+# now, which is where it was when only the tests made directories.
+tempfile.workspace = true
 time.workspace = true
 # `process` and `io-util` are the session half: a grilling session is a child
 # process whose output is read as it arrives, and neither the spawning nor the
@@ -102,7 +106,6 @@ serde-saphyr.workspace = true
 # Writing a row the store's own calls will not write: the tests about a state
 # word this Verkstead cannot parse have to put one there by hand.
 sqlx.workspace = true
-tempfile.workspace = true
 # `test-util` for the runtime's own clock: a keep-alive is a quarter-minute
 # apart, and no test should spend that waiting for one.
 tokio = { workspace = true, features = ["test-util"] }

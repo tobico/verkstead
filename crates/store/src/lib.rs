@@ -45,6 +45,7 @@ mod push;
 mod repos;
 mod session_names;
 mod session_pairings;
+mod shares;
 mod stops;
 mod transcripts;
 mod unseen;
@@ -97,6 +98,7 @@ pub use repos::{
 };
 pub use session_names::session_id;
 pub use session_pairings::RanUnder;
+pub use shares::{Share, record_share, share};
 pub use stops::{
     Decision, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop,
     stop_as_asked, stopped,
@@ -724,6 +726,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // and is the one fact here about the person reading the list rather than
     // about the work on it. See [`unseen`].
     unseen::apply_schema(pool).await?;
+
+    // And where the share of each was published, which hangs off the
+    // Conversations alone as well: a link to a file is not something that
+    // happened to the work either. See [`shares`].
+    shares::apply_schema(pool).await?;
 
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite

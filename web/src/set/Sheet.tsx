@@ -44,7 +44,7 @@ import { Contents, navigation } from "./Contents";
 import { Diff } from "./Diff";
 import { Postscript } from "./Postscript";
 import styles from "./Sheet.module.css";
-import { Standing } from "./Standing";
+import { Badge, Standing } from "./Standing";
 import { drawDiagrams } from "./diagrams";
 import { anchor, outline, spied } from "./outline";
 import { Head, starred } from "./table";
@@ -66,9 +66,17 @@ import { settledAge, utcStamp } from "./when";
 /// has room for: the sidebar in the margin the 60rem cap leaves, or the bar with
 /// the list folded into it where the human has dragged the pane narrower than
 /// that. Which is the nav's own question — see `Contents`.
+///
+/// `readOnly` is a sheet with nobody behind it — the share, where a colleague is
+/// reading a Conversation out of a file. It is drawn as the record however the
+/// Set stood: a Set still waiting on somebody is part of what was shared, and a
+/// form on a page with no server to submit through would be an offer that could
+/// not be taken up. The badge stays and the menu behind it goes, for the same
+/// reason.
 export function Sheet(props: {
   set: SetView;
   back?: () => void;
+  readOnly?: boolean;
 }): JSX.Element {
   // The renderer, named by a Set that has a Diagram on it to draw and by no
   // other: mermaid is megabytes, so a Set without one loads none of them. What a
@@ -209,7 +217,19 @@ export function Sheet(props: {
             than about answering it — and because locking is decided with the
             badge and the Questions in view, not from a list row. */}
         <Show when={waiting()}>
-          {(liveness) => <Standing id={props.set.id} liveness={liveness()} />}
+          {(liveness) => (
+            /* The badge either way, and the menu only where there is something
+               behind it: locking a Set is a thing done to the record, and a
+               reader holding a file has no record to do it to. What the badge
+               says is still worth saying — a share of a Set nobody had answered
+               yet is a share of a Set nobody had answered yet. */
+            <Show
+              when={!props.readOnly}
+              fallback={<Badge liveness={liveness()} />}
+            >
+              <Standing id={props.set.id} liveness={liveness()} />
+            </Show>
+          )}
         </Show>
       </div>
       {/* The Preface, as the shared card: the heading a jump from the table of
@@ -224,8 +244,12 @@ export function Sheet(props: {
       <Show when={props.set.diff.length > 0}>
         <Diff blocks={props.set.diff} wrapped={wrapped()} flip={flip} />
       </Show>
+      {/* The record, or the sheet to fill in — and on a read-only sheet the
+          record whichever it is. Which of the two is decided from the Set as it
+          was loaded rather than from anything that happens after, so a settled
+          Set never flashes a form. */}
       <Show
-        when={decided()}
+        when={decided() || props.readOnly}
         fallback={
           <Answering
             id={props.set.id}
@@ -239,6 +263,7 @@ export function Sheet(props: {
         <Questions
           questions={props.set.questions}
           response={response()}
+          open={!decided()}
           postscript={props.set.postscript_html}
           proposal={props.set.proposal}
         />
@@ -254,15 +279,22 @@ export function Sheet(props: {
 /// list, so a jump lands on the name of the thing rather than just above its
 /// first row. A Set still waiting is asked on the sheet instead — see
 /// [`Answering`] — which draws the same heading and the same anchors.
+///
+/// `open` is the Set that has not settled at all, which reaches here only on a
+/// read-only sheet: a share carries a Set exactly as it stood, and one nobody
+/// had got to yet is a record of questions still out rather than of a decision.
+/// It is told apart from a Set that was locked, because the two are opposite
+/// things — one is waiting and the other never will be again.
 function Questions(props: {
   questions: QuestionView[];
   response: Response | null;
+  open?: boolean;
   postscript: string | null;
   proposal: ProposalView | null;
 }): JSX.Element {
   /// A Set that settled with no Response behind it, which is the one standing
   /// that was never answered by anybody.
-  const orphaned = () => props.response === null;
+  const orphaned = () => props.response === null && !props.open;
 
   /// What to say at the head of a Response that resolved nothing.
   const nothing = () => {
@@ -287,6 +319,14 @@ function Questions(props: {
           This Set was locked unanswered: nobody answered these questions, and
           no Response was ever sent. The agent was told the Set had been
           locked.
+        </p>
+      </Show>
+      {/* And the Set that had simply not been got to yet, which only a
+          read-only sheet ever draws. */}
+      <Show when={props.open}>
+        <p class={styles.counterQuestion}>
+          This Set was still open when this record was made: nobody had answered
+          these questions yet.
         </p>
       </Show>
       <Show when={nothing()}>

@@ -51,6 +51,8 @@ import type {
   SettingsEdit,
   SettingsSaved,
   SettingsView,
+  ShareCommented,
+  SharePublished,
   ShowingArchived,
   Started,
   SteerOpened,
@@ -266,6 +268,40 @@ export function loadConversation(id: string): Promise<ConversationView> {
     `/api/ui/conversations/${encodeURIComponent(id)}`,
     READING_A_CONVERSATION,
   );
+}
+
+/// And where the same Conversation stands as a file to send somebody: the share
+/// build of the viewer with this record inside it.
+///
+/// A path rather than a fetch, which is the one thing in this module that is
+/// not a request. What the human asked for is a file in their downloads, and a
+/// link is the whole of how a browser does that: the server names it and says
+/// it is an attachment, so nothing here has to hold a megabyte of HTML in
+/// memory to hand it straight back to the page it came from.
+export function sharePath(id: number): string {
+  return `/api/ui/conversations/${id}/share`;
+}
+
+/// And the same file put where a link reaches it: one press builds the share
+/// and publishes it as a secret gist.
+///
+/// A request rather than a path, unlike the download above, because what comes
+/// back is where it went — and because it costs something: a gist is made in
+/// somebody's account, and every way that can be refused has a name.
+export function publishShare(id: number): Promise<SharePublished> {
+  return post<SharePublished>(`/api/ui/conversations/${id}/share/publish`, {});
+}
+
+/// And the whole of it in one press: the same publish, and a comment carrying
+/// the link on every pull request the conversation is on.
+///
+/// One request rather than a publish followed by a comment per pull request,
+/// because it is one intention — the human is handing the record to whoever is
+/// reviewing the work, and where that is is the server's to know. What comes
+/// back says how far it got: where each comment landed, and which pull request
+/// missed out.
+export function shareToPullRequests(id: number): Promise<ShareCommented> {
+  return post<ShareCommented>(`/api/ui/conversations/${id}/share/comment`, {});
 }
 
 /// What one session printed, whole.
@@ -744,6 +780,16 @@ export function loadSettings(): Promise<SettingsView> {
 /// way.
 export function saveSettings(edit: SettingsEdit): Promise<SettingsSaved> {
   return post<SettingsSaved>("/api/ui/settings", edit);
+}
+
+/// Where the share viewer stands to be taken away: the small page Verkstead
+/// ships, which the human hosts once so that a published share can be read in a
+/// browser rather than downloaded.
+///
+/// A path rather than a fetch, for the reason a share's own download is one:
+/// what the press is for is a file, and a link is how a browser is handed one.
+export function shareViewerPath(): string {
+  return "/api/ui/share-viewer.html";
 }
 
 /// The public half of the server's VAPID keypair — what `PushManager.subscribe`

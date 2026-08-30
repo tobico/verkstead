@@ -130,7 +130,15 @@ export function Panes(props: {
   pane: Pane;
 
   /// The three panes, in the order they are walked through.
-  conversations: JSX.Element;
+  ///
+  /// The first of them is absent in the one frame that has nothing to pick
+  /// from: a share, which is one Conversation and no list of them. Then the
+  /// frame is two panes — the record and what it opens — the dividers go with
+  /// the pane that is not there, and the two stand side by side from the width
+  /// the sidebar used to arrive at. Nothing else changes: the panes are the same
+  /// panes, drawn by the same components, walked through one at a time on a
+  /// phone.
+  conversations?: JSX.Element;
   middle: JSX.Element;
   details: JSX.Element;
 
@@ -139,6 +147,11 @@ export function Panes(props: {
   /// The other two are the same thing on every page and name themselves.
   middleLabel: string;
 }): JSX.Element {
+  /// Whether there is a list to pick from at all — see `conversations` above.
+  /// Where there is not, the frame is two panes and none of the widths below
+  /// are read: nothing can be dragged, so there is nothing to remember.
+  const picking = () => props.conversations !== undefined;
+
   /// Which layout is standing, which decides how many dividers there are and
   /// how much room each pane is allowed to leave the others.
   const beside = matching(BESIDE);
@@ -260,7 +273,7 @@ export function Panes(props: {
   /// each name, so an absent pair is the untouched frame rather than a broken
   /// one.
   const columns = () =>
-    beside()
+    beside() && picking()
       ? {
           "--pane-sidebar": `${shown().sidebar}%`,
           "--pane-middle": `${shown().middle}%`,
@@ -269,23 +282,29 @@ export function Panes(props: {
 
   return (
     <div
-      class={styles.panes}
+      class={[styles.panes, picking() ? undefined : styles.two]
+        .filter(Boolean)
+        .join(" ")}
       data-pane={props.pane}
       ref={element}
       style={columns()}
     >
-      <section
-        class={`${styles.pane} ${styles.conversationsPane}`}
-        aria-label="Conversations"
-      >
-        {props.conversations}
-      </section>
+      <Show when={picking()}>
+        <section
+          class={`${styles.pane} ${styles.conversationsPane}`}
+          aria-label="Conversations"
+        >
+          {props.conversations}
+        </section>
+      </Show>
 
       {/* One divider per border there is: the sidebar's wherever the sidebar
           stands beside something, the middle pane's only where all three panes
           are up. Each sits between the two panes it parts, so the grid places
-          it without being told where. */}
-      <Show when={beside()}>
+          it without being told where. None at all in the two-pane frame: there
+          is no list to trade room with, and the two panes it does have are the
+          record and the one thing it has open. */}
+      <Show when={beside() && picking()}>
         <Handle
           divider="sidebar"
           label="Resize the conversations pane"
@@ -304,7 +323,7 @@ export function Panes(props: {
         {props.middle}
       </section>
 
-      <Show when={allThree()}>
+      <Show when={allThree() && picking()}>
         <Handle
           divider="middle"
           label={`Resize the ${props.middleLabel.toLowerCase()} pane`}

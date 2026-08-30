@@ -1,6 +1,6 @@
-//! What Verkstead has been told — the GitHub token, the git author and the
-//! shared Rust build cache — as the viewer receives it, and what it sends to
-//! change any of them.
+//! What Verkstead has been told — the GitHub token, the git author, the shared
+//! Rust build cache and where the share viewer is hosted — as the viewer
+//! receives it, and what it sends to change any of them.
 //!
 //! The token goes one way only. What comes back about it is that there is one,
 //! its last four characters and when it was saved, and nothing here can be made
@@ -21,6 +21,11 @@
 //! Sandbox the human sets rather than the installer, and one fact about it
 //! travels one way only — whether the server found an sccache to compile
 //! through, which is its own environment and nobody's setting.
+//!
+//! The share viewer's URL is plainer still: one value, written and read back as
+//! itself. It is a public page the human hosts, and where a Published Share is
+//! linked from a pull request it is what the link goes through — so it is
+//! configuration in the ordinary sense, and the page shows it as it stands.
 
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +45,18 @@ pub struct SettingsView {
 
     /// And how the shared Rust build cache stands.
     pub rust_build_cache: BuildCacheView,
+
+    /// Where the human hosts the share viewer, or empty where they host it
+    /// nowhere.
+    ///
+    /// A string rather than an optional, empty for nothing configured, the way
+    /// the author's two halves are: the field on the page holds it either way,
+    /// and clearing the box is how it is taken away.
+    ///
+    /// Configuration rather than a secret — it is a public page, and its URL
+    /// goes in a comment on a pull request — so unlike the token it reads back
+    /// exactly as it was written.
+    pub share_viewer_url: String,
 }
 
 /// The shared Rust build cache as the settings page draws it: the switch, the
@@ -117,6 +134,11 @@ pub struct SettingsEdit {
     /// there is nothing secret about either, so a save says where they are to
     /// stand and the server writes that down.
     pub rust_build_cache: BuildCacheEdit,
+
+    /// And where the share viewer is hosted, as a value for the same reason:
+    /// an empty one is nothing configured, which is what clearing the field
+    /// means.
+    pub share_viewer_url: String,
 }
 
 /// The build cache as the human has just set it.
@@ -182,7 +204,27 @@ pub struct SettingsSaved {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Verified {
     /// GitHub says the token is this account's.
-    Account { login: String },
+    Account {
+        login: String,
+
+        /// The scopes Verkstead needs that GitHub says this token has not been
+        /// given — empty on one that can do everything asked of it.
+        ///
+        /// `gist` is the whole of the list, and it is a list because the answer
+        /// is *what to go and tick*: publishing a share writes a secret gist,
+        /// which is Verkstead's own write to GitHub rather than a session's, and
+        /// a token issued for reading repositories does not carry it. The
+        /// scopes a *session* needs are not checked here — a session
+        /// authenticates as this token too, but what it does with it is the
+        /// repository's review process rather than anything this server asks
+        /// for.
+        ///
+        /// Empty as well where GitHub said nothing about scopes at all, which is
+        /// what a fine-grained token comes back as: it has permissions rather
+        /// than scopes, and reporting the absence of a header as a missing scope
+        /// would be sending the human to re-issue a token that works.
+        missing: Vec<String>,
+    },
 
     /// GitHub would not say, in `gh`'s own words or Verkstead's about `gh`.
     Refused { why: String },

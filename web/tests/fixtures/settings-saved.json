@@ -13,11 +13,13 @@
       "enabled": true,
       "size": "50G",
       "size_configured": true
-    }
+    },
+    "share_viewer_url": "https://ada.github.io/verkstead-shares/"
   },
   "verified": {
     "Account": {
-      "login": "ada"
+      "login": "ada",
+      "missing": []
     }
   }
 }
