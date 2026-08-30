@@ -63,7 +63,14 @@
 //! on the Conversation is the way to all of it.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  createUniqueId,
+  type JSX,
+} from "solid-js";
 
 import { ContextMenu, Menu } from "../Menu";
 import { Modal } from "../Modal";
@@ -204,6 +211,55 @@ export function Action(props: {
       <span class={styles.title}>{props.working ? props.pressing : props.label}</span>
       <span class={styles.says}>{props.says}</span>
     </button>
+  );
+}
+
+/// What a press that did nothing is answered with: the refusal's own sentence,
+/// under a heading saying that is what it is, with one way out.
+///
+/// A card over the page rather than a line under the row, because the menu the
+/// row was in has gone by the time there is anything to say — and because every
+/// one of these sentences is the human being told the world moved under what
+/// they were looking at.
+///
+/// One way out rather than two, which is the whole of what tells this card from
+/// a confirm sheet: nothing is being decided here. The press has already been
+/// refused, and reading why is all there is left to do.
+///
+/// Its own component because the two menus below are not the only place a row
+/// of this menu is drawn. The escape hatch draws one for the Conversation whose
+/// page will not load — the same `Action`, off the same refusal maps — and a
+/// press refused one way there and another way here would be two answers to the
+/// same press.
+export function Refusal(props: {
+  /// The sentence, or `null` while there is nothing to answer.
+  said: string | null;
+  /// Said once it has been read.
+  close: () => void;
+}): JSX.Element {
+  // The heading's own id, for the `aria-labelledby` naming the card by it.
+  // Generated rather than written, because more than one of these stands on a
+  // page at once — the Conversation pane's and the sidebar's right-click each
+  // hold one — and an id is the page's to keep unique.
+  const id = createUniqueId();
+
+  return (
+    <Modal
+      class={styles.refused!}
+      open={props.said !== null}
+      close={props.close}
+      labelledBy={id}
+    >
+      <p id={id} class={styles.refusedTitle}>
+        Nothing happened
+      </p>
+      <p class={styles.refusedWhy}>{props.said}</p>
+      <div class={styles.refusedOut}>
+        <button type="button" onClick={() => props.close()}>
+          OK
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -538,28 +594,9 @@ function actions(): {
     // menu: what the human is looking at from here is one card over the page.
     modal: () => (
       <>
-        {/* What a press that did nothing is answered with: the refusal's own
-            sentence, under a heading saying that is what it is, with one way
-            out. A card over the page rather than a line under the row, because
-            the menu the row was in has gone by the time there is anything to
-            say — and because every one of these sentences is the human being
-            told the world moved under what they were looking at. */}
-        <Modal
-          class={styles.refused!}
-          open={refused() !== null}
-          close={() => setRefused(null)}
-          labelledBy="conversation-refused"
-        >
-          <p id="conversation-refused" class={styles.refusedTitle}>
-            Nothing happened
-          </p>
-          <p class={styles.refusedWhy}>{refused()}</p>
-          <div class={styles.refusedOut}>
-            <button type="button" onClick={() => setRefused(null)}>
-              OK
-            </button>
-          </div>
-        </Modal>
+        {/* What a press that did nothing is answered with — see [`Refusal`],
+            which the escape hatch draws the same card from. */}
+        <Refusal said={refused()} close={() => setRefused(null)} />
 
         <Show when={steering()}>
           {(opened) => {

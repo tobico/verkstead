@@ -2639,12 +2639,16 @@ describe("the escape hatch on a conversation that will not load", () => {
     });
   });
 
-  /// And a refusal goes where every other refusal in this menu goes: the
-  /// console. There is no row left to correct and nowhere on a page that will
-  /// not load to put a sentence.
-  it("logs a refusal and stays where it is", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-
+  /// And a refusal goes where every other refusal in this menu goes: a card
+  /// over the page, saying the refusal's own sentence.
+  ///
+  /// It matters more here than anywhere else the card is drawn. Everywhere else
+  /// a refusal is a page drawn against a Conversation that has moved and the
+  /// re-read behind the press is the correction; here the reading is the thing
+  /// that failed, so a press that went quietly nowhere would leave the human on
+  /// a page that will not load with the one way off it apparently doing
+  /// nothing.
+  it("says over the page that the press did nothing, and stays where it is", async () => {
     theBrokenConversation(
       whenever(
         CLOSE_AND_ARCHIVE,
@@ -2657,13 +2661,35 @@ describe("the escape hatch on a conversation that will not load", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
 
-    await waitFor(() =>
-      expect(logged).toHaveBeenCalledWith(CLOSE_REFUSAL.NoSuchConversation),
-    );
-    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
-    expect(screen.queryByText("This conversation is gone.")).toBeNull();
+    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
+    expect(said.textContent).toBe(CLOSE_REFUSAL.NoSuchConversation);
 
-    logged.mockRestore();
+    // The menu goes as the card comes up, as it does in the ordinary menu: a
+    // dropdown left hanging behind a card is one nobody can see to close.
+    expect(container.querySelector(`.${dropdown.drop}`)).toBeNull();
+    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
+  });
+
+  /// And a request that fell over on the way out is answered the same way: the
+  /// press was made and nothing came of it, which is the whole of what the card
+  /// is for.
+  it("says over the page when the request itself fell over", async () => {
+    theBrokenConversation(
+      whenever(
+        CLOSE_AND_ARCHIVE,
+        json({ error: "the server is not answering" }, 503),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
+
+    expect(said.textContent).toContain("could not be closed");
+    expect(said.textContent).toContain("the server is not answering");
   });
 });
 
