@@ -640,30 +640,50 @@ describe("the workbench", () => {
 
   /// The switch is the foot of the pane rather than the last row of the list:
   /// last in the column, with whatever room the conversations leave over taken
-  /// above it. So a short list stands it against the bottom of the screen and a
-  /// long one leaves it after the last card, behind the scroll — and neither
-  /// costs a card being covered, which is what a strip stuck across the list
-  /// would have cost for the life of the pane.
+  /// above it, and stuck to the bottom edge once there is no room to take. So a
+  /// short list stands it against the bottom of the screen and a long one keeps
+  /// it there with the cards going under it — which is worth the strip of list
+  /// it covers, a list with no end in sight being exactly the one nobody should
+  /// have to reach the end of to answer this.
+  ///
+  /// It is the frame's own foot, which is why the sticking is asked of
+  /// `Panes.module.css` here and this pane is asked only that it wears the name.
   ///
   /// Where a thing sits is the stylesheet's, and jsdom lays nothing out: what is
-  /// asked here is that it is last in the pane, that the room over it is what
-  /// puts it there, and that the pane is the column that gives it any.
-  it("stands the archived switch at the foot of the pane", async () => {
+  /// asked here is that it is last in the pane, that it is the pane's foot, and
+  /// that the pane is the column that gives a foot its room.
+  it("sticks the archived switch to the foot of the pane", async () => {
     theWorkbench();
     const { container } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
     const pane = container.querySelector(`.${shell.conversationsPane}`)!;
-    expect(pane.lastElementChild!.className).toBe(sidebar.showArchived);
+    const foot = pane.lastElementChild!;
 
-    const at = sidebarCss.indexOf("\n.showArchived {");
-    expect(sidebarCss.slice(at, sidebarCss.indexOf("\n}", at))).toContain(
+    expect(foot.classList.contains(sidebar.showArchived!)).toBe(true);
+    expect(foot.classList.contains(shell.paneFoot!)).toBe(true);
+
+    const stuck = shellCss.indexOf("\n.pane > .paneFoot {");
+    expect(shellCss.slice(stuck, shellCss.indexOf("\n}", stuck))).toContain(
+      "position: sticky;\n  bottom: 0;",
+    );
+
+    // Against the bottom edge rather than a padding above it, which is where a
+    // negative margin left it: what a sticky box may never be pushed past is
+    // its containing block, so the room under a pane's last line is the pane's
+    // to stop keeping rather than the foot's to take back.
+    expect(shellCss).toContain(
+      ".pane:has(> .paneFoot) {\n  padding-bottom: 0;\n}",
+    );
+    expect(shellCss).toContain("  margin: 1rem -1.25rem 0;\n");
+
+    // And the room over it, which is the column's to give: a list too short to
+    // scroll has nothing to stick against, and the switch belongs at the bottom
+    // of the pane rather than under the last card.
+    const room = shellCss.indexOf("\n.conversationsPane > .paneFoot {");
+    expect(shellCss.slice(room, shellCss.indexOf("\n}", room))).toContain(
       "margin-top: auto;",
     );
-    expect(
-      sidebarCss,
-      "the foot is the end of the pane rather than a strip laid over it",
-    ).not.toContain("position: sticky");
 
     const column = shellCss.indexOf("\n.conversationsPane {");
     expect(
@@ -5862,10 +5882,13 @@ describe("the foot of the timeline pane", () => {
 
     expect(container.querySelectorAll(`.${timeline.agentOutput}`)).toHaveLength(1);
 
-    // And the frame's own rule for something stuck to a pane's bottom edge went
-    // with it: the strip was the only thing that ever wore that name, and a rule
-    // with no wearer is a rule nobody can read the reason for.
-    expect(shellCss).not.toContain(".pane > .paneFoot {");
+    // And nothing in this pane wears the frame's name for something stuck to a
+    // pane's bottom edge any more. The name itself outlived the strip by one
+    // pane, which is why the search is this pane rather than the page: the
+    // conversations keep their archived switch down there.
+    expect(
+      container.querySelector(`.${shell.middlePane} .${shell.paneFoot}`),
+    ).toBeNull();
   });
 
   /// And the status button says what the strip said, which is why it could go:

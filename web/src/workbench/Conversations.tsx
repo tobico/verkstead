@@ -86,6 +86,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { CardActions } from "./Actions";
+import shell from "../Panes.module.css";
 import styles from "./Conversations.module.css";
 import { SPOKEN } from "./Mark";
 // The rings and the badge a card carries at its right edge. Drawn here rather
@@ -563,13 +564,12 @@ function Settings(): JSX.Element {
 /// The one setting that is about this list rather than about the rest of
 /// Verkstead: whether the conversations the human has archived are drawn in it.
 ///
-/// At the foot of the pane, under the list it is about. Pushed there by the
-/// room left over rather than stuck over the cards — see `.showArchived`, and
-/// the column the pane is made into in `Panes.module.css` — so a list that
-/// does not fill the screen leaves this against the bottom of it, and a list
-/// that does leaves it after the last card, behind the scroll. A strip laid
-/// across the list would have covered a card for the whole life of the pane to
-/// save the human a scroll they make once.
+/// At the foot of the pane, under the list it is about, and kept there: it
+/// wears the frame's `paneFoot`, so a list too short to scroll leaves it
+/// against the bottom of the pane and a long one keeps it there with the cards
+/// going under it. What it costs is the strip of list behind it; what it saves
+/// is having to reach the end of a list with no end in sight to say whether the
+/// conversations put away are among them.
 ///
 /// A switch rather than something that presses, because it is a state the list
 /// is in rather than something to do to it. *Show archived* rather than the
@@ -607,7 +607,7 @@ function ShowArchived(): JSX.Element {
     flip.isPending ? (flip.variables ?? false) : (showing.data ?? false);
 
   return (
-    <div class={styles.showArchived}>
+    <div class={`${styles.showArchived} ${shell.paneFoot}`}>
       <Toggle
         label="Show archived"
         on={on()}
