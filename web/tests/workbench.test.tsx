@@ -6963,6 +6963,12 @@ describe("stopping a conversation", () => {
 /// reaches outside the machine.
 const PUBLISHING = `/api/ui/conversations/${GRILLING.id}/share/publish`;
 
+/// And what comes back from it: the link the server composed, which is the
+/// gist's id in the share viewer's fragment rather than the gist. Whose viewer
+/// it is — Verkstead's hosted one or the human's own — is settled over there;
+/// what this side has to do is hand out whatever arrived.
+const PUBLISHED = "https://tobico.github.io/verkstead/share-viewer.html#9f1";
+
 describe("publishing a share", () => {
   /// Two rows and one thing: the file to attach, and the same file put where a
   /// link reaches it. Both are offered on every conversation there is, because
@@ -6976,7 +6982,7 @@ describe("publishing a share", () => {
         json({
           Published: {
             share: {
-              url: "https://gist.github.com/tobico/9f1",
+              url: PUBLISHED,
               at: "2026-08-30T01:02:03Z",
             },
           },
@@ -6998,12 +7004,54 @@ describe("publishing a share", () => {
     await waitFor(() => expect(sent(fetching, PUBLISHING)).toEqual({}));
   });
 
+  /// And the moment itself carries the link, because the menu it was pressed
+  /// from is shut by the time the toast is read.
+  ///
+  /// The link is the share viewer's rather than the gist's — composed by the
+  /// server, so what this asks is that the toast opens what came back rather
+  /// than something of its own: a toast pointing at the gist would hand
+  /// somebody a page GitHub draws as source.
+  it("puts the link it just made in the toast", async () => {
+    theGrillingStanding(
+      {},
+      whenever(
+        PUBLISHING,
+        json({
+          Published: {
+            share: { url: PUBLISHED, at: "2026-08-30T01:02:03Z" },
+          },
+        } satisfies SharePublished),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
+    );
+
+    const said = await waitFor(() =>
+      screen.getByText("The share is published.", { exact: false }),
+    );
+
+    expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
+    expect(
+      said.querySelector<HTMLAnchorElement>("a")!.getAttribute("href"),
+    ).toBe(PUBLISHED);
+  });
+
   /// A published share is a link the human can send again without publishing a
   /// second snapshot, so it stands in the menu with the day it was taken.
+  ///
+  /// The URL is the server's own composition — the gist's id in the share
+  /// viewer's fragment, rather than the gist — so what this draws is whatever
+  /// the record came back carrying. See `link` in
+  /// `crates/server/src/sharing.rs`, which is where that is decided and proved.
   it("draws where the last one went, and when", async () => {
     theGrillingStanding({
       shared: {
-        url: "https://gist.github.com/tobico/9f1",
+        url: "https://tobico.github.io/verkstead/share-viewer.html#9f1",
         at: "2026-08-30T01:02:03Z",
       },
     });
@@ -7015,8 +7063,12 @@ describe("publishing a share", () => {
       `.${actions.conversationActions} .${actions.published}`,
     );
 
-    expect(link.getAttribute("href")).toBe("https://gist.github.com/tobico/9f1");
-    expect(screen.getByText(/Taken .* Opens the gist on GitHub\./)).toBeTruthy();
+    expect(link.getAttribute("href")).toBe(
+      "https://tobico.github.io/verkstead/share-viewer.html#9f1",
+    );
+    expect(
+      screen.getByText(/Taken .* Opens it in the share viewer\./),
+    ).toBeTruthy();
 
     // And the press says so: publishing again is a fresh snapshot rather than a
     // second go at the same one.
