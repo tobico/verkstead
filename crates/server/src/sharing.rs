@@ -10,6 +10,11 @@
 //! Two halves, and the seam between them is a pair of slots. The build leaves
 //! them empty in the document and this fills them in.
 //!
+//! Both ends spell those slots out — the tags in `web/share.html`, the constants
+//! below — and `web/tests/template.test.ts` is what compares them: nothing in
+//! this crate can, the share build being something `cargo test` neither waits on
+//! nor runs.
+//!
 //! The first holds the record — a `<script type="application/json">` holding
 //! `null` until the Conversation goes in. The alternative was a viewer that
 //! fetched its own payload from somewhere, which is the one thing a file sent as

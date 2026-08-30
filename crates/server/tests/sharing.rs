@@ -15,6 +15,12 @@
 //! shape, and what proves the built document has nothing outside it is the build
 //! itself: `web/vite.share.config.ts` refuses to write one that still points at
 //! a file beside it.
+//!
+//! What a template of the right shape *is*, though, is a claim about a document
+//! this suite cannot see — so the slots those unit tests write into are compared
+//! against the real `web/share.html` from the side that owns it, in
+//! `web/tests/template.test.ts`. Both ends spell the two tags out; that is what
+//! says they still agree.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
