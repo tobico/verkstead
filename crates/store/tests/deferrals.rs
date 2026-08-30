@@ -113,8 +113,8 @@ async fn folding(pool: &SqlitePool, conversation: i64) -> Vec<String> {
         .collect()
 }
 
-/// Which Sets on the Timeline were asked deferred, oldest first.
-async fn deferrals(pool: &SqlitePool, conversation: i64) -> Vec<(String, bool)> {
+/// How each Set on the Timeline was asked, oldest first.
+async fn deferrals(pool: &SqlitePool, conversation: i64) -> Vec<(String, Ask)> {
     timeline(pool, conversation)
         .await
         .unwrap()
@@ -127,16 +127,16 @@ async fn deferrals(pool: &SqlitePool, conversation: i64) -> Vec<(String, bool)> 
                     .expect("the stored Set reads back")
                     .title
                     .clone(),
-                asked.deferred,
+                asked.ask,
             )),
             _ => None,
         })
         .collect()
 }
 
-/// Both kinds land on the Timeline, and the Timeline says which is which: both
-/// are something to answer, and only one of them has a session standing still
-/// behind it.
+/// All three kinds land on the Timeline, and the Timeline says which is which:
+/// every one of them is something to answer, and what differs is who is standing
+/// still behind it.
 #[tokio::test]
 async fn the_timeline_tells_a_deferred_set_from_a_blocking_one() {
     let (_dir, pool) = fresh_pool().await;
@@ -144,12 +144,14 @@ async fn the_timeline_tells_a_deferred_set_from_a_blocking_one() {
 
     asked(&pool, conversation, "blocking", Ask::Blocking).await;
     asked(&pool, conversation, "deferred", Ask::Deferred).await;
+    asked(&pool, conversation, "stored", Ask::StoreAndNudge).await;
 
     assert_eq!(
         deferrals(&pool, conversation).await,
         [
-            ("blocking".to_owned(), false),
-            ("deferred".to_owned(), true)
+            ("blocking".to_owned(), Ask::Blocking),
+            ("deferred".to_owned(), Ask::Deferred),
+            ("stored".to_owned(), Ask::StoreAndNudge),
         ],
     );
 }
@@ -188,6 +190,40 @@ async fn a_deferred_set_is_not_a_session_still_asking() {
     );
 
     assert_ne!(blocking, deferred);
+}
+
+/// And a store-and-nudge ask is a session still asking, stored though it is.
+///
+/// The whole point of the third state. Its session has ended its turn and is
+/// waiting for the line Verkstead types when the Response lands, so a driver
+/// that read the row beside it as *nobody is waiting* would end that session on
+/// quiet and leave the Answer with nothing to nudge.
+#[tokio::test]
+async fn a_store_and_nudge_set_is_a_session_still_asking() {
+    let (_dir, pool) = fresh_pool().await;
+    let conversation = conversation(&pool).await;
+
+    let stored = asked(&pool, conversation, "stored", Ask::StoreAndNudge).await;
+
+    assert_eq!(
+        unanswered_set_since(&pool, conversation, 0).await.unwrap(),
+        Some(stored),
+        "a session is idling on it, so its own session is not one to end",
+    );
+
+    submit_response(&pool, &Settlements::new(4), stored, &picked())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        unanswered_set_since(&pool, conversation, 0).await.unwrap(),
+        None,
+        "and answering it settles it as it settles any other",
+    );
+
+    // And its Answers fold, exactly as a Deferred Ask's do: a session that has
+    // gone before the nudge reaches it is the folding rule's own case.
+    assert_eq!(folding(&pool, conversation).await, ["stored".to_owned()]);
 }
 
 /// Only what the human has actually answered: an unanswered Deferred Ask is

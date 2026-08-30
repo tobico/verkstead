@@ -399,8 +399,37 @@ async fn a_locked_round_is_not_the_latest_word_and_a_deferred_one_is_never_count
         "and a Deferred Ask is nobody's round: its Answers are for a later \
          session by design"
     );
-}
+    assert!(
+        nothing_else(&pool, conversation).await.unwrap(),
+        "and a Deferred Ask is nobody's round: its Answers are for a later \
+         session by design"
+    );
 
+    // And the third kind is a round like any other. Stored though it is, the
+    // session that asked it is idling on the Answer with its turn ended — which
+    // is exactly the session this mark ends — so what the human said to it is
+    // the follow-up's latest word.
+    let stored = ask(
+        &pool,
+        conversation,
+        &round("the round a stored ask put up"),
+        Ask::StoreAndNudge,
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation is there to ask from")
+    .id;
+
+    submit_response(&pool, &settlements(), stored, &answering())
+        .await
+        .unwrap();
+
+    assert!(
+        !nothing_else(&pool, conversation).await.unwrap(),
+        "an answer without the mark on a store-and-nudge round puts the \
+         follow-up back to running"
+    );
+}
 #[tokio::test]
 async fn the_follow_up_lands_back_in_the_wrap_up_and_takes_the_checks_with_it() {
     let (_dir, pool) = fresh_pool().await;

@@ -348,7 +348,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         &state,
         id,
         settlement,
-        stored.deferred,
+        stored.ask.deferred_shaped(),
         &stored.created_at,
         OffsetDateTime::now_utc(),
     );
@@ -399,7 +399,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 /// registry either way: whichever of the two the human is looking at, it is the
 /// page they act on.
 ///
-/// Except for a Deferred Ask, which the registry has nothing to say about: no
+/// Except for a stored ask, which the registry has nothing to say about: no
 /// wait was ever held on one, so ageing it against the clock would report an
 /// agent that had gone where none was ever there. `deferred` is what the record
 /// says about how it was asked, and it is the whole verdict where it is true.
@@ -1229,7 +1229,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                                 &state,
                                 asked.set_id,
                                 asked.settlement,
-                                asked.deferred,
+                                asked.ask.deferred_shaped(),
                                 &event.at,
                                 now,
                             );

@@ -432,9 +432,35 @@ impl Grilling {
         id
     }
 
-    /// What both of them are made of: post the Set over the agent API and read
+    /// The same again on a backend whose sessions cannot wait: the ask says
+    /// nothing about the channel, and the reply says the Set was stored.
+    ///
+    /// The one assertion the ask itself carries, because it is what the CLI
+    /// reads to know it is not to open a wait — see `verkstead_schema`'s
+    /// `SetCreated`.
+    async fn ask_stored(&self, yaml: &str) -> i64 {
+        let created = self.submitting(yaml, "").await;
+
+        assert!(
+            created.stored,
+            "an ordinary ask on a store-and-nudge backend comes back stored, \
+             which is what tells the CLI to return: {created:?}",
+        );
+
+        self.asked();
+
+        created.id
+    }
+
+    /// What all of them are made of: post the Set over the agent API and read
     /// its id back.
     async fn asking(&self, yaml: &str, how: &str) -> i64 {
+        self.submitting(yaml, how).await.id
+    }
+
+    /// And the whole of what the server said, for the one caller that reads
+    /// more of it than the id.
+    async fn submitting(&self, yaml: &str, how: &str) -> verkstead_schema::SetCreated {
         let (status, body) = fetch(
             &self.app,
             Request::builder()
@@ -448,8 +474,7 @@ impl Grilling {
 
         assert_eq!(status, StatusCode::CREATED, "the Set was refused: {body}");
 
-        let created: verkstead_schema::SetCreated = serde_saphyr::from_str(&body).unwrap();
-        created.id
+        serde_saphyr::from_str(&body).unwrap()
     }
 
     /// Tell the stub that the Set it would have sent is up, which is what stops
@@ -1344,8 +1369,33 @@ async fn grilling_on_codex(stub: &str) -> Grilling {
     .await
 }
 
+/// The same with every role on that Profile, spilling what its sessions were
+/// told somewhere that outlives their worktrees and with a `gh` of the caller's
+/// choosing — which is what a wrap-up on the second backend needs.
+async fn grilling_spilling_on_codex(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    grilling_however_started(
+        spill,
+        stub,
+        gh,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnCodex,
+        Origin::None,
+    )
+    .await
+}
+
 /// The model that Profile lists, which is what its sessions are launched on.
 const CODEX_MODEL: &str = "gpt-5-codex";
+
+/// And the one its grilling role runs on where every role is on that Profile.
+///
+/// A model apiece for the same reason the Claude fixtures give each role a
+/// Profile of its own: the stubs tell the session that breaks the work down
+/// from the ones that build it by the model they were launched on — see
+/// [`A_BACKLOG_OF_ONE`] — and a Conversation whose roles all ran the same model
+/// would be one where no stub could tell what it had been sent to do.
+const CODEX_GRILLING_MODEL: &str = "gpt-5-codex-grilling";
 
 /// The same, with a second repository registered beside this one and added to
 /// the Conversation as a companion before the press — which is a companion in
@@ -1479,6 +1529,10 @@ enum Pickers {
     /// The grilling role runs on a Profile whose whole account is one home,
     /// which is every agent type after Claude — see [`Bench::grilling_on_codex`].
     GrillingOnCodex,
+
+    /// And every role on that Profile, which is a Conversation whose whole run
+    /// is on the second backend — see [`Bench::everything_on_codex`].
+    EverythingOnCodex,
 }
 
 /// The same with a read-write companion beside it, for the tests about a
@@ -1610,6 +1664,7 @@ async fn grilling_however_started(
         Pickers::Ungrilled => bench.ungrilled(id).await,
         Pickers::Unreviewed => bench.unreviewed(id).await,
         Pickers::GrillingOnCodex => bench.grilling_on_codex(id).await,
+        Pickers::EverythingOnCodex => bench.everything_on_codex(id).await,
     }
 
     // While it is still drafting, which is the only time a companion can be
@@ -1721,6 +1776,34 @@ impl Bench {
     /// [`Bench::unreviewed`] is: it is the picker moved off what it was filled
     /// with, which is what the human does on the setup card.
     async fn grilling_on_codex(&self, id: i64) {
+        self.on_codex(id, &[("grilling", CODEX_MODEL)]).await;
+    }
+
+    /// And the same for every role at once, which is what a Conversation whose
+    /// whole run is on the second backend looks like.
+    ///
+    /// What the tests about the store-and-nudge channel want: the sessions that
+    /// ask and are ended on quiet are the wrap-up's, so putting only the
+    /// grilling role on that backend would leave every ask of theirs blocking.
+    ///
+    /// The grilling role on a model of its own, because one Profile is running
+    /// every role here and the stubs tell the session that breaks the work down
+    /// from the ones that build it by the model — see [`CODEX_GRILLING_MODEL`].
+    async fn everything_on_codex(&self, id: i64) {
+        self.on_codex(
+            id,
+            &[
+                ("grilling", CODEX_GRILLING_MODEL),
+                ("implementation", CODEX_MODEL),
+                ("review", CODEX_MODEL),
+            ],
+        )
+        .await;
+    }
+
+    /// The Profile both of them pick, and the pressing of the pickers named,
+    /// each on the model it is paired with.
+    async fn on_codex(&self, id: i64, roles: &[(&str, &str)]) {
         let home = self.watched.path().join("codex/.codex");
         std::fs::create_dir_all(&home).unwrap();
 
@@ -1730,7 +1813,7 @@ impl Bench {
             &serde_json::json!({
                 "name": "codex",
                 "account": { "agent_type": "Codex", "home": home },
-                "models": [CODEX_MODEL],
+                "models": [CODEX_MODEL, CODEX_GRILLING_MODEL],
             }),
         )
         .await;
@@ -1744,15 +1827,25 @@ impl Bench {
             .expect("the Profile just saved should be on the list")
             .id;
 
-        let chosen: verkstead_render::ProfileChosen = post(
-            &self.app,
-            &format!("/api/ui/conversations/{id}/grilling-pairing"),
-            &serde_json::json!({
-                "pairing": { "profile_id": profile_id, "model": CODEX_MODEL },
-            }),
-        )
-        .await;
-        assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+        for (role, model) in roles {
+            let pairing = serde_json::json!({ "profile_id": profile_id, "model": model });
+
+            // The two pickers that offer a row which is no account at all send
+            // which row was picked, exactly as [`Bench::under_every_pairing`]
+            // does.
+            let picked = match *role {
+                "grilling" | "review" => serde_json::json!({ "pairing": pairing }),
+                _ => pairing,
+            };
+
+            let chosen: verkstead_render::ProfileChosen = post(
+                &self.app,
+                &format!("/api/ui/conversations/{id}/{role}-pairing"),
+                &picked,
+            )
+            .await;
+            assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+        }
     }
 
     /// And pick the Grilling picker's other row instead: this Conversation is
@@ -4494,7 +4587,7 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
 /// which is the half under test.
 const A_BACKLOG_OF_ONE: &str = r#"
 case "$1" in
-claude-grilling-5)
+claude-grilling-5|gpt-5-codex-grilling)
     printf 'grilling\n'
     mkdir -p .tasks
     printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
@@ -6561,6 +6654,175 @@ async fn a_deferred_ask_of_a_reviews_own_does_not_hold_its_session_open() {
         "and nobody ever answered it: {:?}",
         sets(&view),
     );
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the session was seen out and the review never settled: {:?}",
+            notices(&fixture.view().await),
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped over a question nobody was waiting on: {:?}",
+        notices(&view),
+    );
+    assert!(
+        matches!(
+            where_it_stands(&view, set),
+            Some(verkstead_render::Standing::Waiting(_))
+        ),
+        "and it is still there to be answered in their own time: {:?}",
+        where_it_stands(&view, set),
+    );
+}
+
+/// The same review on a backend whose sessions cannot hold a shell command open
+/// for hours: the ask comes back stored the moment it lands, and the session it
+/// came from is left standing all the same.
+///
+/// Which is the whole of the third state. The Set is stored as a Deferred Ask
+/// is — nothing is waiting on the wire, so the CLI returns and the session ends
+/// its turn — and a session *is* idling on it, waiting for the line Verkstead
+/// types when the Response lands. Read as a Deferred Ask it would be ended on
+/// quiet and prodded by the rescue before the human had answered, leaving the
+/// Response with nothing to nudge; read as a blocking one the CLI would sit
+/// there for hours. So it is counted as open by the enders and by the rescue,
+/// and stored by the reply.
+///
+/// Nothing is nudged here — that is the next step's — so the stub waits on the
+/// marker the test writes, exactly as the blocking one does.
+#[tokio::test]
+async fn an_ask_on_a_store_and_nudge_backend_is_stored_and_holds_its_session_open() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling_on_codex(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    // The ask itself says nothing about the channel — it is the same `verkstead
+    // ask` it would be anywhere — and what comes back says the Set was stored.
+    let set = fixture.ask_stored(REVIEW).await;
+
+    // Several graces of a session saying nothing at all, which on this backend
+    // is what a session with its turn ended looks like from outside.
+    tokio::time::sleep(BRISKLY.proposing * 4).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session is still there to be nudged: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        !review_settled(&fixture).await,
+        "and nothing settled a review whose questions are still open",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nor was it prodded and stopped over a question the human has not \
+         answered: {:?}",
+        notices(&view),
+    );
+    assert!(
+        matches!(
+            where_it_stands(&view, set),
+            Some(verkstead_render::Standing::Waiting(
+                verkstead_schema::Liveness::Deferred
+            ))
+        ),
+        "and the human sees a deferred-shaped ask, because nothing is holding a \
+         connection open on it: {:?}",
+        where_it_stands(&view, set),
+    );
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the answers were in and the session that read them was never ended",
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| !output.running),
+        "the session that sat on the ask is over: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// And `--deferred` on that same backend still means an ask nobody is idling on:
+/// the session that sent one is ended on quiet like any other.
+///
+/// The one thing the backend does not decide. `--deferred` is the agent saying
+/// it will carry straight on, and a backend that stores every ask does not make
+/// that untrue — so the review settles over the top of one and the question
+/// stays open for the human to answer in their own time, exactly as on Claude.
+#[tokio::test]
+async fn a_deferred_ask_on_a_store_and_nudge_backend_still_holds_nothing_open() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling_on_codex(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask_deferred(REVIEW).await;
+
+    // Which is the whole assertion: it returns only once the session that sent
+    // the Set is over, and an ask read as one somebody was idling on would hold
+    // this open until the deadline instead.
+    fixture
+        .until(|view| {
+            outputs(view)
+                .last()
+                .and_then(|output| (!output.running).then_some(()))
+        })
+        .await;
 
     let deadline = Instant::now() + *PATIENCE;
     while !review_settled(&fixture).await {

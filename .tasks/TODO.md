@@ -30,6 +30,6 @@ Roadmap stage: [02: Asking and idling](docs/roadmaps/agent-backends/02-asking-an
 
 - [x] 01: `verkstead answers` — [details](01-verkstead-answers.md)
 - [x] 02: The agent type reaches the sandbox, and the Guide is tailored to it — [details](02-the-guide-per-backend.md)
-- [ ] 03: The ask channel per agent type — [details](03-the-ask-channel.md)
+- [x] 03: The ask channel per agent type — [details](03-the-ask-channel.md)
 - [ ] 04: The nudge — [details](04-the-nudge.md)
 - [ ] 05: Screen-signature idle, and the byte-quiet long-stop — [details](05-screen-signature-idle.md)

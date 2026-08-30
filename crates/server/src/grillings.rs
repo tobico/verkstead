@@ -312,10 +312,10 @@ comment: none of this is settled about the burst allowance
                 ),
                 settlement,
                 // A grilling's digest is made of what was answered rather than
-                // of how it was asked: a Deferred Ask the human answered is
+                // of how it was asked: a stored ask the human answered is
                 // something they decided, and the relaunch is owed it exactly as
                 // it is owed a blocking one's.
-                deferred: false,
+                ask: store::Ask::Blocking,
             })),
         }
     }

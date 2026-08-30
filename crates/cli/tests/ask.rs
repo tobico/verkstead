@@ -317,8 +317,9 @@ fn a_deferred_ask_returns_as_soon_as_the_set_is_stored() {
     let asked = stored.set.set().expect("it reads back").clone();
 
     assert_eq!(asked.title, "How should the CLI wait?");
-    assert!(
-        stored.deferred,
+    assert_eq!(
+        stored.ask,
+        verkstead_server::store::Ask::Deferred,
         "and the record beside it says which kind of ask it was"
     );
 }

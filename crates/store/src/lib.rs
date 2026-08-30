@@ -73,7 +73,7 @@ pub use conversations::{
     start_stage, start_unnamed_conversation, state, steer_conversation, timeline,
     unanswered_set_since, work_on_repo,
 };
-pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
+pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use endings::{ended_on, nothing_else};
 pub use pairings::{RepoPairings, remembered_pairings};
 pub use pauses::Pause;
@@ -117,9 +117,9 @@ pub struct StoredSet {
     pub created_at: String,
     pub set: Asked,
 
-    /// Whether it was a Deferred Ask: stored and returned to, with no session
-    /// idling on the Answer — see [`deferrals`].
-    pub deferred: bool,
+    /// How it was asked: blocking, stored with a session idling on the Answer,
+    /// or stored with nobody idling on it at all — see [`deferrals`].
+    pub ask: Ask,
 }
 
 /// What a stored Question Set is, as far as this build can read it.
@@ -734,8 +734,8 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// rather than as a failure: the row is still there and still says what was
 /// asked, and losing the read would be losing the record.
 pub async fn load_set(pool: &SqlitePool, id: i64) -> Result<Option<StoredSet>> {
-    let row: Option<(i64, String, String, Option<i64>)> = sqlx::query_as(
-        "SELECT q.id, q.created_at, q.body, d.set_id
+    let row: Option<(i64, String, String, Option<bool>)> = sqlx::query_as(
+        "SELECT q.id, q.created_at, q.body, d.idled
          FROM question_sets q
          LEFT JOIN deferrals d ON d.set_id = q.id
          WHERE q.id = ?",
@@ -745,7 +745,7 @@ pub async fn load_set(pool: &SqlitePool, id: i64) -> Result<Option<StoredSet>> {
     .await
     .with_context(|| format!("loading Question Set {id}"))?;
 
-    let Some((id, created_at, body, deferral)) = row else {
+    let Some((id, created_at, body, idled)) = row else {
         return Ok(None);
     };
 
@@ -753,9 +753,10 @@ pub async fn load_set(pool: &SqlitePool, id: i64) -> Result<Option<StoredSet>> {
         id,
         created_at,
         set: Asked::read(body),
-        // The row being there is the whole of it: one is written for a Deferred
-        // Ask and none for a blocking one.
-        deferred: deferral.is_some(),
+        // The row being there says it was stored rather than waited on, and what
+        // the row holds says which of the two stored kinds — see
+        // [`deferrals::kind`], which is the one place that reads the pair.
+        ask: deferrals::kind(idled),
     }))
 }
 

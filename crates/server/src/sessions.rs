@@ -535,6 +535,10 @@ struct Running {
     /// end-of-file — see [`Sessions::alive`], which is the whole of what it is
     /// for.
     gone: Arc<AtomicBool>,
+
+    /// Which backend it is, so that a Set it asks is stored the way that backend
+    /// asks — see [`Sessions::channel`].
+    agent_type: store::AgentType,
 }
 
 impl Sessions {
@@ -609,6 +613,29 @@ impl Sessions {
             .expect("the sessions registry is not poisoned")
             .get(&conversation_id)
             .map(|running| running.event_id)
+    }
+
+    /// How a Conversation's running session asks: the channel its backend's
+    /// agent type names — see [`store::AgentType::channel`].
+    ///
+    /// The register rather than the Conversation's Pairings, because what this
+    /// decides is how *this* session's Set is stored and a Conversation runs its
+    /// roles under Pairings that need not agree — a wrap-up's review may be on
+    /// one backend and the work on another.
+    ///
+    /// [`store::Channel::Blocking`] where nothing is running, which is what a
+    /// Set arriving from outside a session is: a router with no agents at all,
+    /// and the human's own devices, which never post one here. It is also the
+    /// safe way round — a wait opened on a Set nobody will nudge about ends
+    /// when the CLI that opened it does, where a Set stored for a session that
+    /// is not idling would be one nobody ever comes back for.
+    pub(crate) fn channel(&self, conversation_id: i64) -> store::Channel {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .get(&conversation_id)
+            .map(|running| running.agent_type.channel())
+            .unwrap_or(store::Channel::Blocking)
     }
 
     /// Whether a Conversation's running session has stopped printing.
@@ -1103,6 +1130,7 @@ impl Sessions {
                     quiet: quiet.clone(),
                     ended: ended.clone(),
                     gone,
+                    agent_type: pairing.profile.agent_type(),
                 },
             );
         }

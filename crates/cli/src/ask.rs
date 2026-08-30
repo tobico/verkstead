@@ -1,5 +1,5 @@
 //! `verkstead ask`: read a Question Set, check it, enrich it, send it, and —
-//! unless it was deferred — wait.
+//! unless the server stored it — wait.
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -11,17 +11,23 @@ use crate::client::Client;
 use crate::repo;
 
 /// Put a Question Set to the human and block until it is answered — or, where
-/// `deferred` says so, leave it with them and return.
+/// the server stored it instead of taking a wait, leave it with them and return.
 ///
 /// The Set is refused here, before anything is sent, if it breaks the question
 /// grammar — the agent gets the same violations the server would have given it,
 /// only sooner and naming the Question at fault.
 ///
-/// A Deferred Ask is the same submission and the same Set on the same Timeline.
-/// The only difference is on this end: nothing opens a wait, so the session goes
-/// on working, and what stdout carries is the stored Set instead of a Response —
-/// which is the whole of what there is to say at that point, and says which Set
-/// it was.
+/// A stored ask is the same submission and the same Set on the same Timeline.
+/// The only difference is on this end: nothing opens a wait, so the session ends
+/// its turn or goes on working, and what stdout carries is the stored Set
+/// instead of a Response — which is the whole of what there is to say at that
+/// point, and says which Set it was.
+///
+/// **Which of the two it is is the server's word rather than this one's.**
+/// `deferred` is what the agent asked for and goes with the submission, and the
+/// reply says whether a wait was taken: a backend whose sessions cannot hold a
+/// shell command open for hours has every ask of theirs stored, and the CLI runs
+/// the same way there (ADR-0011). So the flag is not read again here.
 pub fn ask(file: Option<&Path>, deferred: bool, server: &str) -> Result<()> {
     let yaml = read(file)?;
 
@@ -56,10 +62,10 @@ pub fn ask(file: Option<&Path>, deferred: bool, server: &str) -> Result<()> {
     let created = client.submit(&set, deferred)?;
 
     // The Response is the CLI's whole output: the agent parses stdout, so
-    // nothing else has ever been written there. A Deferred Ask has no Response
-    // to print and never will have on this end, so what goes there is the one
-    // thing that did happen — the Set was stored, and this is which one.
-    let yaml = match deferred {
+    // nothing else has ever been written there. A stored ask has no Response to
+    // print and never will have on this end, so what goes there is the one thing
+    // that did happen — the Set was stored, and this is which one.
+    let yaml = match created.stored {
         true => created
             .to_yaml()
             .context("rendering the stored Question Set as YAML")?,

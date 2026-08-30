@@ -1028,19 +1028,34 @@ to answer is asking for a reply, one with news is only asking to be read.
 _Avoid_: unread (nothing here is a message), badge, alert, notification (that is
 the push, this is what is left behind it), new
 
-**Blocking Ask** / **Deferred Ask**:
-The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles
+**Blocking Ask** / **Store-and-nudge Ask** / **Deferred Ask**:
+The three ways an agent puts a Question Set to the human. A **Blocking Ask** idles
 the session until the Response arrives, as every ask does in askance. A
 **Deferred Ask** does not idle it: the Set waits in the Timeline and its
 Answers are folded into a later session's prompt. Work blocks only on Questions
 whose Answers affect work about to be done.
 
-`verkstead ask --deferred` is the second one, and the difference is the session's
-alone. Both land on the Timeline, both leave the Conversation *blocked on you*
+`verkstead ask --deferred` is the third one, and that difference is the session's
+alone: it is the agent saying it will carry straight on, on every backend. Both
+land on the Timeline, both leave the Conversation *blocked on you*
 and both notify the human's devices; a deferred one says on the Timeline that it
 is deferred, and its badge says no agent is waiting rather than that one has
 disconnected. What is deferred is how it was asked rather than anything in the
 Set, so it is kept beside the stored body rather than in it.
+
+A **Store-and-nudge Ask** is the two halves the other way round, and is the
+ordinary ask on a backend that cannot hold a shell command open for hours: the
+Set is *stored* as a deferred one is, so `verkstead ask` returns at once and the
+session ends its turn — and a session is *idling* on it all the same, waiting
+for the line Verkstead types into its terminal when the Response lands, which it
+answers by fetching the Answers with `verkstead answers`. Which of the two an
+ordinary ask is is the backend's fact rather than the Set's: the CLI asks the
+same way everywhere, and the server reads the agent type of the session that
+asked. What the human sees is a deferred-shaped ask, because nothing is holding
+a connection open on it; what differs is underneath, where everything that
+decides a session's fate — the quiet grace, the Rescue, a wrap-up's proposals,
+the locking of what a gone session left open — counts it as a question somebody
+is standing behind.
 
 The **folding** is the far end: when a session is started to build, every
 answered Deferred Ask of that Conversation nobody has been told about goes into
