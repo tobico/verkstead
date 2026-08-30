@@ -934,12 +934,13 @@ describe("the path a details pane stands at", () => {
     expect(face.classList).toContain(card.open);
 
     // The paths and the agent type the card gave up, in the pane that has room
-    // for them: the two paths are the form's own fields.
+    // for them: the account's paths are the form's own fields.
     const details = panes(container)[2]!;
+    const account = PROFILES[0]!.account;
     expect(
       (screen.getByLabelText(/Claude directory/) as HTMLInputElement).value,
-    ).toBe(PROFILES[0]!.claude_dir);
-    expect(details.textContent).toContain(PROFILES[0]!.agent_type);
+    ).toBe(account.claude_dir);
+    expect(details.textContent).toContain(account.agent_type);
 
     // In the third pane rather than over the page: the modal is gone.
     expect(details.querySelector("form")).not.toBeNull();

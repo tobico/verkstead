@@ -18,7 +18,7 @@ blocking one.
 
 ## Stages
 
-- [ ] 01: Foundations — [brief](01-foundations.md)
+- [ ] 01: Foundations — [brief](01-foundations.md) *(in progress: `agent-backends/01-foundations`)*
 - [ ] 02: Asking and idling — [brief](02-asking-and-idling.md)
 - [ ] 03: Codex — [brief](03-codex.md)
 - [ ] 04: Grok Build — [brief](04-grok-build.md)

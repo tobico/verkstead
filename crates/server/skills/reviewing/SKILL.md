@@ -239,14 +239,15 @@ ways to fix it and the leave-it:
   through is not a task to hand on, and something you simply do not fancy is a
   fix. Offer it where the work is too big and nowhere else.
 
-Then put it through `verkstead ask`, **as a background command**: it blocks
-until they answer, and that may be hours — they are on a phone rather than at
-this terminal.
+Then put it through `verkstead ask`, run the way the Guide says to run an ask
+that blocks: it blocks until they answer, and that may be hours — they are on a
+phone rather than at this terminal.
 
-**The answers are yours to wait for.** Nothing ends this session when the Set
-lands and nobody else is dispatched to act on it: what becomes of your findings
-happens here. So there is nothing to do while you wait. Do not start on what you
-have only proposed, and do not take your own recommendations.
+**The answers are yours to wait for.** Idling is the ask working rather than the
+ask failing. Nothing ends this session when the Set lands and nobody else is
+dispatched to act on it: what becomes of your findings happens here. So there is
+nothing to do while you wait. Do not start on what you have only proposed, and
+do not take your own recommendations.
 
 If the ask itself fails — the server unreachable, any non-zero exit that is not
 a refused Set — say so and stop. Never decide on their behalf.

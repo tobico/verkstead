@@ -136,12 +136,13 @@ Nothing about this session makes it a special one.
   much belongs in one, and the shape it goes over the wire in. It ships inside
   the binary, so nothing else has to be found.
 
-Then put it through `verkstead ask`, **as a background command**: it blocks
-until they answer, and that may be hours.
+Then put it through `verkstead ask`, run the way the Guide says to run an ask
+that blocks: it blocks until they answer, and that may be hours.
 
-**The answers are yours to wait for.** Nobody else is dispatched to act on what
-they say, so there is nothing to do while you wait: do not start on what you
-have only proposed, and do not take your own recommendations.
+**The answers are yours to wait for.** Idling is the ask working rather than the
+ask failing, and nobody else is dispatched to act on what they say, so there is
+nothing to do while you wait: do not start on what you have only proposed, and
+do not take your own recommendations.
 
 If the ask itself fails — the server unreachable, any non-zero exit that is not
 a refused Set — say so and stop. Never answer on their behalf.

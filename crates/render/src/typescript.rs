@@ -196,7 +196,8 @@ fn the_viewers_types_are_written_from_these() {
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the choices a Conversation makes of them —
     // a Pairing, or the row that runs no session where the role offers one.
-    // A `ProfileEntry` writes the agent type and the broken-ness it carries.
+    // A `ProfileEntry` writes the account it carries — the agent type and that
+    // type's own fields, flat — and the broken-ness beside it.
     ProfileEntry::export_all(&config).unwrap();
     ProfileEdit::export_all(&config).unwrap();
     ProfileSaved::export_all(&config).unwrap();

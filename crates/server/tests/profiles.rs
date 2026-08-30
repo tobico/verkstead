@@ -19,8 +19,8 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    AgentType, BriefSaved, Broken, ConversationView, PickedView, ProfileChosen, ProfileDeleted,
-    ProfileEntry, ProfileSaved, Registered, Started,
+    BriefSaved, Broken, ConversationView, PickedView, ProfileAccount, ProfileChosen,
+    ProfileDeleted, ProfileEntry, ProfileSaved, Registered, Started,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
@@ -54,13 +54,17 @@ fn pair(root: &Path, account: &str) -> (PathBuf, PathBuf) {
     (claude_dir, config_file)
 }
 
-/// The body a save takes, from a pair, a name and the models the account can
-/// run.
+/// The body a save takes: a name, the models the account can run, and the
+/// account itself — which says which agent type it is and carries that type's
+/// own fields, Claude's pair here.
 fn edit(name: &str, claude_dir: &Path, config_file: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
-        "claude_dir": claude_dir,
-        "config_file": config_file,
+        "account": {
+            "agent_type": "Claude",
+            "claude_dir": claude_dir,
+            "config_file": config_file,
+        },
         "models": models,
     })
 }
@@ -273,28 +277,20 @@ async fn a_saved_profile_appears_on_the_list_with_everything_it_was_given() {
 
     assert_eq!(profile.name, "work");
     assert_eq!(profile.models, MODELS);
-    assert_eq!(profile.agent_type, AgentType::Claude);
 
-    // The resolved paths, which are what will be bind-mounted.
+    // The account, in the shape its agent type keeps one — and the resolved
+    // paths in it, which are what will be bind-mounted.
+    let resolved = watched.path().canonicalize().unwrap();
     assert_eq!(
-        profile.claude_dir,
-        watched
-            .path()
-            .canonicalize()
-            .unwrap()
-            .join("work/.claude")
-            .to_str()
-            .unwrap()
-    );
-    assert_eq!(
-        profile.config_file,
-        watched
-            .path()
-            .canonicalize()
-            .unwrap()
-            .join("work/.claude.json")
-            .to_str()
-            .unwrap()
+        profile.account,
+        ProfileAccount::Claude {
+            claude_dir: resolved.join("work/.claude").to_str().unwrap().to_owned(),
+            config_file: resolved
+                .join("work/.claude.json")
+                .to_str()
+                .unwrap()
+                .to_owned(),
+        }
     );
 
     // Its pair is where it was left, which is the ordinary case.

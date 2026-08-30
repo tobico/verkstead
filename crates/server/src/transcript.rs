@@ -110,9 +110,15 @@ impl Tail {
     /// Follow the log of the session named `session`, run under `profile` for
     /// `conversation`.
     pub(crate) fn of(conversation: i64, profile: &store::Profile, session: &str) -> Tail {
+        // Where Claude Code keeps its logs, under the directory the account is.
+        // Each backend after it names its own place under its own account, so
+        // this is one arm per type rather than one path every type is assumed
+        // to keep.
+        let store::Account::Claude { claude_dir, .. } = &profile.account;
+
         Tail {
             conversation,
-            projects: profile.claude_dir.join("projects"),
+            projects: claude_dir.join("projects"),
             session: session.to_owned(),
             log: None,
             read: 0,
