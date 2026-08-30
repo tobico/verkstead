@@ -153,6 +153,32 @@ impl Server {
         }
     }
 
+    /// Store a Set the way the server stores one asked on a backend whose
+    /// sessions cannot wait, and hand back the id it went under.
+    ///
+    /// Written through the store rather than asked through the CLI, because
+    /// which channel an ordinary ask is on is read off the agent type of the
+    /// session that sent it — and there are no sessions here, this being the
+    /// CLI's own suite. What a session on such a backend would have left behind
+    /// is a Set stored with somebody idling on it, which is exactly this; that
+    /// the server marks one so when a session of that type asks is
+    /// `crates/server/tests/sessions.rs`'s to prove.
+    pub fn store_and_nudge(&self, yaml: &str) -> i64 {
+        let set = QuestionSet::from_yaml(yaml).expect("the fixture Set parses");
+
+        self.block_on(async {
+            let pool = verkstead_server::open_database(&self.database)
+                .await
+                .unwrap();
+            let created = store::ask(&pool, ASKING_FROM, &set, store::Ask::StoreAndNudge)
+                .await
+                .unwrap()
+                .expect("the fixture's Conversation is there to ask from");
+            pool.close().await;
+            created.id
+        })
+    }
+
     /// Answer a Set the way the human's device does: YAML over HTTP.
     pub fn answer(&self, id: i64, yaml: &str) {
         let reply = ureq::post(format!("{}/api/v1/sets/{id}/response", self.url()))

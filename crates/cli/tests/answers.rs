@@ -1,8 +1,14 @@
 //! `verkstead answers`: coming back for the Response to a Set stored earlier.
 //!
-//! The other half of a Deferred Ask's life. The Set was stored and the command
-//! came back; the human answered it in their own time; and this is the session
-//! fetching what they said, in the shape a blocking ask would have printed.
+//! The far end of a store-and-nudge ask. The Set was stored and `verkstead ask`
+//! came back at once; the session ended its turn; the human answered in their
+//! own time; and this is the session coming back for what they said, in the
+//! shape a blocking ask would have printed.
+//!
+//! **And the one stored ask this is not for.** A Deferred Ask's Answers go into
+//! a later session's prompt by the agent's own word, so fetching one is refused
+//! rather than served — see
+//! [`a_deferred_ask_is_refused_because_its_answers_are_the_next_prompts`].
 
 mod support;
 
@@ -40,8 +46,19 @@ comment: |
   End the turn and come back for these.
 ";
 
-/// Store a Set and take back the id the human's Answers will be filed under.
-fn stored(server: &Server, dir: &Path, set: &str) -> i64 {
+/// A Set stored with a session idling on it, which is what every fetch below
+/// comes back for.
+///
+/// Written through the store rather than asked through the CLI — see
+/// [`Server::store_and_nudge`], which says why the channel cannot be reached
+/// from this suite.
+fn stored(server: &Server, set: &str) -> i64 {
+    server.store_and_nudge(set)
+}
+
+/// And one asked with `--deferred`, which is the other stored kind and the one
+/// nobody comes back for.
+fn deferred(server: &Server, dir: &Path, set: &str) -> i64 {
     let mut child = Command::new(env!("CARGO_BIN_EXE_verkstead"))
         .arg("ask")
         .arg("--deferred")
@@ -101,7 +118,7 @@ fn an_answered_set_is_fetched_as_the_response_yaml_on_stdout() {
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::start(tmp.path().join("verkstead.db"));
 
-    let id = stored(&server, tmp.path(), SET);
+    let id = stored(&server, SET);
     server.answer(id, COMPLETE);
 
     let output = finished(answers(&server, tmp.path(), id));
@@ -154,7 +171,7 @@ fn a_fetched_response_is_byte_for_byte_what_the_blocking_ask_prints() {
     let blocked = stdout(&finished(waiting));
 
     // And the stored half, answered identically and fetched.
-    let id = stored(&server, tmp.path(), SET);
+    let id = stored(&server, SET);
     server.answer(id, COMPLETE);
     let fetched = stdout(&finished(answers(&server, tmp.path(), id)));
 
@@ -170,7 +187,7 @@ fn an_unanswered_set_is_refused_rather_than_waited_on() {
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::start(tmp.path().join("verkstead.db"));
 
-    let id = stored(&server, tmp.path(), SET);
+    let id = stored(&server, SET);
 
     // Nothing answers it: the command has to come back on its own, which is the
     // whole difference between this and the wait.
@@ -197,7 +214,7 @@ fn a_set_locked_unanswered_is_refused_saying_no_response_is_coming() {
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::start(tmp.path().join("verkstead.db"));
 
-    let id = stored(&server, tmp.path(), SET);
+    let id = stored(&server, SET);
     server.lock(id);
 
     let output = finished(answers(&server, tmp.path(), id));
@@ -231,7 +248,7 @@ fn a_successful_fetch_records_the_set_as_folded() {
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::start(tmp.path().join("verkstead.db"));
 
-    let id = stored(&server, tmp.path(), SET);
+    let id = stored(&server, SET);
     server.answer(id, COMPLETE);
 
     assert_eq!(
@@ -254,7 +271,7 @@ fn a_refused_fetch_leaves_the_folding_record_alone() {
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::start(tmp.path().join("verkstead.db"));
 
-    let id = stored(&server, tmp.path(), SET);
+    let id = stored(&server, SET);
 
     // Refused: nothing has answered it yet, so nothing was delivered.
     assert!(!finished(answers(&server, tmp.path(), id)).status.success());
@@ -264,5 +281,48 @@ fn a_refused_fetch_leaves_the_folding_record_alone() {
         unfolded(&server),
         vec![id],
         "a fetch that handed nothing over cannot have spent the folding"
+    );
+}
+
+/// And a Deferred Ask is refused whatever the human has said to it, because its
+/// Answers are not this session's to take.
+///
+/// The one promise `--deferred` makes. The agent that sends one says it will
+/// carry straight on, and what it is told in return is that the Answers go into
+/// the prompt of a later session — so nothing *this* session does will ever see
+/// them. Served here, that would be untrue twice over: the session that asked
+/// would have them, and the folding spent on handing them over would mean the
+/// later session never did.
+#[test]
+fn a_deferred_ask_is_refused_because_its_answers_are_the_next_prompts() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::start(tmp.path().join("verkstead.db"));
+
+    let id = deferred(&server, tmp.path(), SET);
+    server.answer(id, COMPLETE);
+
+    let output = finished(answers(&server, tmp.path(), id));
+    assert!(
+        !output.status.success(),
+        "answered though it is, its Answers are not fetched, got {:?}",
+        output.status
+    );
+    assert!(
+        stderr(&output).contains("--deferred"),
+        "and the refusal says which kind of ask it was, so the agent knows it \
+         asked for this rather than that something is broken, got:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        stdout(&output).is_empty(),
+        "a refusal has nothing to say on stdout, got:\n{}",
+        stdout(&output)
+    );
+
+    assert_eq!(
+        unfolded(&server),
+        vec![id],
+        "and the folding is where it was: these Answers are still owed to the \
+         next session's prompt, which is the whole of what was promised"
     );
 }

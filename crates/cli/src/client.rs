@@ -99,8 +99,8 @@ impl Client {
     /// The same endpoint the wait is held on, asked to hold for nothing. This
     /// one does not retry, because every ending here is one the agent is owed
     /// straight away: a Set nobody has answered yet, a Set the human locked
-    /// unanswered, and an id that names no Set of this Conversation are three
-    /// different things, and each is said as itself.
+    /// unanswered, a Set asked deferred, and an id that names no Set of this
+    /// Conversation are four different things, and each is said as itself.
     ///
     /// Which of this Conversation's Sets is the base URL's business, as it is
     /// everywhere else: an id belonging to another Conversation names nothing
@@ -131,6 +131,11 @@ impl Client {
             404 => bail!(
                 "this Conversation has no Question Set {id} — check the id the ask \
                  that stored it printed"
+            ),
+            409 => bail!(
+                "Question Set {id} was sent with `--deferred`, so its Answers are not \
+                 fetched — they go into the prompt of a later session of this \
+                 Conversation, and nothing this session does will see them"
             ),
             410 => bail!(
                 "Question Set {id} was locked unanswered — the human closed it \
