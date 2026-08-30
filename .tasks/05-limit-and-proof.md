@@ -65,3 +65,61 @@ done.
 - [ ] A Conversation is grilled, asked by store-and-nudge, nudged when the
       Response lands, answered, built and wrapped end to end under a Grok Build
       Profile — and CONTEXT.md says what this stage changed.
+
+## What was read off the real thing
+
+The wording this task was to ship turned out to be two wordings and neither of
+them the one the plan had. Read off grok 1.0.13, pulled down and driven outside
+Verkstead: installed under a `GROK_HOME` of its own from `@xai-official/grok`,
+pointed by `GROK_CLI_CHAT_PROXY_BASE_URL` and `XAI_API_KEY` at a stand-in xAI
+chat proxy — grok speaks `POST /v1/chat/completions` to it — which answered a
+turn with `429` and `{"error":"subscription:free-usage-exhausted"}`, the code
+grok's own binary carries. Everything below is grok's; only the server behind it
+was not.
+
+- **Grok does not print its limit. It draws a card.** The interactive grok
+  retries the refused turn, gives up, and puts up a bordered panel headed `You
+  hit your free usage limit.` with three tiers under it. The sentence this stage
+  planned to ship — `You’ve reached your free Grok Build usage limit for now.
+  Get SuperGrok…`, and a typographic apostrophe at that, not the ASCII one the
+  constant had — is what `grok -p` prints and exits with. Verkstead launches the
+  interactive one.
+- **And a card is drawn where no line-reader can see it.** Grok writes a frame
+  as a cursor move per row with no newline anywhere, so everything it has drawn
+  since the last read is *one* line of bytes: in the capture this was read off,
+  the sentence sat at column 4102 of a line 5015 characters long. The matcher
+  asks what a line opens with, so it would have found nothing whatever phrase it
+  held. What it now reads beside the printed bytes and the log is the **frame**,
+  off the same Screen the idle judgement reads — one line of a grid, the card's
+  border in front of it as decoration.
+- **The log says nothing a reader here can use.** What reaches `updates.jsonl`
+  is two `retry_state` lines whose reason is the server's own error string —
+  bookkeeping by kind, folded under its own name, and never a statement the
+  summary reads. So a Grok limit is caught on the frame and only there; the
+  Transcript arm is a guard against a release that starts saying it in prose.
+- **A paid plan's card is headed differently**: `You hit your weekly limit.`,
+  with `Upgrade to a higher tier for more usage` and `Purchase credits to keep
+  using Grok Build` under it, in the same binary and the same card. Nobody has
+  watched one drawn and one phrase per backend cannot open both, so a paid stop
+  still stalls — the same shape as a backend with no phrase, and the reason the
+  next thing this wants is a backend holding more than one wording.
+- **The nudge lands in grok's composer as a send.** Typed the way Verkstead
+  types it — the line as one write, the carriage return a quarter-second behind
+  it — into a real grok on a pseudo-terminal: the composer submitted it, the
+  model was sent it as a user turn, and the composer was empty afterwards. So
+  burst detection stays off this backend's launch line, as it did for codex.
+
+## What is still waiting
+
+There is no `grok` on the system profile and no xAI account on this machine, so
+the **end-to-end run is outstanding rather than met**: a Conversation grilled,
+asked by store-and-nudge, nudged, answered, built and wrapped under a Grok Build
+Profile. Two halves of it are settled above — the frame a limit lands on and the
+nudge landing as a send — and what is left needs a real model turn: that a Grok
+session reads the store-and-nudge Guide, ends its turn on an ask, and comes back
+for its Answers when the nudge arrives.
+
+The first criterion's own end-to-end half waits on something else again: there
+is no phrase-less backend to run a session on yet. What is proved is the skip
+itself — the mapping, the reading, and a Watch on such a backend finding nothing
+in any of the three records it is fed. OpenCode is what will make it a session.

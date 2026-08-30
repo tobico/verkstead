@@ -1950,7 +1950,12 @@ async fn relay(
                 // leaves the ending here because this is the task it is running
                 // inside.
                 if limits
-                    .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
+                    .look(
+                        pool,
+                        nudges,
+                        &screen.drawn(),
+                        tail.as_ref().and_then(Tail::latest),
+                    )
                     .await
                     && !ending
                 {
@@ -1975,7 +1980,12 @@ async fn relay(
                     // in its own log and not on its display would otherwise go
                     // unnoticed until the terminal happened to say something.
                     if limits
-                        .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
+                        .look(
+                            pool,
+                            nudges,
+                            &screen.drawn(),
+                            tail.as_ref().and_then(Tail::latest),
+                        )
                         .await
                         && !ending
                     {

@@ -31,17 +31,36 @@
 //! **Recognition is one sentence per backend, said once.** [`exhausted_phrase`]
 //! is the whole of what is matched, because the wording is the backend's and will
 //! move: claude 2.1.234 draws it as `Usage limit reached · continuing
-//! automatically at 3pm · esc to cancel`, and codex 0.149.0 opens with `You've
-//! hit your usage limit` and decorates what follows by plan. Every part of either
-//! but the phrase itself is decoration this build has no business depending on.
-//! It is read off what the session leaves behind — the Capture of what it printed
-//! and the Transcript its backend wrote — rather than out of anything the agent
-//! is asked.
+//! automatically at 3pm · esc to cancel`, codex 0.149.0 opens with `You've hit
+//! your usage limit` and decorates what follows by plan, and grok 1.0.13 heads a
+//! card with `You hit your free usage limit.` and offers three tiers under it.
+//! Every part of any of them but the phrase itself is decoration this build has
+//! no business depending on. It is read off what the session leaves behind rather
+//! than out of anything the agent is asked.
+//!
+//! **Three records, because a session leaves three.** What it printed, the frame
+//! that printing drew, and what its backend wrote in its own log — see
+//! [`Watch::found`]. The frame is not a luxury: a full-screen display puts each
+//! row of a frame on the screen with a cursor move rather than a newline, so
+//! everything it has drawn is one line of bytes and its sentence lands somewhere
+//! in the middle of it — a reader with only those bytes would never find grok's
+//! card, whatever phrase it held. The same [`crate::screen::Screen`] the idle
+//! judgement reads is what makes it a line again.
 //!
 //! One phrase apiece, kept in the one place, so a wording that moves is one edit
 //! rather than a search — the same bargain the idle signature makes, and for the
 //! same reason. Which phrase a session is read against is a fact about its
 //! Profile's agent type, which is what the Watch is told when it is made.
+//!
+//! **Or no sentence at all, which is an answer.** A backend nobody has watched
+//! run out has no wording to be read against, and the empty string is not what
+//! stands in for one: it opens every line there is, so a session on that backend
+//! would stop at its first flush. Such a backend is skipped instead — nothing is
+//! looked at and nothing comes back — and its account running out lands as the
+//! ordinary stall it would have been anyway. A phrase that covers only some
+//! accounts of a backend is the other shape of the same thing: grok's is the card
+//! a free account gets, a paid plan's card is headed differently, and a paid stop
+//! stalls.
 //!
 //! A line that *says* it rather than one that mentions it: the phrase has to open
 //! the line, once the terminal's own decoration is off the front of it — and
@@ -66,20 +85,25 @@ use crate::nudge::Nudges;
 use crate::store;
 
 /// The sentence a session of `agent_type` prints when its account is out of
-/// window.
+/// window — or nothing, where no such wording has ever been seen.
 ///
 /// Matched without regard to case and to nothing around it. One phrase per
 /// backend is the whole of the coupling to somebody else's display, and they are
 /// here together so that a wording that moves is one edit rather than a search.
 ///
-/// A backend whose phrase this build has never seen would take an arm of its own
-/// here; until it has one, its limit lands as the ordinary stall it would have
+/// **A backend may have none, and that is an answer rather than a gap.** The
+/// wording is read off an account actually running out, so a backend nobody has
+/// watched run out has nothing to read — and the empty string does not stand in
+/// for it: [`says_so`] compares the *opening* of a line against the phrase, so an
+/// empty one opens every line there is and would stop such a session at its first
+/// flush. So a backend without a phrase is skipped rather than matched against
+/// nothing, and its account running out lands as the ordinary stall it would have
 /// been anyway (ADR-0011).
-fn exhausted_phrase(agent_type: store::AgentType) -> &'static str {
+fn exhausted_phrase(agent_type: store::AgentType) -> Option<&'static str> {
     match agent_type {
-        store::AgentType::Claude => CLAUDE_EXHAUSTED,
-        store::AgentType::Codex => CODEX_EXHAUSTED,
-        store::AgentType::Grok => GROK_EXHAUSTED,
+        store::AgentType::Claude => Some(CLAUDE_EXHAUSTED),
+        store::AgentType::Codex => Some(CODEX_EXHAUSTED),
+        store::AgentType::Grok => Some(GROK_EXHAUSTED),
     }
 }
 
@@ -99,13 +123,22 @@ const CLAUDE_EXHAUSTED: &str = "usage limit reached";
 /// mark, and ASCII punctuation is not decoration there.
 const CODEX_EXHAUSTED: &str = "you've hit your usage limit";
 
-/// And what grok 1.0.13 gives a free account, the rest of the line being the
-/// upgrade pitch.
+/// And the title grok 1.0.13 puts on the card it draws a free account that has
+/// run out, the rest of the card being three tiers to upgrade to.
 ///
-/// A free account's wording is the one that has been seen. A paid account's is
-/// xAI's own per plan and nobody here has watched one run out, so a paid stop
-/// lands as the ordinary stall until somebody does.
-const GROK_EXHAUSTED: &str = "you've reached your free grok build usage limit";
+/// **The card rather than the sentence, because the card is what a session
+/// sees.** Run out of window, grok retries the refused turn, gives up, and
+/// draws a bordered panel headed by this — on the frame, which is why the frame
+/// is read: see [`Watch::found`]. The sentence `You’ve reached your free Grok
+/// Build usage limit for now.` is grok's too and is *not* this: that is what its
+/// headless mode prints, and Verkstead launches the interactive one. Both read
+/// off grok 1.0.13 driven until it drew each of them.
+///
+/// A free account's card is the one that has been seen. A paid plan's is headed
+/// `You hit your weekly limit.` in the same binary and has not been watched
+/// drawn, and one phrase per backend cannot open both, so a paid stop lands as
+/// the ordinary stall until this build holds more than one wording per backend.
+const GROK_EXHAUSTED: &str = "you hit your free usage limit";
 
 /// How much of a session's printing is held between looks.
 ///
@@ -126,19 +159,22 @@ pub(crate) struct Exhausted {
     pub(crate) said: String,
 }
 
-/// The sentence in `text` that says an account of `agent_type` is out of window,
-/// or `None`.
+/// The sentence in `text` that says an account is out of window, read against
+/// `phrase` — or `None`, both where the text says no such thing and where the
+/// backend has no phrase to read it against.
 ///
-/// The agent type rather than nothing, because the phrase is the backend's: a
-/// session is read against the wording its own backend draws and against no
-/// other, so a line one backend would stop on is a line another prints in the
-/// middle of its work.
+/// A phrase in hand rather than an agent type, because a session is read against
+/// the wording its own backend draws and against no other — the Watch settles
+/// which that is when it is made, so a line one backend would stop on is a line
+/// another prints in the middle of its work, and a backend with no wording at all
+/// reads nothing. See [`exhausted_phrase`] for why the empty string is not what
+/// stands in for having none.
 ///
 /// Pure and cheap on purpose: this runs on every flush of every session, twice a
 /// second while an agent talks, so everything the stop needs beyond *whether* —
 /// the words the reset is in — is worked out afterwards and only on a hit.
-pub(crate) fn exhausted(text: &str, agent_type: store::AgentType) -> Option<Exhausted> {
-    let phrase = exhausted_phrase(agent_type);
+fn saying(text: &str, phrase: Option<&str>) -> Option<Exhausted> {
+    let phrase = phrase?;
 
     text.lines()
         .map(crate::capture::plain)
@@ -284,11 +320,14 @@ pub(crate) struct Watch {
     /// that is what the stop names — see [`crate::stopping::Decided`].
     profile: String,
 
-    /// And which agent that Profile runs, kept because that is what says which
-    /// sentence this session is read against — see [`exhausted_phrase`]. Taken
-    /// with the name and for the same reason: the Profile a session was launched
-    /// under is the one it is watched as, whatever is edited while it runs.
-    agent_type: store::AgentType,
+    /// The sentence this session is read against, off the agent its Profile runs
+    /// — and `None` on a backend that has none, which is a session nothing here
+    /// ever stops. See [`exhausted_phrase`].
+    ///
+    /// Settled when the Watch is made, with the Profile's name and for the same
+    /// reason: the Profile a session was launched under is the one it is watched
+    /// as, whatever is edited while it runs.
+    phrase: Option<&'static str>,
 
     /// What the session has printed since the last look, less whatever has
     /// already been looked at.
@@ -338,7 +377,7 @@ impl Watch {
             conversation_id,
             event_id,
             profile,
-            agent_type,
+            phrase: exhausted_phrase(agent_type),
             printed: String::new(),
             raised: false,
         }
@@ -352,13 +391,32 @@ impl Watch {
         self.printed.push_str(text);
     }
 
+    /// The sentence in any of the three records this session leaves behind that
+    /// says its account is out of window, or `None`.
+    ///
+    /// What it printed, the frame it drew, and what its backend wrote in its own
+    /// log. All three, because a backend that says so in one and not the others
+    /// would otherwise go unnoticed — and the frame in particular, because a
+    /// full-screen display never says it in what it printed: see
+    /// [`Screen::drawn`], and the module head for what a frame costs a reader
+    /// that only has the bytes.
+    ///
+    /// `None` on every record there is where this backend has no phrase, which
+    /// is the whole of the skip: see [`exhausted_phrase`].
+    fn found(&self, drawn: &str, said: Option<&str>) -> Option<Exhausted> {
+        saying(&self.printed, self.phrase)
+            .or_else(|| saying(drawn, self.phrase))
+            .or_else(|| saying(said.unwrap_or_default(), self.phrase))
+    }
+
     /// Look at what has arrived, and stop the run if it says the account is out
     /// of window.
     ///
-    /// `said` is the last thing the agent wrote in its own log, which is the other
-    /// record a session leaves behind — see [`crate::transcript`]. It is looked at
-    /// beside the terminal rather than instead of it: a backend that says so in
-    /// its log and not on its display would otherwise go unnoticed.
+    /// `drawn` is the frame the session has on its Screen — see
+    /// [`Screen::drawn`] — and `said` the last thing the agent wrote in its own
+    /// log — see [`crate::transcript`]. Both are looked at beside the terminal
+    /// rather than instead of it: a backend that says so in one record and not
+    /// the others would otherwise go unnoticed.
     ///
     /// `true` is *this session is to end*, which is what a stop having just been
     /// written comes to. The relay is what ends it, because the relay is what
@@ -370,18 +428,18 @@ impl Watch {
         &mut self,
         pool: &SqlitePool,
         nudges: &Nudges,
+        drawn: &str,
         said: Option<&str>,
     ) -> bool {
         // Whether the terminal said anything at all since the last look, which is
         // what tells a session going on from a session standing still — see
         // [`Watch::raised`], which is let go on the first of those and never on
-        // the second. The terminal alone: the log's last line is the same last
-        // line between repaints, so a look that read it as news would read news
-        // twice a second for ever.
+        // the second. The terminal alone: the frame and the log's last line are
+        // the same frame and the same line between repaints, so a look that read
+        // either as news would read news twice a second for ever.
         let printed_something = !self.printed.is_empty();
 
-        let found = exhausted(&self.printed, self.agent_type)
-            .or_else(|| exhausted(said.unwrap_or_default(), self.agent_type));
+        let found = self.found(drawn, said);
 
         // Everything up to the last newline has been looked at now. What is kept
         // is the line still being printed, which is where the next chunk carries
@@ -527,7 +585,14 @@ async fn out_of_window(
 mod tests {
     use super::*;
 
-    use store::AgentType::{Claude, Codex};
+    use store::AgentType::{Claude, Codex, Grok};
+
+    /// One backend's reading of one piece of text, which is what a Watch on that
+    /// backend does with everything its session leaves behind — see
+    /// [`Watch::found`], which is the same call with the phrase already in hand.
+    fn exhausted(text: &str, agent_type: store::AgentType) -> Option<Exhausted> {
+        saying(text, exhausted_phrase(agent_type))
+    }
 
     /// The line claude 2.1.234 draws, decoration and all: the phrase opens it
     /// once the terminal's own marks are off the front.
@@ -565,6 +630,45 @@ mod tests {
         }
     }
 
+    /// The card row grok 1.0.13 draws a free account that has run out, with the
+    /// border it draws in front of it.
+    ///
+    /// The row as it stands on the grid — the panel's `┃` and the spaces are
+    /// decoration, so what says it is what follows them.
+    #[test]
+    fn the_card_grok_draws_when_a_free_account_runs_out_is_recognised() {
+        for line in [
+            "┃  You hit your free usage limit.",
+            "You hit your free usage limit.",
+            "  ┃  You hit your free usage limit.",
+        ] {
+            assert!(
+                exhausted(line, Grok).is_some(),
+                "{line:?} was not recognised",
+            );
+        }
+    }
+
+    /// And what grok's *headless* mode prints instead, which is not what this
+    /// backend is read against.
+    ///
+    /// Both sentences are grok's and only one of them is on a Verkstead
+    /// session's screen: `grok -p` prints this one and exits, and Verkstead
+    /// launches the interactive grok, which draws the card. Kept here as the
+    /// thing the phrase is deliberately not, so that a later reader moving the
+    /// constant knows there were two to choose from.
+    #[test]
+    fn the_sentence_groks_headless_mode_prints_is_not_what_this_reads() {
+        assert_eq!(
+            exhausted(
+                "You’ve reached your free Grok Build usage limit for now. Get SuperGrok for \
+                 much higher limits, or try again later: https://grok.com/supergrok",
+                Grok,
+            ),
+            None,
+        );
+    }
+
     /// Each backend is read against its own sentence and against no other.
     ///
     /// Which matters both ways round. A Codex session that printed claude's
@@ -583,6 +687,155 @@ mod tests {
             exhausted("You've hit your usage limit.", Claude),
             None,
             "nor codex's sentence claude's",
+        );
+        assert_eq!(
+            exhausted("You've hit your usage limit.", Grok),
+            None,
+            "nor codex's grok's, near as the two wordings are to each other",
+        );
+        assert_eq!(
+            exhausted("You hit your free usage limit.", Codex),
+            None,
+            "nor grok's codex's",
+        );
+    }
+
+    /// A backend nobody has watched run out has no phrase, and is skipped rather
+    /// than matched against nothing.
+    ///
+    /// Every banner any backend draws, read on a backend that has none: nothing
+    /// comes back, because nothing was looked at. That is what a session on such
+    /// a backend gets for the whole of its life — its account running out lands
+    /// as the ordinary stall, which is what it would have been anyway.
+    #[test]
+    fn a_backend_with_no_phrase_reads_nothing_at_all() {
+        for line in [
+            "✻ Usage limit reached · continuing automatically at 3pm · esc to cancel",
+            "▌ You've hit your usage limit. Upgrade to Plus to continue using Codex",
+            "┃  You hit your free usage limit.",
+            "working the backlog",
+            "",
+        ] {
+            assert_eq!(
+                saying(line, None),
+                None,
+                "{line:?} was read against nothing"
+            );
+        }
+    }
+
+    /// And why it is skipped rather than given the empty string, which is the
+    /// other way a mapping could have said *no wording here*.
+    ///
+    /// The empty phrase opens every line there is: [`says_so`] compares as much
+    /// of a line as the phrase is long, and none of a line is what every line
+    /// starts with. A backend handed one would stop its session on the first
+    /// thing it printed — the wrong end of the bargain twice over, since the
+    /// point of a phrase is to catch the one line in a run that says the account
+    /// is spent.
+    #[test]
+    fn the_empty_phrase_would_have_matched_the_first_line_of_anything() {
+        assert_eq!(
+            saying("working the backlog\n", Some("")).map(|found| found.said),
+            Some("working the backlog".to_owned()),
+        );
+    }
+
+    /// A Watch on such a backend finds nothing in either record it is fed.
+    ///
+    /// The session-level half of the skip: what a Watch reads is what its
+    /// Profile's backend says, settled when it is made, so a phrase-less one
+    /// reads neither what the terminal printed nor what the log holds. The same
+    /// Watch with claude's phrase finds the banner in both, which is what says
+    /// the records themselves were fine and the skip is what stopped the reading.
+    #[test]
+    fn a_watch_on_a_backend_with_no_phrase_finds_nothing_in_any_record() {
+        let banner = "✻ Usage limit reached · continuing automatically at 3pm\n";
+
+        let mut watch = Watch {
+            phrase: None,
+            ..Watch::on(1, 2, "opencode".to_owned(), Claude)
+        };
+
+        watch.printed(banner);
+
+        assert_eq!(watch.found("", None), None, "nothing off the terminal");
+        assert_eq!(watch.found(banner, None), None, "nothing off the frame");
+        assert_eq!(watch.found("", Some(banner)), None, "nothing off the log");
+
+        let mut reading = Watch::on(1, 2, "fable".to_owned(), Claude);
+
+        reading.printed(banner);
+
+        assert!(
+            reading.found("", None).is_some(),
+            "and the same terminal read against a phrase says what it always said",
+        );
+        assert!(
+            Watch::on(1, 2, "fable".to_owned(), Claude)
+                .found(banner, None)
+                .is_some(),
+            "as do the same frame and the same log, on a Watch whose terminal has \
+             said nothing",
+        );
+        assert!(
+            Watch::on(1, 2, "fable".to_owned(), Claude)
+                .found("", Some(banner))
+                .is_some(),
+        );
+    }
+
+    /// A frame grok 1.0.13 drew when a free account ran out, byte for byte.
+    ///
+    /// Cut out of a real capture: the spinner and the counters it was redrawing
+    /// while it waited, and then the frame that put the card up in their place.
+    /// Its long runs of spaces — the card's background being painted — are
+    /// shortened, and nothing else is touched.
+    ///
+    /// Every row placed by a cursor move and not one newline in the whole of it,
+    /// which is what a full-screen display sends and what makes the frame worth
+    /// reading: see the test below.
+    const GROK_CARD: &str = "\
+        \u{1b}[?2026h\u{1b}[23;5H\u{1b}[38;5;251;48;5;233m⠴\u{1b}[23;31H\
+ \u{1b}[38;5;242;48;5;233m7\u{1b}[23;83H7\u{1b}[39m\u{1b}[49m\
+ \u{1b}[59m\u{1b}[0m\
+ \u{1b}]0;⠦ - Waiting for response… - say hi - grok\u{7}\u{1b}[26;7H\
+ \u{1b}[?2026l\u{1b}[?2026h\u{1b}[23;31H\u{1b}[38;5;242;48;5;233m8\
+ \u{1b}[23;83H9\u{1b}[39m\u{1b}[49m\u{1b}[59m\u{1b}[0m\u{1b}[26;7H\
+ \u{1b}[?2026l\u{1b}[?2026h\u{1b}[17;100H\u{1b}[39;48;5;233m \
+ \u{1b}[18;3H\u{1b}[38;5;251;48;5;235m┃\u{1b}[39;48;5;235m  \
+ \u{1b}[18;100H\u{1b}[39;48;5;233m \u{1b}[19;3H\
+ \u{1b}[38;5;251;48;5;235m┃\u{1b}[39;48;5;235m  \u{1b}[1m\
+ \u{1b}[38;5;254;48;5;235mYou hit your free usage limit.\u{1b}[22m\
+ \u{1b}[39;48;5;235m  \u{1b}[19;100H\u{1b}[39;48;5;233m 
+";
+
+    /// A Grok session's account running out is found on the frame it drew, and
+    /// not in the bytes that drew it.
+    ///
+    /// **Which is the whole reason a frame is read at all.** What grok sends its
+    /// terminal is a cursor move per row and no newlines, so a session's printing
+    /// is one line however many rows it has drawn, and the sentence lands
+    /// wherever in it the card happened to fall — where a reader that asks what a
+    /// *line* opens with will never find it, however right the phrase is. Run
+    /// through the Screen the same bytes are a grid, and the card's title is a
+    /// line of its own with the panel's border in front of it.
+    #[test]
+    fn a_grok_card_is_found_on_the_frame_and_not_in_the_bytes_that_drew_it() {
+        assert_eq!(
+            saying(GROK_CARD, exhausted_phrase(Grok)),
+            None,
+            "the bytes that drew the card say nothing a line-reader can find: \
+             they are one line, and it opens with the spinner grok was turning",
+        );
+
+        let drawn = crate::screen::replay(GROK_CARD).drawn();
+
+        assert_eq!(
+            saying(&drawn, exhausted_phrase(Grok)).map(|found| found.said),
+            Some("┃  You hit your free usage limit.".to_owned()),
+            "and the frame those same bytes drew says it on a line of its own, \
+             the card's border in front of it as decoration: {drawn:?}",
         );
     }
 
@@ -642,8 +895,8 @@ mod tests {
     /// of — a false alarm this build could not have anywhere else, and the one it
     /// is most likely to hit.
     ///
-    /// Every line against both backends, because a session grepping for one
-    /// phrase prints the lines that hold the other beside it.
+    /// Every line against every backend, because a session grepping for one
+    /// phrase prints the lines that hold the others beside it.
     #[test]
     fn this_repositorys_own_fixtures_do_not_pause_the_session_reading_them() {
         for line in [
@@ -656,14 +909,17 @@ mod tests {
             r#"            "  │ USAGE LIMIT REACHED","#,
             r#"            "You've hit your usage limit.","#,
             r#"            "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus)","#,
-            // And a line of prose about either, in a document or a commit
+            r#"            "You hit your free usage limit.","#,
+            r#"            "┃  You hit your free usage limit.","#,
+            // And a line of prose about any of them, in a document or a commit
             // message.
             "- Usage limit reached is the phrase, and only the phrase",
             "# Usage limit reached",
             "> Usage limit reached, said the display",
             "- You've hit your usage limit is codex's, and only that much of it",
+            "- You hit your free usage limit is the card grok heads with",
         ] {
-            for agent_type in [Claude, Codex] {
+            for agent_type in [Claude, Codex, Grok] {
                 assert_eq!(
                     exhausted(line, agent_type),
                     None,

@@ -355,13 +355,16 @@ stop Notice's evidence draw from, falling back to the Capture when a session
 left none.
 
 **Which log it is read from is the backend's to say.** A backend that takes a
-session id at launch is told the name Verkstead chose, so its log is looked up
-under it. A backend that takes none — Codex is the first — writes a log of its
-own choosing, so the session's is *found* rather than named: the one that
-appeared in the account's own session store after this session was launched and
-whose opening line names this Conversation's Worktree. A session whose log never
-appears has the Capture as its whole record, which is what a session with no log
-has always had.
+session id at launch — Claude Code and Grok Build both do — is told the name
+Verkstead chose, so its log is looked up under it rather than searched for; grok
+keeps a directory per session under one per working directory, and the outer
+name being grok's own encoding of that path is why the store is walked for the
+session's name rather than the path worked out. A backend that takes none —
+Codex is the first — writes a log of its own choosing, so the session's is
+*found* rather than named: the one that appeared in the account's own session
+store after this session was launched and whose opening line names this
+Conversation's Worktree. A session whose log never appears has the Capture as
+its whole record, which is what a session with no log has always had.
 _Avoid_: messages, chat log, session log (the backend's file, not Verkstead's
 record), transcript-as-bytes (that is the Capture)
 
@@ -401,9 +404,10 @@ stopped — so what says one has stopped is a line on its **Screen**, read one o
 two ways: an at-the-prompt line *standing* there, or an at-work line *gone* from
 it. Which way is a fact about the backend, and Codex and Grok Build are both the
 second — the frame each leaves when its turn is over and the frame it draws
-mid-turn are the same screen but for the line saying it is working. One signature per backend, kept in
-one place and accepted to drift the way the usage-limit phrase does. The
-at-work reading asks for the ordinary silence beside it, because the line is
+mid-turn are the same screen but for the line saying it is working. One
+signature per backend, kept in one place and accepted to drift the way the
+usage-limit phrase does. The at-work reading asks for the ordinary silence
+beside it, because the line is
 equally missing from a session that has drawn nothing yet; the at-the-prompt one
 does not, and a silence mid-turn is not idle either way — a TUI that stops to
 think would otherwise be reaped out from under its own work.
@@ -423,9 +427,10 @@ the account itself, and the models that account can run. **The account's shape
 is its type's**, rather than one shape every Profile is assumed to have — Claude
 Code's is the directory and config file pair bind-mounted at `~/.claude` /
 `~/.claude.json` inside the sandbox, and every backend after it keeps its whole
-account under one relocatable home — Codex's at `~/.codex`. Whichever it is,
-mounting it is what keeps accounts separate. A type is offered to the human only
-once it can launch the real thing: one that cannot would be a lie in a picker,
+account under one relocatable home — Codex's at `~/.codex`, Grok Build's at
+`~/.grok`. Whichever it is, mounting it is what keeps accounts separate. A type
+is offered to the human only once it can launch the real thing: one that cannot
+would be a lie in a picker,
 so the form offers Claude, Codex and Grok Build, and a Profile of a type whose
 stage has not landed is one saved over the API until it does. Picking a type on
 the form asks for that type's own account paths. The models are a list and the
@@ -721,15 +726,26 @@ that tells it apart is what it carries: the Profile that ran out, and — where
 the sentence the session printed carried a time this build could read — when the
 window comes back, as words to show beside the **Resume**. Information rather
 than a timer: nothing counts down to it, and nothing starts when it passes.
-Recognition is one phrase per backend, read off the Capture and the Transcript,
-kept in one place because the wording is the backend's and will move — the same
-bargain the idle signature makes. A session is read against its own backend's
-sentence and against no other, so a wording one of them stops on is one another
-may print in the middle of its work. The session is ended along with the stop,
-the agent's own wait for the same reset being no reason to have work going on
-inside a Conversation that reads as stopped. And **no auto-switching between
-Profiles**: an exhausted account is a wait, never a reason to spend a different
-one.
+Recognition is one phrase per backend, kept in one place because the wording is
+the backend's and will move — the same bargain the idle signature makes — and it
+is read off all three records a session leaves: what it printed, the **Screen**
+that printing drew, and its **Transcript**. The frame is read because a
+full-screen backend never says it in what it printed: a cursor move per row and
+no newlines makes a whole frame one line of bytes with the sentence somewhere in
+the middle of it, and grok says it by drawing a card. A session is read against
+its own backend's sentence and against no other, so a wording one of them stops
+on is one another may print in the middle of its work. **Or against none**: a
+backend nobody has watched run out has no phrase, and is skipped rather than
+matched against nothing — the empty string would open every line there is and
+would stop such a session at its first flush, where skipping leaves its limit
+landing as the ordinary stall it would have been anyway. A phrase covering only
+some accounts of a backend comes to the same thing for the rest: Grok Build
+ships the heading of the card a free account gets, a paid plan's card is headed
+differently, and its stop stalls until somebody has watched one drawn. The
+session is ended along with the stop, the agent's own wait for the same reset
+being no reason to have work going on inside a Conversation that reads as
+stopped. And **no auto-switching between Profiles**: an exhausted account is a
+wait, never a reason to spend a different one.
 _Avoid_: halt and pause (the two names this had before there was one of it),
 hold (gone, and nothing replaced it), interruption, error, failure, crash,
 incident, alert, block, rate limit, throttle

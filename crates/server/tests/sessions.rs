@@ -11473,10 +11473,30 @@ fn out_of_window(sentence: &str) -> String {
 /// half of what the latch is for: claude's spinner turns, and a backend that
 /// draws a still mark repeats itself exactly. Neither is a second wait.
 fn out_of_window_marked(marks: &str, sentence: &str) -> String {
+    out_of_window_saying(&format!(
+        r#"
+                    for pass in 1 2; do
+                        for turning in {marks}
+                        do
+                            printf "$turning {sentence}\r\n"
+                            sleep 0.125
+                        done
+                    done
+        "#
+    ))
+}
+
+/// And the same again for a backend that *draws* it rather than printing it:
+/// `banner` is the shell the stub says it with, run where the account runs out.
+///
+/// Which is what a full-screen display does — a cursor move per row and no
+/// newline anywhere — and what the two above come to as well, their printing
+/// being the ordinary case of the same thing.
+fn out_of_window_saying(banner: &str) -> String {
     format!(
         r#"
         case "$1" in
-        claude-grilling-5|gpt-5-codex-grilling)
+        claude-grilling-5|gpt-5-codex-grilling|grok-4.6-grilling)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             mkdir -p .tasks
             printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
@@ -11501,12 +11521,12 @@ fn out_of_window_marked(marks: &str, sentence: &str) -> String {
                 if [ "$next" = 01-count.md ]; then
                     # The wait itself, in miniature: the task lands, the account
                     # runs out before the next one, and the agent holds with its
-                    # banner up. Redrawn twice over the caller's marks — more
-                    # than the half a second Verkstead writes down what a
-                    # session printed on, so the banner is looked at more than
-                    # once — with whatever that backend draws in front of it,
-                    # which is what makes each repaint a different line where
-                    # the mark turns and the same line where it does not.
+                    # banner up. Said twice over — more than the half a second
+                    # Verkstead writes down what a session printed on, so the
+                    # banner is looked at more than once — with whatever that
+                    # backend puts in front of it, which is what makes each
+                    # repaint a different line where a mark turns and the same
+                    # line where it does not.
                     # The glyphs themselves rather than `\xe2\x9c\xbb` and its
                     # kind. `\xNN` is bash's extension to `printf` and not
                     # POSIX: a `/bin/sh` that is dash — which is what Debian and
@@ -11516,14 +11536,10 @@ fn out_of_window_marked(marks: &str, sentence: &str) -> String {
                     # refuse. ASCII punctuation is not decoration there,
                     # deliberately, so it does not open a status line. This file
                     # is UTF-8 and the shell passes the bytes through, which
-                    # needs no escape at either end.
-                    for pass in 1 2; do
-                        for turning in {marks}
-                        do
-                            printf "$turning {sentence}\r\n"
-                            sleep 0.125
-                        done
-                    done
+                    # needs no escape at either end. `\033` is the one escape
+                    # POSIX does give a format, which is what a frame is drawn
+                    # with.
+                    {banner}
                 fi
             else
                 printf 'finishing\n'
@@ -11805,6 +11821,170 @@ async fn a_codex_session_saying_so_only_in_its_rollout_is_stopped_off_the_transc
             .html
             .contains("You've hit your usage limit. Upgrade to Plus"),
         "carrying the sentence as the rollout held it: {:?}",
+        notice.html,
+    );
+
+    let event = fixture
+        .until(|view| output(view).map(|output| output.id))
+        .await;
+
+    assert!(
+        !fixture.capture(event).await.contains("usage limit"),
+        "and the terminal never said a word about it, so the Transcript is the \
+         only record that could have stopped this run",
+    );
+
+    assert_eq!(
+        fixture.stop_on_the_record().await.decision,
+        Decision::Verkstead,
+        "Verkstead pulled the brake",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(notice.id),
+        "and the run is blocked on the human until they press Resume",
+    );
+}
+
+/// And the third backend, which says it by *drawing* it: a Grok session that
+/// puts its card up stops the run off the frame that card is on.
+///
+/// The same claim as the Codex one above and the harder half of it. Grok heads a
+/// bordered card with `You hit your free usage limit.` and offers three tiers
+/// under it — read off grok 1.0.13 driven until it drew one — and it draws that
+/// card the way a full-screen display draws anything: a cursor move to each row
+/// and not one newline in the frame. So what the session *printed* is a single
+/// line with the spinner it was turning at the front of it and the sentence
+/// somewhere in the middle, which is a line that says nothing; what it drew is a
+/// grid, and the sentence is a line of that with the card's border in front. The
+/// stub says it exactly that way round, so a build that read only the bytes
+/// would run this backlog to the end.
+///
+/// A paid account's card is headed differently and nobody has watched one drawn,
+/// so a paid stop stalls instead — the accepted state rather than a gap, and
+/// nothing this can stand for.
+#[tokio::test]
+async fn a_grok_account_out_of_window_stops_the_run_on_the_card_it_draws() {
+    let fixture = grilling_on_grok(&out_of_window_saying(
+        r#"
+                    for pass in 1 2 3 4; do
+                        printf '\033[?2026h\033[23;5H⠴ 7s\033[19;3H┃  You hit your free usage limit.\033[?2026l'
+                        sleep 0.125
+                    done
+        "#,
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    let notice = fixture.stopped().await;
+
+    assert!(
+        notice
+            .html
+            .contains("the account <strong>grok</strong> was being spent is out of window"),
+        "naming the Profile whose account ran out, which is the Grok Build one \
+         every role of this run is on: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice.html.contains("You hit your free usage limit."),
+        "with the card's own heading kept as it was drawn, the border in front \
+         of it and all: {:?}",
+        notice.html,
+    );
+
+    let stop = fixture.stop_on_the_record().await;
+
+    assert_eq!(
+        stop.decision,
+        Decision::Verkstead,
+        "Verkstead pulled the brake, exactly as it does on the other two backends",
+    );
+    assert_eq!(
+        stop.resets, None,
+        "and grok names no reset, so the stop carries none: what the sentence \
+         does not say, nothing here invents",
+    );
+
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(notice.id),
+        "a run that has stopped carries *blocked on you*, whatever backend it was on",
+    );
+
+    let sessions = outputs(&fixture.view().await).len();
+
+    // Long enough for several more turns of a runner that was still turning.
+    pause(Duration::from_secs(3)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        sessions,
+        "while it is stopped the run does not advance: no next Step, no fresh session",
+    );
+    assert_eq!(
+        notices(&fixture.view().await).len(),
+        1,
+        "and the banner turning is the same wait, however many times it is drawn",
+    );
+    assert!(
+        outputs(&fixture.view().await)
+            .iter()
+            .all(|session| !session.running),
+        "and no session is running behind the stop",
+    );
+}
+
+/// And off the last of the three: a Grok session that says its account is spent
+/// in the log it keeps, and neither prints nor draws it, is stopped off the
+/// Transcript.
+///
+/// Every record is read on this backend as on the others — a backend that said
+/// so in one and not the rest would otherwise go unnoticed until the terminal
+/// happened to speak — and what carries it here is grok's own kind for the prose
+/// it streams, a session update being what grok's log is made of.
+///
+/// **This one is a guard rather than a path grok walks.** Driven to a real
+/// refusal, grok 1.0.13 puts nothing about it in its log but a `retry_state`
+/// line whose reason is the server's own error string — bookkeeping, which the
+/// reader folds under its own name and the summary never reads. So today a Grok
+/// limit is caught on the frame and only there; what this holds is the case
+/// where a release starts saying it in prose.
+#[tokio::test]
+async fn a_grok_session_saying_so_only_in_its_log_is_stopped_off_the_transcript() {
+    let fixture = grilling_on_grok(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        mine=$HOME/.grok/sessions/$(pwd | sed 's|/|%2F|g')/$name
+        mkdir -p "$mine"
+        log=$mine/updates.jsonl
+
+        printf 'reading the brief\n'
+        printf '{"method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"You hit your free usage limit."}}}}\n' "$name" > "$log"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let notice = fixture.stopped().await;
+
+    assert!(
+        notice
+            .html
+            .contains("the account <strong>grok</strong> was being spent is out of window"),
+        "the stop is the same stop, named for the same Profile: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice.html.contains("You hit your free usage limit."),
+        "carrying the sentence as the log held it: {:?}",
         notice.html,
     );
 
