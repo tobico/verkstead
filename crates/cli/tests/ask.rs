@@ -6,16 +6,14 @@
 
 mod support;
 
-use std::future::Future;
 use std::io::Write;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Child, Command, Stdio};
+use std::time::Duration;
 
+use support::server::{Server, finished, stderr, stdout};
 use support::{REPO_NAME, linked_worktree, repo_with_a_commit};
-use verkstead_schema::{QuestionSet, Response, SetCreated};
-use verkstead_server::store::{self, StoredSet};
+use verkstead_schema::{Response, SetCreated};
 
 /// Two Questions, one with a Sub-question, so a Response has to cover `Q1`,
 /// `Q2` and `Q2a`. `project` and `branch` are forged: the CLI derives both
@@ -63,10 +61,6 @@ comment: |
   The agent parses stdout; keep the noise on stderr.
 ";
 
-/// The Conversation these Sets are asked from, made by the server fixture over a
-/// database with nothing in it — so it is always the first there is.
-const ASKING_FROM: i64 = 1;
-
 /// A third level of nesting, which the question grammar forbids. The CLI has
 /// to refuse this itself, before anything reaches the server.
 const THREE_LEVELS_DEEP: &str = "
@@ -81,154 +75,6 @@ questions:
           - letter: i
             text: A third level, which the grammar forbids.
 ";
-
-/// The real server, on a runtime of its own, so a blocking test can kill it
-/// under the CLI's feet and bring it back on the same port.
-struct Server {
-    addr: SocketAddr,
-    database: PathBuf,
-    runtime: tokio::runtime::Runtime,
-}
-
-impl Server {
-    fn start(database: PathBuf) -> Self {
-        Self::bind("127.0.0.1:0".parse().unwrap(), database)
-    }
-
-    fn bind(addr: SocketAddr, database: PathBuf) -> Self {
-        Self::serve(addr, database)
-    }
-
-    fn serve(addr: SocketAddr, database: PathBuf) -> Self {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .unwrap();
-
-        let (listener, addr, pool) = runtime.block_on(async {
-            let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-            let addr = listener.local_addr().unwrap();
-            let pool = verkstead_server::open_database(&database).await.unwrap();
-
-            // Somewhere for the Sets to land. Every Set is asked from a
-            // Conversation, and the base URL a session is given is what says
-            // which — so a test standing in for a session has to be given the
-            // same thing. Made only where there is none: this server is brought
-            // up twice over one database, and the second time is a restart.
-            if store::conversations(&pool).await.unwrap().is_empty() {
-                let repo =
-                    store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
-                        .await
-                        .unwrap()
-                        .expect("nothing is registered at that path yet");
-
-                let conversation = store::start_conversation(&pool, repo.id, "api-core-and-cli")
-                    .await
-                    .unwrap()
-                    .expect("the Repo was just registered");
-                assert_eq!(conversation, ASKING_FROM);
-            }
-
-            (listener, addr, pool)
-        });
-
-        runtime.spawn(async move {
-            let _ = axum::serve(listener, verkstead_server::router(pool)).await;
-        });
-
-        Server {
-            addr,
-            database,
-            runtime,
-        }
-    }
-
-    /// Where the server is, whole — the viewer's namespace hangs off this, and
-    /// it is nobody's Conversation.
-    fn base(&self) -> String {
-        format!("http://{}", self.addr)
-    }
-
-    /// And what a session is given as `VERKSTEAD_SERVER`: the same server,
-    /// scoped to the Conversation it is asking from.
-    fn url(&self) -> String {
-        format!("{}/conversations/{ASKING_FROM}", self.base())
-    }
-
-    fn block_on<F: Future>(&self, future: F) -> F::Output {
-        self.runtime.block_on(future)
-    }
-
-    /// Stop serving without a graceful shutdown, so a held long-poll is
-    /// dropped exactly as it would be if the process were killed. Hands back
-    /// what [`Server::bind`] needs to bring the same server up again.
-    fn kill(self) -> (SocketAddr, PathBuf) {
-        let Server {
-            addr,
-            database,
-            runtime,
-        } = self;
-        runtime.shutdown_timeout(Duration::from_millis(100));
-        (addr, database)
-    }
-
-    /// The Set the CLI submitted, read back through a second pool on the same
-    /// file — the store is where the enriched Set can actually be seen.
-    fn stored_set(&self, id: i64) -> Option<StoredSet> {
-        self.block_on(async {
-            let pool = verkstead_server::open_database(&self.database)
-                .await
-                .unwrap();
-            let stored = store::load_set(&pool, id).await.unwrap();
-            pool.close().await;
-            stored
-        })
-    }
-
-    /// Block until the CLI has submitted Set `id`, and hand back what it asked.
-    ///
-    /// The Set itself rather than the row holding it: a stored body this build
-    /// cannot read is a broken test rather than a case with anything to say
-    /// here.
-    fn await_asked_set(&self, id: i64) -> QuestionSet {
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            if let Some(stored) = self.stored_set(id) {
-                return stored
-                    .set
-                    .set()
-                    .expect("the Set the CLI just sent reads back")
-                    .clone();
-            }
-            assert!(
-                Instant::now() < deadline,
-                "the CLI never submitted Question Set {id}"
-            );
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-
-    /// Answer a Set the way the human's device does: YAML over HTTP.
-    fn answer(&self, id: i64, yaml: &str) {
-        let reply = ureq::post(format!("{}/api/v1/sets/{id}/response", self.url()))
-            .header("Content-Type", "application/yaml")
-            .send(yaml)
-            .unwrap();
-        assert_eq!(reply.status().as_u16(), 201);
-    }
-
-    /// Lock a Set unanswered the way the human's browser does. It lives in the
-    /// viewer's namespace and nowhere else: the agent API has no route for it,
-    /// because only a human may close a Set nobody is going to answer.
-    fn lock(&self, id: i64) {
-        let reply = ureq::post(format!("{}/api/ui/sets/{id}/lock", self.base()))
-            .header("Content-Type", "application/json")
-            .send("{}")
-            .unwrap();
-        assert_eq!(reply.status().as_u16(), 200);
-    }
-}
 
 /// `verkstead ask`, pointed at the test server and running in `dir`, with its
 /// three streams on pipes the test can drive and read back.
@@ -286,24 +132,6 @@ fn ask_file(server: &Server, dir: &Path, file: &Path) -> Child {
 fn kill(mut child: Child) {
     child.kill().unwrap();
     child.wait().unwrap();
-}
-
-/// What the CLI wrote and how it exited, insisting it exited at all.
-fn finished(child: Child) -> Output {
-    let output = child.wait_with_output().unwrap();
-    eprintln!(
-        "verkstead stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    output
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8(output.stdout.clone()).unwrap()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8(output.stderr.clone()).unwrap()
 }
 
 #[test]

@@ -1,5 +1,6 @@
 //! The CLI's end of the API: submit a Set, then hold a reconnecting long-poll
-//! until the Response lands.
+//! until the Response lands — or, where the session ended its turn instead of
+//! idling, come back for that Response in one poll that holds for nothing.
 //!
 //! There is no expiry on the waiting (ADR-0001). The client owns retry, so
 //! "nothing yet", a dropped connection, a refused connection and a server
@@ -90,6 +91,56 @@ impl Client {
 
         serde_saphyr::from_str(&text)
             .with_context(|| format!("the server's reply was not a stored Set: {text}"))
+    }
+
+    /// Poll once for Set `id`'s Response: the Response itself, or the reason
+    /// there is none to take.
+    ///
+    /// The same endpoint the wait is held on, asked to hold for nothing. This
+    /// one does not retry, because every ending here is one the agent is owed
+    /// straight away: a Set nobody has answered yet, a Set the human locked
+    /// unanswered, and an id that names no Set of this Conversation are three
+    /// different things, and each is said as itself.
+    ///
+    /// Which of this Conversation's Sets is the base URL's business, as it is
+    /// everywhere else: an id belonging to another Conversation names nothing
+    /// here.
+    pub fn fetch(&self, id: i64) -> Result<Response> {
+        let url = format!("{}/api/v1/sets/{id}/response?hold=0", self.base);
+
+        let mut reply = self
+            .agent
+            .get(&url)
+            .call()
+            .with_context(|| format!("fetching the Response from {}", self.base))?;
+
+        match reply.status().as_u16() {
+            200 => {
+                let text = reply
+                    .body_mut()
+                    .read_to_string()
+                    .context("reading the Response")?;
+                Response::from_yaml(&text).map_err(|error| {
+                    anyhow!("the server sent something that is not a Response: {error}\n{text}")
+                })
+            }
+            204 => bail!(
+                "Question Set {id} has not been answered yet, so there is nothing \
+                 to fetch — wait to be told its Answers have landed"
+            ),
+            404 => bail!(
+                "this Conversation has no Question Set {id} — check the id the ask \
+                 that stored it printed"
+            ),
+            410 => bail!(
+                "Question Set {id} was locked unanswered — the human closed it \
+                 without answering, so no Response is coming"
+            ),
+            status => {
+                let text = reply.body_mut().read_to_string().unwrap_or_default();
+                bail!("the server answered {status}: {}", refusal(&text))
+            }
+        }
     }
 
     /// Block until Set `id` has been answered, reconnecting for as long as it

@@ -1,5 +1,6 @@
-//! The Response endpoints: the human's reply in, and the waiting agent's
-//! long-poll out.
+//! The Response endpoints: the human's reply in, and the agent's Answers out —
+//! whether it held a long-poll open for them or came back for them in one poll,
+//! which is the same request asked to hold for nothing.
 //!
 //! Both are reached through the Conversation the Set was asked from, because
 //! that is what the session's base URL says — see [`crate::sets`]. A Set id that
@@ -102,6 +103,10 @@ pub(crate) struct Wait {
 /// A Set the human locked unanswered ends the wait with a 410 instead: nothing
 /// is ever coming, and the client is told so rather than left polling a Set
 /// nobody will answer.
+///
+/// Handing the Response over is a delivery either way, and is written down as
+/// one — see [`delivered`], which is what keeps a session's own Answers from
+/// also arriving under the next session's prompt.
 pub(crate) async fn wait_for_response(
     State(state): State<AppState>,
     Path((conversation_id, id)): Path<(i64, i64)>,
@@ -136,6 +141,9 @@ pub(crate) async fn wait_for_response(
     loop {
         match store::settlement(&state.pool, id).await {
             Ok(Some(Settlement::Answered(stored))) => {
+                // Handing it over is the delivery, whether this was a wait held
+                // open or a fetch that came back for it.
+                delivered(&state, id).await;
                 return yaml(StatusCode::OK, &stored.response);
             }
             Ok(Some(Settlement::LockedUnanswered(_))) => return gone(id),
@@ -209,6 +217,24 @@ impl Watched {
 impl Drop for Watched {
     fn drop(&mut self) {
         self.announce();
+    }
+}
+
+/// Record that a session has been handed Set `id`'s Answers, so the folding
+/// rule passes over it.
+///
+/// A fetch is a delivery: the Answers reach the session that asked or a later
+/// session's prompt, never both — see [`crate::deferrals`]. Written here, in the
+/// request that hands the Response over, rather than by anything the CLI says
+/// afterwards, so a session that read its Answers and then died still counts as
+/// having read them.
+///
+/// Nothing to write for a Blocking Ask, which has no folding record at all, and
+/// nothing is refused for a write that fails: the cost of one is the human's
+/// Answers arriving twice, which is worse than losing the Response they were.
+async fn delivered(state: &AppState, id: i64) {
+    if let Err(error) = store::record_folded(&state.pool, &[id]).await {
+        tracing::error!(error = ?error, set_id = id, "recording a fetched Question Set as folded failed");
     }
 }
 

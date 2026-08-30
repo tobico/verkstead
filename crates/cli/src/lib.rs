@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod answers;
 mod ask;
 mod client;
 mod guide;
@@ -65,6 +66,24 @@ enum Command {
         server: String,
     },
 
+    /// Fetch the Response to a Question Set stored earlier, by id.
+    ///
+    /// Prints the Response as YAML on stdout and exits 0 — byte for byte what
+    /// a blocking `verkstead ask` prints for the same Set, so an agent parses
+    /// the two the same way. Nothing else is ever written to stdout.
+    ///
+    /// A fetch rather than a wait: it polls once and comes back, so a Set
+    /// nobody has answered yet is a non-zero exit rather than something to
+    /// idle on. Run it when something has said the Answers are there.
+    Answers {
+        /// The id of the stored Set, as the ask that stored it printed it.
+        id: i64,
+
+        /// Base URL of the Verkstead server.
+        #[arg(long, env = "VERKSTEAD_SERVER", default_value = DEFAULT_SERVER)]
+        server: String,
+    },
+
     /// Run the Verkstead server: the agents' API and the human's viewer.
     ///
     /// The flags are the server's own, and the one verb here that is not an
@@ -91,6 +110,7 @@ impl Cli {
                 deferred,
                 server,
             }) => ask::ask(file.as_deref(), deferred, &server),
+            Some(Command::Answers { id, server }) => answers::answers(id, &server),
             Some(Command::Serve(config)) => serve::serve(config),
             Some(Command::Guide { topic }) => guide::guide(topic.as_deref()),
             None => guide::guide(None),

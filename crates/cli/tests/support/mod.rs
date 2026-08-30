@@ -1,6 +1,9 @@
-//! Scratch git repositories for the tests that need one.
+//! What the CLI's tests stand up around the binary: scratch git repositories,
+//! and the real server the round trips are made against.
 
 #![allow(dead_code)]
+
+pub mod server;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -59,7 +59,7 @@ pub fn ask(file: Option<&Path>, deferred: bool, server: &str) -> Result<()> {
     // nothing else has ever been written there. A Deferred Ask has no Response
     // to print and never will have on this end, so what goes there is the one
     // thing that did happen — the Set was stored, and this is which one.
-    let mut yaml = match deferred {
+    let yaml = match deferred {
         true => created
             .to_yaml()
             .context("rendering the stored Question Set as YAML")?,
@@ -69,6 +69,16 @@ pub fn ask(file: Option<&Path>, deferred: bool, server: &str) -> Result<()> {
             .context("rendering the Response as YAML")?,
     };
 
+    deliver(yaml)
+}
+
+/// The one thing the CLI ever writes on stdout, ending on the newline a YAML
+/// document ends on.
+///
+/// Shared with [`crate::answers`], because a Response fetched is byte for byte
+/// a Response waited for: one Response shape reaches the agent however it came
+/// by it.
+pub(crate) fn deliver(mut yaml: String) -> Result<()> {
     if !yaml.ends_with('\n') {
         yaml.push('\n');
     }
