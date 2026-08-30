@@ -26,7 +26,7 @@ Roadmap stage: [03: Codex](docs/roadmaps/agent-backends/03-codex.md)
 ## Tasks
 
 - [x] 01: The `codex` type launches — [details](01-codex-launches.md)
-- [ ] 02: Codex judged idle at its prompt — [details](02-idle-at-its-prompt.md)
+- [x] 02: Codex judged idle at its prompt — [details](02-idle-at-its-prompt.md)
 - [ ] 03: Rollout discovery — [details](03-rollout-discovery.md)
 - [ ] 04: The rollout renderer — [details](04-rollout-renderer.md)
 - [ ] 05: Codex's limit phrase, and the whole thing proved — [details](05-limit-phrase-and-proof.md)

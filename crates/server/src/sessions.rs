@@ -134,9 +134,9 @@ pub struct Agents {
     /// `None` in a server, which runs the binary the Profile's type names.
     agent: Option<Vec<String>>,
 
-    /// What a TUI backend's session has on its Screen when it is sitting at its
-    /// prompt, where anything is standing where that backend's binary goes — see
-    /// [`Agents::at_the_prompt`], whose answer this stands in for.
+    /// What a TUI backend's session has on its Screen, where anything is
+    /// standing where that backend's binary goes — see [`Agents::signature`],
+    /// whose answer this stands in for.
     ///
     /// A field for [`Agents::agent`]'s reason. What this module has to be able
     /// to prove is that a session drawing a full screen is judged idle off the
@@ -145,10 +145,10 @@ pub struct Agents {
     /// draws one where the backend goes, and hands its signature in here.
     ///
     /// `None` in a server, which is every signature a backend ships with — see
-    /// [`Agents::at_the_prompt`], where they are kept. Claude is judged on its
+    /// [`Agents::signature`], where they are kept. Claude is judged on its
     /// silence whatever this holds: three seconds is its answer, and it draws no
     /// screen to read a prompt off.
-    signature: Option<String>,
+    signature: Option<Signature>,
 
     /// How fast the runner works the backlog these sessions are launched for.
     ///
@@ -217,11 +217,11 @@ impl Agents {
         Agents { pace, ..self }
     }
 
-    /// The same, with `signature` where a TUI backend's own goes — see
-    /// [`Agents::signature`].
+    /// The same, with the prompt `signature` draws where a TUI backend's own
+    /// goes — see [`Agents::signature`].
     pub fn drawing(self, signature: &str) -> Agents {
         Agents {
-            signature: Some(signature.to_owned()),
+            signature: Some(Signature::AtThePrompt(signature.to_owned())),
             ..self
         }
     }
@@ -296,8 +296,8 @@ impl Agents {
         argv
     }
 
-    /// What a session of `agent_type` has on its Screen when it is at its
-    /// prompt, and `None` where its idle is the silence itself.
+    /// What a session of `agent_type` has on its Screen that says whether it has
+    /// stopped, and `None` where its idle is the silence itself.
     ///
     /// **One constant per backend**, the same bargain the usage-limit phrase
     /// makes — see [`crate::limits`]: the wording is the backend's and it will
@@ -310,24 +310,27 @@ impl Agents {
     /// rather than repainting a screen, so there is no frame to read a prompt
     /// off, and three seconds of silence is an answer that works.
     ///
-    /// Codex's is one line of the frame the real codex leaves standing when it
-    /// is waiting for a human, and it is not written down here yet: it has to be
-    /// read off a running codex rather than guessed at, a guess being exactly
-    /// the drift the long-stop exists to catch. What stands here until then is
-    /// whatever the suite handed in — the signature drawn by the stub it stands
-    /// where an agent goes.
-    fn at_the_prompt(&self, agent_type: store::AgentType) -> Option<&str> {
+    /// Codex's is [`CODEX_AT_WORK`], and it is the other of the two readings —
+    /// see [`Signature`]. What stands here instead is whatever the suite handed
+    /// in, which is the prompt drawn by the stub it stands where an agent goes:
+    /// the backends after this one draw a prompt of their own, and the suite
+    /// proves that reading against a stub rather than against an account.
+    fn signature(&self, agent_type: store::AgentType) -> Option<Signature> {
         match agent_type {
             store::AgentType::Claude => None,
-            store::AgentType::Codex => self.signature.as_deref(),
+            store::AgentType::Codex => Some(
+                self.signature
+                    .clone()
+                    .unwrap_or_else(|| Signature::AtWork(CODEX_AT_WORK.to_owned())),
+            ),
         }
     }
 
     /// And how a session of that type is judged idle — see [`Judged`].
     fn judged(&self, agent_type: store::AgentType) -> Judged {
-        match self.at_the_prompt(agent_type) {
+        match self.signature(agent_type) {
             Some(signature) => Judged::Drawing {
-                signature: signature.to_owned(),
+                signature,
                 long_stop: self.pace.long_stop,
             },
             None => Judged::Printing,
@@ -418,10 +421,18 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
             // A session with no Worktree is one that never starts — see
             // [`Sessions::start`] — so what this leaves off is the trust of a
             // directory there is none of, rather than a prompt let through.
+            //
+            // The whole table rather than the one key under it, because codex
+            // splits a `-c` key on every dot it finds and does not stop at the
+            // quotes: a Worktree named for a Repo or a branch with a dot in it
+            // — and either may have one — is a path
+            // `projects."…".trust_level` addresses some other way, and the
+            // session then sits on the trust prompt for ever. A table on the
+            // right-hand side is read as the TOML it is.
             if let Some(worktree) = worktree {
                 tail.push("-c".to_owned());
                 tail.push(format!(
-                    "projects.\"{}\".trust_level=\"trusted\"",
+                    "projects={{\"{}\"={{trust_level=\"trusted\"}}}}",
                     worktree.display()
                 ));
             }
@@ -442,6 +453,25 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
 /// usage-limit phrase and the idle signature make: one place to edit when it
 /// moves.
 const CODEX_CREDENTIAL_STORE: &str = "cli_auth_credentials_store";
+
+/// What codex has on its Screen while it is working, and nothing of what it has
+/// there when it is waiting for a human — see [`Signature::AtWork`].
+///
+/// Read off codex 0.149.0 rather than guessed at, and the reading is the whole
+/// reason this backend's answer is an at-work line rather than a prompt: the
+/// frame codex leaves when its turn is over and the frame it draws mid-turn are
+/// the same screen but for this one line. The composer, its placeholder — `Ask
+/// Codex to do anything` — and the bar under it stand in both, so none of them
+/// says anything about whether the session has stopped.
+///
+/// The fragment rather than the whole line, because the rest of it moves while
+/// this does not: the spinner glyph in front changes every frame, and the
+/// seconds count up.
+///
+/// Named for the same reason the spelling above is, and it is the same bargain
+/// the usage-limit phrase makes: the wording is codex's and it will move, and
+/// moving it costs one edit here.
+const CODEX_AT_WORK: &str = "esc to interrupt";
 
 /// The sessions this server has running, by the Conversation each belongs to.
 ///
@@ -605,7 +635,7 @@ pub(crate) struct Idle {
 /// How a session's backend says it has stopped.
 ///
 /// Two readings of the one terminal, and which of them a session gets is its
-/// agent type's — see [`Agents::at_the_prompt`], which is where each backend's
+/// agent type's — see [`Agents::signature`], which is where each backend's
 /// answer is kept.
 #[derive(Debug, Clone)]
 enum Judged {
@@ -613,13 +643,14 @@ enum Judged {
     /// the rule every session was read by before there was a second backend.
     Printing,
 
-    /// By what it draws: this backend's at-the-prompt signature standing on the
-    /// Screen, with a long byte-quiet behind it.
+    /// By what it draws: this backend's signature read off the Screen, with a
+    /// long byte-quiet behind it.
     ///
     /// A full-screen interface is never reliably silent — it repaints while it
     /// works and may go on repainting its prompt after it has stopped — so
     /// silence says nothing about one either way, and what does is the frame it
-    /// leaves on the terminal.
+    /// leaves on the terminal. Which of the two things a frame can say is this
+    /// backend's — see [`Signature`].
     ///
     /// **The long-stop is what a drifted signature lands in.** The wording is
     /// the backend's and will move, and a signature that no longer matches
@@ -630,9 +661,92 @@ enum Judged {
     /// would-not-ask stop — one slow round rather than never. See
     /// [`crate::runner::Pace::long_stop`].
     Drawing {
-        signature: String,
+        signature: Signature,
         long_stop: Duration,
     },
+}
+
+/// The one line a backend draws that says whether it has stopped, and which of
+/// the two things it says.
+///
+/// A backend is read either way round, and which way is a fact about what it
+/// draws rather than a choice:
+///
+/// - one that draws a prompt of its own when it is waiting says so by that line
+///   *standing*, and
+/// - one whose waiting frame is indistinguishable from its working frame says so
+///   by its at-work line *going*.
+///
+/// Codex is the second, and it is the reason there are two — see
+/// [`CODEX_AT_WORK`], where the frames it draws are set out.
+///
+/// **The two read the silence differently, and they have to.** A prompt standing
+/// is a whole answer: the backend has drawn the thing it draws only when it is
+/// waiting, and nothing else has to agree with it. An at-work line *gone* is
+/// half of one — the line is missing from the frame before the first frame is
+/// drawn, and it is missing again from every frame of a session drawing
+/// something Verkstead has never seen — so the ordinary [`IDLE_AFTER`] quiet is
+/// asked for beside it. That is what keeps a drifted at-work phrase from
+/// stopping a session in the middle of its work: a working TUI repaints, and one
+/// that is repainting is never quiet.
+#[derive(Debug, Clone)]
+pub(crate) enum Signature {
+    /// The line this backend draws when it is sitting at its prompt: standing
+    /// says the session has stopped, and it is the whole of the judgement.
+    AtThePrompt(String),
+
+    /// The line this backend draws while it is working, where it draws nothing
+    /// of its own when it is waiting: gone says the session has stopped, once
+    /// [`IDLE_AFTER`] of quiet says so too.
+    AtWork(String),
+}
+
+impl Signature {
+    /// Whether the frame on `screen` says the session has stopped.
+    fn at_rest(&self, screen: &Live) -> bool {
+        match self {
+            Signature::AtThePrompt(line) => screen.showing(line),
+            Signature::AtWork(line) => !screen.showing(line),
+        }
+    }
+
+    /// And when a session whose frame has said so since `at_rest` — having last
+    /// printed at `printed` — is idle.
+    ///
+    /// At once for a prompt, which is an answer on its own; [`IDLE_AFTER`] after
+    /// the last byte for an at-work line, which is half of one.
+    fn settled(&self, at_rest: Instant, printed: Instant) -> Instant {
+        match self {
+            Signature::AtThePrompt(_) => at_rest,
+            Signature::AtWork(_) => printed + IDLE_AFTER,
+        }
+    }
+
+    /// And the moment such a session stopped, which is what every span of idle
+    /// is measured from and what *last seen at work* answers with.
+    ///
+    /// When its prompt first stood, for a backend that draws one — it has been
+    /// sitting there since, whatever else its terminal has done. Its last byte
+    /// for a backend read by its at-work line, because a backend that draws only
+    /// while it works was working right up to the moment it went quiet.
+    fn stopped_at(&self, at_rest: Instant, printed: Instant) -> Instant {
+        match self {
+            Signature::AtThePrompt(_) => at_rest,
+            Signature::AtWork(_) => printed,
+        }
+    }
+
+    /// Whether a session that has drawn nothing at all is at rest under this
+    /// reading.
+    ///
+    /// It is under an at-work one: a session that has drawn nothing is not
+    /// drawing that it is at work, and what says it has stopped is then the
+    /// quiet alone — which is Claude's own rule, and the right one for a
+    /// launched session that never got going. Under a prompt it is not: nothing
+    /// drawn is no prompt drawn.
+    fn at_rest_undrawn(&self) -> bool {
+        matches!(self, Signature::AtWork(_))
+    }
 }
 
 /// What the clock holds: when the session last printed anything, whether that
@@ -655,6 +769,10 @@ struct Silence {
     /// on rather than a new one, so a signature already standing keeps the
     /// moment it first stood.
     ///
+    /// Set from the launch under an at-work reading, where a session that has
+    /// drawn nothing is a session not drawing that it is at work — see
+    /// [`Signature::at_rest_undrawn`].
+    ///
     /// Never set at all under [`Judged::Printing`], where the silence itself is
     /// the judgement and [`Silence::at`] is the whole of it.
     idling_since: Option<Instant>,
@@ -662,12 +780,18 @@ struct Silence {
 
 impl Idle {
     fn started(judged: Judged) -> Idle {
+        let now = Instant::now();
+        let undrawn = match &judged {
+            Judged::Printing => false,
+            Judged::Drawing { signature, .. } => signature.at_rest_undrawn(),
+        };
+
         Idle {
             judged,
             silence: Arc::new(Mutex::new(Silence {
-                at: Instant::now(),
+                at: now,
                 spoke: false,
-                idling_since: None,
+                idling_since: undrawn.then_some(now),
             })),
         }
     }
@@ -681,9 +805,9 @@ impl Idle {
     fn printed(&self, screen: &Live) {
         // Outside the lock, because it takes the Screen's: two locks held at
         // once are two locks that can be taken in two orders.
-        let at_the_prompt = match &self.judged {
+        let at_rest = match &self.judged {
             Judged::Printing => false,
-            Judged::Drawing { signature, .. } => screen.showing(signature),
+            Judged::Drawing { signature, .. } => signature.at_rest(screen),
         };
 
         let mut silence = self.silence();
@@ -692,7 +816,7 @@ impl Idle {
         silence.at = now;
         silence.spoke = true;
 
-        if at_the_prompt {
+        if at_rest {
             silence.idling_since.get_or_insert(now);
         } else {
             silence.idling_since = None;
@@ -708,8 +832,15 @@ impl Idle {
 
         match &self.judged {
             Judged::Printing => silence.at.elapsed() >= IDLE_AFTER,
-            Judged::Drawing { long_stop, .. } => {
-                silence.idling_since.is_some() || silence.at.elapsed() >= *long_stop
+            Judged::Drawing {
+                signature,
+                long_stop,
+            } => {
+                let settled = silence
+                    .idling_since
+                    .is_some_and(|since| signature.settled(since, silence.at) <= Instant::now());
+
+                settled || silence.at.elapsed() >= *long_stop
             }
         }
     }
@@ -729,10 +860,14 @@ impl Idle {
 
         match &self.judged {
             Judged::Printing => silence.at.elapsed(),
-            Judged::Drawing { long_stop, .. } => {
+            Judged::Drawing {
+                signature,
+                long_stop,
+            } => {
                 let drawn = silence
                     .idling_since
-                    .map(|since| since.elapsed())
+                    .filter(|since| signature.settled(*since, silence.at) <= Instant::now())
+                    .map(|since| signature.stopped_at(since, silence.at).elapsed())
                     .unwrap_or_default();
                 let printed = silence.at.elapsed();
 
@@ -756,8 +891,11 @@ impl Idle {
 
         match &self.judged {
             Judged::Printing => silence.at + IDLE_AFTER,
-            Judged::Drawing { long_stop, .. } => match silence.idling_since {
-                Some(since) => since,
+            Judged::Drawing {
+                signature,
+                long_stop,
+            } => match silence.idling_since {
+                Some(since) => signature.settled(since, silence.at),
                 None => silence.at + *long_stop,
             },
         }
@@ -797,7 +935,11 @@ impl Idle {
 
         match &self.judged {
             Judged::Printing => silence.at,
-            Judged::Drawing { .. } => silence.idling_since.unwrap_or(silence.at),
+            Judged::Drawing { signature, .. } => silence
+                .idling_since
+                .filter(|since| signature.settled(*since, silence.at) <= Instant::now())
+                .map(|since| signature.stopped_at(since, silence.at))
+                .unwrap_or(silence.at),
         }
     }
 
@@ -1985,7 +2127,14 @@ mod tests {
 
     /// The Worktree a session of either is launched in, which is the directory
     /// codex is told to trust.
-    const WORKTREE: &str = "/srv/worktrees/verkstead-rate-limiting";
+    /// The Worktree a session of these fixtures works in.
+    ///
+    /// **With a dot in it**, and that is the point: a Worktree is named for its
+    /// Repo and the branch it holds, and either may carry one. Codex splits a
+    /// `-c` key on every dot and does not stop at the quotes, so a path like
+    /// this one is what tells a trust pre-seed that lands from one that leaves
+    /// the session sitting on the trust prompt for ever.
+    const WORKTREE: &str = "/srv/worktrees/verkstead-rate-limiting-v1.2";
 
     fn worktree() -> Option<&'static Path> {
         Some(Path::new(WORKTREE))
@@ -2129,7 +2278,9 @@ mod tests {
     /// No session id, because codex takes none — which is why its log is found
     /// rather than named. The credential store is file-backed because there is
     /// no keyring inside the sandbox, and the Worktree is trusted from the line
-    /// rather than from anything written into the Profile's own directory.
+    /// rather than from anything written into the Profile's own directory —
+    /// trusted as a whole table rather than as a key under one, which is what a
+    /// Worktree with a dot in its name needs. See [`WORKTREE`].
     #[test]
     fn a_codex_session_takes_the_line_codex_takes() {
         let state = tempfile::tempdir().unwrap();
@@ -2152,7 +2303,7 @@ mod tests {
                 "-c".to_owned(),
                 "cli_auth_credentials_store=\"file\"".to_owned(),
                 "-c".to_owned(),
-                format!("projects.\"{WORKTREE}\".trust_level=\"trusted\""),
+                format!("projects={{\"{WORKTREE}\"={{trust_level=\"trusted\"}}}}"),
             ]
         );
     }

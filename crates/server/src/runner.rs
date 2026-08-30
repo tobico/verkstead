@@ -148,7 +148,7 @@ pub struct Pace {
     /// And how long a session judged on the screen it draws may print nothing
     /// before it is idle whatever that screen says.
     ///
-    /// The long-stop behind an at-the-prompt signature — see
+    /// The long-stop behind a signature read off the screen — see
     /// [`crate::sessions::Idle`]. Five minutes: minutes rather than seconds,
     /// because a backend that repaints leaves gaps a few seconds long in the
     /// middle of its work and a session reaped inside one would be reaped at

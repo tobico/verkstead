@@ -961,13 +961,16 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // as the wrap-up starts, and the tests that want the window before it hold
     // it open themselves.
     reviewing: Duration::ZERO,
-    // Three times the proposing grace above, where a server's is five minutes
-    // against sixty seconds. Nothing here is judged by it unless its stub draws
-    // a screen — see [`DRAWING`] — and the fixtures that are want it clear of
-    // the grace on both sides: a silence mid-turn has to be able to run past the
-    // grace without reaching this, and a session caught by this has to be one
-    // the grace alone would have caught much sooner.
-    long_stop: paced(Duration::from_millis(2700)),
+    // Clear of the grace on both sides and clear of the three-second mark a
+    // session is idle on once its screen says so, where a server's is five
+    // minutes against sixty seconds and three. Nothing here is judged by it
+    // unless its stub draws a screen — see [`DRAWING`] — and the fixtures that
+    // are want the window: a silence mid-turn has to be able to run past the
+    // grace without reaching this, a session caught by this has to be one the
+    // grace alone would have caught much sooner, and a backend read by its
+    // at-work line has to be able to go quiet for the three seconds that end it
+    // without this ending it first.
+    long_stop: paced(Duration::from_millis(6000)),
 });
 
 /// And the same at a pace that does look, for the tests that are about the
@@ -1402,9 +1405,11 @@ async fn grilling_spilling_on_codex(spill: tempfile::TempDir, stub: &str, gh: &s
 /// that repaints — the ender, the rescue, the stop — and those are the run's
 /// sessions rather than the grilling one alone.
 ///
-/// The signature is the suite's rather than a backend's: none ships yet, and
-/// what stands where a backend goes here is a stub that draws whatever it is
-/// told to — see [`AT_THE_PROMPT`] and [`A_PROMPT_THAT_DRIFTED`].
+/// The signature is the suite's rather than a backend's: the one backend that
+/// ships one draws an at-work line instead — see [`grilling_at_work`] — and the
+/// backends that will draw a prompt of their own are not here yet. So what
+/// stands where a backend goes is a stub drawing whatever it is told to — see
+/// [`AT_THE_PROMPT`] and [`A_PROMPT_THAT_DRIFTED`].
 async fn grilling_drawing(stub: &str, signature: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
@@ -1415,6 +1420,28 @@ async fn grilling_drawing(stub: &str, signature: &str) -> Grilling {
         Pickers::EverythingOnCodex,
         Origin::None,
         Some(signature),
+    )
+    .await
+}
+
+/// And the same with a stub that draws the way codex draws, with nothing handed
+/// in to read it by.
+///
+/// The difference from [`grilling_drawing`] is the whole point: there the suite
+/// stands both halves — the stub's prompt and the signature Verkstead looks for
+/// — because no backend ships a prompt yet. Here only the stub is the suite's,
+/// and what finds its at-work line is the constant the server already carries
+/// for this backend.
+async fn grilling_at_work(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnCodex,
+        Origin::None,
+        None,
     )
     .await
 }
@@ -2049,9 +2076,10 @@ async fn bench_at_pace(
     .at_pace(pace);
 
     // And, where this fixture's stub draws a full screen rather than printing
-    // lines, the line it draws when its turn is over — which stands where the
-    // backend's own at-the-prompt signature goes. Nothing on Claude is judged by
-    // it whatever is handed in here; see the server's `sessions` module.
+    // lines, the prompt it draws when its turn is over — which stands where a
+    // backend's own signature goes, for the backends that will draw one. A
+    // fixture that hands in nothing leaves the server reading its own, which is
+    // how the Codex ones are written; see the server's `sessions` module.
     let agents = match signature {
         Some(signature) => agents.drawing(signature),
         None => agents,
@@ -2913,9 +2941,10 @@ async fn a_codex_session_is_launched_with_the_line_codex_takes() {
         .expect("the session says where it ran");
     assert!(
         said.contains(&format!(
-            "arg=projects.\"{where_it_ran}\".trust_level=\"trusted\"\n"
+            "arg=projects={{\"{where_it_ran}\"={{trust_level=\"trusted\"}}}}\n"
         )),
-        "and it trusts the Worktree it was launched in: {said:?}"
+        "and it trusts the Worktree it was launched in — as a whole table, which \
+         is what a path with a dot in it needs: {said:?}"
     );
 
     assert!(
@@ -17719,6 +17748,273 @@ async fn a_prompt_the_signature_does_not_know_is_caught_by_the_long_stop() {
         stopped.html,
     );
     assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// What the real codex has on its Screen while it is working, which is the whole
+/// of what says a Codex session has not stopped — see the server's `sessions`
+/// module, where Verkstead's own copy of this wording is kept.
+///
+/// Written out here rather than reached for out of the server, and deliberately:
+/// what these prove is that Verkstead already knows codex's line, so the stub
+/// draws what codex draws and nothing is handed in to meet it.
+const AT_WORK: &str = "◦ Working (12s • esc to interrupt)";
+
+/// And the frame it leaves when its turn is over: the composer, which is drawn
+/// exactly the same while it works.
+///
+/// That is the reason a Codex session is read the other way round from a session
+/// that draws a prompt of its own — there is nothing in this line to tell the two
+/// states apart, and the line above is the only thing that changes.
+const AT_ITS_PROMPT: &str = "› Ask Codex to do anything";
+
+/// And what a stub draws where that wording has moved on without Verkstead: an
+/// at-work line that says the same thing in words Verkstead has never seen.
+const AT_WORK_IN_OTHER_WORDS: &str = "◦ Thinking (12s • press escape to stop)";
+
+/// A backlog of one worked by sessions that draw the way codex draws: an at-work
+/// line while they work, the composer when they are waiting, and — this being
+/// what makes codex codex — not one byte once they are.
+///
+/// The mirror of [`a_backlog_drawing`], and the shape is the same but for which
+/// frame says the turn is over. There the prompt appearing says it; here the
+/// at-work line *going* says it, and the quiet behind it is the other half.
+///
+/// Each of these leaves a silence in the middle of its turn that is longer than
+/// the grace a printing session is ended on, with its at-work line standing
+/// through it: a TUI that stops to think is not a TUI that has finished, and on
+/// this reading the line standing is what says so.
+///
+/// `at_work` is what it draws while it works — codex's own where the test is
+/// about Verkstead knowing it, and something else where it is about a wording
+/// that has moved on. `resting` is the frame it leaves when its turn is over.
+///
+/// `commits` is whether the step does what its task asked, as it is there: one
+/// that does is ended on its landing and its judgement together, and one that
+/// does not is a run nobody can move, which is the rescue's.
+fn a_backlog_at_work(at_work: &str, resting: &str, commits: bool) -> String {
+    let working = if commits {
+        r#"
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+    fi"#
+    } else {
+        ""
+    };
+
+    // The same span [`a_backlog_drawing`] thinks for, and between the same two
+    // of the Pace's: past the grace, so that a session ended inside it would be
+    // one ended by the byte clock, and well short of the long-stop.
+    let thinking = (BRISKLY.proposing * 3 / 2).as_secs_f64();
+
+    format!(
+        r#"
+frame() {{ printf '\033[2J\033[H%s\n' "$1"; }}
+working() {{
+    LEFT=$1
+    while [ "$LEFT" -ne 0 ]; do
+        frame '{at_work}'
+        sleep 0.05
+        LEFT=$((LEFT - 1))
+    done
+}}
+resting() {{
+    frame '{resting}'
+    printf 'silent\n' > "/tmp/verkstead/silent-$1"
+    sleep 300
+}}
+case "$1" in
+gpt-5-codex-grilling)
+    working 10
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    resting grilling
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
+    working 10
+    sleep {thinking:.2}
+    working 10{working}
+    resting step &
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#
+    )
+}
+
+/// A backlog worked by sessions that draw codex's at-work line is worked to the
+/// end, on that line going rather than on any frame they leave standing.
+///
+/// Nothing is handed in here: the stub draws what codex draws, and what finds it
+/// is Verkstead's own constant for this backend. That is the whole of what this
+/// covers — a Codex session judged by the line the real codex draws.
+///
+/// **And the silence each leaves mid-turn ends nothing.** It is longer than the
+/// grace a printing session is ended on, and the at-work line stands through it:
+/// a TUI that stops to think has not stopped working, whatever its terminal is
+/// doing.
+#[tokio::test]
+async fn codex_sessions_are_ended_on_the_at_work_line_going_rather_than_on_the_frame_they_leave() {
+    let fixture = grilling_at_work(&a_backlog_at_work(AT_WORK, AT_ITS_PROMPT, true)).await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: every session was ended where it stood, its at-work \
+         line gone and its terminal quiet: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into any of them: the silence each left in the \
+         middle of its turn is longer than the grace, and its at-work line was \
+         standing through the whole of it",
+    );
+}
+
+/// And a step that draws its composer without doing what it was sent for is told
+/// and then stopped, on the same judgement.
+///
+/// The rescue's precondition is idle, so this is the other half of the reading
+/// being right: a session that has stopped has to *reach* the rescue, and what
+/// says this one has stopped is the at-work line no longer on its Screen.
+#[tokio::test]
+async fn a_codex_step_that_stops_without_committing_is_told_and_then_stopped() {
+    let fixture = grilling_at_work(&a_backlog_at_work(AT_WORK, AT_ITS_PROMPT, false)).await;
+
+    picked(&fixture, "task-list").await;
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        said[0].contains("summarize your status"),
+        "the same line as anywhere else, in the words somebody watching would \
+         have typed: {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("01-count.md"),
+        "the Notice names the step, a human wanting to know which task: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and says why it stopped: {:?}",
+        stopped.html,
+    );
+    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// An at-work line that has moved on without Verkstead costs the run nothing:
+/// the quiet behind it is what says the session has stopped, and it says it
+/// alone.
+///
+/// This is the direction a wording moves in most often — a release renames the
+/// line, and Verkstead is left looking for words nothing draws. A session
+/// drawing them reads as one that has stopped *by the screen*, from its very
+/// first frame, and nothing goes wrong: the [`IDLE_AFTER`]-length quiet asked
+/// for beside the screen is not there while it works, because a TUI at work
+/// repaints. So the backlog is worked to the end, on the byte clock alone —
+/// which is Claude's own rule, and the right one to fall back to.
+#[tokio::test]
+async fn an_at_work_line_that_has_moved_on_leaves_the_run_on_the_byte_clock() {
+    let fixture = grilling_at_work(&a_backlog_at_work(
+        AT_WORK_IN_OTHER_WORDS,
+        AT_ITS_PROMPT,
+        true,
+    ))
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: a wording Verkstead does not know is a session read \
+         on its quiet, not a session nothing ever ends: {:?}",
+        notices(&view),
+    );
+}
+
+/// And an at-work line that never goes is caught by the long-stop, which is the
+/// whole reason there is one.
+///
+/// The other way a signature drifts, and the dangerous one: the line stops
+/// telling the two states apart — a release draws it at the prompt as well, or
+/// the frame Verkstead reads is not the frame it thought — and a session then
+/// reads as one that never stops working. Nothing else here would catch it: the
+/// rescue's precondition is idle, every ender waits on the same judgement, and
+/// no session carries a cap on its life. So the byte clock stays behind it as a
+/// long-stop, and what the human gets is the ordinary would-not-ask stop — one
+/// slow round rather than never.
+///
+/// **And it is slow**, deliberately: the step draws its at-work line for longer
+/// than the grace and nothing is typed into it, because a session showing that
+/// it is at work is at work whatever else its terminal is doing. Only once it
+/// has stopped printing altogether does the long-stop start, and only once that
+/// is out is it idle.
+#[tokio::test]
+async fn an_at_work_line_that_never_goes_is_caught_by_the_long_stop() {
+    let fixture = grilling_at_work(&a_backlog_at_work(AT_WORK, AT_WORK, false)).await;
+
+    picked(&fixture, "task-list").await;
+
+    // The step session has drawn its at-work line for a window longer than the
+    // grace, and has now stopped printing altogether — which is where the
+    // long-stop starts.
+    until_written(&handoff_directory(&fixture).join("silent-step")).await;
+    let fell_silent = Instant::now();
+
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "nothing was typed into it while it was drawing: a session drawing that \
+         it is at work is at work, however long it sits there saying so",
+    );
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        fell_silent.elapsed() >= BRISKLY.proposing * 2,
+        "and what caught it was the long-stop rather than the grace, which \
+         would have had it in under half the time",
+    );
+    assert!(
+        said[0].contains("summarize your status"),
+        "the ordinary line, this being the ordinary rules arriving late: \
+         {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and the ordinary stop under them: {:?}",
+        stopped.html,
+    );
 }
 
 /// And an inline implementation that goes quiet without committing anything is

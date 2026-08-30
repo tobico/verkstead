@@ -41,3 +41,45 @@ rather than shipping a constant nobody has seen stand.
 - [ ] With the signature deliberately wrong, the session reads as busy until
       the byte-quiet long-stop, and what the human then gets is the ordinary
       would-not-ask stop rather than a session that runs for ever.
+
+## What was built instead, and why
+
+**Codex has no at-the-prompt line.** Driven for real — codex 0.149.0, against a
+stand-in model server, there being no account on the machine — the frame it
+leaves when it is waiting for a human and the frame it draws mid-turn are the
+same screen but for one line, and that line is the one it draws while it is
+*working*:
+
+```
+25|• Hello from the stand-in.            waiting
+28|› Ask Codex to do anything
+30|  gpt-5 default · /tmp/codextrust/wt
+
+25|◦ Working (39s • esc to interrupt)    mid-turn
+28|› Ask Codex to do anything
+30|  gpt-5 default · /tmp/codextrust/wt
+```
+
+Two measurements went with it, both the other way round from what ADR-0011
+assumed: at its prompt codex sends not one byte once the frame settles, and
+mid-turn it repaints every 33 ms without a gap.
+
+So the constant is codex's **at-work** line — `esc to interrupt` — and a
+signature now reads one of two ways, which way being a fact about the backend.
+Put to the human as Question Set 1 (Q1), who took the recommendation: the
+at-work line, with the ordinary three-second quiet asked for beside it, so that
+a wording which drifts leaves a working session alone rather than reaping it.
+ADR-0011's TUI-idle section records the whole of it. The at-the-prompt reading
+and its tests are untouched, for the backends that will draw one.
+
+The same round settled two things beside it: the trust pre-seed task 01
+shipped is ignored when the Worktree path holds a dot, and is fixed here (Q2);
+and the ADR is amended in this commit rather than later (Q3).
+
+## What is still waiting on the human
+
+**The account.** Everything above is the real codex binary drawing its real
+frames, but no session has ever reached a prompt under a logged-in account
+here. What that leaves unconfirmed is narrow — whether a subscription or
+API-key login changes what the composer and the bar under it draw — and it is
+the same wait task 05 carries.

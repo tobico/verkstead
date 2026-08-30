@@ -99,6 +99,38 @@ rather than never.
 Claude Code stays on the three-second byte-quiet, which works and stays
 measured on what it was calibrated for.
 
+Amended: **a signature reads one of two ways, and which way is a fact about
+the backend rather than a choice.** Both assumptions above were checked
+against the real codex when its stage was built, and both came out the other
+way round for it:
+
+- **Its waiting frame is its working frame.** The screen codex leaves when its
+  turn is over and the screen it draws mid-turn differ by one line — the
+  `Working (12s • esc to interrupt)` status line, which is there while it
+  works and gone when it is waiting. The composer, its `Ask Codex to do
+  anything` placeholder and the bar under it stand in both, so there is no
+  at-the-prompt state to parse. What the constant can be is the *at-work* line,
+  and standing then says the opposite of what it says above.
+- **It is byte-silent at its prompt.** Not one byte once the frame settles,
+  where mid-turn it repaints every 33 ms without a gap.
+
+So the constant per backend stands, and what it says about the session is the
+backend's too: a prompt line *standing* says stopped, an at-work line *going*
+says stopped. The second is half an answer rather than a whole one — the line
+is equally missing from the frame of a session that has drawn nothing yet, and
+from every frame of a session drawing a wording this build has never seen — so
+the ordinary three-second quiet is asked for beside it. That is what keeps a
+drifted at-work phrase from reaping a session mid-work: a TUI at work
+repaints, and one that is repainting is never quiet. Where the phrase drifts
+the other way and never goes, the long-stop below is still what catches it,
+unchanged.
+
+The three-second mark counting for one reading and not the other is not a
+softening of the rule above. It is that rule's own reasoning applied to a
+different screen: a moment's silence mid-turn says nothing about a session
+whose at-work line is standing, and it is only ever consulted once that line
+has gone.
+
 ## The skills move to a neutral path
 
 The bundled skills mount at **`/verkstead/skills`** for every backend, Claude
