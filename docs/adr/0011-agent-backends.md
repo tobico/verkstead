@@ -65,6 +65,36 @@ agent type in the sandbox environment, and `verkstead guide` prints the
 asking instructions for that backend. One Guide, tailored at print time —
 not a fork of the skills per backend, and not a longer prompt.
 
+Amended: **the two blocking backends share a channel and not a mechanism, so
+the Guide's *Running the ask* is per backend rather than per channel.** Claude
+Code makes the call a background one and is woken when it returns; opencode
+runs it synchronously inside the model's turn. Which kinds of ask a backend
+has stays the channel's, because that is the whole of what a channel decides.
+
+And what an OpenCode session has to be told is **pass a large timeout**,
+measured against opencode 1.18.25: the shell tool takes any positive timeout
+in milliseconds and holds the command for it, but a call that passes none is
+killed at its default — two minutes, which is what its own description tells
+the model — and `verkstead ask` waits on a human with a phone. So Verkstead
+does both: the Guide says to pass one, and the sandbox raises the default
+underneath it with `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS`, so a
+session that ignored its Guide still holds. Measured on that release against a
+stand-in provider: a `verkstead ask` held 170 s and came back with the Response
+as its tool output seconds after the human answered; the same call with no
+timeout and no variable was killed at exactly 120 000 ms; and with the variable
+set and no timeout passed it held past the default and came back.
+
+**A held ask is a session at work, and not a quiet one.** opencode animates the
+dial beside its `esc interrupt` label for as long as the shell tool holds the
+command — writing every 20–40 ms and leaving the label standing — so a session
+waiting on the human reads *at work* by this backend's own signature, and
+neither the enders nor Rescue nor the byte-quiet long-stop is anywhere near it.
+The unanswered Set that holds such a session open is therefore the second line
+of defence here rather than the only one, which is the right way round: it is
+what stands the day the label moves or the renderer settles, and it is what
+Verkstead's own suite proves against a session that is quiet and shows no label
+at all.
+
 ## Quiet is read off the screen for a full-screen TUI
 
 All three new backends draw full-screen TUIs, and none is confirmed

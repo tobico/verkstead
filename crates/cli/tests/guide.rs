@@ -593,8 +593,10 @@ fn a_store_and_nudge_backend_reads_its_own_channel() {
     );
 }
 
-/// And a blocking one reads what it always read. Claude Code holds the ask
-/// open in a background shell call, which is the whole of how it asks.
+/// And a Claude session reads what it always read. Claude Code holds the ask
+/// open in a background shell call its harness wakes it from, which is the
+/// whole of how it asks — and is Claude Code's own rather than every blocking
+/// backend's, which is what the test below this one is about.
 #[test]
 fn a_blocking_backend_reads_the_guide_it_always_read() {
     let claude = stdout(&run_as("claude", &["guide"]));
@@ -602,14 +604,14 @@ fn a_blocking_backend_reads_the_guide_it_always_read() {
     assert_eq!(
         claude,
         stdout(&run(&["guide"])),
-        "the blocking Guide is what nothing set prints, so a Claude session and \
-         a human at a terminal read the same document"
+        "Claude's is what nothing set prints, so a Claude session and a human \
+         at a terminal read the same document"
     );
 
     let running = section(&claude, "## Running the ask");
     assert!(
         running.contains("run_in_background"),
-        "the blocking channel keeps the advice about holding the ask open in a \
+        "Claude Code keeps the advice about holding the ask open in a \
          background shell call, got:\n{running}"
     );
     assert!(
@@ -619,13 +621,67 @@ fn a_blocking_backend_reads_the_guide_it_always_read() {
     );
 }
 
-/// Both channels are one Guide, so everything about writing a Set is written
-/// once and read the same either way. What differs is this end and nothing
-/// else.
+/// And the second backend that blocks reads how *it* holds an ask, which is
+/// not how Claude Code holds one.
+///
+/// The two share a channel and not a mechanism. Claude Code makes the call a
+/// background one and is woken when it returns; opencode's shell tool runs the
+/// command synchronously in the turn and kills it at the timeout it was given,
+/// so what an OpenCode session has to be told is to pass a large one. Handed
+/// Claude's instruction it would go looking for a harness feature it has not
+/// got — and handed no instruction at all it would take the tool's own default
+/// and lose the ask minutes into a wait measured in hours.
 #[test]
-fn only_the_two_asking_sections_differ_between_the_channels() {
+fn opencode_reads_how_it_holds_an_ask_rather_than_how_claude_does() {
+    let opencode = stdout(&run_as("opencode", &["guide"]));
+    let claude = stdout(&run_as("claude", &["guide"]));
+
+    let running = section(&opencode, "## Running the ask");
+
+    assert!(
+        running.contains("timeout"),
+        "the section should name the thing that decides whether the ask \
+         survives the wait, got:\n{running}"
+    );
+    assert!(
+        running.contains("86400000"),
+        "and say a value in the units the tool takes, rather than leaving \
+         'large' to be guessed at, got:\n{running}"
+    );
+    assert!(
+        !running.contains("run_in_background") && !running.contains("background shell"),
+        "and none of Claude Code's mechanism should survive: an OpenCode \
+         session told to background the call goes looking for a harness \
+         feature it has not got, got:\n{running}"
+    );
+    assert!(
+        !running.contains("verkstead answers"),
+        "nor should one already holding the Response be sent to fetch it, \
+         got:\n{running}"
+    );
+    assert_ne!(
+        running,
+        section(&claude, "## Running the ask"),
+        "which is the whole of what says this section is the backend's rather \
+         than its channel's",
+    );
+
+    assert_eq!(
+        section(&opencode, "## Two kinds of ask"),
+        section(&claude, "## Two kinds of ask"),
+        "the kinds *are* the channel's, though: both of these block, and what \
+         a blocking ask is is the same thing on either",
+    );
+}
+
+/// Every backend reads one Guide, so everything about writing a Set is written
+/// once and read the same whichever is reading. What differs is this end and
+/// nothing else.
+#[test]
+fn only_the_two_asking_sections_differ_between_the_backends() {
     let blocking = stdout(&run_as("claude", &["guide"]));
     let store_and_nudge = stdout(&run_as("codex", &["guide"]));
+    let opencode = stdout(&run_as("opencode", &["guide"]));
 
     for heading in [
         "## Question labels",
@@ -637,8 +693,14 @@ fn only_the_two_asking_sections_differ_between_the_channels() {
         assert_eq!(
             section(&blocking, heading),
             section(&store_and_nudge, heading),
-            "{heading} is about the Set rather than about this end, so both \
-             channels should read the same words"
+            "{heading} is about the Set rather than about this end, so every \
+             backend should read the same words"
+        );
+        assert_eq!(
+            section(&blocking, heading),
+            section(&opencode, heading),
+            "{heading} is about the Set rather than about this end, so every \
+             backend should read the same words"
         );
     }
 
@@ -728,10 +790,13 @@ fn bare_verkstead_is_tailored_the_same_way() {
 }
 
 /// The tailored halves stand alone the way the whole does: no chat to fall back
-/// to, no transport to detect, and the human is somewhere else entirely.
+/// to, no transport to detect, and the human is somewhere else entirely. Every
+/// backend's, because each of the three sections is written for one of them and
+/// a passage that leans on a conversation would be in whichever was written
+/// last.
 #[test]
-fn every_channels_guide_stands_alone() {
-    for agent_type in ["claude", "codex"] {
+fn every_backends_guide_stands_alone() {
+    for agent_type in ["claude", "codex", "grok", "opencode"] {
         stands_alone(&stdout(&run_as(agent_type, &["guide"])));
     }
 }

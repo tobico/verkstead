@@ -322,7 +322,7 @@ That is a property of the writing rather than of the Questions:
 
 ## Running the ask
 
-<!-- running the ask, per channel -->
+<!-- running the ask, per backend -->
 
 There is no health probe — the attempt is the probe. If the ask fails for a
 reason that isn't the Set — the server down, the connection refused, any other

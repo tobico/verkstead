@@ -158,6 +158,39 @@ pub(crate) const OPENCODE_DATA_INSIDE_HOME: &str = ".local/share/opencode";
 const OPENCODE_DB: &str = "OPENCODE_DB";
 const OPENCODE_DB_FILE: &str = "opencode.db";
 
+/// And how long a command opencode's shell tool will run before it kills it,
+/// where the model passed no timeout of its own.
+///
+/// **This is what keeps a blocking ask from being killed under a session that
+/// ignored its Guide.** `verkstead ask` blocks until the human answers and the
+/// human is on a phone, so the wait is measured in hours; the shell tool's own
+/// default is two minutes, and its description tells the model that a command
+/// with no timeout is killed after it. So the Guide tells an OpenCode session
+/// to pass a large one — see the CLI's `running-opencode.md` — and this raises
+/// what a session that passed nothing gets. Both, because the instruction is
+/// the mechanism and this is what stands under a drifted instruction: an ask
+/// killed two minutes in is an answer the human gave to nobody.
+///
+/// A day, which is the same order as the wait itself: a Set asked at the end of
+/// an evening is answered the next morning, and nothing about an ask expires
+/// before that — see ADR-0001. What it costs is the tool's own guard against a
+/// command that hangs for reasons of its own: with the default in place such a
+/// command is killed after two minutes and the model carries on, and with this
+/// it is not. Nothing else here would catch one either — opencode repaints its
+/// at-work label for as long as the tool holds a command, so the session reads
+/// at work and the byte-quiet long-stop behind the screen never comes — so
+/// what is left of that case is the Stop the human presses. Taken deliberately:
+/// a hung command is rare and is drawn on the Screen while it hangs, and an ask
+/// killed under a session waiting on the human loses an answer that was given.
+///
+/// Read off opencode 1.18.25, the release this backend is pinned at, and named
+/// for the reason the store's name above is: the spelling is opencode's, it
+/// says `EXPERIMENTAL` on it, and moving it costs one edit here. A value it
+/// cannot read as a positive integer is ignored rather than refused, so the
+/// number is written out in milliseconds rather than computed into one.
+const OPENCODE_BASH_DEFAULT_TIMEOUT: &str = "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS";
+const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
+
 /// Which backend a session is running, in its own environment.
 ///
 /// Set for the Guide alone. Nothing else inside a sandbox needs to know — the
@@ -798,9 +831,11 @@ impl Sandbox {
             // Two binds rather than one, and the same relative path on both
             // sides of each: an OpenCode Profile's home is an opencode home,
             // and the XDG defaults resolve inside the fresh HOME — see
-            // [`OPENCODE_CONFIG_INSIDE_HOME`]. And the store named while the
-            // account is being said, since where opencode writes it is inside
-            // the second of the two.
+            // [`OPENCODE_CONFIG_INSIDE_HOME`]. And the two things this backend
+            // is told about itself said while the account is being said: the
+            // store, because where opencode writes it is inside the second of
+            // the two directories, and the shell tool's default timeout,
+            // because what it is there for is the ask this backend holds open.
             store::Account::OpenCode { home } => {
                 for inside in [OPENCODE_CONFIG_INSIDE_HOME, OPENCODE_DATA_INSIDE_HOME] {
                     bwrap
@@ -809,7 +844,17 @@ impl Sandbox {
                         .arg(self.home.path.join(inside));
                 }
 
-                bwrap.arg("--setenv").arg(OPENCODE_DB).arg(OPENCODE_DB_FILE);
+                bwrap
+                    .arg("--setenv")
+                    .arg(OPENCODE_DB)
+                    .arg(OPENCODE_DB_FILE)
+                    // And how long its shell tool holds a command the model
+                    // gave no timeout of its own, which is what a blocking ask
+                    // under this backend stands on — see
+                    // [`OPENCODE_BASH_DEFAULT_TIMEOUT`].
+                    .arg("--setenv")
+                    .arg(OPENCODE_BASH_DEFAULT_TIMEOUT)
+                    .arg(OPENCODE_BASH_DEFAULT_TIMEOUT_MS);
             }
         }
 

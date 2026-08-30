@@ -19035,6 +19035,198 @@ async fn an_opencode_at_work_label_that_never_goes_is_caught_by_the_long_stop() 
     );
 }
 
+/// A Set of the step session's own, which is what a session blocked on
+/// `verkstead ask` is waiting for. Q9, because that is the Question
+/// [`Grilling::answer`] answers.
+const A_STEPS_QUESTION: &str = r#"
+title: Which clock does the window roll on?
+questions:
+  - label: Q9
+    text: The request's own timestamp, or the server's?
+    options:
+      - n: 1
+        text: The server's
+        recommended: true
+      - n: 2
+        text: The request's
+"#;
+
+/// A backlog of one whose step session holds a blocking ask: at work until the
+/// Set is up, then not a byte and no at-work label until it is answered, and
+/// then the work it was sent to do.
+///
+/// **Which is the strictest shape the wait can take from out here, and not the
+/// shape the real opencode wears.** A held ask under the real thing is a
+/// session at work: the shell tool runs the command inside the model's own
+/// turn, and opencode animates the dial beside its `esc interrupt` label the
+/// whole time it does — so it draws its at-work label and is never byte-quiet.
+/// What this stub draws instead is what an OpenCode session would look like the
+/// day that stops being true: a label that has moved on, or a renderer that
+/// settles while a tool call runs. The session is then idle by every reading
+/// Verkstead has, the long-stop included, and the unanswered Set of its own is
+/// the whole of what stands between the human's answer and a session ended
+/// before it could read it.
+///
+/// `hold` is the marker the test writes once the Set is up, which is what puts
+/// the ask and the silence into the order they happen in on a real session —
+/// [`WHILE_NOBODY_HAS_ASKED`] is the same trick for a stub that prints. A
+/// marker of its own rather than the one [`Grilling::ask`] writes, because the
+/// pick that starts the backlog is an ask as well.
+fn a_step_that_holds_an_ask(grilling_model: &str, at_work: &str, resting: &str) -> String {
+    format!(
+        r#"
+frame() {{ printf '\033[2J\033[H%s\n' "$1"; }}
+working() {{
+    LEFT=$1
+    while [ "$LEFT" -ne 0 ]; do
+        frame '{at_work}'
+        sleep 0.05
+        LEFT=$((LEFT - 1))
+    done
+}}
+[ "$2" = --prompt ] && set -- "$1" "$3"
+case "$1" in
+{grilling_model})
+    working 10
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    frame '{resting}'
+    sleep 300
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
+    working 10
+    while [ ! -f /tmp/verkstead/hold ]; do
+        frame '{at_work}'
+        sleep 0.05
+    done
+    frame '{resting}'
+    printf 'holding\n' > /tmp/verkstead/holding
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    working 10
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+    fi
+    frame '{resting}'
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#
+    )
+}
+
+/// An OpenCode session holding a blocking ask is left where it stands however
+/// long the human takes, and ended by the ordinary rules once they have
+/// answered and its work is done.
+///
+/// **The half of the blocking ask this backend does not bring with it.** The
+/// asking is the CLI's and is the same everywhere; what is this backend's own
+/// is that its sessions are judged by what they draw, and a session waiting on
+/// the human draws nothing new. Every ender waits on that judgement and the
+/// rescue's precondition is idle, so a wait that read as silence would be
+/// reaped mid-question — and the byte-quiet long-stop behind the screen would
+/// have it whatever its frame said. What holds it is the unanswered Set of its
+/// own, which every one of them reads.
+///
+/// So the stub here is quiet and shows no at-work label for longer than the
+/// long-stop, which is the worst case rather than the real one — see
+/// [`a_step_that_holds_an_ask`]. Nothing ends it, nothing is typed into it, and
+/// the Answers are in front of the session when it goes on.
+#[tokio::test]
+async fn an_opencode_session_holding_a_blocking_ask_is_neither_ended_nor_prodded() {
+    let fixture = grilling_on_opencode(&a_step_that_holds_an_ask(
+        OPENCODE_GRILLING_MODEL,
+        OPENCODE_AT_WORK,
+        OPENCODE_AT_ITS_PROMPT,
+    ))
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    // The step session's own Set, and then the marker that tells the stub it is
+    // up — which is what puts the ask before the silence, as it is on a real
+    // session.
+    let set = fixture.ask(A_STEPS_QUESTION).await;
+    std::fs::write(handoff_directory(&fixture).join("hold"), "").unwrap();
+
+    until_written(&handoff_directory(&fixture).join("holding")).await;
+    let holding = Instant::now();
+
+    // Longer than the long-stop, which is the longest clock in here: the grace
+    // is spent several times over, and the byte quiet that catches a signature
+    // nobody has caught up with has run past its own mark.
+    tokio::time::sleep(BRISKLY.long_stop + BRISKLY.proposing * 2).await;
+
+    assert!(
+        holding.elapsed() >= BRISKLY.long_stop,
+        "the session was quiet past the one clock that ends a drawing session \
+         whatever its screen says",
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session is still there to read what they say: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into it: a session with a question standing in \
+         front of the human is not one to prod, however quiet it is",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nor was it stopped over a question the human has not answered: {:?}",
+        notices(&view),
+    );
+
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    // And then the ordinary rules: the step lands, the backlog empties, and the
+    // sessions are ended where they stand.
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: every session was ended where it stood: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was ever typed into any of them",
+    );
+}
+
 /// And an inline implementation that goes quiet without committing anything is
 /// told and stopped the same way.
 ///

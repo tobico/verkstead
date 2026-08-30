@@ -1273,11 +1273,13 @@ The agent-facing usage instructions shipped inside the CLI and printed by
 it, so an agent needs nothing beyond the binary to learn how to ask. A core
 that every ask needs, plus any Topics fetched when their task arises — since
 the gates Topic was retired the core is the whole of it. **One document,
-tailored at print time**: how an ask is run and what comes back from it is the
-backend's own, so those two sections come one per channel and everything about
-writing a Set is written once. Which channel is the reader's own comes off the
-agent type Verkstead sets in every sandbox; a Guide printed outside one is the
-blocking Guide.
+tailored at print time**: what an ask waits for is the backend's channel, and
+how one is *run* is the backend itself — a synchronous shell call given a long
+timeout is not a backgrounded one a harness wakes — so those two sections are
+spliced in at their own grains and everything about writing a Set is written
+once. Which backend the reader is comes off the agent type Verkstead sets in
+every sandbox; a Guide printed outside one is Claude's, which is the blocking
+ask a human at a terminal has.
 _Avoid_: help, manual, docs
 
 **Topic**:

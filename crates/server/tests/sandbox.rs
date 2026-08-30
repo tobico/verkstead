@@ -1208,6 +1208,49 @@ async fn an_opencode_account_lands_at_the_xdg_paths_opencode_reads() {
     assert_eq!(reported["agent"], "opencode");
 }
 
+/// And an OpenCode session's shell tool holds a command for a day rather than
+/// for two minutes, which is what a blocking ask under this backend stands on.
+///
+/// The Guide tells an OpenCode session to pass a timeout of its own, and this is
+/// what a session that did not gets: opencode's own default is two minutes, and
+/// `verkstead ask` blocks until a human on a phone answers. Without it a
+/// drifted instruction is an ask killed minutes into a wait measured in hours,
+/// with the human's answer landing where nothing is waiting for it.
+///
+/// This backend's alone, as the store's name is: it is opencode's spelling for
+/// opencode's tool, and a sandbox running any other backend has no such tool to
+/// tell anything.
+#[tokio::test]
+async fn an_opencode_session_holds_a_shell_command_far_longer_than_opencodes_own_default() {
+    let fixture = grilling().await;
+    let opencode = fixture.opencode_profile().await;
+
+    let reported = probe(
+        &fixture.sandbox_under(&opencode, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            say timeout "${OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS-unset}"
+        "#,
+    );
+
+    assert_eq!(
+        reported["timeout"], "86400000",
+        "a day in milliseconds, which is the order the wait itself is: a Set \
+         asked in the evening is answered the next morning"
+    );
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        r#"
+            say timeout "${OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS-unset}"
+        "#,
+    );
+
+    assert_eq!(
+        reported["timeout"], "unset",
+        "and nothing is said to a backend with no such tool to say it to"
+    );
+}
+
 /// Which backend a session is running is in its environment, and it is there for
 /// the Guide: `verkstead guide` inside a sandbox prints the asking instructions
 /// for the backend reading them, and nothing else inside says which that is.
