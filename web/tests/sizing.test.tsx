@@ -446,6 +446,36 @@ describe("the dividers on the workbench", () => {
     expect(localStorage.getItem(MIDDLE)).toBeNull();
   });
 
+  /// The defaults *this frame* has, that is. Between the two breakpoints only
+  /// the sidebar's divider is up, and a double-click on it is a human asking
+  /// for the width they can see back — not for the middle pane's, which they
+  /// have no handle on and will not meet again until the window is wider.
+  ///
+  /// Said here because it is the one place the two frames' widths could get
+  /// mixed up without anybody noticing: what a double-click here left behind
+  /// would show up as a column somebody never touched, on some other afternoon,
+  /// at some other window size.
+  it("leaves the middle pane's width alone where its divider is not up", async () => {
+    remember(all({ sidebar: 40, middle: 25 }), THREE);
+
+    const { container, frame } = await bench("two panes");
+    expect(dividers(container)).toHaveLength(1);
+
+    fireEvent.dblClick(dividers(container)[0]!);
+
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--pane-sidebar")).toBe(
+        `${DEFAULTS.sidebar}%`,
+      ),
+    );
+    expect(localStorage.getItem(SIDEBAR)).toBeNull();
+
+    // And the width the three-pane frame would be drawn at is where this
+    // device left it, on the frame and in the storage behind it.
+    expect(frame.style.getPropertyValue("--pane-middle")).toBe("25%");
+    expect(localStorage.getItem(MIDDLE)).toBe("25");
+  });
+
   /// A handle nobody can put a pointer on is still a handle, so the arrow keys
   /// move it — and settle it, there being no letting go of a key.
   it("moves with the arrow keys too", async () => {
