@@ -21,7 +21,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
-use verkstead_render::{Registered, RepoRemoved, RepoView, Resolution};
+use verkstead_render::{ConflictResolution, Registered, RepoRemoved, RepoView};
 
 use crate::store;
 use crate::watched::{Admission, WatchedPaths};
@@ -182,7 +182,7 @@ pub(crate) async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView
 pub(crate) async fn set_resolution(
     pool: &SqlitePool,
     id: i64,
-    resolution: Option<Resolution>,
+    resolution: Option<ConflictResolution>,
 ) -> Result<Option<RepoView>> {
     if store::registered_repo(pool, id).await?.is_none() {
         return Ok(None);
@@ -199,18 +199,18 @@ pub(crate) async fn set_resolution(
 /// of `config.yaml` and this pane reads one Repo's override out of the store,
 /// and the two are the same two words either way. A second mapping would be a
 /// second chance for the viewer's word and the store's to come apart.
-pub(crate) fn resolution(resolution: store::Resolution) -> Resolution {
+pub(crate) fn resolution(resolution: store::ConflictResolution) -> ConflictResolution {
     match resolution {
-        store::Resolution::Merge => Resolution::Merge,
-        store::Resolution::Rebase => Resolution::Rebase,
+        store::ConflictResolution::Merge => ConflictResolution::Merge,
+        store::ConflictResolution::Rebase => ConflictResolution::Rebase,
     }
 }
 
 /// And back, which is what a press on either page sends.
-pub(crate) fn stored(resolution: Resolution) -> store::Resolution {
+pub(crate) fn stored(resolution: ConflictResolution) -> store::ConflictResolution {
     match resolution {
-        Resolution::Merge => store::Resolution::Merge,
-        Resolution::Rebase => store::Resolution::Rebase,
+        ConflictResolution::Merge => store::ConflictResolution::Merge,
+        ConflictResolution::Rebase => store::ConflictResolution::Rebase,
     }
 }
 

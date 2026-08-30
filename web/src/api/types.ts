@@ -793,6 +793,20 @@ worktree: Worktree | null,
 base_commit: string | null, };
 
 /**
+ * How a merge conflict between a pull request and its base branch is resolved.
+ *
+ * Two words for two ways of putting the base's work on a branch that has
+ * diverged from it, and what tells them apart is what happens to the commits
+ * already pushed: a merge leaves every one of them where it is, and a rebase
+ * writes them again and has to be force-pushed — which rewrites what reviewers
+ * have read and breaks anything stacked on the branch.
+ *
+ * Which is why the page says so beside the choice rather than leaving it to be
+ * found later, and why merge is what nobody choosing anything gets.
+ */
+export type ConflictResolution = "Merge" | "Rebase";
+
+/**
  * And what became of archiving one: putting a Closed Conversation away, so the
  * sidebar stops drawing it.
  *
@@ -2118,21 +2132,7 @@ roadmaps: Array<AbandonedRoadmap>,
  * would be a choice nobody made. What that global is, is on the settings
  * themselves — see [`crate::SettingsView::conflict_resolution`].
  */
-conflict_resolution: Resolution | null, };
-
-/**
- * How a merge conflict between a pull request and its base branch is resolved.
- *
- * Two words for two ways of putting the base's work on a branch that has
- * diverged from it, and what tells them apart is what happens to the commits
- * already pushed: a merge leaves every one of them where it is, and a rebase
- * writes them again and has to be force-pushed — which rewrites what reviewers
- * have read and breaks anything stacked on the branch.
- *
- * Which is why the page says so beside the choice rather than leaving it to be
- * found later, and why merge is what nobody choosing anything gets.
- */
-export type Resolution = "Merge" | "Rebase";
+conflict_resolution: ConflictResolution | null, };
 
 /**
  * How one Repo is to resolve a conflict from now on, which is the one thing
@@ -2143,7 +2143,7 @@ export type Resolution = "Merge" | "Rebase";
  * Repo holding a copy of today's global would go on holding it after the global
  * moved.
  */
-export type ResolutionEdit = { resolution: Resolution | null, };
+export type ResolutionEdit = { resolution: ConflictResolution | null, };
 
 /**
  * The **Resolve conflicts** press as the page receives it: when, and nothing
@@ -2453,7 +2453,7 @@ share_viewer_url: string,
  * nothing, as a value for the same reason: there are two answers and a save
  * says which of them this is to be.
  */
-conflict_resolution: Resolution, 
+conflict_resolution: ConflictResolution, 
 /**
  * The Watched Paths the settings own, as values again: what is sent is
  * what `config.yaml` holds afterwards, so a row taken off the page is a
@@ -2537,7 +2537,7 @@ share_viewer_url: string,
  * rather than whether anybody has been here. A Repo's own override is on
  * the Repo — see [`crate::RepoView::conflict_resolution`].
  */
-conflict_resolution: Resolution, 
+conflict_resolution: ConflictResolution, 
 /**
  * And the Watched Paths and the Sandbox Configuration binds, from both of
  * the places either of them is said.

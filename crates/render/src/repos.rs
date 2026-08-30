@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AbandonedRoadmap, Resolution};
+use crate::{AbandonedRoadmap, ConflictResolution};
 
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
@@ -157,7 +157,7 @@ pub struct RepoView {
     /// is changed, and a Repo that had quietly frozen this morning's global
     /// would be a choice nobody made. What that global is, is on the settings
     /// themselves — see [`crate::SettingsView::conflict_resolution`].
-    pub conflict_resolution: Option<Resolution>,
+    pub conflict_resolution: Option<ConflictResolution>,
 }
 
 /// How one Repo is to resolve a conflict from now on, which is the one thing
@@ -170,5 +170,5 @@ pub struct RepoView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ResolutionEdit {
-    pub resolution: Option<Resolution>,
+    pub resolution: Option<ConflictResolution>,
 }

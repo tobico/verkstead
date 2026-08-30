@@ -1132,13 +1132,13 @@ async fn resolve(
 /// A store that will not answer is a merge as well, and deliberately: the
 /// question here is whether to force-push somebody's branch, and *we could not
 /// read the override* is no reason to.
-async fn resolution(state: &AppState, repo_id: i64) -> store::Resolution {
+async fn resolution(state: &AppState, repo_id: i64) -> store::ConflictResolution {
     match store::repo_resolution(&state.pool, repo_id).await {
         Ok(Some(resolution)) => return resolution,
         Ok(None) => {}
         Err(error) => {
             tracing::error!(error = ?error, repo_id, "reading how a Repo resolves a conflict failed, so the merge every Repo shares is what happens");
-            return store::Resolution::Merge;
+            return store::ConflictResolution::Merge;
         }
     }
 
@@ -1205,15 +1205,15 @@ async fn unmergeable(
 /// have read — so a session left to pick would be picking something the human
 /// has a setting for. Which is why the merge says *not a rebase* and the rebase
 /// says *with a lease*: each has to say the thing the other would have done.
-fn resolving(watched: &Watched, resolution: store::Resolution) -> String {
+fn resolving(watched: &Watched, resolution: store::ConflictResolution) -> String {
     let how = match resolution {
-        store::Resolution::Merge => {
+        store::ConflictResolution::Merge => {
             "Merge the pull request's base branch into the branch that worktree is on, resolve \
              every conflict, run the repository's tests, then commit the merge and push it. A \
              merge rather than a rebase: nothing here force-pushes, so whatever has been read \
              or stacked on this branch goes on standing."
         }
-        store::Resolution::Rebase => {
+        store::ConflictResolution::Rebase => {
             "Rebase the branch that worktree is on onto the pull request's base branch, resolve \
              every conflict as the rebase reaches it, run the repository's tests, then \
              force-push the rebased branch with `--force-with-lease`. A rebase rather than a \
@@ -1315,7 +1315,7 @@ mod tests {
     /// — merge the base in, and neither side thrown away.
     #[test]
     fn a_resolution_session_is_told_which_pull_request_will_not_merge_and_how_to_fix_it() {
-        let told = resolving(&watched(), store::Resolution::Merge);
+        let told = resolving(&watched(), store::ConflictResolution::Merge);
 
         assert!(
             told.contains("#7") && told.contains("askance"),
@@ -1355,7 +1355,7 @@ mod tests {
     /// history the human configured this for.
     #[test]
     fn a_resolution_session_configured_for_a_rebase_is_told_to_rebase() {
-        let told = resolving(&watched(), store::Resolution::Rebase);
+        let told = resolving(&watched(), store::ConflictResolution::Rebase);
 
         assert!(
             told.contains("#7") && told.contains("askance"),

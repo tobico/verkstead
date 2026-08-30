@@ -21,7 +21,7 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Registered, RepoEntry, RepoRemoved, RepoView, Resolution};
+use verkstead_render::{ConflictResolution, Registered, RepoEntry, RepoRemoved, RepoView};
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
 /// A router watching `watched`, plus the directory holding its database alive.
@@ -134,7 +134,7 @@ async fn remove(app: &Router, id: i64) -> RepoRemoved {
 
 /// Say how one Repo is to resolve a conflict from now on — or, with `None`, that
 /// it is to go back to whatever every other Repo does.
-async fn resolve(app: &Router, id: i64, resolution: Option<Resolution>) -> RepoView {
+async fn resolve(app: &Router, id: i64, resolution: Option<ConflictResolution>) -> RepoView {
     post(
         app,
         &format!("/api/ui/repos/{id}/resolution"),
@@ -581,21 +581,21 @@ async fn a_repos_resolution_is_said_taken_back_and_read_off_the_pane() {
         "a Repo nobody has told overrides nothing",
     );
 
-    let saved = resolve(&app, id, Some(Resolution::Rebase)).await;
+    let saved = resolve(&app, id, Some(ConflictResolution::Rebase)).await;
     assert_eq!(
         saved.conflict_resolution,
-        Some(Resolution::Rebase),
+        Some(ConflictResolution::Rebase),
         "the answer is the Repo as it now stands, which is what the pane draws",
     );
 
     let read: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
-    assert_eq!(read.conflict_resolution, Some(Resolution::Rebase));
+    assert_eq!(read.conflict_resolution, Some(ConflictResolution::Rebase));
 
     assert_eq!(
-        resolve(&app, id, Some(Resolution::Merge))
+        resolve(&app, id, Some(ConflictResolution::Merge))
             .await
             .conflict_resolution,
-        Some(Resolution::Merge),
+        Some(ConflictResolution::Merge),
         "and either word can be the override, a Repo pinned to a merge being a \
          real thing to say where the global is a rebase",
     );

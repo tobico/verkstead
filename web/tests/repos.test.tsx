@@ -27,7 +27,7 @@ import type {
   Registered,
   RepoEntry,
   RepoView,
-  Resolution,
+  ConflictResolution,
   SettingsView,
 } from "../src/api/types";
 import card from "../src/CardButton.module.css";
@@ -147,7 +147,7 @@ function theOpenedResolving(view: RepoView, saved: RepoView) {
 
 /// One Repo resolving conflicts a stated way — `null` being the override taken
 /// back, which is what nearly every Repo holds.
-function resolving(resolution: Resolution | null): RepoView {
+function resolving(resolution: ConflictResolution | null): RepoView {
   return { ...OPENED, conflict_resolution: resolution };
 }
 

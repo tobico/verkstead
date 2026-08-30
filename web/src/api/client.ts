@@ -42,7 +42,7 @@ import type {
   RepoEntry,
   RepoRemoved,
   RepoView,
-  Resolution,
+  ConflictResolution,
   Resolved,
   Response as Decided,
   Resumed,
@@ -192,7 +192,7 @@ export function removeRepo(id: number): Promise<RepoRemoved> {
 /// saves under.
 export function setRepoResolution(
   id: number,
-  resolution: Resolution | null,
+  resolution: ConflictResolution | null,
 ): Promise<RepoView> {
   return post<RepoView>(`/api/ui/repos/${id}/resolution`, { resolution });
 }

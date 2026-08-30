@@ -10,7 +10,7 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Adding, Lifecycle, Resolution, Unregistering, add_companion, load_repo, open_database,
+    Adding, ConflictResolution, Lifecycle, Unregistering, add_companion, load_repo, open_database,
     recorded_repos, register_repo, registered_repos, repo_resolution, set_repo_resolution,
     set_state, start_adoption, start_conversation, unregister_repo,
 };
@@ -375,21 +375,21 @@ async fn a_repo_told_how_to_resolve_a_conflict_keeps_it_until_it_is_taken_back()
         .unwrap()
         .unwrap();
 
-    set_repo_resolution(&pool, repo.id, Some(Resolution::Rebase))
+    set_repo_resolution(&pool, repo.id, Some(ConflictResolution::Rebase))
         .await
         .unwrap();
     assert_eq!(
         repo_resolution(&pool, repo.id).await.unwrap(),
-        Some(Resolution::Rebase),
+        Some(ConflictResolution::Rebase),
     );
 
     // Said again, which is the settings page being pressed twice.
-    set_repo_resolution(&pool, repo.id, Some(Resolution::Merge))
+    set_repo_resolution(&pool, repo.id, Some(ConflictResolution::Merge))
         .await
         .unwrap();
     assert_eq!(
         repo_resolution(&pool, repo.id).await.unwrap(),
-        Some(Resolution::Merge),
+        Some(ConflictResolution::Merge),
     );
 
     set_repo_resolution(&pool, repo.id, None).await.unwrap();
@@ -412,13 +412,13 @@ async fn an_override_is_one_repos_alone() {
         .unwrap()
         .unwrap();
 
-    set_repo_resolution(&pool, told.id, Some(Resolution::Rebase))
+    set_repo_resolution(&pool, told.id, Some(ConflictResolution::Rebase))
         .await
         .unwrap();
 
     assert_eq!(
         repo_resolution(&pool, told.id).await.unwrap(),
-        Some(Resolution::Rebase),
+        Some(ConflictResolution::Rebase),
     );
     assert_eq!(repo_resolution(&pool, untold.id).await.unwrap(), None);
 }

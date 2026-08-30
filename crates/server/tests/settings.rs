@@ -29,7 +29,7 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    PathResolution, PathSource, Resolution, SettingsSaved, SettingsView, Verified,
+    ConflictResolution, PathResolution, PathSource, SettingsSaved, SettingsView, Verified,
 };
 use verkstead_server::sandbox::SandboxConfig;
 use verkstead_server::{Gh, WatchedPaths, open_database, router_asking_github, router_installed};
@@ -575,7 +575,10 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
 async fn a_conflict_nobody_has_configured_is_merged() {
     let (_dir, app) = app().await;
 
-    assert_eq!(settings(&app).await.conflict_resolution, Resolution::Merge);
+    assert_eq!(
+        settings(&app).await.conflict_resolution,
+        ConflictResolution::Merge
+    );
 }
 
 /// And what a save of it says: the word goes into the file the next resolution
@@ -598,7 +601,10 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
     )
     .await;
 
-    assert_eq!(saved.settings.conflict_resolution, Resolution::Rebase);
+    assert_eq!(
+        saved.settings.conflict_resolution,
+        ConflictResolution::Rebase
+    );
 
     // In the file rather than only in the answer, and as the word a human
     // hand-editing it would write.
@@ -608,7 +614,10 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
         "the strategy is in config.yaml, in the file's own words: {written}"
     );
 
-    assert_eq!(settings(&app).await.conflict_resolution, Resolution::Rebase);
+    assert_eq!(
+        settings(&app).await.conflict_resolution,
+        ConflictResolution::Rebase
+    );
 
     // And back again, because a setting that could only be turned on would be a
     // setting nobody could undo from a phone.
@@ -626,7 +635,10 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
     )
     .await;
 
-    assert_eq!(settings(&app).await.conflict_resolution, Resolution::Merge);
+    assert_eq!(
+        settings(&app).await.conflict_resolution,
+        ConflictResolution::Merge
+    );
 }
 
 /// Clearing the size field is asking for the default back rather than asking

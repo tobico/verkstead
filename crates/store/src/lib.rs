@@ -96,8 +96,8 @@ pub use push::{
     store_subscription, vapid_keys,
 };
 pub use repos::{
-    Repo, Resolution, Unregistering, load_repo, recorded_repos, register_repo, registered_repo,
-    registered_repos, repo_resolution, set_repo_resolution, unregister_repo,
+    ConflictResolution, Repo, Unregistering, load_repo, recorded_repos, register_repo,
+    registered_repo, registered_repos, repo_resolution, set_repo_resolution, unregister_repo,
 };
 pub use session_names::session_id;
 pub use session_pairings::RanUnder;

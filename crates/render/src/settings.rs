@@ -87,7 +87,7 @@ pub struct SettingsView {
     /// configured is a merge, so what comes back is where the setting sits
     /// rather than whether anybody has been here. A Repo's own override is on
     /// the Repo — see [`crate::RepoView::conflict_resolution`].
-    pub conflict_resolution: Resolution,
+    pub conflict_resolution: ConflictResolution,
 
     /// And the Watched Paths and the Sandbox Configuration binds, from both of
     /// the places either of them is said.
@@ -106,7 +106,7 @@ pub struct SettingsView {
 /// found later, and why merge is what nobody choosing anything gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum Resolution {
+pub enum ConflictResolution {
     /// Merge the base branch into the work branch and push the merge.
     Merge,
 
@@ -289,7 +289,7 @@ pub struct SettingsEdit {
     /// And how a conflicted pull request is resolved where its Repo says
     /// nothing, as a value for the same reason: there are two answers and a save
     /// says which of them this is to be.
-    pub conflict_resolution: Resolution,
+    pub conflict_resolution: ConflictResolution,
 
     /// The Watched Paths the settings own, as values again: what is sent is
     /// what `config.yaml` holds afterwards, so a row taken off the page is a

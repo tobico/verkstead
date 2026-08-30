@@ -31,7 +31,7 @@ import { Match, Show, Switch as Choose, type JSX } from "solid-js";
 import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
 import { loadSettings, saveSettings } from "../api/client";
-import type { Resolution, SettingsSaved, SettingsView } from "../api/types";
+import type { ConflictResolution, SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { Picker } from "../picking";
@@ -46,14 +46,14 @@ import { heldPaths } from "./held";
 /// all three are offering the same two answers: three spellings of *rebase*
 /// would be three chances to describe it differently, and the description is the
 /// part that matters.
-export const RESOLUTION: Record<Resolution, string> = {
+export const RESOLUTION: Record<ConflictResolution, string> = {
   Merge: "Merge the base branch in",
   Rebase: "Rebase onto the base branch",
 };
 
 /// And what each of them does to the pull request, for the line under the
 /// picker: what a human is choosing between rather than what it is called.
-export const RESOLVES: Record<Resolution, string> = {
+export const RESOLVES: Record<ConflictResolution, string> = {
   Merge:
     "The base branch is merged into the work branch and the merge is pushed. Every commit stays where it is, so nothing anybody has read moves.",
   Rebase:
@@ -149,7 +149,7 @@ export function ConflictsPane(props: {
   const told = (): SettingsView | undefined => settings.data;
 
   const save = useMutation(() => ({
-    mutationFn: (conflict_resolution: Resolution) => {
+    mutationFn: (conflict_resolution: ConflictResolution) => {
       const settings = told();
 
       return saveSettings({
@@ -211,12 +211,12 @@ export function ConflictsPane(props: {
                 </label>
                 <Picker
                   id="conflict-resolution"
-                  options={["Merge", "Rebase"] satisfies Resolution[]}
+                  options={["Merge", "Rebase"] satisfies ConflictResolution[]}
                   value={(resolution) => resolution}
                   label={(resolution) => RESOLUTION[resolution]}
                   chosen={set().conflict_resolution}
                   disabled={save.isPending}
-                  pick={(picked) => save.mutate(picked as Resolution)}
+                  pick={(picked) => save.mutate(picked as ConflictResolution)}
                 />
               </div>
 

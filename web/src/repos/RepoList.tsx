@@ -78,7 +78,7 @@ import type {
   RepoEntry,
   RepoRemoved,
   RepoView,
-  Resolution,
+  ConflictResolution,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
@@ -490,7 +490,7 @@ function ConflictResolution(props: { repo: RepoView }): JSX.Element {
   const queries = useQueryClient();
 
   const save = useMutation(() => ({
-    mutationFn: (resolution: Resolution | null) =>
+    mutationFn: (resolution: ConflictResolution | null) =>
       setRepoResolution(props.repo.id, resolution),
     // The answer *is* a fresh read of the Repo, so a second read would learn
     // nothing and could only disagree with what is on screen.
@@ -516,12 +516,12 @@ function ConflictResolution(props: { repo: RepoView }): JSX.Element {
         label={(option) =>
           option === ""
             ? "Use the global setting"
-            : RESOLUTION[option as Resolution]
+            : RESOLUTION[option as ConflictResolution]
         }
         chosen={chosen()}
         disabled={save.isPending}
         pick={(picked) =>
-          save.mutate(picked === "" ? null : (picked as Resolution))
+          save.mutate(picked === "" ? null : (picked as ConflictResolution))
         }
       />
 

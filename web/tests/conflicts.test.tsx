@@ -24,7 +24,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Resolution, SettingsSaved, SettingsView } from "../src/api/types";
+import type { ConflictResolution, SettingsSaved, SettingsView } from "../src/api/types";
 import { ConflictsCard, ConflictsPane } from "../src/settings/Conflicts";
 import styles from "../src/settings/Conflicts.module.css";
 import { json, serving, whenever } from "./serving";
@@ -79,7 +79,7 @@ function answering(standing: SettingsView): SettingsSaved {
 /// this picker comes back as.
 function resolving(
   standing: SettingsView,
-  conflict_resolution: Resolution,
+  conflict_resolution: ConflictResolution,
 ): SettingsView {
   return { ...standing, conflict_resolution };
 }

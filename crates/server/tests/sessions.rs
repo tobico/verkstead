@@ -47,11 +47,11 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, CompanionAdded,
-    CompanionMode, CompanionModeChosen, CompanionView, ConversationClosed, ConversationSteered,
-    ConversationStopped, ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PickedView,
-    PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resolution, Resolved, Resumed, Shown,
-    Size, StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
-    TimelineEvent, TranscriptView, Turn, Watching,
+    CompanionMode, CompanionModeChosen, CompanionView, ConflictResolution, ConversationClosed,
+    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Lifecycle,
+    NoticeEvent, PickedView, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resolved,
+    Resumed, Shown, Size, StageListReached, Started, SteerOpened, Submitted, TaskListEvent,
+    TaskListReached, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::build_cache::BuildCache;
@@ -5087,7 +5087,7 @@ fn configure(fixture: &Grilling, more: &str) {
 
 /// And say how one Repo resolves a conflict, which is the override that wins
 /// over that file.
-async fn told_to_resolve_by(fixture: &Grilling, repo: i64, resolution: Resolution) {
+async fn told_to_resolve_by(fixture: &Grilling, repo: i64, resolution: ConflictResolution) {
     let view: verkstead_render::RepoView = post(
         &fixture.app,
         &format!("/api/ui/repos/{repo}/resolution"),
@@ -20250,7 +20250,12 @@ async fn each_resolution_session_is_told_the_strategy_its_repo_resolves_by() {
     // as each session is dispatched, so what matters is that they are there by
     // then.
     configure(&fixture, "conflict_resolution: rebase\n");
-    told_to_resolve_by(&fixture, companion_repo(&fixture).await, Resolution::Merge).await;
+    told_to_resolve_by(
+        &fixture,
+        companion_repo(&fixture).await,
+        ConflictResolution::Merge,
+    )
+    .await;
 
     worked_to_empty(&fixture).await;
 

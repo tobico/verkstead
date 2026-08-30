@@ -31,7 +31,7 @@
 //! One more fact about a Repo lives beside the registration in the same shape:
 //! how a merge conflict on its pull requests is resolved, where the human has
 //! overridden what `config.yaml` says for every Repo at once. A row is an
-//! override and no row is the global answer — see [`Resolution`].
+//! override and no row is the global answer — see [`ConflictResolution`].
 
 use std::path::{Path, PathBuf};
 
@@ -375,7 +375,7 @@ pub async fn recorded_repos(pool: &SqlitePool) -> Result<Vec<PathBuf>> {
 /// Verkstead resolving a conflict the way nobody asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Resolution {
+pub enum ConflictResolution {
     /// Merge the base branch into the work branch. Nothing is rewritten and
     /// nothing is force-pushed, so whatever has been read or stacked on the
     /// branch goes on standing — which is why this is what nobody choosing
@@ -388,7 +388,7 @@ pub enum Resolution {
     Rebase,
 }
 
-impl Resolution {
+impl ConflictResolution {
     /// The word the column holds, which is the word `config.yaml` holds too —
     /// lowercase and spelled out, so a database opened by hand says the same
     /// thing the settings file does.
@@ -423,7 +423,10 @@ impl Resolution {
 /// [`load_repo`] finds one: nothing new is worked in it, and a Conversation
 /// already wrapping in it is still a Conversation whose conflicts have to be
 /// resolved somehow.
-pub async fn repo_resolution(pool: &SqlitePool, repo_id: i64) -> Result<Option<Resolution>> {
+pub async fn repo_resolution(
+    pool: &SqlitePool,
+    repo_id: i64,
+) -> Result<Option<ConflictResolution>> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT strategy FROM repo_resolutions WHERE repo_id = ?")
             .bind(repo_id)
@@ -431,7 +434,8 @@ pub async fn repo_resolution(pool: &SqlitePool, repo_id: i64) -> Result<Option<R
             .await
             .with_context(|| format!("reading how the Repo {repo_id} resolves a conflict"))?;
 
-    row.map(|(word,)| Resolution::read(&word)).transpose()
+    row.map(|(word,)| ConflictResolution::read(&word))
+        .transpose()
 }
 
 /// Say how this Repo resolves a conflict, or take back what was said.
@@ -442,7 +446,7 @@ pub async fn repo_resolution(pool: &SqlitePool, repo_id: i64) -> Result<Option<R
 pub async fn set_repo_resolution(
     pool: &SqlitePool,
     repo_id: i64,
-    resolution: Option<Resolution>,
+    resolution: Option<ConflictResolution>,
 ) -> Result<()> {
     match resolution {
         Some(resolution) => sqlx::query(

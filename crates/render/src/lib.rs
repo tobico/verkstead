@@ -60,9 +60,9 @@ pub use profiles::{
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use repos::{Registered, Registration, RepoEntry, RepoRemoved, RepoView, ResolutionEdit};
 pub use settings::{
-    Author, BindEntry, BuildCacheEdit, BuildCacheView, PathResolution, PathSource, PathsView,
-    Resolution, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified,
-    WatchedPathEntry,
+    Author, BindEntry, BuildCacheEdit, BuildCacheView, ConflictResolution, PathResolution,
+    PathSource, PathsView, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved,
+    Verified, WatchedPathEntry,
 };
 pub use sharing::{
     CommentedOn, MissedOut, ShareCommented, SharePublished, SharedCommit, SharedConversation,
