@@ -1571,9 +1571,14 @@ fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
 /// state a human is trying to get out of when they press Close. Refusing them
 /// would leave a Conversation nothing can ever end, which is worse than the
 /// directory it was protecting. So the removal is attempted, a failure is logged
-/// with the path in it, and the close is recorded regardless: what is left behind
-/// is one directory under the Data Directory, named in the log, for a human to
-/// delete.
+/// with the path in it, and the close is recorded regardless.
+///
+/// **And then the sweep this ends with takes the directory anyway.** What git's
+/// polite removal could not have is exactly what [`worktrees::sweep`] is for:
+/// nothing under the Data Directory outlives the record that named it, so a
+/// directory the log has just been written about is one the close reclaims
+/// before it returns, along with whatever earlier closes and crashes left
+/// behind.
 ///
 /// And what it was still drawing the human with goes last of all — the questions
 /// it left open, in [`asked`], and the news mark it was carrying, in [`read`].
