@@ -26,9 +26,9 @@
 //! is what everything else on this page is.
 //!
 //! What is on the card is what a list is scanned for — the name, the models, and
-//! the warning where the account has gone. The mounted paths and the agent type
-//! come off it and into the pane, which has room for them: the paths are the
-//! account's own fields, and the agent type is said beside them.
+//! the warning where the account has gone. The agent type and the mounted paths
+//! come off it and into the pane, which has room for them: both are the form's
+//! own fields there, the type over the paths it decides.
 //!
 //! Removing is in that pane too, under the form. It was a second control on
 //! every row, which put a destructive press beside a list somebody was only
@@ -39,16 +39,22 @@
 //! read apiece would be two reads of it — the cache is what makes the second
 //! caller free.
 //!
-//! The models are one of those four fields, and a profile carries the whole list
+//! The models are one of those fields, and a profile carries the whole list
 //! of them: a profile reaches one account with one configuration, so what it can
 //! launch is its own rather than a list every profile shares. They are typed as
 //! free text a line apiece, because a list of the models there are goes stale
 //! the week another one ships.
 //!
-//! The agent type is not offered. There is one, and a select with a single
-//! option is theatre; the discriminator is real because it is on the record, so
-//! the pane says what a Profile's is rather than asking for it, and the picker
-//! arrives when there is something to pick between.
+//! The agent type is picked rather than said. It was said while there was one of
+//! it — a select with a single option is theatre — and there is a second backend
+//! now, so the picker has something to pick between. It sits over the account's
+//! fields because it is what says which fields those are: changing it swaps them
+//! for the picked type's own, blank, a path typed for one type's account meaning
+//! nothing in another's.
+//!
+//! A type is offered only once it can launch the real binary, which is what
+//! keeps the picker from being a lie: [`ACCOUNT_FIELDS`] is the one list, and a
+//! row in it is a type the form offers as well as one it can draw.
 //!
 //! A section of the settings page rather than a page of its own: which accounts
 //! a session may be run under is settled once and then left alone, which is the
@@ -146,10 +152,10 @@ type AccountField = {
 /// lands a backend adds one, which is the point of the account being a shape
 /// rather than a pair every profile is assumed to have.
 ///
-/// A row here is what a saved profile of that type is *drawn* with, and it says
-/// nothing about whether one can be written: the form offers no choice of type
-/// — see [`BLANK`] — so a codex profile is one saved over the API, and this is
-/// what it reads back as.
+/// It is also the list the type picker is drawn from, so a row here is a type
+/// the human can pick as well as one a saved profile reads back as. Both at
+/// once, deliberately: a picker offering a type the form could not then ask the
+/// paths of would be a choice that led nowhere.
 const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
   Claude: [
     {
@@ -184,17 +190,39 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
   ],
 };
 
+/// An account of each type with nothing typed into it: what picking that type
+/// leaves in the form.
+///
+/// Blank rather than carried across, because the paths are not the same paths:
+/// what a Claude profile keeps in two is what a Codex one keeps in one, and a
+/// directory typed for either means nothing under the other.
+const BLANK_ACCOUNT: Record<AgentType, ProfileAccount> = {
+  Claude: { agent_type: "Claude", claude_dir: "", config_file: "" },
+  Codex: { agent_type: "Codex", home: "" },
+};
+
+/// And what each type is called over its picker.
+///
+/// The backend's own name rather than the discriminator, which is the word the
+/// record is written in and not one anybody would recognise their account by.
+const AGENT_NAME: Record<AgentType, string> = {
+  Claude: "Claude Code",
+  Codex: "Codex",
+};
+
 /// An empty form: what "add a profile" starts from.
 ///
-/// A Claude account, because the form offers no choice of type — a type that
-/// cannot launch the real binary yet would be a lie in a picker, and the stage
-/// that makes one launch is the stage that offers it. What this is not is a
-/// hard-coded pair: the fields drawn under it come off the type this names.
+/// A Claude account because it is the first row of the list the picker offers,
+/// rather than because it is the only one. What this is not is a hard-coded
+/// pair: the fields drawn under it come off the type this names.
 const BLANK: ProfileEdit = {
   name: "",
-  account: { agent_type: "Claude", claude_dir: "", config_file: "" },
+  account: BLANK_ACCOUNT.Claude,
   models: [],
 };
+
+/// The types the picker offers, in the order they are written above.
+const AGENT_TYPES = Object.keys(ACCOUNT_FIELDS) as AgentType[];
 
 /// One of an account's paths, by the key the table above named it with.
 ///
@@ -449,6 +477,13 @@ export function ProfilePane(props: {
     setRefused(null);
   };
 
+  /// And the agent type, which takes the account's paths with it: they are the
+  /// old type's fields, and there is nothing in them the new type asked for.
+  const pickedType = (agent_type: AgentType) => {
+    setEdited({ ...form(), account: BLANK_ACCOUNT[agent_type] });
+    setRefused(null);
+  };
+
   /// And the models, which are that same typing split at its newlines.
   ///
   /// Split and nothing else: the empty line under the one being written is part
@@ -505,6 +540,25 @@ export function ProfilePane(props: {
               onInput={(ev) => typedModels(ev.currentTarget.value)}
             />
 
+            {/* Which agent this account is for, over the fields it decides:
+                picking another type is asking for that type's own paths, so what
+                is under this changes with it and nothing typed for the old one
+                is carried across. */}
+            <label for="profile-agent_type">Agent</label>
+            <select
+              id="profile-agent_type"
+              value={form().account.agent_type}
+              onChange={(ev) =>
+                pickedType(ev.currentTarget.value as AgentType)
+              }
+            >
+              <For each={AGENT_TYPES}>
+                {(agent_type) => (
+                  <option value={agent_type}>{AGENT_NAME[agent_type]}</option>
+                )}
+              </For>
+            </select>
+
             {/* The account, in whatever shape its agent type keeps one: the
                 fields come off the type rather than being written here, so a
                 backend arriving is a row in `ACCOUNT_FIELDS` and nothing
@@ -552,19 +606,13 @@ export function ProfilePane(props: {
             </Show>
           </form>
 
-          {/* What is on the record about a saved Profile but not in the form:
-              the agent type it runs, and the press that takes the whole thing
-              away. Neither belongs to a Profile that does not exist yet. */}
+          {/* The one press that is about a saved Profile rather than about what
+              is typed into the form, and so belongs to no Profile that does not
+              exist yet. The agent type used to be said here; it is picked in the
+              form now, which is where a fact somebody can change belongs. */}
           <Show when={saved()}>
             {(profile) => (
               <section class={styles.standing}>
-                {/* Said rather than offered: there is one agent type, and a
-                    select with a single option is theatre — but it is on the
-                    record, and this pane has the room the card did not. */}
-                <p class={styles.agentType}>
-                  Runs a <code>{profile().account.agent_type}</code> agent.
-                </p>
-
                 <div class={styles.actions}>
                   <button
                     type="button"

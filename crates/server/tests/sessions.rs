@@ -2797,10 +2797,6 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
-/// A session that keeps no log of itself leaves no Transcript, and nothing about
-/// that is a fault: it is every stub agent the test suite runs, and every
-/// backend that keeps no such record. What those sessions said is the Capture,
-/// which is a complete record on its own.
 /// A session on the second agent type runs the same way: launched into a
 /// sandbox with its Profile's one home bound where that backend looks for it,
 /// on the model its Pairing names, told which backend it is.
@@ -2855,6 +2851,86 @@ async fn a_session_on_a_second_backend_runs_from_its_home_with_the_capture_as_it
     );
 }
 
+/// And the line it is launched with is codex's own: the model as `-m`, the
+/// Brief as the one positional, the approval bypass and the inline screen after
+/// them, and no session id at all.
+///
+/// The stub reads its whole line back, which is how this is provable without an
+/// account: what a real codex does with the line is codex's business, and what
+/// could be wrong here is Verkstead's end of it.
+///
+/// **The account is configured from the line rather than from its directory.**
+/// The credential store is file-backed because there is no keyring inside the
+/// sandbox, and the Worktree is trusted so that no version of codex stops at a
+/// trust prompt in front of nobody — and the Profile's own home is left exactly
+/// as the account keeps it, which is what the last of these reads.
+#[tokio::test]
+async fn a_codex_session_is_launched_with_the_line_codex_takes() {
+    let fixture = grilling_on_codex(
+        r#"
+        printf 'flag=%s\n' "$0"
+        printf 'model=%s\n' "$1"
+        printf 'where=%s\n' "$(pwd)"
+        printf 'account=%s\n' "$(ls -A "$HOME/.codex" | tr '\n' ' ')"
+        for arg in "$@"; do printf 'arg=%s\n' "$arg"; done
+        printf 'prompt=%s' "$2"
+        "#,
+    )
+    .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("flag=-m\n") && said.contains(&format!("model={CODEX_MODEL}\n")),
+        "codex is told its model with -m: {said:?}"
+    );
+    assert!(
+        said.contains(BRIEF),
+        "and the Brief is the one positional after it: {said:?}"
+    );
+
+    for flag in [
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--no-alt-screen",
+        "cli_auth_credentials_store=\"file\"",
+    ] {
+        assert!(
+            said.contains(&format!("arg={flag}\n")),
+            "codex's line carries {flag}: {said:?}"
+        );
+    }
+
+    // The directory codex will actually be sitting in, read off the session
+    // rather than worked out here: a seed naming any other path would be a trust
+    // prompt in front of nobody.
+    let where_it_ran = said
+        .lines()
+        .find_map(|line| line.strip_prefix("where="))
+        .expect("the session says where it ran");
+    assert!(
+        said.contains(&format!(
+            "arg=projects.\"{where_it_ran}\".trust_level=\"trusted\"\n"
+        )),
+        "and it trusts the Worktree it was launched in: {said:?}"
+    );
+
+    assert!(
+        !said.contains("--session-id"),
+        "codex takes no session id, so it is told none: {said:?}"
+    );
+    assert!(
+        said.contains("account=\n"),
+        "and Verkstead writes nothing into the Profile's own directory: {said:?}"
+    );
+}
+
+/// that is a fault: it is every stub agent the test suite runs, and every
+/// backend that keeps no such record. What those sessions said is the Capture,
+/// which is a complete record on its own.
 #[tokio::test]
 async fn a_session_that_keeps_no_log_leaves_no_transcript() {
     let fixture = grilling(r#"printf 'Nothing to say.\n'"#).await;

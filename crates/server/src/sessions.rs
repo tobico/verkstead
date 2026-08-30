@@ -23,6 +23,7 @@
 //! reading back a live one out of a database.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -115,16 +116,23 @@ pub struct Agents {
     handoffs: Handoffs,
     settings: Settings,
 
-    /// What a Profile's agent is run as, before its model and its prompt.
+    /// Something to run where a Profile's own binary goes, or `None` to run the
+    /// one its agent type names — see [`binary`].
     ///
-    /// A field rather than a match on the agent type, and the reason is that
-    /// what this module has to be able to prove is that a session's output
-    /// reaches the Timeline while it is still running. Proving it against the
-    /// real claude would be a test that needed an account, a network and a
-    /// model's patience — so a test stands its own program where claude goes,
-    /// and everything from the sandbox outwards is the same code the server
-    /// runs.
-    agent: Vec<String>,
+    /// An override rather than the answer itself, and the reason is that what
+    /// this module has to be able to prove is that a session's output reaches
+    /// the Timeline while it is still running. Proving it against the real
+    /// claude would be a test that needed an account, a network and a model's
+    /// patience — so a test stands its own program where the agent goes, and
+    /// everything from the sandbox outwards is the same code the server runs.
+    ///
+    /// One override for every type rather than one per type: what a stub stands
+    /// in for is *an agent*, and which line it is handed is still its Profile's
+    /// type's own — see [`Agents::argv`] — so a backend's launch line stays
+    /// provable without an account and the stubs go on reading what they read.
+    ///
+    /// `None` in a server, which runs the binary the Profile's type names.
+    agent: Option<Vec<String>>,
 
     /// What a TUI backend's session has on its Screen when it is sitting at its
     /// prompt, where anything is standing where that backend's binary goes — see
@@ -154,35 +162,10 @@ pub struct Agents {
 }
 
 impl Agents {
-    /// The real thing: claude, under whichever account the Profile names.
+    /// The real thing: each Profile's own binary — see [`binary`] — under
+    /// whichever account it names.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        home: Home,
-        reachable: Reachable,
-        config: SandboxConfig,
-        cache: BuildCache,
-        skills: Skills,
-        verkstead: Option<Executable>,
-        handoffs: Handoffs,
-        settings: Settings,
-    ) -> Agents {
-        Agents::running(
-            vec!["claude".to_owned()],
-            home,
-            reachable,
-            config,
-            cache,
-            skills,
-            verkstead,
-            handoffs,
-            settings,
-        )
-    }
-
-    /// The same, with something else where claude goes — see [`Agents::agent`].
-    #[allow(clippy::too_many_arguments)]
-    pub fn running(
-        agent: Vec<String>,
         home: Home,
         reachable: Reachable,
         config: SandboxConfig,
@@ -201,9 +184,31 @@ impl Agents {
             verkstead,
             handoffs,
             settings,
-            agent,
+            agent: None,
             signature: None,
             pace: Pace::default(),
+        }
+    }
+
+    /// The same, with something else where every type's binary goes — see
+    /// [`Agents::agent`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn running(
+        agent: Vec<String>,
+        home: Home,
+        reachable: Reachable,
+        config: SandboxConfig,
+        cache: BuildCache,
+        skills: Skills,
+        verkstead: Option<Executable>,
+        handoffs: Handoffs,
+        settings: Settings,
+    ) -> Agents {
+        Agents {
+            agent: Some(agent),
+            ..Agents::new(
+                home, reachable, config, cache, skills, verkstead, handoffs, settings,
+            )
         }
     }
 
@@ -221,15 +226,21 @@ impl Agents {
         }
     }
 
-    /// What a session under `pairing` on `prompt`, named `session`, runs.
+    /// What a session under `pairing` on `prompt`, named `session`, working in
+    /// `worktree`, runs.
+    ///
+    /// The binary is the Profile's agent type's — see [`binary`] — or whatever
+    /// is standing where every type's goes, which is how a test proves this
+    /// without an account.
     ///
     /// The model is the Pairing's, said on the command line rather than left to
     /// whatever the account's own settings hold: which model a session runs is
     /// the half of the choice the Profile does not make. A Conversation that
     /// chose its Profile before there was a model to choose beside it runs on
-    /// the one that Profile carried — see [`store::Pairing::runs_on`]. The
-    /// prompt follows it as the one positional argument, which is where an
-    /// interactive claude takes the thing it is to start on.
+    /// the one that Profile carried — see [`store::Pairing::runs_on`]. What the
+    /// flag is spelled is the backend's — see [`Line::model`]. The prompt
+    /// follows it as the one positional argument, which is where every
+    /// interactive agent here takes the thing it is to start on.
     ///
     /// A Profile listing no models is refused when it is saved, so the flag is
     /// only ever left off for a row somebody edited by hand — and left off
@@ -240,37 +251,47 @@ impl Agents {
     /// side of that choice is everything that already reads this line: an agent
     /// is run as its model and then its Brief, and a flag pushed in between the
     /// two would move the Brief under every stub agent the test suite stands
-    /// where claude goes. Options added here go on the end, so nothing that was
-    /// already there moves.
+    /// where an agent goes. Options added here go on the end, so nothing that
+    /// was already there moves — which holds for every type, since one stub
+    /// stands where all of them go.
     ///
     /// `None` is a session Verkstead could not name — see [`session_name`] —
     /// and the flag is then left off entirely rather than passed empty: an agent
     /// told to run under no name at all would refuse to start, where one not
-    /// told anything picks its own.
+    /// told anything picks its own. A backend that takes no session id at all is
+    /// told none whatever Verkstead named it — see [`Line::names_the_session`].
     ///
-    /// Last of all come the flags the backend itself needs — see [`flags`] —
-    /// which is the one part of this line that reads differently for one agent
-    /// type than for another.
-    fn argv(&self, pairing: &store::Pairing, prompt: &str, session: Option<&str>) -> Vec<String> {
-        let mut argv = self.agent.clone();
+    /// Last of all comes the tail the backend itself needs — see [`Line::tail`]
+    /// — which with the two above is the whole of what reads differently for one
+    /// agent type than for another.
+    fn argv(
+        &self,
+        pairing: &store::Pairing,
+        prompt: &str,
+        session: Option<&str>,
+        worktree: Option<&Path>,
+    ) -> Vec<String> {
+        let agent_type = pairing.profile.agent_type();
+        let line = line(agent_type, worktree);
+
+        let mut argv = match &self.agent {
+            Some(standing) => standing.clone(),
+            None => vec![binary(agent_type).to_owned()],
+        };
 
         if let Some(model) = pairing.runs_on() {
-            argv.push("--model".to_owned());
+            argv.push(line.model.to_owned());
             argv.push(model.to_owned());
         }
 
         argv.push(prompt.to_owned());
 
-        if let Some(session) = session {
+        if let Some(session) = session.filter(|_| line.names_the_session) {
             argv.push("--session-id".to_owned());
             argv.push(session.to_owned());
         }
 
-        argv.extend(
-            flags(pairing.profile.agent_type())
-                .iter()
-                .map(|flag| (*flag).to_owned()),
-        );
+        argv.extend(line.tail);
 
         argv
     }
@@ -289,10 +310,12 @@ impl Agents {
     /// rather than repainting a screen, so there is no frame to read a prompt
     /// off, and three seconds of silence is an answer that works.
     ///
-    /// Codex's is the stage that launches the real binary rather than this one.
-    /// What runs where it goes until then is a stub, which is judged on its
-    /// silence like anything else that prints line by line — and the suite hands
-    /// this one the signature the stub it stands there draws.
+    /// Codex's is one line of the frame the real codex leaves standing when it
+    /// is waiting for a human, and it is not written down here yet: it has to be
+    /// read off a running codex rather than guessed at, a guess being exactly
+    /// the drift the long-stop exists to catch. What stands here until then is
+    /// whatever the suite handed in — the signature drawn by the stub it stands
+    /// where an agent goes.
     fn at_the_prompt(&self, agent_type: store::AgentType) -> Option<&str> {
         match agent_type {
             store::AgentType::Claude => None,
@@ -312,33 +335,113 @@ impl Agents {
     }
 }
 
-/// The flags a backend needs on its own launch line, beyond the model, the
-/// prompt and the session name every one of them is given.
+/// The program a Profile of each agent type is run as.
 ///
-/// Claude's is `--dangerously-skip-permissions`. Running unattended is what
-/// Verkstead promises rather than something the account's own configuration is
-/// trusted to have been left holding: a session that stopped to ask for
-/// approval would be asking it in front of nobody, with the whole backlog
-/// behind it waiting on an answer that is not coming. What stops a session
-/// doing harm is the Sandbox, which this does not touch and which is still the
-/// boundary.
+/// The host provides them, as it provides `claude` (ADR-0011): the installer
+/// puts each backend's binary on the system profile the sandbox already reads,
+/// and a Profile whose binary is missing fails at session start, named in the
+/// Capture of the session that could not run.
 ///
 /// A later backend adds one arm here and nothing else, which is the whole
-/// reason this is a mapping rather than a flag pushed straight onto the line.
-/// The type comes off the Pairing's Profile, so nothing has to be plumbed
-/// through to say which agent is being launched.
-///
-/// Codex's is empty, and empty rather than absent: what it needs — the approval
-/// bypass, the trust pre-seed, where its model and its prompt go — is the stage
-/// that makes it launch the real binary, and a line guessed at here would be
-/// one that stage has to find and undo. What it launches until then is a stub,
-/// which takes the line every stub takes.
-fn flags(agent_type: store::AgentType) -> &'static [&'static str] {
+/// reason this is a mapping rather than a name written into the line. The type
+/// comes off the Pairing's Profile, so nothing has to be plumbed through to say
+/// which agent is being launched.
+fn binary(agent_type: store::AgentType) -> &'static str {
     match agent_type {
-        store::AgentType::Claude => &["--dangerously-skip-permissions"],
-        store::AgentType::Codex => &[],
+        store::AgentType::Claude => "claude",
+        store::AgentType::Codex => "codex",
     }
 }
+
+/// The rest of a backend's launch line: how it is told its model, whether it
+/// takes the session id Verkstead named, and what goes on the end.
+///
+/// One value rather than three mappings, because the three are one fact — what
+/// this backend's command line looks like — and a stage that lands a backend
+/// writes it once here.
+struct Line {
+    /// What the model is said with. `--model` reads as claude's own; codex
+    /// takes `-m`.
+    model: &'static str,
+
+    /// Whether the session Verkstead named is named on the line.
+    ///
+    /// False for a backend that takes no session id at all, whose log is
+    /// therefore found rather than named — see [`crate::transcript`].
+    names_the_session: bool,
+
+    /// The flags and configuration overrides that go last, after the prompt.
+    ///
+    /// Owned rather than borrowed, because the trust pre-seed below names the
+    /// Worktree this session is being launched in.
+    tail: Vec<String>,
+}
+
+/// Which line `agent_type` takes, for a session working in `worktree`.
+///
+/// **Every backend is launched with its approval bypass on.** Running
+/// unattended is what Verkstead promises rather than something the account's
+/// own configuration is trusted to have been left holding: a session that
+/// stopped to ask for approval would be asking it in front of nobody, with the
+/// whole backlog behind it waiting on an answer that is not coming. What stops
+/// a session doing harm is the Sandbox, which this does not touch and which is
+/// still the boundary — and codex's own sandbox is off rather than nested,
+/// because it will not start inside bwrap and bwrap is already the boundary.
+///
+/// Codex draws a full-screen TUI, and `--no-alt-screen` keeps it drawing inline
+/// instead: the Capture and the Screen are the record of what a session did, and
+/// an alternate screen is a record that is thrown away as the program leaves it.
+///
+/// **What its account needs is said on the line rather than written into it.**
+/// Codex takes `-c key=value` overrides, which is how the home is configured
+/// without Verkstead writing into a directory that belongs to the human's
+/// account: the credential store file-backed, since there is no keyring inside
+/// the sandbox and a login that reached for one would find nothing; and the
+/// Worktree pre-seeded as trusted, since some versions still put the trust
+/// prompt up despite the bypass and a session stopped at a prompt is a run
+/// waiting on nobody.
+fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
+    match agent_type {
+        store::AgentType::Claude => Line {
+            model: "--model",
+            names_the_session: true,
+            tail: vec!["--dangerously-skip-permissions".to_owned()],
+        },
+        store::AgentType::Codex => {
+            let mut tail = vec![
+                "--dangerously-bypass-approvals-and-sandbox".to_owned(),
+                "--no-alt-screen".to_owned(),
+                "-c".to_owned(),
+                format!("{CODEX_CREDENTIAL_STORE}=\"file\""),
+            ];
+
+            // A session with no Worktree is one that never starts — see
+            // [`Sessions::start`] — so what this leaves off is the trust of a
+            // directory there is none of, rather than a prompt let through.
+            if let Some(worktree) = worktree {
+                tail.push("-c".to_owned());
+                tail.push(format!(
+                    "projects.\"{}\".trust_level=\"trusted\"",
+                    worktree.display()
+                ));
+            }
+
+            Line {
+                model: "-m",
+                names_the_session: false,
+                tail,
+            }
+        }
+    }
+}
+
+/// Where codex keeps the credentials a login writes, which inside the sandbox
+/// has to be the file beside the configuration rather than a keyring.
+///
+/// Named because it is somebody else's spelling, the same bargain the
+/// usage-limit phrase and the idle signature make: one place to edit when it
+/// moves.
+const CODEX_CREDENTIAL_STORE: &str = "cli_auth_credentials_store";
 
 /// The sessions this server has running, by the Conversation each belongs to.
 ///
@@ -1074,7 +1177,12 @@ impl Sessions {
         // [`skills::naming`].
         let prompt = skills::naming(&prompt, conversation.naming);
 
-        let argv = agents.argv(pairing, &prompt, session.as_deref());
+        let argv = agents.argv(
+            pairing,
+            &prompt,
+            session.as_deref(),
+            conversation.worktree.as_deref(),
+        );
         let conversation_id = conversation.id;
 
         // The sandbox asks git where the worktree's object database is, and the
@@ -1859,9 +1967,34 @@ mod tests {
         }
     }
 
-    fn agents(agent: Vec<String>, state: &std::path::Path) -> Agents {
-        Agents::running(
-            agent,
+    /// And the same on the second backend: one home, and the model its account
+    /// can launch.
+    fn codex_pairing() -> store::Pairing {
+        store::Pairing {
+            profile: store::Profile {
+                id: 2,
+                name: "work".to_owned(),
+                account: store::Account::Codex {
+                    home: PathBuf::from("/srv/accounts/work/.codex"),
+                },
+                models: vec!["gpt-5-codex".to_owned()],
+            },
+            model: Some("gpt-5-codex".to_owned()),
+        }
+    }
+
+    /// The Worktree a session of either is launched in, which is the directory
+    /// codex is told to trust.
+    const WORKTREE: &str = "/srv/worktrees/verkstead-rate-limiting";
+
+    fn worktree() -> Option<&'static Path> {
+        Some(Path::new(WORKTREE))
+    }
+
+    /// A server's own: the binary is the Profile's agent type's, with nothing
+    /// standing where it goes.
+    fn real(state: &std::path::Path) -> Agents {
+        Agents::new(
             Home {
                 path: PathBuf::from("/home/verkstead"),
             },
@@ -1880,6 +2013,14 @@ mod tests {
         )
     }
 
+    /// And the same with `agent` standing where every type's binary goes.
+    fn agents(agent: Vec<String>, state: &std::path::Path) -> Agents {
+        Agents {
+            agent: Some(agent),
+            ..real(state)
+        }
+    }
+
     /// The prompt is what the grilling starts from, and an interactive claude
     /// takes what it is to start on as a positional argument.
     #[test]
@@ -1889,6 +2030,7 @@ mod tests {
             &pairing(),
             "# Rate limiting\n",
             None,
+            worktree(),
         );
 
         assert_eq!(
@@ -1917,6 +2059,7 @@ mod tests {
             &unpaired,
             "# Rate limiting\n",
             None,
+            worktree(),
         );
 
         assert_eq!(
@@ -1940,6 +2083,7 @@ mod tests {
             &pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
         );
 
         assert_eq!(
@@ -1954,6 +2098,105 @@ mod tests {
                 "--dangerously-skip-permissions".to_owned(),
             ]
         );
+    }
+
+    /// A Profile is launched on the binary its agent type names, so that a
+    /// Codex Profile runs codex rather than whatever the first backend was.
+    #[test]
+    fn a_profile_is_run_on_its_own_agent_types_binary() {
+        let state = tempfile::tempdir().unwrap();
+        let agents = real(state.path());
+
+        assert_eq!(
+            agents
+                .argv(&pairing(), "# Rate limiting\n", None, worktree())
+                .first()
+                .map(String::as_str),
+            Some("claude")
+        );
+        assert_eq!(
+            agents
+                .argv(&codex_pairing(), "# Rate limiting\n", None, worktree())
+                .first()
+                .map(String::as_str),
+            Some("codex")
+        );
+    }
+
+    /// And the whole of codex's line: the model as `-m`, the prompt as the one
+    /// positional, and everything the account and the sandbox need after it.
+    ///
+    /// No session id, because codex takes none — which is why its log is found
+    /// rather than named. The credential store is file-backed because there is
+    /// no keyring inside the sandbox, and the Worktree is trusted from the line
+    /// rather than from anything written into the Profile's own directory.
+    #[test]
+    fn a_codex_session_takes_the_line_codex_takes() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["codex".to_owned()], state.path()).argv(
+            &codex_pairing(),
+            "# Rate limiting\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "codex".to_owned(),
+                "-m".to_owned(),
+                "gpt-5-codex".to_owned(),
+                "# Rate limiting\n".to_owned(),
+                "--dangerously-bypass-approvals-and-sandbox".to_owned(),
+                "--no-alt-screen".to_owned(),
+                "-c".to_owned(),
+                "cli_auth_credentials_store=\"file\"".to_owned(),
+                "-c".to_owned(),
+                format!("projects.\"{WORKTREE}\".trust_level=\"trusted\""),
+            ]
+        );
+    }
+
+    /// A Conversation with no worktree is one no session starts in, so what is
+    /// left off is the trust of a directory there is none of — and the rest of
+    /// the line, the account's own half included, stands.
+    #[test]
+    fn a_codex_session_with_no_worktree_trusts_nothing() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["codex".to_owned()], state.path()).argv(
+            &codex_pairing(),
+            "# Rate limiting\n",
+            None,
+            None,
+        );
+
+        assert!(
+            !argv.iter().any(|arg| arg.contains("trust_level")),
+            "there is no worktree to trust: {argv:?}"
+        );
+        assert!(
+            argv.contains(&"cli_auth_credentials_store=\"file\"".to_owned()),
+            "and the account still needs its credential store file-backed: {argv:?}"
+        );
+    }
+
+    /// The stub the suite stands where an agent goes stands there for every
+    /// type, and reads the line it reads today: the model first and the prompt
+    /// after it, whichever backend's line that is.
+    #[test]
+    fn a_stub_stands_where_every_types_binary_goes() {
+        let state = tempfile::tempdir().unwrap();
+        let stub = vec!["/bin/sh".to_owned(), "-c".to_owned(), "printf x".to_owned()];
+        let argv = agents(stub.clone(), state.path()).argv(
+            &codex_pairing(),
+            "# Rate limiting\n",
+            None,
+            worktree(),
+        );
+
+        assert_eq!(argv[..stub.len()], stub[..]);
+        assert_eq!(argv[stub.len() + 1], "gpt-5-codex".to_owned());
+        assert_eq!(argv[stub.len() + 2], "# Rate limiting\n".to_owned());
     }
 
     /// A name claude will take as a session id, which is a version 4 UUID and

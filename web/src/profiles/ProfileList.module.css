@@ -66,10 +66,8 @@
   color: var(--ink-soft);
 }
 
-/* What is quoted rather than said: every model name the account can launch, and
-   the pair's two paths where the pane shows them. */
-.profile .model,
-.standing code {
+/* What is quoted rather than said: every model name the account can launch. */
+.profile .model {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
@@ -88,10 +86,10 @@
   font-size: 0.85rem;
 }
 
-/* One form for both saving and rewriting — a profile is four fields with nothing
-   built from them yet, so editing one is filling the same form in with what it
-   already says. It is the details pane now rather than a modal over the page, so
-   there is nothing around it but the pane's own head. */
+/* One form for both saving and rewriting — a profile is a handful of fields with
+   nothing built from them yet, so editing one is filling the same form in with
+   what it already says. It is the details pane now rather than a modal over the
+   page, so there is nothing around it but the pane's own head. */
 .form label {
   display: block;
   margin-bottom: 0.35rem;
@@ -105,8 +103,11 @@
 
 /* The models are the one field that is a list, so they are the one taken in a
    textarea — drawn as the inputs around it, because it is the same kind of
-   typing with room for more than one line of it. */
+   typing with room for more than one line of it. The agent type is the one field
+   that is picked rather than typed, and it is drawn as the rest for the same
+   reason: it is another of the form's rows, not a control of its own kind. */
 .form input,
+.form select,
 .form textarea {
   display: block;
   width: 100%;
@@ -153,20 +154,14 @@
   font-size: 0.9rem;
 }
 
-/* What is on the record about a saved Profile but not in the form: the agent
-   type, and the press that takes the whole thing away. Set well below the form
-   and behind a rule: a destructive press in among the fields, or beside the
-   button that saves them, is one waiting to be made by mistake. */
+/* The press that takes a saved Profile away, which is the one thing in this pane
+   that is not the form. Set well below it and behind a rule: a destructive press
+   in among the fields, or beside the button that saves them, is one waiting to
+   be made by mistake. */
 .standing {
   margin-top: 1.5rem;
   padding-top: 1.25rem;
   border-top: 1px solid var(--edge);
-}
-
-.standing .agentType {
-  margin: 0 0 0.85rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
 }
 
 .actions {
@@ -183,9 +178,10 @@
   border-color: var(--edge);
 }
 
-/* The field being typed in, which is no pointer's doing: the border says which
-   of the four the words are going into. */
+/* The field being worked in, which is no pointer's doing: the border says which
+   of them the words are going into. */
 .form input:focus-visible,
+.form select:focus-visible,
 .form textarea:focus-visible {
   border-color: var(--accent);
 }
@@ -195,6 +191,7 @@
    in — the remove's red. */
 @media (hover: hover) {
   .form input:hover,
+  .form select:hover,
   .form textarea:hover {
     border-color: var(--ink-soft);
   }

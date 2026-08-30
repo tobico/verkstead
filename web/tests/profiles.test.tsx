@@ -132,9 +132,32 @@ function pair(account: ProfileAccount) {
   return account;
 }
 
+/// And the same narrowing for the second type, whose whole account is one home.
+function home(account: ProfileAccount) {
+  if (account.agent_type !== "Codex") {
+    throw new Error(
+      `this fixture should be a Codex account, not ${account.agent_type}`,
+    );
+  }
+
+  return account;
+}
+
+/// A saved profile of the second type, built from the fixture rather than served
+/// as one of its own: what a Codex account is, and what the server does with one,
+/// is `crates/server`'s subject — what is read here is that the form draws and
+/// sends that type's own shape.
+const CODEX: ProfileEntry = {
+  ...FABLE,
+  id: 9,
+  name: "work",
+  account: { agent_type: "Codex", home: "/srv/accounts/work/.codex" },
+  models: ["gpt-5-codex"],
+};
+
 /// The account's fields are the ones its agent type has, which is a Claude
 /// pair here — the form draws them off the type, and this fills in what it
-/// drew.
+/// drew. The picker is left where it opens, Claude being the type it opens on.
 function fillIn(profile: ProfileEdit) {
   fireEvent.input(screen.getByLabelText("Name"), {
     target: { value: profile.name },
@@ -157,6 +180,17 @@ const NEW: ProfileEdit = {
     agent_type: "Claude",
     claude_dir: "/home/you/accounts/personal/.claude",
     config_file: "/home/you/accounts/personal/.claude.json",
+  },
+};
+
+/// And one of the second type, whose account is the one home that type keeps
+/// everything under.
+const NEW_CODEX: ProfileEdit = {
+  name: "work",
+  models: ["gpt-5-codex"],
+  account: {
+    agent_type: "Codex",
+    home: "/home/you/accounts/work/.codex",
   },
 };
 
@@ -347,22 +381,96 @@ describe("the pane a card opens", () => {
     ).toEqual([
       "profile-name",
       "profile-models",
+      "profile-agent_type",
       "profile-claude_dir",
       "profile-config_file",
     ]);
   });
 
+  /// And a profile of the second type is asked for that type's own account,
+  /// which is one home rather than a pair — the fields come off the
+  /// discriminator, so this is the same form drawing a different shape.
+  it("asks for the second type's own account when the profile is one", async () => {
+    serving(whenever("/api/ui/profiles", json([CODEX])));
+    const { container } = mountPane(CODEX.id);
+
+    await waitFor(() => screen.getByLabelText(/Home directory/));
+
+    expect(
+      [...container.querySelectorAll("form label")].map(
+        (label) => label.getAttribute("for"),
+      ),
+    ).toEqual(["profile-name", "profile-models", "profile-agent_type", "profile-home"]);
+    expect(
+      (screen.getByLabelText(/Home directory/) as HTMLInputElement).value,
+    ).toBe(home(CODEX.account).home);
+    expect(
+      (screen.getByLabelText("Agent") as HTMLSelectElement).value,
+    ).toBe("Codex");
+  });
+
   /// The paths shown are the resolved ones the server recorded rather than
   /// whatever was typed to save them — those are what will be bind-mounted, and
   /// the point of showing them is that they can be checked. The agent type is
-  /// said beside them rather than offered, there being one of it.
-  it("says what is on the record but not in the form", async () => {
+  /// among the fields rather than said beside them: it is on the record and it
+  /// is also the human's to change, and what is left standing under the form is
+  /// the one press that is neither.
+  it("keeps only the removal out of the form", async () => {
     theProfiles();
     const { container } = mountPane(FABLE.id);
 
     const standing = await drawn(container, `.${styles.standing}`);
-    expect(standing.textContent).toContain(FABLE.account.agent_type);
-    expect(container.querySelector("select")).toBeNull();
+    expect(
+      [...standing.querySelectorAll("button")].map(
+        (press) => press.textContent,
+      ),
+    ).toEqual(["Remove"]);
+    expect(
+      (screen.getByLabelText("Agent") as HTMLSelectElement).value,
+    ).toBe(FABLE.account.agent_type);
+  });
+
+  /// Every type the form can ask the account of, and no other: a picker offering
+  /// one whose paths it could not then ask for would be a choice leading
+  /// nowhere, and one offering a backend that cannot launch would be a lie.
+  it("offers every agent type there is, by the backend's own name", async () => {
+    theProfiles();
+    mountPane(FABLE.id);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Agent"),
+    )) as HTMLSelectElement;
+
+    expect([...picker.options].map((option) => option.value)).toEqual([
+      "Claude",
+      "Codex",
+    ]);
+    expect([...picker.options].map((option) => option.textContent)).toEqual([
+      "Claude Code",
+      "Codex",
+    ]);
+  });
+
+  /// Picking another type is asking for that type's account, so the fields under
+  /// the picker are that type's and what was typed into the old one's does not
+  /// come with them: a path meant for `~/.claude` means nothing under `~/.codex`.
+  it("swaps the account's fields when another type is picked", async () => {
+    theProfiles();
+    const { container } = mountPane(FABLE.id);
+
+    await waitFor(() => screen.getByLabelText(/Claude directory/));
+
+    fireEvent.change(screen.getByLabelText("Agent"), {
+      target: { value: "Codex" },
+    });
+
+    await waitFor(() => screen.getByLabelText(/Home directory/));
+    expect(screen.queryByLabelText(/Claude directory/)).toBeNull();
+    expect(screen.queryByLabelText(/Config file/)).toBeNull();
+    expect(
+      (screen.getByLabelText(/Home directory/) as HTMLInputElement).value,
+    ).toBe("");
+    expect(container.querySelector("form")).toBeTruthy();
   });
 
   /// The way back out of it, in the slot every pane keeps for it: a change of
@@ -488,6 +596,32 @@ describe("the pane the plus opens", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(done).toHaveBeenCalled());
+  });
+
+  /// A profile of the second backend is written here rather than over the API:
+  /// the type is picked from the form, the one home is asked for under it, and
+  /// what goes over is that type's own account.
+  it("saves a profile of the type that was picked", async () => {
+    const fetching = theProfiles(json("Saved"));
+    mountPane("new");
+
+    fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: NEW_CODEX.name },
+    });
+    fireEvent.input(screen.getByLabelText("Models, one per line"), {
+      target: { value: NEW_CODEX.models.join("\n") },
+    });
+    fireEvent.change(screen.getByLabelText("Agent"), {
+      target: { value: "Codex" },
+    });
+    fireEvent.input(await waitFor(() => screen.getByLabelText(/Home directory/)), {
+      target: { value: home(NEW_CODEX.account).home },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/profiles")).toEqual(NEW_CODEX),
+    );
   });
 
   /// Each refusal is a different sentence, and each names which of the two paths
