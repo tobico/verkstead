@@ -280,6 +280,7 @@ pub(crate) struct Watch {
     /// with the name and for the same reason: the Profile a session was launched
     /// under is the one it is watched as, whatever is edited while it runs.
     agent_type: store::AgentType,
+
     /// What the session has printed since the last look, less whatever has
     /// already been looked at.
     ///
@@ -333,6 +334,7 @@ impl Watch {
             raised: false,
         }
     }
+
     /// Take a chunk of what the session printed.
     ///
     /// Cheap on purpose: this is called with everything that comes off the

@@ -3083,6 +3083,7 @@ async fn a_codex_sessions_row_is_summarised_from_the_rollout_the_pane_draws() {
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
+/// A session that keeps no log of itself leaves no Transcript, and nothing about
 /// that is a fault: it is every stub agent the test suite runs, and every
 /// backend that keeps no such record. What those sessions said is the Capture,
 /// which is a complete record on its own.

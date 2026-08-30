@@ -2145,9 +2145,8 @@ mod tests {
         }
     }
 
-    /// The Worktree a session of either is launched in, which is the directory
-    /// codex is told to trust.
-    /// The Worktree a session of these fixtures works in.
+    /// The Worktree a session of either fixture is launched in, which is the
+    /// directory codex is told to trust.
     ///
     /// **With a dot in it**, and that is the point: a Worktree is named for its
     /// Repo and the branch it holds, and either may carry one. Codex splits a
