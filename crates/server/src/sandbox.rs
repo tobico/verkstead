@@ -772,11 +772,19 @@ impl Sandbox {
         // one that wins. Read-only as the mount that used to stand here was, so
         // a session cannot fill the directory in and then read from it.
         //
-        // Claude's, because Claude's is the account that has one here. Each
-        // backend after it has a discovery path of its own, covered the same way
-        // by the stage that lands it — a bind into a home no session of that
-        // type is running under would cover nothing and make a directory the
-        // account never had.
+        // Claude's, and so far Claude's alone. Each backend after it has a
+        // discovery path of its own, covered the same way by the stage that
+        // lands it — except where that path is *inside* the account home
+        // itself, as Codex's `~/.codex/skills` and Grok Build's `~/.grok/skills`
+        // both are: covering one would hide the skills those programs ship as
+        // well as the ones the account added, and the home is the whole of what
+        // such a Profile names, so it is left as the account keeps it
+        // (ADR-0011). Which is both backends that have landed, so a stage that
+        // adds no bind here is following the rule rather than forgetting one.
+        //
+        // And the account's type at all, rather than every home there is,
+        // because a bind into a home no session is running under would cover
+        // nothing and make a directory the account never had.
         if matches!(self.account, store::Account::Claude { .. }) {
             bwrap
                 .arg("--ro-bind")
