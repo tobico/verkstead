@@ -36,7 +36,7 @@ export function PaneHead(props: {
   children?: JSX.Element;
 }): JSX.Element {
   return (
-    <div class={`${styles.head} ${shell.paneChrome}`}>
+    <div class={styles.head}>
       <Show when={props.back}>
         {(back) => (
           <button

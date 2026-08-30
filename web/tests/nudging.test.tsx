@@ -142,6 +142,11 @@ const ASKED: QuestionSetEvent = (() => {
 /// What the Timeline already carried when the page was drawn.
 const ALREADY_THERE = ASKED.title;
 
+/// Where the Set on that Event is read from, which two tests here hold to its
+/// own path: a page fetches more than the one thing a test is about, and an
+/// answer left in the sequence goes to whichever of them asked first.
+const SET = `/api/ui/sets/${ASKED.set_id}`;
+
 /// The Set the stream is there to be immediate about — put to the human while
 /// they are looking straight at the Timeline it lands on.
 const ARRIVAL: QuestionSetEvent = {
@@ -698,11 +703,23 @@ describe("what a Nudge is about", () => {
       standing: { Waiting: "disconnected" },
     };
 
-    window.history.pushState({}, "", `/sets/${WAITING.id}`);
-    const fetching = serving(...BESIDE, json(readingOf(WAITING)), json(readingOf(DISCONNECTED)));
+    // The Set as it is read: the details pane of the Event it was asked on.
+    window.history.pushState(
+      {},
+      "",
+      `/conversations/${CONVERSATION.id}/events/${ASKED.id}`,
+    );
+    let asked = WAITING;
+    const fetching = serving(
+      ...BESIDE,
+      whenever(OPENED, json(CONVERSATION)),
+      whenever(SET, () => json(readingOf(asked))()),
+      json({}),
+    );
     const { container } = render(() => <App />);
     await drawn(container, `.${standing.liveness}.${standing.waiting}`);
     stream().opens();
+    asked = DISCONNECTED;
 
     // Scoped to a Conversation, and the Set is keyed by its own id: what a page
     // showing one Set does about a Set moving somewhere is read the Set it is
@@ -712,7 +729,7 @@ describe("what a Nudge is about", () => {
     // The verdict used to cycle with the ten-second poll. The poll is gone, so
     // the agent letting go of its wait is a Nudge of its own (ADR-0009).
     await drawn(container, `.${standing.liveness}.${standing.disconnected}`);
-    expect(askedFor(fetching, `/api/ui/sets/${WAITING.id}`)).toBe(2);
+    expect(askedFor(fetching, SET)).toBe(2);
   });
 });
 
@@ -872,14 +889,25 @@ describe("a Nudge relayed by the worker", () => {
   });
 
   it("reads everything back, exactly as a Nudge on the stream does", async () => {
-    window.history.pushState({}, "", `/sets/${WAITING.id}`);
-    serving(...BESIDE, json(readingOf(WAITING)), json(readingOf(ANSWERED)));
+    window.history.pushState(
+      {},
+      "",
+      `/conversations/${CONVERSATION.id}/events/${ASKED.id}`,
+    );
+    let asked = WAITING;
+    serving(
+      ...BESIDE,
+      whenever(OPENED, json(CONVERSATION)),
+      whenever(SET, () => json(readingOf(asked))()),
+      json({}),
+    );
     const container = attaches();
     const { container: page } = render(() => <App />);
-    // The badge and the menu under it belong to a Set still waiting: the page
+    // The badge and the menu under it belong to a Set still waiting: the pane
     // as it was drawn.
     await waitFor(() => expect(page.querySelector(`.${standing.standing}`)).toBeTruthy());
 
+    asked = ANSWERED;
     await pushed(container);
 
     // A relayed Nudge says nothing at all where a streamed one says a kind, and

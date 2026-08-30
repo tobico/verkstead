@@ -33,6 +33,7 @@ import type {
   PickedView,
   Worktree,
 } from "../api/types";
+import { PaneSticky } from "../Panes";
 import { Empty } from "../notices";
 import * as pairing from "../pairing";
 import styles from "./Brief.module.css";
@@ -72,7 +73,9 @@ export function Brief(props: {
 }): JSX.Element {
   return (
     <>
-      <PaneHead back={{ to: "Timeline", go: props.back }} title="Brief" />
+      <PaneSticky>
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Brief" />
+      </PaneSticky>
 
       <Show
         when={props.brief.html !== ""}

@@ -2568,6 +2568,32 @@ pub async fn asked_from(pool: &SqlitePool, set_id: i64) -> Result<Option<i64>> {
     Ok(found.map(|(id,)| id))
 }
 
+/// Where a Set is read: the Conversation it was asked from, and the Timeline
+/// Event it landed on.
+///
+/// The two halves a path to a Set is made of. A Set has no page of its own — it
+/// is read in the details pane of its Event — so anything that has to say where
+/// a Set is, a push notification above all, needs the pair rather than the id.
+///
+/// [`asked_from`] answers the first half alone, for the callers whose question
+/// stops at which Conversation this belongs to. `None` here means what it means
+/// there: a broken record rather than a Set with nowhere to be, since [`ask`]
+/// writes the Set, its Event and the row joining them in one transaction.
+pub async fn opened_at(pool: &SqlitePool, set_id: i64) -> Result<Option<(i64, i64)>> {
+    let found: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT e.conversation_id, e.id
+         FROM set_events s
+         JOIN timeline_events e ON e.id = s.event_id
+         WHERE s.set_id = ?",
+    )
+    .bind(set_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("looking for the Timeline Event Question Set {set_id} landed on"))?;
+
+    Ok(found)
+}
+
 /// Where a Conversation stands, and nothing else about it.
 ///
 /// For the readers whose whole question is the state: whether the Set on the

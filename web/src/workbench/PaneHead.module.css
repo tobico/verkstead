@@ -1,25 +1,31 @@
 /* The furniture every workbench pane repeats: the bar across the top of it and
    the way back out to the pane it was entered from. See `PaneHead.tsx` for what
-   the seven panes vary.
-
-   What is *not* here is the panes themselves — the grid they stand in, which of
-   them is drawn at which width, the divider between two of them, and what a pane
-   does with the block stuck to the top of it. That is `Panes.module.css`,
-   and what a header is to a pane is said there in one rule rather than in the
-   two halves this file and the one stylesheet used to hold: the header wears the
-   frame's `paneChrome` name — see `PaneHead.tsx` — and the way back out of a
-   pane wears its `paneBack`, so that the frame can stick the one and hide the
-   other where the pane it returns to is already on screen. */
+   the seven panes vary. */
 
 /* A pane's title with the way out of it above. Wrapping, so a narrow pane puts
-   the title under the way back rather than squeezing both onto one line. */
+   the title under the way back rather than squeezing both onto one line.
+
+   The rem above the row is the chrome's own top padding, borrowed rather than
+   added to: the controls standing in this row are hit targets with padding of
+   their own, and they hang up into that rem instead of pushing the title down
+   out of the place a pane's title has always been. Which is the whole of what
+   the negative margin is — room to hang in, and the same rem handed back.
+
+   The rem below is kept. It is the space between the header and whatever comes
+   after it inside the sticky block, and there is nothing under a header to
+   borrow it from: a sticky block ends where its content ends, so a rem taken
+   back here is a rem of paper the header does not get. Which is what it was —
+   the conversations pane drew its header a rem past the paper, and everywhere
+   else the fade below the block was lying over the first line of the record
+   instead of hanging in the gap kept for it. See `Panes.module.css`. */
 .head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: 0.8rem;
+  margin: -1rem 0 0;
+  padding: 1rem 0;
 }
 
 .head h1 {

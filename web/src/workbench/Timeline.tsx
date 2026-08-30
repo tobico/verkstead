@@ -113,6 +113,7 @@ import type {
 } from "../api/types";
 import app from "../App.module.css";
 import { CardButton } from "../CardButton";
+import { PaneSticky } from "../Panes";
 import { Empty, ErrorLine, Note } from "../notices";
 import { followBottom } from "../scrolling";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
@@ -404,7 +405,7 @@ export function Timeline(props: {
           of them travel with it, so there is no strip of scrolling record
           between the title and the pinned items and nothing to keep a pinned
           block's own offset in step with. */}
-      <div class={shell.paneChrome}>
+      <PaneSticky>
         {/* The way back out of this level, which is the whole of what a narrow
             window offers instead of the pane beside it. Drawn always and hidden
             by the pane head where all three panes are on screen at once.
@@ -513,7 +514,7 @@ export function Timeline(props: {
           select={props.select}
           details={props.details}
         />
-      </div>
+      </PaneSticky>
 
       <ol class={styles.timeline} ref={record}>
         <For each={props.conversation.timeline}>

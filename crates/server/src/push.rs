@@ -80,8 +80,9 @@ const JWT_HEADER: &str = r#"{"typ":"JWT","alg":"ES256"}"#;
 /// tapping it goes.
 #[derive(Debug, Serialize)]
 struct Notice<'a> {
-    /// The page the notification opens — a Set's own page for a Set, and the
-    /// Conversation for everything that happened to one.
+    /// The page the notification opens — the Timeline Event a Set landed on,
+    /// which is where a Set is read, and the Conversation for everything that
+    /// happened to one.
     ///
     /// Said by the server rather than worked out by the worker, because what a
     /// push is about is the server's to know: a phone woken by a stop that
@@ -115,25 +116,49 @@ enum Delivery {
 /// Returns as soon as the work is handed to the runtime: the caller's job is to
 /// answer the agent, and this must not be able to delay that or to fail it.
 pub(crate) fn announce(pool: &SqlitePool, id: i64, set: &QuestionSet) {
-    let notice = Notice {
-        path: format!("/sets/{id}"),
-        title: &set.title,
-        project: set.project.as_deref(),
-    };
-
-    let notice = match serde_json::to_vec(&notice) {
-        Ok(notice) => notice,
-        Err(error) => {
-            tracing::error!(set = id, error = ?error, "the push notice could not be built");
-            return;
-        }
-    };
-
+    let title = set.title.clone();
+    let project = set.project.clone();
     let pool = pool.clone();
-    let about = format!("Set {id}");
 
     tokio::spawn(async move {
-        if let Err(error) = notify(&pool, &about, &notice).await {
+        // Where tapping it goes. A Set has no page of its own: it is read in the
+        // details pane of the Timeline Event it landed on, so the path names the
+        // Event and the Conversation it is on.
+        //
+        // Looked up rather than carried in, because it is a fact about the
+        // record that was just written and the store is what holds it. A Set
+        // whose Event cannot be found is a broken record rather than a Set with
+        // nowhere to be — the two are written in one transaction — so there is
+        // nowhere to send anybody and nothing worth waking a phone for.
+        let found = match verkstead_store::opened_at(&pool, id).await {
+            Ok(Some(found)) => found,
+            Ok(None) => {
+                tracing::error!(set = id, "the Set is on no Timeline, so nobody was told");
+                return;
+            }
+            Err(error) => {
+                tracing::error!(set = id, error = ?error, "looking for where the Set is read failed");
+                return;
+            }
+        };
+
+        let (conversation, event) = found;
+
+        let notice = Notice {
+            path: format!("/conversations/{conversation}/events/{event}"),
+            title: &title,
+            project: project.as_deref(),
+        };
+
+        let notice = match serde_json::to_vec(&notice) {
+            Ok(notice) => notice,
+            Err(error) => {
+                tracing::error!(set = id, error = ?error, "the push notice could not be built");
+                return;
+            }
+        };
+
+        if let Err(error) = notify(&pool, &format!("Set {id}"), &notice).await {
             tracing::error!(set = id, error = ?error, "telling the devices about a Set failed");
         }
     });

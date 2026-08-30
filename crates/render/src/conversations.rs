@@ -1500,9 +1500,9 @@ pub struct AgentOutputEvent {
 /// was asked from, and the Timeline is re-read every time an open page hears the
 /// world moved.
 ///
-/// `set_id` is what the details pane fetches the document by — the same
-/// `/api/ui/sets/{id}` the standalone page reads, because it is the same Set
-/// reached another way.
+/// `set_id` is what the details pane fetches the document by, through
+/// `/api/ui/sets/{id}` — the Set's own id rather than this Event's, because a
+/// Set answered anywhere is the same Set here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct QuestionSetEvent {
@@ -1520,7 +1520,7 @@ pub struct QuestionSetEvent {
     pub rows: Vec<SetRow>,
 
     /// Whether it is still waiting on the human, and what became of it if not.
-    /// The same verdict the Set's own page carries, from the same registry of
+    /// The same verdict the Set's own sheet carries, from the same registry of
     /// held waits — this is a Timeline the human answers from.
     pub standing: Standing,
 }

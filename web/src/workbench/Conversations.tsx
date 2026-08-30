@@ -66,6 +66,7 @@ import { CardButton } from "../CardButton";
 import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
 import { Menu } from "../Menu";
+import { PaneSticky } from "../Panes";
 import { Switch as Toggle } from "../Switch";
 import {
   listAbandonedRoadmaps,
@@ -445,17 +446,19 @@ export function Conversations(props: {
           The wordmark is the class the pane head is handed for its `<h1>`, and
           it is styled with the rest of what this pane draws — no way back
           either, this being the level every other pane is entered from. */}
-      <PaneHead
-        heading={styles.wordmark}
-        title={
-          <>
-            <img src="/icons/icon-192.png" alt="" />
-            Verkstead
-          </>
-        }
-      >
-        <Settings />
-      </PaneHead>
+      <PaneSticky>
+        <PaneHead
+          heading={styles.wordmark}
+          title={
+            <>
+              <img src="/icons/icon-192.png" alt="" />
+              Verkstead
+            </>
+          }
+        >
+          <Settings />
+        </PaneHead>
+      </PaneSticky>
 
       <NewConversation open={props.open} />
 

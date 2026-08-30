@@ -25,11 +25,18 @@
 //! and the dividers that set them exist only in the layouts that stand panes
 //! side by side: below that breakpoint the page is walked through one pane at a
 //! time, so there is no border to drag and nothing remembered is read.
+//!
+//! The floors under those percentages are lengths rather than shares, because
+//! what makes a pane too narrow is what stands in it. So this is the one part
+//! of the frame that measures itself: how wide it is in rem is what turns a
+//! pane's minimum into a share the widths can be held against, and it is
+//! measured again whenever the window changes shape under the panes.
 
 import {
   Show,
   createSignal,
   onCleanup,
+  onMount,
   type Accessor,
   type JSX,
 } from "solid-js";
@@ -47,6 +54,7 @@ import {
   restore,
   widths as remembered,
   type Divider,
+  type Frame,
   type Widths,
 } from "./widths";
 
@@ -141,15 +149,60 @@ export function Panes(props: {
   /// remembering, and the hundred it passed through on the way there are not.
   const [settled, setSettled] = createSignal<Widths>(remembered());
 
-  /// And as they may actually be drawn: a sidebar dragged wide in the two-pane
-  /// layout is not allowed to squeeze the middle pane out of the three-pane
-  /// one, so the minimums are met against the layout in front of the human
-  /// rather than against the one the width was settled in.
-  const shown = () => clamped(settled(), allThree());
-
   /// The frame the shares are shares *of* — a divider dropped at a point on the
   /// screen means nothing until it is measured against this.
-  let frame!: HTMLDivElement;
+  let element!: HTMLDivElement;
+
+  /// How wide the frame stands, in rem.
+  ///
+  /// Which the arithmetic needs because the minimums under these widths are
+  /// lengths: what a pane is owed is the same span of paper on every window,
+  /// and turning that into a share of the frame takes the frame's own width.
+  /// Nought until the page has been laid out, which `widths.ts` reads as no
+  /// floors yet rather than as floors of nothing.
+  ///
+  /// In rem rather than in pixels, and converted here where the browser can be
+  /// asked what a rem is: a human who has told their browser to draw text
+  /// larger has said the panes should hold what they held, which is what makes
+  /// this the right unit for a floor and the wrong one for a width.
+  const [across, setAcross] = createSignal(0);
+
+  const measure = (width = element.getBoundingClientRect().width) => {
+    const root =
+      parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+
+    if (width > 0) {
+      setAcross(width / root);
+    }
+  };
+
+  /// Measured when the frame is first drawn, and again whenever it changes
+  /// shape under the panes — a window dragged narrower is exactly when a pane
+  /// stops being wide enough for what it holds. A browser with no
+  /// `ResizeObserver` to ask keeps the width it opened at, and re-measures at
+  /// the start of every drag.
+  onMount(() => {
+    measure();
+
+    if (typeof ResizeObserver !== "function") {
+      return;
+    }
+
+    const watching = new ResizeObserver(() => measure());
+
+    watching.observe(element);
+    onCleanup(() => watching.disconnect());
+  });
+
+  /// The frame as the arithmetic asks about it: how much room there is, and how
+  /// many panes are sharing it.
+  const frame = (): Frame => ({ rem: across(), three: allThree() });
+
+  /// And the widths as they may actually be drawn: a sidebar dragged wide in
+  /// the two-pane layout is not allowed to squeeze the middle pane out of the
+  /// three-pane one, so the minimums are met against the frame in front of the
+  /// human rather than against the one the width was settled in.
+  const shown = () => clamped(settled(), frame());
 
   /// Dragging one. The listeners go on the window rather than on the handle,
   /// because a pointer that has outrun the handle — which every drag's does —
@@ -158,14 +211,19 @@ export function Panes(props: {
     // Which stops the drag selecting the text of both panes on the way past.
     event.preventDefault();
 
-    const frameRect = frame.getBoundingClientRect();
+    const frameRect = element.getBoundingClientRect();
     if (frameRect.width === 0) {
       return;
     }
 
+    // Free, the rect being in hand: it keeps a browser with no observer to ask
+    // from meeting the floors against a frame the window has been resized out
+    // from under.
+    measure(frameRect.width);
+
     const moved = (at: PointerEvent) => {
       const share = ((at.clientX - frameRect.left) / frameRect.width) * 100;
-      setSettled((was) => dragged(was, divider, share, allThree()));
+      setSettled((was) => dragged(was, divider, share, frame()));
     };
 
     const dropped = () => {
@@ -183,7 +241,7 @@ export function Panes(props: {
   /// Moving one with the keyboard, which settles at once: there is no letting
   /// go of an arrow key.
   const nudge = (divider: Divider, by: number) => {
-    setSettled((was) => nudged(was, divider, by, allThree()));
+    setSettled((was) => nudged(was, divider, by, frame()));
     remember(settled());
   };
 
@@ -213,7 +271,7 @@ export function Panes(props: {
     <div
       class={styles.panes}
       data-pane={props.pane}
-      ref={frame}
+      ref={element}
       style={columns()}
     >
       <section
@@ -232,7 +290,7 @@ export function Panes(props: {
           divider="sidebar"
           label="Resize the conversations pane"
           share={shown().sidebar}
-          travel={range("sidebar", shown(), allThree())}
+          travel={range("sidebar", shown(), frame())}
           drag={drag}
           nudge={nudge}
           restore={defaults}
@@ -251,7 +309,7 @@ export function Panes(props: {
           divider="middle"
           label={`Resize the ${props.middleLabel.toLowerCase()} pane`}
           share={shown().middle}
-          travel={range("middle", shown(), allThree())}
+          travel={range("middle", shown(), frame())}
           drag={drag}
           nudge={nudge}
           restore={defaults}
@@ -265,5 +323,91 @@ export function Panes(props: {
         {props.details}
       </section>
     </div>
+  );
+}
+
+/// The block a pane keeps against its top edge while the pane scrolls under
+/// it: the pane's header, and whatever else is meant to stay with it — the
+/// timeline hands in its pinned items as well.
+///
+/// The `paneChrome` name is the frame's, and what it means to a pane is said
+/// once in `Panes.module.css`: stuck to the top, paper out past the pane's own
+/// padding, and a rem of fade under it that the record thins out into. This is
+/// the component that wears the name, so that a pane hands its chrome in rather
+/// than knowing how a pane sticks one.
+///
+/// And it says how tall it stands, as `--pane-chrome` on the pane it is in.
+/// Anything else in the pane that pins itself to the top edge has to pin below
+/// this — the table of contents in a Set does — and how tall a header stands is
+/// a question of what is in it and how wide the human left the pane, which is
+/// nothing a stylesheet can be told in advance. Written on the pane rather than
+/// here so that it reaches the whole of what the pane holds; measured again
+/// whenever the block changes shape, a title that has wrapped included.
+///
+/// And whether it is stuck yet, as `data-stuck`, which is what the fade under
+/// it is drawn by: there is no gap below the block for a fade to hang in, so a
+/// pane at rest would be wearing a rem of paper over its first line.
+///
+/// Watched rather than listened for. A pane scrolls two ways — the page below
+/// the first breakpoint, the pane itself above it — and a scroll listener would
+/// have to be told which, and be moved from one to the other as the human
+/// drags the window across the breakpoint. What both come to is the same thing
+/// seen from the rem of pane above the block: the page carries it off the top of
+/// the window, or the pane clips it away, and an observer of that rem reads
+/// either as the one answer it is.
+export function PaneSticky(props: { children?: JSX.Element }): JSX.Element {
+  let element!: HTMLDivElement;
+  let edge!: HTMLDivElement;
+
+  /// Whether the record is passing under the block. Not until something says
+  /// so: a browser with no observer to ask draws no fade, the fade being about
+  /// a passing it cannot see.
+  const [stuck, setStuck] = createSignal(false);
+
+  onMount(() => {
+    const pane = element.closest<HTMLElement>(`.${styles.pane}`);
+
+    if (pane === null) {
+      return;
+    }
+
+    const measure = () =>
+      pane.style.setProperty("--pane-chrome", `${element.offsetHeight}px`);
+
+    measure();
+    onCleanup(() => pane.style.removeProperty("--pane-chrome"));
+
+    // A browser with no observer to be had keeps the height the block opened
+    // at, which is the right one until something in it wraps.
+    if (typeof ResizeObserver === "function") {
+      const watching = new ResizeObserver(() => measure());
+
+      watching.observe(element);
+      onCleanup(() => watching.disconnect());
+    }
+
+    if (typeof IntersectionObserver !== "function") {
+      return;
+    }
+
+    const watching = new IntersectionObserver(([seen]) => {
+      setStuck(seen !== undefined && !seen.isIntersecting);
+    });
+
+    watching.observe(edge);
+    onCleanup(() => watching.disconnect());
+  });
+
+  return (
+    <>
+      <div class={styles.paneEdge} ref={edge} />
+      <div
+        class={styles.paneChrome}
+        data-stuck={stuck() ? "" : undefined}
+        ref={element}
+      >
+        {props.children}
+      </div>
+    </>
   );
 }
