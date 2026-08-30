@@ -21,5 +21,5 @@ blocking one.
 - [x] 01: Foundations — [brief](01-foundations.md)
 - [x] 02: Asking and idling — [brief](02-asking-and-idling.md)
 - [x] 03: Codex — [brief](03-codex.md)
-- [ ] 04: Grok Build — [brief](04-grok-build.md) *(in progress: `agent-backends/04-grok-build`)*
-- [ ] 05: OpenCode — [brief](05-opencode.md)
+- [x] 04: Grok Build — [brief](04-grok-build.md)
+- [ ] 05: OpenCode — [brief](05-opencode.md) *(in progress: `agent-backends/05-opencode`)*
