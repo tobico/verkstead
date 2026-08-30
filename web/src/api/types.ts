@@ -2095,12 +2095,14 @@ export type ResolutionEdit = { resolution: Resolution | null, };
  * either sets a resolution going or it does not, and a button that quietly did
  * nothing would leave the human waiting on a session that was never dispatched.
  *
- * Both refusals are readings that have moved on rather than anything for the
- * human to correct — the button is drawn off the record, and the record is what
- * this is answered from — so each says what has changed since the pane was
- * drawn.
+ * The refusals are of two kinds. Two of them are readings that have moved on
+ * rather than anything for the human to correct — the button is drawn off the
+ * record, and the record is what this is answered from — so each says what has
+ * changed since the pane was drawn. The other two are about the checkout the
+ * resolution session would work in, which a Conversation left Done for weeks is
+ * the likeliest of any to have lost.
  */
-export type Resolved = "Resolving" | "NoSuchConversation" | "NotDone" | "NothingConflicts";
+export type Resolved = "Resolving" | "NoSuchConversation" | "NotDone" | "NothingConflicts" | "NowhereToWork" | "WorktreeRefused";
 
 /**
  * The submitted collection of Answers and Unanswered markers for one Question

@@ -9349,6 +9349,13 @@ async fn a_conflict_that_arrives_after_done_is_written_down_and_nothing_else() {
 /// read the review, and a base that moved under the branch since is not a reason
 /// to read it a second time. The review's settle stands, so the wrap-up finds it
 /// settled and runs nothing for it.
+///
+/// **The checkout has gone by the time they press**, which is the state a Done
+/// Conversation is likeliest of any to be in: nothing has worked in it since the
+/// work was finished with, and that may be weeks. So the press makes it again
+/// from the branch before it moves anything, the way Resume makes one — and the
+/// resolution session below is a session that could only have run in a checkout
+/// that was there.
 #[tokio::test]
 async fn pressing_resolve_on_a_conflicted_done_pull_request_gets_it_resolved() {
     let spill = tempfile::tempdir().unwrap();
@@ -9386,8 +9393,29 @@ async fn pressing_resolve_on_a_conflicted_done_pull_request_gets_it_resolved() {
          about",
     );
 
+    // And in the weeks nothing was working in it, the checkout went. A worktree
+    // is derived state and the branch holds everything that was committed, so
+    // this is a directory to make again rather than work that is lost — but a
+    // session dispatched at the path before it is made again is a session that
+    // cannot start.
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("the work is checked out")
+            .path,
+    );
+    std::fs::remove_dir_all(&worktree).unwrap();
+
     // Which they do, on the pull request's own details pane.
     assert_eq!(fixture.resolve_conflicts().await, Resolved::Resolving);
+
+    assert!(
+        worktree.join(".git").exists(),
+        "the press made the checkout again from the branch before it moved \
+         anything, so there is somewhere for the resolution session to work",
+    );
 
     assert_eq!(
         fixture.view().await.state,

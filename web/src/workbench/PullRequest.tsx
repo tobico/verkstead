@@ -49,14 +49,18 @@ import { PaneHead } from "./PaneHead";
 import styles from "./PullRequest.module.css";
 import { ABBREVIATED } from "./Timeline";
 
-/// Each way of being refused the press, in the words of what has changed since
-/// the pane was drawn.
+/// Each way of being refused the press, in the words of what stopped it.
 ///
-/// Neither of them is anything for the human to go and do: the button is drawn
-/// off the record and the press is answered from it, so a refusal is the record
-/// having moved on under a page somebody left open. Which is why the re-read
-/// behind the sentence is as much of the answer as the sentence — the row goes
+/// Two of them are the record having moved on under a page somebody left open —
+/// the button is drawn off the record and the press is answered from it — and
+/// neither is anything for the human to go and do, which is why the re-read
+/// behind the sentence is as much of the answer as the sentence: the row goes
 /// with it.
+///
+/// The other two are about the checkout the resolution session would work in. A
+/// conversation stays finished with for as long as nobody merges its pull
+/// request, which is time enough for a directory to go — and the press sees to
+/// that before it moves anything, so what it says here is why nothing moved.
 export const RESOLVE_REFUSAL: Record<Resolved, string> = {
   Resolving: "",
   NoSuchConversation: "This conversation is gone.",
@@ -64,6 +68,10 @@ export const RESOLVE_REFUSAL: Record<Resolved, string> = {
     "This conversation is not finished with any more, so whatever is driving it has the conflict in hand.",
   NothingConflicts:
     "This pull request merges again, so there is nothing left to resolve.",
+  NowhereToWork:
+    "This conversation has no worktree recorded, so there is nowhere to resolve the conflict.",
+  WorktreeRefused:
+    "The worktree this conversation was done in has gone, and git would not make it again. The server's log says why.",
 };
 
 export function PullRequest(props: {

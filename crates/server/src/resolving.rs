@@ -35,6 +35,17 @@
 //! next poll without dispatching anything. See [`store::forget_fix_attempts`],
 //! which is the same forgetting from the same reasoning.
 //!
+//! **And the checkout is seen to before any of it**, which is the one thing
+//! this press has to do that the rest of the wrap-up does not. Every other way
+//! into a Worktree is a way into one something was working in minutes ago; this
+//! one is a way into one nothing has touched since the work was finished with,
+//! which may be weeks. So it is read and made again where it has gone, exactly
+//! as [`crate::resume`] reads and makes one — a worktree being derived state —
+//! and the press refuses rather than moving where it cannot be made. A
+//! resolution session dispatched at a directory that is not there would spend
+//! both of the pull request's goes on a sandbox nothing could build, and stop
+//! the run with a Notice blaming the conflict.
+//!
 //! The watchers then go on as found. There is nothing here that decides what
 //! runs: each of them reads the record for itself a moment later, which is what
 //! makes this press the same wrap-up every other way into one starts — the
@@ -54,10 +65,16 @@ use crate::store;
 /// Press **Resolve conflicts**: send a Done Conversation back to its wrap-up,
 /// and start the watchers that will resolve the conflict.
 ///
-/// The refusals are asked by the store, inside the transaction that makes the
-/// move — which is what keeps two presses a moment apart from both moving one
-/// Conversation, and what makes *nothing conflicts* an answer about the record
-/// rather than about a reading taken beside it.
+/// The refusals about the record are asked by the store, inside the transaction
+/// that makes the move — which is what keeps two presses a moment apart from
+/// both moving one Conversation, and what makes *nothing conflicts* an answer
+/// about the record rather than about a reading taken beside it.
+///
+/// The refusals about the checkout are asked here, before it: what they are
+/// about is a directory rather than a row, and a Conversation moved into
+/// Wrapping over a Worktree nothing could work in would be one left standing
+/// there for the stall sweep to stop. So the checkout is seen to first and the
+/// move is made over one that is there.
 ///
 /// The registration is taken before the move and held across the spawn, for
 /// [`crate::resume`]'s reason: a Conversation that says Wrapping with nothing on
@@ -68,6 +85,78 @@ pub(crate) async fn resolve(state: &AppState, conversation_id: i64) -> anyhow::R
     // Taken before the move rather than after it, and dropped by the early
     // returns on every path that refuses.
     let driving = state.drivers.driving(conversation_id);
+
+    let Some(conversation) = store::load_conversation(&state.pool, conversation_id).await? else {
+        return Ok(Resolved::NoSuchConversation);
+    };
+
+    // Asked here as well as in the transaction below, and cheaply: what follows
+    // it is a checkout of somebody's repository, and making one for a
+    // Conversation the move is about to refuse would be slow work done for
+    // nothing. The store's own answer is still the one that decides — see the
+    // match below, which is what two presses a moment apart race on.
+    if conversation.state != store::Lifecycle::Done {
+        return Ok(Resolved::NotDone);
+    }
+
+    // Every state past drafting has a Worktree, so one missing from the record
+    // is a record that cannot be true: there is nowhere for the resolution
+    // session to work and nothing to make a checkout from either, the path being
+    // Verkstead's own to have chosen.
+    let Some(worktree) = conversation.worktree.clone() else {
+        return Ok(Resolved::NowhereToWork);
+    };
+
+    // The branch first, which may not be called what the record says — see
+    // [`crate::renames`], and [`crate::resume`], which reads it here for the
+    // same reason: the sweep that follows a rename runs only while a session
+    // does, so a rename nothing saw would have the checkout below read as broken
+    // and rebuilt from a branch that is not there.
+    let branch = crate::renames::follow(
+        &state.pool,
+        conversation_id,
+        &conversation.repo.path,
+        &worktree,
+        &conversation.branch,
+    )
+    .await
+    .unwrap_or_else(|| conversation.branch.clone());
+
+    // And then the checkout itself, because this press is the one way into a
+    // wrap-up that starts work in a Worktree nothing has touched for weeks. A
+    // Conversation stays Done for as long as nobody merges its pull request, and
+    // in that time a directory is deleted, hollowed out or dropped from the
+    // repository's list of worktrees — and a resolution session dispatched at a
+    // path that is not there spends a go on a sandbox that cannot be built, then
+    // spends the other, and stops the run with a Notice blaming the conflict.
+    //
+    // So it is made again from the branch, exactly as Resume makes it and for
+    // Resume's reason: a worktree is derived state. Nothing healthy is touched,
+    // uncommitted changes and all — see [`crate::worktrees::healthy`], which is
+    // what answers on nearly every press and costs a git read.
+    //
+    // The Conversation's own alone, as Resume rebuilds its own alone: a
+    // companion whose directory has gone is a sandbox no session of any kind
+    // could be built for, and that is the same everywhere rather than this
+    // press's to answer.
+    //
+    // Off the runtime's threads, a checkout of a large repository being no quick
+    // call, and under the registration taken above, a Conversation being rebuilt
+    // being a Conversation being driven.
+    let usable = tokio::task::spawn_blocking({
+        let repo = conversation.repo.path.clone();
+        let worktree = worktree.clone();
+
+        move || {
+            crate::worktrees::healthy(&repo, &worktree, &branch)
+                || crate::worktrees::rebuild(&repo, &worktree, &branch)
+        }
+    })
+    .await?;
+
+    if !usable {
+        return Ok(Resolved::WorktreeRefused);
+    }
 
     match store::resolve_conflicts(&state.pool, conversation_id).await? {
         store::Resolving::NoSuchConversation => return Ok(Resolved::NoSuchConversation),

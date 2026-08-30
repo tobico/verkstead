@@ -2721,10 +2721,12 @@ pub enum Resumed {
 /// either sets a resolution going or it does not, and a button that quietly did
 /// nothing would leave the human waiting on a session that was never dispatched.
 ///
-/// Both refusals are readings that have moved on rather than anything for the
-/// human to correct — the button is drawn off the record, and the record is what
-/// this is answered from — so each says what has changed since the pane was
-/// drawn.
+/// The refusals are of two kinds. Two of them are readings that have moved on
+/// rather than anything for the human to correct — the button is drawn off the
+/// record, and the record is what this is answered from — so each says what has
+/// changed since the pane was drawn. The other two are about the checkout the
+/// resolution session would work in, which a Conversation left Done for weeks is
+/// the likeliest of any to have lost.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Resolved {
@@ -2750,6 +2752,26 @@ pub enum Resolved {
     /// Wrapping for it would be a round trip to Done with nothing done on the
     /// way.
     NothingConflicts,
+
+    /// There is no Worktree on the record for the resolution session to work in.
+    /// A Conversation past drafting is supposed to have one, so this is a record
+    /// that cannot be true.
+    ///
+    /// [`Resumed::NowhereToWork`] under another press, and the same thing: a
+    /// conflict is resolved by a session doing git in a checkout, and there is
+    /// no checkout here to name.
+    NowhereToWork,
+
+    /// There is one on the record, the directory it names is not a worktree any
+    /// more, and it could not be made again from the branch.
+    ///
+    /// The one refusal here with nothing for the human to correct, exactly as
+    /// [`Resumed::WorktreeRefused`] is: the reason is in the server's log. A
+    /// Conversation stays Done for as long as nobody merges its pull request,
+    /// which is time enough for a directory to go — so this is the press
+    /// refusing over the checkout rather than moving the work back into a
+    /// wrap-up that had nowhere to do it.
+    WorktreeRefused,
 }
 
 /// What clicking Steer found, which is what the modal it opens is drawn from.

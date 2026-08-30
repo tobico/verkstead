@@ -11725,13 +11725,20 @@ describe("the pinned pull request", () => {
     );
   });
 
-  /// And a press that was refused says which refusal it was. Both of them are
+  /// And a press that was refused says which refusal it was. Two of them are
   /// the record having moved on under a page somebody left open — the
   /// conversation is not finished with any more, or the branch merges again —
   /// and neither is anything to go and do, which is why the re-read behind the
-  /// sentence is as much of the answer.
+  /// sentence is as much of the answer. The other two are the checkout the
+  /// resolution session would have worked in, which a conversation left finished
+  /// with for weeks is the likeliest of any to have lost.
   it("says which refusal a press came back with", async () => {
-    for (const outcome of ["NotDone", "NothingConflicts"] satisfies Resolved[]) {
+    for (const outcome of [
+      "NotDone",
+      "NothingConflicts",
+      "NowhereToWork",
+      "WorktreeRefused",
+    ] satisfies Resolved[]) {
       theWrapping(
         { ...whoseMerging("Conflicting"), state: "Done" },
         whenever(

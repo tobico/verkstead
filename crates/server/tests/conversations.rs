@@ -7307,6 +7307,75 @@ async fn resolving_a_conflict_is_refused_where_there_is_none_to_resolve() {
     );
 }
 
+/// And refused where there is nowhere to resolve it — the Worktree gone and git
+/// unable to make it again.
+///
+/// The refusal this press has that no other reading gives it. A Conversation
+/// stays Done for as long as nobody merges its pull request, which is weeks in
+/// the case the press is for, and a directory goes in that time: deleted by
+/// hand, hollowed out, or left behind by a repository that is no longer there.
+/// A press that moved the work back into a wrap-up over one would dispatch a
+/// resolution session at a path that is not there, spend both of the pull
+/// request's goes on a sandbox nothing could build, and stop the run with a
+/// Notice blaming the conflict.
+///
+/// So the checkout is seen to before the move, and where it cannot be made the
+/// press refuses and the Conversation stays exactly where it was. The
+/// repository itself is taken away here because that is the one way to make git
+/// refuse for certain — what is being asked is what the press does when it
+/// refuses, rather than which of the ways a checkout goes was this one.
+#[tokio::test]
+async fn resolving_a_conflict_is_refused_where_there_is_nowhere_to_resolve_it() {
+    let (watched, dir, app, repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+    store::record_merging(&pool, id, repo_id, store::Merging::Conflicting)
+        .await
+        .unwrap();
+
+    for waiting_on in store::WAITED_ON.into_iter().chain([
+        store::WaitingOn::Checks(repo_id),
+        store::WaitingOn::Comments(repo_id),
+        store::WaitingOn::Mergeable(repo_id),
+    ]) {
+        store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    store::finish_wrap_up(&pool, id).await.unwrap();
+
+    // The work is finished with, the pull request conflicts, and there is
+    // nothing left on this machine to do anything about it in.
+    std::fs::remove_dir_all(repo.join(".git")).unwrap();
+
+    assert_eq!(
+        resolving(&app, id).await,
+        Resolved::WorktreeRefused,
+        "git cannot make the checkout again, so the press says so rather than \
+         moving the work into a wrap-up with nowhere to work",
+    );
+
+    assert_eq!(
+        opened(&app, id).await.state,
+        Lifecycle::Done,
+        "and the Conversation is where the press found it",
+    );
+}
+
 /// Press **Resolve conflicts**, the way the button on a Done pull request's
 /// details pane does. Nothing goes with it: which Conversation it is is the
 /// whole of what it says.
