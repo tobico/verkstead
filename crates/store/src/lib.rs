@@ -85,9 +85,10 @@ pub use profiles::{
     delete_profile, load_profile, profiles, update_profile,
 };
 pub use pull_requests::{
-    Merging, PullRequest, Rollup, Wrapping, check_rollup, merging, pull_request, pull_request_repo,
-    pull_requests, record_another_pull_request, record_check_rollup, record_merging,
-    record_pull_request,
+    Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup, merging,
+    pull_request, pull_request_repo, pull_requests, record_another_pull_request,
+    record_check_rollup, record_merging, record_pull_request, record_standing, standing,
+    unfinished_pull_requests,
 };
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,

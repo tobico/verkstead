@@ -117,6 +117,12 @@
 //! nothing to wait for*. Neither holds anything up where it cannot be told —
 //! a `gh` that answered without a head and a checkout with no origin to ask are
 //! the third thing again, and the rollup stands on its own.
+//!
+//! **All of this stops at Done**, which is where [`crate::merges`] takes over:
+//! a base goes on moving under a branch waiting to be merged, and there is
+//! nothing here left watching for it. What that sweep does with a conflict is
+//! write it down, nothing more — the dispatching above is a wrap-up's, and a
+//! wrap-up is over.
 
 use std::path::Path;
 use std::time::Duration;

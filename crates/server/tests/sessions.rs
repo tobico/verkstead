@@ -932,6 +932,12 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // about something else say nothing about it, and the ones that are about it
     // keep [`SWEEPING`].
     stalls: paced(Duration::from_secs(600)),
+    // And longer than any of these run for again, for the stall sweep's reason
+    // one sweep along: every fixture that reaches Done has a pull request
+    // nothing has merged, which is exactly what the sweep after Done goes and
+    // asks about — so the tests that are about something else say nothing about
+    // it, and the ones that are about it keep [`LANDING`].
+    merges: paced(Duration::from_secs(600)),
     // Nothing, which is a server's own: the review takes the Worktree as soon
     // as the wrap-up starts, and the tests that want the window before it hold
     // it open themselves.
@@ -946,6 +952,18 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// number of seconds it waits before noticing is not part of the answer.
 static SWEEPING: LazyLock<Pace> = LazyLock::new(|| Pace {
     stalls: paced(Duration::from_millis(100)),
+    ..*BRISKLY
+});
+
+/// And the same at a pace that sweeps the pull requests of what is already
+/// finished, for the tests about what happens to one after Done.
+///
+/// A server sweeps those every fifteen minutes. What is being asked here is
+/// whether a pull request that starts conflicting long after the work on it is
+/// over is noticed at all, and the number of minutes it waits is not part of the
+/// answer.
+static LANDING: LazyLock<Pace> = LazyLock::new(|| Pace {
+    merges: paced(Duration::from_millis(100)),
     ..*BRISKLY
 });
 
@@ -965,6 +983,14 @@ static SWEEPING: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// request itself, which reads as a suite of nothing. Which is what makes the
 /// pane's own freshening visible — nothing else writes a rollup down.
 ///
+/// The pane's own answer carries the two facts about the pull request itself
+/// beside them — whether it merges, and where it has got to — for the same
+/// reason and one of its own: opening the pane is the one thing left that asks
+/// GitHub about a pull request nothing is watching, so it freshens every fact a
+/// card is drawn off rather than only the list it came for. Where it has got to
+/// is the one of the three nothing else here writes down, which is what makes
+/// that freshening visible.
+///
 /// That one answer carries the `mergeable` the same watcher reads, because a
 /// wrap-up waits on that as much as on the checks: a pull request nothing has
 /// said merges is one Verkstead is still waiting to hear about, and every
@@ -975,7 +1001,7 @@ const PULL_REQUEST: &str = r#"
 if [ "$1" = api ]; then printf '[]'; exit 0; fi
 case "$5" in
 *commits*)
-    printf '{"commits":[{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}],"comments":[{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}],"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'
+    printf '{"commits":[{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}],"comments":[{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}],"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}],"mergeable":"MERGEABLE","state":"OPEN"}'
     ;;
 *comments*)
     printf '{"comments":[],"reviews":[]}'
@@ -1076,6 +1102,82 @@ esac
 "#,
         after = quoted(after),
     )
+}
+
+/// A `gh` for the sweep that watches a pull request after the work on it is
+/// Done: everything a wrap-up asks answered green and merging, and the sweep's
+/// own question answered out of a file the test writes.
+///
+/// The sweep is told from every other question by the fields it asks for and
+/// nothing else — `mergeable,state`, matched exactly rather than by a glob,
+/// because the details pane asks for both of those beside its own three. Which
+/// is the whole of what makes these tests possible: nothing but the sweep is
+/// ever answered out of `landing`.
+///
+/// Every one of those questions is written down in `asked` as it arrives, so a
+/// test can read back not only what Verkstead recorded but whether it went and
+/// asked at all — which is what *never asked about again* is read off.
+///
+/// An empty `landing` is a pull request that is open and merges, which is what
+/// every one of these starts as: the file is how a test says GitHub has come to
+/// say something else.
+fn gh_landing(asked: &Path, landing: &Path) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+case "$5" in
+mergeable,state)
+    printf '%s\n' "$5" >> {asked}
+    if [ -s {landing} ]; then cat {landing}; else printf '{{"mergeable":"MERGEABLE","state":"OPEN"}}'; fi
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[],"mergeable":"MERGEABLE","state":"OPEN"}}'
+    ;;
+*statusCheckRollup*)
+{GREEN}
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#,
+        asked = quoted(asked),
+        landing = quoted(landing),
+    )
+}
+
+/// How many times the sweep has asked GitHub about the pull request — read off
+/// the file [`gh_landing`] writes every question into.
+fn swept(asked: &Path) -> usize {
+    std::fs::read_to_string(asked)
+        .unwrap_or_default()
+        .lines()
+        .count()
+}
+
+/// Wait until the sweep has asked at least once, or give up.
+///
+/// What a test that is about the *second* thing GitHub says has to wait for
+/// first: writing the new answer before anything had read the old one would be a
+/// test that never saw the change it was about.
+async fn until_swept(asked: &Path) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        if swept(asked) > 0 {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the sweep never asked about the pull request",
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
 }
 
 /// A green suite, as [`gh_about`]'s answer about the checks.
@@ -1436,6 +1538,12 @@ async fn grilling_swept(stub: &str) -> Grilling {
         &[],
     )
     .await
+}
+
+/// The same, on a server that sweeps a Done Conversation's pull requests briskly
+/// enough to watch it do so — see [`LANDING`].
+async fn grilling_landing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    grilling_at_pace(spill, stub, gh, *LANDING, &[]).await
 }
 
 /// The same, over a directory the caller already has the name of — which is
@@ -4691,6 +4799,11 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
     // watcher's question with a pull request that has no suite on it.
     assert_eq!(check_rollup(&fixture).await, None);
 
+    // Nor where the pull request has got to, which the watcher never asks about:
+    // whether anybody has merged the work yet is no business of a Conversation
+    // still wrapping it up.
+    assert_eq!(recorded_standing(&fixture).await, None);
+
     // And what is on the PR is fetched when the pane opens it, through the same
     // host `gh` — never written down.
     let carried: verkstead_render::PullRequestDetails = get(
@@ -4727,6 +4840,20 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
     assert_eq!(
         check_rollup(&fixture).await,
         Some(verkstead_server::store::Rollup::Passed),
+    );
+
+    // And the two facts about the pull request itself that rode the same answer,
+    // which a card is drawn off as much as the icon is: it merges, and it is
+    // open. Whatever state the Conversation is in — this one is still Wrapping,
+    // and the sweep that keeps them fresh does not start until Done.
+    assert_eq!(
+        recorded_merging(&fixture).await,
+        Some(verkstead_server::store::Merging::Cleanly),
+    );
+    assert_eq!(
+        recorded_standing(&fixture).await,
+        Some(verkstead_server::store::Standing::Open),
+        "which nothing but the pane could have written down here",
     );
 }
 
@@ -4914,6 +5041,79 @@ async fn told_to_resolve_by(fixture: &Grilling, repo: i64, resolution: Resolutio
     .await;
 
     assert_eq!(view.conflict_resolution, Some(resolution));
+}
+
+/// What Verkstead has written down about whether this Conversation's own pull
+/// request merges, which is the reading a card is drawn off long after anything
+/// stopped watching.
+///
+/// Read out of the store rather than off the Timeline for [`checks_settled`]'s
+/// reason: it is a reading of GitHub rather than something that happened.
+async fn recorded_merging(fixture: &Grilling) -> Option<verkstead_server::store::Merging> {
+    let repo = own_repo(fixture).await;
+    let pool = open_database(&fixture.database).await.unwrap();
+    let merging = verkstead_server::store::merging(&pool, fixture.id, repo)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    merging
+}
+
+/// And where it had got to — open, merged or closed — which is the reading that
+/// ends the sweep after Done.
+async fn recorded_standing(fixture: &Grilling) -> Option<verkstead_server::store::Standing> {
+    let repo = own_repo(fixture).await;
+    let pool = open_database(&fixture.database).await.unwrap();
+    let standing = verkstead_server::store::standing(&pool, fixture.id, repo)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    standing
+}
+
+/// Read what is written down about the merge back until GitHub's latest word is
+/// there, or give up.
+async fn until_merging(fixture: &Grilling, said: verkstead_server::store::Merging) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let read = recorded_merging(fixture).await;
+
+        if read == Some(said) {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "GitHub said the pull request merges {said:?} and nothing wrote it down. \
+             What stands is {read:?}",
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// And the same about where it has got to.
+async fn until_standing(fixture: &Grilling, said: verkstead_server::store::Standing) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let read = recorded_standing(fixture).await;
+
+        if read == Some(said) {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "GitHub said the pull request stands {said:?} and nothing wrote it down. \
+             What stands is {read:?}",
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
 }
 
 /// And how many resolution sessions it has counted against the conflict on that
@@ -8963,6 +9163,196 @@ async fn a_merge_github_has_not_worked_out_dispatches_nothing() {
     );
 }
 
+/// A pull request that starts conflicting after the work on it is Done is
+/// noticed all the same — and nothing at all is done about it.
+///
+/// A wrap-up's watchers stop the moment the Conversation reaches Done, and the
+/// pull request goes on sitting there waiting for the human to merge it. Bases
+/// move: a branch that merged cleanly at Done conflicts the next morning without
+/// anybody having touched it, and there would be nothing left asking.
+///
+/// So a sweep of its own asks, every fifteen minutes on a server and every
+/// hundred milliseconds here. What it does with the answer is write it down and
+/// nothing else: no session, no stop, no Notice, and the Conversation stays
+/// exactly where it was. After Done, what to do about a conflict is the human's.
+#[tokio::test]
+async fn a_conflict_that_arrives_after_done_is_written_down_and_nothing_else() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let asked = spill.path().join("gh-sweeps");
+    let landing = spill.path().join("landing");
+
+    let fixture = grilling_landing(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_landing(&asked, &landing),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    // The sweep has it in hand: the pull request is open, which is the reading
+    // nothing but this sweep asks for — the wrap-up's own watcher never asks
+    // where a pull request has got to.
+    until_standing(&fixture, verkstead_server::store::Standing::Open).await;
+
+    assert_eq!(
+        recorded_merging(&fixture).await,
+        Some(verkstead_server::store::Merging::Cleanly),
+        "it merged cleanly the whole way to Done",
+    );
+
+    // And then somebody merges something else, and the base moves out from under
+    // a branch nobody is working on any more.
+    std::fs::write(&landing, r#"{"mergeable":"CONFLICTING","state":"OPEN"}"#).unwrap();
+
+    until_merging(&fixture, verkstead_server::store::Merging::Conflicting).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Done,
+        "the work is still finished with: a conflict after Done moves nothing",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing was said about it on the Timeline: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !dispatched.exists(),
+        "and nothing was sent at it: after Done, what to do about a conflict is \
+         the human's: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+    assert_eq!(
+        conflict_attempts_spent(&fixture).await,
+        0,
+        "so no go was spent on it either",
+    );
+}
+
+/// A pull request somebody has merged is never asked about again, and that is
+/// where the sweep ends.
+///
+/// Merged and closed are both endings — nothing about either moves again — so
+/// asking a second time would be a `gh` call every fifteen minutes for the life
+/// of the server about a pull request that has stopped existing as a question.
+/// It is learned from the same answer the conflict is watched for, which is what
+/// makes the ending free.
+///
+/// And it ends per pull request rather than all at once: what stops the asking is
+/// the reading written down about *this* one.
+#[tokio::test]
+async fn a_pull_request_that_has_been_merged_is_never_asked_about_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let asked = spill.path().join("gh-sweeps");
+    let landing = spill.path().join("landing");
+
+    let fixture = grilling_landing(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_landing(&asked, &landing),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    until_swept(&asked).await;
+
+    // The human merges it, which is the act this whole pipeline is built around
+    // and the one Verkstead never makes itself.
+    std::fs::write(&landing, r#"{"mergeable":"MERGEABLE","state":"MERGED"}"#).unwrap();
+
+    until_standing(&fixture, verkstead_server::store::Standing::Merged).await;
+
+    // GitHub would say something else now, and nothing is ever going to hear it.
+    std::fs::write(&landing, r#"{"mergeable":"CONFLICTING","state":"OPEN"}"#).unwrap();
+
+    let stopped_at = swept(&asked);
+
+    // Long enough for many sweeps of a pull request there is nothing left to ask
+    // about.
+    pause(Duration::from_millis(1500)).await;
+
+    assert_eq!(
+        swept(&asked),
+        stopped_at,
+        "the sweep stopped asking the moment the merge was recorded",
+    );
+    assert_eq!(
+        recorded_merging(&fixture).await,
+        Some(verkstead_server::store::Merging::Cleanly),
+        "so what stands about it is the last thing anybody asked, from before it \
+         was merged",
+    );
+}
+
+/// And a Closed Conversation is never asked about at all.
+///
+/// Closing is the human finished with the work, whatever state it had got to —
+/// so a pull request left open on one is theirs to leave open, and a sweep going
+/// on asking about it would be Verkstead watching something nobody is waiting
+/// for. Which takes an Archived Conversation with it: archiving is a Closed
+/// Conversation off the sidebar rather than a state of its own.
+#[tokio::test]
+async fn a_closed_conversation_is_never_asked_about() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let asked = spill.path().join("gh-sweeps");
+    let landing = spill.path().join("landing");
+
+    let fixture = grilling_landing(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_landing(&asked, &landing),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    until_swept(&asked).await;
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+
+    // The base moves under it afterwards, and nothing is listening.
+    std::fs::write(&landing, r#"{"mergeable":"CONFLICTING","state":"OPEN"}"#).unwrap();
+
+    let stopped_at = swept(&asked);
+
+    // Long enough for many sweeps of a Conversation nobody is waiting on.
+    pause(Duration::from_millis(1500)).await;
+
+    assert_eq!(
+        swept(&asked),
+        stopped_at,
+        "closing it stopped the asking, whatever GitHub had left to say",
+    );
+    assert_eq!(
+        recorded_merging(&fixture).await,
+        Some(verkstead_server::store::Merging::Cleanly),
+        "so the conflict that arrived after the human was finished is not written \
+         down anywhere",
+    );
+}
+
 /// What a server that comes back up owes a batch's proposal nobody is behind: the
 /// same thing it owes the review's.
 ///
@@ -9323,10 +9713,14 @@ async fn comments_already_dispatched_for_are_not_dispatched_for_again_after_a_re
 ///
 /// And what it does not wait for is the merge itself. Whether GitHub *can* merge
 /// the pull request is asked on every poll, one conflicted being one nothing
-/// could land; whether anybody *has* merged it is never asked at all. The pull
-/// request is open the whole time here — stages stack on unmerged predecessors,
-/// so a Conversation that waited for one to land would hold up every stage
-/// behind it.
+/// could land; whether anybody *has* merged it is asked by nothing a wrap-up
+/// runs. The pull request is open the whole time here — stages stack on unmerged
+/// predecessors, so a Conversation that waited for one to land would hold up
+/// every stage behind it.
+///
+/// The sweep after Done asks it, which is another question at another time: what
+/// it is watching for is the moment there is nothing left to watch, rather than
+/// anything a wrap-up is waiting on.
 #[tokio::test]
 async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_merge() {
     let spill = tempfile::tempdir().unwrap();

@@ -777,6 +777,101 @@ impl Mergeable {
     }
 }
 
+/// Where a pull request has got to, and whether it merges — the two facts one
+/// look at a pull request that nobody is wrapping up any more comes back with.
+///
+/// One question rather than two, `gh` taking a list of fields: a pull request
+/// whose base has moved and one somebody has merged are the two things a sweep
+/// after Done is looking for, and asking them separately would be two round
+/// trips over somebody else's network for one answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Landing {
+    /// Whether GitHub can merge it into its base as it stands.
+    pub(crate) mergeable: Mergeable,
+
+    /// And where it has got to, which is what says whether there is any point
+    /// asking again.
+    pub(crate) stands: Stands,
+}
+
+/// Where GitHub says a pull request has got to.
+///
+/// Three answers and a fourth for not knowing, exactly as [`Mergeable`] has: the
+/// two endings are final, and *open* and *not known* are each a reason to ask
+/// again. Which way an unreadable word falls matters here for [`Mergeable`]'s
+/// reason turned around — reading one as an ending would stop the asking for
+/// good, so nothing but GitHub's own two words for an ending is one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stands {
+    /// It is open: `OPEN`.
+    Open,
+
+    /// Somebody merged it: `MERGED`.
+    Merged,
+
+    /// Somebody closed it without merging it: `CLOSED`.
+    Closed,
+
+    /// GitHub said nothing this knows how to read, which includes an answer
+    /// carrying no `state` at all. Nothing is concluded from it, the way nothing
+    /// is concluded from a `gh` that would not answer.
+    Unknown,
+}
+
+impl Stands {
+    /// The one GitHub's word names.
+    fn read(said: &str) -> Self {
+        match said.to_ascii_uppercase().as_str() {
+            "OPEN" => Self::Open,
+            "MERGED" => Self::Merged,
+            "CLOSED" => Self::Closed,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// Whether pull request `number` merges into its base, and where it has got to.
+///
+/// What the sweep after Done asks, and the only question it asks: a Conversation
+/// that has finished wrapping up has no suite anybody is waiting on and no
+/// comments left to dispatch about, so what is left worth knowing is whether the
+/// branch still lands and whether anybody has landed it. See [`crate::merges`].
+///
+/// [`checks`] is what asks the same about a pull request somebody is still
+/// wrapping up — the merge rides that call rather than this one, because a
+/// wrap-up is asking about the suite anyway. The two never both run over one
+/// pull request: the watcher stops at Done and the sweep starts there.
+pub(crate) fn landing(gh: &Gh, repo: &Path, number: i64) -> Result<Landing, Trouble> {
+    /// What `--json mergeable,state` comes back as.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Read {
+        #[serde(default)]
+        mergeable: String,
+        #[serde(default)]
+        state: String,
+    }
+
+    let said = gh.ask(
+        repo,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "mergeable,state",
+        ],
+    )?;
+
+    let read: Read = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    Ok(Landing {
+        mergeable: Mergeable::read(&read.mergeable),
+        stands: Stands::read(&read.state),
+    })
+}
+
 /// What GitHub says about a pull request's checks, and which commit it is
 /// saying it about.
 ///
@@ -1148,6 +1243,14 @@ fn identity(id: &str, url: &str, author: &str, at: &str) -> String {
 pub(crate) struct Details {
     pub(crate) pane: verkstead_render::PullRequestDetails,
     pub(crate) checks: Vec<Check>,
+
+    /// And where the pull request has got to and whether it merges, which ride
+    /// the same question for the reason the checks do — see [`Landing`]. What
+    /// they are for is the recording rather than the pane: opening it is the one
+    /// thing that asks GitHub about a pull request nothing is watching or
+    /// sweeping, so it freshens every fact that is drawn off a card as well as
+    /// the list it came for.
+    pub(crate) landing: Landing,
 }
 
 /// What is on the pull request now: the commits it carries, what GitHub is
@@ -1162,9 +1265,16 @@ pub(crate) struct Details {
 /// taking a list of fields: two questions would be two round trips over somebody
 /// else's network, and a commit list from before a push beside checks from after
 /// it.
+///
+/// And whether it merges and where it has got to ride the same list again, for
+/// the same reason and one of their own: opening the pane is the one thing left
+/// that asks GitHub about a pull request nothing is watching, so it is what
+/// freshens every fact a card draws rather than only the one the pane came for.
+/// See [`Landing`], and [`crate::merges`], where the recording is.
 pub(crate) fn details(gh: &Gh, repo: &Path, number: i64) -> Result<Details, Trouble> {
-    /// What `--json commits,comments,statusCheckRollup` comes back as, of which
-    /// this takes the fields the details pane draws.
+    /// What `--json commits,comments,statusCheckRollup,mergeable,state` comes
+    /// back as, of which this takes the fields the details pane draws and the
+    /// three the card does.
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Carried {
@@ -1174,6 +1284,10 @@ pub(crate) fn details(gh: &Gh, repo: &Path, number: i64) -> Result<Details, Trou
         comments: Vec<Said>,
         #[serde(default)]
         status_check_rollup: Vec<Reported>,
+        #[serde(default)]
+        mergeable: String,
+        #[serde(default)]
+        state: String,
     }
 
     /// `gh` writes its JSON in the field names the GraphQL API uses, which are
@@ -1204,7 +1318,7 @@ pub(crate) fn details(gh: &Gh, repo: &Path, number: i64) -> Result<Details, Trou
             "view",
             &number.to_string(),
             "--json",
-            "commits,comments,statusCheckRollup",
+            "commits,comments,statusCheckRollup,mergeable,state",
         ],
     )?;
 
@@ -1235,6 +1349,10 @@ pub(crate) fn details(gh: &Gh, repo: &Path, number: i64) -> Result<Details, Trou
             checks.iter().map(drawn).collect(),
         ),
         checks,
+        landing: Landing {
+            mergeable: Mergeable::read(&carried.mergeable),
+            stands: Stands::read(&carried.state),
+        },
     })
 }
 

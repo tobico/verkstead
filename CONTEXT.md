@@ -1056,9 +1056,27 @@ every other pull request's before the run stops, and the stop's Notice names the
 pull request that would not merge clean. Resume and a steer into Wrapping forget
 the count, exactly as they forget the checks'.
 
+**And it goes on being asked after Done.** A wrap-up's watchers stop when the
+Conversation reaches Done, and the pull request goes on sitting there waiting to
+be merged while its base moves under it — so a sweep of its own asks, every
+fifteen minutes, about every Done Conversation's pull requests. What it writes
+down is the same reading and one beside it: where the pull request has got to,
+which is *open*, *merged* or *closed*. A pull request recorded merged or closed
+is never asked about again, that being a question with a final answer; a Closed
+Conversation is never asked about at all, and an **Archived** one with it, a
+human who has closed the work being finished with it. Nothing is dispatched from
+there and nothing moves: after Done a conflict is the human's to decide about,
+and the sweep's part is that the fact is there when they look.
+
+Opening a pull request's details pane asks GitHub the same two things on its way
+to listing the checks, so it freshens both wherever the Conversation has got to —
+the way it already freshens a stale **check rollup**.
+
 *Can be merged* rather than *has been merged*: Verkstead never waits for the
 merge itself, which is the human's act and the one this pipeline is built
-around.
+around. The sweep above asks whether it has happened, which is not the same
+thing — it is watching for the moment there is nothing left to watch, rather
+than holding anything up until it comes.
 _Avoid_: merged, landed, mergeability, clean (the words here are mergeable and
 conflicting)
 

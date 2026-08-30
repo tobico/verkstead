@@ -16,11 +16,12 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Lifecycle, Merging, PullRequest, Rebuilding, Rollup, Wrapping, check_rollup,
-    close_conversation, implement_again, load_conversation, merging, open_database, pick_direction,
-    pull_request, pull_request_repo, record_another_pull_request, record_check_rollup,
-    record_merging, record_pull_request, register_repo, save_brief, start_conversation,
-    start_grilling, timeline,
+    Event, Finished, Lifecycle, Merging, PullRequest, Rebuilding, Rollup, Standing, WAITED_ON,
+    WaitingOn, Wrapping, check_rollup, close_conversation, finish_wrap_up, implement_again,
+    load_conversation, merging, open_database, pick_direction, pull_request, pull_request_repo,
+    pull_requests, record_another_pull_request, record_check_rollup, record_merging,
+    record_pull_request, record_standing, register_repo, save_brief, settle_wrap_up, standing,
+    start_conversation, start_grilling, timeline, unfinished_pull_requests,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -100,6 +101,23 @@ async fn companion(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet")
         .id
+}
+
+/// Everything a wrap-up waits on, read off the record rather than written out —
+/// which is what walking a Conversation to Done here means settling.
+async fn waiting_on(pool: &SqlitePool, id: i64) -> Vec<WaitingOn> {
+    let opened = pull_requests(pool, id).await.unwrap();
+
+    WAITED_ON
+        .into_iter()
+        .chain(opened.into_iter().flat_map(|(repo, _)| {
+            [
+                WaitingOn::Checks(repo.id),
+                WaitingOn::Comments(repo.id),
+                WaitingOn::Mergeable(repo.id),
+            ]
+        }))
+        .collect()
 }
 
 /// What a Conversation's Timeline holds, in order.
@@ -661,5 +679,202 @@ async fn whether_a_pull_request_merges_outlives_the_server_that_asked() {
     assert_eq!(
         merging(&pool, id, own).await.unwrap(),
         Some(Merging::Conflicting),
+    );
+}
+
+/// Where a pull request has got to is written down beside whether it merges,
+/// per pull request and the same way.
+///
+/// A different fact from the merge rather than a qualifier on it: a pull request
+/// somebody has merged still merged cleanly, and the two are read out of one
+/// `gh` answer into two rows. So what this asks is that the two are told apart,
+/// that a companion's is its own, and that the last word written is the word
+/// read back.
+#[tokio::test]
+async fn where_each_pull_request_has_got_to_is_written_down_and_read_back() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    let beside = companion(&pool).await;
+
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+    record_another_pull_request(&pool, id, beside, &beside_it())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        standing(&pool, id, own).await.unwrap(),
+        None,
+        "nothing has asked GitHub yet, which is not the same as being open",
+    );
+
+    record_standing(&pool, id, own, Standing::Open)
+        .await
+        .unwrap();
+    record_standing(&pool, id, beside, Standing::Merged)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        standing(&pool, id, own).await.unwrap(),
+        Some(Standing::Open)
+    );
+    assert_eq!(
+        standing(&pool, id, beside).await.unwrap(),
+        Some(Standing::Merged),
+        "the companion's half has landed and the work's own has not, which is two \
+         repositories being two repositories",
+    );
+
+    // And the merge beside it is untouched by any of that: a pull request that
+    // has been merged merged cleanly.
+    record_merging(&pool, id, own, Merging::Conflicting)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        standing(&pool, id, own).await.unwrap(),
+        Some(Standing::Open)
+    );
+    assert_eq!(
+        merging(&pool, id, own).await.unwrap(),
+        Some(Merging::Conflicting),
+    );
+
+    // Written over rather than added to, as every reading of GitHub here is.
+    record_standing(&pool, id, own, Standing::Closed)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        standing(&pool, id, own).await.unwrap(),
+        Some(Standing::Closed),
+    );
+}
+
+/// Which pull requests are still worth asking GitHub about: a Done
+/// Conversation's, that nothing has recorded merged or closed.
+///
+/// The whole of what the sweep after Done walks. A Conversation still wrapping
+/// up has a watcher of its own asking every half minute, so it is not here; a
+/// Closed one is the human finished with the work, so it is not here either —
+/// and an Archived one is a Closed one off the sidebar, which is the same answer
+/// by the same route.
+#[tokio::test]
+async fn the_pull_requests_still_waiting_to_land_are_the_done_ones_nobody_has_merged() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let wrapping = implementing(&pool).await;
+    let own = own(&pool, wrapping).await;
+    record_pull_request(&pool, wrapping, own, &opened())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        unfinished_pull_requests(&pool).await.unwrap(),
+        Vec::new(),
+        "a wrap-up's own watcher is asking about this every half minute already",
+    );
+
+    // The work finishes, which is where the watching stops and the sweeping
+    // starts.
+    for waiting_on in waiting_on(&pool, wrapping).await {
+        settle_wrap_up(&pool, wrapping, waiting_on).await.unwrap();
+    }
+    assert_eq!(
+        finish_wrap_up(&pool, wrapping).await.unwrap(),
+        Finished::Done
+    );
+
+    assert_eq!(
+        unfinished_pull_requests(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|unfinished| (
+                unfinished.conversation_id,
+                unfinished.repo.id,
+                unfinished.number
+            ))
+            .collect::<Vec<_>>(),
+        [(wrapping, own, 41)],
+        "and the Repo comes with it, `gh` reading its repository from wherever it \
+         is run",
+    );
+
+    // A reading that leaves it open leaves it on the list, which is the sweep
+    // going on asking.
+    record_standing(&pool, wrapping, own, Standing::Open)
+        .await
+        .unwrap();
+
+    assert_eq!(unfinished_pull_requests(&pool).await.unwrap().len(), 1);
+
+    // And one that says somebody has merged it takes it off for good.
+    record_standing(&pool, wrapping, own, Standing::Merged)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        unfinished_pull_requests(&pool).await.unwrap(),
+        Vec::new(),
+        "a merged pull request is a question with a final answer",
+    );
+}
+
+/// And a Closed Conversation's pull request is never on the list, however open
+/// it is.
+#[tokio::test]
+async fn a_closed_conversations_pull_request_is_never_asked_about() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+
+    for waiting_on in waiting_on(&pool, id).await {
+        settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+    assert_eq!(unfinished_pull_requests(&pool).await.unwrap().len(), 1);
+
+    close_conversation(&pool, id).await.unwrap();
+
+    assert_eq!(
+        unfinished_pull_requests(&pool).await.unwrap(),
+        Vec::new(),
+        "closing is the human finished with the work, and nothing goes on \
+         watching what they are finished with",
+    );
+}
+
+/// And what has been written down about a pull request outlives the server that
+/// asked, for the reason everything beside it does: a sweep every fifteen
+/// minutes is not what a card drawn an hour later is read off.
+#[tokio::test]
+async fn where_a_pull_request_has_got_to_outlives_the_server_that_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("verkstead.db");
+
+    let pool = open_database(&database).await.unwrap();
+    let id = implementing(&pool).await;
+    let own = own(&pool, id).await;
+    record_pull_request(&pool, id, own, &opened())
+        .await
+        .unwrap();
+    record_standing(&pool, id, own, Standing::Merged)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let pool = open_database(&database).await.unwrap();
+
+    assert_eq!(
+        standing(&pool, id, own).await.unwrap(),
+        Some(Standing::Merged),
     );
 }

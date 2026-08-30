@@ -158,6 +158,71 @@ impl Merging {
     }
 }
 
+/// Where a pull request has got to, as the last look at GitHub found it.
+///
+/// Three words rather than the two [`Merging`] has, and no *not known* among
+/// them for the same reason: nothing having asked is the absence of a row here.
+/// What matters is the difference between the first and the other two — an open
+/// pull request is one still worth asking about, and a merged or closed one is a
+/// question that has been answered for good. See [`unfinished_pull_requests`],
+/// where that is a sweep's whole end condition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Standing {
+    /// It is open, and whether it merges is still a live question.
+    Open,
+
+    /// Somebody merged it, which is the ending this pipeline is built around and
+    /// the one act Verkstead never makes itself.
+    Merged,
+
+    /// Somebody closed it without merging it.
+    Closed,
+}
+
+impl Standing {
+    /// The word the column holds. Lowercase and spelled out, so a database
+    /// opened by hand says something.
+    fn stored(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Merged => "merged",
+            Self::Closed => "closed",
+        }
+    }
+
+    /// The one a stored word names. An unknown word is a database written by a
+    /// Verkstead this one does not understand, exactly as an unknown lifecycle
+    /// state is.
+    fn read(word: &str) -> Result<Self> {
+        Ok(match word {
+            "open" => Self::Open,
+            "merged" => Self::Merged,
+            "closed" => Self::Closed,
+            other => bail!("a pull request stands the unknown {other:?}"),
+        })
+    }
+}
+
+/// One pull request a Done Conversation is still waiting to see land: which
+/// Conversation, which repository to ask GitHub in, and which number to ask
+/// about.
+///
+/// What the sweep after Done walks — see [`unfinished_pull_requests`]. The Repo
+/// rather than its id alone for [`pull_requests`]'s reason: `gh` reads its
+/// repository from wherever it is run, and `#7` names something else in another
+/// one or nothing at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unfinished {
+    /// The Done Conversation whose work the pull request carries.
+    pub conversation_id: i64,
+
+    /// The Repo it was opened in, which is where `gh` is run to ask about it.
+    pub repo: Repo,
+
+    /// And the number GitHub gave it, which means that in that repository alone.
+    pub number: i64,
+}
+
 /// What became of recording one.
 ///
 /// The mirror of [`super::Implementing`] one state along, and refused for the
@@ -260,6 +325,31 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the pull request merges table")?;
+
+    // And where it has got to — open, merged or closed — which is the fact that
+    // ends the asking. A pull request nobody has merged or closed is one whose
+    // conflicts are still worth watching for long after the Conversation is
+    // Done; one that has been is a question with a final answer, and nothing
+    // asks GitHub about it again. See [`unfinished_pull_requests`].
+    //
+    // Beside the merges above rather than a column in them, because a pull
+    // request that has been merged still merged cleanly: the two are separate
+    // readings of one `gh` answer, and neither is the other's qualifier. A row
+    // in one and no row in the other is the ordinary shape of it — the wrap-up's
+    // own watcher writes the merge down and never asks where the pull request
+    // has got to, that being no business of a Conversation still wrapping up.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS pull_request_standings (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             repo_id         INTEGER NOT NULL REFERENCES repos(id),
+             standing        TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, repo_id)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the pull request standings table")?;
 
     Ok(())
 }
@@ -770,4 +860,131 @@ pub async fn merging(
     })?;
 
     row.map(|(word,)| Merging::read(&word)).transpose()
+}
+
+/// Write down where the pull request opened in `repo_id` has got to.
+///
+/// Per pull request for [`record_merging`]'s reason and beside it in the same
+/// spirit: this is a reading of GitHub as it stood the last time anything asked,
+/// written over rather than appended to.
+///
+/// The one reading that is final. A pull request recorded merged or closed is
+/// one nothing asks about again — see [`unfinished_pull_requests`] — so what is
+/// written here is what ends a sweep, and *open* is the only word that leaves it
+/// running.
+pub async fn record_standing(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+    standing: Standing,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO pull_request_standings (conversation_id, repo_id, standing, at)
+         VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (conversation_id, repo_id)
+         DO UPDATE SET standing = excluded.standing, at = excluded.at",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .bind(standing.stored())
+    .execute(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "recording where the pull request Conversation {conversation_id} opened in \
+             Repo {repo_id} has got to"
+        )
+    })?;
+
+    Ok(())
+}
+
+/// And where it stood the last time anything asked, or `None` where nothing has.
+///
+/// Stale on a pull request nothing is sweeping any more, exactly as the merge
+/// beside it is — and on a merged or closed one it is stale for good, that being
+/// the reading nothing asks about twice.
+pub async fn standing(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+) -> Result<Option<Standing>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT standing FROM pull_request_standings
+         WHERE conversation_id = ? AND repo_id = ?",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "reading where the pull request Conversation {conversation_id} opened in \
+             Repo {repo_id} has got to"
+        )
+    })?;
+
+    row.map(|(word,)| Standing::read(&word)).transpose()
+}
+
+/// Every pull request there is still something to ask GitHub about after the
+/// work on it is over: a Done Conversation's, that nothing has recorded merged
+/// or closed.
+///
+/// What the sweep after Done walks, and the whole of what decides which pull
+/// requests it asks about — see [`crate::checks`] in the server for the watcher
+/// that covers a wrap-up, and the sweep for what covers a pull request once the
+/// wrap-up is finished with.
+///
+/// **Done alone.** A Conversation still Wrapping has a watcher of its own asking
+/// this every half minute, and one that is Closed is the human finished with the
+/// work — which takes an Archived one with it, archiving being a Closed
+/// Conversation off the sidebar rather than a state of its own. Everything below
+/// Wrapping has no pull request to ask about in the first place.
+///
+/// **And open alone.** A merged or closed pull request is an answer that will
+/// not change, so it drops out of the list the moment one is recorded and never
+/// comes back — which is what ends the asking per pull request rather than all
+/// at once. A pull request nothing has asked about yet has no row at all, and
+/// that is as much a reason to ask as an open one.
+///
+/// In Conversation order and then the order the pull requests were recorded,
+/// which is each Conversation's own first and its companions as they were found.
+pub async fn unfinished_pull_requests(pool: &SqlitePool) -> Result<Vec<Unfinished>> {
+    /// The columns in the order the query below selects them: the Conversation,
+    /// the Repo to ask in, and the number to ask about.
+    type Row = (i64, i64, String, String, String, i64);
+
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT p.conversation_id, r.id, r.path, r.name, r.default_branch, p.number
+         FROM pull_requests p
+         JOIN conversations v ON v.id = p.conversation_id
+         JOIN repos r ON r.id = p.repo_id
+         LEFT JOIN pull_request_standings s
+              ON s.conversation_id = p.conversation_id AND s.repo_id = p.repo_id
+         WHERE v.state = ?
+           AND (s.standing IS NULL OR s.standing = ?)
+         ORDER BY p.conversation_id, p.event_id",
+    )
+    .bind(Lifecycle::Done.stored())
+    .bind(Standing::Open.stored())
+    .fetch_all(pool)
+    .await
+    .context("reading which pull requests are still waiting to land")?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(conversation_id, id, path, name, default_branch, number)| Unfinished {
+                conversation_id,
+                repo: Repo {
+                    id,
+                    path: std::path::PathBuf::from(path),
+                    name,
+                    default_branch,
+                },
+                number,
+            },
+        )
+        .collect())
 }

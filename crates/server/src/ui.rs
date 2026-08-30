@@ -2366,6 +2366,11 @@ async fn roadmap(
 /// The checks watcher keeps that fresh while a wrap-up is running and stops when
 /// the wrap-up is over, so on a Conversation carried to Done the pane is the one
 /// thing left that asks.
+///
+/// And whether the pull request merges and where it has got to ride the same
+/// answer, so opening the pane freshens those too — whatever state the
+/// Conversation is in. See [`crate::merges`], whose sweep is what keeps them
+/// fresh between one opening and the next.
 async fn pull_request(
     State(state): State<AppState>,
     Path((id, event)): Path<(String, String)>,
@@ -2402,7 +2407,7 @@ async fn pull_request(
     // pull request asked about in the work's own repo would come back as
     // somebody else's work or as a 404. See [`store::pull_request_repo`].
     let repo = match store::pull_request_repo(&state.pool, id, event).await {
-        Ok(Some(repo)) => repo.path,
+        Ok(Some(repo)) => repo,
         Ok(None) => return no_such_pull_request(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a pull request failed");
@@ -2412,9 +2417,11 @@ async fn pull_request(
 
     let gh = state.github.clone();
 
-    let asked =
-        tokio::task::spawn_blocking(move || crate::github::details(&gh, &repo, opened.number))
-            .await;
+    let asked = {
+        let path = repo.path.clone();
+
+        tokio::task::spawn_blocking(move || crate::github::details(&gh, &path, opened.number)).await
+    };
 
     match asked {
         Ok(Ok(read)) => {
@@ -2422,6 +2429,12 @@ async fn pull_request(
             // the card on the Nudge this sends draws what the pane is about to
             // show it.
             crate::checks::remember(&state, id, &read.checks).await;
+
+            // And the two facts about the pull request itself that came back on
+            // the same question: whether it merges, and where it has got to. The
+            // pane is what freshens both on a Conversation nothing is watching
+            // and nothing is sweeping — see [`crate::merges::remember`].
+            crate::merges::remember(&state, id, &repo, read.landing).await;
 
             Json(read.pane).into_response()
         }

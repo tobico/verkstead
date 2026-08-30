@@ -52,6 +52,9 @@ mod grillings;
 /// sessions means saying where they live.
 pub mod handoffs;
 mod limits;
+/// Watching a pull request go on merging after the work on it is Done — see
+/// [`checks`] for the watcher that covers a wrap-up, which this takes over from.
+mod merges;
 mod nudge;
 mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
@@ -526,6 +529,12 @@ fn routed(
     // undriven after everything that resumes has resumed is what genuinely has
     // nobody — see [`stalls`].
     stalls::sweeping(&state, resumed);
+
+    // And the pull requests of everything that has already finished, which is a
+    // sweep of its own at a pace of its own: a base goes on moving under a
+    // branch nobody is working on, and a wrap-up's watchers stop at Done. See
+    // [`merges`].
+    merges::sweeping(&state);
 
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up
