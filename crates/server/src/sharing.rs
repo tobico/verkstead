@@ -62,10 +62,10 @@ const CLOSES: &str = "</script>";
 /// emailed one needs. A *published* one is a secret gist, and a gist link alone
 /// draws nothing: GitHub renders a gist as source, and the raw URL is served
 /// `text/plain` with `nosniff`, which every browser refuses to draw. So the gap
-/// between a link and a read is one static page, and this is it — hosted by the
-/// human on a public site of their own, with its URL in
-/// [`crate::settings::Config::share_viewer_url`] so that a comment on a pull
-/// request can be composed through it.
+/// between a link and a read is one static page, and this is it — kept at
+/// [`HOSTED`], which is where every link is composed through unless
+/// [`crate::settings::Config::share_viewer_url`] names a copy the human hosts
+/// themselves. Handed over here because that copy has to come from somewhere.
 ///
 /// It is Verkstead's file rather than the recipient's server. The gist id rides
 /// in the fragment, which no browser sends anywhere, and the share is fetched
@@ -236,8 +236,29 @@ pub(crate) fn titled(conversation: &ConversationView) -> &str {
     }
 }
 
-/// Where a reader is sent for a Published Share: through the share viewer where
-/// the human has hosted one, and at the gist itself where they have not.
+/// Where the viewer is when nobody has said otherwise: the copy this repository
+/// keeps on its own GitHub Pages, published by `.github/workflows/pages.yml`.
+///
+/// A default rather than nothing, because nothing is what every Verkstead
+/// starts as: a human who has never been to the settings page would otherwise
+/// hand out gist links, which GitHub draws as source. The page has to be
+/// somewhere public for a published share to read at all, and one copy kept up
+/// beside the code it ships with is a place every install already has.
+///
+/// It is Verkstead's file on Verkstead's site, which changes nothing about what
+/// the host of it learns: the gist's id rides in the fragment and the share is
+/// fetched by the reader's own browser — see [`VIEWER`] — so this page sees
+/// neither which share was read through it nor anything that is in it. The
+/// setting still wins: a human hosting their own keeps exactly what they had.
+///
+/// Spelled here and in the workflow that publishes it, and
+/// `web/tests/viewing.test.ts` is what holds the two together: the address is
+/// the one thing about the viewer that has to be the same in both places.
+pub(crate) const HOSTED: &str = "https://tobico.github.io/verkstead/share-viewer.html";
+
+/// Where a reader is sent for a Published Share: through the share viewer,
+/// which is the human's own where they have hosted one and [`HOSTED`] where
+/// they have not.
 ///
 /// The viewer takes the gist's id in its **fragment** — `…/viewer.html#9f1` —
 /// which is the whole of why the page learns nothing about what is read through
@@ -245,15 +266,14 @@ pub(crate) fn titled(conversation: &ConversationView) -> &str {
 /// after the `#` is the last segment of the published URL, which is GitHub's id
 /// for the gist.
 ///
-/// Nothing configured is a link to the gist itself, which draws source rather
-/// than a share: a worse read rather than a failure, and the settings page is
-/// where it is put right. Which is also the answer for a published URL with no
-/// segment to take an id from — a link that pointed a reader at a viewer with no
-/// gist named would draw nothing at all.
+/// The one answer that is still the gist itself is a published URL with no
+/// segment to take an id from: a link pointing a reader at a viewer with no gist
+/// named would draw nothing at all, where the gist at least draws its source.
 pub(crate) fn link(published: &str, viewer: Option<&str>) -> String {
-    let Some(viewer) = viewer.map(str::trim).filter(|viewer| !viewer.is_empty()) else {
-        return published.to_owned();
-    };
+    let viewer = viewer
+        .map(str::trim)
+        .filter(|viewer| !viewer.is_empty())
+        .unwrap_or(HOSTED);
 
     let Some(gist) = identified(published) else {
         return published.to_owned();
@@ -455,15 +475,39 @@ mod tests {
         );
     }
 
-    /// And at the gist itself where they have not, which is a worse read rather
-    /// than a failure: GitHub draws it as source, and the settings page is where
-    /// that is put right.
+    /// And through the hosted one where they have not, which is what makes a
+    /// Verkstead nobody has configured hand out links that draw: the setting is
+    /// an override rather than the thing that switches the viewer on.
     #[test]
-    fn a_verkstead_with_no_viewer_links_the_gist() {
+    fn a_verkstead_told_nothing_links_through_the_hosted_viewer() {
         const GIST: &str = "https://gist.github.com/tobico/9f1";
 
-        assert_eq!(link(GIST, None), GIST);
-        assert_eq!(link(GIST, Some("   ")), GIST);
+        assert_eq!(link(GIST, None), format!("{HOSTED}#9f1"));
+
+        // A field somebody emptied is a field nobody filled: the settings page
+        // writes a blank away, and a blank that arrived any other way says the
+        // same thing.
+        assert_eq!(link(GIST, Some("   ")), format!("{HOSTED}#9f1"));
+    }
+
+    /// The hosted viewer is the page this repository publishes, at the address
+    /// the workflow puts it at — said here because the two are spelled apart and
+    /// a link to the wrong address is a 404 on every share.
+    #[test]
+    fn the_hosted_viewer_is_the_page_this_repository_publishes() {
+        assert_eq!(
+            HOSTED,
+            "https://tobico.github.io/verkstead/share-viewer.html"
+        );
+    }
+
+    /// And a published URL with no id in it is the one thing still linked as
+    /// itself: a viewer with no gist named draws nothing at all, where the gist
+    /// at least draws its source.
+    #[test]
+    fn a_published_url_with_no_gist_in_it_is_linked_as_itself() {
+        assert_eq!(link("", None), "");
+        assert_eq!(link("///", Some("https://tobico.github.io/shares/")), "///");
     }
 
     /// A viewer URL somebody pasted with a fragment already on it is one `#` too

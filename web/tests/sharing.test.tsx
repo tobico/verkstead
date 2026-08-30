@@ -21,6 +21,9 @@ import {
 } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 
+// The column every page of the app sits in, which is what a share has to sit in
+// too — see the test that holds the two together.
+import { Shell } from "../src/App";
 import type {
   CommitEvent,
   SetReading,
@@ -160,6 +163,54 @@ describe("a shared conversation", () => {
     expect(container.querySelector('[role="menuitem"]')).toBeNull();
     expect(container.querySelector("textarea")).toBeNull();
     expect(container.querySelector("input")).toBeNull();
+  });
+
+  /// The share sits in the app's own column, which is what makes the two
+  /// documents one rendering rather than two that resemble each other.
+  ///
+  /// The widths every card and the Diff's gutter are built out of — `--measure`,
+  /// and `--gutter` and `--bleed` above the breakpoint — are named on `main` in
+  /// `styles/base.css`, and the exception a frame of panes makes to the column
+  /// is named on the shell's class in `App.module.css`. A share that dropped
+  /// either would draw the same components with every padding built on those
+  /// names collapsed to nothing, which is what this happened to.
+  ///
+  /// Asked against the real `Shell` rather than against a class name written out
+  /// here: what is being held is that the two elements are the same element, so
+  /// the assertion has to fail when the app's shell changes and the share's does
+  /// not.
+  it("draws its record in the same column the app draws every page in", async () => {
+    const app = render(() => (
+      <Shell>
+        <p>Any page at all.</p>
+      </Shell>
+    ));
+    const shell = app.container.querySelector("main");
+    expect(shell).toBeTruthy();
+    expect(shell!.className).toBeTruthy();
+
+    cleanup();
+
+    const { container } = render(() => <Share shared={SHARED} />);
+    await screen.findByLabelText("Timeline");
+
+    const column = container.querySelector("main");
+    expect(column).toBeTruthy();
+    expect(column!.className).toBe(shell!.className);
+
+    // And the frame stands inside it, which is what the shell's exception for a
+    // page of panes is looking for.
+    expect(column!.querySelector("[data-pane]")).toBeTruthy();
+  });
+
+  /// Including the file that is carrying nothing: the app wraps every page it
+  /// draws, and what a share says when its slot is empty is a page.
+  it("draws the column even where it is carrying no conversation", () => {
+    const { container } = render(() => <Share shared={null} />);
+
+    const column = container.querySelector("main");
+    expect(column).toBeTruthy();
+    expect(column!.textContent).toContain("not carrying a conversation");
   });
 
   /// There is no list to pick from and no way back to one: a share is one piece

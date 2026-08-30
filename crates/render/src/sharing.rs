@@ -436,9 +436,10 @@ pub struct MissedOut {
 /// file behind it.
 ///
 /// Markdown, because that is what a comment is. `link` is composed by whoever
-/// is posting — the share viewer with the gist's id after it where the human has
-/// hosted one, and the gist itself where they have not — so nothing here has an
-/// opinion about which of the two a reader is being sent to.
+/// is posting — the share viewer with the gist's id after it, the human's own
+/// viewer where they host one and Verkstead's hosted copy where they do not —
+/// so nothing here has an opinion about which page a reader is being sent
+/// through.
 ///
 /// **Itemized off the share rather than off the Conversation.** What the comment
 /// lists is what the file actually carries, which is the curated Timeline and

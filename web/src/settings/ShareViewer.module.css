@@ -1,8 +1,9 @@
 /* The share viewer — see `ShareViewer.tsx`.
 
-   Two halves in two panes, like the sections above it: the card says where the
-   viewer is hosted, or what it costs that nobody has hosted one, and the pane
-   beside it carries the file, the three steps and the field.
+   Two halves in two panes, like the sections above it: the card says which
+   viewer this Verkstead reads its published shares through, and the pane beside
+   it carries the file, the three steps and the field for hosting one of your
+   own.
 
    What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
    while its pane is open, and what it does under the pointer. What is here is
@@ -25,29 +26,29 @@
   color: var(--ink-soft);
 }
 
-.standing .hosted {
+/* An address wherever one is written into a sentence — on the card, and in the
+   note the pane opens with. Set in the monospace a URL is read in, and allowed
+   to break anywhere, because these are long and a phone is narrow. */
+.hosted {
   overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, monospace;
   color: var(--ink);
 }
 
-/* And a section nobody has been to, with what that costs. Drawn the way the
-   sections above draw a setting that is not there — an edge with the red down
-   its side, so it says the same thing on all three of the card's surfaces —
-   because it is the same kind of sentence: nothing has failed, and this is what
-   will be worse until somebody acts on it. */
-.warning {
-  margin: 0;
-  padding: 0.7rem 0.9rem;
-  border: 1px solid var(--edge);
-  border-inline-start: 3px solid var(--stopped);
-  border-radius: 0.6rem;
+/* The details pane: what the viewer is, who would host their own, the three
+   steps, and the field.
+
+   This first line is who those steps are for, which is not everybody: the
+   hosted viewer works, and this is what says the rest of the pane is
+   optional. */
+.instead {
+  margin: 1rem 0 0;
   font-size: 0.9rem;
+  color: var(--ink-soft);
 }
 
-/* The details pane: what the viewer is, the three steps, and the field. */
 .steps {
-  margin: 1rem 0 0;
+  margin: 0.5rem 0 0;
   padding-inline-start: 1.25rem;
   font-size: 0.9rem;
   line-height: 1.5;
@@ -113,8 +114,8 @@
   opacity: 0.65;
 }
 
-/* What the setting buys, with the address in it: the link a comment on a pull
-   request carries. */
+/* What a link looks like, with whichever address is in force: the one a comment
+   on a pull request, the toast and the Share row all carry. */
 .linking {
   margin: 0.85rem 0 0;
   font-size: 0.9rem;

@@ -77,6 +77,29 @@ async fn app_asking_github() -> (tempfile::TempDir, SqlitePool, Router) {
     (dir, pool.clone(), router_asking_github(pool, data_dir, gh))
 }
 
+/// Verkstead's own hosted **share viewer**, which is where a published share is
+/// linked through on a Verkstead nobody has configured — `HOSTED` in
+/// `crates/server/src/sharing.rs`, spelled again here because this suite is
+/// another crate and cannot see it.
+///
+/// That module's own tests are what pin the address; this is what says the rows
+/// and the toast are composed through it.
+const HOSTED: &str = "https://tobico.github.io/verkstead/share-viewer.html";
+
+/// Say where the human has hosted a share viewer of their own, by writing the
+/// settings file the server reads.
+///
+/// Written rather than saved through the endpoint because that is all this
+/// needs: `config.yaml` is read at the moment it is wanted, so a file written
+/// here is in force for the next request — see `crates/server/src/settings.rs`.
+fn hosting(dir: &tempfile::TempDir, url: &str) {
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        format!("share_viewer_url: {url}\n"),
+    )
+    .unwrap();
+}
+
 /// A Conversation with a Brief and nothing else: no pull request, which is what
 /// the press that comments on them has to have nothing to do about.
 async fn drafting(pool: &SqlitePool) -> i64 {
@@ -1213,9 +1236,15 @@ async fn a_commit_the_repository_has_lost_says_so_rather_than_stopping_the_expor
 /// Where a share was published is the workbench's fact about a Conversation,
 /// drawn beside the Share row so the human can send the same link twice without
 /// publishing twice.
+///
+/// And it is drawn through the **share viewer**: what the store keeps is the
+/// gist's own URL, which GitHub draws as source, and what the row hands out is
+/// that gist's id in the viewer's fragment. A Verkstead nobody has configured
+/// gets Verkstead's own hosted copy, which is what makes this true of a fresh
+/// install rather than of a settings page somebody has been to.
 #[tokio::test]
 async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
-    let (_dir, pool, app) = app().await;
+    let (_dir, pool, app) = app_asking_github().await;
     let id = everything(&pool).await;
 
     let before: verkstead_render::ConversationView =
@@ -1234,11 +1263,61 @@ async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
         get(&app, &format!("/api/ui/conversations/{id}")).await;
     let shared = after.shared.expect("the published share");
 
-    assert_eq!(shared.url, "https://gist.github.com/tobico/9f1");
+    assert_eq!(shared.url, format!("{HOSTED}#9f1"));
     assert!(
         shared.at.starts_with("20"),
         "an RFC 3339 stamp, not {:?}",
         shared.at,
+    );
+}
+
+/// The composition happens as the page is drawn rather than as the share is
+/// published, which is what a share published before any of this was here gets
+/// for nothing: the record holds the gist, and the row links through whatever
+/// viewer is configured *now*.
+#[tokio::test]
+async fn a_share_published_before_there_was_a_viewer_still_links_through_one() {
+    let (dir, pool, app) = app_asking_github().await;
+    let id = everything(&pool).await;
+
+    // What a publish wrote down before there was a viewer to compose through,
+    // which is the same thing a publish writes down today: the gist, untouched.
+    store::record_share(&pool, id, "https://gist.github.com/tobico/9f1")
+        .await
+        .unwrap();
+
+    hosting(&dir, "https://ada.github.io/shares/");
+
+    let after: verkstead_render::ConversationView =
+        get(&app, &format!("/api/ui/conversations/{id}")).await;
+
+    assert_eq!(
+        after.shared.map(|shared| shared.url),
+        Some("https://ada.github.io/shares/#9f1".to_owned()),
+        "a viewer configured after the publish should retarget the row",
+    );
+}
+
+/// And a viewer the human hosts themselves wins over the one Verkstead hosts:
+/// the default is what a Verkstead nobody has told anything does, rather than a
+/// place every link has to go through.
+#[tokio::test]
+async fn a_configured_viewer_wins_over_the_hosted_one() {
+    let (dir, pool, app) = app_asking_github().await;
+    let id = everything(&pool).await;
+
+    hosting(&dir, "https://ada.github.io/verkstead-shares/");
+
+    store::record_share(&pool, id, "https://gist.github.com/tobico/9f1")
+        .await
+        .unwrap();
+
+    let after: verkstead_render::ConversationView =
+        get(&app, &format!("/api/ui/conversations/{id}")).await;
+
+    assert_eq!(
+        after.shared.map(|shared| shared.url),
+        Some("https://ada.github.io/verkstead-shares/#9f1".to_owned()),
     );
 }
 
@@ -1248,7 +1327,7 @@ async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
 /// comment is written from.
 #[tokio::test]
 async fn publishing_again_replaces_the_link_the_workbench_draws() {
-    let (_dir, pool, app) = app().await;
+    let (_dir, pool, app) = app_asking_github().await;
     let id = everything(&pool).await;
 
     store::record_share(&pool, id, "https://gist.github.com/tobico/9f1")
@@ -1263,7 +1342,7 @@ async fn publishing_again_replaces_the_link_the_workbench_draws() {
 
     assert_eq!(
         whole.shared.map(|shared| shared.url),
-        Some("https://gist.github.com/tobico/a20".to_owned()),
+        Some(format!("{HOSTED}#a20")),
     );
 }
 

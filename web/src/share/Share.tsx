@@ -17,10 +17,19 @@
 //! off already saying nothing — and the Timeline is asked for its read-only
 //! shape on top of that, which takes off the menu, the block that says what
 //! happens next, and the way back to a list that does not exist.
+//!
+//! And it is drawn inside the column the app draws every page in, for the same
+//! reason it is drawn by the app's components: the two documents have to be one
+//! rendering. The column is `main`'s in `styles/base.css` — the measure, and the
+//! Gutter every card hangs its marks in — so a share that mounted its panes
+//! straight into the body would be a page where every `calc()` built on those
+//! names was invalid and every padding they feed collapsed to nothing. See
+//! [`Share`], which wears the same `main` the `Shell` in `App.tsx` does.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { Show, createEffect, createSignal, type JSX } from "solid-js";
 
+import app from "../App.module.css";
 import { Panes, type Pane } from "../Panes";
 import type { SharedConversation } from "../api/types";
 import { Empty } from "../notices";
@@ -44,19 +53,37 @@ export function Share(props: {
   shared: SharedConversation | null;
 }): JSX.Element {
   return (
-    <QueryClientProvider client={queries}>
-      <Show
-        when={props.shared}
-        fallback={
-          <Empty>
-            This file is not carrying a conversation. Ask whoever sent it for
-            another.
-          </Empty>
-        }
-      >
-        {(shared) => <Record shared={shared()} />}
-      </Show>
-    </QueryClientProvider>
+    /* The column, which is the app's own rather than a copy of it: the class is
+       the `Shell`'s in `App.tsx` and the element is the `main` that class is
+       written for, so the widths — `--measure`, and `--gutter` and `--bleed`
+       above the breakpoint — are defined here exactly as they are in the
+       workbench. The exception the shell makes for a frame of panes travels
+       with it: `.shell:has([data-pane])` finds this page by what the frame is,
+       so a share stands its two panes edge to edge the way the workbench stands
+       its three.
+
+       Outside the `Show` rather than inside it, because the app wraps *every*
+       page: a file carrying no Conversation says so at the measure, the way the
+       app's own `NoSuchPage` does.
+
+       No toast layer beside it, which is the one part of the app's shell a share
+       has nothing to do with: a toast is what became of a press, and there is
+       nothing here to press. */
+    <main class={app.shell}>
+      <QueryClientProvider client={queries}>
+        <Show
+          when={props.shared}
+          fallback={
+            <Empty>
+              This file is not carrying a conversation. Ask whoever sent it for
+              another.
+            </Empty>
+          }
+        >
+          {(shared) => <Record shared={shared()} />}
+        </Show>
+      </QueryClientProvider>
+    </main>
   );
 }
 

@@ -23,9 +23,11 @@
 //! through, which is its own environment and nobody's setting.
 //!
 //! The share viewer's URL is plainer still: one value, written and read back as
-//! itself. It is a public page the human hosts, and where a Published Share is
-//! linked from a pull request it is what the link goes through — so it is
-//! configuration in the ordinary sense, and the page shows it as it stands.
+//! itself. It is a public page the human hosts a copy of, and every link to a
+//! Published Share goes through it — so it is configuration in the ordinary
+//! sense, and the page shows it as it stands. An empty one is *no copy of their
+//! own* rather than no viewer: links are then composed through the copy
+//! Verkstead itself hosts, which is `HOSTED` in `crates/server/src/sharing.rs`.
 
 use serde::{Deserialize, Serialize};
 
@@ -46,12 +48,17 @@ pub struct SettingsView {
     /// And how the shared Rust build cache stands.
     pub rust_build_cache: BuildCacheView,
 
-    /// Where the human hosts the share viewer, or empty where they host it
-    /// nowhere.
+    /// Where the human hosts a share viewer of their own, or empty where they
+    /// host none.
     ///
     /// A string rather than an optional, empty for nothing configured, the way
     /// the author's two halves are: the field on the page holds it either way,
     /// and clearing the box is how it is taken away.
+    ///
+    /// Empty is not *no viewer*. Links are then composed through the copy
+    /// Verkstead hosts, and this field is the override — which is why nothing
+    /// fills it in on the human's behalf: a field holding an address nobody
+    /// typed is a setting they cannot tell they have not chosen.
     ///
     /// Configuration rather than a secret — it is a public page, and its URL
     /// goes in a comment on a pull request — so unlike the token it reads back
@@ -135,9 +142,9 @@ pub struct SettingsEdit {
     /// stand and the server writes that down.
     pub rust_build_cache: BuildCacheEdit,
 
-    /// And where the share viewer is hosted, as a value for the same reason:
-    /// an empty one is nothing configured, which is what clearing the field
-    /// means.
+    /// And where the human hosts a share viewer of their own, as a value for
+    /// the same reason: an empty one is nothing configured, which is what
+    /// clearing the field means and what puts Verkstead's own hosted copy back.
     pub share_viewer_url: String,
 }
 

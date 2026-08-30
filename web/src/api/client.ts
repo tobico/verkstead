@@ -782,9 +782,13 @@ export function saveSettings(edit: SettingsEdit): Promise<SettingsSaved> {
   return post<SettingsSaved>("/api/ui/settings", edit);
 }
 
-/// Where the share viewer stands to be taken away: the small page Verkstead
-/// ships, which the human hosts once so that a published share can be read in a
-/// browser rather than downloaded.
+/// Where the share viewer stands to be taken away: the small page that draws a
+/// published share in a browser rather than downloading it.
+///
+/// For whoever would rather host it themselves. Verkstead keeps a copy of the
+/// same page on its own GitHub Pages and composes every link through that
+/// unless the setting beside this names another — see `HOSTED` in
+/// `settings/ShareViewer.tsx`.
 ///
 /// A path rather than a fetch, for the reason a share's own download is one:
 /// what the press is for is a file, and a link is how a browser is handed one.
