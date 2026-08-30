@@ -49,7 +49,7 @@ use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, CompanionAdded,
     CompanionMode, CompanionModeChosen, CompanionView, ConversationClosed, ConversationSteered,
     ConversationStopped, ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PickedView,
-    PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size,
+    PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resolution, Resumed, Shown, Size,
     StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
     TimelineEvent, TranscriptView, Turn, Watching,
 };
@@ -4888,6 +4888,32 @@ async fn attempts_spent(fixture: &Grilling, check: &str) -> i64 {
     pool.close().await;
 
     spent
+}
+
+/// Write `config.yaml` over, keeping the author every sandbox is configured out
+/// of — see [`bench_at_pace`], which is what wrote it in the first place.
+///
+/// The file is read at the moment it is needed rather than held from startup, so
+/// a fixture that writes it after its server is up is a human who went to the
+/// settings page while the work was going on.
+fn configure(fixture: &Grilling, more: &str) {
+    let path = fixture.state.path().join("config.yaml");
+    let author = std::fs::read_to_string(&path).unwrap();
+
+    std::fs::write(&path, format!("{author}{more}")).unwrap();
+}
+
+/// And say how one Repo resolves a conflict, which is the override that wins
+/// over that file.
+async fn told_to_resolve_by(fixture: &Grilling, repo: i64, resolution: Resolution) {
+    let view: verkstead_render::RepoView = post(
+        &fixture.app,
+        &format!("/api/ui/repos/{repo}/resolution"),
+        &serde_json::json!({ "resolution": resolution }),
+    )
+    .await;
+
+    assert_eq!(view.conflict_resolution, Some(resolution));
 }
 
 /// And how many resolution sessions it has counted against the conflict on that
@@ -19534,6 +19560,79 @@ async fn two_conflicted_pull_requests_are_merged_one_session_at_a_time() {
         told.len(),
         2,
         "one each and no more, each conflict going away on its own session: {told:?}",
+    );
+}
+
+/// What each resolution session is told to *do* is the strategy configured for
+/// the repository its pull request is in: the setting every Repo shares, unless
+/// that Repo has been given one of its own.
+///
+/// Two conflicts in one wrap-up, the settings file asking for a rebase and the
+/// companion Repo overriding it back to a merge. So the two prompts have to
+/// differ — one telling its session to rebase and force-push with a lease, the
+/// other to merge and never force-push — which is the whole of the setting doing
+/// anything: a strategy that never reached the session would be a picker that
+/// wrote a word in a file.
+///
+/// The stub sessions merge either way, this being about what they are told
+/// rather than about git. What a rebase costs is said on the settings page,
+/// beside the choice, and is why the merge is what nobody choosing anything
+/// gets.
+#[tokio::test]
+async fn each_resolution_session_is_told_the_strategy_its_repo_resolves_by() {
+    let spill = tempfile::tempdir().unwrap();
+    let dispatched = spill.path().join("fix-prompts");
+    let busy = spill.path().join("busy");
+    let own = spill.path().join("fixed-own");
+    let companion = spill.path().join("fixed-companion");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_fixes(&dispatched, &busy, &own, &companion),
+        "askance",
+        &gh_alongside_checking(
+            &green_but_conflicting_until(&own),
+            &green_but_conflicting_until(&companion),
+        ),
+    )
+    .await;
+
+    // Both said before the wrap-up is anywhere near: the settings file is read
+    // as each session is dispatched, so what matters is that they are there by
+    // then.
+    configure(&fixture, "conflict_resolution: rebase\n");
+    told_to_resolve_by(&fixture, companion_repo(&fixture).await, Resolution::Merge).await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let told = std::fs::read_to_string(&dispatched).expect("both conflicts were resolved");
+    let told = prompts(&told);
+
+    let own = told
+        .iter()
+        .find(|prompt| prompt.contains("#41") && prompt.contains("verkstead"))
+        .expect("the work's own pull request had a session of its own");
+
+    assert!(
+        own.contains("Rebase the branch") && own.contains("--force-with-lease"),
+        "the Repo that overrides nothing resolves the way the settings file says, \
+         which here is a rebase: {own}",
+    );
+
+    let companion = told
+        .iter()
+        .find(|prompt| prompt.contains("#7") && prompt.contains("askance"))
+        .expect("and so did the companion's");
+
+    assert!(
+        companion.contains("Merge the pull request's base branch")
+            && companion.contains("rather than a rebase"),
+        "and the Repo that was given one of its own resolves by that, whatever \
+         every other Repo does: {companion}",
     );
 }
 

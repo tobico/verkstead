@@ -22,7 +22,7 @@ own, not a steer, offered only while conflicted.
 
 - [x] 01: Detect conflicts and gate Done on them — [details](01-detect-and-gate.md)
 - [x] 02: Dispatch the resolution session — [details](02-resolution-session.md)
-- [ ] 03: The resolution-strategy setting — [details](03-strategy-setting.md)
+- [x] 03: The resolution-strategy setting — [details](03-strategy-setting.md)
 - [ ] 04: Watch Done Conversations' pull requests — [details](04-done-sweep.md)
 - [ ] 05: Draw the conflict indicator — [details](05-indicator.md)
 - [ ] 06: The resolve button — [details](06-resolve-button.md)

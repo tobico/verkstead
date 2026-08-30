@@ -23,7 +23,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Registered, RepoEntry, RepoView } from "../src/api/types";
+import type {
+  Registered,
+  RepoEntry,
+  RepoView,
+  Resolution,
+} from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
 import { RepoDetails, RepoList, RepoPane } from "../src/repos/RepoList";
@@ -118,6 +123,28 @@ function theOpened(
       ? [whenever(`/api/ui/repos/${view.id}/remove`, removal, "POST")]
       : []),
   );
+}
+
+/// The same, with the pane's other write answered: how this Repo resolves a
+/// conflict, which comes back as the Repo itself read afresh.
+function theOpenedResolving(view: RepoView, saved: RepoView) {
+  return serving(
+    whenever(`/api/ui/repos/${view.id}`, json(view)),
+    whenever(`/api/ui/repos/${view.id}/resolution`, json(saved), "POST"),
+  );
+}
+
+/// One Repo resolving conflicts a stated way — `null` being the override taken
+/// back, which is what nearly every Repo holds.
+function resolving(resolution: Resolution | null): RepoView {
+  return { ...OPENED, conflict_resolution: resolution };
+}
+
+/// The picker on the opened pane, once the read behind it has landed.
+async function thePicker(): Promise<HTMLSelectElement> {
+  return (await waitFor(() =>
+    screen.getByLabelText(/How a pull request that will not merge/),
+  )) as HTMLSelectElement;
 }
 
 /// Press the Remove in the opened pane, once the read behind it has landed.
@@ -432,6 +459,88 @@ describe("the pane a card opens", () => {
 
     fireEvent.click(out);
     expect(back).toHaveBeenCalled();
+  });
+});
+
+describe("how a repo resolves a conflict", () => {
+  /// The state nearly every Repo is in: nothing said here, so what happens is
+  /// whatever the settings page says for every Repo. Nothing at all rather than
+  /// a copy of today's global, which is why the picker's third option is the
+  /// one that sends nothing.
+  it("offers the global setting, a merge and a rebase", async () => {
+    theOpened(resolving(null));
+    mountOpened();
+
+    const picker = await thePicker();
+
+    expect(picker.value).toBe("");
+    expect([...picker.options].map((option) => option.value)).toEqual([
+      "",
+      "Merge",
+      "Rebase",
+    ]);
+    expect(picker.options[0]!.textContent).toBe("Use the global setting");
+  });
+
+  /// Picking is the save: a choice that needed confirming afterwards would be a
+  /// choice the human has to make twice.
+  it("sends the override the moment one is picked", async () => {
+    const fetching = theOpenedResolving(
+      resolving(null),
+      resolving("Rebase"),
+    );
+    mountOpened();
+
+    fireEvent.change(await thePicker(), { target: { value: "Rebase" } });
+
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        `/api/ui/repos/${FIRST.id}/resolution`,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ resolution: "Rebase" }),
+        }),
+      ),
+    );
+  });
+
+  /// And taking it back sends nothing rather than the word the global happens to
+  /// hold today — the whole reason the option that sends nothing is there.
+  it("sends nothing at all when the override is taken back", async () => {
+    const fetching = theOpenedResolving(resolving("Rebase"), resolving(null));
+    mountOpened();
+
+    fireEvent.change(await thePicker(), { target: { value: "" } });
+
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        `/api/ui/repos/${FIRST.id}/resolution`,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ resolution: null }),
+        }),
+      ),
+    );
+  });
+
+  /// What a rebase costs, said in the pane the choice is made in rather than
+  /// found weeks later by a stage that will not push. Drawn only where a rebase
+  /// is the answer, because a warning drawn everywhere is one nobody reads.
+  it("says what a rebase costs, wherever a rebase is the answer", async () => {
+    theOpened(resolving("Rebase"));
+    const { container } = mountOpened();
+
+    await waitFor(() => screen.getByText(/rewrites what reviewers/));
+    expect(container.textContent).toContain("force-pushed");
+  });
+
+  it("says nothing about force-pushing where the answer is a merge", async () => {
+    theOpened(resolving("Merge"));
+    const { container } = mountOpened();
+
+    await thePicker();
+
+    expect(container.textContent).not.toContain("force-pushed");
   });
 });
 

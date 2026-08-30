@@ -24,10 +24,10 @@ use crate::{
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
     GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
     ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RepoEntry, RepoRemoved, RepoView, Resumed, RoadmapPane,
-    RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedConversation, ShowingArchived, Shown, Started, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
+    PushKey, Registered, Registration, RepoEntry, RepoRemoved, RepoView, ResolutionEdit, Resumed,
+    RoadmapPane, RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedConversation, ShowingArchived, Shown, Started,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
     UpdateNotice, Watching,
 };
 
@@ -62,6 +62,11 @@ fn the_viewers_types_are_written_from_these() {
     Registration::export_all(&config).unwrap();
     Registered::export_all(&config).unwrap();
     RepoRemoved::export_all(&config).unwrap();
+
+    // And the one thing there is to say to a registered Repo: how it resolves a
+    // conflict, which is an override of the global setting or nothing at all.
+    // Its own type rather than a field of a view, being what a press sends.
+    ResolutionEdit::export_all(&config).unwrap();
 
     // The workbench: the sidebar, one Conversation with its Timeline, and the
     // three things the human changes about a drafting one. Each edit brings its

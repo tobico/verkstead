@@ -35,11 +35,11 @@ use verkstead_render::{
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, Cursor, GrillingStarted,
     Lifecycle, Locked, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed,
-    RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, ResolutionEdit,
+    Resumed, RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit,
+    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -74,6 +74,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // under the Profile: what comes back is a named outcome, and a refusal
         // is an answer rather than a status.
         .route("/api/ui/repos/{id}/remove", post(remove_repo))
+        .route("/api/ui/repos/{id}/resolution", post(set_repo_resolution))
         .route(
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
@@ -641,6 +642,38 @@ async fn remove_repo(State(state): State<AppState>, Path(id): Path<String>) -> H
         Err(error) => {
             tracing::error!(error = ?error, repo_id = id, "removing a Repo failed");
             unavailable("the Repo could not be removed")
+        }
+    }
+}
+
+/// `POST /api/ui/repos/{id}/resolution` — say how this Repo resolves a merge
+/// conflict, or take back what was said.
+///
+/// A value rather than an action, and nothing to refuse: what the body carries
+/// is where the setting is to stand — one of the two words, or nothing at all
+/// for *whatever the settings page says for every Repo*.
+///
+/// The answer is the Repo as it now stands rather than an outcome to read, for
+/// the reason the settings' save answers with the settings: the pane draws what
+/// the server says rather than what it just sent.
+///
+/// A 404 for an id nothing is registered under, as the reads above give: neither
+/// names a Repo, and the pane says the repo is gone.
+async fn set_repo_resolution(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(edit): Json<ResolutionEdit>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_repo(&id);
+    };
+
+    match crate::repos::set_resolution(&state.pool, id, edit.resolution).await {
+        Ok(Some(view)) => Json(view).into_response(),
+        Ok(None) => no_such_repo(&id.to_string()),
+        Err(error) => {
+            tracing::error!(error = ?error, repo_id = id, "saying how a Repo resolves a conflict failed");
+            unavailable("the Repo could not be told how to resolve a conflict")
         }
     }
 }
@@ -3247,6 +3280,10 @@ async fn save_settings(
             // And where the share viewer is hosted, the same way: an empty
             // field is nowhere, which is how it is taken away again.
             Some(edit.share_viewer_url),
+            // And how a conflict is resolved where the Repo it is in says
+            // nothing, which is one of two words and never absent: there is no
+            // third state for a page to send.
+            crate::repos::stored(edit.conflict_resolution),
         ))?;
 
         let verifying = match &edit.github_token {
@@ -3354,6 +3391,9 @@ fn as_told(settings: &crate::settings::Settings, caches_compiles: bool) -> Setti
         // page, whose URL goes on a pull request the moment a share is
         // published through it.
         share_viewer_url: config.share_viewer_url().unwrap_or_default().to_owned(),
+        // Where the setting sits rather than whether anybody has been here:
+        // nothing configured is a merge, and there is no third state to draw.
+        conflict_resolution: crate::repos::resolution(config.conflict_resolution()),
         github_token: secrets.github_token().map(|token| TokenSaved {
             last_four: last_four(token),
             at: settings

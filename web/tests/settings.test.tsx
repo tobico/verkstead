@@ -406,6 +406,7 @@ describe("saving", () => {
           size: TOLD.rust_build_cache.size,
         },
         share_viewer_url: TOLD.share_viewer_url,
+        conflict_resolution: TOLD.conflict_resolution,
       }),
     );
   });
@@ -630,6 +631,7 @@ describe("replacing and clearing the token", () => {
         // with — see the sections below it for what does change these.
         rust_build_cache: TOLD.rust_build_cache,
         share_viewer_url: TOLD.share_viewer_url,
+        conflict_resolution: TOLD.conflict_resolution,
       },
       verified: null,
     };
@@ -648,6 +650,7 @@ describe("replacing and clearing the token", () => {
           size: TOLD.rust_build_cache.size,
         },
         share_viewer_url: TOLD.share_viewer_url,
+        conflict_resolution: TOLD.conflict_resolution,
       }),
     );
 

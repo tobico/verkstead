@@ -82,10 +82,12 @@
 //! end: the same dispatch under the same Pairing, the Conversation's Turn taken
 //! before anything is counted, [`ATTEMPTS`] goes counted in the store as each
 //! session starts, and the same waiting for every other pull request before a
-//! stop is written. What it is told is to merge the base branch in, resolve the
-//! conflicts, run the tests and push — a merge rather than a rebase, so that
-//! nothing is force-pushed and nothing stacked on the branch breaks. See
-//! [`resolve`] and [`resolving`].
+//! stop is written. What it is told is to put the base branch's work on the
+//! branch, resolve the conflicts, run the tests and push — by merging, which is
+//! what a Verkstead nobody has configured does, so that nothing is force-pushed
+//! and nothing stacked on the branch breaks. The human can ask for a rebase
+//! instead, globally or for one Repo, and then the session is told to rebase and
+//! force-push with a lease. See [`resolve`], [`resolution`] and [`resolving`].
 //!
 //! A conflict is the whole of what such a poll *dispatches*. A branch nothing
 //! can land is not a branch worth getting a check green on, and the resolution's
@@ -1077,16 +1079,51 @@ async fn resolve(
         return Watching::Again(writing);
     }
 
+    // Read as the session is dispatched rather than held from anywhere: the
+    // settings file is read every time it is asked for, and a resolution
+    // configured a minute ago is what the next conflict is resolved by.
+    let resolution = resolution(state, watched.repo.id).await;
+
     tracing::info!(
         conversation_id,
         repo = watched.repo.name,
         number = watched.number,
+        resolution = ?resolution,
         "the pull request will not merge, so a session is starting on the conflict",
     );
 
-    let said = crate::runner::address(state, conversation_id, &resolving(watched)).await;
+    let said =
+        crate::runner::address(state, conversation_id, &resolving(watched, resolution)).await;
 
     Watching::Again(said.or(writing))
+}
+
+/// How a conflict in this Repo is to be resolved: what the Repo says, else what
+/// the settings file says, else a merge.
+///
+/// Three answers in that order and each is a real state. A Repo that has been
+/// told something has been told it about this repository in particular — a
+/// stacked branch that must not be rewritten, say — so it wins over the setting
+/// every other Repo shares. A settings file that says nothing is a merge, which
+/// is the answer that rewrites nothing.
+///
+/// A store that will not answer is a merge as well, and deliberately: the
+/// question here is whether to force-push somebody's branch, and *we could not
+/// read the override* is no reason to.
+async fn resolution(state: &AppState, repo_id: i64) -> store::Resolution {
+    match store::repo_resolution(&state.pool, repo_id).await {
+        Ok(Some(resolution)) => return resolution,
+        Ok(None) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, repo_id, "reading how a Repo resolves a conflict failed, so the merge every Repo shares is what happens");
+            return store::Resolution::Merge;
+        }
+    }
+
+    // The settings file, read here rather than on a blocking thread: it is one
+    // small file, and this is the moment a conflict was found rather than
+    // anything on the poll's hot path.
+    state.settings.config().conflict_resolution()
 }
 
 /// Stop asking the machine about a pull request that will not merge, and say so
@@ -1133,30 +1170,45 @@ async fn unmergeable(
 }
 
 /// What a resolution session is told: which pull request will not merge, where
-/// to work, and what to do about it.
+/// to work, and what to do about it — in the words of the strategy this
+/// repository resolves conflicts by.
 ///
 /// Where to work for [`feedback`]'s reason, and named the same way whichever
 /// repository it is: `git` reads its repository from wherever it runs, so a
 /// merge made in the wrong checkout is a change to work nobody asked about.
 ///
-/// **Merge rather than rebase.** A rebase rewrites the branch and would have to
-/// be force-pushed, which throws away whatever the pull request's reviewers have
-/// already read and breaks anything stacked on top of it. A merge commit is
-/// ugly and safe, and safe is what an unattended session should be. The strategy
-/// is settled here rather than asked about — task 03 is what makes it
-/// configurable.
-fn resolving(watched: &Watched) -> String {
+/// **The strategy is named rather than left to the session.** The two are
+/// genuinely different acts on the branch — a merge leaves every pushed commit
+/// where it is, a rebase writes them again and force-pushes over what reviewers
+/// have read — so a session left to pick would be picking something the human
+/// has a setting for. Which is why the merge says *not a rebase* and the rebase
+/// says *with a lease*: each has to say the thing the other would have done.
+fn resolving(watched: &Watched, resolution: store::Resolution) -> String {
+    let how = match resolution {
+        store::Resolution::Merge => {
+            "Merge the pull request's base branch into the branch that worktree is on, resolve \
+             every conflict, run the repository's tests, then commit the merge and push it. A \
+             merge rather than a rebase: nothing here force-pushes, so whatever has been read \
+             or stacked on this branch goes on standing."
+        }
+        store::Resolution::Rebase => {
+            "Rebase the branch that worktree is on onto the pull request's base branch, resolve \
+             every conflict as the rebase reaches it, run the repository's tests, then \
+             force-push the rebased branch with `--force-with-lease`. A rebase rather than a \
+             merge: this repository is configured for one, so the branch is rewritten and the \
+             lease is what stops the push landing over work that arrived while you were \
+             resolving."
+        }
+    };
+
     format!(
         "GitHub cannot merge {} into its base branch: the branch and the base have both \
          changed the same lines since they parted. Work in that repository's worktree, at \
-         `{}` — `git` reads the repository from wherever it is run, so a merge made anywhere \
-         else is a different repository's.\n\nMerge the pull request's base branch into the \
-         branch that worktree is on, resolve every conflict, run the repository's tests, then \
-         commit the merge and push it. A merge rather than a rebase: nothing here \
-         force-pushes, so whatever has been read or stacked on this branch goes on \
-         standing.\n\nA conflict is two changes to reconcile. Neither side is the one to keep \
-         — taking the branch's hunk or the base's wholesale would throw away work somebody \
-         did, so read both and write what they both meant.",
+         `{}` — `git` reads the repository from wherever it is run, so a resolution made \
+         anywhere else is a different repository's.\n\n{how}\n\nA conflict is two changes to \
+         reconcile. Neither side is the one to keep — taking the branch's hunk or the base's \
+         wholesale would throw away work somebody did, so read both and write what they both \
+         meant.",
         named(watched),
         watched.worktree.display(),
     )
@@ -1241,7 +1293,7 @@ mod tests {
     /// — merge the base in, and neither side thrown away.
     #[test]
     fn a_resolution_session_is_told_which_pull_request_will_not_merge_and_how_to_fix_it() {
-        let told = resolving(&watched());
+        let told = resolving(&watched(), store::Resolution::Merge);
 
         assert!(
             told.contains("#7") && told.contains("askance"),
@@ -1268,6 +1320,43 @@ mod tests {
         assert!(
             told.contains("two changes to reconcile"),
             "and neither side is the one to keep: {told}",
+        );
+    }
+
+    /// And what it is told where the human has asked for a rebase instead: the
+    /// other act on the branch, named as the other act, and the force-push it
+    /// takes said with the lease that makes it safe to make unattended.
+    ///
+    /// The strategy has to be *in the words* rather than implied by them. A
+    /// session told to merge and left to rebase would rewrite a branch nobody
+    /// asked it to, and one told to rebase and left to merge would leave the
+    /// history the human configured this for.
+    #[test]
+    fn a_resolution_session_configured_for_a_rebase_is_told_to_rebase() {
+        let told = resolving(&watched(), store::Resolution::Rebase);
+
+        assert!(
+            told.contains("#7") && told.contains("askance"),
+            "which pull request, in which repository: {told}",
+        );
+        assert!(
+            told.contains("/state/worktrees/rate-limiting-askance"),
+            "and the worktree to do it in: {told}",
+        );
+        assert!(
+            told.contains("Rebase the branch") && told.contains("rather than a merge"),
+            "the strategy is the one that rewrites the branch, said as what it is \
+             and as what it is not: {told}",
+        );
+        assert!(
+            told.contains("--force-with-lease"),
+            "and the push a rewritten branch takes, leased rather than outright: \
+             {told}",
+        );
+        assert!(
+            told.contains("two changes to reconcile"),
+            "and neither side is the one to keep, which is the same either way: \
+             {told}",
         );
     }
 

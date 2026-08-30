@@ -1844,14 +1844,38 @@ mod tests {
             "and the shortcuts that throw one of them away are named: {addressing}"
         );
         assert!(
+            addressing.contains("commit that resolves a conflict is bookkeeping"),
+            "and its commit is bookkeeping rather than a summary to fight over: \
+             {addressing}"
+        );
+    }
+
+    /// And what says which of the two acts on the branch a resolution session is
+    /// making: the feedback, because the human has a setting for it — merge,
+    /// which is pushed and never force-pushed, or rebase, which cannot be pushed
+    /// any other way than with a lease.
+    ///
+    /// The skill has to name both and hand the choice back to the feedback. One
+    /// that said *merge* outright would be a skill arguing with a Repo configured
+    /// for a rebase, and a session that split the difference would either fail to
+    /// push or rewrite a branch nobody asked it to.
+    #[test]
+    fn the_addressing_skill_leaves_merge_or_rebase_to_the_feedback() {
+        let addressing = skill("addressing/SKILL.md");
+
+        assert!(
+            addressing.contains("The feedback\n  names which of the two"),
+            "which act on the branch this is, is the feedback's to say: {addressing}"
+        );
+        assert!(
             addressing.contains("never force-push"),
-            "the merge is pushed as it stands, nothing stacked on the branch \
+            "a merge is pushed as it stands, nothing stacked on the branch \
              breaking: {addressing}"
         );
         assert!(
-            addressing.contains("merge commit that resolves a conflict is bookkeeping"),
-            "and its commit is bookkeeping rather than a summary to fight over: \
-             {addressing}"
+            addressing.contains("--force-with-lease"),
+            "and a rebase is force-pushed with a lease, having rewritten the \
+             branch: {addressing}"
         );
     }
 

@@ -46,13 +46,16 @@ Read the feedback whole before changing anything, then go and see for yourself.
 - **A review finding or a comment**: read the code it is about, and the code
   around it. What is being asked for is usually smaller than it sounds and
   occasionally larger.
-- **A merge conflict**: fetch first, so the base you merge is the one GitHub is
-  looking at, then do the merge and let git show you where the two sides
-  disagree. Read both of them — this branch's change and what has landed on the
-  base since it parted — before you write anything, and read what each was for
-  rather than only what each says. A merge that comes through clean is still a
-  merge to commit and push: it is what puts the base's work on the branch, and
-  it is what GitHub reads next.
+- **A merge conflict**: fetch first, so the base you work against is the one
+  GitHub is looking at, then start what the feedback asked for — a merge or a
+  rebase — and let git show you where the two sides disagree. **The feedback
+  names which of the two**, because they are different acts on the branch and
+  the human has configured which one this repository gets: do the one you were
+  told to do, and neither the other nor both. Read both sides — this branch's
+  change and what has landed on the base since it parted — before you write
+  anything, and read what each was for rather than only what each says. A merge
+  that comes through clean is still a merge to commit and push: it is what puts
+  the base's work on the branch, and it is what GitHub reads next.
 
 If it is already fixed — a check that failed on a commit the branch has since
 moved past, a comment answered by work that landed after it — say so and stop.
@@ -77,8 +80,8 @@ it away silently, because the merge then looks exactly like one that went
 cleanly. Write what the two changes together were meant to do. Where they
 genuinely cannot both stand, that is a question for the human rather than a call
 to make on their behalf — see *When you need the human* below. And do not undo
-the merge to escape it: a `git merge --abort` leaves the pull request exactly as
-conflicted as it was.
+it to escape it: a `git merge --abort` or a `git rebase --abort` leaves the pull
+request exactly as conflicted as it was.
 
 Then run the repository's tests — the whole of the check that failed, where
 there was one, and the whole suite after a merge — and make sure what you did
@@ -99,13 +102,21 @@ are one repository's, and a commit made in the wrong directory is a change to
 work nobody asked about.
 
 A resolved conflict commits the same way — the merge left everything staged, so
-`git add -A` and `git commit` are what finish it. **Push it, never force-push
-it**: the branch keeps every commit it had, so nothing anybody has already read
-moves and nothing stacked on it breaks. That is why the feedback asks for a
-merge rather than a rebase, and a rebase done anyway would undo the reason.
+`git add -A` and `git commit` are what finish it, and a rebase finishes each
+conflicted commit with `git add -A` and `git rebase --continue`.
 
-**The merge commit that resolves a conflict is bookkeeping**, so it carries no
-message body under the rule below: what it puts on the branch is the base branch
+**How it is pushed is the feedback's to say, and only the feedback's.** A merge
+is pushed as it stands and **never force-pushed**: the branch keeps every commit
+it had, so nothing anybody has already read moves and nothing stacked on it
+breaks. A rebase has rewritten the branch and cannot be pushed any other way, so
+the feedback that asked for one asks for `git push --force-with-lease` — the
+lease being what stops the push landing over work that arrived while you were
+resolving. Never force-push a branch you merged into, and never plain-push one
+you rebased: each of those is the other strategy's ending, and one of them
+fails while the other quietly undoes what was asked for.
+
+**The commit that resolves a conflict is bookkeeping**, so it carries no message
+body under the rule below: what it puts on the branch is the base branch
 arriving rather than anything you set out to build, and its diff against either
 parent is the other parent's work. Say what you reconciled in the subject line
 and leave it at that.

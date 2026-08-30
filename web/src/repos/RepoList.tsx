@@ -30,6 +30,13 @@
 //! git read or a count, and a list that carried them would pay for all of them
 //! on every visit to this page.
 //!
+//! The one thing on that pane that is a setting rather than a reading is how a
+//! conflicted pull request in this repository is resolved: merge, rebase, or
+//! whatever the settings page says for every Repo — which is what a Repo nobody
+//! has been to holds, and is nothing at all rather than a copy of today's
+//! answer. What a rebase costs is said there in the same words the settings page
+//! says it in, because it is the same choice.
+//!
 //! Taking one away is in the pane that opened it, and it is an unregistering
 //! rather than a delete: Verkstead stops offering the repository and leaves the
 //! directory where it is, so every Conversation ever worked in it goes on saying
@@ -52,14 +59,23 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 import { CardButton } from "../CardButton";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
+import { RESOLUTION, RESOLVES, forcePushed } from "../settings/Conflicts";
+import { Picker } from "../picking";
 import {
   RefusedError,
   listRepos,
   loadRepo,
   registerRepo,
   removeRepo,
+  setRepoResolution,
 } from "../api/client";
-import type { Registered, RepoEntry, RepoRemoved } from "../api/types";
+import type {
+  Registered,
+  RepoEntry,
+  RepoRemoved,
+  RepoView,
+  Resolution,
+} from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
@@ -385,6 +401,12 @@ export function RepoDetails(props: {
                 </Show>
               </section>
 
+              {/* How a conflicted pull request in this repository is resolved,
+                  which is the one thing about a Repo that is a setting rather
+                  than a reading. Over the removal because it is something to
+                  change about a Repo that is staying. */}
+              <ConflictResolution repo={repo()} />
+
               {/* And the one press there is to make about a Repo, under
                   everything it is about. What the line says is what the press
                   does: Verkstead stops offering the repository, and nothing on
@@ -428,6 +450,75 @@ export function RepoDetails(props: {
         </Match>
       </Switch>
     </>
+  );
+}
+
+/// How this Repo resolves a merge conflict, as the picker that says so.
+///
+/// Three answers rather than the settings page's two, and the third is the one
+/// most Repos are on: *use the global setting*, which is this Repo saying
+/// nothing at all. It is nothing rather than a copy of what the global says
+/// today, so a Repo left alone follows that setting when it is changed.
+///
+/// The picker is its own press, the way the build cache's switch is: a choice
+/// that needed confirming afterwards would be a choice made twice. What the
+/// answer in force costs is said under it, in the words the settings page uses —
+/// the same sentence in both places, because it is the same choice.
+function ConflictResolution(props: { repo: RepoView }): JSX.Element {
+  const queries = useQueryClient();
+
+  const save = useMutation(() => ({
+    mutationFn: (resolution: Resolution | null) =>
+      setRepoResolution(props.repo.id, resolution),
+    // The answer *is* a fresh read of the Repo, so a second read would learn
+    // nothing and could only disagree with what is on screen.
+    onSuccess: (saved: RepoView) =>
+      queries.setQueryData(["repo", props.repo.id], saved),
+  }));
+
+  /// What is chosen now, as the picker writes it: the empty string is the option
+  /// that sends nothing, which is this Repo overriding nothing.
+  const chosen = (): string => props.repo.conflict_resolution ?? "";
+
+  return (
+    <section class={styles.resolving}>
+      <h2>Conflict resolution</h2>
+
+      <label for="repo-conflict-resolution">
+        How a pull request that will not merge is resolved here
+      </label>
+      <Picker
+        id="repo-conflict-resolution"
+        options={["", "Merge", "Rebase"]}
+        value={(option) => option}
+        label={(option) =>
+          option === ""
+            ? "Use the global setting"
+            : RESOLUTION[option as Resolution]
+        }
+        chosen={chosen()}
+        disabled={save.isPending}
+        pick={(picked) =>
+          save.mutate(picked === "" ? null : (picked as Resolution))
+        }
+      />
+
+      <p class={styles.resolves}>
+        {props.repo.conflict_resolution === null
+          ? "Whatever the settings page says for every repo."
+          : RESOLVES[props.repo.conflict_resolution]}
+      </p>
+
+      <Show when={props.repo.conflict_resolution === "Rebase"}>
+        {forcePushed()}
+      </Show>
+
+      <Show when={save.isError}>
+        <ErrorLine class={styles.failure}>
+          That could not be saved: {save.error?.message}
+        </ErrorLine>
+      </Show>
+    </section>
   );
 }
 

@@ -2023,7 +2023,43 @@ finished: number,
  * new-conversation box finds them. Empty where there are none, which is
  * most repositories most days.
  */
-roadmaps: Array<AbandonedRoadmap>, };
+roadmaps: Array<AbandonedRoadmap>, 
+/**
+ * How a conflicted pull request in this repository is resolved, where this
+ * Repo has been told something other than what every other one does.
+ *
+ * `null` is *whatever the global setting says* rather than *merge*: the two
+ * are the same answer today and stop being the same the moment the global
+ * is changed, and a Repo that had quietly frozen this morning's global
+ * would be a choice nobody made. What that global is, is on the settings
+ * themselves — see [`crate::SettingsView::conflict_resolution`].
+ */
+conflict_resolution: Resolution | null, };
+
+/**
+ * How a merge conflict between a pull request and its base branch is resolved.
+ *
+ * Two words for two ways of putting the base's work on a branch that has
+ * diverged from it, and what tells them apart is what happens to the commits
+ * already pushed: a merge leaves every one of them where it is, and a rebase
+ * writes them again and has to be force-pushed — which rewrites what reviewers
+ * have read and breaks anything stacked on the branch.
+ *
+ * Which is why the page says so beside the choice rather than leaving it to be
+ * found later, and why merge is what nobody choosing anything gets.
+ */
+export type Resolution = "Merge" | "Rebase";
+
+/**
+ * How one Repo is to resolve a conflict from now on, which is the one thing
+ * there is to *say* to a registered Repo besides taking it away.
+ *
+ * `null` takes the override back rather than writing the global's word down:
+ * what *use the global setting* means is that this Repo says nothing, and a
+ * Repo holding a copy of today's global would go on holding it after the global
+ * moved.
+ */
+export type ResolutionEdit = { resolution: Resolution | null, };
 
 /**
  * The submitted collection of Answers and Unanswered markers for one Question
@@ -2292,7 +2328,13 @@ rust_build_cache: BuildCacheEdit,
  * the same reason: an empty one is nothing configured, which is what
  * clearing the field means and what puts Verkstead's own hosted copy back.
  */
-share_viewer_url: string, };
+share_viewer_url: string, 
+/**
+ * And how a conflicted pull request is resolved where its Repo says
+ * nothing, as a value for the same reason: there are two answers and a save
+ * says which of them this is to be.
+ */
+conflict_resolution: Resolution, };
 
 /**
  * What became of a save.
@@ -2346,7 +2388,17 @@ rust_build_cache: BuildCacheView,
  * goes in a comment on a pull request — so unlike the token it reads back
  * exactly as it was written.
  */
-share_viewer_url: string, };
+share_viewer_url: string, 
+/**
+ * And how a conflicted pull request is resolved in every Repo that has not
+ * said otherwise.
+ *
+ * Never null, the way the build cache's switch is never null: nothing
+ * configured is a merge, so what comes back is where the setting sits
+ * rather than whether anybody has been here. A Repo's own override is on
+ * the Repo — see [`crate::RepoView::conflict_resolution`].
+ */
+conflict_resolution: Resolution, };
 
 /**
  * What became of sharing a Conversation to the pull requests its work is on.

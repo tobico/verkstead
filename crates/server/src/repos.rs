@@ -11,13 +11,17 @@
 //! Git is shelled out to rather than linked, as it is in the CLI: the answers
 //! are one-liners, and what git says about a repository on this machine is what
 //! the sandboxed sessions will see later when they run it themselves.
+//!
+//! And the one thing a registered Repo is *told* rather than read: how a merge
+//! conflict on its pull requests is resolved, which is an override of the
+//! setting every Repo shares and passes through to the store like the removal.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
-use verkstead_render::{Registered, RepoRemoved, RepoView};
+use verkstead_render::{Registered, RepoRemoved, RepoView, Resolution};
 
 use crate::store;
 use crate::watched::{Admission, WatchedPaths};
@@ -157,7 +161,57 @@ pub(crate) async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView
         live: work.live,
         finished: work.finished,
         roadmaps,
+        conflict_resolution: store::repo_resolution(pool, id).await?.map(resolution),
     }))
+}
+
+/// Say how this Repo resolves a conflict from now on, and hand back the Repo as
+/// it now stands.
+///
+/// `None` takes the override back rather than writing the global's word down —
+/// see [`verkstead_render::ResolutionEdit`]. Nothing is refused: there is no
+/// work this could be taken out from under, unlike an unregistering, and the
+/// next conflict is simply resolved the new way.
+///
+/// The Repo that comes back is the whole pane's worth, read afresh: the pane
+/// draws what the server says rather than what it just sent, which is the same
+/// rule the settings page saves under.
+///
+/// `None` is a Repo nothing is registered under, which is a pane somebody left
+/// open in another tab.
+pub(crate) async fn set_resolution(
+    pool: &SqlitePool,
+    id: i64,
+    resolution: Option<Resolution>,
+) -> Result<Option<RepoView>> {
+    if store::registered_repo(pool, id).await?.is_none() {
+        return Ok(None);
+    }
+
+    store::set_repo_resolution(pool, id, resolution.map(stored)).await?;
+
+    opened(pool, id).await
+}
+
+/// The store's word for a resolution as the viewer receives it.
+///
+/// Here rather than beside each caller: the settings page reads the global out
+/// of `config.yaml` and this pane reads one Repo's override out of the store,
+/// and the two are the same two words either way. A second mapping would be a
+/// second chance for the viewer's word and the store's to come apart.
+pub(crate) fn resolution(resolution: store::Resolution) -> Resolution {
+    match resolution {
+        store::Resolution::Merge => Resolution::Merge,
+        store::Resolution::Rebase => Resolution::Rebase,
+    }
+}
+
+/// And back, which is what a press on either page sends.
+pub(crate) fn stored(resolution: Resolution) -> store::Resolution {
+    match resolution {
+        Resolution::Merge => store::Resolution::Merge,
+        Resolution::Rebase => store::Resolution::Rebase,
+    }
 }
 
 /// Take a Repo off the registry, if nothing live is being worked in it.

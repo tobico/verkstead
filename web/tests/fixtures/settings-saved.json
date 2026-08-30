@@ -1,5 +1,6 @@
 {
   "settings": {
+    "conflict_resolution": "Rebase",
     "git_author": {
       "email": "ada@example.com",
       "name": "Ada Lovelace"

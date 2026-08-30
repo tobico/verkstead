@@ -224,6 +224,9 @@ describe("the pane", () => {
           size: TOLD.rust_build_cache.size,
         },
         share_viewer_url: "https://ada.github.io/elsewhere/",
+        // Untouched by this form, and sent back as it stands: one request
+        // writes the whole of `config.yaml`.
+        conflict_resolution: TOLD.conflict_resolution,
       }),
     );
 

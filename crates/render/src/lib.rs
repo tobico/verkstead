@@ -57,10 +57,10 @@ pub use profiles::{
     ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
 };
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
-pub use repos::{Registered, Registration, RepoEntry, RepoRemoved, RepoView};
+pub use repos::{Registered, Registration, RepoEntry, RepoRemoved, RepoView, ResolutionEdit};
 pub use settings::{
-    Author, BuildCacheEdit, BuildCacheView, SettingsEdit, SettingsSaved, SettingsView, TokenEdit,
-    TokenSaved, Verified,
+    Author, BuildCacheEdit, BuildCacheView, Resolution, SettingsEdit, SettingsSaved, SettingsView,
+    TokenEdit, TokenSaved, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, ShareCommented, SharePublished, SharedCommit, SharedConversation,

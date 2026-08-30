@@ -139,6 +139,10 @@ export function ShareViewerPane(props: {
             : "",
         },
         share_viewer_url,
+        // Untouched, for the reason the rest of it is: the endpoint writes the
+        // whole of `config.yaml`, and the section under this one is where it is
+        // set.
+        conflict_resolution: settings?.conflict_resolution ?? "Merge",
       });
     },
     onSuccess: (saved: SettingsSaved) => {

@@ -28,6 +28,11 @@
 //! sense, and the page shows it as it stands. An empty one is *no copy of their
 //! own* rather than no viewer: links are then composed through the copy
 //! Verkstead itself hosts, which is `HOSTED` in `crates/server/src/sharing.rs`.
+//!
+//! And how a conflict is resolved is the plainest of the lot: one of two words,
+//! written and read back as itself. What travels with it is the warning the page
+//! draws beside the second of them — a rebase is force-pushed, and a
+//! force-pushed branch rewrites what reviewers have read.
 
 use serde::{Deserialize, Serialize};
 
@@ -64,6 +69,36 @@ pub struct SettingsView {
     /// goes in a comment on a pull request — so unlike the token it reads back
     /// exactly as it was written.
     pub share_viewer_url: String,
+
+    /// And how a conflicted pull request is resolved in every Repo that has not
+    /// said otherwise.
+    ///
+    /// Never null, the way the build cache's switch is never null: nothing
+    /// configured is a merge, so what comes back is where the setting sits
+    /// rather than whether anybody has been here. A Repo's own override is on
+    /// the Repo — see [`crate::RepoView::conflict_resolution`].
+    pub conflict_resolution: Resolution,
+}
+
+/// How a merge conflict between a pull request and its base branch is resolved.
+///
+/// Two words for two ways of putting the base's work on a branch that has
+/// diverged from it, and what tells them apart is what happens to the commits
+/// already pushed: a merge leaves every one of them where it is, and a rebase
+/// writes them again and has to be force-pushed — which rewrites what reviewers
+/// have read and breaks anything stacked on the branch.
+///
+/// Which is why the page says so beside the choice rather than leaving it to be
+/// found later, and why merge is what nobody choosing anything gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Resolution {
+    /// Merge the base branch into the work branch and push the merge.
+    Merge,
+
+    /// Rebase the work branch onto the base branch and force-push what comes
+    /// out.
+    Rebase,
 }
 
 /// The shared Rust build cache as the settings page draws it: the switch, the
@@ -146,6 +181,11 @@ pub struct SettingsEdit {
     /// the same reason: an empty one is nothing configured, which is what
     /// clearing the field means and what puts Verkstead's own hosted copy back.
     pub share_viewer_url: String,
+
+    /// And how a conflicted pull request is resolved where its Repo says
+    /// nothing, as a value for the same reason: there are two answers and a save
+    /// says which of them this is to be.
+    pub conflict_resolution: Resolution,
 }
 
 /// The build cache as the human has just set it.

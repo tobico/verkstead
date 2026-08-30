@@ -280,6 +280,8 @@ export function GithubPane(props: {
       // And where the share viewer is hosted, as it stands, for the same
       // reason: one request writes the whole of `config.yaml`.
       share_viewer_url: told()?.share_viewer_url ?? "",
+      // And how a conflicted pull request is resolved, likewise.
+      conflict_resolution: told()?.conflict_resolution ?? "Merge",
     });
 
   const submit = (ev: SubmitEvent) => {

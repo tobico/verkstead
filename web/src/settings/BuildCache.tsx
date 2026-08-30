@@ -186,6 +186,9 @@ export function BuildCachePane(props: {
         // Untouched, for the reason the author is: the endpoint writes the
         // whole of `config.yaml`, and the section below is where this is set.
         share_viewer_url: told()?.share_viewer_url ?? "",
+        // And so is how a conflict is resolved, which is the section under
+        // that one.
+        conflict_resolution: told()?.conflict_resolution ?? "Merge",
       });
     },
     onSuccess: (saved: SettingsSaved) => {

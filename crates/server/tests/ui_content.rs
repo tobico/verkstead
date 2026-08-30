@@ -2856,6 +2856,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // configured half of this too, and `settings-unset.json` is where
             // nobody has hosted one.
             "share_viewer_url": "https://ada.github.io/verkstead-shares/",
+            // And a rebase configured, for the reason the size above is typed:
+            // the fixture of a Verkstead that has been told everything carries
+            // the answer somebody chose, and `settings-unset.json` is the one
+            // nobody has chosen anything in.
+            "conflict_resolution": "Rebase",
         }),
     )
     .await;

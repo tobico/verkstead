@@ -9,8 +9,9 @@
 //! folded together they are sections of one pane, read down in the order a
 //! fresh install needs them: credentials first, because without them nothing a
 //! session does with a Repo can be pushed, then the shared Rust build cache
-//! every session builds into, then where the share viewer is hosted, then the
-//! Agent Profiles and the Repos a Conversation is settled against.
+//! every session builds into, then where the share viewer is hosted, then how a
+//! conflicted pull request is resolved, then the Agent Profiles and the Repos a
+//! Conversation is settled against.
 //!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
@@ -51,6 +52,7 @@ import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
 import { BuildCacheCard, BuildCachePane } from "./BuildCache";
+import { ConflictsCard, ConflictsPane } from "./Conflicts";
 import { GithubCard, GithubPane } from "./Credentials";
 import { ShareViewerCard, ShareViewerPane } from "./ShareViewer";
 import {
@@ -227,6 +229,14 @@ function Settings(props: {
           open={props.opening === "share-viewer"}
           press={() => props.select("share-viewer")}
         />
+        {/* And the last thing Verkstead itself was told: what a session sent at
+            a pull request that will not merge is told to do about it. Under the
+            three above because it is the one nobody has to read — what it does
+            with nothing configured is the safe half of the choice. */}
+        <ConflictsCard
+          open={props.opening === "conflicts"}
+          press={() => props.select("conflicts")}
+        />
         {/* Told which of its own things is open rather than the whole opening:
             where a Profile's pane stands is this page's arithmetic, and a
             section that knew the settings' paths would be a second opinion
@@ -293,6 +303,9 @@ function Details(props: {
       </Match>
       <Match when={props.opening === "share-viewer"}>
         <ShareViewerPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "conflicts"}>
+        <ConflictsPane back={props.back} />
       </Match>
       {/* The Repos' two panes are two components rather than one asked about a
           Repo that does not exist yet, the way the Profiles' one form is: what
