@@ -174,7 +174,8 @@ pub(crate) async fn click(state: &AppState, conversation_id: i64) -> anyhow::Res
 /// [`crate::stopping::stopped`] — so anything started behind one would find the
 /// Conversation stopped and start nothing. Into Done there is nothing to start,
 /// and the stop is cleared all the same: a Conversation Verkstead has finished
-/// with wearing *blocked on you* would be a badge with no press to answer it.
+/// with wearing *blocked on you* would be a word with nothing behind it to
+/// answer.
 pub(crate) async fn submit(
     state: &AppState,
     conversation_id: i64,

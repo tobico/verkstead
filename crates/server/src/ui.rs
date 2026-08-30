@@ -1325,7 +1325,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     // A Notice by the time it is on the wire, which is what a
                     // migrated database needs it to be: an open Pause was read
                     // onto its Conversation as the stop it is, and the Event the
-                    // *blocked on you* badge points at is this one.
+                    // record marks as the one the run stopped at is this one.
                     store::Event::Pause(pause) => verkstead_render::notice_event(
                         event.id,
                         event.at,

@@ -47,8 +47,8 @@ it already had, reviewed afresh. **Follow-up** sits beside the ladder rather
 than on it, the way Closed does, and is the one state with no way in but a
 Steer: the human taking something up about work that is already on a pull
 request, and landing back in the wrap-up when they are finished with it.
-*Blocked on you* is a badge on an active state, never a state of its own, and
-*Waiting on checks* is a condition of Wrapping read the same way — where
+*Blocked on you* is a condition of an active state, never a state of its own,
+and *Waiting on checks* is a condition of Wrapping read the same way — where
 **Closed** is a state of its own, off the ladder rather than on it: every other
 state is somewhere the work has got to, and closing is the work stopping
 wherever it was. Nothing about a Closed Conversation waits on the human:
@@ -654,11 +654,13 @@ are.
 *Is it waiting for a press?* Everything but circumstance is: the next server up
 carries a circumstance stop on unasked, and leaves every other one exactly where
 it stands. *Is the human being told?* Verkstead's brake and a stop nobody chose
-carry the full marks — the sidebar's disc and the *blocked on you* badge — and a
-stop the human made themselves carries neither, showing a quiet **Stopped**
-label in the Conversation's header instead, which goes to the same stop Notice.
-They were there when they pressed it, and a mark that appears where nothing
-happened without them is the mark that teaches them to stop reading the marks.
+carry the full marks — the sidebar's disc, and the status button saying
+*Waiting on you* in the accent — and a stop the human made themselves carries
+neither, the button reading a quiet **Stopped** instead. They were there when
+they pressed it, and a mark that appears where nothing happened without them is
+the mark that teaches them to stop reading the marks. Either way the stop
+Notice is on the record and marked where it stands, which is how a long
+Timeline still says where the run got to.
 Push follows the same rule for the same reason: Verkstead's brake reaches a
 phone, a stop nobody chose does not — a restart being free to pick it up — and
 neither does the human's own Stop.
@@ -667,8 +669,8 @@ neither does the human's own Stop.
 Profile has exhausted its window stops the way everything else does, and all
 that tells it apart is what it carries: the Profile that ran out, and — where
 the sentence the session printed carried a time this build could read — when the
-window comes back, as words to show beside the **Resume**. Information rather
-than a timer: nothing counts down to it, and nothing starts when it passes.
+window comes back, as words on the status button's second line, where what
+is running is otherwise said. Information rather than a timer: nothing counts down to it, and nothing starts when it passes.
 Recognition is one phrase read off the Capture and the Transcript, kept in one
 place because the wording is the backend's and will move. The session is ended
 along with the stop, the agent's own wait for the same reset being no reason to
@@ -680,16 +682,19 @@ hold (gone, and nothing replaced it), interruption, error, failure, crash,
 incident, alert, block, rate limit, throttle
 
 **Resume**:
-The one way a stopped Conversation gets going again, standing in the start-work
-menu wherever there is driving to start. It recomputes what *ought* to be
-running now — from the lifecycle the Conversation is in and what its branch has
-written — and starts that, rather than running again whatever it was that
-stopped. A stop may be answered the next morning, and the Conversation moves on
-in the meantime; where the stop carries words about a usage window coming back,
-they stand beside the button as text, and nothing is waiting on them.
+The one way a stopped Conversation gets going again, standing as the first row
+of the conversation actions menu wherever there is driving to start — above the
+stops, being the one *go* among them, and reached from the status button
+that says nothing is driving this as much as from the sidebar's right-click,
+which drops the same rows. It recomputes what *ought* to be running now — from
+the lifecycle the Conversation is in and what its branch has written — and
+starts that, rather than running again whatever it was that stopped. A stop may
+be answered the next morning, and the Conversation moves on in the meantime;
+where the stop carries words about a usage window coming back, they stand on the
+button's second line as text, and nothing is waiting on them.
 
 It carries nothing. Steering the work is what **Steer** is for, so there is no
-note to write and one button rather than one per way of stopping. It is never
+note to write and one row rather than one per way of stopping. It is never
 silent either: either something starts, which the Timeline says by itself, or
 the press is refused by name and the page says which — the backlog that has
 gone, the Pairing that has, the Worktree that is nowhere. A Worktree the record
@@ -874,13 +879,13 @@ finish flag
 What a wrap-up has narrowed to when the review is answered, nothing said on the
 pull request is left unaddressed, the checks alone are outstanding and nothing
 is running in the Worktree. A **Notice** says so on the Timeline, once per
-narrowing; the card carries the words as a label beside the branch, and the
-sidebar row reads them in place of the state word, Wrapping being what has
+narrowing; the status button reads the words where its status word goes, and
+the sidebar row reads them in place of the state word, Wrapping being what has
 narrowed.
 
 A condition of Wrapping rather than a state, exactly as *blocked on you* is a
-badge on an active state: the Lifecycle is untouched, and the only thing stored
-is the mark saying the line has been written. What the label is drawn from is
+condition of an active state: the Lifecycle is untouched, and the only thing
+stored is the mark saying the line has been written. What it is drawn from is
 the wrap-up's own settle facts and the sessions register, read together every
 time they are asked.
 
@@ -965,7 +970,7 @@ out — is registered, rather than by how long nothing has happened. Wrapping
 idles for days under live watchers and is perfectly healthy; so are the gaps
 between an unattended run's Steps. Draft, Done and Closed are never stalled,
 nothing being supposed to drive them.
-_Avoid_: blocked on you (the badge a stall is precisely without), stopped (what
+_Avoid_: blocked on you (the mark a stall is precisely without), stopped (what
 a stall becomes, not what it is), state, stuck, hung, idle
 
 **Archived**:
