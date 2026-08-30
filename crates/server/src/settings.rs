@@ -570,11 +570,6 @@ impl GitAuthor {
     }
 }
 
-/// A configured value that is only whitespace is no value: a field left empty by
-/// hand reads as the human having cleared it, and a variable set to nothing at
-/// all is a session that fails obscurely rather than one that says plainly what
-/// it has not got — `GH_TOKEN=` is a login `gh` chokes on, and an empty
-/// `user.name` is a commit by nobody that git makes without a word.
 /// A list of rows as somebody left them, with the ones they emptied out taken
 /// away.
 ///
@@ -597,6 +592,11 @@ fn entries_written(entries: Vec<String>) -> Vec<String> {
     entries.into_iter().filter_map(blank_is_nothing).collect()
 }
 
+/// A configured value that is only whitespace is no value: a field left empty by
+/// hand reads as the human having cleared it, and a variable set to nothing at
+/// all is a session that fails obscurely rather than one that says plainly what
+/// it has not got — `GH_TOKEN=` is a login `gh` chokes on, and an empty
+/// `user.name` is a commit by nobody that git makes without a word.
 fn blank_is_nothing(value: String) -> Option<String> {
     let trimmed = value.trim();
 
