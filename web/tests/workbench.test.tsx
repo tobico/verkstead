@@ -75,6 +75,8 @@ import pressableCss from "../src/CardButton.module.css?raw";
 import button from "../src/IconButton.module.css";
 import dropdown from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
+// And the layer an outcome that reached outside this machine is said on.
+import toasts from "../src/Toasts.module.css";
 // The set page as it is drawn inside a details pane: its nav, its sections, and
 // the record of a Set this build cannot read.
 import contents from "../src/set/Contents.module.css";
@@ -6878,8 +6880,12 @@ describe("publishing a share", () => {
 
   /// The one press here whose failures are the human's to read. A token that
   /// cannot write gists is not a page drawn against a conversation that moved:
-  /// nothing moved, and a re-read would correct nothing — so the row says what
-  /// is wrong and points at the page it is fixed on.
+  /// nothing moved, and a re-read would correct nothing — so what is wrong is
+  /// said, with the way to the page it is fixed on inside the sentence.
+  ///
+  /// In a toast rather than in the row that was pressed, and the menu shuts as
+  /// it arrives: an outcome is a moment, and a row here is a drawing of the
+  /// conversation it is about — see `Toasts.tsx`.
   it("says which token trouble stopped it, and where to fix it", async () => {
     theGrillingStanding(
       {},
@@ -6898,10 +6904,57 @@ describe("publishing a share", () => {
       }),
     );
 
-    expect(said.closest("button")).toBeTruthy();
+    expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
     expect(
       said.querySelector<HTMLAnchorElement>('a[href="/settings/github"]'),
     ).toBeTruthy();
+
+    // And the menu it was pressed from has gone: what it said is on the toast,
+    // and a row still holding it would go on saying it over whatever
+    // conversation is opened next.
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${actions.conversationActions} .${actions.publish}`),
+      ).toBeNull(),
+    );
+  });
+
+  /// And nothing of it is left on the next conversation's menu, which is the
+  /// whole reason an outcome is not kept in a row: the sidebar's right-click is
+  /// one menu for the whole list, and the pane's own ⋯ outlives a walk from one
+  /// conversation to the next.
+  it("leaves nothing behind on the menu of another conversation", async () => {
+    theGrillingStanding(
+      {},
+      whenever(PUBLISHING, json("NoToken" satisfies SharePublished), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
+    );
+
+    const said = await waitFor(() =>
+      screen.getByText("Verkstead has no GitHub token to publish as.", {
+        exact: false,
+      }),
+    );
+
+    // Done with, the way the human is done with it.
+    fireEvent.click(
+      said.closest(`.${toasts.toast}`)!.querySelector("button")!,
+    );
+
+    await openActions(container);
+    expect(
+      (
+        await drawn(
+          container,
+          `.${actions.conversationActions} .${actions.publish}`,
+        )
+      ).textContent,
+    ).toBe("PublishPublish it as a secret gist and get a link to send.");
   });
 
   /// And a Verkstead nobody has given a token is the other half of the same

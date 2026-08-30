@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { onCleanup, onMount, type JSX } from "solid-js";
 
 import styles from "./App.module.css";
+import { Toasts } from "./Toasts";
 import { retrying } from "./api/client";
 import { Empty } from "./notices";
 import { listenForNudges } from "./nudge";
@@ -111,8 +112,23 @@ export function App(): JSX.Element {
 /// What every page sits in. The column the stylesheets set its width on: the
 /// measure every page but one is read at is `main`'s own in `styles/base.css`,
 /// and the workbench's exception to it is this shell's, in `App.module.css`.
-function Shell(props: { children?: JSX.Element }): JSX.Element {
-  return <main class={styles.shell}>{props.children}</main>;
+///
+/// With the toast layer beside it rather than inside it: what a toast is drawn
+/// over is the page, so it belongs outside the column the page is read at — and
+/// it is here, once, because an outcome outlives the control that learned it and
+/// no page owns one. See [`Toasts`].
+///
+/// Exported so that a test mounting a page can mount the shell it really sits
+/// in: a press whose outcome is a toast has nowhere to say it otherwise, and a
+/// test that supplied its own layer would be asking about a layer the app does
+/// not have.
+export function Shell(props: { children?: JSX.Element }): JSX.Element {
+  return (
+    <>
+      <main class={styles.shell}>{props.children}</main>
+      <Toasts />
+    </>
+  );
 }
 
 function NoSuchPage(): JSX.Element {

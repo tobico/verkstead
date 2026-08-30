@@ -18,6 +18,7 @@ import type {
   RepoEntry,
   ShowingArchived,
 } from "../src/api/types";
+import { Shell } from "../src/App";
 import { Conversations } from "../src/workbench/Conversations";
 import { Workbench } from "../src/workbench/Workbench";
 import { json, serving, whenever } from "./serving";
@@ -105,7 +106,9 @@ export function mount(at = "/") {
   return {
     ...render(() => (
       <QueryClientProvider client={client}>
-        <MemoryRouter history={history}>
+        {/* The shell every page really sits in, so a press whose outcome is a
+            toast has the layer to say it on — see `Shell` in `src/App.tsx`. */}
+        <MemoryRouter history={history} root={Shell}>
           <Route path="/" component={Workbench} />
           {/* And the details panes nested under the Conversation, exactly as
               `App.tsx` nests them: the nesting is what keeps the middle pane up
