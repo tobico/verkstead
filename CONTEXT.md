@@ -1057,9 +1057,23 @@ decides a session's fate — the quiet grace, the Rescue, a wrap-up's proposals,
 the locking of what a gone session left open — counts it as a question somebody
 is standing behind.
 
+The **nudge** in that name is one line typed into the session's terminal, down
+the channel the Rescue types through and a watcher's keystrokes take — not the
+viewer's **Nudge**, which is a signal to a browser and reaches no agent. It is
+written as the human would write it and names the Set and the command that
+fetches it, because a session that has ended its turn has neither in front of
+it; the line and the Enter behind it are typed a moment apart, an interface
+reading a burst as a paste. It is typed wherever the Response arrived from and
+only where there is a session idling on that Set to type it at. Nothing goes on
+the Timeline for it — it is Verkstead speaking to an agent rather than anything
+the work has got to — and the session's own Capture holds it, the same account
+the Rescue gives of itself.
+
 The **folding** is the far end: when a session is started to build, every
-answered Deferred Ask of that Conversation nobody has been told about goes into
-its prompt, oldest first, under the documents the prompt is built from. Each is
+answered stored ask of that Conversation nobody has been told about goes into
+its prompt, oldest first, under the documents the prompt is built from — a
+Deferred Ask, which had nobody to tell from the start, and a store-and-nudge one
+whose session went before it fetched. Each is
 folded once, and that it was folded is recorded rather than worked out from what
 is answered. The one session never folded into is a relaunched grilling, which
 is already primed with everything the Conversation has answered.
@@ -1236,6 +1250,10 @@ to visibility each fall back to re-reading everything — which is also the
 whole meaning of the push-relayed Nudge. A query whose rendering holds reader
 state must still reconcile its re-reads, or be `static` where its payload
 cannot change (ADR-0005).
+
+Not the nudge in **Store-and-nudge Ask**, which is a line of English typed into
+an agent's terminal. This one is a signal to a browser and never leaves the
+viewer.
 _Avoid_: tick, refresh signal, ping, change event, notification
 
 **Update Notice**:

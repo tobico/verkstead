@@ -6016,6 +6016,7 @@ const REVIEW_THEN_DIE_ON_THE_ANSWERS: &str = "    SAYING='reading the branch'\n 
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'gh: the connection dropped\\n'\n    \
      exit 1";
+
 /// One that finds nothing, says so as the last thing it prints, and stops.
 const REVIEW_AND_FIND_NOTHING: &str =
     "    printf 'I read the whole branch and found nothing worth raising\n'";
@@ -6029,6 +6030,30 @@ const REVIEW_AND_FIND_NOTHING: &str =
 /// session that simply sits there, which is every session there is.
 const REVIEW_AND_FIND_NOTHING_THEN_IDLE: &str =
     "    printf 'I read the whole branch and found nothing worth raising\n'\n    sleep 300";
+
+/// One that stores its ask, ends its turn, and reads what is typed into it when
+/// the Answers land — which is what a session on a store-and-nudge backend does
+/// with the rest of its life.
+///
+/// **Two reads, with the terminal out of canonical mode for them.** What says
+/// the line and its Enter arrived as two keystrokes is a session that took two
+/// reads to get them: a burst would come back from the first read whole, which
+/// is the paste an agent's interface would have read it as. So `stty` is set
+/// before the wait rather than after it — the line may land while the stub is
+/// still getting there — and each read writes down what it got.
+///
+/// Then it carries on, as a session told its Answers are there does: it says
+/// what it did and idles, which is what ends the review on quiet.
+const REVIEW_THEN_READ_THE_NUDGE: &str = "    SAYING='reading the branch'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     stty -icanon min 1 time 0\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     LINE=$(dd bs=4096 count=1 2>/dev/null)\n    \
+     printf '%s\\n' \"$LINE\" >> /tmp/verkstead/nudges\n    \
+     ENTER=$(dd bs=4096 count=1 2>/dev/null | od -An -c)\n    \
+     printf '%s\\n' \"$ENTER\" >> /tmp/verkstead/nudges\n    \
+     printf 'fetched the answers and left the rest\\n'\n    \
+     sleep 300";
 
 /// One that reads the branch, waits on the human, does what they accepted — and
 /// then idles rather than exiting, as a real one does.
@@ -6849,6 +6874,426 @@ async fn a_deferred_ask_on_a_store_and_nudge_backend_still_holds_nothing_open() 
         "and it is still there to be answered in their own time: {:?}",
         where_it_stands(&view, set),
     );
+}
+
+/// The far end of a store-and-nudge ask: the Response lands, and the session
+/// that stored the Set is told so in its own terminal.
+///
+/// Which is the one thing that end of the ask cannot do for itself. The session
+/// asked, `verkstead ask` came back with the id, and the turn ended there — so
+/// there is nothing on the wire to hand a Response to and nothing on that end
+/// listening for one. What there is is a terminal, and one line goes into it
+/// naming the Set and the command that fetches it, down the channel the rescue
+/// already types through.
+///
+/// **Two keystrokes**, which is what the stub's two reads are for: an agent's
+/// interface reads a line and its carriage return arriving together as a paste,
+/// and a paste's return is a line break rather than a send. And what the session
+/// does with the line is take another turn, which is the whole point of typing
+/// one — no marker is written here, unlike every other test of a session being
+/// answered, because the line *is* the Response reaching it.
+#[tokio::test]
+async fn a_response_to_a_store_and_nudge_ask_is_typed_into_the_session_that_stored_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling_on_codex(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_READ_THE_NUDGE),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask_stored(REVIEW).await;
+
+    // Long enough for the session to have ended its turn and be sitting at the
+    // read, which is what the two keystrokes are told apart by: a line typed at
+    // one that had not got there yet would be waiting in the terminal with its
+    // Enter behind it, and the first read would take both.
+    pause(BRISKLY.proposing * 2).await;
+
+    assert!(
+        outputs(&fixture.view().await)
+            .last()
+            .is_some_and(|output| output.running),
+        "the session is still there to be nudged: {}",
+        standing(&fixture.view().await),
+    );
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    let read = typed_into(&fixture, "nudges", 2).await;
+
+    assert!(
+        read[0].contains(&format!("Question Set {set}")),
+        "the line names the Set, which is what an agent that stored more than \
+         one has no other way of knowing: {read:?}",
+    );
+    assert!(
+        read[0].contains(&format!("verkstead answers {set}")),
+        "and the command that fetches it, so that reading the line is enough \
+         without going back to the Guide: {read:?}",
+    );
+    assert!(
+        !read[0].contains('\r') && !read[0].contains('\n'),
+        "the first read got the line and nothing that would submit it: {read:?}",
+    );
+    assert!(
+        read[1].trim() == r"\n",
+        "and the second got the Enter on its own, a moment behind — one read for \
+         each keystroke, where a burst would have arrived as a paste. A newline \
+         rather than the carriage return that was typed, because that is what a \
+         terminal hands a program reading one: {read:?}",
+    );
+
+    // And the session takes another turn on it, which is the whole of what the
+    // line is for: it fetches, says what it did and goes quiet, and going quiet
+    // with nothing open is what ends a review.
+    let deadline = Instant::now() + *PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the session was told and never carried on: {}",
+            standing(&fixture.view().await),
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped along the way: {:?}",
+        notices(&view),
+    );
+    let said = nudges_about(&fixture, set).await;
+
+    assert_eq!(
+        said.len(),
+        1,
+        "the line is in the session's own Capture and nowhere else — a terminal \
+         says what is typed into it, and that is the whole of the account \
+         Verkstead gives of having spoken: {said:?}",
+    );
+}
+
+/// A backlog of one whose step session falls over with its ask still standing,
+/// and works the task once the human has pressed Resume — with every session
+/// writing down the prompt it was started on.
+///
+/// What a stored ask whose session dies wants around it: a Set stored by a
+/// session that is gone before the Response lands, and a session after it whose
+/// prompt can be read. A step's ask is an ordinary one — unlike a review's,
+/// which is closed unanswered when the session that was to act on it goes, there
+/// being nothing left that could act on it.
+///
+/// Held up by markers of the test's own: `dropped` is when the session falls
+/// over, which is after the test has asked, and `mended` is the human having
+/// been round to it, which is what the press finds.
+fn a_backlog_of_one_dying_on_its_ask(prompts: &Path) -> String {
+    format!(
+        r#"
+case "$1" in
+{CODEX_GRILLING_MODEL})
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks 2>/dev/null | grep -E "^$number-" | head -n 1)
+    printf '===== %s\n%s\n' "${{next:-finish}}" "$2" >> {prompts}
+    if [ ! -f /tmp/verkstead/mended ]; then
+        while [ ! -f /tmp/verkstead/dropped ]; do printf 'reading the task\n'; sleep 0.1; done
+        printf 'gh: the connection dropped\n'
+        exit 1
+    fi
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: $next"
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+esac
+"#,
+        prompts = quoted(prompts),
+    )
+}
+
+/// A session that has gone before the Response lands is the folding rule's
+/// case: nothing is typed anywhere, and its Answers open the next session's
+/// prompt.
+///
+/// The two ends of a stored ask do not overlap, and this is which of them takes
+/// a Set whose session died. Nothing about the folding is new — an answered
+/// stored ask goes into the prompt of the next session started on its
+/// Conversation, under the documents that prompt is built from, and folded once
+/// — and the whole of what is under test is that the nudge stays out of it.
+#[tokio::test]
+async fn a_store_and_nudge_ask_whose_session_died_is_folded_in_and_nothing_is_typed() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling_on_codex(
+        spill,
+        &a_backlog_of_one_dying_on_its_ask(&written),
+        PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let proposal = fixture.ask_stored(PROPOSING).await;
+    assert_eq!(
+        fixture.pick(proposal, "task-list").await,
+        Submitted::Accepted
+    );
+
+    // The step session, started on the task and asking something about it.
+    until_written_by(&written, 1).await;
+
+    let set = fixture.ask_stored(DEFERRED).await;
+
+    // And then it goes, with the Set standing and nobody left to fetch it.
+    std::fs::write(handoff_directory(&fixture).join("dropped"), "").unwrap();
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("the connection dropped"),
+        "the run stopped over the session rather than over the question: {:?}",
+        stopped.html,
+    );
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([{
+                    "label": "Q9",
+                    "selected": 1,
+                    "free_text": "and say which limit it hit",
+                }]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("mended"), "").unwrap();
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    // The step over again, and the finish step behind it — which is what says
+    // the Answers went in once rather than into every session after them.
+    until_written_by(&written, 3).await;
+
+    let started = prompts_by_step(&written);
+    let (_, first) = &started[0];
+    let (_, second) = &started[1];
+    let (_, third) = &started[2];
+
+    assert!(
+        second.contains("# What I have since said about the deferred questions"),
+        "the session after the one that asked opens with the Answers: {second:?}",
+    );
+    assert!(
+        second.contains("429 Too Many Requests") && second.contains("and say which limit it hit"),
+        "and it is the exchange itself — the Option picked and what the human \
+         wrote beside it: {second:?}",
+    );
+    assert!(
+        !first.contains("429 Too Many Requests"),
+        "the session that asked was started before it had asked: {first:?}",
+    );
+    assert!(
+        !third.contains("429 Too Many Requests"),
+        "and folded once: the step after it is primed with the work rather than \
+         with a decision it has already been told: {third:?}",
+    );
+
+    assert!(
+        nudges_about(&fixture, set).await.is_empty(),
+        "and nothing was typed at anything: the session the Answers belonged to \
+         had gone, and the one the press started reads them off its prompt",
+    );
+}
+
+/// A Response to a `--deferred` Set types nothing, on the backend that stores
+/// every ask as much as anywhere else.
+///
+/// The one thing a backend does not decide. `--deferred` is the agent saying
+/// nobody is idling on this, and a nudge typed at a session that never stopped
+/// working would be Verkstead interrupting it about a question it has already
+/// carried on past.
+#[tokio::test]
+async fn a_response_to_a_deferred_ask_types_nothing_into_the_session_that_stored_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    // One that never goes quiet, so that it is still there to be typed at when
+    // the Response lands: a session that has carried on is exactly the session
+    // this must not speak to.
+    let fixture = grilling_spilling_on_codex(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THAT_KEEPS_TALKING),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask_deferred(REVIEW).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    // A window with the Response settled and the session still printing, which
+    // is where a nudge would land if one were coming.
+    pause(BRISKLY.proposing * 2).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session is still there for a line to have been typed at: {}",
+        standing(&view),
+    );
+    assert!(
+        nudges_about(&fixture, set).await.is_empty(),
+        "and nothing was typed at it: nobody is idling on a Deferred Ask, \
+         whatever the backend it was sent from",
+    );
+}
+
+/// And a Response to a Blocking Ask types nothing either: the wait is what
+/// delivers it.
+///
+/// Claude behaves exactly as it did. The session is sitting on `verkstead ask`
+/// with the Response about to come back down it, and a line typed into that
+/// terminal would be Verkstead talking over the answer on its way in.
+#[tokio::test]
+async fn a_response_to_a_blocking_ask_types_nothing_into_the_session_waiting_on_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    // What stands in for the Response arriving down the wait, as it does in
+    // every other test of an answered blocking session: a stub cannot idle on
+    // one and wake up.
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the answered session was never seen out: {}",
+            standing(&fixture.view().await),
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    assert!(
+        nudges_about(&fixture, set).await.is_empty(),
+        "and nothing was typed at it on the way: what a blocking ask is is a \
+         session already holding the connection its Answers come back down",
+    );
+}
+
+/// Every line Verkstead has typed at one of this Conversation's sessions about
+/// this Set, as their own Captures hold it.
+///
+/// Read off the Capture rather than from inside a session, because a terminal
+/// says what is typed into it: the keystrokes are echoed straight back out and
+/// land in the session's own account of itself, whatever the session then does
+/// about them. Which is what makes *nothing was typed* something that can be
+/// asserted from out here at all — a stub that was never spoken to and one that
+/// ignored what it was told look alike from everywhere else.
+///
+/// By the Set, because a Conversation run on this backend has more than one
+/// stored ask in it: the proposal every one of these fixtures is directed by is
+/// itself an ordinary ask, and its own session is told about it in the same
+/// breath. What each of these tests is about is one Set.
+async fn nudges_about(fixture: &Grilling, set_id: i64) -> Vec<String> {
+    let view = fixture.view().await;
+    let fetching = format!("verkstead answers {set_id}`");
+    let mut typed = Vec::new();
+
+    for output in outputs(&view) {
+        let capture = fixture.capture(output.id).await;
+
+        typed.extend(
+            capture
+                .lines()
+                .filter(|line| line.contains(&fetching))
+                .map(str::to_owned),
+        );
+    }
+
+    typed
 }
 
 /// Where this Set of the Conversation's stands, or `None` where the Conversation
@@ -16395,7 +16840,17 @@ async fn a_gone_follow_up_session_takes_the_question_it_left_with_it() {
 /// rescue arrives at the session's own terminal, and what proves it arrived is
 /// the session having read it.
 async fn told(fixture: &Grilling, times: usize) -> Vec<String> {
-    let written = handoff_directory(fixture).join("rescues");
+    typed_into(fixture, "rescues", times).await
+}
+
+/// The same for anything else typed into a session: `file` is what that stub
+/// writes each read down to, in the handoff directory every sandbox has.
+///
+/// One loop for the two things Verkstead types at a session — the rescue and the
+/// nudge — because from out here they are the same claim: a line went into a
+/// terminal, and the session read it.
+async fn typed_into(fixture: &Grilling, file: &str, times: usize) -> Vec<String> {
+    let written = handoff_directory(fixture).join(file);
     let deadline = Instant::now() + *PATIENCE;
 
     loop {
@@ -16408,7 +16863,7 @@ async fn told(fixture: &Grilling, times: usize) -> Vec<String> {
 
         assert!(
             Instant::now() < deadline,
-            "the follow-up session was told {} times rather than {times}: {lines:?}",
+            "the session read {} of the {times} lines typed into it: {lines:?}",
             lines.len(),
         );
 

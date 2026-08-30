@@ -51,6 +51,8 @@ mod grillings;
 pub mod handoffs;
 mod limits;
 mod nudge;
+/// Telling a session idling on a stored ask that its Answers are there to fetch.
+mod nudging;
 mod profiles;
 mod push;
 /// Following a Conversation's branch to the name a session renamed it to,
@@ -111,6 +113,9 @@ mod tasks;
 /// what proves a terminal is a terminal is a process running on one saying so.
 pub mod terminal;
 mod transcript;
+/// What Verkstead says to a running session: the keystrokes the rescue and the
+/// nudge both go in as.
+mod typing;
 mod ui;
 mod updates;
 mod viewer;
@@ -483,6 +488,14 @@ fn routed(
     // undriven after everything that resumes has resumed is what genuinely has
     // nobody — see [`stalls`].
     stalls::sweeping(&state, resumed);
+
+    // And a listener on the one channel a Set is settled through, so that a
+    // session idling on a stored ask is told its Answers have landed whether the
+    // human answered from the viewer or an agent answered over the API — see
+    // [`nudging::listening`]. Here rather than in either of those endpoints,
+    // because a nudge sent from one and silently not from the other is a session
+    // waiting for a line nobody is going to type.
+    nudging::listening(&state);
 
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up

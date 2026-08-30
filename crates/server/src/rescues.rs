@@ -9,10 +9,11 @@
 //!
 //! **So it is spoken to.** Verkstead types a canned line into the running
 //! session — through the terminal a watcher's keystrokes go through, which is the
-//! only way in there is — putting to it the two moves that would end the silence:
-//! carrying on, where it has a next step, and otherwise the one move that reaches
-//! the human at all, which is where it has got to put to them as a Set. An agent
-//! that had finished its turn takes another one.
+//! only way in there is and which [`crate::typing`] is — putting to it the two
+//! moves that would end the silence: carrying on, where it has a next step, and
+//! otherwise the one move that reaches the human at all, which is where it has
+//! got to put to them as a Set. An agent that had finished its turn takes
+//! another one.
 //!
 //! **Both, because the line is sometimes wrong.** What it is read off is a
 //! session watched from outside, and a session doing exactly what it should can
@@ -60,7 +61,7 @@
 //! own Capture holds the line and whatever the agent made of it.
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::AppState;
 use crate::runner::{Landing, Pace};
@@ -88,67 +89,24 @@ pub(crate) const AT_MOST: usize = 2;
 /// one quiet turn, rather than a Question Set manufactured for a human who did
 /// not need one.
 ///
-/// One line and no newline of its own. The Enter is [`rescue`]'s, and a line
-/// broken over two would be submitted half-written.
+/// One line and no newline of its own. The Enter is [`crate::typing`]'s, and a
+/// line broken over two would be submitted half-written.
 pub(crate) const LINE: &str = "If you have your next step, carry on with it now. If you are blocked or waiting on me, \
      summarize your status and ask me what to do next via `verkstead ask`.";
-
-/// How long the line is left sitting in the session's composer before the Enter
-/// is typed after it.
-///
-/// **Because an agent's terminal interface reads a burst as a paste.** The
-/// interfaces Verkstead launches take a line and its carriage return arriving in
-/// one read for pasted text, and a return inside pasted text is a line break in
-/// what is being written rather than a send — which leaves the rescue sitting in
-/// the composer unsent, the session as quiet as it was, and Verkstead reading
-/// that as a session that would not ask. Typed a moment apart they are two
-/// keystrokes, which is what they are meant to be.
-///
-/// Long enough for the interface to have drawn the line and short enough that
-/// nothing else could have happened in between: this is one turnaround of a
-/// terminal, not a wait on anything.
-const BEFORE_THE_ENTER: Duration = Duration::from_millis(250);
-
-/// And how long after the Enter the line is still arriving back.
-///
-/// **Because a terminal says what is typed into it.** The keystrokes a rescue
-/// puts in are echoed straight back out — by the line discipline where the agent
-/// left it alone, and by the interface's own composer where it did not — so the
-/// session appears to say the very words Verkstead just said to it, within a
-/// moment of their being said. Which is nothing about the session: a process
-/// that has hung with its terminal open echoes exactly as well as one that is
-/// about to take a turn.
-///
-/// So the stir a rescue makes is taken from here rather than from the last
-/// keystroke — see [`until_it_will_not_ask`], where what says the line landed is
-/// the session speaking *after* the stir. A stir the typing itself answered
-/// would be no stir at all, and the second rescue would arm on the bare grace
-/// the first one did.
-///
-/// One turnaround of a terminal again, for [`BEFORE_THE_ENTER`]'s reason: an
-/// echo is drawn as it is read, and anything arriving later than this is the
-/// session rather than the keyboard.
-const AFTER_THE_ECHO: Duration = Duration::from_millis(250);
 
 /// Type [`LINE`] into the session, and say whether it reached one.
 ///
 /// By the Event as well as by the Conversation, which is what
-/// [`crate::sessions::Sessions::alive`] asks for and what keeps this from typing
-/// into whatever is running now: the session being rescued is the one the caller
-/// has been watching go quiet.
+/// [`crate::typing::typed`] asks for and what keeps this from typing into
+/// whatever is running now: the session being rescued is the one the caller has
+/// been watching go quiet.
 ///
 /// `false` is a session that is not there any more — it ended between the last
 /// look and this one — which is not a rescue that failed but a rescue that had
 /// nothing to rescue. The caller is waiting on that ending too, so what to do
 /// about it is already in hand.
-///
-/// **Asked of the process rather than of the register**, which is the difference
-/// between the two answers and matters exactly here: a session stays on the
-/// register through its last sweep of the branch, and a line typed in over that
-/// stretch would go into a terminal nothing is reading and be counted against a
-/// session that had already finished.
 pub(crate) async fn rescue(state: &AppState, conversation_id: i64, event_id: i64) -> bool {
-    if !state.sessions.alive(conversation_id, event_id) {
+    if !crate::typing::typed(state, conversation_id, event_id, LINE).await {
         tracing::info!(
             conversation_id,
             event_id,
@@ -156,18 +114,6 @@ pub(crate) async fn rescue(state: &AppState, conversation_id: i64, event_id: i64
         );
         return false;
     }
-
-    let Some(screen) = state.sessions.screen(conversation_id, event_id) else {
-        return false;
-    };
-
-    // The line first, and the carriage return an Enter arrives as a moment
-    // behind it — see [`BEFORE_THE_ENTER`], which is why the two are not one
-    // write. Both take the path a watcher's keystrokes take, which is the whole
-    // of the way into a running session.
-    screen.put_in(LINE).await;
-    tokio::time::sleep(BEFORE_THE_ENTER).await;
-    screen.put_in("\r").await;
 
     tracing::info!(
         conversation_id,
@@ -374,10 +320,10 @@ pub(crate) async fn until_it_will_not_ask(
             spent += 1;
 
             // Once what was typed has finished arriving back, rather than as it
-            // was typed — see [`AFTER_THE_ECHO`]. A terminal echoes, so a stir
-            // taken at the last keystroke is one the keystrokes answer
-            // themselves.
-            tokio::time::sleep(AFTER_THE_ECHO).await;
+            // was typed — see [`crate::typing::AFTER_THE_ECHO`]. A terminal
+            // echoes, so a stir taken at the last keystroke is one the
+            // keystrokes answer themselves.
+            tokio::time::sleep(crate::typing::AFTER_THE_ECHO).await;
 
             stirred = Instant::now();
         }
