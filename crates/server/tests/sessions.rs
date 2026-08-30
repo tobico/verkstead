@@ -1446,14 +1446,14 @@ async fn grilling_at_work(stub: &str) -> Grilling {
     .await
 }
 
-/// And the same again on the third backend, whose stub draws the way grok
-/// draws — nothing handed in here either.
+/// And the same again on the third backend, grilled under an account of its
+/// type — one home, as the second's is.
 ///
-/// A fixture of its own rather than a flag on the one above, because what these
-/// two prove is one thing apiece: that Verkstead carries the right line for
-/// *this* backend. A session run under the wrong type's Profile would be read
-/// by the wrong type's constant and prove nothing about either.
-async fn grilling_at_work_on_grok(stub: &str) -> Grilling {
+/// Which is what the tests about grok's own reading of itself stand on, whether
+/// that is its at-work hint or the log it keeps: a session run under another
+/// type's Profile would be read by that type's constants and prove nothing about
+/// either backend.
+async fn grilling_on_grok(stub: &str) -> Grilling {
     grilling_however_started(
         tempfile::tempdir().unwrap(),
         stub,
@@ -3158,6 +3158,144 @@ async fn a_codex_sessions_row_is_summarised_from_the_rollout_the_pane_draws() {
         Some(2),
         "the turn put to it and the turn it took — and neither the token count \
          nor the same turn over again as the model was sent it"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// A Grok session's log is named rather than found: grok takes the session id at
+/// launch, so the conversation it keeps is the file under the name Verkstead
+/// gave it.
+///
+/// What Verkstead does not know is the directory grok grouped that session
+/// under. Grok's store is organised by working directory and then by session,
+/// and the outer name is grok's own encoding of the path — so the stub writes
+/// its log under an encoding of its own, as grok would have, and nothing in
+/// Verkstead works that name out. Two things sit beside it that a real store
+/// also has in it and that are not this session's conversation: another
+/// Conversation's session under its own encoded directory, and the index entry
+/// grok keeps next to the log itself.
+///
+/// And the following is stage 02's, unchanged: the lines reach the Transcript
+/// exactly as grok wrote them, in order, with a line caught half-written held
+/// until the rest of it arrives.
+#[tokio::test]
+async fn a_grok_session_follows_the_log_it_was_named_for() {
+    let fixture = grilling_on_grok(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        store=$HOME/.grok/sessions
+
+        # A session of another Conversation, in the same account's store, under
+        # the directory grok grouped that Worktree's sessions in.
+        elsewhere=$store/%2Fsrv%2Fworktrees%2Ftables/6f8b17c2-not-this-session
+        mkdir -p "$elsewhere"
+        printf '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Another Conversation."}}\n' \
+            > "$elsewhere/updates.jsonl"
+
+        # And this session's own, under grok's encoding of the directory it is
+        # running in — which the stub stands in for, since nothing here is grok.
+        encoded=$(pwd | sed 's|/|%2F|g')
+        mine=$store/$encoded/$name
+        mkdir -p "$mine"
+
+        printf 'grouped=%s\n' "$encoded"
+
+        # The store's index entry, which sits beside the log and is not it.
+        printf '{"title":"Rate limiting","model":"grok-4.6"}\n' > "$mine/summary.json"
+
+        printf 'named=%s\n' "$name"
+
+        log=$mine/updates.jsonl
+        printf '{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Rate limiting"}}\n' > "$log"
+        printf 'Reading the brief.\n'
+
+        printf '{"sessionUpdate":"agent_message_chunk","content":{"type":"te' >> "$log"
+        sleep 2
+        printf 'xt","text":"Where does the counter live?"}}\n' >> "$log"
+        printf 'Asking.\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 2).await;
+
+    assert_eq!(
+        transcript,
+        vec![
+            r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Rate limiting"}}"#
+                .to_owned(),
+            r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Where does the counter live?"}}"#
+                .to_owned(),
+        ],
+        "the log under the name Verkstead gave this session is the one followed, \
+         and its lines should be kept exactly as grok wrote them — a line caught \
+         half-written waiting for the rest of itself"
+    );
+
+    // The name it was actually run under, read off what it printed: what makes
+    // the log above this session's own rather than whatever else was in there.
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+    let name = said
+        .lines()
+        .find_map(|line| line.strip_prefix("named="))
+        .expect("the session says what it was named");
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert_eq!(
+        verkstead_store::session_id(&pool, event).await.unwrap(),
+        Some(name.to_owned()),
+        "and that name is the one Verkstead wrote down beside the session's Event"
+    );
+
+    // And the log really was inside an encoded directory, which is what says the
+    // store was walked rather than the path guessed at: a stub that had left the
+    // group out would have put its log where a lookup finds it without walking
+    // anything, and proved nothing.
+    let grouped = said
+        .lines()
+        .find_map(|line| line.strip_prefix("grouped="))
+        .expect("the session says what it grouped its log under");
+
+    assert!(
+        grouped.contains("%2F"),
+        "the group directory is grok's own encoding of the working directory: {grouped:?}"
+    );
+    assert!(
+        said.contains("Reading the brief.\n"),
+        "following the log should not cost the Capture anything: {said:?}"
+    );
+
+    let view = fixture.view().await;
+    let printed = output(&view).expect("the session is on the Timeline");
+
+    assert!(
+        matches!(printed.turns, Some(turns) if turns > 0),
+        "and the row shows a Transcript rather than nothing: {:?}",
+        printed.turns
+    );
+
+    // The details pane over the same lines. Nothing parses a Grok line yet, so
+    // each of them is drawn as the JSON it is — which is ADR 0006's rule for a
+    // format nothing has a reader for rather than a gap.
+    let drawn = fixture.spoken(event, 2).await;
+
+    assert!(
+        drawn.turns.iter().any(|turn| matches!(
+            turn,
+            Turn::Unread(unread) if unread.line.contains("Where does the counter live?")
+        )),
+        "the pane should open what has been stored: {:?}",
+        drawn.turns
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
@@ -18439,7 +18577,7 @@ const GROK_AT_ITS_PROMPT: &str = "Shift+Tab:mode  │  Ctrl+x:shortcuts";
 /// the quiet behind the screen carries it either way.
 #[tokio::test]
 async fn grok_sessions_are_ended_on_their_own_at_work_hint_rather_than_on_codexs() {
-    let fixture = grilling_at_work_on_grok(&a_backlog_at_work(
+    let fixture = grilling_on_grok(&a_backlog_at_work(
         GROK_GRILLING_MODEL,
         GROK_AT_WORK,
         GROK_AT_ITS_PROMPT,
@@ -18476,7 +18614,7 @@ async fn grok_sessions_are_ended_on_their_own_at_work_hint_rather_than_on_codexs
 /// would-not-ask stop.
 #[tokio::test]
 async fn a_grok_at_work_hint_that_never_goes_is_caught_by_the_long_stop() {
-    let fixture = grilling_at_work_on_grok(&a_backlog_at_work(
+    let fixture = grilling_on_grok(&a_backlog_at_work(
         GROK_GRILLING_MODEL,
         GROK_AT_WORK,
         GROK_AT_WORK,

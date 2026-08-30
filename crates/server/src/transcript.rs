@@ -14,7 +14,10 @@
 //! all, so nothing known before it starts names its log: what identifies a
 //! rollout is what the session wrote in it about itself, which is the Worktree
 //! it opened in — so the session's log is the one naming this Worktree that
-//! appeared after this session was launched.
+//! appeared after this session was launched. Grok Build takes one too, so its
+//! log is a lookup again — of a directory called the name, inside a directory
+//! grok named by encoding the working directory, which is why the store is
+//! walked rather than the encoding reproduced.
 //!
 //! Lines go to the store exactly as they were written, and nothing here parses
 //! one. That is what holds the coupling to somebody else's file format down to
@@ -115,13 +118,15 @@ pub(crate) struct Tail {
 
 /// How a session's log is found.
 ///
-/// Two backends, two answers, and the difference between them is not an
+/// Three backends, three answers, and the difference between them is not an
 /// implementation detail. Claude takes the name Verkstead gave the session and
 /// writes a file called that, so its log is a lookup. Codex takes no session id
 /// at launch at all — so nothing Verkstead knows before the session starts
 /// names its log, and what identifies it afterwards is what the session wrote
 /// about itself: the Worktree it opened in, in a file that appeared after it
-/// was launched.
+/// was launched. Grok Build takes one as Claude does, so its log is named again
+/// — but it is a file of a fixed name inside a directory called the name, and
+/// what that directory sits in is grok's own encoding of the working directory.
 enum Search {
     /// Claude's: the Profile's directory of projects, and the name Verkstead
     /// gave the session, which is what the file is called.
@@ -134,6 +139,11 @@ enum Search {
         worktree: PathBuf,
         launched: SystemTime,
     },
+
+    /// Grok Build's: the account's store of sessions, and the name Verkstead
+    /// gave this one, which is what the directory holding its log is called —
+    /// see [`updates`].
+    Updates { sessions: PathBuf, session: String },
 
     /// And nowhere at all, for a session there is nothing to look for. Nothing
     /// is looked for and the Capture is the whole record, which is ADR-0006's
@@ -149,13 +159,29 @@ enum Search {
 /// moves.
 const ROLLOUTS: &str = "sessions";
 
+/// And what grok calls the directory it keeps its sessions under, inside the one
+/// directory its account is.
+///
+/// The same word as [`ROLLOUTS`] and a constant of its own, because it is a
+/// second backend's spelling of its own store rather than the same store: one of
+/// the two moving is not both of them moving.
+const SESSIONS: &str = "sessions";
+
+/// What grok calls the log itself, inside the directory named for the session.
+///
+/// The authoritative record of the conversation, and the only file in there that
+/// is: `summary.json` beside it is the store's index entry, and the rest is the
+/// session's own furniture — its plan, its rewind points, its raw chat history.
+const UPDATES: &str = "updates.jsonl";
+
 impl Tail {
     /// Follow the log of the session named `session`, run under `profile` for
     /// `conversation` in `worktree`, and started at `launched`.
     ///
-    /// The last two are Codex's and are nothing to Claude's: they are what its
-    /// log is found *by*, and a session with neither is a session with nothing
-    /// to look for — see [`Search`].
+    /// The last two are Codex's and are nothing to the two backends that name
+    /// their own session: they are what a rollout is found *by*, and a Codex
+    /// session with neither is a session with nothing to look for — see
+    /// [`Search`].
     pub(crate) fn of(
         conversation: i64,
         profile: &store::Profile,
@@ -190,12 +216,14 @@ impl Tail {
             // given up on rather than guessed at.
             (store::Account::Codex { .. }, None) => Search::Nowhere,
 
-            // Grok Build names its session at launch, so its log is named
-            // rather than found — under a directory of its own inside the
-            // account's session store. Nothing looks for it yet, and a session
-            // with no log has its Capture as the whole record, which is
-            // ADR-0006's rule doing its job rather than a gap.
-            (store::Account::Grok { .. }, _) => Search::Nowhere,
+            // And where grok keeps its sessions, under the one directory its
+            // account is. Grok Build names its session at launch, so the log is
+            // named rather than found — the Worktree and the moment are
+            // nothing to it.
+            (store::Account::Grok { home }, _) => Search::Updates {
+                sessions: home.join(SESSIONS),
+                session: session.to_owned(),
+            },
         };
 
         Tail {
@@ -254,6 +282,7 @@ impl Tail {
                 worktree,
                 launched,
             } => rollout(sessions, worktree, *launched).await,
+            Search::Updates { sessions, session } => updates(sessions, session).await,
         }
     }
 
@@ -529,6 +558,46 @@ fn to_the_second(moment: SystemTime) -> SystemTime {
     }
 }
 
+/// The log a Grok session keeps of itself: the `updates.jsonl` inside the
+/// directory named for the session id Verkstead gave it.
+///
+/// Grok organises its store by working directory and then by session — one
+/// directory per directory it has been run in, and one per session inside that.
+/// **What it calls the outer one is grok's own encoding of the path**: URL-
+/// encoded where that fits and a slug with a hash of it where it does not, with
+/// the original path left in a `.cwd` file beside the sessions. Working out
+/// which of those a Worktree's path would have come out as means reimplementing
+/// somebody else's private scheme (ADR 0006), and it would come apart the first
+/// time either half of it moved.
+///
+/// So the store's own directories are what say where to look, and the session id
+/// is what identifies the log inside them: one level of walking, and a name
+/// Verkstead chose at the end of it. Beside them as well as inside one, for the
+/// reason Claude's log is looked for both places — whether grok grouped this
+/// session under an encoded directory at all is grok's business, and what
+/// Verkstead knows is the store and the name it gave the session.
+///
+/// `None` while the session has not written it yet, which is every poll of its
+/// first seconds: grok makes the directory when it starts talking rather than
+/// when it starts.
+async fn updates(sessions: &Path, session: &str) -> Option<PathBuf> {
+    let beside = sessions.join(session).join(UPDATES);
+
+    if is_file(&beside).await {
+        return Some(beside);
+    }
+
+    for encoded in directories(sessions).await {
+        let inside = encoded.join(session).join(UPDATES);
+
+        if is_file(&inside).await {
+            return Some(inside);
+        }
+    }
+
+    None
+}
+
 /// The directories directly under `under`, and nothing else that is there.
 async fn directories(under: &Path) -> Vec<PathBuf> {
     let Ok(mut entries) = tokio::fs::read_dir(under).await else {
@@ -788,6 +857,157 @@ mod tests {
         assert_eq!(
             rollout(&sessions, &worktree, launched).await,
             Some(tomorrow)
+        );
+    }
+
+    /// A Grok session's log where grok keeps one: `updates.jsonl` inside a
+    /// directory named for the session, inside the directory grok named by
+    /// encoding the working directory.
+    fn kept(sessions: &Path, encoded: &str, session: &str) -> PathBuf {
+        let directory = sessions.join(encoded).join(session);
+        std::fs::create_dir_all(&directory).unwrap();
+
+        let log = directory.join("updates.jsonl");
+        std::fs::write(&log, format!("{A_LINE}\n")).unwrap();
+
+        log
+    }
+
+    /// One line of one, as grok writes them: the stream of session updates its
+    /// own agent protocol is spoken in. What any of it means is the renderer's,
+    /// and nothing here reads a line at all.
+    const A_LINE: &str = r#"{"sessionUpdate":"agent_message_chunk"}"#;
+
+    /// Two Grok sessions running at once in two Worktrees write into the one
+    /// store their account keeps, and each finder takes its own.
+    ///
+    /// Which is what naming a session at launch buys: the two logs are told
+    /// apart by the name Verkstead gave each of them, so neither the directory
+    /// grok grouped them under nor the moment either started has to be read.
+    #[tokio::test]
+    async fn two_sessions_in_two_worktrees_each_find_their_own_log() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+
+        let rate = "%2Fsrv%2Fworktrees%2Frate-limiting";
+        let tables = "%2Fsrv%2Fworktrees%2Ftables";
+
+        let of_rate = kept(&sessions, rate, "aaaa-1111");
+        let of_tables = kept(&sessions, tables, "bbbb-2222");
+
+        // And the session that worked in the rate-limiting Worktree yesterday,
+        // beside today's in the same directory: one Worktree is worked in
+        // session after session, and only one of them is this one.
+        let yesterday = kept(&sessions, rate, "cccc-3333");
+
+        assert_eq!(
+            updates(&sessions, "aaaa-1111").await,
+            Some(of_rate),
+            "the log under the name Verkstead gave this session is the one followed"
+        );
+        assert_eq!(
+            updates(&sessions, "bbbb-2222").await,
+            Some(of_tables),
+            "and the session beside it follows its own, in the directory grok \
+             grouped that Worktree under"
+        );
+        assert!(
+            yesterday.is_file(),
+            "the earlier session's log is still there and was followed by neither"
+        );
+    }
+
+    /// What the directory a session is grouped under is called is grok's own
+    /// encoding of the working directory, and nothing here reads it: a path that
+    /// URL-encodes to more than grok's limit is kept under a slug and a hash
+    /// instead, with the path itself left in a `.cwd` file beside the sessions.
+    ///
+    /// So the store's directories are walked rather than the encoding
+    /// reproduced, and a session grouped under no directory at all is found the
+    /// same way — which of the two grok does is grok's business.
+    #[tokio::test]
+    async fn a_log_is_found_whatever_grok_encoded_the_working_directory_as() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+
+        let hashed = "srv-worktrees-verkstead-rate-limiting-8f2c1d9e";
+        let log = kept(&sessions, hashed, "aaaa-1111");
+        std::fs::write(
+            sessions.join(hashed).join(".cwd"),
+            "/srv/worktrees/verkstead-rate-limiting\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            updates(&sessions, "aaaa-1111").await,
+            Some(log),
+            "a group directory named however grok had to name it holds the log all \
+             the same"
+        );
+
+        let beside = sessions.join("bbbb-2222");
+        std::fs::create_dir_all(&beside).unwrap();
+        let unencoded = beside.join("updates.jsonl");
+        std::fs::write(&unencoded, "{}\n").unwrap();
+
+        assert_eq!(
+            updates(&sessions, "bbbb-2222").await,
+            Some(unencoded),
+            "and a session the store held directly is found as well"
+        );
+    }
+
+    /// Nothing in the session's own directory but the log is taken for the log.
+    ///
+    /// A Grok session fills that directory with the store's own furniture — the
+    /// index entry, the raw chat history it sent the model, its plan, its rewind
+    /// points — and one file of it is the conversation.
+    #[tokio::test]
+    async fn nothing_beside_the_log_is_taken_for_it() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+
+        let directory = sessions.join("%2Fsrv%2Fworktrees%2Ftables/aaaa-1111");
+        std::fs::create_dir_all(&directory).unwrap();
+
+        for beside in [
+            "summary.json",
+            "chat_history.jsonl",
+            "plan.json",
+            "rewind_points.jsonl",
+            "signals.json",
+        ] {
+            std::fs::write(directory.join(beside), "{}\n").unwrap();
+        }
+
+        std::fs::create_dir_all(directory.join("subagents")).unwrap();
+
+        assert_eq!(
+            updates(&sessions, "aaaa-1111").await,
+            None,
+            "the conversation is `updates.jsonl` and nothing else in there is it"
+        );
+    }
+
+    /// And a session that has not written anything yet is a session with nothing
+    /// to follow, which is every poll of its first seconds.
+    #[tokio::test]
+    async fn a_session_that_has_written_nothing_yet_has_no_log_to_follow() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+
+        assert_eq!(
+            updates(&sessions, "aaaa-1111").await,
+            None,
+            "a store that has never been written in holds no log"
+        );
+
+        let log = kept(&sessions, "%2Fsrv%2Fworktrees%2Ftables", "aaaa-1111");
+
+        assert_eq!(
+            updates(&sessions, "aaaa-1111").await,
+            Some(log),
+            "and the poll after the session started talking finds it"
         );
     }
 }
