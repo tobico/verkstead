@@ -1687,7 +1687,7 @@ async fn comment_share(State(state): State<AppState>, Path(id): Path<String>) ->
 }
 
 /// One composed share published: the gist made, the file pushed into it and the
-/// link written down beside the Conversation.
+/// gist written down beside the Conversation.
 ///
 /// Its own function because both presses that publish do exactly this — the
 /// **Publish** row, which stops here, and the one-click share, which goes on to
@@ -3379,9 +3379,13 @@ fn last_four(token: &str) -> String {
 /// `GET /api/ui/share-viewer.html` — the share viewer, to take away and host.
 ///
 /// The one file Verkstead hands over that is nobody's record: a small static
-/// page that draws a Published Share in a browser, which the human puts on a
-/// public site of their own once and never touches again — see
+/// page that draws a Published Share in a browser — see
 /// [`crate::sharing::VIEWER`], where what it does and why is written down.
+///
+/// Offered rather than required. Links are composed through the copy Verkstead
+/// hosts unless the human says otherwise ([`crate::sharing::HOSTED`]), so this
+/// is for whoever would rather put the page on a public site of their own once
+/// and point the setting at it.
 ///
 /// An attachment rather than a page, for the reason a share is one: what the
 /// press is for is getting the file, and a viewer that opened here would be a

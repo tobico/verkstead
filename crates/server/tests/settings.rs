@@ -1,8 +1,8 @@
 //! What Verkstead is told, over the viewer's namespace: reading the git author,
 //! the presence of a GitHub token, how the shared Rust build cache is set and
-//! where the share viewer is hosted, and writing any of them. The viewer page
-//! itself is handed over from here as well, that being the other half of the
-//! setting recording where it went.
+//! where the human hosts a share viewer of their own, and writing any of them.
+//! The viewer page itself is handed over from here as well, that being the
+//! other half of the setting recording where it went.
 //!
 //! Asked of the *server*, through the endpoints, rather than of the settings
 //! files underneath them. The one thing this half has to be trusted about is
@@ -538,8 +538,8 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
     assert!(!saved.settings.rust_build_cache.size_configured);
 }
 
-/// Where the human hosts the share viewer, which is the plainest setting on the
-/// page: written as it was typed and read back as itself.
+/// Where the human hosts a share viewer of their own, which is the plainest
+/// setting on the page: written as it was typed and read back as itself.
 ///
 /// It is not a secret — it is a public page, and its URL goes into a comment on
 /// a pull request the moment a share is published through it — so unlike the
@@ -555,8 +555,8 @@ async fn where_the_share_viewer_is_hosted_goes_in_and_comes_back() {
         "https://ada.github.io/verkstead-shares/"
     );
 
-    // In the file rather than only in the answer: what task 06 composes a
-    // comment from is the file, read at the moment it comments.
+    // In the file rather than only in the answer: what a link is composed
+    // through is the file, read at the moment the link is drawn.
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
     assert!(
         written.contains("https://ada.github.io/verkstead-shares/"),
@@ -570,8 +570,14 @@ async fn where_the_share_viewer_is_hosted_goes_in_and_comes_back() {
 }
 
 /// A Verkstead nobody has hosted one for says so as an empty field rather than
-/// as a guess: there is no default, because nobody but the human knows where
-/// their own site is.
+/// as a guess: the *setting* has no default, because nobody but the human knows
+/// where their own site is, and a field filled in with an address nobody typed
+/// is a setting they cannot tell they have not chosen.
+///
+/// What an empty one *means* is another matter, and not this page's: links are
+/// composed through the copy Verkstead hosts — `HOSTED` in
+/// `crates/server/src/sharing.rs`, and `tests/sharing.rs` is where that is
+/// asked about.
 #[tokio::test]
 async fn a_share_viewer_nobody_has_hosted_comes_back_empty() {
     let (_dir, app) = app().await;
@@ -626,8 +632,9 @@ async fn save_viewer(app: &Router, url: &str) -> SettingsSaved {
     .await
 }
 
-/// The viewer itself, which is the other half of that setting: Verkstead ships
-/// the page and the human hosts it, so it has to be obtainable from here.
+/// The viewer itself, which is the other half of that setting: a human filling
+/// the field in is a human hosting this page, so it has to be obtainable from
+/// here.
 ///
 /// An attachment, because the point of the press is having the file — a viewer
 /// that opened in the browser would be one served off the tailnet, where nobody

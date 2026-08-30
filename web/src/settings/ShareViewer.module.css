@@ -114,8 +114,8 @@
   opacity: 0.65;
 }
 
-/* What the setting buys, with the address in it: the link a comment on a pull
-   request carries. */
+/* What a link looks like, with whichever address is in force: the one a comment
+   on a pull request, the toast and the Share row all carry. */
 .linking {
   margin: 0.85rem 0 0;
   font-size: 0.9rem;

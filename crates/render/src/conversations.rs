@@ -588,7 +588,14 @@ pub struct ConversationView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ShareView {
-    /// The page to send somebody to, as GitHub gave it.
+    /// The page to send somebody to: the gist's id in the share viewer's
+    /// fragment, which is what draws the share as the conversation rather than
+    /// as source.
+    ///
+    /// Composed by the server on the way out rather than read off the record —
+    /// what the record holds is the gist as GitHub gave it, and which viewer a
+    /// reader goes through is a fact about the settings at the moment the page
+    /// is drawn. See `link` in `crates/server/src/sharing.rs`.
     pub url: String,
 
     /// When it was published, RFC 3339 — drawn beside the link, because a link

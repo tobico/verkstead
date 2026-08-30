@@ -21,10 +21,11 @@
 //!
 //! How wide they stand is the frame's, because a width is a property of the
 //! frame rather than of anything drawn in it. They are percentages kept per
-//! device (`widths.ts`) — one pair for the device rather than one per page —
-//! and the dividers that set them exist only in the layouts that stand panes
-//! side by side: below that breakpoint the page is walked through one pane at a
-//! time, so there is no border to drag and nothing remembered is read.
+//! device (`widths.ts`) — one set for the device rather than one per page, with
+//! a width of its own for the frame that has no list in it — and the dividers
+//! that set them exist only in the layouts that stand panes side by side: below
+//! that breakpoint the page is walked through one pane at a time, so there is no
+//! border to drag and nothing remembered is read.
 //!
 //! The floors under those percentages are lengths rather than shares, because
 //! what makes a pane too narrow is what stands in it. So this is the one part
