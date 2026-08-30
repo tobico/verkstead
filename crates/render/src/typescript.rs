@@ -42,11 +42,10 @@ fn the_viewers_types_are_written_from_these() {
     // see `.cargo/config.toml`, which is where both are said once.
     let config = ts_rs::Config::from_env();
 
-    // One Set, whole — which is what both the standalone page and the details
-    // pane of the Timeline it landed on are drawn from. The whole reading
-    // rather than the `SetView` inside it: what comes back says whether this
-    // build could read the stored body at all, and the page has to be able to
-    // draw either answer.
+    // One Set, whole — which is what the details pane of the Timeline it
+    // landed on is drawn from. The whole reading rather than the `SetView`
+    // inside it: what comes back says whether this build could read the stored
+    // body at all, and the pane has to be able to draw either answer.
     SetReading::export_all(&config).unwrap();
 
     // Answering a Set, and closing it unanswered. What goes *in* to the first of
@@ -214,7 +213,8 @@ fn the_viewers_types_are_written_from_these() {
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the choices a Conversation makes of them —
     // a Pairing, or the row that runs no session where the role offers one.
-    // A `ProfileEntry` writes the agent type and the broken-ness it carries.
+    // A `ProfileEntry` writes the account it carries — the agent type and that
+    // type's own fields, flat — and the broken-ness beside it.
     ProfileEntry::export_all(&config).unwrap();
     ProfileEdit::export_all(&config).unwrap();
     ProfileSaved::export_all(&config).unwrap();

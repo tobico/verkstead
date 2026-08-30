@@ -123,8 +123,8 @@ export function Details(props: {
           {/* The whole sheet, drawn by the component the workbench opens a
               Set with and asked for its read-only shape: the Preface, the
               Diff it was asked over, every Question with its Options and what
-              was decided, and the Postscript. With its table of contents from
-              the pane's own width, exactly as the workbench draws one. */}
+              was decided, and the Postscript. With its own pane header and its
+              table of contents, exactly as the workbench draws one. */}
           <Match when={setIn(open())}>
             {(asked) => (
               <Show
@@ -135,16 +135,7 @@ export function Details(props: {
                   </Missing>
                 }
               >
-                {(set) => (
-                  <Sheet
-                    set={set()}
-                    lead={
-                      <PaneHead back={{ to: "Timeline", go: props.back }} />
-                    }
-                    contents="pane"
-                    readOnly
-                  />
-                )}
+                {(set) => <Sheet set={set()} back={props.back} readOnly />}
               </Show>
             )}
           </Match>

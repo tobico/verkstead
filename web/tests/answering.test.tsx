@@ -506,11 +506,11 @@ describe("a question whose Options were declared as a table", () => {
 
 describe("submitting a Response", () => {
   it("sends the Set answered in the browser as the Response the server records", async () => {
-    const { page, fetching, history, settles } = await answering(
+    const { page, fetching, back, settles } = await answering(
       WAITING,
       submitted("Accepted"),
     );
-    // What the page reads back once the Response has been taken: it stays put,
+    // What the pane reads back once the Response has been taken: it stays put,
     // so the sheet it redraws is the record of what was decided.
     settles(ANSWERED);
 
@@ -528,11 +528,11 @@ describe("submitting a Response", () => {
     // and what the agent was handed as YAML.
     expect(sent(fetching)).toEqual(DECIDED);
 
-    // And the page stays on the Set, read back as the decision that was made —
-    // which is the confirmation that the agent has its answer. There is no list
-    // for the Set's absence to be the confirmation on any more.
+    // And the pane stays on the Set, read back as the decision that was made —
+    // which is the confirmation that the agent has its answer. Nobody is taken
+    // back to the Timeline: what answering leaves behind is the record.
     await waitFor(() => expect(page.querySelector(`.${sheet.answeredAt}`)).toBeTruthy());
-    expect(history.get()).toBe(`/sets/${WAITING.id}`);
+    expect(back).not.toHaveBeenCalled();
   });
 
   it("sends a Set with every choice made without asking anything first", async () => {

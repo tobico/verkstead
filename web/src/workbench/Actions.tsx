@@ -1,18 +1,28 @@
 //! What can be done to a Conversation as a whole, rather than to any one event:
-//! the rows behind the ⋯ at the head of the Conversation pane, and the same rows
-//! under the pointer on a card in the sidebar.
+//! the rows behind the status button at the head of the Conversation pane, and
+//! the same rows under the pointer on a card in the sidebar.
 //!
 //! A menu rather than three buttons, because the last of them throws a worktree
 //! away and a pane header is somewhere the human's cursor passes on the way to
 //! everything else.
 //!
-//! In order of what each costs: share, which costs nothing and is a file to take
-//! away rather than a press at all; publish, which puts that file in a gist;
-//! share to pull request, which publishes it and says so in front of whoever is
-//! reviewing the work; stop, which waits for the task the run is
-//! on; force stop, which does not; steer, which moves the work somewhere else;
-//! and the two closes, which are not a stop at all but the end of the
-//! Conversation
+//! Resume is first, because it is the one *go* among them: what the human most
+//! often comes here for is a Conversation nothing is driving. It is drawn
+//! exactly where the server says it is worth drawing — see `ready_to_resume`,
+//! which is the state being one something ought to be driving and nothing
+//! driving it. The page cannot work that out for itself: what drives a
+//! Conversation is a register of running tasks, and a register lives in the
+//! server. It carries nothing, either: what to start is recomputed from where
+//! the work now stands at the moment of the press, which is the whole point of
+//! one row rather than one per way of stopping — saying something else should
+//! happen is what Steer is for.
+//!
+//! Then, in order of what each costs: share, which costs nothing and is a file
+//! to take away rather than a press at all; publish, which puts that file in a
+//! gist; share to pull request, which publishes it and says so in front of
+//! whoever is reviewing the work; stop, which waits for the task the run is on;
+//! force stop, which does not; steer, which moves the work somewhere else; and
+//! the two closes, which are not a stop at all but the end of the Conversation
 //! — one of them taking it off the list on the way out. Each carries what it
 //! does *inside* it, under its own name — because *stop* and *force stop* are
 //! two words apart and hours of work apart, and because a row that is one press
@@ -28,23 +38,28 @@
 //! answer a second press by doing exactly what the first did. Force stop stays,
 //! being the escalation from there rather than the same press again.
 //!
-//! Most of these draw no failure. They are not expected to fail in ordinary use
-//! — every refusal they have is a page drawn against a Conversation that has
-//! since moved — and the re-read each press ends with is both the correction and
-//! the answer: a row that stopped applying stops being drawn. What is left for
-//! whoever is debugging is a `console.error`, which is where a thing nobody is
-//! meant to see belongs.
+//! Every refusal is said in front of the human, and so is a request that fell
+//! over on the way out. These presses are not expected to fail in ordinary use —
+//! nearly every refusal any of them has is a page drawn against a Conversation
+//! that has since moved — and the re-read each press ends with is still the
+//! correction: a row that stopped applying stops being drawn. But a press the
+//! human made and nothing came of is owed an answer rather than a line in a
+//! console nobody has open, so the refusal's own sentence opens as a card over
+//! the page and the menu goes on the way — a dropdown left hanging behind a
+//! modal is a menu nobody can see to close.
+//!
+//! Resume is why that stance changed. Its refusals are the whole of what the row
+//! is for — a Conversation nothing is driving, and the reason nothing is — and
+//! there was never a way to tell those sentences from the rest.
 //!
 //! The two that publish are the exception, and it is the reaching outside this
 //! machine that makes them one: what GitHub refused is a thing to go and do
 //! something about rather than a page out of date, and where a share went is
-//! worth being told. Both are said in a **toast** — see `Toasts.tsx` — because an
-//! outcome is a moment and a row here is a drawing of a Conversation: an outcome
-//! kept in a row is lost when the menu shuts, or goes on standing over the next
-//! Conversation the human right-clicks, this being one menu for the whole
-//! sidebar.
+//! worth being told. Both are said in a **toast** — see `Toasts.tsx` — because a
+//! publish that worked hands back a link to reach for, and a card with one way
+//! out is a sentence to dismiss rather than something to take up.
 //!
-//! Two menus and one set of rows. The pane's ⋯ is about the Conversation that is
+//! Two menus and one set of rows. The pane's is about the Conversation that is
 //! open, and the sidebar's right-click is about the card under the pointer,
 //! which is very often a different one — but *what there is to do about a
 //! Conversation* does not depend on which of the two asked. So the presses live
@@ -54,14 +69,22 @@
 //!
 //! The sidebar's is a pointer affordance and nothing else. A touch device has no
 //! right-click, and a long press on a card there already picks it up to be
-//! dragged — so on a phone this menu simply is not there, and the ⋯ on the
-//! Conversation is the way to all of it.
+//! dragged — so on a phone this menu simply is not there, and the status button
+//! on the Conversation is the way to all of it.
 
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  createUniqueId,
+  type JSX,
+} from "solid-js";
 
 import { ContextMenu, Menu } from "../Menu";
+import { Modal } from "../Modal";
 import {
   archiveConversation,
   closeAndArchiveConversation,
@@ -69,6 +92,7 @@ import {
   forceStopConversation,
   loadConversation,
   publishShare,
+  resume,
   sharePath,
   shareToPullRequests,
   steerConversation,
@@ -83,6 +107,7 @@ import type {
   ConversationUnarchived,
   ConversationView,
   MissedOut,
+  Resumed,
   ShareCommented,
   SharePublished,
   SteerOpened,
@@ -95,7 +120,7 @@ import styles from "./Actions.module.css";
 import { Steer, onAPullRequest } from "./Steer";
 
 /// Each way of being refused a stop, whichever of the two was pressed, in the
-/// words the console is told them in.
+/// words the human is told them in.
 ///
 /// The two that are not refusals map to nothing: a conversation that has
 /// stopped, and one that is still finishing its task, are both the press having
@@ -143,6 +168,36 @@ export const UNARCHIVE_REFUSAL: Record<ConversationUnarchived, string> = {
   NoSuchConversation: "This conversation is gone.",
 };
 
+/// And each way of being refused a resume.
+///
+/// Every one of them is the row doing the one thing it is for: saying what there
+/// is to do about a conversation nothing is driving. A press that quietly found
+/// nothing to start would leave the human exactly as stuck as they were, which
+/// is why the server names these rather than logging them — and why the rows
+/// around it now say their refusals the same way.
+export const RESUME_REFUSAL: Record<Resumed, string> = {
+  Resumed: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDriven:
+    "Nothing is supposed to be driving this conversation, so there is nothing to start again.",
+  AlreadyDriven:
+    "Something is already driving this conversation. Have a look at what it is doing.",
+  NowhereToWork:
+    "This conversation has no worktree to work in, so there is nowhere to start.",
+  WorktreeRefused:
+    "This conversation's worktree is broken and git would not make it again from the branch. The server log says why.",
+  NoDirection:
+    "Nothing on the record says how this work is being built, so there is no run to pick up.",
+  NothingToWork:
+    "There is no backlog left to work and nothing was ever written on this branch, so there is nothing built here to carry anywhere. Set the next thing going by hand.",
+  NoGrillingPairing:
+    "Choose a grilling profile and model first, on the brief.",
+  NoImplementationPairing:
+    "Choose an implementation profile and model first, on the brief.",
+  NoFollowUpBrief:
+    "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
+};
+
 /// What a publish came back with, as the toast it is said in.
 ///
 /// The one press on this menu whose outcome is *not* a page drawn against a
@@ -151,11 +206,10 @@ export const UNARCHIVE_REFUSAL: Record<ConversationUnarchived, string> = {
 /// each is a sentence and a way to the page it is fixed on, and the one that
 /// worked is a sentence and the link it just made.
 ///
-/// **A toast rather than the row that was pressed.** An outcome is a moment and
-/// a menu row is a drawing of the conversation it is about — so a row holding
-/// one either loses it when the menu closes or, worse, goes on saying it over
-/// the next conversation the human right-clicks: the sidebar's menu is one menu
-/// for the whole list. See `Toasts.tsx`, which is where an outcome lives now.
+/// **A toast rather than the card the refusals around it open.** An outcome is a
+/// moment and a menu row is a drawing of the conversation it is about — and the
+/// link a publish just made is a thing to reach for rather than a sentence to
+/// dismiss, which is what a card with one way out asks for. See `Toasts.tsx`.
 function published(outcome: SharePublished): JSX.Element {
   if (outcome === "NoToken") {
     return (
@@ -285,8 +339,8 @@ export function Action(props: {
 /// half-way with a megabyte in flight, and a right-click that offers *Save link
 /// as* like every other download the human has ever made.
 ///
-/// Which is also why it draws no failure, where the presses around it at least
-/// log one: what goes wrong with a link is the browser's to say, in the place it
+/// Which is also why it draws no failure, where the presses around it say
+/// theirs: what goes wrong with a link is the browser's to say, in the place it
 /// already says it.
 export function Download(props: {
   /// Which row this is, for the paint and for the tests that look for it.
@@ -302,6 +356,55 @@ export function Download(props: {
       <span class={styles.title}>{props.label}</span>
       <span class={styles.says}>{props.says}</span>
     </a>
+  );
+}
+
+/// What a press that did nothing is answered with: the refusal's own sentence,
+/// under a heading saying that is what it is, with one way out.
+///
+/// A card over the page rather than a line under the row, because the menu the
+/// row was in has gone by the time there is anything to say — and because every
+/// one of these sentences is the human being told the world moved under what
+/// they were looking at.
+///
+/// One way out rather than two, which is the whole of what tells this card from
+/// a confirm sheet: nothing is being decided here. The press has already been
+/// refused, and reading why is all there is left to do.
+///
+/// Its own component because the two menus below are not the only place a row
+/// of this menu is drawn. The escape hatch draws one for the Conversation whose
+/// page will not load — the same `Action`, off the same refusal maps — and a
+/// press refused one way there and another way here would be two answers to the
+/// same press.
+export function Refusal(props: {
+  /// The sentence, or `null` while there is nothing to answer.
+  said: string | null;
+  /// Said once it has been read.
+  close: () => void;
+}): JSX.Element {
+  // The heading's own id, for the `aria-labelledby` naming the card by it.
+  // Generated rather than written, because more than one of these stands on a
+  // page at once — the Conversation pane's and the sidebar's right-click each
+  // hold one — and an id is the page's to keep unique.
+  const id = createUniqueId();
+
+  return (
+    <Modal
+      class={styles.refused!}
+      open={props.said !== null}
+      close={props.close}
+      labelledBy={id}
+    >
+      <p id={id} class={styles.refusedTitle}>
+        Nothing happened
+      </p>
+      <p class={styles.refusedWhy}>{props.said}</p>
+      <div class={styles.refusedOut}>
+        <button type="button" onClick={() => props.close()}>
+          OK
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -323,7 +426,8 @@ function actions(): {
   closes: (close: () => void) => void;
   /// The rows, for the Conversation given.
   rows: (conversation: () => ConversationView) => JSX.Element;
-  /// And what the steer row opens, which outlives the menu that opened it.
+  /// And what the rows open over the page — the steer form, and the card a
+  /// refused press is answered with. Both outlive the menu that opened them.
   modal: () => JSX.Element;
 } {
   const queries = useQueryClient();
@@ -341,9 +445,28 @@ function actions(): {
     working: boolean;
   } | null>(null);
 
+  /// The sentence a refused press is answered with, and `null` while there is
+  /// nothing to answer. Held out here for the reason the steer is: what opens
+  /// over the page outlives the menu the press was made in.
+  const [refused, setRefused] = createSignal<string | null>(null);
+
   // The menu's own way to shut, held here because what closes it is the press
   // coming back rather than the press going out.
   let shut = (): void => {};
+
+  /// What a press that did nothing comes to: the menu goes, and the sentence
+  /// saying why opens over the page.
+  ///
+  /// The menu goes first because the card is drawn over it — a dropdown left
+  /// hanging behind a modal is a menu nobody can see to close. And because the
+  /// row that was pressed goes with it: shutting the menu hands the focus back
+  /// to the button it was dropped from, which is then where the card hands it
+  /// back to when it is answered. Opened the other way round, the card would
+  /// come up over a document body with the focus on it and put it back there.
+  const refuse = (sentence: string): void => {
+    shut();
+    setRefused(sentence);
+  };
 
   /// What every press here leaves behind: a page drawn against a conversation
   /// that has moved. Reading it again is both the correction and, where the
@@ -353,14 +476,14 @@ function actions(): {
     void queries.invalidateQueries({ queryKey: ["conversations"] });
   };
 
-  /// Both stops answer the same way, so both are pressed the same way: a
-  /// refusal goes to the console and the menu stays where it is for the re-read
-  /// to correct, and anything else is the press having landed.
-  const pressing = (stopping: (id: number) => Promise<ConversationStopped>) => ({
-    mutationFn: stopping,
-    onSuccess: (outcome: ConversationStopped) => {
-      if (STOP_REFUSAL[outcome]) {
-        console.error(STOP_REFUSAL[outcome]);
+  /// Getting Verkstead driving again, which is the one row here that starts
+  /// something rather than ending it. Its refusals are the whole of what it is
+  /// for, so a press that found nothing to start says so in as many words.
+  const start = useMutation(() => ({
+    mutationFn: (id: number) => resume(id),
+    onSuccess: (outcome: Resumed) => {
+      if (RESUME_REFUSAL[outcome]) {
+        refuse(RESUME_REFUSAL[outcome]);
       } else {
         shut();
       }
@@ -368,7 +491,25 @@ function actions(): {
       reread();
     },
     onError: (error: Error) =>
-      console.error("The conversation could not be stopped:", error),
+      refuse(`The conversation could not be resumed: ${error.message}`),
+  }));
+
+  /// Both stops answer the same way, so both are pressed the same way: a
+  /// refusal opens as a card over the page and the re-read behind it corrects
+  /// what was drawn, and anything else is the press having landed.
+  const pressing = (stopping: (id: number) => Promise<ConversationStopped>) => ({
+    mutationFn: stopping,
+    onSuccess: (outcome: ConversationStopped) => {
+      if (STOP_REFUSAL[outcome]) {
+        refuse(STOP_REFUSAL[outcome]);
+      } else {
+        shut();
+      }
+
+      reread();
+    },
+    onError: (error: Error) =>
+      refuse(`The conversation could not be stopped: ${error.message}`),
   });
 
   const stop = useMutation(() => pressing(stopConversation));
@@ -433,20 +574,25 @@ function actions(): {
       steerConversation(conversation.id),
     onSuccess: (outcome: SteerOpened, conversation: ConversationView) => {
       if (outcome === "NoSuchConversation") {
-        console.error("This conversation is gone.");
+        refuse("This conversation is gone.");
         reread();
         return;
       }
 
-      setSteering({ conversation, working: outcome.Opened.working });
+      // The menu first, as a refusal does it: shutting hands the focus back to
+      // the button the press came from, and the modal opening after that is
+      // what makes that button where the focus lands again when it is closed.
       shut();
+      setSteering({ conversation, working: outcome.Opened.working });
 
       // The conversation has stopped, whatever the human goes on to decide, so
       // the page behind the modal is already out of date.
       reread();
     },
     onError: (error: Error) =>
-      console.error("The conversation could not be stopped to steer it:", error),
+      refuse(
+        `The conversation could not be stopped to steer it: ${error.message}`,
+      ),
   }));
 
   /// Both closing rows answer the same way, so both are pressed the same way:
@@ -456,7 +602,7 @@ function actions(): {
     mutationFn: ending,
     onSuccess: (outcome: ConversationClosed) => {
       if (CLOSE_REFUSAL[outcome]) {
-        console.error(CLOSE_REFUSAL[outcome]);
+        refuse(CLOSE_REFUSAL[outcome]);
         return;
       }
 
@@ -465,7 +611,7 @@ function actions(): {
       reread();
     },
     onError: (error: Error) =>
-      console.error("The conversation could not be closed:", error),
+      refuse(`The conversation could not be closed: ${error.message}`),
   });
 
   const close = useMutation(() => closing(closeConversation));
@@ -482,7 +628,7 @@ function actions(): {
     mutationFn: (id: number) => archiveConversation(id),
     onSuccess: (outcome: ConversationArchived) => {
       if (ARCHIVE_REFUSAL[outcome]) {
-        console.error(ARCHIVE_REFUSAL[outcome]);
+        refuse(ARCHIVE_REFUSAL[outcome]);
         return;
       }
 
@@ -490,7 +636,7 @@ function actions(): {
       reread();
     },
     onError: (error: Error) =>
-      console.error("The conversation could not be archived:", error),
+      refuse(`The conversation could not be archived: ${error.message}`),
   }));
 
   /// And the way back out, which is the same press mirrored: its one refusal is
@@ -500,7 +646,7 @@ function actions(): {
     mutationFn: (id: number) => unarchiveConversation(id),
     onSuccess: (outcome: ConversationUnarchived) => {
       if (UNARCHIVE_REFUSAL[outcome]) {
-        console.error(UNARCHIVE_REFUSAL[outcome]);
+        refuse(UNARCHIVE_REFUSAL[outcome]);
         return;
       }
 
@@ -508,7 +654,7 @@ function actions(): {
       reread();
     },
     onError: (error: Error) =>
-      console.error("The conversation could not be unarchived:", error),
+      refuse(`The conversation could not be unarchived: ${error.message}`),
   }));
 
   return {
@@ -516,8 +662,25 @@ function actions(): {
 
     rows: (conversation) => (
       <>
+        {/* The one standing way to get Verkstead driving again, and the one row
+            here that starts something: above the stops because it is the *go*
+            among them, and drawn only where the server says there is something
+            to start — see `ready_to_resume`. It carries nothing: what to start
+            is worked out from where the work now stands at the moment of the
+            press. */}
+        <Show when={conversation().ready_to_resume}>
+          <Action
+            class={styles.resume}
+            label="Resume"
+            pressing="Resuming…"
+            says="Work out what should be running from where the work stands, and start it."
+            working={start.isPending}
+            press={() => start.mutate(conversation().id)}
+          />
+        </Show>
+
         {/* A copy of the record to send somebody, which is the one row here
-            that does nothing to the conversation — so it is first, above
+            that does nothing to the conversation at all — so it stands above
             everything that costs something. Offered in every state and on every
             conversation there is: a share is the record as it stands, and a
             record stands from the moment there is one. */}
@@ -686,44 +849,66 @@ function actions(): {
       </>
     ),
 
-    // Outside the menu, because the press that opens it shuts the menu: what
-    // the human is looking at from here is one card over the page.
+    // Outside the menu, because the press that opens either of these shuts the
+    // menu: what the human is looking at from here is one card over the page.
     modal: () => (
-      <Show when={steering()}>
-        {(opened) => {
-          // Read on the way in rather than left as a getter on the modal's
-          // props: what the steer is about was settled by the press, and a
-          // `Show`'s accessor goes stale the moment the modal is closed —
-          // which is precisely when the modal is still tearing its own memos
-          // down over what it was drawn against.
-          const { conversation, working } = opened();
+      <>
+        {/* What a press that did nothing is answered with — see [`Refusal`],
+            which the escape hatch draws the same card from. */}
+        <Refusal said={refused()} close={() => setRefused(null)} />
 
-          return (
-            <Steer
-              conversation={conversation}
-              working={working}
-              close={() => setSteering(null)}
-            />
-          );
-        }}
-      </Show>
+        <Show when={steering()}>
+          {(opened) => {
+            // Read on the way in rather than left as a getter on the modal's
+            // props: what the steer is about was settled by the press, and a
+            // `Show`'s accessor goes stale the moment the modal is closed —
+            // which is precisely when the modal is still tearing its own memos
+            // down over what it was drawn against.
+            const { conversation, working } = opened();
+
+            return (
+              <Steer
+                conversation={conversation}
+                working={working}
+                close={() => setSteering(null)}
+              />
+            );
+          }}
+        </Show>
+      </>
     ),
   };
 }
 
-/// The ⋯ at the head of the Conversation pane: what there is to do about the
+/// The menu at the head of the Conversation pane: what there is to do about the
 /// Conversation that is open.
-export function Actions(props: { conversation: ConversationView }): JSX.Element {
+///
+/// The trigger is the caller's, which is the one thing that makes this menu
+/// different from every other one at the head of a pane. What drops it is the
+/// StatusButton — a two-line button saying where the work stands — so the mark
+/// and the paint that the menu draws for a ⋯ would both be in the way, and the
+/// caller hands in what its trigger reads as and a class to paint it by.
+///
+/// The class is handed to the anchor *beside* this menu's own, rather than in
+/// place of it: what the card the rows come down as looks like belongs with the
+/// rows, and it is the same card the sidebar's right-click drops.
+export function Actions(props: {
+  conversation: ConversationView;
+  /// What the button reads as, which is the whole of the caller's half.
+  trigger: JSX.Element;
+  /// And the caller's class on the anchor, for painting that button. Styled by
+  /// whoever passes it, never here.
+  class: string;
+}): JSX.Element {
   const acts = actions();
 
   return (
     <>
       <Menu
-        class={styles.conversationActions!}
-        label="Conversation actions"
+        class={`${styles.conversationActions!} ${props.class}`}
         name="Conversation actions"
         closer={acts.closes}
-        mark
+        trigger={props.trigger}
       >
         {() => acts.rows(() => props.conversation)}
       </Menu>

@@ -82,9 +82,14 @@ describe("a shared conversation", () => {
   it("draws the record it was given, titled for its branch", async () => {
     render(() => <Share shared={SHARED} />);
 
-    // The timeline pane, named as the workbench names it.
+    // The timeline pane, named as the workbench names it: the branch, and the
+    // Repo understated beside it. A share keeps the Repo's name and loses its
+    // path — the name is what the record calls the work's repository — so the
+    // header of a share reads exactly as the workbench's own does.
     expect(await screen.findByLabelText("Timeline")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "usage-limits" })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "usage-limits verkstead" }),
+    ).toBeTruthy();
 
     // And what is on it: the brief, and every commit the branch carried.
     expect(screen.getByText("Brief")).toBeTruthy();

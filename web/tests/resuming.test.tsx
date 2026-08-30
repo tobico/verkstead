@@ -158,18 +158,37 @@ describe("coming back to the app", () => {
     expect(askedFor(fetching, OPENED)).toBe(2);
   });
 
-  it("catches up the Set whose page was open when it went away", async () => {
-    window.history.pushState({}, "", `/sets/${WAITING.id}`);
-    serving(...BESIDE, json(reads(WAITING)), json(reads(ANSWERED)));
+  it("catches up the Set whose pane was open when it went away", async () => {
+    // A Set is read in the details pane of the Event it was asked on, so the
+    // page the human left open is the workbench standing at that Event.
+    window.history.pushState(
+      {},
+      "",
+      `/conversations/${CONVERSATION.id}/events/${ASKED.id}`,
+    );
+    // The Set is held to its own path and moved on between the two reads: a
+    // page fetches more than the two things this test is about, and an answer
+    // left in the sequence would be handed to whichever of them asked first.
+    let asked = WAITING;
+
+    serving(
+      ...BESIDE,
+      whenever(OPENED, json(CONVERSATION)),
+      whenever(`/api/ui/sets/${ASKED.set_id}`, () => json(reads(asked))()),
+      json({}),
+    );
     const { container } = render(() => <App />);
     // The badge and the menu under it belong to a Set still waiting: this is
-    // the page as it was left.
-    await waitFor(() => expect(container.querySelector(`.${standing.standing}`)).toBeTruthy());
+    // the pane as it was left.
+    await waitFor(() =>
+      expect(container.querySelector(`.${standing.standing}`)).toBeTruthy(),
+    );
 
+    // Answered from another device in the meantime, so what the human comes
+    // back to is the record rather than the form they left.
+    asked = ANSWERED;
     reopened();
 
-    // Answered from another device in the meantime, so the page the human comes
-    // back to is the record rather than the form they left.
     await waitFor(() =>
       expect(container.querySelector(`.${sheet.answeredAt}`)).toBeTruthy(),
     );

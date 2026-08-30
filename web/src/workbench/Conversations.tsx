@@ -27,8 +27,8 @@
 //! restart and a second device without any of the three being a case.
 //!
 //! A card also answers a right-click with what there is to do about the
-//! Conversation it stands for — the same rows the ⋯ at the head of the
-//! Conversation pane would offer it, drawn by the same component and acting on
+//! Conversation it stands for — the same rows the status button at the head of
+//! the Conversation pane offers, drawn by the same component and acting on
 //! the card that was pressed rather than on whatever is open. Both menus are
 //! `Actions.tsx`, which is where the rows and everything behind them live.
 //!
@@ -66,6 +66,7 @@ import { CardButton } from "../CardButton";
 import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
 import { Menu } from "../Menu";
+import { PaneSticky } from "../Panes";
 import { Switch as Toggle } from "../Switch";
 import {
   listAbandonedRoadmaps,
@@ -445,17 +446,19 @@ export function Conversations(props: {
           The wordmark is the class the pane head is handed for its `<h1>`, and
           it is styled with the rest of what this pane draws — no way back
           either, this being the level every other pane is entered from. */}
-      <PaneHead
-        heading={styles.wordmark}
-        title={
-          <>
-            <img src="/icons/icon-192.png" alt="" />
-            Verkstead
-          </>
-        }
-      >
-        <Settings />
-      </PaneHead>
+      <PaneSticky>
+        <PaneHead
+          heading={styles.wordmark}
+          title={
+            <>
+              <img src="/icons/icon-192.png" alt="" />
+              Verkstead
+            </>
+          }
+        >
+          <Settings />
+        </PaneHead>
+      </PaneSticky>
 
       <NewConversation open={props.open} />
 

@@ -30,6 +30,7 @@
 
 import { Match, Show, Switch, createMemo, type JSX } from "solid-js";
 
+import { PaneSticky } from "../Panes";
 import { loadBacklogPane } from "../api/client";
 import type { ConversationView, TaskDocument } from "../api/types";
 import { useReading } from "../freshness";
@@ -103,7 +104,9 @@ export function Backlog(props: {
 
   return (
     <>
-      <PaneHead back={{ to: "Timeline", go: props.back }} title="Task list" />
+      <PaneSticky>
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Task list" />
+      </PaneSticky>
 
       {/* What the backlog is called, where the list wrote itself a heading —
           the same words the card carries, so the pane walked into on a phone
@@ -115,7 +118,7 @@ export function Backlog(props: {
       {/* Above the documents. The stylesheet takes it out of the flow and puts
           it in the pane's margin where there is room for one. */}
       <Show when={sections().length > 0}>
-        <Contents sections={sections()} watched={watched()} nav={nav} paned />
+        <Contents sections={sections()} watched={watched()} nav={nav} />
       </Show>
 
       <Switch>

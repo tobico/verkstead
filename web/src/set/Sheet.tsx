@@ -13,16 +13,17 @@
 //! nothing to press — except that there is no Response to show, because there
 //! never was one.
 //!
-//! Its own module rather than the page's, because a Set is reached two ways: as
-//! a page of its own, and as the details pane of the Timeline Event it landed on
-//! — see `workbench/Asked`. The rendering is the same either way, and a second
-//! copy of it would be a second reading of one decision.
+//! Its own module rather than the pane's, because what a Set looks like is one
+//! question and where it is read is another: the pane fetches the Set and says
+//! what became of the read — see `workbench/Asked` — and this draws whatever
+//! came back.
 
 import type { JSX } from "solid-js";
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 
 import app from "../App.module.css";
 import { Card } from "../Card";
+import { PaneSticky } from "../Panes";
 import type {
   Answer,
   AskView,
@@ -36,9 +37,10 @@ import type {
 } from "../api/types";
 import { setWrapping, wrapping } from "../device";
 import { DIRECTION, DIRECTION_LABEL, DIRECTIONS } from "../directions";
+import { PaneHead } from "../workbench/PaneHead";
 import { Answering } from "./Answering";
 import { AskText } from "./AskText";
-import { Contents, PageHeader, navigation } from "./Contents";
+import { Contents, navigation } from "./Contents";
 import { Diff } from "./Diff";
 import { Postscript } from "./Postscript";
 import styles from "./Sheet.module.css";
@@ -48,7 +50,6 @@ import { anchor, outline, spied } from "./outline";
 import { Head, starred } from "./table";
 import { settledAge, utcStamp } from "./when";
 
-
 /// One Set, top to bottom: how it stands and its own material — what the agent
 /// asked about and the evidence for it — and then the record of what became of
 /// it.
@@ -56,18 +57,15 @@ import { settledAge, utcStamp } from "./when";
 /// The material above is the same however it stands: a settled Set is read for
 /// what was decided *and* for what the decision was about.
 ///
-/// `lead` is whatever the sheet is reached through — the way back to the list it
-/// is on, or the pane header of the Timeline Event it belongs to. Nothing is
-/// drawn where there is none.
+/// The sheet draws its own pane header, titled by what the Set asked: a pane
+/// titled over the top of that would name the same thing twice. `back` is what
+/// the way out of the pane does, and there is no way out where nothing was
+/// handed one.
 ///
-/// `contents` is where the table of contents is being drawn, and what decides
-/// which width it picks its shape from: the window on a page, and the pane's own
-/// width in a details pane — where the 60rem cap leaves a margin of its own for
-/// the sidebar to stand in. `"none"` is a sheet drawn without one at all.
-///
-/// The floating header belongs to the page alone. It names where the reader is
-/// across the top of the column, and a pane already has a header of its own
-/// there.
+/// The table of contents comes with it, in whichever of its two shapes the pane
+/// has room for: the sidebar in the margin the 60rem cap leaves, or the bar with
+/// the list folded into it where the human has dragged the pane narrower than
+/// that. Which is the nav's own question — see `Contents`.
 ///
 /// `readOnly` is a sheet with nobody behind it — the share, where a colleague is
 /// reading a Conversation out of a file. It is drawn as the record however the
@@ -77,8 +75,7 @@ import { settledAge, utcStamp } from "./when";
 /// reason.
 export function Sheet(props: {
   set: SetView;
-  lead?: JSX.Element;
-  contents?: "page" | "pane" | "none";
+  back?: () => void;
   readOnly?: boolean;
 }): JSX.Element {
   // The renderer, named by a Set that has a Diagram on it to draw and by no
@@ -182,41 +179,19 @@ export function Sheet(props: {
     return null;
   };
 
-  /// Where the table of contents is drawn — the page by default, because the
-  /// page is what a Set is usually read as.
-  const where = () => props.contents ?? "page";
-
-  /// Whether it is drawn at all.
-  const listed = () => where() !== "none";
-
   return (
     <>
-      {props.lead}
-      <h1>{props.set.title}</h1>
-      {/* After the title and before the rest: the page says what it is, then
+      <PaneSticky>
+        <PaneHead
+          back={props.back && { to: "Timeline", go: props.back }}
+          title={props.set.title}
+        />
+      </PaneSticky>
+      {/* After the title and before the rest: the sheet says what it is, then
           what is in it. It is taken out of the flow and put in the margin by
           the stylesheet, so where it sits here is a reading order rather than
           a position. */}
-      <Show when={listed()}>
-        <Contents
-          sections={sections()}
-          watched={watched()}
-          nav={nav}
-          paned={where() === "pane"}
-        />
-        {/* Under the nav in reading order and pinned to the top edge by the
-            stylesheet, which is also what keeps it off a narrow viewport: there
-            the nav's own bar is already doing this job. And off a pane, which
-            has the pane header across its top already. */}
-        <Show when={where() === "page"}>
-          <PageHeader
-            watched={watched()}
-            nav={nav}
-            wrapped={wrapped()}
-            flip={flip}
-          />
-        </Show>
-      </Show>
+      <Contents sections={sections()} watched={watched()} nav={nav} />
       {/* One line about the Set rather than from it: where it came from at the
           near end, and how it stands at the far end — the date it settled, or
           the badge and the menu for a Set still waiting. Never empty, because

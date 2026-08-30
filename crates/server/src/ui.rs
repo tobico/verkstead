@@ -1169,6 +1169,24 @@ pub(crate) async fn conversation_view(
     // on — no stop resumes itself, so every one of them waits for the same press.
     let resets = stopped.and_then(|stopped| stopped.resets);
 
+    // And whether anything about this Conversation is waiting on the human at
+    // all, which is the fold the sidebar's own row is drawn by, asked here of
+    // this one Conversation — see [`store::waiting`]. The rule is the store's
+    // and it is one piece of code, so the row and the page it opens cannot come
+    // to disagree about the same Conversation: the head of the Timeline says
+    // *waiting on you* exactly where the sidebar draws its disc.
+    //
+    // A read that fails reads as *not waiting*, the way round that leaves the
+    // page quiet: a status word drawn in the accent colour because a query went
+    // wrong is Verkstead inventing something for the human to chase.
+    let waiting = match store::waiting(&state.pool, id).await {
+        Ok(waiting) => waiting,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation waits on the human failed");
+            false
+        }
+    };
+
     // And whether the wrap-up has narrowed to its checks, which is a label
     // beside the state rather than a state of its own: the review and the
     // comments settled, the checks not. Half of the condition — the other half
@@ -1248,6 +1266,7 @@ pub(crate) async fn conversation_view(
         pinned,
         blocked_on,
         stopped_by_hand,
+        waiting,
         // A fix session actively working a red check is a wrap-up getting on
         // with it, so the label is drawn only where nothing is running — the
         // same reading `working` below is.
@@ -1289,15 +1308,28 @@ pub(crate) async fn conversation_view(
                     // The summary and not the Capture: a Timeline is read every
                     // time an open page hears the world moved, and a session's
                     // output is megabytes the middle pane never shows.
-                    store::Event::AgentOutput(summary) => verkstead_render::agent_output_event(
-                        event.id,
-                        event.at,
-                        summary.lines,
-                        summary.turns,
-                        summary.latest,
-                        writing == Some(event.id),
-                        idling,
-                    ),
+                    // With what it ran under beside it, off the record rather
+                    // than off the Conversation's Pairing now: a Profile can be
+                    // renamed and a Pairing repicked, and what this Event is is
+                    // the account of one session that has already happened.
+                    store::Event::AgentOutput(summary, ran_under) => {
+                        let (profile, model) = match ran_under {
+                            Some(ran_under) => (Some(ran_under.profile), ran_under.model),
+                            None => (None, None),
+                        };
+
+                        verkstead_render::agent_output_event(
+                            event.id,
+                            event.at,
+                            summary.lines,
+                            summary.turns,
+                            summary.latest,
+                            writing == Some(event.id),
+                            idling,
+                            profile,
+                            model,
+                        )
+                    }
                     // The table of what was asked against what was decided, and no
                     // more: the whole document is what the details pane fetches,
                     // from the endpoint one Set has always been read through.
@@ -1375,7 +1407,7 @@ pub(crate) async fn conversation_view(
                     // A Notice by the time it is on the wire, which is what a
                     // migrated database needs it to be: an open Pause was read
                     // onto its Conversation as the stop it is, and the Event the
-                    // *blocked on you* badge points at is this one.
+                    // record marks as the one the run stopped at is this one.
                     store::Event::Pause(pause) => verkstead_render::notice_event(
                         event.id,
                         event.at,

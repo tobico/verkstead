@@ -1166,8 +1166,11 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
         "/api/ui/profiles",
         &serde_json::json!({
             "name": name,
-            "claude_dir": claude_dir,
-            "config_file": config_file,
+            "account": {
+                "agent_type": "Claude",
+                "claude_dir": claude_dir,
+                "config_file": config_file,
+            },
             "models": ["claude-opus-5"],
         }),
     )
@@ -4346,6 +4349,200 @@ async fn a_done_conversation_with_an_open_set_is_still_waiting() {
         matches!(standings(&opened(&app, id).await)[0], Standing::Waiting(_)),
         "because it is still there to answer",
     );
+}
+
+/// The Conversation's own page carries the same fact its row does, folded by the
+/// same rule in the same place — see the store's `waits_on_the_human`.
+///
+/// A grilling nobody has asked anything on waits on nothing: it is being worked,
+/// and being worked is not wanting the human. The ask is what turns it on, and
+/// the answer is what turns it off again.
+#[tokio::test]
+async fn the_conversation_view_says_when_an_open_ask_is_waiting_on_the_human() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    assert!(
+        !waits(&app, id).await,
+        "a grilling with nothing outstanding wants nobody",
+    );
+
+    let set = ask(&app, id, ORDINARY).await;
+    assert!(waits(&app, id).await, "there is something answerable now");
+
+    answer_ordinary(&app, set).await;
+    assert!(
+        !waits(&app, id).await,
+        "and the answer is the end of it: nothing is left to come back for",
+    );
+}
+
+/// And a stop is the other source, read the same way on the page as on the row:
+/// what happened without the human draws them, and their own press does not.
+///
+/// Beside `stopped_by_hand`, which is the same stop asked a narrower question —
+/// *which* mark the head draws. This is whether there is one at all.
+#[tokio::test]
+async fn the_conversation_view_says_when_a_stop_is_waiting_on_the_human() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::stop(
+        &pool,
+        id,
+        store::Decision::Human,
+        "You pressed Stop.\n",
+        None,
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation was running");
+
+    assert!(
+        opened(&app, id).await.blocked_on.is_some(),
+        "the drive has stopped, and the head says so",
+    );
+    assert!(
+        !waits(&app, id).await,
+        "but they pressed it themselves, so there is nothing here they have not heard",
+    );
+
+    store::clear_stop(&pool, id).await.unwrap();
+    store::stop(
+        &pool,
+        id,
+        store::Decision::Verkstead,
+        "The checks would not go green.\n",
+        None,
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation is running again");
+
+    assert!(
+        waits(&app, id).await,
+        "Verkstead's own brake stopped it, and nobody has been told but the page",
+    );
+
+    pool.close().await;
+}
+
+/// Whether a Conversation waits on the human, asked of its page and of its row
+/// together.
+///
+/// The two are one fold in the store rather than two readings that happen to
+/// agree — see the store's `waits_on_the_human` — so a test of either is a test
+/// of both, and this asserts as much on every read.
+async fn waits(app: &Router, id: i64) -> bool {
+    let waiting = opened(app, id).await.waiting;
+
+    assert_eq!(
+        waiting,
+        row(app, id).await.waiting,
+        "the page and the sidebar row disagreed about the same Conversation",
+    );
+
+    waiting
+}
+
+/// What a session was launched under is stamped onto its Event as that Event is
+/// opened, so the record says what actually ran — see the store's `RanUnder`.
+///
+/// Written down rather than looked up afterwards: a Conversation's Pairing is a
+/// thing the human can repick and a Profile is a thing they can rename or
+/// delete, and none of that changes what a session that has already run was
+/// running. Nothing in the viewer draws it yet — the StatusButton is what will.
+///
+/// The Capture is opened through the store rather than by running an agent, for
+/// the reason the worktrees here are: whether a session starts at all is
+/// `sessions.rs`'s subject, and what an Event opened under a Pairing puts on the
+/// wire is this file's.
+#[tokio::test]
+async fn a_sessions_event_says_what_it_was_launched_under() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    // The Pairing this Conversation's grilling was settled under, which is what
+    // the server has in hand at the moment it starts a session.
+    let picked = opened(&app, id)
+        .await
+        .grilling_pairing
+        .pairing()
+        .expect("the grilling was paired before it started")
+        .clone();
+    let pairing = store::Pairing {
+        profile: store::load_profile(&pool, picked.profile.id)
+            .await
+            .unwrap()
+            .expect("the Profile is still there"),
+        model: picked.model,
+    };
+
+    store::start_capture(&pool, id, Some("a-session"), Some(&pairing))
+        .await
+        .unwrap();
+
+    let output = printed(&app, id).await;
+    assert_eq!(
+        output.profile.as_deref(),
+        Some("fable"),
+        "the name of the Profile the session was launched from",
+    );
+    assert_eq!(
+        output.model.as_deref(),
+        Some("claude-opus-5"),
+        "and the model id raw, prettifying being the viewer's alone",
+    );
+
+    pool.close().await;
+}
+
+/// And a session from before any of that was written down says nothing about
+/// it, which is every Event on every Timeline that is already there.
+///
+/// Absent rather than guessed at: the Conversation's Pairing now is what the
+/// *next* session would run under, and answering with it would be Verkstead
+/// making up a history it does not have. The rest of the Event is unchanged, so
+/// everything drawn from one goes on being drawn.
+#[tokio::test]
+async fn a_session_that_was_never_paired_says_nothing_about_it() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::start_capture(&pool, id, None, None).await.unwrap();
+
+    let output = printed(&app, id).await;
+    assert_eq!(output.profile, None, "nothing was paired with this one");
+    assert_eq!(output.model, None, "so there is no model to name either");
+    assert_eq!(
+        (output.lines, output.turns, output.latest.as_str()),
+        (0, None, ""),
+        "and the Event is otherwise the one it always was",
+    );
+
+    pool.close().await;
+}
+
+/// The one session's output on a Conversation's page.
+async fn printed(app: &Router, id: i64) -> verkstead_render::AgentOutputEvent {
+    opened(app, id)
+        .await
+        .timeline
+        .into_iter()
+        .find_map(|event| match event {
+            TimelineEvent::AgentOutput(output) => Some(output),
+            _ => None,
+        })
+        .expect("the Conversation has a session's output on its Timeline")
 }
 
 /// A server running no sessions at all — which is every one of these — has none

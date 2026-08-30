@@ -22,6 +22,7 @@
 
 import { For, Match, Show, Switch, type JSX } from "solid-js";
 
+import { PaneSticky } from "../Panes";
 import { loadPullRequest } from "../api/client";
 import type { ConversationView, PullRequestEvent } from "../api/types";
 import { useReading } from "../freshness";
@@ -56,7 +57,9 @@ export function PullRequest(props: {
 
   return (
     <>
-      <PaneHead back={{ to: "Timeline", go: props.back }} title="Pull request" />
+      <PaneSticky>
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Pull request" />
+      </PaneSticky>
 
       <div class={styles.summary}>
         <p class={styles.title}>{props.opened.title}</p>

@@ -196,7 +196,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
 
     // A session's output, which is the biggest thing on a Timeline and the
     // first thing a share leaves behind.
-    store::start_capture(pool, id, Some("session-1"))
+    store::start_capture(pool, id, Some("session-1"), None)
         .await
         .unwrap();
 
@@ -454,10 +454,11 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
         &pool,
         &store::ProfileFacts {
             name: "fable".to_owned(),
-            claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
-            config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
+            account: store::Account::Claude {
+                claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
+                config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
+            },
             models: vec!["claude-fable-5".to_owned()],
-            agent_type: store::AgentType::Claude,
         },
     )
     .await

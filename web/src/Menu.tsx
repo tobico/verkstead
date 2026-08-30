@@ -111,6 +111,13 @@ export function Menu(props: {
   /// What a press that has done its work calls — and what a press that *failed*
   /// deliberately does not: a menu that shut on the way out would take the only
   /// place the failure had left to be said in.
+  ///
+  /// Shutting this way hands the focus back to the trigger, exactly as Escape
+  /// does. The row that was pressed goes when the menu does — the rows are
+  /// built when it opens and thrown away when it closes — so a menu shut and
+  /// left alone would drop whoever is working by keyboard onto the document
+  /// body, and anything the press opens over the page would hand them back
+  /// there when they close it.
   closer?: (close: () => void) => void;
   /// The rows, as a thunk: they are built when the menu opens and thrown away
   /// when it closes, so anything the caller wants standing while it is shut
@@ -124,8 +131,6 @@ export function Menu(props: {
   // `true` while the menu hangs open under the trigger.
   const [open, setOpen] = createSignal(false);
 
-  props.closer?.(() => setOpen(false));
-
   // The drop's own id, for the `aria-controls` that ties it to the trigger.
   // Generated rather than named by the caller, because two of these can be on
   // one page and an id is the page's to keep unique. Only said while the menu is
@@ -136,16 +141,32 @@ export function Menu(props: {
   // from rather than at the top of the page.
   let trigger!: HTMLButtonElement;
 
+  /// Take the menu back, and the focus with it.
+  ///
+  /// The trigger is the only thing left of an open menu once it has shut — the
+  /// rows go with it — so a menu that closed and said nothing about the focus
+  /// would leave it on the document body, which is where anything opened over
+  /// the page would then hand it back to.
+  ///
+  /// Only from open, so that a shut said twice, or said after a press on the
+  /// backdrop has already taken the menu, leaves the focus where the hand put
+  /// it: somebody who has moved on is not asking to be sent back.
+  const shut = (): void => {
+    if (!open()) return;
+
+    setOpen(false);
+    trigger.focus();
+  };
+
+  props.closer?.(shut);
+
   // The way out that needs no aim: a menu drawn over the page has to be
   // dismissible from the keyboard. The other way — a press on the page — is the
   // backdrop's, so the press taking the menu back cannot also press something
   // underneath it. That one leaves the focus where the press put it, because a
   // hand that has moved on is not asking to be sent back.
   const escape = (ev: KeyboardEvent) => {
-    if (ev.key === "Escape" && open()) {
-      setOpen(false);
-      trigger.focus();
-    }
+    if (ev.key === "Escape") shut();
   };
 
   document.addEventListener("keydown", escape);

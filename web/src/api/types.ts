@@ -182,15 +182,27 @@ running: boolean,
  * gone quiet — so a page opened onto a session that has been idle for an
  * hour says so at once rather than waiting to be told.
  */
-idle: boolean, };
-
+idle: boolean, 
 /**
- * Which coding agent a Profile runs.
+ * The name of the Agent Profile this session was launched from.
  *
- * One value. It is on the wire so that a second backend is a variant added
- * beside `Claude` rather than a field the viewer has to start being told about.
+ * Off the record rather than off what is running: it is written down as
+ * the session starts and stays true afterwards, so a Profile renamed or
+ * deleted since — and a Verkstead restarted since — leaves this saying
+ * what actually ran. `null` for a session started before Verkstead wrote
+ * it down.
  */
-export type AgentType = "Claude";
+profile: string | null, 
+/**
+ * And the model it was launched on, as the raw id: `claude-opus-5` rather
+ * than "Opus 5". Prettifying is the viewer's, so a model nothing here has
+ * heard of still reaches the human as its id.
+ *
+ * `null` beside a `profile` that is there is a Pairing that named no model
+ * at all; `null` beside a `profile` that is not is a session from before
+ * either was recorded.
+ */
+model: string | null, };
 
 /**
  * One question's slot in a Response: either an Answer — a selected Option
@@ -1128,36 +1140,51 @@ direction: Direction | null,
  * Which Event the Conversation is blocked on, or `null` where nothing is
  * stopping it.
  *
- * What the *blocked on you* badge is drawn from. The Event id and not a
- * flag, so that a header saying the work has stopped can point at the thing
- * that stopped it — a Timeline is long by the time a run gets far enough to
- * stop, and *blocked on you* with nowhere to go would be a badge the human
- * had to go hunting behind.
+ * The Event id and not a flag, so that the Notice a run stopped at can be
+ * marked where it stands on the record — a Timeline is long by the time a
+ * run gets far enough to stop, and the status button at the head of it
+ * saying the work has stopped is half an answer without somewhere to read
+ * why.
  *
- * *Blocked on you* is a badge on an active state and never a state of its
+ * Being stopped is a condition of an active state and never a state of its
  * own, which is why this sits beside `state` rather than in it.
  *
- * Set for every stop, however it stopped. Which of the two marks the
- * header draws is `stopped_by_hand` below — both of them point here, a
- * stop the human has to find being the same Notice as a stop they made
- * themselves.
+ * Set for every stop, however it stopped. Which word the status button
+ * says over it is `stopped_by_hand` below; the Notice is the same Notice
+ * either way, a stop the human has to find being no different on the
+ * record from a stop they made themselves.
  */
 blocked_on: number | null, 
 /**
  * Whether that stop is the human's own press, or a row from before the
  * two were told apart and read as one.
  *
- * Which of the two marks the header draws, decided here rather than in the
- * browser: `false` is the accent *Blocked on you* badge — Verkstead pulled
- * the brake, or a crash took the driver away — and `true` is the quiet
- * **Stopped** label, which goes to the same Notice and says nothing about
- * anybody waiting. The sidebar's disc follows the same rule from its own
- * end of the wire, where the row's `waiting` has already folded it in.
+ * Which word the status button says over the stop, decided here rather
+ * than in the browser: `false` is the accented one — Verkstead pulled the
+ * brake, or a crash took the driver away, so the Conversation is *Waiting
+ * on you*, or *Blocked* where somehow it is not — and `true` is the quiet
+ * *Stopped*, which says nothing about anybody waiting. The sidebar's disc
+ * follows the same rule from its own end of the wire, where the row's
+ * `waiting` has already folded it in.
  *
  * `false` where nothing has stopped, which is the ordinary Conversation:
- * there is no mark to choose between.
+ * there is no word to choose between.
  */
 stopped_by_hand: boolean, 
+/**
+ * Whether something about this Conversation is waiting on the human: an ask
+ * left open, or driving that has stopped without them.
+ *
+ * The same fact the sidebar row carries — see [`ConversationEntry::waiting`]
+ * — folded by the same rule in the same place, so the row and the page it
+ * opens can never come to disagree about the one Conversation. What the
+ * page does with it is its own: the row draws a disc, and the head of the
+ * Timeline draws the status word in the accent colour.
+ *
+ * A Draft is never one of them, and neither is a Closed Conversation: the
+ * first is drawn as a draft and the second has nothing left to want.
+ */
+waiting: boolean, 
 /**
  * Whether the wrap-up has narrowed to its checks: the review answered, the
  * comments dealt with, the checks alone outstanding, and nothing running in
@@ -1182,10 +1209,11 @@ waiting_on_checks: boolean,
  * `null` on every stop that is not a usage window's — which is nearly all
  * of them, and every Conversation that has not stopped.
  *
- * Words to draw beside Resume rather than a moment anything acts on: no
- * stop resumes itself, so what a stopped run waits for is a press whatever
- * stopped it. The one thing that tells a run stopped by an exhausted window
- * from a run stopped by anything else — same card, same badge, same button.
+ * Words for the status button's second line, where what is running is
+ * otherwise said, rather than a moment anything acts on: no stop resumes
+ * itself, so what a stopped run waits for is a press whatever stopped it.
+ * The one thing that tells a run stopped by an exhausted window from a run
+ * stopped by anything else — same card, same status, same row to press.
  *
  * As the session printed it, because the wording is the backend's: `3pm`
  * stays `3pm`, which is what somebody looks at their own clock for.
@@ -1538,6 +1566,23 @@ export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
 export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
 /**
+ * The account a Profile names, in the shape the agent type running it keeps
+ * one.
+ *
+ * Flat on the wire — `{"agent_type": "Claude", "claude_dir": "…",
+ * "config_file": "…"}` — so the type is a field the viewer can read and narrow
+ * on rather than a name it has to unwrap the account out of. Which is what the
+ * form draws its fields off: a shape per type, and adding a backend adds a
+ * variant here and the fields beside it.
+ *
+ * One shape for both directions. A Profile as the viewer receives it carries
+ * the resolved paths the server recorded and a Profile as the human has just
+ * written it carries what they typed, but they are the same fields either way,
+ * and two types for one shape would be two opinions about what an account is.
+ */
+export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, config_file: string, };
+
+/**
  * Which Profile and model a Conversation is pairing for one of its roles.
  */
 export type ProfileChoice = { profile_id: number, 
@@ -1560,19 +1605,16 @@ export type ProfileDeleted = "Removed" | "NoSuchProfile" | "InUse";
 /**
  * A Profile as the human has just written it, for saving or for rewriting.
  *
- * No agent type: there is one, and offering a choice of one is theatre. The
- * server records `Claude`, and the field arrives here when there is something
- * to choose between.
+ * The account says which type it is, because the fields beside it are that
+ * type's. The form still offers no choice of one — there is one type — so what
+ * arrives here is always `Claude`; what makes the discriminator real is that
+ * the shape hangs off it, not that anything picks it.
  */
 export type ProfileEdit = { name: string, 
 /**
- * The absolute path of the directory bind-mounted over `~/.claude`.
+ * The absolute paths this Profile's account is, in its type's shape.
  */
-claude_dir: string, 
-/**
- * The absolute path of the file bind-mounted over `~/.claude.json`.
- */
-config_file: string, 
+account: ProfileAccount, 
 /**
  * The models this account can run a session on, in the order they were
  * typed. The form takes them a line apiece; blank lines and repeated
@@ -1584,19 +1626,25 @@ models: Array<string>, };
 /**
  * One row of the Profile list.
  *
- * The paths are the resolved ones the server recorded rather than whatever was
- * typed to save them: those are what will be bind-mounted, so those are what is
- * worth showing.
+ * The account's paths are the resolved ones the server recorded rather than
+ * whatever was typed to save them: those are what will be bind-mounted, so
+ * those are what is worth showing.
  */
-export type ProfileEntry = { id: number, name: string, claude_dir: string, config_file: string, 
+export type ProfileEntry = { id: number, name: string, 
+/**
+ * Which agent this Profile runs, and the account it runs as — one field,
+ * because the type is what says which fields the account has.
+ */
+account: ProfileAccount, 
 /**
  * Every model this account can run a session on. At least one, and none of
  * them preferred over the others: the list says what is available and
  * nothing more.
  */
-models: Array<string>, agent_type: AgentType, 
+models: Array<string>, 
 /**
- * `null` while the pair is where it was left, which is the ordinary case.
+ * `null` while the account is where it was left, which is the ordinary
+ * case.
  */
 broken: Broken | null, };
 
@@ -1808,9 +1856,9 @@ id: number, html: string, };
  * was asked from, and the Timeline is re-read every time an open page hears the
  * world moved.
  *
- * `set_id` is what the details pane fetches the document by — the same
- * `/api/ui/sets/{id}` the standalone page reads, because it is the same Set
- * reached another way.
+ * `set_id` is what the details pane fetches the document by, through
+ * `/api/ui/sets/{id}` — the Set's own id rather than this Event's, because a
+ * Set answered anywhere is the same Set here.
  */
 export type QuestionSetEvent = { id: number, 
 /**
@@ -1824,7 +1872,7 @@ at: string, set_id: number, title: string,
 rows: Array<SetRow>, 
 /**
  * Whether it is still waiting on the human, and what became of it if not.
- * The same verdict the Set's own page carries, from the same registry of
+ * The same verdict the Set's own sheet carries, from the same registry of
  * held waits — this is a Timeline the human answers from.
  */
 standing: Standing, };

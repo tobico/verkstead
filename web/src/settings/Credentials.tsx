@@ -42,6 +42,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { PaneSticky } from "../Panes";
 import { loadSettings, saveSettings } from "../api/client";
 import { useReading } from "../freshness";
 import type {
@@ -295,10 +296,12 @@ export function GithubPane(props: {
 
   return (
     <>
-      <PaneHead
-        back={{ to: "Settings", go: props.back }}
-        title="GitHub and git author"
-      />
+      <PaneSticky>
+        <PaneHead
+          back={{ to: "Settings", go: props.back }}
+          title="GitHub and git author"
+        />
+      </PaneSticky>
 
       <Switch>
         <Match when={settings.isPending}>

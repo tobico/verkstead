@@ -30,12 +30,17 @@
 //! conversations, and on a wide one the empty pane — one navigation, because
 //! they are the same one.
 //!
-//! Refusals go to the console and nowhere else, exactly as the ordinary menu's
-//! do: they are all a page drawn against a Conversation that has since moved,
-//! and there is no row left to correct.
+//! **A refused press is said in front of the human**, as the ordinary menu's
+//! now is: the refusal's own sentence, in the same card over the page. It
+//! matters more here than anywhere else it is drawn. Everywhere else a refusal
+//! is a page drawn against a Conversation that has moved, and the re-read behind
+//! the press is the correction; here there is no re-read to make and no row to
+//! correct, because the reading is the thing that failed — so a press that went
+//! quietly nowhere would leave the human on a page that will not load, with the
+//! one way off it apparently doing nothing.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Show, type JSX } from "solid-js";
+import { Show, createSignal, type JSX } from "solid-js";
 
 import { Menu } from "../Menu";
 import {
@@ -45,7 +50,7 @@ import {
 } from "../api/client";
 import type { ConversationArchived, ConversationClosed } from "../api/types";
 import { useReading } from "../freshness";
-import { ARCHIVE_REFUSAL, Action, CLOSE_REFUSAL } from "./Actions";
+import { ARCHIVE_REFUSAL, Action, CLOSE_REFUSAL, Refusal } from "./Actions";
 import styles from "./Actions.module.css";
 import { PaneHead } from "./PaneHead";
 
@@ -61,6 +66,24 @@ export function Hatch(props: {
   back: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
+
+  /// The sentence a refused press is answered with, and `null` while there is
+  /// nothing to answer. Held out here rather than in the menu's rows, because
+  /// the rows are built when the menu opens and thrown away when it closes, and
+  /// the card outlives the menu the press was made in: the press shuts it.
+  const [refused, setRefused] = createSignal<string | null>(null);
+
+  // The menu's own way to shut, held here because what closes it is the press
+  // coming back rather than the press going out.
+  let shut = (): void => {};
+
+  /// What a press that did nothing comes to: the menu goes, handing the focus
+  /// back to the ⋯ it was dropped from, and the sentence saying why opens over
+  /// the page.
+  const refuse = (sentence: string): void => {
+    shut();
+    setRefused(sentence);
+  };
 
   /// The sidebar's own list, read under the key the sidebar reads it under — so
   /// this is the answer already in hand rather than a second fetch of it.
@@ -96,73 +119,82 @@ export function Hatch(props: {
     mutationFn: (id: number) => closeAndArchiveConversation(id),
     onSuccess: (outcome: ConversationClosed) => {
       if (CLOSE_REFUSAL[outcome]) {
-        console.error(CLOSE_REFUSAL[outcome]);
+        refuse(CLOSE_REFUSAL[outcome]);
         return;
       }
 
       leave();
     },
     onError: (error: Error) =>
-      console.error("The conversation could not be closed:", error),
+      refuse(`The conversation could not be closed: ${error.message}`),
   }));
 
   const archive = useMutation(() => ({
     mutationFn: (id: number) => archiveConversation(id),
     onSuccess: (outcome: ConversationArchived) => {
       if (ARCHIVE_REFUSAL[outcome]) {
-        console.error(ARCHIVE_REFUSAL[outcome]);
+        refuse(ARCHIVE_REFUSAL[outcome]);
         return;
       }
 
       leave();
     },
     onError: (error: Error) =>
-      console.error("The conversation could not be archived:", error),
+      refuse(`The conversation could not be archived: ${error.message}`),
   }));
 
   return (
-    <PaneHead
-      // The way back out of a level a narrow window has no other way out of.
-      // Drawn always and hidden where all three panes stand at once, as every
-      // pane's is — and the whole reason the hatch is on the pane rather than on
-      // the sidebar's right-click, which a phone has no way to open at all.
-      back={{ to: "Conversations", go: props.back }}
-      // The branch, where the sidebar knows it, so the human can see this is the
-      // Conversation they meant. Where it does not, the id it was asked for:
-      // a header with no name at all would be one more thing that will not load.
-      title={row()?.branch ?? `Conversation ${props.id}`}
-    >
-      <Menu
-        class={styles.conversationActions!}
-        label="Conversation actions"
-        name="Conversation actions"
-        mark
+    <>
+      <PaneHead
+        // The way back out of a level a narrow window has no other way out of.
+        // Drawn always and hidden where all three panes stand at once, as every
+        // pane's is — and the whole reason the hatch is on the pane rather than
+        // on the sidebar's right-click, which a phone has no way to open at all.
+        back={{ to: "Conversations", go: props.back }}
+        // The branch, where the sidebar knows it, so the human can see this is
+        // the Conversation they meant. Where it does not, the id it was asked
+        // for: a header with no name at all would be one more thing that will
+        // not load.
+        title={row()?.branch ?? `Conversation ${props.id}`}
       >
-        {() => (
-          <Show
-            when={row()?.state === "Closed"}
-            fallback={
+        <Menu
+          class={styles.conversationActions!}
+          label="Conversation actions"
+          name="Conversation actions"
+          closer={(close) => (shut = close)}
+          mark
+        >
+          {() => (
+            <Show
+              when={row()?.state === "Closed"}
+              fallback={
+                <Action
+                  class={styles.closeAndArchive}
+                  label="Close and archive"
+                  pressing="Closing…"
+                  says="Permanently end the conversation, delete the worktree, and take it off the conversations list. The branch stays where it is."
+                  working={closeAway.isPending}
+                  press={() => closeAway.mutate(id())}
+                />
+              }
+            >
               <Action
-                class={styles.closeAndArchive}
-                label="Close and archive"
-                pressing="Closing…"
-                says="Permanently end the conversation, delete the worktree, and take it off the conversations list. The branch stays where it is."
-                working={closeAway.isPending}
-                press={() => closeAway.mutate(id())}
+                class={styles.archive}
+                label="Archive"
+                pressing="Archiving…"
+                says="Take it off the conversations list. Its record stays where it is."
+                working={archive.isPending}
+                press={() => archive.mutate(id())}
               />
-            }
-          >
-            <Action
-              class={styles.archive}
-              label="Archive"
-              pressing="Archiving…"
-              says="Take it off the conversations list. Its record stays where it is."
-              working={archive.isPending}
-              press={() => archive.mutate(id())}
-            />
-          </Show>
-        )}
-      </Menu>
-    </PaneHead>
+            </Show>
+          )}
+        </Menu>
+      </PaneHead>
+
+      {/* Outside the header, because the press that opens it shuts the menu it
+          was made in: what the human is looking at from here is one card over
+          the page. */}
+      <Refusal said={refused()} close={() => setRefused(null)} />
+    </>
   );
 }

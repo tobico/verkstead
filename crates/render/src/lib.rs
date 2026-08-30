@@ -53,7 +53,7 @@ pub use conversations::{
     steer_event, task_list, task_list_event, task_list_reached, unreadable_set_event,
 };
 pub use profiles::{
-    AgentType, Broken, PairingView, PickedView, ProfileChoice, ProfileChosen, ProfileDeleted,
+    Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen, ProfileDeleted,
     ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
 };
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
