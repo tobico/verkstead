@@ -262,10 +262,14 @@ export function Conversations(props: {
     // held by a hand that is no longer on it.
     drop();
 
-    // The card keeps the pointer for the length of the drag, so nothing it is
-    // carried over lights up under a hand that is already holding something —
-    // and so the browser has something to say, below, on the day it takes the
-    // pointer back. Where the drag is actually watched is the window.
+    // The card takes the pointer for as long as the browser will leave it
+    // there, so nothing it is carried over lights up under a hand that is
+    // already holding something. For as long as it will leave it and no longer:
+    // the list moving this very card is what the drag is for, and a card that
+    // moves in the DOM has the pointer taken back off it. So the capture is a
+    // courtesy that can go at any moment rather than the thing the drag runs
+    // on — what the drag runs on is the window, which hears the pointer
+    // whoever is holding it.
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 
     const began: NonNullable<typeof press> = {
@@ -282,11 +286,15 @@ export function Conversations(props: {
     // The rest of the gesture is watched at the window rather than at the card,
     // which is what the pane dividers next door do: a pointer that has outrun
     // the card is still dragging it, and a release out beyond the sidebar — or
-    // beyond the window — is still the release. Lost capture is listened for
-    // as well, for the endings that are neither: a card taken out from under
-    // the hand by a re-render, or a gesture the browser has taken over. Every
-    // one of them puts the card down, so there is no way for a drag to end that
-    // leaves the list held.
+    // beyond the window — is still the release. A cancel is an ending too,
+    // being what the browser says when it has taken the gesture over. Both of
+    // them put the card down, so there is no way for a drag to end that leaves
+    // the list held.
+    //
+    // The capture going is not an ending, whatever it looks like: the first row
+    // the drag moves takes the capture with it, so a drag that ended there
+    // would be a drag of exactly one place — press, one row, and then nothing
+    // until the hand let go and took the card again.
     const moved = (at: PointerEvent) => {
       if (at.pointerId === began.pointer) drag(at);
     };
@@ -298,13 +306,11 @@ export function Conversations(props: {
       window.removeEventListener("pointermove", moved);
       window.removeEventListener("pointerup", ended);
       window.removeEventListener("pointercancel", ended);
-      window.removeEventListener("lostpointercapture", ended);
     };
 
     window.addEventListener("pointermove", moved);
     window.addEventListener("pointerup", ended);
     window.addEventListener("pointercancel", ended);
-    window.addEventListener("lostpointercapture", ended);
 
     // A finger lifts a card by holding still. No distance tells a drag from a
     // scroll on a phone — both of them are the finger moving — so what tells
@@ -353,10 +359,10 @@ export function Conversations(props: {
   /// The drag is over: what is on the screen is what the human meant, so that
   /// is what is sent.
   ///
-  /// Every ending comes through here — the release, a cancel, a capture lost,
-  /// a press that turned out to be a scroll, and the next press finding this
-  /// one still standing — so there is one place the listeners come off and one
-  /// place the held card is put down.
+  /// Every ending comes through here — the release, a cancel, a press that
+  /// turned out to be a scroll, and the next press finding this one still
+  /// standing — so there is one place the listeners come off and one place the
+  /// held card is put down.
   const drop = () => {
     const at = press;
 
