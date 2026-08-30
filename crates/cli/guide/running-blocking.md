@@ -26,3 +26,9 @@ Set alone — backticks and `$` are ordinary characters in prose and in a diff.
 While waiting, do any work that does not depend on the answers. Don't speculate
 about what the human will say, and don't start work the answers might throw
 away.
+
+The wait reconnects on its own through a dropped connection or a server that
+went away, for as long as it takes, so nothing here is a failure to act on. What
+it has to say about that goes to stderr and is written as a YAML comment — so
+the file a harness collects the two streams into still parses as the Response,
+which is what **Reading the Response** below describes.

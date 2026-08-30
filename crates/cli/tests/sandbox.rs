@@ -371,9 +371,12 @@ fn a_session_reads_the_guide_for_the_backend_it_is_running() {
         blocking.contains("run_in_background"),
         "a Claude session reads the blocking ask's own mechanics, got:\n{blocking}"
     );
+    // What it is never sent to do, rather than a command it never names: the CLI
+    // contract every channel quotes says `verkstead answers` refuses a Deferred
+    // Ask, which is worth a blocking session's knowing too.
     assert!(
-        !blocking.contains("verkstead answers"),
-        "and is never sent to fetch a Response it is already holding"
+        !blocking.contains("Fetch the Answers"),
+        "and is never sent to fetch a Response it is already holding, got:\n{blocking}"
     );
 
     let codex = fixture.codex_profile();
@@ -381,7 +384,7 @@ fn a_session_reads_the_guide_for_the_backend_it_is_running() {
         fixture.inside_sandbox(&fixture.sandbox_under(&codex), &["verkstead", "guide"]);
 
     assert!(
-        store_and_nudge.contains("verkstead answers"),
+        store_and_nudge.contains("Fetch the Answers"),
         "a session that cannot hold an ask open reads that it ends its turn and \
          fetches the Answers when the nudge lands, got:\n{store_and_nudge}"
     );

@@ -1,9 +1,10 @@
 # Asking the human
 
 Verkstead carries a Question Set from a coding agent to the human. The human
-answers on a phone, away from the terminal, so a wait of hours is the tool
-working rather than the tool failing — and where the work does not turn on the
-answer, an ask that does not wait at all is the point of the second kind below.
+answers on a phone, away from the terminal, so hours between the ask and the
+answer is the tool working rather than the tool failing — and where the work
+does not turn on the answer, an ask nothing ever comes back to is the point of
+the second kind below.
 
 This Guide is everything the binary knows about asking well, and it ships
 inside the binary: `verkstead guide` — or `verkstead` with no arguments — is
@@ -17,9 +18,9 @@ waits there to be answered. What differs is this end.
 <!-- the two kinds of ask, per channel -->
 
 The rule decides a Question at a time, and a Set is one kind or the other — so
-Questions of both kinds go in two Sets: what the work turns on in the one that
-comes back, and everything else in a deferred one sent alongside it. Budget each
-of them as a Set in its own right, by **Pacing** below.
+Questions of both kinds go in two Sets: what the work turns on in the first
+kind, and everything else in a deferred one sent alongside it. Budget each of
+them as a Set in its own right, by **Pacing** below.
 
 A deferred ask is a foreground call: it returns as soon as the Set is stored,
 and there is nothing to wait for. What it prints is the stored Set rather than a
@@ -128,9 +129,11 @@ them off the parent as Sub-questions.
 Verbatim, as shipped:
 
 ```
-Submit a Question Set and block until the human answers it.
+Submit a Question Set and wait for the human to answer it.
 
-Prints the Response as YAML on stdout and exits 0 — or, with `--deferred`, prints the stored Set and returns without waiting. Nothing else is ever written to stdout, so the agent can parse what comes back as it stands.
+Whether waiting means blocking here until the Response comes back, or storing the Set and ending the turn to be told later, is this backend's own — run `verkstead guide` for which it is and how to run one. Either way the human answers in their own time, and that may be hours.
+
+Prints the Response as YAML on stdout and exits 0 where it blocked, and the stored Set where it did not. Nothing else is ever written to stdout, so the agent can parse what comes back as it stands.
 
 Usage: verkstead ask [OPTIONS] [FILE]
 
@@ -140,9 +143,9 @@ Arguments:
 
 Options:
       --deferred
-          Don't wait: store the Set and return.
+          Nobody is to wait on it: store the Set and carry straight on.
           
-          Prints the stored Set as YAML instead of a Response — its `id` and when the server took it — and exits 0. The human answers it in their own time, and their Answers reach a later session of this Conversation. Block only on Questions whose Answers affect the work about to be done.
+          Prints the stored Set as YAML instead of a Response — its `id` and when the server took it — and exits 0, on every backend. The human answers it in their own time, and their Answers reach a later session of this Conversation and never this one, so `verkstead answers` refuses one. Wait only on Questions whose Answers affect the work about to be done.
 
       --server <SERVER>
           Base URL of the Verkstead server
@@ -354,10 +357,10 @@ comment: |
   On Q11a I genuinely don't know — pick whatever's least work to change later.
 ```
 
-That holds for the file a harness collects a background command into, where
-the two streams land together: a wait that goes to plan is silent, and the
-little the CLI has to say while reconnecting is written as a YAML comment. Hand
-the whole thing to a parser.
+That holds wherever the two streams land in one file — a harness collecting a
+command it ran, a shell redirect: a run that goes to plan says nothing at all on
+stderr, and the little the CLI ever has to say there is written as a YAML
+comment. Hand the whole thing to a parser.
 
 Every Question and Sub-question the Set actually asked comes back exactly once,
 so there is never anything to infer about what the human passed over. A Heading

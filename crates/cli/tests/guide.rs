@@ -652,6 +652,43 @@ fn only_the_two_asking_sections_differ_between_the_channels() {
     );
 }
 
+/// And nothing anywhere else in a store-and-nudge Guide tells its reader the
+/// ask blocks.
+///
+/// The two asking sections are what the tailoring splits, but the sections
+/// around them are shared — so a sentence written for the blocking channel and
+/// left in the common half reaches a backend it is false of, which is exactly
+/// what tailoring the Guide was for. The whole document rather than the two
+/// sections, because that is where such a sentence hides.
+///
+/// Its own voice rather than what it quotes: the CLI contract is `verkstead ask
+/// --help` verbatim, and what that says is pinned by
+/// [`the_guides_quoted_cli_contract_is_the_real_one`] against the binary itself.
+#[test]
+fn nothing_in_a_store_and_nudge_guide_says_the_ask_blocks() {
+    let store_and_nudge = prose(&stdout(&run_as("codex", &["guide"])));
+    let blocking = prose(&stdout(&run_as("claude", &["guide"])));
+
+    for mechanism in [
+        "run_in_background",
+        "background shell",
+        "blocks until",
+        "reconnect",
+        "While waiting",
+    ] {
+        assert!(
+            !store_and_nudge.contains(mechanism),
+            "{mechanism:?} is the blocking channel's own mechanism and is false \
+             of a backend that cannot hold an ask open",
+        );
+        assert!(
+            blocking.contains(mechanism),
+            "{mechanism:?} should still be somewhere in the blocking Guide — a \
+             phrase that has gone from both is one this test stopped checking",
+        );
+    }
+}
+
 /// A word this binary has not got is refused by name.
 ///
 /// Read past as blocking, a Guide would hand the hold-the-ask advice to a
