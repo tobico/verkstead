@@ -94,6 +94,16 @@
   box-shadow: var(--lift);
 }
 
+/* And hung over the control instead, where there is not room under it: a pane
+   scrolls its own content and the steer modal's card is capped, so a control
+   standing low in one of those has its rows measured against that box's edge
+   rather than the screen's — see `clipping` in `picking.tsx`. The same gap, off
+   the other edge, so the rows sit against the control either way. */
+.drop.above {
+  top: auto;
+  bottom: calc(100% + 0.3rem);
+}
+
 /* One row: a mark, and the reading beside it. Tall enough to be hit by a finger
    rather than aimed at — the workbench is answered from a phone, which is what
    the native control was kept for until now — and wrapping rather than cut,

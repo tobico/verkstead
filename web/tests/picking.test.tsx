@@ -17,7 +17,7 @@
 
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentType } from "../src/agents";
 import { Listbox } from "../src/picking";
@@ -335,6 +335,117 @@ describe("what a row of the listbox draws", () => {
   /// phone, which is what the native control was kept for until now.
   it("gives every row a height a finger can hit", () => {
     expect(css).toContain("min-height: 2.75rem;");
+  });
+});
+
+/// The last thing a native dropdown kept for itself: its popup is the browser's
+/// and goes wherever it fits, and these rows are an element inside whatever
+/// clips the page. Every one of the five controls stands in a box that clips —
+/// a pane scrolls its own content, the steer modal's card is capped at `80vh` —
+/// so a control low in one of those would drop its rows out of sight behind a
+/// backdrop that says nothing about where they went.
+///
+/// Measured rather than styled, which is why it is asserted through the
+/// measurements: jsdom lays nothing out, so the boxes are the ones this file
+/// hands back and the answer is the arithmetic over them.
+describe("which way the rows come down", () => {
+  /// A window of a known height, and boxes for the two elements that decide it:
+  /// the control wherever it is put, the rows however tall they are, and the
+  /// scrolling box around them wherever `clip` says.
+  function laid(at: {
+    control: number;
+    rows: number;
+    clip?: { top: number; bottom: number };
+  }): void {
+    const clip = at.clip ?? { top: 0, bottom: 1000 };
+
+    window.innerHeight = 1000;
+
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element): DOMRect {
+        if (this.classList.contains(styles.drop!)) {
+          return { top: 0, bottom: at.rows, height: at.rows } as DOMRect;
+        }
+
+        if (this.tagName === "BUTTON") {
+          return {
+            top: at.control,
+            bottom: at.control + 40,
+            height: 40,
+          } as DOMRect;
+        }
+
+        return { top: clip.top, bottom: clip.bottom } as DOMRect;
+      },
+    );
+
+    // What the walk to the box that clips reads on the way up. jsdom applies no
+    // stylesheet, so the pane every one of these stands in has to be said here.
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      overflowY: "auto",
+    } as CSSStyleDeclaration);
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /// Which is the ordinary way round, and stays it wherever the rows fit.
+  it("comes down under the control where there is room for it", () => {
+    laid({ control: 100, rows: 250 });
+    picking();
+
+    expect(opened(UNDER).classList.contains(styles.above!)).toBe(false);
+  });
+
+  it("comes down over the control where there is not", () => {
+    laid({ control: 800, rows: 250 });
+    picking();
+
+    expect(opened(UNDER).classList.contains(styles.above!)).toBe(true);
+  });
+
+  /// Against the box that clips rather than against the window: the steer
+  /// modal's card is capped at `80vh`, so rows that would fit on the screen can
+  /// still be rows that fall out of the card.
+  it("measures against the box that would clip it, not the window", () => {
+    laid({ control: 400, rows: 250, clip: { top: 200, bottom: 500 } });
+    picking();
+
+    expect(opened(UNDER).classList.contains(styles.above!)).toBe(true);
+  });
+
+  /// And where it fits neither side, the side that shows more of it — which is
+  /// the rule doing what it is for rather than a case of its own, the list being
+  /// capped and scrolled from its top whichever way it hangs.
+  it("takes the roomier side where it fits neither", () => {
+    laid({ control: 500, rows: 2000 });
+    picking();
+
+    expect(opened(UNDER).classList.contains(styles.above!)).toBe(true);
+  });
+
+  /// Under it all the same where under it is the roomier side: the ordinary way
+  /// round is the one to be in wherever being in it costs nothing.
+  it("stays under the control where under it is the roomier side", () => {
+    laid({ control: 300, rows: 2000 });
+    picking();
+
+    expect(opened(UNDER).classList.contains(styles.above!)).toBe(false);
+  });
+
+  /// And it is measured again each time, rather than settled on the first: the
+  /// pane the control stands in scrolls under it.
+  it("measures again every time the rows come down", () => {
+    laid({ control: 800, rows: 250 });
+    picking();
+
+    expect(opened(UNDER).classList.contains(styles.above!)).toBe(true);
+
+    fireEvent.click(control());
+    laid({ control: 100, rows: 250 });
+
+    expect(opened(UNDER).classList.contains(styles.above!)).toBe(false);
   });
 });
 

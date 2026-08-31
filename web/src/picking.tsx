@@ -256,6 +256,18 @@ export function Listbox<T>(
   /// to keep for it.
   const [walked, setWalked] = createSignal(0);
 
+  /// Which way they come down: under the control where there is room for them
+  /// there, and over it where there is not.
+  ///
+  /// The other thing a native dropdown kept for itself. Its popup is the
+  /// browser's own and is put wherever it fits on the screen; these rows are an
+  /// element of the page, inside whatever clips the page — a pane is
+  /// `overflow-y: auto` from the second breakpoint up, and the steer modal's
+  /// card is capped at `80vh` — so a control standing low in one of those would
+  /// drop its rows past its edge and out of sight, behind a backdrop that draws
+  /// nothing to say where they went.
+  const [above, setAbove] = createSignal(false);
+
   /// The same index, held inside the list as it stands now.
   ///
   /// A Nudge can take a row away while the rows are down — a Profile deleted
@@ -282,6 +294,11 @@ export function Listbox<T>(
   // The control, so that a press on a row — which is a press on something no
   // browser will focus — hands the keyboard back where it was.
   let control!: HTMLButtonElement;
+
+  // And the rows, for the one measure that says which way they hang. Held as
+  // `undefined` as well, unlike the control: they are on the page only while
+  // they are down.
+  let dropped: HTMLDivElement | undefined;
 
   /// Drop the rows, with the keyboard on the row that is the choice: a walk
   /// starts where the human already is rather than at the top of a list they
@@ -366,6 +383,39 @@ export function Listbox<T>(
     }
   };
 
+  // Which way the rows hang, measured each time they come down: what they need
+  // against what is left under the control, inside whatever would clip them.
+  //
+  // Here rather than in [`drop`] because what is measured is the rows' own
+  // height, which nothing knows until they are on the page — and an effect runs
+  // after they are and before the browser paints, so the choice is made before
+  // anybody has seen them anywhere. Back under the control as they go, so the
+  // next measure starts from the ordinary way round rather than from the last
+  // answer.
+  createEffect(() => {
+    if (!open()) {
+      setAbove(false);
+      return;
+    }
+
+    if (!dropped) return;
+
+    const anchor = control.getBoundingClientRect();
+    const wanted = dropped.getBoundingClientRect().height;
+    const clip = clipping(control);
+
+    // Over it only where they do not fit under it, and then only where there is
+    // more room over it: the ordinary way round is the one to be in wherever
+    // being in it costs nothing, and where neither side fits the rows go to
+    // whichever side shows more of them. Which side that is changes nothing
+    // about *which* rows — the list is capped and scrolls from its top either
+    // way.
+    setAbove(
+      anchor.bottom + wanted > clip.bottom &&
+        anchor.top - clip.top > clip.bottom - anchor.bottom,
+    );
+  });
+
   // The row the keyboard has walked to, kept in view: the drop is capped in
   // height, so a list longer than it can be walked past its own edge.
   createEffect(() => {
@@ -425,7 +475,14 @@ export function Listbox<T>(
           aria-hidden="true"
           onClick={() => shut()}
         />
-        <div class={styles.drop} id={list} role="listbox">
+        <div
+          ref={dropped}
+          class={[styles.drop, above() ? styles.above : undefined]
+            .filter(Boolean)
+            .join(" ")}
+          id={list}
+          role="listbox"
+        >
           <For each={props.options}>
             {(option, index) => (
               <div
@@ -450,6 +507,35 @@ export function Listbox<T>(
       </Show>
     </div>
   );
+}
+
+/// The box the rows have to fit inside: the nearest thing above the control that
+/// would clip them, and the window where nothing does.
+///
+/// Which is not the window as often as it looks. A pane scrolls its own content
+/// from the second breakpoint up and the steer modal's card is capped at `80vh`,
+/// so the edge the rows would disappear past is that box's rather than the
+/// screen's — and it is met with the window all the same, a pane being able to
+/// stand taller than the window it is scrolled inside.
+///
+/// `hidden` counts with `auto` and `scroll`: what matters here is that the box
+/// clips, and one that clips without scrolling is the worse of the two to drop
+/// rows into.
+function clipping(from: Element): { top: number; bottom: number } {
+  for (let at = from.parentElement; at; at = at.parentElement) {
+    const { overflowY } = getComputedStyle(at);
+
+    if (["auto", "scroll", "hidden"].includes(overflowY)) {
+      const box = at.getBoundingClientRect();
+
+      return {
+        top: Math.max(box.top, 0),
+        bottom: Math.min(box.bottom, window.innerHeight),
+      };
+    }
+  }
+
+  return { top: 0, bottom: window.innerHeight };
 }
 
 /// One row's reading: the harness's mark, and the words beside it.
