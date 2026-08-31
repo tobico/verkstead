@@ -282,6 +282,14 @@ own settings being what keeps a run unattended. What stops a session doing
 harm is the Sandbox, which is unchanged; a backend stopping to ask approval
 mid-run stalls a run nobody is watching.
 
+Amended: **OpenCode's bypass is `--auto` on the launch line**, rather than the
+permission configuration this paragraph first named. So every one of the four
+says its approvals in the same place — one flag apiece on the line Verkstead
+builds — and nothing about approvals lives in the sandbox's environment, where
+the two things this backend *is* told there are both about something else: the
+name of its store and how long its shell tool holds a command. opencode has no
+sandbox of its own to switch off, so the flag is the whole of it.
+
 The host provides the binaries, as it provides `claude` today: the installer
 puts `codex`, `grok` and `opencode` on the system profile the sandbox
 already reads, and a Profile whose binary is missing fails at session start,
