@@ -446,13 +446,13 @@ _Avoid_: announce, notify, post, broadcast (a comment is left, once, by a press
 the human made)
 
 **Ignore rule**:
-One class of comment nobody wants addressed, written in the workbench settings:
-a regex over who said it, a regex over what it says, or both. A rule matches
-where every field it gives does, and the list combines with OR — so a comment
-any one rule matches is skipped wherever Wrapping reads comments, in the fresh
-ones a session would be dispatched about and the standing ones folded into the
-review alike, on a Companion Repo's pull request as much as on the
-Conversation's own.
+One class of comment nobody wants addressed, written in the GitHub and git
+author settings pane, a row apiece: a regex over who said it, a regex over what
+it says, or both. A rule matches where every field it gives does, and the list
+combines with OR — so a comment any one rule matches is skipped wherever
+Wrapping reads comments, in the fresh ones a session would be dispatched about
+and the standing ones folded into the review alike, on a Companion Repo's pull
+request as much as on the Conversation's own.
 What they are for is a bot nobody can turn off: a review service set up with no
 billing information on it, filing the same word about billing on every pull
 request, where the alternative is a session spun up to address it each time.

@@ -694,6 +694,269 @@ describe("replacing and clearing the token", () => {
   });
 });
 
+/// The third section of the same form: the comments nobody wants an agent
+/// addressing, a row of two patterns apiece.
+///
+/// The rules are the one setting a save can be *refused* over, which is what
+/// most of this is about: they go out only once a row has been touched, so the
+/// two sections above cannot be turned down over a pattern they never showed
+/// anybody, and a refusal leaves both files exactly as they were with the words
+/// drawn at the row they name.
+///
+/// What a pattern really means is the server's — `crates/server/tests/
+/// settings.rs` is what says which comments a rule matches and which rules are
+/// refused. This side's job is to draw the rows, to send the list, and to put
+/// the answer where the row it is about is.
+describe("the ignore rules", () => {
+  /// The row a rule is drawn as, by where it stands: the two boxes in the order
+  /// the section holds them.
+  function boxes(which: number): [HTMLInputElement, HTMLInputElement] {
+    return [
+      screen.getAllByLabelText(/^Author,/)[which] as HTMLInputElement,
+      screen.getAllByLabelText(/^Body,/)[which] as HTMLInputElement,
+    ];
+  }
+
+  /// Whether a save is still out, which is what the Save button says: it is
+  /// disabled while one is, and a press on it then is a press that goes
+  /// nowhere.
+  function saving(): boolean {
+    return (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement)
+      .disabled;
+  }
+
+  /// What the save was answered with where it was turned down: neither file
+  /// touched, so the settings are how they stood, and one row named.
+  function turnedDown(...refused: SettingsSaved["refused"]): SettingsSaved {
+    return { settings: TOLD, verified: null, refused };
+  }
+
+  const RULE = TOLD.ignored_comments[0]!;
+
+  it("draws a row for each rule that is written down", async () => {
+    theSettings(TOLD);
+    mountPane();
+    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+
+    const [author, body] = boxes(0);
+    expect(screen.getAllByLabelText(/^Author,/)).toHaveLength(1);
+    expect(author.value).toBe(RULE.author);
+    expect(body.value).toBe(RULE.body);
+  });
+
+  /// Empty is the ordinary condition rather than a setting half made, so it is
+  /// said in the quiet a list with nothing in it is said in — no warning.
+  it("says so where nothing is ignored", async () => {
+    theSettings(UNSET);
+    mountPane();
+
+    await waitFor(() => screen.getByText("No comments are ignored."));
+    expect(screen.queryAllByLabelText(/^Author,/)).toHaveLength(0);
+  });
+
+  /// A row is added empty, for a rule to be written into. Nothing is sent by
+  /// the press itself: the Save at the foot of the form is what saves.
+  it("adds an empty row on the press", async () => {
+    const fetching = theSettings(TOLD);
+    mountPane();
+    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
+
+    await waitFor(() =>
+      expect(screen.getAllByLabelText(/^Author,/)).toHaveLength(2),
+    );
+    const [author, body] = boxes(1);
+    expect(author.value).toBe("");
+    expect(body.value).toBe("");
+    expect(
+      fetching.mock.calls.some(([, init]) => init?.method === "POST"),
+    ).toBe(false);
+  });
+
+  /// The server writes the rules as one list, so what a touched row sends is
+  /// the whole of it in the order it is drawn.
+  it("sends the whole list once a row has been touched", async () => {
+    const fetching = theSettings(TOLD, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getAllByLabelText(/^Body,/));
+
+    fireEvent.input(boxes(0)[1], { target: { value: "^nit:" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(
+        (sent(fetching) as { ignored_comments: unknown }).ignored_comments,
+      ).toEqual({ Set: { rules: [{ author: RULE.author, body: "^nit:" }] } }),
+    );
+  });
+
+  it("sends a rule that was added on the page", async () => {
+    const fetching = theSettings(TOLD, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
+    await waitFor(() => expect(boxes(1)[0]).toBeTruthy());
+    fireEvent.input(boxes(1)[0], { target: { value: "dependabot" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(
+        (sent(fetching) as { ignored_comments: unknown }).ignored_comments,
+      ).toEqual({
+        Set: {
+          rules: [
+            { author: RULE.author, body: RULE.body },
+            { author: "dependabot", body: "" },
+          ],
+        },
+      }),
+    );
+  });
+
+  /// A row taken off the page is a rule taken out of the file, which is what an
+  /// empty list says: the human has removed the last one.
+  it("sends the list without a row that was removed", async () => {
+    const fetching = theSettings(TOLD, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getByRole("button", { name: "Remove" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => screen.getByText("No comments are ignored."));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(
+        (sent(fetching) as { ignored_comments: unknown }).ignored_comments,
+      ).toEqual({ Set: { rules: [] } }),
+    );
+  });
+
+  /// And the whole point of their travelling as an action: a save nobody made
+  /// about the rules says nothing about them, so it is a save that cannot be
+  /// refused over a pattern somebody hand-edited into the file weeks ago.
+  it("says nothing about them where no row was touched", async () => {
+    const fetching = theSettings(TOLD, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Name"));
+
+    fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "Ada Byron" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(
+        (sent(fetching) as { ignored_comments: unknown }).ignored_comments,
+      ).toBe("Keep"),
+    );
+  });
+
+  /// The refusal is drawn at the box it names, in the engine's own words, and
+  /// what the human typed is still in front of them: nothing was written, so
+  /// there is nothing to read back and nothing to reorder.
+  it("draws a refused pattern at the box it is about", async () => {
+    const why = "regex parse error: unclosed character class";
+    theSettings(TOLD, json(turnedDown({ rule: 0, field: "Author", why })));
+    mountPane();
+    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+
+    fireEvent.input(boxes(0)[0], { target: { value: "[oh" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => screen.getByText(why));
+    expect(boxes(0)[0].value).toBe("[oh");
+    expect(boxes(0)[1].value).toBe(RULE.body);
+  });
+
+  /// And the refusal there is no box to draw at, which is the rule itself: a
+  /// row with neither pattern would ignore every comment there is.
+  it("draws a rule refused as a whole at its row", async () => {
+    const why =
+      "a rule with neither field would ignore every comment there is, so it " +
+      "needs an author, a body, or both";
+    theSettings(TOLD, json(turnedDown({ rule: 1, field: null, why })));
+    mountPane();
+    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
+    await waitFor(() => expect(boxes(1)[0]).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => screen.getByText(why));
+    // The row it named is still there, empty and refused rather than dropped.
+    expect(screen.getAllByLabelText(/^Author,/)).toHaveLength(2);
+  });
+
+  /// A refusal is the whole request refused, so nothing else the form was
+  /// carrying landed either — the token field is unspent and the author is
+  /// still what was typed rather than what the files say.
+  it("keeps the rest of the form where a save was refused", async () => {
+    theSettings(TOLD, json(turnedDown({ rule: 0, field: "Body", why: "no" })));
+    mountPane();
+    await waitFor(() => screen.getAllByLabelText(/^Body,/));
+
+    fireEvent.input(screen.getByLabelText("Email"), {
+      target: { value: "ada@analytical.engine" },
+    });
+    fireEvent.input(boxes(0)[1], { target: { value: "[oh" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => screen.getByText("no"));
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+      "ada@analytical.engine",
+    );
+  });
+
+  /// And the words go with the press that answers them: what came back is about
+  /// what was sent, and a second save is a second question.
+  it("drops the refusal when the next save goes out", async () => {
+    theSettings(
+      TOLD,
+      json(turnedDown({ rule: 0, field: "Author", why: "unclosed" })),
+      json(SAVED),
+    );
+    mountPane();
+    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+
+    fireEvent.input(boxes(0)[0], { target: { value: "[oh" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => screen.getByText("unclosed"));
+    // The words land before the save is over, so the second press waits for
+    // the button rather than for them: pressing Save while it is still
+    // disabled is a press that goes nowhere.
+    await waitFor(() => expect(saving()).toBe(false));
+
+    fireEvent.input(boxes(0)[0], { target: { value: "coderabbitai" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.queryByText("unclosed")).toBeNull());
+  });
+
+  /// A save that landed is read back rather than echoed: the rows go back to
+  /// following the server, which has just been told what they said.
+  it("draws what the save came back with", async () => {
+    const written: SettingsSaved = {
+      settings: {
+        ...SAVED.settings,
+        ignored_comments: [{ author: "", body: "^nit:" }],
+      },
+      verified: null,
+      refused: [],
+    };
+    theSettings(TOLD, json(written));
+    mountPane();
+    await waitFor(() => screen.getAllByLabelText(/^Body,/));
+
+    fireEvent.input(boxes(0)[1], { target: { value: "^nit:" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(boxes(0)[0].value).toBe(""));
+    expect(boxes(0)[1].value).toBe("^nit:");
+  });
+});
+
 /// The page the credentials head, on the routes the app really gives it: the
 /// settings pane in the middle, the conversations beside it, and a details pane
 /// for whatever the path names.

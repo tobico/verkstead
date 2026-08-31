@@ -14,4 +14,4 @@ applied everywhere Wrapping reads comments.
 - [x] 01: The share comment stops triggering Wrapping — [details](01-share-comment-marker.md)
 - [x] 02: Ignore rules live in the settings and round-trip the API — [details](02-ignore-rules-setting.md)
 - [x] 03: Wrapping skips ignored comments everywhere it reads them — [details](03-wrapping-skips-ignored.md)
-- [ ] 04: The row editor in the GitHub and git author pane — [details](04-ignore-rules-editor.md)
+- [x] 04: The row editor in the GitHub and git author pane — [details](04-ignore-rules-editor.md)
