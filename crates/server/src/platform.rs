@@ -130,11 +130,21 @@ impl Environment {
 ///
 /// **Nowhere to resolve to refuses startup**, naming the flag, exactly as the
 /// Build Cache refuses naming `--build-cache-dir` and for the same reason: a
-/// service unit that says nothing about a home would otherwise be handed a Data
-/// Directory nobody chose and nobody will find. That makes it an error at
+/// machine that names no directory to put one in would otherwise be handed a
+/// Data Directory nobody chose and nobody will find. That makes it an error at
 /// startup rather than anything the flag parser can express — which is why the
 /// flag holds only what was *said*, and why the resolving happens here, where a
 /// failure has somewhere to be worded.
+///
+/// **Which machine that is, is narrower than it reads**, and worth saying so
+/// that nobody takes this for the guard against a unit that said nothing about
+/// a home. [`crate::sandbox::Home::of_the_server`] is asked first, in
+/// [`crate::run`], and an unset `HOME` is refused there — a session's `~` and
+/// the machine's git identity both come out of it, so a Verkstead without one
+/// can run no session whatever it does about a Data Directory. What reaches
+/// this refusal on a Unix machine is therefore the stranger case that check
+/// lets through: a `HOME` set to a relative path or to nothing, with no
+/// absolute `XDG_DATA_HOME` beside it.
 pub fn data_dir(said: Option<&Path>) -> anyhow::Result<PathBuf> {
     match said {
         Some(dir) => Ok(dir.to_owned()),
