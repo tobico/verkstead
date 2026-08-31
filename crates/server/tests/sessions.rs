@@ -9,11 +9,19 @@
 //! the real claude would be a test that needed an account, a network and a
 //! model's patience.
 //!
-//! The stub is handed exactly what claude would be: `--model`, the Profile's
-//! model, and then the Brief, with the session name and the backend's own flags
-//! after it. So `$1` is the model it was told to run and `$2` is the Brief it
-//! was primed with — which is how these read them back, and why everything
-//! Verkstead adds to that line goes on the end of it.
+//! The stub is handed exactly what the backend it stands where would be: the
+//! model flag, the Profile's model, and then the Brief, with the session name
+//! and the backend's own flags after it. So `$1` is the model it was told to
+//! run, and everything Verkstead adds to that line goes on the end of it.
+//!
+//! **The Brief is `$2` on three of the four, and one place later on the
+//! fourth.** Claude Code, codex and grok each take it as the one positional
+//! argument; opencode's positional is the project to start in, so its Brief
+//! goes under `--prompt` and `$2` is the flag — see `Line::prompt` in the
+//! server's `sessions` module. The two stubs a session of that type runs put
+//! the two back into the order the rest of this reads them in, before anything
+//! looks at either, so every case below reads `$1` and `$2` whichever backend
+//! it is standing in for.
 //!
 //! Watching a live session is here too, at the end, and is the one thing asked
 //! over a socket rather than of the Router: an upgrade is a connection rather
