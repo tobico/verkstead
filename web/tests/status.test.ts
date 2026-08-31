@@ -11,7 +11,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { AgentOutputEvent, ConversationView } from "../src/api/types";
+import type {
+  AgentOutputEvent,
+  ConversationView,
+  ProfileEntry,
+} from "../src/api/types";
 import { agent, status } from "../src/workbench/StatusButton";
 
 import building from "./fixtures/conversation-building.json" with {
@@ -39,6 +43,24 @@ const QUIET: ConversationView = {
 function like(over: Partial<ConversationView>): ConversationView {
   return { ...QUIET, ...over };
 }
+
+/// A saved Claude Code account, which is all the reading cares about one: a
+/// name and an agent type.
+const profile = (name: string): ProfileEntry => ({
+  id: 1,
+  name,
+  account: {
+    agent_type: "Claude",
+    claude_dir: "/srv/dir",
+    config_file: "/srv/file",
+  },
+  models: [],
+  broken: null,
+});
+
+/// The saved Profiles as the line reads them, with two Claude Code accounts on
+/// the list — which is what makes the account's own name worth saying.
+const SAVED = [profile("Work"), profile("Home")];
 
 /// A session on its record, running or finished.
 function ran(over: Partial<AgentOutputEvent>): AgentOutputEvent {
@@ -195,16 +217,45 @@ describe("the status word", () => {
 });
 
 describe("what the second line says", () => {
-  /// The Profile and the model as the human would say them, with nothing
-  /// between: one thing being named rather than two facts joined.
-  it("names the running session's profile and model", () => {
+  /// The shared reading of what the session was launched under: the backend,
+  /// the model, and the account's own name where two accounts on that backend
+  /// are what it tells apart.
+  it("names the running session as every other site names one", () => {
     expect(
-      agent(like({ working: true, timeline: [{ AgentOutput: ran({}) }] })),
-    ).toBe("Work Fable 5");
+      agent(
+        like({ working: true, timeline: [{ AgentOutput: ran({}) }] }),
+        SAVED,
+      ),
+    ).toBe("Claude Code Fable 5 — Work");
+  });
+
+  /// And drops the name where its backend has one account saved: there is
+  /// nothing for the name to tell apart, and the model has said the rest.
+  it("drops the account's name where its backend has one", () => {
+    expect(
+      agent(like({ working: true, timeline: [{ AgentOutput: ran({}) }] }), [
+        profile("Work"),
+      ]),
+    ).toBe("Claude Code Fable 5");
+  });
+
+  /// A session started before Verkstead wrote the backend down: the model and
+  /// the account, with no backend guessed for it — and the name said whatever
+  /// the list holds, there being nothing to count it against.
+  it("leaves out a backend the record never kept", () => {
+    expect(
+      agent(
+        like({
+          working: true,
+          timeline: [{ AgentOutput: ran({ agent_type: null }) }],
+        }),
+        [profile("Work")],
+      ),
+    ).toBe("Fable 5 — Work");
   });
 
   /// The prettifying is the viewer's, so an id this build has never heard of
-  /// still reaches the human — as itself.
+  /// still reaches the human — as itself, with the backend still beside it.
   it("says a model it does not know as the id it travelled as", () => {
     expect(
       agent(
@@ -212,8 +263,9 @@ describe("what the second line says", () => {
           working: true,
           timeline: [{ AgentOutput: ran({ model: "claude-opus-7" }) }],
         }),
+        SAVED,
       ),
-    ).toBe("Work claude-opus-7");
+    ).toBe("Claude Code claude-opus-7 — Work");
   });
 
   /// The last running session, a Conversation running one at a time — a record
@@ -228,42 +280,55 @@ describe("what the second line says", () => {
             { AgentOutput: ran({ id: 2, profile: "Now" }) },
           ],
         }),
+        SAVED,
       ),
-    ).toBe("Now Fable 5");
+    ).toBe("Claude Code Fable 5 — Now");
   });
 
   /// The one stop that says something a resume cannot: every other one waits
   /// for the same press, and this one waits for the same press and an account.
   it("says when the account comes back on a stop a window made", () => {
-    expect(agent(like({ ready_to_resume: true, resets: "3pm" }))).toBe(
-      "Out of window until 3pm",
-    );
+    expect(
+      agent(like({ ready_to_resume: true, resets: "3pm" }), SAVED),
+    ).toBe("Out of window until 3pm");
   });
 
   /// Every other moment with nothing registered, which includes the quiet
   /// between two steps of a backlog and every Draft, Done and Closed
   /// conversation there is.
   it("says nothing is running in every other quiet moment", () => {
-    expect(agent(QUIET)).toBe("No agent running");
-    expect(agent(like({ driven: true }))).toBe("No agent running");
-    expect(agent(like({ state: "Done" }))).toBe("No agent running");
+    expect(agent(QUIET, SAVED)).toBe("No agent running");
+    expect(agent(like({ driven: true }), SAVED)).toBe("No agent running");
+    expect(agent(like({ state: "Done" }), SAVED)).toBe("No agent running");
 
     // A session that has ended is not one that is running: the record keeps it
     // and the button has moved on.
     expect(
-      agent(like({ timeline: [{ AgentOutput: ran({ running: false }) }] })),
+      agent(
+        like({ timeline: [{ AgentOutput: ran({ running: false }) }] }),
+        SAVED,
+      ),
     ).toBe("No agent running");
   });
 
-  /// A session from before Verkstead wrote either half down. There is one
+  /// A session from before Verkstead wrote any of the three down. There is one
   /// running and nothing true to say about it, which is what this says.
-  it("says a session is running where the record kept neither half", () => {
+  it("says a session is running where the record kept none of it", () => {
     expect(
       agent(
         like({
           working: true,
-          timeline: [{ AgentOutput: ran({ profile: null, model: null }) }],
+          timeline: [
+            {
+              AgentOutput: ran({
+                agent_type: null,
+                profile: null,
+                model: null,
+              }),
+            },
+          ],
         }),
+        SAVED,
       ),
     ).toBe("Agent running");
   });
@@ -271,7 +336,13 @@ describe("what the second line says", () => {
   it("says the half it has where the record kept one of them", () => {
     expect(
       agent(
-        like({ working: true, timeline: [{ AgentOutput: ran({ model: null }) }] }),
+        like({
+          working: true,
+          timeline: [
+            { AgentOutput: ran({ agent_type: null, model: null }) },
+          ],
+        }),
+        SAVED,
       ),
     ).toBe("Work");
   });

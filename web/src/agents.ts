@@ -21,7 +21,11 @@
 //! Two shared vocabularies feed it: the names above, and the models in
 //! [`./models.ts`](./models.ts), each of which now says whose model it is.
 
-import type { ProfileAccount, ProfileEntry } from "./api/types";
+import type {
+  AgentOutputEvent,
+  ProfileAccount,
+  ProfileEntry,
+} from "./api/types";
 import { known, prettify } from "./models";
 
 /// Which agent a Profile runs, which is the discriminator its account is shaped
@@ -156,4 +160,20 @@ function tells(said: Said, saved: ProfileEntry[] | undefined): boolean {
   );
 
   return backend.length !== 1 || backend[0]!.name !== said.profile;
+}
+
+/// What one finished or running session was launched under, off the record it
+/// wrote as it started.
+///
+/// The three fields under three other names, and one coercion: a session from
+/// before Verkstead wrote a Profile's name down has none, and no name is the
+/// empty one — the reading drops an empty half rather than drawing an em dash
+/// with nothing after it. A run recorded with none of the three reads as
+/// nothing at all, which is each site's own fallback to say instead.
+export function ran(output: AgentOutputEvent): Said {
+  return {
+    agent: output.agent_type,
+    model: output.model,
+    profile: output.profile ?? "",
+  };
 }

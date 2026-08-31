@@ -87,7 +87,8 @@ import {
   type JSX,
 } from "solid-js";
 
-import { saveBrief, startGrilling } from "../api/client";
+import { ran, reading } from "../agents";
+import { listProfiles, saveBrief, startGrilling } from "../api/client";
 import type {
   AgentOutputEvent,
   BriefEvent,
@@ -102,6 +103,7 @@ import type {
   MovedEvent,
   NoticeEvent,
   PinnedEvent,
+  ProfileEntry,
   PullRequestEvent,
   QuestionSetEvent,
   StageListEvent,
@@ -115,6 +117,7 @@ import type {
 import app from "../App.module.css";
 import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
+import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { followBottom } from "../scrolling";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
@@ -383,6 +386,22 @@ export function Timeline(props: {
   /// column of the page below the first breakpoint, and the pane above it.
   let record!: HTMLOListElement;
 
+  // The saved Profiles, for the one thing the record needs them for: whether
+  // the account a session ran as is the only one on its backend, and so whether
+  // its name is said after the model. Once for the pane rather than once per
+  // card, a record holding a session per resume being a column of them.
+  //
+  // Not in a share, which is what the gate is: a share fetches nothing, and an
+  // Agent run never boards one anyway — so this is a read for a card that
+  // cannot be there. A list that has not been read says the account's name,
+  // which is the answer that can never misattribute a run.
+  const profiles = useReading(() => ({
+    queryKey: ["profiles"],
+    queryFn: listProfiles,
+    enabled: !props.readOnly,
+    freshness: { reconcile: "id" },
+  }));
+
   // And the pane follows the bottom of it, the way a running session's output
   // already does — the same code, because it is the same reading: a record still
   // being written, opened at its end because what is being said now is there.
@@ -551,6 +570,7 @@ export function Timeline(props: {
                   {(output) => (
                     <AgentOutput
                       output={output()}
+                      saved={profiles.data}
                       selected={props.selected === output().id}
                       open={() => {
                         props.select(output().id);
@@ -1549,18 +1569,28 @@ function ConflictsResolved(): JSX.Element {
   return <p class={styles.pressed}>You asked for the conflict to be resolved</p>;
 }
 
-/// What a session has printed: how much of it there is, and the last thing it
-/// said.
+/// What a session has printed: who ran it, how much of it there is, and the
+/// last thing it said.
 ///
 /// A button, because the whole of it is in the details pane and this is how it
 /// is opened — the summary is a line, and a grilling session's Capture is an
 /// hour of terminal output nobody wants in the middle pane.
+///
+/// The head names the run rather than the kind of thing it is. *Agent run* was
+/// the same three words over every card on a record that may hold a dozen of
+/// them, and what tells one from another is what it was run under — so the head
+/// is the shared reading in [`../agents`], off the three facts the session wrote
+/// down as it started. A session from before Verkstead wrote any of them down
+/// has nothing to be named by, and keeps the words.
 ///
 /// It moves while the session runs, which is the point: the page hears the world
 /// moved and reads this back, so a session that has just asked something says so
 /// here rather than at the end of an hour.
 function AgentOutput(props: {
   output: AgentOutputEvent;
+  /// The Profiles as they stand, which says whether the account's own name is
+  /// worth saying — `undefined` until the list has been read.
+  saved: ProfileEntry[] | undefined;
   selected: boolean;
   open: () => void;
 }): JSX.Element {
@@ -1571,7 +1601,9 @@ function AgentOutput(props: {
       press={props.open}
     >
       <span class={styles.eventHead}>
-        <span class={styles.what}>Agent run</span>
+        <span class={styles.what}>
+          {reading(ran(props.output), props.saved) || "Agent run"}
+        </span>
         {/* How far the conversation has got. A session with no Transcript to
             count has no metric at all rather than a zero: there is nothing here
             that took turns, and a `0 turns` would be a claim about it. */}

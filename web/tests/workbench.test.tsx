@@ -5081,6 +5081,85 @@ describe("a session's output on the timeline", () => {
     expect(output.textContent).not.toContain("Reading the brief");
   });
 
+  /// And the head names the run rather than the kind of thing it is: the shared
+  /// reading of what the session was launched under, off the three facts it
+  /// wrote down as it started. A record holding a session per resume is a
+  /// column of cards, and *Agent run* was the same three words on every one.
+  ///
+  /// The account's name is said here because the saved list holds three Claude
+  /// Code accounts and none of them is this one — a name the list no longer
+  /// holds keeps its own, dropping it being a run attributed to whoever is left.
+  it("names the run at the head of the card", async () => {
+    theGrillingOutput({
+      agent_type: "Claude",
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    await waitFor(() =>
+      expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+        "Claude Code Fable 5 — Work",
+      ),
+    );
+  });
+
+  /// A session from before Verkstead wrote the backend down says the half it
+  /// kept, with no backend guessed for it — which is every Agent run on every
+  /// record made before this.
+  it("leaves the backend out of a run that never recorded one", async () => {
+    theGrillingOutput({
+      agent_type: null,
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    await waitFor(() =>
+      expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+        "Fable 5 — Work",
+      ),
+    );
+  });
+
+  /// And a session that recorded none of the three keeps the words: there is
+  /// nothing to name it by, and the card is still a card.
+  it("says Agent run where the record kept nothing to name it by", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    expect(OUTPUT.profile).toBeNull();
+    expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+      "Agent run",
+    );
+  });
+
+  /// The details pane is titled the same way, for the reason its summary line
+  /// is: the card and the pane are one session read at two distances, and a
+  /// pane titled otherwise would be two answers to who ran it.
+  it("titles the details pane with the same reading", async () => {
+    theGrillingOutput({
+      agent_type: "Claude",
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head} h1`);
+
+    await waitFor(() =>
+      expect(head.textContent).toBe("Claude Code Fable 5 — Work"),
+    );
+  });
+
   /// A session whose backend keeps no log has no Transcript to count, and its
   /// row says nothing rather than saying none: every stub agent is one, and a
   /// `0 turns` on it would be a claim about a conversation nothing can see.
@@ -5972,10 +6051,17 @@ describe("the foot of the timeline pane", () => {
   /// And the status button says what the strip said, which is why it could go:
   /// the running session, named rather than marked.
   it("says what is running at the head of the pane instead", async () => {
-    theGrillingOutput({ running: true, profile: "Work", model: "claude-fable-5" });
+    theGrillingOutput({
+      running: true,
+      agent_type: "Claude",
+      profile: "Work",
+      model: "claude-fable-5",
+    });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    expect(await saidRunning(container)).toBe("Work Fable 5");
+    await waitFor(() =>
+      expect(saidRunning(container)).resolves.toBe("Claude Code Fable 5 — Work"),
+    );
   });
 });
 
@@ -11124,15 +11210,34 @@ describe("the status button", () => {
   /// The second line: the Profile and the model the session was launched under,
   /// off the record rather than off the Pairing the Conversation is configured
   /// with — what is running is what was launched.
-  it("names the agent running, as the human would say it", async () => {
+  it("names the agent running, as every other site names one", async () => {
     theGrillingOutput({
       running: true,
+      agent_type: "Claude",
       profile: "Work",
       model: "claude-fable-5",
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    expect(await saidRunning(container)).toBe("Work Fable 5");
+    await waitFor(() =>
+      expect(saidRunning(container)).resolves.toBe("Claude Code Fable 5 — Work"),
+    );
+  });
+
+  /// And a session from before the backend was written down says the half the
+  /// record kept, with no backend guessed for it.
+  it("leaves out a backend the running session never recorded", async () => {
+    theGrillingOutput({
+      running: true,
+      agent_type: null,
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() =>
+      expect(saidRunning(container)).resolves.toBe("Fable 5 — Work"),
+    );
   });
 
   /// And on the one stop that waits for something a press cannot supply, when
