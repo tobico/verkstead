@@ -149,9 +149,16 @@
 }
 
 .adoptRoadmap .in,
-.adoptRoadmap .stage {
+.adoptRoadmap .stage,
+.adoptRoadmap .base {
   font-size: 0.85rem;
   color: var(--ink-soft);
+}
+
+/* Where the roadmap was found, on its own line under the stage and only there
+   when it is somewhere other than the default branch. */
+.adoptRoadmap .base {
+  display: block;
 }
 
 /* The conversations themselves, drawn as the set lists' rows are: the whole card

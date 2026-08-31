@@ -1627,6 +1627,37 @@ mod tests {
         );
     }
 
+    /// And where the backlog was a stage's, the finish is what ticks the stage
+    /// off. The roadmap keeps the score of the whole effort and this is the
+    /// moment the stage finished, so the box moves here rather than a step
+    /// later — [`crate::stages::startable`] refuses to adopt a roadmap whose
+    /// lowest unchecked stage is annotated with a branch that still exists, and
+    /// [`crate::continuing`] has to tell a finished stage from one in flight.
+    #[test]
+    fn the_next_task_fork_ticks_the_roadmap_stage_it_finished() {
+        let next_task = skill("next-task/SKILL.md");
+
+        assert!(
+            next_task.contains("Roadmap stage:"),
+            "the line in TODO.md is what says the backlog was a stage's, and it is what the \
+             fork is told to read: {next_task}"
+        );
+        assert!(
+            next_task.contains("ROADMAP.md"),
+            "and the roadmap beside the brief is where the score is kept: {next_task}"
+        );
+        assert!(
+            next_task.contains("`- [ ]` to `- [x]`"),
+            "the box is what says a stage is done, the same mark a task's box takes: \
+             {next_task}"
+        );
+        assert!(
+            next_task.contains("in progress:"),
+            "and the annotation goes with it — the stage is done rather than in flight: \
+             {next_task}"
+        );
+    }
+
     /// And it carries the branch the rest of the way: pushed, and opened as a
     /// draft pull request. How is the target repository's own business, so what
     /// the fork carries is the instruction to read and follow its process —

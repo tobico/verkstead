@@ -2119,9 +2119,43 @@ describe("the adopt-a-roadmap group", () => {
       expect(sent(fetching, "/api/ui/adoptions")).toEqual({
         repo_id: ABANDONED[0]!.repo_id,
         roadmap: ABANDONED[0]!.roadmaps[1]!.name,
+        // Off the default branch, so there is no base to fix: a conversation
+        // with none already reads the roadmap there.
+        base: null,
       }),
     );
     await waitFor(() => expect(history.get()).toBe(`/conversations/${OPEN.id}`));
+  });
+
+  /// A roadmap staged on a branch that has not merged is only on that branch,
+  /// so the conversation has to start fixed to it — a conversation reading the
+  /// default branch would find nothing of the roadmap that was just pressed.
+  /// The row says where it was found for the same reason: which branch it is
+  /// decides what the stage gets built on.
+  it("starts a conversation fixed to the branch an unmerged roadmap was found on", async () => {
+    const fetching = theWorkbench(
+      whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
+      whenever("/api/ui/adoptions", json({ Started: { id: OPEN.id } }), "POST"),
+    );
+    const { container } = mount();
+    await openNewConversation(container);
+
+    const rows = await drawn(container, `.${sidebar.menuGroup}`);
+    const found = rows.querySelectorAll<HTMLButtonElement>(
+      `.${sidebar.adoptRoadmap}`,
+    )[2]!;
+
+    expect(found.textContent).toContain("tobi/steer");
+
+    fireEvent.click(found);
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/adoptions")).toEqual({
+        repo_id: ABANDONED[0]!.repo_id,
+        roadmap: ABANDONED[0]!.roadmaps[2]!.name,
+        base: ABANDONED[0]!.roadmaps[2]!.base,
+      }),
+    );
   });
 });
 

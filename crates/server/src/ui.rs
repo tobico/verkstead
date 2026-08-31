@@ -824,7 +824,14 @@ async fn start_adoption(
     State(state): State<AppState>,
     Json(new): Json<NewAdoption>,
 ) -> HttpResponse {
-    match crate::conversations::start_adopting(&state, new.repo_id, &new.roadmap).await {
+    match crate::conversations::start_adopting(
+        &state,
+        new.repo_id,
+        &new.roadmap,
+        new.base.as_deref(),
+    )
+    .await
+    {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "starting a Conversation to adopt a roadmap failed");

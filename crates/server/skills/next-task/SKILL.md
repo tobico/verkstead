@@ -121,6 +121,32 @@ Take the backlog away — the list and the task files together — and commit th
 
 The feature name is `TODO.md`'s own heading.
 
+### If this backlog was a roadmap stage, tick the stage off
+
+`TODO.md`'s `Roadmap stage:` line is what says it was — a link to the brief
+under `docs/roadmaps/<name>/`, written when the stage was planned. Where it is
+there, the roadmap beside that brief is keeping score on this stage and the
+score is now out of date: this is the moment the stage finished.
+
+So in the same finish commit, edit `docs/roadmaps/<name>/ROADMAP.md`: find this
+stage's entry, change its `- [ ]` to `- [x]`, and drop the
+`*(in progress: `<branch>`)*` annotation after its link — the stage is done
+rather than in flight, and the annotation was only ever saying whose it was.
+
+    - [ ] 03: Grant filters — [brief](03-grant-filters.md) *(in progress: `missing-roles/03-grant-filters`)*
+
+becomes
+
+    - [x] 03: Grant filters — [brief](03-grant-filters.md)
+
+Nothing else in the file changes: no renumbering, no reordering, no rewording,
+and no touching another stage's box. Verkstead reads those boxes to decide what
+to start next, and a stage ticked here is what lets the stage after it begin
+without anybody being asked.
+
+Where there is no `Roadmap stage:` line, this backlog was an ordinary feature's
+and there is no roadmap to tick. Skip it.
+
 ### Then get the branch reviewed, the way this repository does it
 
 Read the repository's `docs/agents/git-workflow.md` — its `## Review process`,

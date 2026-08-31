@@ -215,10 +215,14 @@ export function listAbandonedRoadmaps(): Promise<AbandonedRepo[]> {
 export function startAdoption(
   repoId: number,
   roadmap: string,
+  base: string,
 ): Promise<Started> {
   return post<Started>("/api/ui/adoptions", {
     repo_id: repoId,
     roadmap,
+    // The branch the roadmap was found on, so the new Conversation starts
+    // fixed to it. Empty is the default branch, which is what no base means.
+    base: base || null,
   });
 }
 
