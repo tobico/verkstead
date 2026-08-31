@@ -21,6 +21,15 @@ stages 04 and 05 to reuse.
   ordinary answer, and the CLI legs stay musl exactly as they are.
 - **Artifact naming follows the release's existing scheme** where it applies;
   the AppImage keeps the format's own `Name-arch.AppImage` convention.
+- **The packaging assets live outside `assets/`.** `web/vite.config.ts` sets
+  `publicDir: "../assets"`, so everything under it is copied untouched into the
+  viewer build — and the viewer is embedded in every binary, the headless CLI
+  included. A `.desktop` file and a set of packaging icons served at the web
+  root and carried inside the CLI is neither's business, so they get a
+  directory of their own, made by the first packaging stage to run and reused
+  by the other two — which by the ordering above is this one. The one piece of
+  artwork stays where it is: `assets/icons/verkstead-hammer.png` is the viewer's
+  own source too.
 - **The shared release plumbing is this stage's, laid once.** A leg does not
   attach anything: the four CLI legs upload workflow artifacts and one
   `publish` job collects them, counts them and creates the Release. Carrying a
@@ -33,10 +42,13 @@ stages 04 and 05 to reuse.
 
 ## Proposed tasks (provisional)
 
-1. **Icons and desktop entry** — `.desktop` file with `net.tobico.Verkstead`,
-   sized PNGs from `assets/icons/verkstead-hammer.png` via
-   `tools/generate-icons.sh`'s approach. Accepts: assets referenced by the
-   AppImage build; regeneration scripted, not hand-drawn.
+1. **Icons and desktop entry** — `.desktop` file with `net.tobico.Verkstead`
+   and the sized PNGs the packaging stages need, generated from
+   `assets/icons/verkstead-hammer.png` the way `tools/generate-icons.sh`
+   generates the viewer's, into a packaging directory of their own rather than
+   into `assets/`. Accepts: assets referenced by the AppImage build;
+   regeneration scripted, not hand-drawn; nothing desktop-only is served by the
+   viewer or embedded in the CLI.
 2. **AppImage build** — script the bundle (appimagetool or linuxdeploy),
    runnable locally and in CI. Accepts: the file launches the tray on a
    runner-fresh distro image; `--no-open` smoke test headless.
@@ -67,6 +79,8 @@ stages 04 and 05 to reuse.
   settled for CI.
 - What stage 02 settled about the Linux tray backend — appindicator vs ksni
   decides what must ride inside the AppImage.
+- What the viewer copies whole when the stage starts (`publicDir` in
+  `web/vite.config.ts`), which is what the packaging assets have to stay out of.
 - GitHub Actions billing on this account has blocked runs before; a leg that
   dies in seconds with no steps is billing, not the workflow.
 
