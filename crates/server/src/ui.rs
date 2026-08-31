@@ -311,11 +311,6 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read and the save being the same page's two halves — and one save for
         // the author and the token together, because the page has one button.
         .route("/api/ui/settings", get(settings).post(save_settings))
-        // The page the human hosts once so that a Published Share can be read
-        // in a browser — see [`crate::sharing::VIEWER`]. A download beside the
-        // field that records where they put it, because the two are one job:
-        // take this away, put it up, say where it went.
-        .route("/api/ui/share-viewer.html", get(share_viewer))
         .route("/api/ui/update", get(update))
 }
 
@@ -1284,21 +1279,14 @@ pub(crate) async fn conversation_view(
     // Composed through the share viewer here rather than written down that way,
     // which is what makes the row a *drawing* of the record: the store keeps the
     // gist's URL as GitHub gave it, so a share published before there was a
-    // viewer links through one now, and a viewer moved later retargets every row
-    // there is without republishing anything — see [`crate::sharing::link`].
+    // viewer links through one now — see [`crate::sharing::link`].
     //
     // A read that fails reads as *never published*, which is a link missing from
     // a page rather than a page that will not draw: the record itself is
     // untouched, and the next publish writes over whatever is there.
-    let viewer = state
-        .settings
-        .config()
-        .share_viewer_url()
-        .map(str::to_owned);
-
     let shared = match store::share(&state.pool, id).await {
         Ok(shared) => shared.map(|shared| verkstead_render::ShareView {
-            url: crate::sharing::link(&shared.url, viewer.as_deref()),
+            url: crate::sharing::link(&shared.url),
             at: shared.at,
         }),
         Err(error) => {
@@ -1809,15 +1797,11 @@ async fn publishing(
             &file,
         );
 
-        (
-            published,
-            secrets.github_token().map(str::to_owned),
-            config.share_viewer_url().map(str::to_owned),
-        )
+        (published, secrets.github_token().map(str::to_owned))
     })
     .await;
 
-    let (published, token, viewer) = match published {
+    let (published, token) = match published {
         Ok(published) => published,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "publishing a share failed");
@@ -1847,11 +1831,10 @@ async fn publishing(
     // The gist's own URL is what is recorded, and the link is composed off it on
     // the way out — here for the toast and the comment, and again in the page
     // that draws the Share row. What is written down is where the file went;
-    // where a reader is sent is a fact about the viewer, and the viewer may move
-    // after this.
+    // where a reader is sent is a fact about the viewer.
     let share = match store::record_share(&state.pool, conversation_id, &url).await {
         Ok(share) => verkstead_render::ShareView {
-            url: crate::sharing::link(&share.url, viewer.as_deref()),
+            url: crate::sharing::link(&share.url),
             at: share.at,
         },
         Err(error) => {
@@ -3393,9 +3376,6 @@ async fn save_settings(
                 edit.rust_build_cache.enabled,
                 Some(edit.rust_build_cache.size),
             ),
-            // And where the share viewer is hosted, the same way: an empty
-            // field is nowhere, which is how it is taken away again.
-            Some(edit.share_viewer_url),
             // And how a conflict is resolved where the Repo it is in says
             // nothing, which is one of two words and never absent: there is no
             // third state for a page to send.
@@ -3515,10 +3495,6 @@ fn as_told(
             // environment, and the one thing on this page the human cannot set.
             compiles_cached: caches_compiles,
         },
-        // As it was written, because there is nothing secret about it: a public
-        // page, whose URL goes on a pull request the moment a share is
-        // published through it.
-        share_viewer_url: config.share_viewer_url().unwrap_or_default().to_owned(),
         // Where the setting sits rather than whether anybody has been here:
         // nothing configured is a merge, and there is no third state to draw.
         conflict_resolution: crate::repos::resolution(config.conflict_resolution()),
@@ -3548,42 +3524,6 @@ fn last_four(token: &str) -> String {
     let from = characters.len().saturating_sub(4);
 
     characters[from..].iter().collect()
-}
-
-/// `GET /api/ui/share-viewer.html` — the share viewer, to take away and host.
-///
-/// The one file Verkstead hands over that is nobody's record: a small static
-/// page that draws a Published Share in a browser — see
-/// [`crate::sharing::VIEWER`], where what it does and why is written down.
-///
-/// Offered rather than required. Links are composed through the copy Verkstead
-/// hosts unless the human says otherwise ([`crate::sharing::HOSTED`]), so this
-/// is for whoever would rather put the page on a public site of their own once
-/// and point the setting at it.
-///
-/// An attachment rather than a page, for the reason a share is one: what the
-/// press is for is getting the file, and a viewer that opened here would be a
-/// viewer served off the tailnet, where nobody a share is sent to can reach it.
-///
-/// Compiled in rather than embedded like the built viewer beside it. There is
-/// no build step behind this one — it is written by hand and has no
-/// dependencies — so it is in every binary rather than in the ones somebody ran
-/// `pnpm build` for.
-async fn share_viewer() -> HttpResponse {
-    (
-        [
-            (CONTENT_TYPE, "text/html; charset=utf-8".to_owned()),
-            (
-                CONTENT_DISPOSITION,
-                format!(
-                    "attachment; filename=\"{}\"",
-                    crate::sharing::VIEWER_FILENAME
-                ),
-            ),
-        ],
-        crate::sharing::VIEWER,
-    )
-        .into_response()
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

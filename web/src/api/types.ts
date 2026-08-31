@@ -2444,12 +2444,6 @@ export type SettingsEdit = { git_author: Author, github_token: TokenEdit,
  */
 rust_build_cache: BuildCacheEdit, 
 /**
- * And where the human hosts a share viewer of their own, as a value for
- * the same reason: an empty one is nothing configured, which is what
- * clearing the field means and what puts Verkstead's own hosted copy back.
- */
-share_viewer_url: string, 
-/**
  * And how a conflicted pull request is resolved where its Repo says
  * nothing, as a value for the same reason: there are two answers and a save
  * says which of them this is to be.
@@ -2511,24 +2505,6 @@ github_token: TokenSaved | null,
  * And how the shared Rust build cache stands.
  */
 rust_build_cache: BuildCacheView, 
-/**
- * Where the human hosts a share viewer of their own, or empty where they
- * host none.
- *
- * A string rather than an optional, empty for nothing configured, the way
- * the author's two halves are: the field on the page holds it either way,
- * and clearing the box is how it is taken away.
- *
- * Empty is not *no viewer*. Links are then composed through the copy
- * Verkstead hosts, and this field is the override — which is why nothing
- * fills it in on the human's behalf: a field holding an address nobody
- * typed is a setting they cannot tell they have not chosen.
- *
- * Configuration rather than a secret — it is a public page, and its URL
- * goes in a comment on a pull request — so unlike the token it reads back
- * exactly as it was written.
- */
-share_viewer_url: string, 
 /**
  * And how a conflicted pull request is resolved in every Repo that has not
  * said otherwise.

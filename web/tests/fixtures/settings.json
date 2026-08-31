@@ -48,6 +48,5 @@
     "enabled": true,
     "size": "50G",
     "size_configured": true
-  },
-  "share_viewer_url": "https://ada.github.io/verkstead-shares/"
+  }
 }

@@ -89,7 +89,6 @@ git_author:
 rust_build_cache:
   enabled: true
   size: 30G
-share_viewer_url: https://ada.github.io/verkstead-shares/
 conflict_resolution: merge
 sandbox_binds:
   - /var/cache/verkstead-node
@@ -123,13 +122,12 @@ what the settings page saves through:
 $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-   "compiles_cached":true},"share_viewer_url":"","conflict_resolution":"Merge",
+   "compiles_cached":true},"conflict_resolution":"Merge",
  "paths":{"watched":[],"binds":[]}}
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
          "rust_build_cache":{"enabled":true,"size":""},
-         "share_viewer_url":"https://ada.github.io/verkstead-shares/",
          "conflict_resolution":"Merge",
          "watched_paths":["/home/tobi/src"],
          "sandbox_binds":["/var/cache/verkstead-node"]}' \
@@ -138,7 +136,6 @@ $ curl -X POST -H 'Content-Type: application/json' \
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
     "compiles_cached":true},
-  "share_viewer_url":"https://ada.github.io/verkstead-shares/",
   "conflict_resolution":"Merge",
   "paths":{"watched":[{"path":"/home/tobi/src","source":"Settings",
     "resolution":"Resolves"}],
@@ -173,34 +170,20 @@ the settings' own can be sent, and nothing about them is checked as it is
 written — the save lands whatever it was told, and an entry the server cannot
 see is a `"resolution"` saying so rather than a refusal.
 
-`"share_viewer_url"` is where a **share viewer** of your own is hosted, and it is
-the plainest value here: written as it was typed, read back as itself, and empty
-where you host none. The viewer is a small static page that draws a published
-share in a browser — a gist link on its own shows source — and a published share
-is read at `<share-viewer-url>#<gist-id>`.
-
-**Empty is not "no viewer".** Verkstead keeps a copy of the page on its own
-GitHub Pages, at
+A published share is read through the **share viewer**, a small static page that
+draws it in a browser — a gist link on its own shows source. It is not
+configurable and there is nothing to configure: Verkstead keeps the one copy on
+its own GitHub Pages, at
 <https://tobico.github.io/verkstead/share-viewer.html>, and every link it hands
 out — the toast, the Share row and the comment on a pull request — is composed
-through that unless this setting says otherwise. So a Verkstead nobody has told
-anything still hands out links that draw. The page is published by
+through that, as `<share-viewer-url>#<gist-id>`. The page is published by
 `.github/workflows/pages.yml` whenever `crates/server/share-viewer.html` lands
 on `main`; its address is `HOSTED` in `crates/server/src/sharing.rs`, and
 `web/tests/viewing.test.ts` is what holds the two spellings together.
 
-Fill the field in to serve the page yourself instead — so that nothing about
-your shares goes past a site of Verkstead's. Verkstead ships the file rather
-than serving it:
-
-```console
-$ curl -O -J http://127.0.0.1:8422/api/ui/share-viewer.html
-```
-
-Put that on a public site of your own, a GitHub Pages repository being what it
-was written for, and save its address here. Nothing about it is secret either
-way: the page is public, and the id after the `#` is never sent to the host that
-serves it.
+Nothing about that is secret: the page is public, the id after the `#` rides in
+the fragment and is never sent to the host that serves it, and the share itself
+is fetched from GitHub by the reader's own browser.
 
 `"conflict_resolution"` is what a session sent at a pull request that will not
 merge is told to do about it: `"Merge"`, which merges the base branch into the
@@ -226,9 +209,9 @@ does. It is nothing at all rather than a copy of today's global, so a repo left
 alone follows the setting above when it is changed.
 
 The link is composed as a page is drawn rather than written down at the publish.
-What the record holds is the gist's own URL, so a share published before a viewer
-was configured links through one now, and a viewer moved later retargets every
-link there is without republishing anything.
+What the record holds is the gist's own URL, so a share published before there
+was a viewer to compose through links through one now, and the viewer moving
+retargets every link there is without republishing anything.
 
 That link is what **Share to pull request** leaves behind. One press on a
 conversation whose work is on a pull request publishes a share and comments on

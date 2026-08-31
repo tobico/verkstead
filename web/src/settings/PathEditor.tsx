@@ -134,7 +134,6 @@ export function useWritingPaths() {
             ? (standing?.rust_build_cache.size ?? "")
             : "",
         },
-        share_viewer_url: standing?.share_viewer_url ?? "",
         conflict_resolution: standing?.conflict_resolution ?? "Merge",
         ...lists,
       });

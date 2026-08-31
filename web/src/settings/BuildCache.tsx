@@ -184,9 +184,6 @@ export function BuildCachePane(props: {
         // here to stop.
         github_token: "Keep",
         rust_build_cache: edit,
-        // Untouched, for the reason the author is: the endpoint writes the
-        // whole of `config.yaml`, and the section below is where this is set.
-        share_viewer_url: told()?.share_viewer_url ?? "",
         // And so is how a conflict is resolved, which is the last section on
         // the page.
         conflict_resolution: told()?.conflict_resolution ?? "Merge",

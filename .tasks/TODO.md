@@ -16,7 +16,7 @@ settle. Failures land as a Notice; success is quiet.
 
 ## Tasks
 
-- [ ] 01: Remove the share viewer configuration — [details](01-remove-share-viewer-config.md)
+- [x] 01: Remove the share viewer configuration — [details](01-remove-share-viewer-config.md)
 - [ ] 02: The Share pane — [details](02-share-pane.md)
 - [ ] 03: The share-on-Done toggle — [details](03-share-on-done-toggle.md)
 - [ ] 04: Auto-share when the wrap-up settles to Done — [details](04-auto-share-on-done.md)

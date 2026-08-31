@@ -55,7 +55,6 @@ import card from "../src/CardButton.module.css";
 import { GithubCard, GithubPane } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
 import buildCache from "../src/settings/BuildCache.module.css";
-import shareViewer from "../src/settings/ShareViewer.module.css";
 import paths from "../src/settings/Paths.module.css";
 import {
   SettingsPage,
@@ -421,7 +420,6 @@ describe("saving", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
-        share_viewer_url: TOLD.share_viewer_url,
         conflict_resolution: TOLD.conflict_resolution,
         ...PATHS,
       }),
@@ -647,7 +645,6 @@ describe("replacing and clearing the token", () => {
         // Untouched by this form, and so untouched in what the save answers
         // with — see the sections below it for what does change these.
         rust_build_cache: TOLD.rust_build_cache,
-        share_viewer_url: TOLD.share_viewer_url,
         conflict_resolution: TOLD.conflict_resolution,
         paths: TOLD.paths,
       },
@@ -667,7 +664,6 @@ describe("replacing and clearing the token", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
-        share_viewer_url: TOLD.share_viewer_url,
         conflict_resolution: TOLD.conflict_resolution,
         ...PATHS,
       }),
@@ -720,8 +716,8 @@ function thePage(at = "/settings") {
               the middle pane up while the leaf under it changes, so a mount that
               flattened them would be testing a page the app does not build —
               and a list spelled out here would be a second opinion about where
-              a card leads, which is the drift that left the share viewer's card
-              opening the catch-all. */}
+              a card leads, which is the drift that has left a card opening the
+              catch-all before. */}
           <Route path="/settings" component={SettingsPage}>
             {settingsPanes()}
           </Route>
@@ -894,23 +890,7 @@ describe("the path a details pane stands at", () => {
     await waitFor(() => expect(history.get()).toBe("/"));
   });
 
-  /// And the third pane a word names: where the share viewer is hosted.
-  it("opens the share viewer at /settings/share-viewer, replacing", async () => {
-    const { container, history } = thePage();
-
-    const face = await drawn<HTMLElement>(
-      container,
-      `.${shareViewer.shareViewerCard}`,
-    );
-    fireEvent.click(face);
-
-    await waitFor(() => expect(history.get()).toBe("/settings/share-viewer"));
-
-    history.back();
-    await waitFor(() => expect(history.get()).toBe("/"));
-  });
-
-  /// And the fourth: the paths Verkstead may work inside, and what a sandbox is
+  /// And the third: the paths Verkstead may work inside, and what a sandbox is
   /// given beyond its worktree.
   it("opens the paths at /settings/paths, replacing", async () => {
     const { container, history } = thePage();
@@ -930,19 +910,6 @@ describe("the path a details pane stands at", () => {
     await waitFor(() => screen.getByLabelText("Add a watched path"));
 
     const face = await drawn<HTMLElement>(container, `.${paths.pathsCard}`);
-    expect(face.getAttribute("aria-pressed")).toBe("true");
-    expect(face.classList).toContain(card.open);
-  });
-
-  it("draws the viewer's field in the details pane, and reads its card as open", async () => {
-    const { container } = thePage("/settings/share-viewer");
-
-    await waitFor(() => screen.getByLabelText(/Where you hosted it/));
-
-    const face = await drawn<HTMLElement>(
-      container,
-      `.${shareViewer.shareViewerCard}`,
-    );
     expect(face.getAttribute("aria-pressed")).toBe("true");
     expect(face.classList).toContain(card.open);
   });
@@ -1229,7 +1196,6 @@ describe("where a settings details pane stands", () => {
   it("puts an id behind a segment of its own, and a word beside it", () => {
     expect(pathTo("github")).toBe("/settings/github");
     expect(pathTo("build-cache")).toBe("/settings/build-cache");
-    expect(pathTo("share-viewer")).toBe("/settings/share-viewer");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
     expect(pathTo(opensRepo(7))).toBe("/settings/repos/7");
@@ -1240,7 +1206,6 @@ describe("where a settings details pane stands", () => {
     for (const opening of [
       "github",
       "build-cache",
-      "share-viewer",
       opensProfile(7),
       opensProfile("new"),
       opensRepo(7),

@@ -399,17 +399,15 @@ plain text a browser refuses to draw — so the page closes the gap: the gist's 
 rides in the **URL fragment**, the Share is fetched from GitHub by the reader's
 own browser, and it is drawn in a **sandboxed frame** with scripts allowed and
 same-origin withheld.
-**Verkstead hosts one and the human may host their own.** Verkstead's copy is
-published to this project's GitHub Pages from the page in the repository, and it
-is what every link is composed through unless the human says otherwise — so a
-Verkstead nobody has configured hands out links that draw. The page is also
-offered as a download on the settings page, and the **share viewer URL** beside
-it is where the human put a copy of their own; that is configuration rather than
-a secret, it reads back as it was written, and an empty one means Verkstead's
-hosted copy rather than no viewer at all.
+**Verkstead hosts it, and there is nothing to configure.** The copy is published
+to this project's GitHub Pages from the page in the repository, and it is what
+every link is composed through — so every Verkstead hands out links that draw,
+with nobody having been to a settings page. Hosting a copy of your own would buy
+nothing, because the page learns nothing to keep away from Verkstead's site.
 **The link is composed as it is drawn**, off the gist URL the record keeps: a
-Published Share taken before a viewer was configured is linked through one now,
-and a viewer that moves retargets every link there is without republishing.
+Published Share taken before there was a viewer to compose through is linked
+through one now, and the viewer moving retargets every link there is without
+republishing.
 It learns nothing about what passes through it: a fragment is never sent to a
 server, so the host sees only that somebody opened the page, and the frame keeps
 the Share's own scripts off that host's origin.
@@ -422,9 +420,8 @@ Share, publishes it, and leaves **one comment on every pull request the
 Conversation holds** — its own Repo's and every Companion Repo's alike. Offered
 only where the record holds a pull request, because a Conversation on none has
 nowhere for it to go.
-The comment carries **the link** — through the Share Viewer, the human's own
-where they host one and Verkstead's hosted copy where they do not — and the
-**itemized summary** of what is in the file: the Brief's first line, the
+The comment carries **the link** — through the Share Viewer Verkstead hosts —
+and the **itemized summary** of what is in the file: the Brief's first line, the
 Question Sets by title, and the commits by subject with how much each moved.
 Itemized off the Share rather than off the Conversation, so what is listed is
 what a reader will find in it.

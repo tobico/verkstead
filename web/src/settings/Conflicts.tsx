@@ -163,7 +163,6 @@ export function ConflictsPane(props: {
             ? (settings?.rust_build_cache.size ?? "")
             : "",
         },
-        share_viewer_url: settings?.share_viewer_url ?? "",
         conflict_resolution,
         // And the paths as the read left them: a list this section left out
         // would be a list it emptied — see [`heldPaths`].
