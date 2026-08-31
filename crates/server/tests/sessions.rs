@@ -3418,7 +3418,9 @@ async fn a_grok_session_follows_the_log_it_was_named_for() {
 /// test can — by being followed instead if the finder gets it wrong.
 ///
 /// What lands is each record whole: opencode's own kind, its place in the
-/// session's sequence, and the payload byte for byte. Nothing draws one yet.
+/// session's sequence, and the payload byte for byte — and what the row counts
+/// of it is what the pane would draw, which for these two is the turn put to
+/// the session and nothing for the session's own row.
 #[tokio::test]
 async fn an_opencode_session_follows_the_records_of_the_session_it_opened_in_its_worktree() {
     let spill = tempfile::tempdir().unwrap();
@@ -3527,10 +3529,12 @@ async fn an_opencode_session_follows_the_records_of_the_session_it_opened_in_its
     let view = fixture.view().await;
     let printed = output(&view).expect("the session is on the Timeline");
 
-    assert!(
-        matches!(printed.turns, Some(turns) if turns > 0),
-        "and the row shows a Transcript rather than nothing: {:?}",
-        printed.turns
+    assert_eq!(
+        printed.turns,
+        Some(1),
+        "and the row counts the reading the pane draws: the text put to the \
+         session is the one turn of it, and the session's own row is opencode's \
+         bookkeeping",
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);

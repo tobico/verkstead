@@ -375,6 +375,13 @@ record taken rather than a byte offset into a file, and each record still
 reaches the Transcript verbatim, with the kind opencode filed it under and its
 place in that sequence around it.
 
+**And a record may be written over and over.** opencode writes a part of a
+message again every time it grows — an empty sentence, the sentence so far, the
+sentence finished — so what is drawn is the record that finished, and every one
+before it folds away with the backend's own bookkeeping. A turn is drawn once it
+is over rather than held open, which is what keeps one sentence one turn
+wherever the record is drawn, counted or quoted.
+
 A session whose record never appears has the Capture as its whole record, which
 is what a session with no log has always had — and so does a session whose store
 is of a shape this Verkstead cannot read, which is what a backend free to move

@@ -7,15 +7,38 @@
 //! nothing here recognises is still on the Transcript, and is still shown — as
 //! the JSON it is.
 //!
-//! **Three backends, and the line says which.** Claude Code writes a line per
+//! **Four backends, and the line says which.** Claude Code writes a line per
 //! thing said; codex writes a rollout, whose lines are a timestamp, an ordinal
 //! and a `type` around a payload; grok writes the session updates its own
-//! protocol is made of, keyed on `sessionUpdate` and carrying no `type` at all.
-//! Nothing has to be told which is which: the kinds are disjoint, so a line
-//! falls to the reader that knows its own kind and to the fold below all three
-//! where none does. The same lines are rendered in three places and none of
-//! them carries the agent type, which is what makes reading it off the line the
-//! only answer that works everywhere.
+//! protocol is made of, keyed on `sessionUpdate` and carrying no `type` at all;
+//! and an OpenCode line is one record out of the store opencode keeps of its
+//! session, keyed on the `kind` opencode filed that record under. Nothing has
+//! to be told which is which: the keys are disjoint, so a line falls to the
+//! reader that knows its own kind and to the fold below all four where none
+//! does. The same lines are rendered in three places and none of them carries
+//! the agent type, which is what makes reading it off the line the only answer
+//! that works everywhere.
+//!
+//! **Two of the four use the same two words, and the key is what tells them
+//! apart.** opencode tags a message `user` or `assistant` — the words Claude's
+//! lines carry — and nothing hangs off them the same way: Claude puts what was
+//! said under the message, where opencode writes the message's envelope as one
+//! record and each thing said in a record of its own. What keeps the two apart
+//! is that neither word is ever read as a line's own kind here. Claude's is the
+//! line's `type`; opencode's is a `role` two levels down, inside a record whose
+//! line carries no `type` at all. A reader that keyed on the word wherever it
+//! found it would send every opencode record down Claude's arm and draw the lot
+//! as unreadable, so what is read is **the key rather than the value** — and
+//! that is the thing a fifth backend's arrival will test again.
+//!
+//! **opencode writes a part over and over as it grows, and the last of them is
+//! the turn.** One id and one record per growth — an empty text as the model
+//! starts speaking, the sentence so far, the sentence finished — where grok's
+//! store writes one line once the message is over. So what is drawn is the
+//! emission that finished, and every one before it folds away: the same
+//! judgement grok's reader makes of a tool call that has not settled. A turn is
+//! drawn once it is over rather than held open, exactly as everywhere else
+//! here.
 //!
 //! **Grok writes what the agent said whole, and the name of the kind says
 //! otherwise.** Its `agent_message_chunk` is a chunk of the stream by name and
@@ -369,6 +392,53 @@ const GROK: &[&str] = &[
     "usage_update",
 ];
 
+/// And the same for the records opencode keeps of a session: the kinds that are
+/// not the conversation.
+///
+/// The session's own row as it is made and every time it is touched, and the
+/// envelope around each message — its role, the model and agent it ran under,
+/// what it cost, whether it has finished — which carries none of the words. The
+/// words are in the parts of a message and nowhere else.
+///
+/// A closed list and a fall-back past it, for the fourth time — and opencode's
+/// tail is the longest of the four. Its own schema at 1.18.25 names a whole
+/// second family of records beside these, `session.next.*`: the turn put to it,
+/// the shell it ran, the agent and the model it switched to, the summary it
+/// replaced a long conversation with. No session driven the way Verkstead
+/// drives one has been seen to write one, so nothing here draws them; every one
+/// folds away under its own name until one is observed, which is what makes it
+/// findable to whoever meets it first (ADR 0006).
+const OPENCODE: &[&str] = &[
+    "message.part.removed.1",
+    "message.removed.1",
+    "message.updated.1",
+    "session.created.1",
+    "session.deleted.1",
+    "session.updated.1",
+];
+
+/// And the kinds of *part* that are opencode's own bookkeeping rather than
+/// anything anybody said: the step boundaries a turn is made of, the snapshots
+/// and patches it takes of the files, the agent it switched to, the attempt it
+/// retried, the summary it replaced a long conversation with, the subagent it
+/// sent off, and the files attached to a turn.
+///
+/// A closed list and a fall-back past it, as above. One more thing folds here
+/// that is not on the list and is not unknown either: an emission of a text, a
+/// reasoning or a tool part that has not finished growing, which is the
+/// conversation, only not yet — see [`parted`].
+const OPENCODE_PART: &[&str] = &[
+    "agent",
+    "compaction",
+    "file",
+    "patch",
+    "retry",
+    "snapshot",
+    "step-finish",
+    "step-start",
+    "subtask",
+];
+
 /// The keys of a tool's input that say what the call was about, best first.
 ///
 /// Keys rather than tools. Verkstead does not know what tools a session has —
@@ -379,6 +449,7 @@ const ABOUT: &[&str] = &[
     "description",
     "command",
     "file_path",
+    "filePath",
     "path",
     "pattern",
     "prompt",
@@ -641,13 +712,18 @@ fn read(line: &str, into: &mut Reading) {
         // folded under the name the log gave it rather than stood in the
         // conversation — see [`BOOKKEEPING`].
         Some(kind) => into.keep(kind.to_owned(), raw(&entry, reads)),
-        // And a line with no type at all is grok's, which keys its own updates
-        // on what kind of update they are. A line that says neither has no name
-        // to file it under, so it is shown, the way a line that is not JSON at
-        // all is.
-        None => match entry["params"]["update"][SESSION_UPDATE].as_str() {
-            Some(kind) => updated(kind, &entry, into),
-            None => into.take(unread(&entry, reads)),
+        // And a line with no type at all is one of the two backends that key
+        // theirs on something else: an OpenCode line carries the kind opencode
+        // filed the record under, and a Grok line carries the kind of update it
+        // is. A line that says none of the three has no name to file it under,
+        // so it is shown, the way a line that is not JSON at all is.
+        None => match (
+            entry[KIND].as_str(),
+            entry["params"]["update"][SESSION_UPDATE].as_str(),
+        ) {
+            (Some(kind), _) => recorded(kind, &entry, into),
+            (None, Some(kind)) => updated(kind, &entry, into),
+            (None, None) => into.take(unread(&entry, reads)),
         },
     }
 }
@@ -1318,11 +1394,201 @@ const FOR_THE_PROMPT: &str = "_for_prompt";
 /// What grok calls a tool call that ran to the end, and what it calls one that
 /// ended badly.
 ///
-/// The first is the same word codex spells its own status with, and a constant
-/// of its own all the same: two backends that happen to agree on a word are two
-/// spellings rather than one, and either can move without the other.
+/// The first is the same word codex and opencode spell their own statuses with,
+/// and a constant of its own all the same: backends that happen to agree on a
+/// word are that many spellings rather than one, and any of them can move
+/// without the others.
 const GROK_COMPLETED: &str = "completed";
 const GROK_FAILED: &str = "failed";
+
+/// One record out of the store an OpenCode session keeps of itself, put where
+/// it belongs.
+///
+/// The record is under [`RECORD`] exactly as opencode wrote it, with the kind
+/// opencode filed it under beside it — the server crate's `records` module is
+/// what puts the two together, and this is the other end of that.
+///
+/// The conversation is in the parts of a message and nowhere else. Everything
+/// opencode records about the session itself, and the envelope it records
+/// around each message, is bookkeeping: none of it is anything anybody said.
+fn recorded(kind: &str, entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+
+    match kind {
+        PART_UPDATED => match entry[RECORD][PART]["type"].as_str() {
+            Some(part) => parted(part, &entry[RECORD][PART], entry, into),
+            // A record that says a part was written and names no kind of part
+            // keeps the name the record had, which is the only name it has —
+            // the same answer a rollout's event with no payload type gets.
+            None => into.keep(kind.to_owned(), raw(entry, reads)),
+        },
+        // opencode's own record of the session and of the messages in it, and —
+        // the arm below it — a kind nobody here has heard of, folded the same
+        // way and for the same reason: see [`OPENCODE`].
+        kind if OPENCODE.contains(&kind) => into.keep(kind.to_owned(), raw(entry, reads)),
+        kind => into.keep(kind.to_owned(), raw(entry, reads)),
+    }
+}
+
+/// One part of a message, drawn as the turn it is.
+///
+/// Filed under the part's own kind rather than the record's, for the reason a
+/// rollout's event is filed under the event's: every part arrives under
+/// [`PART_UPDATED`], so a group of them all called that would say nothing about
+/// any of them.
+///
+/// **A part is written again every time it grows**, under the one id, so what
+/// is drawn is the emission that finished and every one before it folds away.
+/// Drawing them all would put a sentence on the Transcript once per piece of it
+/// the model streamed.
+fn parted(kind: &str, part: &Value, entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+
+    match kind {
+        // Text opencode wrote to itself rather than anything the session said:
+        // a prompt it synthesised, or one it has since stopped sending.
+        "text" if part[SYNTHETIC] == Value::Bool(true) || part[IGNORED] == Value::Bool(true) => {
+            into.keep(kind.to_owned(), raw(entry, reads))
+        }
+        // A part opencode was handed rather than one it streamed is the turn
+        // put to the session — see [`handed`].
+        "text" if handed(part) => {
+            if let Some(Prose { html, .. }) = prose(part, "text", reads) {
+                into.take(Turn::Put(Put { id: UNPLACED, html }));
+            }
+        }
+        "text" => match grown(part) {
+            true => {
+                if let Some(prose) = prose(part, "text", reads) {
+                    into.take(Turn::Prose(prose));
+                }
+            }
+            false => into.keep(kind.to_owned(), raw(entry, reads)),
+        },
+        "reasoning" => match grown(part) {
+            true => {
+                if let Some(Prose { html, .. }) = prose(part, "text", reads) {
+                    into.take(Turn::Reasoning(Reasoning { id: UNPLACED, html }));
+                }
+            }
+            false => into.keep(kind.to_owned(), raw(entry, reads)),
+        },
+        "tool" => tooled(part, entry, into),
+        // opencode's own bookkeeping, and — the arm below it — a kind of part
+        // nobody here has heard of: see [`OPENCODE_PART`].
+        kind if OPENCODE_PART.contains(&kind) => into.keep(kind.to_owned(), raw(entry, reads)),
+        kind => into.keep(kind.to_owned(), raw(entry, reads)),
+    }
+}
+
+/// Whether a part is one opencode was handed whole rather than one it streamed,
+/// which is what says a piece of text is the turn put to the session rather
+/// than the agent's own prose.
+///
+/// **The times, because they are what is actually different.** The role is on
+/// the message and the words are on the part, and a part arrives as a record of
+/// its own — so the record with the words in it does not say whose they are,
+/// and holding one back until the other arrived would not survive an
+/// incremental reading, where the two can fall in different batches. What the
+/// record does carry is the timing: opencode stamps a part it streams as the
+/// model starts it and again as the model ends it, and a part it was handed —
+/// the Brief a session was launched on, a turn typed at the prompt — is written
+/// once with no times at all.
+///
+/// Read off opencode 1.18.25, whose own schema makes a text part's times
+/// optional and a reasoning part's required: only the agent streams.
+fn handed(part: &Value) -> bool {
+    part[TIME].is_null()
+}
+
+/// And whether a part opencode streamed has finished growing, which is the
+/// emission of it that is drawn.
+fn grown(part: &Value) -> bool {
+    !part[TIME]["end"].is_null()
+}
+
+/// A tool call as opencode writes one: a single part, re-written as the call is
+/// made, runs and answers, carrying its input and what it said back inside its
+/// own state.
+///
+/// The pane draws a call and an answer as one card, so the finished part becomes
+/// that pair — both carrying the call's own id as the name that joins them, the
+/// way a rollout's tool item does. A part whose call has not settled is the call
+/// still running, and folds away: drawing one as an answer would put an answer
+/// under a call that has not made one.
+fn tooled(part: &Value, entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+    let state = &part[STATE];
+
+    let failed = match state["status"].as_str() {
+        Some(OPENCODE_COMPLETED) => false,
+        Some(OPENCODE_ERROR) => true,
+        // `pending` and `running` are the two the schema has, and a status this
+        // has never met is treated as the same thing: a call that has not
+        // answered yet. The record is on the Transcript either way.
+        _ => return into.keep("tool".to_owned(), raw(entry, reads)),
+    };
+
+    let call = text(part["callID"].as_str().unwrap_or_default(), reads);
+
+    into.take(Turn::ToolUse(ToolUse {
+        id: UNPLACED,
+        name: text(part["tool"].as_str().unwrap_or_default(), reads),
+        call: call.clone(),
+        about: summarised(|| titled(state), reads),
+        input: raw(&state["input"], reads),
+    }));
+    into.take(Turn::ToolResult(ToolResult {
+        id: UNPLACED,
+        call,
+        failed,
+        text: text(
+            state[match failed {
+                true => "error",
+                false => "output",
+            }]
+            .as_str()
+            .unwrap_or_default(),
+            reads,
+        ),
+    }));
+}
+
+/// The one line an OpenCode call is collapsed to: the title opencode drew for
+/// it on its own screen, and whatever the input says about itself where
+/// opencode drew none — which is a call that ended badly, since only one that
+/// went through is given a title.
+fn titled(state: &Value) -> String {
+    match state["title"].as_str() {
+        Some(title) if !title.trim().is_empty() => one_line(title),
+        _ => about(&state["input"]),
+    }
+}
+
+/// What Verkstead writes around a record it took out of an OpenCode session's
+/// store: the kind opencode filed it under, and the record itself. The server
+/// crate's `records` module chose both spellings, and reading them is the whole
+/// of what this end knows about how a record got here.
+const KIND: &str = "kind";
+const RECORD: &str = "record";
+
+/// What opencode calls the record carrying one part of a message, which is the
+/// only kind of record the conversation is in.
+const PART_UPDATED: &str = "message.part.updated.1";
+
+/// And opencode's own spellings inside a part: where a part keeps the moments
+/// it was streamed between, where a tool call keeps its input and its answer,
+/// and the two flags that say a piece of text was opencode talking to itself.
+const PART: &str = "part";
+const TIME: &str = "time";
+const STATE: &str = "state";
+const SYNTHETIC: &str = "synthetic";
+const IGNORED: &str = "ignored";
+
+/// What opencode calls a tool call that ran to the end, and what it calls one
+/// that ended badly.
+const OPENCODE_COMPLETED: &str = "completed";
+const OPENCODE_ERROR: &str = "error";
 
 /// Whatever this is, shown as the JSON it is.
 fn unread(value: &Value, reads: Reads) -> Turn {
@@ -2494,6 +2760,344 @@ mod tests {
         );
         assert!(
             matches!(&view.turns[2], Turn::Prose(prose) if prose.html.contains("<em>update</em>")),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// The records an OpenCode session left in its store, as opencode 1.18.25
+    /// wrote them and as the server crate's `records` module puts them on the
+    /// Transcript: a turn put to it, its thinking, its prose, a command it ran
+    /// and what the command printed, a call that ended badly, and the answer it
+    /// finished on. Every record as opencode wrote it, but for the worktree's
+    /// path and the session, message and part ids, which are shortened
+    /// throughout so that the fixture reads.
+    ///
+    /// The shape to see in it is the growing. One part is written again every
+    /// time it grows, under the one id — `prt_4` is an empty text and then the
+    /// sentence, `prt_5` is a call pending and then a call answered — so the
+    /// record that finished is the turn and the ones before it fold away.
+    const RECORDS: &[&str] = &[
+        r#"{"kind":"session.created.1","seq":0,"record":{"sessionID":"ses_1","info":{"id":"ses_1","slug":"misty-lagoon","projectID":"global","directory":"/srv/worktrees/tables","path":"srv/worktrees/tables","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"title":"New session - 2026-08-30T18:14:31.738Z","agent":"build","model":{"id":"big-pickle","providerID":"standin"},"version":"1.18.25","time":{"created":1788113671738,"updated":1788113671738}}}}"#,
+        r#"{"kind":"message.updated.1","seq":1,"record":{"sessionID":"ses_1","info":{"id":"msg_1","sessionID":"ses_1","role":"user","time":{"created":1788113671749},"agent":"build","model":{"providerID":"standin","modelID":"big-pickle"}}}}"#,
+        r#"{"kind":"message.part.updated.1","seq":2,"record":{"sessionID":"ses_1","part":{"id":"prt_1","sessionID":"ses_1","messageID":"msg_1","type":"text","text":"List the task files and tell me what you see."},"time":1788113671752}}"#,
+        r#"{"kind":"message.updated.1","seq":4,"record":{"sessionID":"ses_1","info":{"id":"msg_2","sessionID":"ses_1","role":"assistant","time":{"created":1788113671761},"parentID":"msg_1","modelID":"big-pickle","providerID":"standin","mode":"build","agent":"build","path":{"cwd":"/srv/worktrees/tables","root":"/"},"cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}}}}"#,
+        r#"{"kind":"message.part.updated.1","seq":8,"record":{"sessionID":"ses_1","part":{"id":"prt_2","sessionID":"ses_1","messageID":"msg_2","type":"step-start"},"time":1788113672770}}"#,
+        r#"{"kind":"message.part.updated.1","seq":9,"record":{"sessionID":"ses_1","part":{"id":"prt_3","sessionID":"ses_1","messageID":"msg_2","type":"reasoning","text":"","time":{"start":1788113672771}},"time":1788113672771}}"#,
+        r#"{"kind":"message.part.updated.1","seq":10,"record":{"sessionID":"ses_1","part":{"id":"prt_3","sessionID":"ses_1","messageID":"msg_2","type":"reasoning","text":"The tables are the awkward part.","time":{"start":1788113672771,"end":1788113672772}},"time":1788113672772}}"#,
+        r#"{"kind":"message.part.updated.1","seq":11,"record":{"sessionID":"ses_1","part":{"id":"prt_4","sessionID":"ses_1","messageID":"msg_2","type":"text","text":"","time":{"start":1788113672773}},"time":1788113672773}}"#,
+        r#"{"kind":"message.part.updated.1","seq":12,"record":{"sessionID":"ses_1","part":{"id":"prt_5","sessionID":"ses_1","messageID":"msg_2","type":"tool","callID":"call_standin_1","tool":"bash","state":{"status":"pending","input":{},"raw":""}},"time":1788113672775}}"#,
+        r#"{"kind":"message.part.updated.1","seq":14,"record":{"sessionID":"ses_1","part":{"id":"prt_4","sessionID":"ses_1","messageID":"msg_2","type":"text","text":"I'll start with the *tables*.","time":{"start":1788113672773,"end":1788113672781}},"time":1788113672781}}"#,
+        r#"{"kind":"message.part.updated.1","seq":17,"record":{"sessionID":"ses_1","part":{"id":"prt_5","sessionID":"ses_1","messageID":"msg_2","type":"tool","callID":"call_standin_1","tool":"bash","state":{"status":"completed","input":{"command":"ls .tasks","description":"List the task files"},"output":"04-render.md\n05-summaries.md\n","title":"ls .tasks","metadata":{"output":"04-render.md\n05-summaries.md\n","exit":0,"truncated":false},"time":{"start":1788113672812,"end":1788113672815}}},"time":1788113672815}}"#,
+        r#"{"kind":"message.part.updated.1","seq":18,"record":{"sessionID":"ses_1","part":{"id":"prt_6","sessionID":"ses_1","messageID":"msg_2","type":"step-finish","reason":"tool-calls","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}},"time":1788113672817}}"#,
+        r#"{"kind":"message.updated.1","seq":20,"record":{"sessionID":"ses_1","info":{"id":"msg_2","sessionID":"ses_1","role":"assistant","time":{"created":1788113671761,"completed":1788113672820},"parentID":"msg_1","modelID":"big-pickle","providerID":"standin","mode":"build","agent":"build","path":{"cwd":"/srv/worktrees/tables","root":"/"},"cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"finish":"tool-calls"}}}"#,
+        r#"{"kind":"message.updated.1","seq":21,"record":{"sessionID":"ses_1","info":{"id":"msg_3","sessionID":"ses_1","role":"assistant","time":{"created":1788113672821},"parentID":"msg_1","modelID":"big-pickle","providerID":"standin","mode":"build","agent":"build","path":{"cwd":"/srv/worktrees/tables","root":"/"},"cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}}}}"#,
+        r#"{"kind":"message.part.updated.1","seq":24,"record":{"sessionID":"ses_1","part":{"id":"prt_7","sessionID":"ses_1","messageID":"msg_3","type":"step-start"},"time":1788113672836}}"#,
+        r#"{"kind":"message.part.updated.1","seq":25,"record":{"sessionID":"ses_1","part":{"id":"prt_8","sessionID":"ses_1","messageID":"msg_3","type":"tool","callID":"call_standin_2","tool":"read","state":{"status":"pending","input":{},"raw":""}},"time":1788113672838}}"#,
+        r#"{"kind":"message.part.updated.1","seq":27,"record":{"sessionID":"ses_1","part":{"id":"prt_8","sessionID":"ses_1","messageID":"msg_3","type":"tool","callID":"call_standin_2","tool":"read","state":{"status":"error","input":{"filePath":"/no/such/file.md"},"error":"File not found: /no/such/file.md","time":{"start":1788113672843,"end":1788113672859}}},"time":1788113672859}}"#,
+        r#"{"kind":"message.updated.1","seq":31,"record":{"sessionID":"ses_1","info":{"id":"msg_4","sessionID":"ses_1","role":"assistant","time":{"created":1788113672864},"parentID":"msg_1","modelID":"big-pickle","providerID":"standin","mode":"build","agent":"build","path":{"cwd":"/srv/worktrees/tables","root":"/"},"cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}}}}"#,
+        r#"{"kind":"message.part.updated.1","seq":34,"record":{"sessionID":"ses_1","part":{"id":"prt_9","sessionID":"ses_1","messageID":"msg_4","type":"step-start"},"time":1788113672880}}"#,
+        r#"{"kind":"message.part.updated.1","seq":35,"record":{"sessionID":"ses_1","part":{"id":"prt_10","sessionID":"ses_1","messageID":"msg_4","type":"text","text":"","time":{"start":1788113672881}},"time":1788113672881}}"#,
+        r#"{"kind":"message.part.updated.1","seq":36,"record":{"sessionID":"ses_1","part":{"id":"prt_10","sessionID":"ses_1","messageID":"msg_4","type":"text","text":"Two files: `04-render.md` and `05-summaries.md`. Done.","time":{"start":1788113672881,"end":1788113672882}},"time":1788113672882}}"#,
+        r#"{"kind":"message.part.updated.1","seq":37,"record":{"sessionID":"ses_1","part":{"id":"prt_11","sessionID":"ses_1","messageID":"msg_4","type":"step-finish","reason":"stop","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}},"time":1788113672883}}"#,
+        r#"{"kind":"message.updated.1","seq":39,"record":{"sessionID":"ses_1","info":{"id":"msg_4","sessionID":"ses_1","role":"assistant","time":{"created":1788113672864,"completed":1788113672885},"parentID":"msg_1","modelID":"big-pickle","providerID":"standin","mode":"build","agent":"build","path":{"cwd":"/srv/worktrees/tables","root":"/"},"cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"finish":"stop"}}}"#,
+    ];
+
+    fn records() -> TranscriptView {
+        transcript_view(&lines(RECORDS))
+    }
+
+    /// The conversation opencode kept: what was put to it, what it thought,
+    /// what it said, the two tools it called and what each of them answered.
+    #[test]
+    fn a_real_opencode_session_draws_as_the_conversation_it_records() {
+        let view = records();
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Put(Put {
+                    id: 1,
+                    html: "<p>List the task files and tell me what you see.</p>\n".to_owned()
+                }),
+                Turn::Reasoning(Reasoning {
+                    id: 2,
+                    html: "<p>The tables are the awkward part.</p>\n".to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 3,
+                    html: "<p>I'll start with the <em>tables</em>.</p>\n".to_owned()
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 4,
+                    name: "bash".to_owned(),
+                    call: "call_standin_1".to_owned(),
+                    about: "ls .tasks".to_owned(),
+                    input: serde_json::to_string_pretty(&serde_json::json!({
+                        "command": "ls .tasks",
+                        "description": "List the task files",
+                    }))
+                    .unwrap(),
+                }),
+                Turn::ToolResult(ToolResult {
+                    id: 5,
+                    call: "call_standin_1".to_owned(),
+                    failed: false,
+                    text: "04-render.md\n05-summaries.md\n".to_owned()
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 6,
+                    name: "read".to_owned(),
+                    call: "call_standin_2".to_owned(),
+                    about: "/no/such/file.md".to_owned(),
+                    input: serde_json::to_string_pretty(&serde_json::json!({
+                        "filePath": "/no/such/file.md",
+                    }))
+                    .unwrap(),
+                }),
+                Turn::ToolResult(ToolResult {
+                    id: 7,
+                    call: "call_standin_2".to_owned(),
+                    failed: true,
+                    text: "File not found: /no/such/file.md".to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 8,
+                    html: "<p>Two files: <code>04-render.md</code> and <code>05-summaries.md</code>. Done.</p>\n"
+                        .to_owned()
+                }),
+            ],
+            "and none of opencode's own record of itself is among them"
+        );
+    }
+
+    /// What opencode kept for itself: the session's row, the envelope around
+    /// each message, the steps a turn is made of — and every emission of a part
+    /// that had not finished growing, filed under the kind of part it was
+    /// growing into.
+    #[test]
+    fn what_opencode_kept_for_itself_is_kept_out_of_the_conversation() {
+        let view = records();
+
+        assert_eq!(
+            view.bookkeeping
+                .iter()
+                .map(|kept| kept.kind.as_str())
+                .collect::<Vec<&str>>(),
+            [
+                "session.created.1",
+                "message.updated.1",
+                "message.updated.1",
+                "step-start",
+                "reasoning",
+                "text",
+                "tool",
+                "step-finish",
+                "message.updated.1",
+                "message.updated.1",
+                "step-start",
+                "tool",
+                "message.updated.1",
+                "step-start",
+                "text",
+                "step-finish",
+                "message.updated.1",
+            ]
+        );
+        assert_eq!(
+            view.bookkeeping[0].id, 1,
+            "and it is numbered by its own count rather than the conversation's"
+        );
+    }
+
+    /// The turn count the Timeline row shows and the sentence a Notice quotes
+    /// are the reading the pane draws, for a fourth backend as for the three
+    /// before it.
+    #[test]
+    fn an_opencode_rows_count_and_quote_are_the_reading_the_pane_draws() {
+        let said = lines(RECORDS);
+
+        assert_eq!(turns(&said), records().turns.len());
+        assert_eq!(turns(&said), 8);
+        assert_eq!(
+            statements(&said).last().map(String::as_str),
+            Some("Two files: `04-render.md` and `05-summaries.md`. Done."),
+            "the agent's own words, and the finished emission of them"
+        );
+    }
+
+    /// A part is written again every time it grows, so the reading has to draw
+    /// the one that finished and no other: a sentence drawn once per piece of
+    /// it the model streamed would be a Transcript of fragments.
+    #[test]
+    fn a_part_still_growing_is_not_a_turn_until_it_has_finished() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":9,"record":{"part":{"id":"prt_1","type":"text","text":"Two files: ","time":{"start":1788113672881}}}}"#,
+            r#"{"kind":"message.part.updated.1","seq":10,"record":{"part":{"id":"prt_1","type":"text","text":"Two files: `04-render.md` and `05-summaries.md`.","time":{"start":1788113672881,"end":1788113672882}}}}"#,
+        ]));
+
+        assert_eq!(
+            view.turns,
+            vec![Turn::Prose(Prose {
+                id: 1,
+                html: "<p>Two files: <code>04-render.md</code> and <code>05-summaries.md</code>.</p>\n"
+                    .to_owned()
+            })],
+            "one sentence, once"
+        );
+        assert_eq!(
+            view.bookkeeping.len(),
+            1,
+            "and the growth of it folded away"
+        );
+    }
+
+    /// The distinction the role would make if the role were on the record with
+    /// the words in it. It is not — it is on the message, one record away — so
+    /// what says a piece of text is the turn put to the session is that
+    /// opencode was handed it rather than streaming it, and a part it was
+    /// handed carries no times at all.
+    #[test]
+    fn a_turn_put_to_an_opencode_session_is_told_from_its_prose_by_the_times() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":2,"record":{"part":{"id":"prt_1","messageID":"msg_1","type":"text","text":"What is in the task list?"}}}"#,
+            r#"{"kind":"message.part.updated.1","seq":14,"record":{"part":{"id":"prt_2","messageID":"msg_2","type":"text","text":"Two files.","time":{"start":1788113672773,"end":1788113672781}}}}"#,
+        ]));
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Put(Put {
+                    id: 1,
+                    html: "<p>What is in the task list?</p>\n".to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 2,
+                    html: "<p>Two files.</p>\n".to_owned()
+                }),
+            ]
+        );
+    }
+
+    /// Text opencode wrote to itself in the session's voice, which is
+    /// bookkeeping wearing a turn's clothes — the same thing Claude's `isMeta`
+    /// line is, said in opencode's own spelling.
+    #[test]
+    fn text_an_opencode_session_wrote_to_itself_is_bookkeeping() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":3,"record":{"part":{"id":"prt_1","type":"text","text":"Called the Read tool with the following input: …","synthetic":true}}}"#,
+        ]));
+
+        assert!(view.turns.is_empty(), "nobody said this: {:?}", view.turns);
+        assert_eq!(view.bookkeeping.len(), 1);
+        assert_eq!(view.bookkeeping[0].kind, "text");
+    }
+
+    /// A whole record of a kind nobody here has heard of folds under the name
+    /// opencode filed it under. `session.next.prompted.1` is one of a family
+    /// 1.18.25's own schema names and no session driven this way has been seen
+    /// to write — findable by whoever meets one first, and out of the way until
+    /// then.
+    #[test]
+    fn an_opencode_record_of_a_kind_nobody_knows_folds_under_its_own_name() {
+        let line = r#"{"kind":"session.next.prompted.1","seq":4,"record":{"delivery":"steer"}}"#;
+        let view = transcript_view(&[line.to_owned()]);
+
+        assert!(view.turns.is_empty(), "nobody said this: {:?}", view.turns);
+        assert_eq!(
+            view.bookkeeping,
+            vec![Bookkeeping {
+                id: 1,
+                kind: "session.next.prompted.1".to_owned(),
+                line: pretty(line),
+            }]
+        );
+    }
+
+    /// And a part of a kind nobody knows folds under the part's own kind rather
+    /// than the record's, because every part arrives under the one record kind
+    /// and a group of them all called that would say nothing about any of them.
+    #[test]
+    fn a_part_of_a_kind_nobody_knows_folds_under_the_parts_own_name() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":5,"record":{"part":{"id":"prt_1","type":"telepathy","thought":"a kind from a later version"}}}"#,
+        ]));
+
+        assert!(view.turns.is_empty(), "nobody said this: {:?}", view.turns);
+        assert_eq!(view.bookkeeping[0].kind, "telepathy");
+    }
+
+    /// A record that says a part was written and names no kind of part keeps
+    /// the name the record had, which is the only name it has.
+    #[test]
+    fn a_part_record_that_names_no_part_keeps_the_records_own_name() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":6,"record":{"part":{"id":"prt_1"}}}"#,
+        ]));
+
+        assert!(view.turns.is_empty(), "{:?}", view.turns);
+        assert_eq!(view.bookkeeping[0].kind, "message.part.updated.1");
+    }
+
+    /// A call is answered once. The records before that one are the call being
+    /// made and the call running, and one of them drawn as an answer would put
+    /// an answer under a call that had not made one.
+    #[test]
+    fn an_opencode_call_that_has_not_settled_is_not_an_answer_to_it() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":12,"record":{"part":{"id":"prt_1","type":"tool","callID":"call_1","tool":"bash","state":{"status":"pending","input":{},"raw":""}}}}"#,
+            r#"{"kind":"message.part.updated.1","seq":13,"record":{"part":{"id":"prt_1","type":"tool","callID":"call_1","tool":"bash","state":{"status":"running","input":{"command":"ls .tasks"},"time":{"start":1788113672843}}}}}"#,
+        ]));
+
+        assert!(view.turns.is_empty(), "{:?}", view.turns);
+        assert_eq!(view.bookkeeping.len(), 2);
+        assert_eq!(view.bookkeeping[1].kind, "tool");
+    }
+
+    /// A reading of an OpenCode session ends wherever the poll before it had
+    /// got to — between a call and its answer, here — and what comes out has to
+    /// be the record read whole, turn for turn and numbering included.
+    #[test]
+    fn an_opencode_record_read_in_two_goes_is_the_record_read_whole() {
+        let said = lines(RECORDS);
+
+        let whole = transcript_view(&said);
+        let first = transcript_view(&said[..10]);
+        let rest = transcript_after(first.cursor.parse().unwrap(), &said[10..]);
+
+        assert_eq!([first.turns.clone(), rest.turns].concat(), whole.turns);
+        assert_eq!(
+            [first.bookkeeping.clone(), rest.bookkeeping].concat(),
+            whole.bookkeeping
+        );
+        assert_eq!(rest.cursor, whole.cursor);
+    }
+
+    /// The four backends side by side, which is the whole of what tells them
+    /// apart: the key a line is written on. Claude's and opencode's both carry
+    /// the words `user` and `assistant`, and neither is read as the other's,
+    /// because Claude's is the line's own `type` and opencode's is a role
+    /// inside a record whose line has none.
+    #[test]
+    fn an_opencode_line_is_told_apart_by_the_key_it_is_written_on() {
+        let view = transcript_view(&lines(&[
+            FIXTURE[2],
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"And the *rollout* was read too."}]}}}"#,
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"And so was the *update*."}}}}"#,
+            r#"{"kind":"message.part.updated.1","seq":14,"record":{"sessionID":"ses_1","part":{"id":"prt_1","messageID":"msg_1","type":"text","text":"And the *record* with it.","time":{"start":1788113672773,"end":1788113672781}}}}"#,
+        ]));
+
+        assert_eq!(
+            view.turns
+                .iter()
+                .map(|turn| matches!(turn, Turn::Prose(_)))
+                .collect::<Vec<bool>>(),
+            [true, true, true, true],
+            "{:?}",
+            view.turns
+        );
+        assert!(
+            matches!(&view.turns[3], Turn::Prose(prose) if prose.html.contains("<em>record</em>")),
             "{:?}",
             view.turns
         );
