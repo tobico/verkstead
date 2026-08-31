@@ -38,6 +38,25 @@
 //! email address leaves the credentials alone. Clearing is its own press for the
 //! same reason — an empty write-only field means nothing was typed.
 //!
+//! And a third section under that same button: the comments nobody wants an
+//! agent addressing, as a row of two patterns apiece. They are here because
+//! this is the pane about what Verkstead does on somebody else's GitHub. They
+//! travel as an action rather than a value for a reason of their own — a save
+//! is *refused* over a pattern that will not compile — so the rows are sent
+//! only once somebody has touched one, and a save about an email address is
+//! one the server cannot turn down.
+//!
+//! **A row nobody wrote anything in is not a rule**, and comes off the page as
+//! the save goes out. That is how a rule is deleted — clearing both boxes says
+//! as much as pressing Remove does — and it is what keeps a row somebody added
+//! and never filled in from turning down the save it rode along with. The
+//! server refuses a rule that constrains nothing, and this is what means the
+//! page never asks it to.
+//!
+//! A refusal is the whole request refused: neither file is written, and what
+//! comes back names the row and the box it is about. So it is drawn at that
+//! row, with everything the human typed left exactly where they left it.
+//!
 //! And one switch stands beside them in the pane, saving itself: whether a
 //! Conversation's record is published and linked on its pull request when the
 //! work settles to Done. It is here rather than in a section of its own because
@@ -49,14 +68,19 @@
 //! email address is nobody's author.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import { Index, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
+import { QuietButton } from "../QuietButton";
 import { Switch as Toggle } from "../Switch";
 import { loadSettings, saveSettings } from "../api/client";
 import { useReading } from "../freshness";
 import type {
+  IgnoreRule,
+  IgnoredCommentsEdit,
+  RuleField,
+  RuleRefused,
   SettingsEdit,
   SettingsSaved,
   SettingsView,
@@ -216,6 +240,18 @@ export function GithubPane(props: {
   // answer.
   const [verified, setVerified] = createSignal<Verified | null>(null);
 
+  // The ignore rules as they are being edited, or `null` while nobody has
+  // touched a row — the rows follow the server until then, the way the author
+  // fields do. `null` is also what says the save has nothing to say about
+  // them, which is what keeps a save about the author or the token one that
+  // cannot be refused: see [`IgnoredCommentsEdit`].
+  const [rules, setRules] = createSignal<IgnoreRule[] | null>(null);
+
+  // And what the last save was turned down over, by the row and the box it
+  // named. Emptied as the next save goes out, because it describes what was
+  // sent rather than what is on the page.
+  const [refusals, setRefusals] = createSignal<RuleRefused[]>([]);
+
   const told = (): SettingsView | undefined => settings.data;
   const author = () => told()?.git_author;
   const configured = () => told()?.github_token ?? null;
@@ -249,6 +285,71 @@ export function GithubPane(props: {
 
   const typing = () => replacing() || configured() === null;
 
+  /// The rows as they are drawn: what has been typed, or what is written down
+  /// while nothing has been.
+  const rows = (): IgnoreRule[] => rules() ?? told()?.ignored_comments ?? [];
+
+  /// One box rewritten, which is what makes the next save a `Set` of the whole
+  /// list — the server writes the rules as one list, so a row edited is the
+  /// list sent.
+  const rewrite = (at: number, part: Partial<IgnoreRule>) =>
+    setRules(
+      rows().map((rule, which) => (which === at ? { ...rule, ...part } : rule)),
+    );
+
+  /// A row added, empty, for the human to write a rule into. Its errors are
+  /// dropped with it and with every other row's: a refusal names a row by where
+  /// it stood, so a list that has gained or lost one is a list they no longer
+  /// point into. Typing in a box leaves them, because the rows are still the
+  /// rows the server was talking about.
+  const add = () => {
+    setRefusals([]);
+    setRules([...rows(), { author: "", body: "" }]);
+  };
+
+  const remove = (at: number) => {
+    setRefusals([]);
+    setRules(rows().filter((_, which) => which !== at));
+  };
+
+  /// Why the row standing at `at` was turned down, against one of its boxes or
+  /// against the rule itself — `null` where the save was not refused over it.
+  const trouble = (at: number, field: RuleField | null): string | null =>
+    refusals().find((was) => was.rule === at && was.field === field)?.why ??
+    null;
+
+  /// Whether a row is a rule at all, which is whether anything was written in
+  /// either of its boxes. Emptiness is decided the way the server decides it —
+  /// by what is left after the spaces — so the two halves agree about which
+  /// rows are rules.
+  const written = (rule: IgnoreRule): boolean =>
+    rule.author.trim() !== "" || rule.body.trim() !== "";
+
+  /// The rows nobody has written anything in, taken off the page as the save
+  /// goes out — which is how a rule is deleted, and what stops a row the human
+  /// added and never filled in refusing the save it rode along with.
+  ///
+  /// Taken off the page rather than merely left out of the request, so that
+  /// what is drawn and what was sent are one list: a refusal names a rule by
+  /// where it stood in what was sent, and a request that quietly left rows out
+  /// would have those numbers pointing at the wrong boxes.
+  const tidied = () => {
+    const edited = rules();
+
+    if (edited !== null) {
+      setRules(edited.filter(written));
+    }
+  };
+
+  /// What the save says about the rules: nothing at all until somebody has
+  /// touched a row, and the whole list in the order it is drawn once they have
+  /// — the blank rows having been taken off it by [`tidied`] first.
+  const ruleEdit = (): IgnoredCommentsEdit => {
+    const edited = rules();
+
+    return edited === null ? "Keep" : { Set: { rules: edited } };
+  };
+
   /// The account the last saved token authenticates as, and the words GitHub
   /// or `gh` refused it in — one of the two at a time, and neither until this
   /// pane has saved a token.
@@ -279,11 +380,24 @@ export function GithubPane(props: {
     setEmail(null);
     setToken("");
     setReplacing(false);
+
+    // And the rows go back to following the server, which has just been told
+    // what they said: what is drawn from here on is what was written down.
+    setRules(null);
+    setRefusals([]);
   };
 
   const save = useMutation(() => ({
     mutationFn: (edit: SettingsEdit) => saveSettings(edit),
     onSuccess: (saved: SettingsSaved) => {
+      // A refusal is the whole save refused — neither file was touched — so
+      // nothing here is spent and nothing is read back: what the human typed
+      // stays in front of them, with the errors drawn at the rows they name.
+      if (saved.refused.length > 0) {
+        setRefusals(saved.refused);
+        return;
+      }
+
       setVerified(saved.verified);
       spent();
 
@@ -302,13 +416,30 @@ export function GithubPane(props: {
   /// form is not about — see [`held`]: pressing Save is about the fields, and a
   /// switch that came back off with the author would be a switch the form
   /// flipped.
-  const write = (github_token: TokenEdit) =>
+  const write = (github_token: TokenEdit) => {
+    // Whatever the last save was turned down over went with the press that is
+    // being made now: the answer to this one says what is wrong with what is
+    // being sent this time.
+    setRefusals([]);
+
+    // And a row nobody wrote anything in is not a rule, so it goes before the
+    // list is read off the page — see [`tidied`]. Which is what makes clearing
+    // a row a way to delete it, and what keeps a blank row somebody added and
+    // left from turning down a save about their own email address.
+    tidied();
+
     save.mutate({
       git_author: { name: authorName(), email: authorEmail() },
       github_token,
       share_on_done: sharing(),
+      // And the ignore rules, which this pane is the one that owns: the whole
+      // list where somebody has touched a row, and `Keep` where nobody has —
+      // see [`ruleEdit`]. That is what stops a corrected email address being
+      // refused over a pattern somebody hand-edited into the file weeks ago.
+      ignored_comments: ruleEdit(),
       ...held(),
     });
+  };
 
   /// And the switch's own save, which is its own press.
   ///
@@ -323,6 +454,10 @@ export function GithubPane(props: {
         // Untouched, for the reason a blank field is a `Keep`.
         github_token: "Keep",
         share_on_done,
+        // And the rules left exactly where they are: a flip is not the form's
+        // save, and one that spoke for them could be turned down over a pattern
+        // it never showed anybody — see [`ruleEdit`].
+        ignored_comments: "Keep",
         ...held(),
       }),
     onSuccess: (saved: SettingsSaved) =>
@@ -510,6 +645,102 @@ export function GithubPane(props: {
                 value={authorEmail()}
                 onInput={(ev) => setEmail(ev.currentTarget.value)}
               />
+            </section>
+
+            <section>
+              <h3>Ignored comments</h3>
+
+              {/* What the rules do, said before the boxes that hold them: a
+                  pattern is a thing with rules of its own, and where they
+                  match is the half of it a human cannot see from the box. */}
+              <Note>
+                A comment matching one of these is never addressed by an agent.
+                A rule's fields must all match, and each is a regular
+                expression matching anywhere in the text — case-sensitive,
+                unless it opens with <code>(?i)</code>. Leave one empty for no
+                constraint on that half.
+              </Note>
+
+              <Show
+                when={rows().length > 0}
+                fallback={<Empty>No comments are ignored.</Empty>}
+              >
+                <ul class={styles.rules}>
+                  <Index each={rows()}>
+                    {(rule, at) => (
+                      <li class={styles.rule}>
+                        <label for={`ignored-author-${at}`}>
+                          Author, matched against who wrote it
+                        </label>
+                        <input
+                          id={`ignored-author-${at}`}
+                          type="text"
+                          autocapitalize="off"
+                          autocorrect="off"
+                          spellcheck={false}
+                          placeholder="coderabbitai"
+                          value={rule().author}
+                          onInput={(ev) =>
+                            rewrite(at, { author: ev.currentTarget.value })
+                          }
+                        />
+                        <Show when={trouble(at, "Author")}>
+                          {(why) => (
+                            <ErrorLine class={styles.trouble}>
+                              {why()}
+                            </ErrorLine>
+                          )}
+                        </Show>
+
+                        <label for={`ignored-body-${at}`}>
+                          Body, matched against what it says
+                        </label>
+                        <input
+                          id={`ignored-body-${at}`}
+                          type="text"
+                          autocapitalize="off"
+                          autocorrect="off"
+                          spellcheck={false}
+                          placeholder="billing"
+                          value={rule().body}
+                          onInput={(ev) =>
+                            rewrite(at, { body: ev.currentTarget.value })
+                          }
+                        />
+                        <Show when={trouble(at, "Body")}>
+                          {(why) => (
+                            <ErrorLine class={styles.trouble}>
+                              {why()}
+                            </ErrorLine>
+                          )}
+                        </Show>
+
+                        {/* And what is wrong with the rule rather than with
+                            either box, which is the one refusal there is no
+                            field to draw at. */}
+                        <Show when={trouble(at, null)}>
+                          {(why) => (
+                            <ErrorLine class={styles.trouble}>
+                              {why()}
+                            </ErrorLine>
+                          )}
+                        </Show>
+
+                        <QuietButton
+                          class={styles.remove}
+                          onClick={() => remove(at)}
+                        >
+                          Remove
+                        </QuietButton>
+                      </li>
+                    )}
+                  </Index>
+                </ul>
+              </Show>
+
+              <QuietButton class={styles.add} onClick={add}>
+                Add a rule
+              </QuietButton>
             </section>
 
             <div class={styles.buttons}>

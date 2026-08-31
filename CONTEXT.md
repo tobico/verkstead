@@ -461,8 +461,40 @@ already handed over stays quiet, a second settle after a share that worked stays
 quiet, and a share that *failed* left no fact and gets another go at the next
 settle. Failure is a **Notice** naming what could not be done; success says
 nothing at all, the fresh Published Share reading on the Share Pane.
+**And nothing is ever dispatched about it.** The comment ends with an invisible
+marker — an HTML comment, so a reader sees nothing where it sits — and Wrapping
+drops any comment carrying it at the start of a line, wherever it reads comments.
+It is left as the configured token, which is usually the human's own account, so
+nothing about who said it could tell it from what they write themselves. A human
+quote-replying to it is still somebody to answer: GitHub puts a `>` in front of
+every quoted line, so the marker no longer begins one.
 _Avoid_: announce, notify, post, broadcast (a comment is left, once, by a press
 or by the settle the human turned on)
+
+**Ignore rule**:
+One class of comment nobody wants addressed, written in the GitHub and git
+author settings pane, a row apiece: a regex over who said it, a regex over what
+it says, or both. A rule matches where every field it gives does, and the list
+combines with OR — so a comment any one rule matches is skipped wherever
+Wrapping reads comments, in the fresh ones a session would be dispatched about
+and the standing ones folded into the review alike, on a Companion Repo's pull
+request as much as on the Conversation's own.
+What they are for is a bot nobody can turn off: a review service set up with no
+billing information on it, filing the same word about billing on every pull
+request, where the alternative is a session spun up to address it each time.
+**A skipped comment is written down as addressed**, which is what makes deleting
+a rule change what happens next rather than what happened — months of a bot's
+nagging would otherwise all come back as sessions on the poll after the rule
+went. And the rules are read off the file every poll, so one written on a phone
+takes effect on the next one.
+**About agent work and nothing else.** A skipped comment still appears wherever
+the workbench lists what is on a pull request: a comment nobody is being sent to
+answer is still one the human wrote a rule about, and hiding it would leave them
+no way to see what the rule is doing.
+The marker Share to Pull Request leaves is not one of these. That one is
+Verkstead's own comment, dropped by inspection for ever and never configurable.
+_Avoid_: filter, mute, block, spam rule, exclusion (a rule says what nobody is
+sent to address, not what is hidden)
 
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose

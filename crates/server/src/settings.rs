@@ -31,6 +31,9 @@
 //!   - verkstead=/var/cache/verkstead-cargo
 //! watched_paths:
 //!   - /home/tobi/src
+//! ignored_comments:
+//!   - author: coderabbitai
+//!     body: billing
 //! ```
 //!
 //! Who a session commits as is said here for the reason the token is: it used
@@ -72,6 +75,7 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -434,6 +438,31 @@ pub struct Config {
         skip_serializing_if = "Vec::is_empty"
     )]
     watched_paths: Vec<String>,
+
+    /// And the comments Wrapping is never to address: a list of rules, each an
+    /// optional regex over the author's login and an optional regex over the
+    /// comment's body, matched anywhere in either.
+    ///
+    /// Rules combine with OR and a rule's own fields with AND: a comment is
+    /// ignored where any one rule matches it, and a rule matches where every
+    /// field it gives does. What it is for is a bot nobody can turn off — a
+    /// review service filing the same word about billing on every pull request
+    /// — where the alternative is a session spun up to address it each time.
+    ///
+    /// Read leniently, the way everything else in this file is, and with one
+    /// refusal that is the reading's own rather than the settings page's: a
+    /// rule giving neither field is dropped as it is read. A rule constraining
+    /// nothing matches *everything*, so a hand-edit that left one behind would
+    /// silence every comment on every pull request — which is the one way a
+    /// misread of this file could take work away rather than leave it undone.
+    /// A pattern that will not compile is kept exactly as it was written and
+    /// matches nothing, with a line in the log — see [`IgnoreRule::matches`].
+    #[serde(
+        default,
+        deserialize_with = "rules_written",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    ignored_comments: Vec<IgnoreRule>,
 }
 
 impl Config {
@@ -459,6 +488,7 @@ impl Config {
             share_on_done: config.share_on_done,
             sandbox_binds: entries_written(config.sandbox_binds),
             watched_paths: entries_written(config.watched_paths),
+            ignored_comments: rules_kept(config.ignored_comments),
         })
     }
 
@@ -470,6 +500,7 @@ impl Config {
         share_on_done: bool,
         sandbox_binds: Vec<String>,
         watched_paths: Vec<String>,
+        ignored_comments: Vec<IgnoreRule>,
     ) -> Config {
         Config {
             git_author,
@@ -483,6 +514,12 @@ impl Config {
             share_on_done: Some(share_on_done),
             sandbox_binds: entries_written(sandbox_binds),
             watched_paths: entries_written(watched_paths),
+            // Whole, and not put through the reading half's own drop above: what
+            // reaches here has already been through [`IgnoreRule::trouble`] at
+            // the endpoint, which refuses the rule the reading merely skips —
+            // and dropping one here would be a save that quietly wrote fewer
+            // rules than the page sent.
+            ignored_comments,
         }
     }
 
@@ -530,6 +567,13 @@ impl Config {
     /// configured none, a boundary around nothing.
     pub fn watched_paths(&self) -> &[String] {
         &self.watched_paths
+    }
+
+    /// And the comments nothing is ever to be dispatched about, in the order
+    /// they were written down. An empty list where nobody has added any, which
+    /// is every comment on every pull request being somebody's to address.
+    pub fn ignored_comments(&self) -> &[IgnoreRule] {
+        &self.ignored_comments
     }
 }
 
@@ -621,6 +665,185 @@ impl GitAuthor {
     }
 }
 
+/// One class of comment nobody wants addressed: a regex over who wrote it, a
+/// regex over what it says, or both.
+///
+/// Both halves are optional and each is a constraint only where it is given, so
+/// a rule with an author and no body ignores everything that account writes and
+/// one with a body and no author ignores that phrase from anybody. A rule that
+/// gives neither would ignore every comment there is, which is why it is the
+/// one thing here that is refused rather than read leniently — see
+/// [`IgnoreRule::trouble`], and the [`Config::ignored_comments`] field for what
+/// the reading half does with one that reached the file anyway.
+///
+/// The patterns are the regex crate's own syntax and are matched anywhere in
+/// their text rather than against the whole of it: `billing` is what a human
+/// means by *a comment about billing*, and an implicit anchor either side would
+/// make the ordinary rule the surprising one. Case-sensitive, with `(?i)`
+/// available at the front of a pattern for the human who wants otherwise.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct IgnoreRule {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    author: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body: Option<String>,
+}
+
+impl IgnoreRule {
+    /// The rule a settings page has just been told, each blank half no
+    /// constraint at all — see [`blank_is_nothing`].
+    pub fn of(author: Option<String>, body: Option<String>) -> IgnoreRule {
+        IgnoreRule {
+            author: author.and_then(blank_is_nothing),
+            body: body.and_then(blank_is_nothing),
+        }
+    }
+
+    /// The pattern the author's login is matched against, where one was given.
+    pub fn author(&self) -> Option<&str> {
+        self.author.as_deref()
+    }
+
+    /// And the one the comment's body is matched against.
+    pub fn body(&self) -> Option<&str> {
+        self.body.as_deref()
+    }
+
+    /// What would stop this rule being written down, or `None` where there is
+    /// nothing wrong with it.
+    ///
+    /// The one refusal in either settings file, and it is here because the two
+    /// ways a rule goes wrong are both ways it does something other than what
+    /// was meant: a rule constraining nothing silences every comment, and a
+    /// pattern that will not compile silences none while looking as though it
+    /// does. Both are worth turning a save down over, where a bind naming a
+    /// directory that is not there is not — that one is a row the human has yet
+    /// to make, and this one is a row that cannot come right on its own.
+    pub fn trouble(&self) -> Option<RuleTrouble> {
+        if self.author.is_none() && self.body.is_none() {
+            return Some(RuleTrouble::Empty);
+        }
+
+        if let Some(author) = self.author.as_deref()
+            && let Err(error) = Regex::new(author)
+        {
+            return Some(RuleTrouble::Author(why(&error)));
+        }
+
+        if let Some(body) = self.body.as_deref()
+            && let Err(error) = Regex::new(body)
+        {
+            return Some(RuleTrouble::Body(why(&error)));
+        }
+
+        None
+    }
+
+    /// Whether a comment by `author` reading `body` is one this rule ignores.
+    ///
+    /// Every field the rule gives has to match, and a field it does not give is
+    /// no constraint — so a rule with both halves is narrower than either of
+    /// them alone. A rule giving neither matches nothing here rather than
+    /// everything: it is refused at the save and dropped at the read, and the
+    /// one way to hold one is in memory somebody built by hand.
+    ///
+    /// A pattern that will not compile matches nothing, with a line in the log.
+    /// That is this module's rule about the file it reads — a hand-edit nobody
+    /// can parse leaves the setting unmade rather than refusing the read — and
+    /// it fails in the safe direction: the comment goes on being somebody's to
+    /// address, which is what would have happened with no rule at all.
+    pub fn matches(&self, author: &str, body: &str) -> bool {
+        match (self.author.as_deref(), self.body.as_deref()) {
+            (None, None) => false,
+            (rule_author, rule_body) => {
+                rule_author.is_none_or(|pattern| found(pattern, author))
+                    && rule_body.is_none_or(|pattern| found(pattern, body))
+            }
+        }
+    }
+}
+
+/// What is wrong with a rule somebody tried to save.
+///
+/// Which of the two fields, for the pattern that would not compile: the page
+/// draws the error at the box it is about, and a refusal that named the row and
+/// not the field would leave the human reading both patterns to find out which.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleTrouble {
+    /// It gives neither an author nor a body, so there is nothing it does not
+    /// match.
+    Empty,
+
+    /// The author pattern is not a regex, in the engine's own words.
+    Author(String),
+
+    /// And the body pattern.
+    Body(String),
+}
+
+/// Whether `pattern` is found anywhere in `text`, and `false` where it is not a
+/// pattern at all.
+///
+/// Compiled here rather than held, because the rules are read fresh off the
+/// file every time they are wanted — a rule added on a phone takes effect on
+/// the next poll, and a compiled set held from startup would be one that did
+/// not.
+fn found(pattern: &str, text: &str) -> bool {
+    match Regex::new(pattern) {
+        Ok(regex) => regex.is_match(text),
+        Err(error) => {
+            tracing::warn!(
+                pattern,
+                error = %error,
+                "an ignore rule's pattern is not a regex, so it ignores nothing"
+            );
+
+            false
+        }
+    }
+}
+
+/// A regex the engine would not take, in the words it refused it in, on one
+/// line: the message is a small diagram of the pattern across three or four of
+/// them, and what draws it is a box beside a text field on a phone.
+fn why(error: &regex::Error) -> String {
+    error
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A list of rules as somebody left them, with the rows they emptied out taken
+/// away.
+///
+/// Written for the reason [`rows_written`] is: a row with nothing after its `-`
+/// is YAML's null, and a `Vec<IgnoreRule>` reading one would refuse the whole
+/// file — which under this module's own rule would throw the author and the
+/// build cache away over a half-deleted line.
+fn rules_written<'de, D: serde::Deserializer<'de>>(rules: D) -> Result<Vec<IgnoreRule>, D::Error> {
+    Ok(Vec::<Option<IgnoreRule>>::deserialize(rules)?
+        .into_iter()
+        .flatten()
+        .collect())
+}
+
+/// A written list of rules with the blanks taken out of each and the ones that
+/// came to nothing dropped.
+///
+/// The drop is the one place the reading half refuses anything, and it refuses
+/// in the direction that leaves work to be done: a rule giving neither field
+/// matches every comment there is, so a hand-edit that left one behind would
+/// silence a whole pull request rather than merely failing to silence a bot.
+fn rules_kept(rules: Vec<IgnoreRule>) -> Vec<IgnoreRule> {
+    rules
+        .into_iter()
+        .map(|rule| IgnoreRule::of(rule.author, rule.body))
+        .filter(|rule| rule.author.is_some() || rule.body.is_some())
+        .collect()
+}
+
 /// A list of rows as somebody left them, with the ones they emptied out taken
 /// away.
 ///
@@ -658,7 +881,10 @@ fn blank_is_nothing(value: String) -> Option<String> {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
-    use super::{Config, ConflictResolution, GitAuthor, RustBuildCache, Secrets, Settings};
+    use super::{
+        Config, ConflictResolution, GitAuthor, IgnoreRule, RuleTrouble, RustBuildCache, Secrets,
+        Settings,
+    };
 
     #[test]
     fn the_token_is_what_the_file_says() {
@@ -825,6 +1051,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -839,6 +1066,7 @@ mod tests {
                 RustBuildCache::default(),
                 ConflictResolution::Merge,
                 false,
+                vec![],
                 vec![],
                 vec![],
             ))
@@ -918,6 +1146,7 @@ mod tests {
                 true,
                 vec![],
                 vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -929,6 +1158,7 @@ mod tests {
                 RustBuildCache::default(),
                 ConflictResolution::Merge,
                 false,
+                vec![],
                 vec![],
                 vec![],
             ))
@@ -1115,6 +1345,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -1146,6 +1377,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -1175,6 +1407,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -1195,6 +1428,7 @@ mod tests {
                 RustBuildCache::default(),
                 ConflictResolution::Merge,
                 false,
+                vec![],
                 vec![],
                 vec![],
             ))
@@ -1238,6 +1472,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -1262,6 +1497,7 @@ mod tests {
                 RustBuildCache::default(),
                 ConflictResolution::Merge,
                 false,
+                vec![],
                 vec![],
                 vec![],
             ))
@@ -1326,6 +1562,7 @@ mod tests {
                 false,
                 vec!["/var/cache/verkstead-node".to_owned()],
                 vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -1342,6 +1579,7 @@ mod tests {
                 RustBuildCache::default(),
                 ConflictResolution::Merge,
                 false,
+                vec![],
                 vec![],
                 vec![],
             ))
@@ -1391,9 +1629,168 @@ mod tests {
                 false,
                 vec![],
                 vec!["/home/ada/src".to_owned()],
+                vec![],
             ))
             .unwrap();
 
         assert_eq!(settings.config().watched_paths(), ["/home/ada/src"]);
+    }
+
+    #[test]
+    fn the_ignore_rules_are_what_the_config_file_says() {
+        let config = Config::read(
+            "ignored_comments:\n  - author: coderabbitai\n    body: billing\n  - body: '^nit:'\n",
+        )
+        .unwrap();
+
+        let rules = config.ignored_comments();
+
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].author(), Some("coderabbitai"));
+        assert_eq!(rules[0].body(), Some("billing"));
+        assert_eq!(rules[1].author(), None);
+        assert_eq!(rules[1].body(), Some("^nit:"));
+    }
+
+    #[test]
+    fn a_file_with_no_ignore_rules_in_it_says_none() {
+        assert!(
+            Config::read("git_author:\n  name: Ada\n")
+                .unwrap()
+                .ignored_comments()
+                .is_empty()
+        );
+        assert!(Config::read("").unwrap().ignored_comments().is_empty());
+    }
+
+    /// The one thing the reading half drops rather than keeps, and the reason is
+    /// which way it fails: a rule constraining nothing matches every comment
+    /// there is, so keeping one would silence a whole pull request.
+    #[test]
+    fn a_rule_that_constrains_nothing_is_not_a_rule() {
+        let config = Config::read(
+            "ignored_comments:\n  - author: ''\n    body: ''\n  -\n  - {}\n  - author: dependabot\n",
+        )
+        .unwrap();
+
+        let rules = config.ignored_comments();
+
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].author(), Some("dependabot"));
+    }
+
+    /// The other half of reading leniently: a pattern nothing can compile is
+    /// kept as it was written, so the human can see it on the page and correct
+    /// it, and it ignores nothing in the meantime.
+    #[test]
+    fn a_pattern_that_will_not_compile_is_kept_and_ignores_nothing() {
+        let config = Config::read("ignored_comments:\n  - body: '[oh'\n").unwrap();
+
+        let rules = config.ignored_comments();
+
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].body(), Some("[oh"));
+        assert!(!rules[0].matches("coderabbitai", "[oh"));
+    }
+
+    #[test]
+    fn a_saved_ignore_rule_is_what_the_next_read_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                ConflictResolution::Merge,
+                false,
+                vec![],
+                vec![],
+                vec![IgnoreRule::of(
+                    Some("coderabbitai".to_owned()),
+                    Some("billing".to_owned()),
+                )],
+            ))
+            .unwrap();
+
+        let config = settings.config();
+        let rules = config.ignored_comments();
+
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].author(), Some("coderabbitai"));
+        assert_eq!(rules[0].body(), Some("billing"));
+    }
+
+    /// Every field the rule gives has to match, and one it does not give is no
+    /// constraint at all.
+    #[test]
+    fn a_rule_matches_where_every_field_it_gives_does() {
+        let both = IgnoreRule::of(Some("coderabbit".to_owned()), Some("billing".to_owned()));
+
+        assert!(both.matches("coderabbitai[bot]", "your billing is not set up"));
+        assert!(!both.matches("coderabbitai[bot]", "consider renaming this"));
+        assert!(!both.matches("ada", "your billing is not set up"));
+
+        let author_only = IgnoreRule::of(Some("coderabbit".to_owned()), None);
+
+        assert!(author_only.matches("coderabbitai[bot]", "consider renaming this"));
+        assert!(!author_only.matches("ada", "consider renaming this"));
+
+        let body_only = IgnoreRule::of(None, Some("billing".to_owned()));
+
+        assert!(body_only.matches("ada", "your billing is not set up"));
+        assert!(!body_only.matches("ada", "consider renaming this"));
+    }
+
+    /// Anywhere in the text rather than the whole of it, and case-sensitive
+    /// until the pattern says otherwise.
+    #[test]
+    fn a_pattern_is_found_anywhere_and_minds_its_case() {
+        let rule = IgnoreRule::of(None, Some("billing".to_owned()));
+
+        assert!(rule.matches("ada", "a word about billing, again"));
+        assert!(!rule.matches("ada", "a word about Billing, again"));
+
+        let either = IgnoreRule::of(None, Some("(?i)billing".to_owned()));
+
+        assert!(either.matches("ada", "a word about Billing, again"));
+    }
+
+    /// What the settings page is refused over, which is the two ways a rule does
+    /// something other than what was meant.
+    #[test]
+    fn a_rule_says_what_is_wrong_with_it() {
+        assert_eq!(IgnoreRule::default().trouble(), Some(RuleTrouble::Empty));
+        assert_eq!(
+            IgnoreRule::of(Some("  ".to_owned()), Some(String::new())).trouble(),
+            Some(RuleTrouble::Empty)
+        );
+
+        assert!(matches!(
+            IgnoreRule::of(Some("[oh".to_owned()), None).trouble(),
+            Some(RuleTrouble::Author(_))
+        ));
+        assert!(matches!(
+            IgnoreRule::of(None, Some("[oh".to_owned())).trouble(),
+            Some(RuleTrouble::Body(_))
+        ));
+
+        assert_eq!(
+            IgnoreRule::of(Some("coderabbit".to_owned()), Some("billing".to_owned())).trouble(),
+            None
+        );
+    }
+
+    /// On one line, because what draws it is a box beside a text field on a
+    /// phone and the engine's own message is a diagram across four.
+    #[test]
+    fn a_refused_pattern_is_reported_on_one_line() {
+        let Some(RuleTrouble::Body(why)) = IgnoreRule::of(None, Some("[oh".to_owned())).trouble()
+        else {
+            panic!("a pattern that will not compile is a trouble to report");
+        };
+
+        assert!(!why.contains('\n'), "{why:?}");
+        assert!(!why.is_empty());
     }
 }

@@ -5,6 +5,7 @@
     "name": ""
   },
   "github_token": null,
+  "ignored_comments": [],
   "paths": {
     "binds": [],
     "watched": []

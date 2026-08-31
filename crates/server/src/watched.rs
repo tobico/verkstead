@@ -462,6 +462,7 @@ mod tests {
                 false,
                 vec![],
                 paths,
+                vec![],
             ))
             .unwrap();
     }

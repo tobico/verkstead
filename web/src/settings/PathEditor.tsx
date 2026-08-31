@@ -137,6 +137,12 @@ export function useWritingPaths() {
         conflict_resolution: standing?.conflict_resolution ?? "Merge",
         share_on_done: standing?.share_on_done ?? false,
         ...lists,
+        // And the ignore rules left exactly where they are. Alone among the
+        // settings they travel as an action rather than a value: this form has
+        // nothing to say about them, and one that spoke for them could have its
+        // own save refused over a pattern it never showed anybody — see
+        // [`IgnoredCommentsEdit`].
+        ignored_comments: "Keep",
       });
     },
     onSuccess: (saved: SettingsSaved) => {
