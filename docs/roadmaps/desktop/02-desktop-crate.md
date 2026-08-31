@@ -50,6 +50,14 @@ state/log dir.
 4. **Launch on Startup** — checkbox reads the XDG autostart entry, checking
    writes it, every launch refreshes it while present. Accepts: entry appears
    and disappears with the checkbox; a stale path is rewritten on launch.
+5. **The CI job's system packages** — lands with task 1 rather than after
+   it: `ci.yml` builds the whole workspace (`cargo clippy --workspace
+   --all-targets -- -D warnings`, `cargo test --workspace`) on a runner that
+   installs bubblewrap and nothing else, so the tray's GTK and appindicator
+   development packages have to be there the first time `crates/desktop` is
+   pushed. Accepts: CI is green on the branch that adds the crate, with the
+   packages installed by a step rather than by the runner image happening to
+   carry them.
 
 ## Re-verify at start
 
@@ -57,7 +65,9 @@ state/log dir.
   (`crates/server/src/lib.rs`) — the tray needs a clean-shutdown path; decide
   its shape against the code as it stands then.
 - Which tray backend `tray-icon` uses on Linux (appindicator vs ksni), what
-  GTK/event-loop it demands, and what that means for the AppImage in stage 03.
+  GTK/event-loop it demands, and what that means for the CI runner here and
+  for the AppImage in stage 03 — the same packages answer both, and this stage
+  is where the question is first forced.
 - Stage 01 landed: the platform data-dir and state/log-dir helpers exist.
 - Double-click default actions are a Windows/Linux affordance; macOS opens the
   menu on click — "where possible" per the Brief, no workaround owed.
