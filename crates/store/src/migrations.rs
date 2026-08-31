@@ -12,11 +12,12 @@
 //! about, and which pull request a comment somebody was sent to deal with was
 //! left on, are all a pull request's rather than a Conversation's now.
 //!
-//! Three of them are a column arriving rather than rows moving between tables —
-//! the Review role's Profile, the branch name somebody settled on, and whether a
-//! branch is still waiting to be named — which is the same kind of one-time
-//! rewrite: the rows already there are given the value that says what was true
-//! of them before the column existed.
+//! Four of them are a column arriving rather than rows moving between tables —
+//! the Review role's Profile, the branch name somebody settled on, whether a
+//! branch is still waiting to be named, and whether a session is idling on a
+//! stored ask — which is the same kind of one-time rewrite: the rows already
+//! there are given the value that says what was true of them before the column
+//! existed.
 //!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
@@ -40,7 +41,37 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     addressed_comments_that_named_no_pull_request(pool).await?;
     conversations_that_had_no_review_profile(pool).await?;
     conversations_whose_branch_name_had_no_owner(pool).await?;
-    conversations_whose_branch_nobody_was_naming(pool).await
+    conversations_whose_branch_nobody_was_naming(pool).await?;
+    stored_asks_nobody_was_idling_on(pool).await
+}
+
+/// Give every stored ask written before there were two kinds of one the column
+/// that says whether a session is idling on it.
+///
+/// Nobody is: every row this reaches is a Deferred Ask, because store-and-nudge
+/// asking arrives with the column. So the column's own default is the whole of
+/// the rewrite, and there is no `UPDATE` under it — see [`super::deferrals`].
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn stored_asks_nobody_was_idling_on(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('deferrals') WHERE name = ?")
+            .bind("idled")
+            .fetch_optional(pool)
+            .await
+            .context("looking for which stored asks a session is idling on")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE deferrals ADD COLUMN idled INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await
+        .context("settling the stored asks written before there were two kinds")?;
+
+    Ok(())
 }
 
 /// Give every Conversation written before a branch could be left to its first

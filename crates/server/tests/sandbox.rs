@@ -229,9 +229,21 @@ fi
         cache: &BuildCache,
         extra: Vec<Bind>,
     ) -> Sandbox {
+        self.sandbox_under(&self.profile, listening, cache, extra)
+    }
+
+    /// And one around a Profile that is not the fixture's own, which is how the
+    /// second agent type gets a sandbox to be probed inside.
+    fn sandbox_under(
+        &self,
+        profile: &store::Profile,
+        listening: SocketAddr,
+        cache: &BuildCache,
+        extra: Vec<Bind>,
+    ) -> Sandbox {
         Sandbox::for_conversation(
             &self.conversation,
-            &self.profile,
+            profile,
             self.home(),
             &Reachable::at(listening),
             &self.skills,
@@ -258,6 +270,95 @@ fi
     /// shared build cache is set.
     fn configure(&self, yaml: &str) {
         std::fs::write(self.settings.config_path(), yaml).unwrap();
+    }
+
+    /// A Profile of the second agent type, whose whole account is one home.
+    ///
+    /// Saved into the same store the fixture's own was, with a home inside the
+    /// Watched Path holding something of the account's — so that "the home is
+    /// bound" is a claim about a directory with contents rather than about an
+    /// empty one.
+    async fn codex_profile(&self) -> store::Profile {
+        let home = self.watched.path().join("codex-account/.codex");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("config.toml"), "# the account's own\n").unwrap();
+
+        store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: "codex".to_owned(),
+                account: store::Account::Codex { home },
+                models: vec!["gpt-5-codex".to_owned()],
+            },
+        )
+        .await
+        .unwrap()
+        .expect("nothing is called that yet")
+    }
+
+    /// And one of the third, whose account is one home as the second's is.
+    ///
+    /// With skills of its own inside it, because grok discovers them there and
+    /// the home is the whole of what the Profile names: nothing is bound over
+    /// anything inside such a home (ADR-0011), and what would be hidden if
+    /// something were is the skills grok itself ships.
+    async fn grok_profile(&self) -> store::Profile {
+        let home = self.watched.path().join("grok-account/.grok");
+        std::fs::create_dir_all(home.join("skills/the-accounts-own")).unwrap();
+        std::fs::write(
+            home.join("skills/the-accounts-own/SKILL.md"),
+            "# what grok found there\n",
+        )
+        .unwrap();
+
+        store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: "grok".to_owned(),
+                account: store::Account::Grok { home },
+                models: vec!["grok-4.6".to_owned()],
+            },
+        )
+        .await
+        .unwrap()
+        .expect("nothing is called that yet")
+    }
+
+    /// And one of the fourth, whose account is one home holding the two
+    /// directories opencode keeps an account in.
+    ///
+    /// Made the way a human makes one — a `HOME=<it> opencode` run leaves
+    /// exactly these — with something inside each so the test can say which
+    /// landed where. The skills among them, because an OpenCode Profile binds
+    /// nothing over anything either: its own are inside the config directory
+    /// the Profile names, and its two global paths are under HOME, where a
+    /// fresh sandbox has nothing at all.
+    async fn opencode_profile(&self) -> store::Profile {
+        let home = self.watched.path().join("opencode-account/opencode");
+        let config = home.join(".config/opencode");
+        let data = home.join(".local/share/opencode");
+
+        std::fs::create_dir_all(config.join("skills/the-accounts-own")).unwrap();
+        std::fs::write(
+            config.join("skills/the-accounts-own/SKILL.md"),
+            "# what opencode found there\n",
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("auth.json"), "{}\n").unwrap();
+
+        store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: "opencode".to_owned(),
+                account: store::Account::OpenCode { home },
+                models: vec!["opencode/big-pickle".to_owned()],
+            },
+        )
+        .await
+        .unwrap()
+        .expect("nothing is called that yet")
     }
 
     /// The host home a sandbox is built around — the fixture's rather than
@@ -959,6 +1060,219 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
     assert_eq!(
         reported["home"], ".claude .claude.json ",
         "everything else in HOME is simply not there"
+    );
+}
+
+/// And for a backend whose whole account is one home, that home is the whole of
+/// what HOME holds — bound where that backend looks for it, and nothing of
+/// Claude's beside it.
+///
+/// Two accounts of different shapes cannot both be right about `~`, so what is
+/// mounted is the account's own type's and only that: a `~/.claude` inside a
+/// Codex session would be an account nothing is running as.
+#[tokio::test]
+async fn a_home_account_is_bound_where_its_backend_looks_for_it() {
+    let fixture = grilling().await;
+    let profile = fixture.codex_profile().await;
+    let sandbox = fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]);
+
+    let reported = probe(
+        &sandbox,
+        r#"
+            dir "$HOME/.codex" codex-home
+            file "$HOME/.codex/config.toml" codex-config
+            dir "$HOME/.claude" claude-dir
+            file "$HOME/.claude.json" claude-config
+            say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+        "#,
+    );
+
+    assert_eq!(
+        reported["codex-home"], "write",
+        "a session writes its own logs and settings under the home it runs as"
+    );
+    assert_eq!(
+        reported["codex-config"], "write",
+        "and what the account already kept there is there to be read"
+    );
+    assert_eq!(reported["claude-dir"], "absent");
+    assert_eq!(reported["claude-config"], "absent");
+    assert_eq!(
+        reported["home"], ".codex ",
+        "everything else in HOME is simply not there, this account's own included"
+    );
+}
+
+/// And a Grok Build account is bound where grok looks for it, with everything
+/// the account keeps inside still there.
+///
+/// The skills among them: grok discovers them inside the home the Profile
+/// names, so nothing is bound over anything in there (ADR-0011) — covering that
+/// directory would hide the skills grok itself ships as well as the ones the
+/// account added.
+#[tokio::test]
+async fn a_grok_account_is_bound_over_the_directory_grok_keeps_one_in() {
+    let fixture = grilling().await;
+    let profile = fixture.grok_profile().await;
+    let sandbox = fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]);
+
+    let reported = probe(
+        &sandbox,
+        r#"
+            dir "$HOME/.grok" grok-home
+            file "$HOME/.grok/skills/the-accounts-own/SKILL.md" the-accounts-own
+            dir "$HOME/.claude" claude-dir
+            say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+            say agent "${VERKSTEAD_AGENT-unset}"
+        "#,
+    );
+
+    assert_eq!(
+        reported["grok-home"], "write",
+        "a session writes its own sessions and settings under the home it runs as"
+    );
+    assert_eq!(
+        reported["the-accounts-own"], "write",
+        "and what the account keeps inside it is left where grok looks for it"
+    );
+    assert_eq!(reported["claude-dir"], "absent");
+    assert_eq!(reported["home"], ".grok ");
+    assert_eq!(reported["agent"], "grok");
+}
+
+/// And an OpenCode account lands as the two directories opencode reads, at the
+/// XDG defaults inside a fresh HOME — so nothing has to be said in the
+/// environment about where they are.
+///
+/// The two of them and no more: the cache and the state directories are the
+/// sandbox's own, made fresh and thrown away with it, because neither is part
+/// of the account. The skills the account keeps are inside its config
+/// directory, and nothing is bound over them (ADR-0011) — the two paths
+/// opencode reads globally are under HOME rather than under the account, and a
+/// fresh HOME has neither.
+///
+/// And the store's name is pinned in the environment, so a session writes the
+/// one file Verkstead named rather than whichever one the release channel the
+/// binary came from would have chosen.
+#[tokio::test]
+async fn an_opencode_account_lands_at_the_xdg_paths_opencode_reads() {
+    let fixture = grilling().await;
+    let profile = fixture.opencode_profile().await;
+    let sandbox = fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]);
+
+    let reported = probe(
+        &sandbox,
+        r#"
+            dir "$HOME/.config/opencode" config
+            dir "$HOME/.local/share/opencode" data
+            file "$HOME/.local/share/opencode/auth.json" auth
+            file "$HOME/.config/opencode/skills/the-accounts-own/SKILL.md" the-accounts-own
+            dir "$HOME/.claude" claude-dir
+            say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+            say cache "$(ls -A "$HOME/.cache" 2>/dev/null | tr '\n' ' ')"
+            say db "${OPENCODE_DB-unset}"
+            say agent "${VERKSTEAD_AGENT-unset}"
+        "#,
+    );
+
+    assert_eq!(
+        reported["config"], "write",
+        "a session writes the configuration of the account it runs as"
+    );
+    assert_eq!(
+        reported["data"], "write",
+        "and its store and its own session records beside them"
+    );
+    assert_eq!(
+        reported["auth"], "write",
+        "the account itself being the file in the second of the two"
+    );
+    assert_eq!(
+        reported["the-accounts-own"], "write",
+        "and the skills it keeps are left where opencode looks for them"
+    );
+    assert_eq!(reported["claude-dir"], "absent");
+    assert_eq!(
+        reported["home"], ".config .local ",
+        "and nothing else of HOME is there — the cache and the state opencode \
+         makes are the sandbox's own"
+    );
+    assert_eq!(
+        reported["cache"], "",
+        "the cache directory is not the account's, so nothing of it is bound"
+    );
+    assert_eq!(
+        reported["db"], "opencode.db",
+        "the store is named by Verkstead rather than by the release channel"
+    );
+    assert_eq!(reported["agent"], "opencode");
+}
+
+/// And an OpenCode session's shell tool holds a command for a day rather than
+/// for two minutes, which is what a blocking ask under this backend stands on.
+///
+/// The Guide tells an OpenCode session to pass a timeout of its own, and this is
+/// what a session that did not gets: opencode's own default is two minutes, and
+/// `verkstead ask` blocks until a human on a phone answers. Without it a
+/// drifted instruction is an ask killed minutes into a wait measured in hours,
+/// with the human's answer landing where nothing is waiting for it.
+///
+/// This backend's alone, as the store's name is: it is opencode's spelling for
+/// opencode's tool, and a sandbox running any other backend has no such tool to
+/// tell anything.
+#[tokio::test]
+async fn an_opencode_session_holds_a_shell_command_far_longer_than_opencodes_own_default() {
+    let fixture = grilling().await;
+    let opencode = fixture.opencode_profile().await;
+
+    let reported = probe(
+        &fixture.sandbox_under(&opencode, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            say timeout "${OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS-unset}"
+        "#,
+    );
+
+    assert_eq!(
+        reported["timeout"], "86400000",
+        "a day in milliseconds, which is the order the wait itself is: a Set \
+         asked in the evening is answered the next morning"
+    );
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        r#"
+            say timeout "${OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS-unset}"
+        "#,
+    );
+
+    assert_eq!(
+        reported["timeout"], "unset",
+        "and nothing is said to a backend with no such tool to say it to"
+    );
+}
+
+/// Which backend a session is running is in its environment, and it is there for
+/// the Guide: `verkstead guide` inside a sandbox prints the asking instructions
+/// for the backend reading them, and nothing else inside says which that is.
+#[tokio::test]
+async fn a_session_is_told_which_backend_it_is_running() {
+    let fixture = grilling().await;
+    let codex = fixture.codex_profile().await;
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        r#"say agent "${VERKSTEAD_AGENT-unset}""#,
+    );
+    assert_eq!(reported["agent"], "claude");
+
+    let reported = probe(
+        &fixture.sandbox_under(&codex, LISTENING, &BuildCache::none(), vec![]),
+        r#"say agent "${VERKSTEAD_AGENT-unset}""#,
+    );
+    assert_eq!(
+        reported["agent"], "codex",
+        "off the account's own shape, so nothing has to be plumbed through to \
+         say which agent is being launched"
     );
 }
 

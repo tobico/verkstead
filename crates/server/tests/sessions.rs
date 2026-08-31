@@ -9,11 +9,19 @@
 //! the real claude would be a test that needed an account, a network and a
 //! model's patience.
 //!
-//! The stub is handed exactly what claude would be: `--model`, the Profile's
-//! model, and then the Brief, with the session name and the backend's own flags
-//! after it. So `$1` is the model it was told to run and `$2` is the Brief it
-//! was primed with — which is how these read them back, and why everything
-//! Verkstead adds to that line goes on the end of it.
+//! The stub is handed exactly what the backend it stands where would be: the
+//! model flag, the Profile's model, and then the Brief, with the session name
+//! and the backend's own flags after it. So `$1` is the model it was told to
+//! run, and everything Verkstead adds to that line goes on the end of it.
+//!
+//! **The Brief is `$2` on three of the four, and one place later on the
+//! fourth.** Claude Code, codex and grok each take it as the one positional
+//! argument; opencode's positional is the project to start in, so its Brief
+//! goes under `--prompt` and `$2` is the flag — see `Line::prompt` in the
+//! server's `sessions` module. The two stubs a session of that type runs put
+//! the two back into the order the rest of this reads them in, before anything
+//! looks at either, so every case below reads `$1` and `$2` whichever backend
+//! it is standing in for.
 //!
 //! Watching a live session is here too, at the end, and is the one thing asked
 //! over a socket rather than of the Router: an upgrade is a connection rather
@@ -41,6 +49,7 @@ use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
+use sqlx::{Executor, SqlitePool};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -185,6 +194,16 @@ impl Grilling {
     /// the bench rather than something to thread through.
     fn repo(&self) -> PathBuf {
         self._watched.path().join("verkstead")
+    }
+
+    /// And the home the OpenCode Profile this bench saved keeps its account in.
+    ///
+    /// [`Bench::on_one_home`] puts that Profile's home at one place under the
+    /// same directory, so where opencode's account is is a fact about the bench
+    /// rather than something to thread through — the same bargain
+    /// [`Grilling::repo`] makes.
+    fn opencode_account(&self) -> PathBuf {
+        self._watched.path().join("opencode").join(".opencode")
     }
 
     /// The Conversation as the workbench reads it.
@@ -432,9 +451,35 @@ impl Grilling {
         id
     }
 
-    /// What both of them are made of: post the Set over the agent API and read
+    /// The same again on a backend whose sessions cannot wait: the ask says
+    /// nothing about the channel, and the reply says the Set was stored.
+    ///
+    /// The one assertion the ask itself carries, because it is what the CLI
+    /// reads to know it is not to open a wait — see `verkstead_schema`'s
+    /// `SetCreated`.
+    async fn ask_stored(&self, yaml: &str) -> i64 {
+        let created = self.submitting(yaml, "").await;
+
+        assert!(
+            created.stored,
+            "an ordinary ask on a store-and-nudge backend comes back stored, \
+             which is what tells the CLI to return: {created:?}",
+        );
+
+        self.asked();
+
+        created.id
+    }
+
+    /// What all of them are made of: post the Set over the agent API and read
     /// its id back.
     async fn asking(&self, yaml: &str, how: &str) -> i64 {
+        self.submitting(yaml, how).await.id
+    }
+
+    /// And the whole of what the server said, for the one caller that reads
+    /// more of it than the id.
+    async fn submitting(&self, yaml: &str, how: &str) -> verkstead_schema::SetCreated {
         let (status, body) = fetch(
             &self.app,
             Request::builder()
@@ -448,8 +493,7 @@ impl Grilling {
 
         assert_eq!(status, StatusCode::CREATED, "the Set was refused: {body}");
 
-        let created: verkstead_schema::SetCreated = serde_saphyr::from_str(&body).unwrap();
-        created.id
+        serde_saphyr::from_str(&body).unwrap()
     }
 
     /// Tell the stub that the Set it would have sent is up, which is what stops
@@ -462,6 +506,24 @@ impl Grilling {
 
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(directory.join("asked"), "").unwrap();
+    }
+
+    /// And take it away again, which is what says the Set that was up has been
+    /// answered and no other is.
+    ///
+    /// **The marker is one Conversation's rather than one session's**, the
+    /// handoff directory being the Conversation's — so a Set answered early in
+    /// a run would otherwise go on telling every session after it that somebody
+    /// is asking. What that costs is a session that falls straight through the
+    /// loop it was meant to talk through, goes quiet with nothing of its own
+    /// open, and is ended before the test has asked it anything: the fixture
+    /// racing an ender rather than anything about the work.
+    fn asked_nothing(&self) {
+        let asked = handoff_directory(self).join("asked");
+
+        if asked.exists() {
+            std::fs::remove_file(asked).unwrap();
+        }
     }
 
     /// Answer it the way the human does, from the browser.
@@ -955,6 +1017,16 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // as the wrap-up starts, and the tests that want the window before it hold
     // it open themselves.
     reviewing: Duration::ZERO,
+    // Clear of the grace on both sides and clear of the three-second mark a
+    // session is idle on once its screen says so, where a server's is five
+    // minutes against sixty seconds and three. Nothing here is judged by it
+    // unless its stub draws a screen — see [`DRAWING`] — and the fixtures that
+    // are want the window: a silence mid-turn has to be able to run past the
+    // grace without reaching this, a session caught by this has to be one the
+    // grace alone would have caught much sooner, and a backend read by its
+    // at-work line has to be able to go quiet for the three seconds that end it
+    // without this ending it first.
+    long_stop: paced(Duration::from_millis(6000)),
 });
 
 /// And the same at a pace that does look, for the tests that are about the
@@ -1522,6 +1594,190 @@ async fn grilling(stub: &str) -> Grilling {
     grilling_spilling(tempfile::tempdir().unwrap(), stub, PULL_REQUEST).await
 }
 
+/// The same, grilled under an account of the second agent type — one home
+/// rather than Claude's pair.
+///
+/// The stub stands where that backend's binary goes, as it stands where claude
+/// does: what these fixtures are for is what Verkstead does around a session,
+/// and a second backend's own program is the one thing they never run.
+async fn grilling_on_codex(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::GrillingOnCodex,
+        Origin::None,
+        None,
+    )
+    .await
+}
+
+/// The same with every role on that Profile, spilling what its sessions were
+/// told somewhere that outlives their worktrees and with a `gh` of the caller's
+/// choosing — which is what a wrap-up on the second backend needs.
+async fn grilling_spilling_on_codex(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    grilling_however_started(
+        spill,
+        stub,
+        gh,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnCodex,
+        Origin::None,
+        None,
+    )
+    .await
+}
+
+/// And the same with every role on that Profile and a stub that draws a full
+/// screen where its binary goes, judged idle by the line it draws at its prompt
+/// rather than by its silence.
+///
+/// Every role, because what these are about is what happens *around* a session
+/// that repaints — the ender, the rescue, the stop — and those are the run's
+/// sessions rather than the grilling one alone.
+///
+/// The signature is the suite's rather than a backend's: the one backend that
+/// ships one draws an at-work line instead — see [`grilling_at_work`] — and the
+/// backends that will draw a prompt of their own are not here yet. So what
+/// stands where a backend goes is a stub drawing whatever it is told to — see
+/// [`AT_THE_PROMPT`] and [`A_PROMPT_THAT_DRIFTED`].
+async fn grilling_drawing(stub: &str, signature: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnCodex,
+        Origin::None,
+        Some(signature),
+    )
+    .await
+}
+
+/// And the same with a stub that draws the way codex draws, with nothing handed
+/// in to read it by.
+///
+/// The difference from [`grilling_drawing`] is the whole point: there the suite
+/// stands both halves — the stub's prompt and the signature Verkstead looks for
+/// — because no backend ships a prompt yet. Here only the stub is the suite's,
+/// and what finds its at-work line is the constant the server already carries
+/// for this backend.
+async fn grilling_at_work(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnCodex,
+        Origin::None,
+        None,
+    )
+    .await
+}
+
+/// And the same again on the third backend, grilled under an account of its
+/// type — one home, as the second's is.
+///
+/// Which is what the tests about grok's own reading of itself stand on, whether
+/// that is its at-work hint or the log it keeps: a session run under another
+/// type's Profile would be read by that type's constants and prove nothing about
+/// either backend.
+async fn grilling_on_grok(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnGrok,
+        Origin::None,
+        None,
+    )
+    .await
+}
+
+/// And the same again on the fourth, whose account is one home as well — two
+/// directories inside it rather than the directory itself, which is what
+/// [`Bench::everything_on_opencode`] makes.
+///
+/// What the tests about opencode's own reading of itself stand on, for the
+/// reason [`grilling_on_grok`] is there: a session run under another type's
+/// Profile would be judged by that type's constants, and the whole claim here
+/// is that this backend is judged by its own.
+async fn grilling_on_opencode(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnOpenCode,
+        Origin::None,
+        None,
+    )
+    .await
+}
+
+/// The same with every role on that Profile, spilling what its sessions were
+/// told somewhere that outlives their worktrees — which is what the tests about
+/// opencode's own store need, the store being written for a session from
+/// outside the sandbox it is running in.
+async fn grilling_spilling_on_opencode(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    grilling_however_started(
+        spill,
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        Pickers::EverythingOnOpenCode,
+        Origin::None,
+        None,
+    )
+    .await
+}
+
+/// What Verkstead is told this backend has on its Screen when it is sitting at
+/// its prompt — one line, the whole of the coupling to somebody else's display.
+const AT_THE_PROMPT: &str = "▌ ready for anything";
+
+/// And what the stub draws where that wording has moved on without Verkstead: a
+/// prompt that is not the one being looked for, which is a backend that renamed
+/// its prompt in a release and a signature nobody has caught up with yet.
+const A_PROMPT_THAT_DRIFTED: &str = "◆ what would you like to do?";
+
+/// The model that Profile lists, which is what its sessions are launched on.
+const CODEX_MODEL: &str = "gpt-5-codex";
+
+/// And the one its grilling role runs on where every role is on that Profile.
+///
+/// A model apiece for the same reason the Claude fixtures give each role a
+/// Profile of its own: the stubs tell the session that breaks the work down
+/// from the ones that build it by the model they were launched on — see
+/// [`A_BACKLOG_OF_ONE`] — and a Conversation whose roles all ran the same model
+/// would be one where no stub could tell what it had been sent to do.
+const CODEX_GRILLING_MODEL: &str = "gpt-5-codex-grilling";
+
+/// The model a Grok Build Profile lists, and the one its grilling role runs on
+/// where every role is on that Profile — the pair [`CODEX_MODEL`] and
+/// [`CODEX_GRILLING_MODEL`] are, and for the same reason.
+const GROK_MODEL: &str = "grok-4.6";
+
+/// See [`GROK_MODEL`].
+const GROK_GRILLING_MODEL: &str = "grok-4.6-grilling";
+
+/// And the pair an OpenCode Profile lists, which are `provider/model` strings
+/// because that is the whole of what opencode is told about a model — the
+/// provider it comes from is the front half of the same word.
+const OPENCODE_MODEL: &str = "opencode/big-pickle";
+
+/// See [`OPENCODE_MODEL`].
+const OPENCODE_GRILLING_MODEL: &str = "opencode/big-pickle-grilling";
+
 /// The same, with a second repository registered beside this one and added to
 /// the Conversation as a companion before the press — which is a companion in
 /// the mode one is added in, read-only.
@@ -1617,8 +1873,9 @@ async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> 
         gh,
         *BRISKLY,
         &[],
-        Skipping::Unreviewed,
+        Pickers::Unreviewed,
         Origin::None,
+        None,
     )
     .await
 }
@@ -1633,20 +1890,22 @@ async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> G
         gh,
         *BRISKLY,
         &[],
-        Skipping::Ungrilled,
+        Pickers::Ungrilled,
         Origin::None,
+        None,
     )
     .await
 }
 
-/// Which of its two pickers' *no session* rows the Conversation a fixture builds
-/// was moved onto, neither being every fixture but the ones about picking one.
+/// How the Conversation a fixture builds was left on the setup card: every
+/// picker under a Pairing, one of them moved onto its *no session* row, or the
+/// grilling one moved onto an account of the second agent type.
 ///
-/// The one thing the builders below differ over, and it is settled on the setup
-/// card while the Brief drafts — which is why it is a parameter of the build
-/// rather than something a test does afterwards.
+/// The one thing the builders below differ over, and all of it is settled while
+/// the Brief drafts — which is why it is a parameter of the build rather than
+/// something a test does afterwards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Skipping {
+enum Pickers {
     /// Every role under a Pairing of its own.
     UnderEveryPairing,
 
@@ -1655,6 +1914,20 @@ enum Skipping {
 
     /// The human picked *No review*, so the wrap-up runs none.
     Unreviewed,
+
+    /// The grilling role runs on a Profile whose whole account is one home,
+    /// which is every agent type after Claude — see [`Bench::grilling_on_codex`].
+    GrillingOnCodex,
+
+    /// And every role on that Profile, which is a Conversation whose whole run
+    /// is on the second backend — see [`Bench::everything_on_codex`].
+    EverythingOnCodex,
+
+    /// The same on the third backend — see [`Bench::everything_on_grok`].
+    EverythingOnGrok,
+
+    /// And on the fourth — see [`Bench::everything_on_opencode`].
+    EverythingOnOpenCode,
 }
 
 /// The same with a read-write companion beside it, for the tests about a
@@ -1692,8 +1965,9 @@ async fn grilling_at_pace(
         gh,
         pace,
         companions,
-        Skipping::UnderEveryPairing,
+        Pickers::UnderEveryPairing,
         Origin::None,
+        None,
     )
     .await
 }
@@ -1711,8 +1985,9 @@ async fn grilling_pushing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gri
         gh,
         *BRISKLY,
         &[],
-        Skipping::UnderEveryPairing,
+        Pickers::UnderEveryPairing,
         Origin::Cloned,
+        None,
     )
     .await
 }
@@ -1731,18 +2006,20 @@ enum Origin {
     Cloned,
 }
 
-/// And the whole of it, `skipping` included — which is the setup card pressed
+/// And the whole of it, the pickers included — which is the setup card pressed
 /// the way the human presses it, every picker filled and then one of them moved.
+#[allow(clippy::too_many_arguments)]
 async fn grilling_however_started(
     spill: tempfile::TempDir,
     stub: &str,
     gh: &str,
     pace: Pace,
     companions: &[(&str, CompanionMode)],
-    skipping: Skipping,
+    pickers: Pickers,
     origin: Origin,
+    signature: Option<&str>,
 ) -> Grilling {
-    let bench = bench_at_pace(spill, stub, gh, pace).await;
+    let bench = bench_at_pace(spill, stub, gh, pace, signature).await;
     let app = &bench.app;
 
     // Before the Conversation is started, so that every worktree cut from this
@@ -1781,10 +2058,14 @@ async fn grilling_however_started(
 
     bench.under_every_pairing(id).await;
 
-    match skipping {
-        Skipping::UnderEveryPairing => {}
-        Skipping::Ungrilled => bench.ungrilled(id).await,
-        Skipping::Unreviewed => bench.unreviewed(id).await,
+    match pickers {
+        Pickers::UnderEveryPairing => {}
+        Pickers::Ungrilled => bench.ungrilled(id).await,
+        Pickers::Unreviewed => bench.unreviewed(id).await,
+        Pickers::GrillingOnCodex => bench.grilling_on_codex(id).await,
+        Pickers::EverythingOnCodex => bench.everything_on_codex(id).await,
+        Pickers::EverythingOnGrok => bench.everything_on_grok(id).await,
+        Pickers::EverythingOnOpenCode => bench.everything_on_opencode(id).await,
     }
 
     // While it is still drafting, which is the only time a companion can be
@@ -1875,6 +2156,167 @@ impl Bench {
             // they send is which of their rows was picked — see
             // [`Bench::ungrilled`] and [`Bench::unreviewed`].
             let picked = match role {
+                "grilling" | "review" => serde_json::json!({ "pairing": pairing }),
+                _ => pairing,
+            };
+
+            let chosen: verkstead_render::ProfileChosen = post(
+                &self.app,
+                &format!("/api/ui/conversations/{id}/{role}-pairing"),
+                &picked,
+            )
+            .await;
+            assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+        }
+    }
+
+    /// And pick the grilling role under an account of the second agent type,
+    /// whose whole account is one home rather than Claude's pair.
+    ///
+    /// Pressed after [`Bench::under_every_pairing`] for the reason
+    /// [`Bench::unreviewed`] is: it is the picker moved off what it was filled
+    /// with, which is what the human does on the setup card.
+    async fn grilling_on_codex(&self, id: i64) {
+        self.on_codex(id, &[("grilling", CODEX_MODEL)]).await;
+    }
+
+    /// And the same for every role at once, which is what a Conversation whose
+    /// whole run is on the second backend looks like.
+    ///
+    /// What the tests about the store-and-nudge channel want: the sessions that
+    /// ask and are ended on quiet are the wrap-up's, so putting only the
+    /// grilling role on that backend would leave every ask of theirs blocking.
+    ///
+    /// The grilling role on a model of its own, because one Profile is running
+    /// every role here and the stubs tell the session that breaks the work down
+    /// from the ones that build it by the model — see [`CODEX_GRILLING_MODEL`].
+    async fn everything_on_codex(&self, id: i64) {
+        self.on_codex(
+            id,
+            &[
+                ("grilling", CODEX_GRILLING_MODEL),
+                ("implementation", CODEX_MODEL),
+                ("review", CODEX_MODEL),
+            ],
+        )
+        .await;
+    }
+
+    /// And every role on a Grok Build Profile, which is the same again on the
+    /// third backend.
+    ///
+    /// Every role for the reason [`Bench::everything_on_codex`] is, and the
+    /// grilling one on a model of its own for the reason it is there: one
+    /// Profile runs the lot, and the stubs tell the session that breaks the
+    /// work down from the ones that build it by the model.
+    async fn everything_on_grok(&self, id: i64) {
+        self.on_one_home(
+            id,
+            "Grok",
+            "grok",
+            &[],
+            &[GROK_MODEL, GROK_GRILLING_MODEL],
+            &[
+                ("grilling", GROK_GRILLING_MODEL),
+                ("implementation", GROK_MODEL),
+                ("review", GROK_MODEL),
+            ],
+        )
+        .await;
+    }
+
+    /// And every role on an OpenCode Profile, which is the same again on the
+    /// fourth backend.
+    ///
+    /// The two directories are what makes that home an opencode account: this
+    /// type's home is judged by what opencode keeps an account in rather than
+    /// by the directory holding them, so a home without them is a Profile the
+    /// form refuses to save.
+    async fn everything_on_opencode(&self, id: i64) {
+        self.on_one_home(
+            id,
+            "OpenCode",
+            "opencode",
+            &[".config/opencode", ".local/share/opencode"],
+            &[OPENCODE_MODEL, OPENCODE_GRILLING_MODEL],
+            &[
+                ("grilling", OPENCODE_GRILLING_MODEL),
+                ("implementation", OPENCODE_MODEL),
+                ("review", OPENCODE_MODEL),
+            ],
+        )
+        .await;
+    }
+
+    /// The Profile both of the Codex pickers pick, and the pressing of the
+    /// pickers named, each on the model it is paired with.
+    async fn on_codex(&self, id: i64, roles: &[(&str, &str)]) {
+        self.on_one_home(
+            id,
+            "Codex",
+            "codex",
+            &[],
+            &[CODEX_MODEL, CODEX_GRILLING_MODEL],
+            roles,
+        )
+        .await;
+    }
+
+    /// Saving a Profile of an agent type whose whole account is one home, and
+    /// pressing the pickers named onto it.
+    ///
+    /// One body for every such type — which is every one after Claude — because
+    /// what differs between them is the word in the type and the directory the
+    /// account keeps, and a second copy of this would be a second place to
+    /// forget one of them.
+    ///
+    /// `inside` is what has to be *in* that home for it to be an account of
+    /// this type, and it is the last of the differences between them: none for
+    /// the two whose home is the whole of the account, and the two directories
+    /// opencode keeps an account in for an OpenCode one.
+    async fn on_one_home(
+        &self,
+        id: i64,
+        agent_type: &str,
+        name: &str,
+        inside: &[&str],
+        models: &[&str],
+        roles: &[(&str, &str)],
+    ) {
+        let home = self.watched.path().join(name).join(format!(".{name}"));
+        std::fs::create_dir_all(&home).unwrap();
+
+        for directory in inside {
+            std::fs::create_dir_all(home.join(directory)).unwrap();
+        }
+
+        let saved: ProfileSaved = post(
+            &self.app,
+            "/api/ui/profiles",
+            &serde_json::json!({
+                "name": name,
+                "account": { "agent_type": agent_type, "home": home },
+                "models": models,
+            }),
+        )
+        .await;
+        assert_eq!(saved, ProfileSaved::Saved);
+
+        let profiles: Vec<verkstead_render::ProfileEntry> =
+            get(&self.app, "/api/ui/profiles").await;
+        let profile_id = profiles
+            .into_iter()
+            .find(|profile| profile.name == name)
+            .expect("the Profile just saved should be on the list")
+            .id;
+
+        for (role, model) in roles {
+            let pairing = serde_json::json!({ "profile_id": profile_id, "model": model });
+
+            // The two pickers that offer a row which is no account at all send
+            // which row was picked, exactly as [`Bench::under_every_pairing`]
+            // does.
+            let picked = match *role {
                 "grilling" | "review" => serde_json::json!({ "pairing": pairing }),
                 _ => pairing,
             };
@@ -1988,13 +2430,19 @@ static ROOM: LazyLock<Arc<tokio::sync::Semaphore>> = LazyLock::new(|| {
 });
 
 async fn bench(spill: tempfile::TempDir, stub: &str, gh: &str) -> Bench {
-    bench_at_pace(spill, stub, gh, *BRISKLY).await
+    bench_at_pace(spill, stub, gh, *BRISKLY, None).await
 }
 
 /// The same, at a pace of the caller’s choosing — which is what the tests about
 /// the stall sweep need, that being the one thing [`BRISKLY`] deliberately keeps
 /// slow.
-async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pace) -> Bench {
+async fn bench_at_pace(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    pace: Pace,
+    signature: Option<&str>,
+) -> Bench {
     // Before anything is built, so that a bench queued behind the suite's
     // ceiling costs nothing while it waits — see [`ROOM`].
     let room = ROOM
@@ -2033,6 +2481,16 @@ async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pac
         Settings::in_data_dir(state.path()),
     )
     .at_pace(pace);
+
+    // And, where this fixture's stub draws a full screen rather than printing
+    // lines, the prompt it draws when its turn is over — which stands where a
+    // backend's own signature goes, for the backends that will draw one. A
+    // fixture that hands in nothing leaves the server reading its own, which is
+    // how the Codex ones are written; see the server's `sessions` module.
+    let agents = match signature {
+        Some(signature) => agents.drawing(signature),
+        None => agents,
+    };
 
     let app = router_running_sessions(
         pool,
@@ -2785,6 +3243,671 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// A session on the second agent type runs the same way: launched into a
+/// sandbox with its Profile's one home bound where that backend looks for it,
+/// on the model its Pairing names, told which backend it is.
+///
+/// And its record is the Capture. This stub writes no rollout, and a Codex
+/// session whose log never appears is a session with nothing to follow — which
+/// is ADR-0006's rule for a session with no log and not a new one. Nothing is
+/// said about it either: a log that has not turned up is the ordinary state of
+/// a session's first seconds.
+#[tokio::test]
+async fn a_session_on_a_second_backend_runs_from_its_home_with_the_capture_as_its_record() {
+    let fixture = grilling_on_codex(
+        r#"
+        printf 'model=%s\n' "$1"
+        printf 'agent=%s\n' "${VERKSTEAD_AGENT-unset}"
+        printf 'home=%s\n' "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+        printf 'prompt=%s' "$2"
+        "#,
+    )
+    .await;
+
+    let summary = fixture
+        .until(|view| output(view).filter(|output| !output.running).cloned())
+        .await;
+
+    let said = fixture.capture(summary.id).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(&format!("model={CODEX_MODEL}\n")),
+        "the grilling Pairing's model is what the session runs on: {said:?}"
+    );
+    assert!(
+        said.contains("agent=codex\n"),
+        "and the session is told which backend it is, which is what tailors the \
+         Guide it reads: {said:?}"
+    );
+    assert!(
+        said.contains("home=.codex \n"),
+        "and its one home is the whole of what HOME holds, bound where that \
+         backend looks for it: {said:?}"
+    );
+    assert!(
+        said.contains(BRIEF),
+        "and the Brief is what the grilling starts from, as on any backend: {said:?}"
+    );
+
+    assert!(
+        fixture.transcript(summary.id).await.is_empty(),
+        "a Codex session that wrote no rollout has no Transcript"
+    );
+    assert_eq!(
+        summary.turns, None,
+        "and its row shows no metric rather than a count of none"
+    );
+}
+
+/// And the line it is launched with is codex's own: the model as `-m`, the
+/// Brief as the one positional, the approval bypass and the inline screen after
+/// them, and no session id at all.
+///
+/// The stub reads its whole line back, which is how this is provable without an
+/// account: what a real codex does with the line is codex's business, and what
+/// could be wrong here is Verkstead's end of it.
+///
+/// **The account is configured from the line rather than from its directory.**
+/// The credential store is file-backed because there is no keyring inside the
+/// sandbox, and the Worktree is trusted so that no version of codex stops at a
+/// trust prompt in front of nobody — and the Profile's own home is left exactly
+/// as the account keeps it, which is what the last of these reads.
+#[tokio::test]
+async fn a_codex_session_is_launched_with_the_line_codex_takes() {
+    let fixture = grilling_on_codex(
+        r#"
+        printf 'flag=%s\n' "$0"
+        printf 'model=%s\n' "$1"
+        printf 'where=%s\n' "$(pwd)"
+        printf 'account=%s\n' "$(ls -A "$HOME/.codex" | tr '\n' ' ')"
+        for arg in "$@"; do printf 'arg=%s\n' "$arg"; done
+        printf 'prompt=%s' "$2"
+        "#,
+    )
+    .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("flag=-m\n") && said.contains(&format!("model={CODEX_MODEL}\n")),
+        "codex is told its model with -m: {said:?}"
+    );
+    assert!(
+        said.contains(BRIEF),
+        "and the Brief is the one positional after it: {said:?}"
+    );
+
+    for flag in [
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--no-alt-screen",
+        "cli_auth_credentials_store=\"file\"",
+    ] {
+        assert!(
+            said.contains(&format!("arg={flag}\n")),
+            "codex's line carries {flag}: {said:?}"
+        );
+    }
+
+    // The directory codex will actually be sitting in, read off the session
+    // rather than worked out here: a seed naming any other path would be a trust
+    // prompt in front of nobody.
+    let where_it_ran = said
+        .lines()
+        .find_map(|line| line.strip_prefix("where="))
+        .expect("the session says where it ran");
+    assert!(
+        said.contains(&format!(
+            "arg=projects={{\"{where_it_ran}\"={{trust_level=\"trusted\"}}}}\n"
+        )),
+        "and it trusts the Worktree it was launched in — as a whole table, which \
+         is what a path with a dot in it needs: {said:?}"
+    );
+
+    assert!(
+        !said.contains("--session-id"),
+        "codex takes no session id, so it is told none: {said:?}"
+    );
+    assert!(
+        said.contains("account=\n"),
+        "and Verkstead writes nothing into the Profile's own directory: {said:?}"
+    );
+}
+
+/// A Codex session's log is found rather than named: codex takes no session id,
+/// so what says a rollout is this session's is the Worktree its own first line
+/// names and its having appeared after this session was launched.
+///
+/// The stub writes three logs into the one store its account keeps, which is
+/// what a machine running more than one session at a time actually has in
+/// there: the session's own rollout, one belonging to a session in another
+/// Worktree written a moment before it, and a compressed older one of this very
+/// Worktree. Only the first is the record of this session, and the two beside
+/// it say so in the only way a test can — by being followed instead if the
+/// finder gets it wrong.
+///
+/// And the following itself is stage 02's, unchanged: the lines reach the
+/// Transcript exactly as codex wrote them, in order, with a line caught
+/// half-written held until the rest of it arrives.
+#[tokio::test]
+async fn a_codex_session_follows_the_rollout_that_names_its_own_worktree() {
+    let fixture = grilling_on_codex(
+        r#"
+        day=$HOME/.codex/sessions/$(date +%Y/%m/%d)
+        mkdir -p "$day"
+
+        # A session of another Conversation, writing into the same account's
+        # store at the same moment.
+        printf '{"type":"session_meta","payload":{"cwd":"/srv/worktrees/tables"}}\n' \
+            > "$day/rollout-2026-08-30T17-47-00-aaaa.jsonl"
+
+        # And this Worktree's own work from a week ago, compressed where codex
+        # leaves the older ones.
+        printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$(pwd)" \
+            > "$day/rollout-2026-08-30T17-47-01-bbbb.jsonl.zst"
+
+        printf 'where=%s\n' "$(pwd)"
+
+        log=$day/rollout-2026-08-30T17-47-02-cccc.jsonl
+        printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$(pwd)" > "$log"
+        printf 'Reading the brief.\n'
+
+        printf '{"type":"response_item","payload":{"type":"mess' >> "$log"
+        sleep 2
+        printf 'age","role":"assistant"}}\n' >> "$log"
+        printf 'Asking.\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 2).await;
+
+    // The directory the session was actually sitting in, read off what it
+    // printed rather than worked out here — which is what makes the first line
+    // below a match rather than a restatement.
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+    let worktree = said
+        .lines()
+        .find_map(|line| line.strip_prefix("where="))
+        .expect("the session says where it ran");
+
+    assert_eq!(
+        transcript,
+        vec![
+            format!(r#"{{"type":"session_meta","payload":{{"cwd":"{worktree}"}}}}"#),
+            r#"{"type":"response_item","payload":{"type":"message","role":"assistant"}}"#
+                .to_owned(),
+        ],
+        "the rollout naming this session's own Worktree is the one followed, and its \
+         lines should be kept exactly as codex wrote them — a line caught half-written \
+         waiting for the rest of itself"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// And what the row beside that session shows is read off the same rollout: how
+/// many turns its conversation has taken, and the last thing it said.
+///
+/// Both off the reading the Transcript pane draws, which is what keeps a Codex
+/// session's row saying what a Claude session's row says. The lines codex
+/// writes twice are what proves it: the turn the screen drew is counted once
+/// and quoted once, and the same turn again as the model was sent it is
+/// bookkeeping and neither.
+#[tokio::test]
+async fn a_codex_sessions_row_is_summarised_from_the_rollout_the_pane_draws() {
+    let fixture = grilling_on_codex(
+        r#"
+        day=$HOME/.codex/sessions/$(date +%Y/%m/%d)
+        mkdir -p "$day"
+        log=$day/rollout-2026-08-30T17-47-02-cccc.jsonl
+
+        printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$(pwd)" > "$log"
+        printf '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u-1","content":[{"type":"text","text":"Where should the counter live?"}]}}}\n' >> "$log"
+        printf '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"m-1","content":[{"type":"Text","text":"In the store, beside the window it counts over."}]}}}\n' >> "$log"
+        printf '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1240}}}}\n' >> "$log"
+        printf '{"type":"response_item","payload":{"type":"message","id":"m-1","role":"assistant","content":[{"type":"output_text","text":"In the store, beside the window it counts over."}]}}\n' >> "$log"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let summary = fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| !output.latest.is_empty())
+                .cloned()
+        })
+        .await;
+
+    assert_eq!(
+        summary.latest, "In the store, beside the window it counts over.",
+        "the row quotes what the agent said and not what a tool or the backend did"
+    );
+    assert_eq!(
+        summary.turns,
+        Some(2),
+        "the turn put to it and the turn it took — and neither the token count \
+         nor the same turn over again as the model was sent it"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// A Grok session's log is named rather than found: grok takes the session id at
+/// launch, so the conversation it keeps is the file under the name Verkstead
+/// gave it.
+///
+/// What Verkstead does not know is the directory grok grouped that session
+/// under. Grok's store is organised by working directory and then by session,
+/// and the outer name is grok's own encoding of the path — so the stub writes
+/// its log under an encoding of its own, as grok would have, and nothing in
+/// Verkstead works that name out. Two things sit beside it that a real store
+/// also has in it and that are not this session's conversation: another
+/// Conversation's session under its own encoded directory, and the index entry
+/// grok keeps next to the log itself.
+///
+/// And the following is stage 02's, unchanged: the lines reach the Transcript
+/// exactly as grok wrote them, in order, with a line caught half-written held
+/// until the rest of it arrives. What is added here is the far end of that —
+/// the pane over those same lines, drawing the session updates grok wrote as
+/// the conversation they record.
+#[tokio::test]
+async fn a_grok_session_follows_the_log_it_was_named_for() {
+    let fixture = grilling_on_grok(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        store=$HOME/.grok/sessions
+
+        # A session of another Conversation, in the same account's store, under
+        # the directory grok grouped that Worktree's sessions in.
+        elsewhere=$store/%2Fsrv%2Fworktrees%2Ftables/6f8b17c2-not-this-session
+        mkdir -p "$elsewhere"
+        printf '{"method":"session/update","params":{"sessionId":"6f8b17c2-not-this-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Another Conversation."}}}}\n' \
+            > "$elsewhere/updates.jsonl"
+
+        # And this session's own, under grok's encoding of the directory it is
+        # running in — which the stub stands in for, since nothing here is grok.
+        encoded=$(pwd | sed 's|/|%2F|g')
+        mine=$store/$encoded/$name
+        mkdir -p "$mine"
+
+        printf 'grouped=%s\n' "$encoded"
+
+        # The store's index entry, which sits beside the log and is not it.
+        printf '{"title":"Rate limiting","model":"grok-4.6"}\n' > "$mine/summary.json"
+
+        printf 'named=%s\n' "$name"
+
+        log=$mine/updates.jsonl
+        printf '{"method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Rate limiting"}}}}\n' "$name" > "$log"
+        printf 'Reading the brief.\n'
+
+        printf '{"method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"te' "$name" >> "$log"
+        sleep 2
+        printf 'xt","text":"Where does the counter live?"}}}}\n' >> "$log"
+        printf 'Asking.\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 2).await;
+
+    // The name it was actually run under, read off what it printed: what makes
+    // the log above this session's own rather than whatever else was in there,
+    // and what grok names the session inside every line of it.
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+    let name = said
+        .lines()
+        .find_map(|line| line.strip_prefix("named="))
+        .expect("the session says what it was named");
+
+    assert_eq!(
+        transcript,
+        [
+            r#"{"method":"session/update","params":{"sessionId":"NAMED","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Rate limiting"}}}}"#,
+            r#"{"method":"session/update","params":{"sessionId":"NAMED","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Where does the counter live?"}}}}"#,
+        ]
+        .map(|line| line.replace("NAMED", name)),
+        "the log under the name Verkstead gave this session is the one followed, \
+         and its lines should be kept exactly as grok wrote them — a line caught \
+         half-written waiting for the rest of itself"
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert_eq!(
+        verkstead_store::session_id(&pool, event).await.unwrap(),
+        Some(name.to_owned()),
+        "and that name is the one Verkstead wrote down beside the session's Event"
+    );
+
+    // And the log really was inside an encoded directory, which is what says the
+    // store was walked rather than the path guessed at: a stub that had left the
+    // group out would have put its log where a lookup finds it without walking
+    // anything, and proved nothing.
+    let grouped = said
+        .lines()
+        .find_map(|line| line.strip_prefix("grouped="))
+        .expect("the session says what it grouped its log under");
+
+    assert!(
+        grouped.contains("%2F"),
+        "the group directory is grok's own encoding of the working directory: {grouped:?}"
+    );
+    assert!(
+        said.contains("Reading the brief.\n"),
+        "following the log should not cost the Capture anything: {said:?}"
+    );
+
+    let view = fixture.view().await;
+    let printed = output(&view).expect("the session is on the Timeline");
+
+    assert!(
+        matches!(printed.turns, Some(turns) if turns > 0),
+        "and the row shows a Transcript rather than nothing: {:?}",
+        printed.turns
+    );
+
+    // The details pane over the same lines, which is where the following and
+    // the reading meet: the log grok wrote, followed under the name Verkstead
+    // gave it, drawn as the conversation it records.
+    let drawn = fixture.spoken(event, 2).await;
+
+    assert!(
+        matches!(
+            &drawn.turns[..],
+            [Turn::Put(put), Turn::Prose(prose)]
+                if put.html.contains("Rate limiting")
+                    && prose.html.contains("Where does the counter live?")
+        ),
+        "the pane should draw what has been stored: {:?}",
+        drawn.turns
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// An OpenCode session's record is found rather than named, and it is not a
+/// file: opencode takes no session id, and it keeps its sessions in one database
+/// under its account. So what says a session in there is this one is the
+/// directory it recorded opening in and its having been created after this
+/// session was launched — Codex's rule, against a store of another shape.
+///
+/// The store is written from outside the sandbox, because there is no `sqlite3`
+/// on the system profile for a stub to write one with — and it is written the
+/// way a machine running more than one session at a time actually has it: this
+/// session's own, one belonging to a session in another Worktree created a
+/// moment before it, and an older one of this very Worktree. Only the first is
+/// the record of this session, and the two beside it say so in the only way a
+/// test can — by being followed instead if the finder gets it wrong.
+///
+/// What lands is each record whole: opencode's own kind, its place in the
+/// session's sequence, and the payload byte for byte — and what the row counts
+/// of it is what the pane would draw, which for these two is the turn put to
+/// the session and nothing for the session's own row.
+#[tokio::test]
+async fn an_opencode_session_follows_the_records_of_the_session_it_opened_in_its_worktree() {
+    let spill = tempfile::tempdir().unwrap();
+    let ran_in = spill.path().join("ran-in");
+
+    let fixture = grilling_spilling_on_opencode(
+        spill,
+        &format!(
+            r#"
+            printf '%s' "$(pwd)" > {ran_in}
+            printf 'Reading the brief.\n'
+            sleep 300
+            "#,
+            ran_in = ran_in.display(),
+        ),
+    )
+    .await;
+
+    // Where the session is actually sitting, read off what it wrote rather than
+    // worked out here — which is what makes the row below a match rather than a
+    // restatement.
+    let worktree = until_written(&ran_in).await;
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+
+    let store = opencode_store(&fixture.opencode_account()).await;
+
+    // A session of another Conversation, in the same account's store, created
+    // at the same moment as this one.
+    opencode_session(&store, "ses_elsewhere", "/srv/worktrees/tables", 0).await;
+    opencode_record(
+        &store,
+        "ses_elsewhere",
+        0,
+        "session.created.1",
+        r#"{"info":{"title":"Another Conversation."}}"#,
+    )
+    .await;
+
+    // And this Worktree's own work from an hour ago, which is the same
+    // Conversation resumed and not this session.
+    opencode_session(&store, "ses_before", &worktree, -3_600_000).await;
+    opencode_record(
+        &store,
+        "ses_before",
+        0,
+        "session.created.1",
+        r#"{"info":{"title":"An hour ago."}}"#,
+    )
+    .await;
+
+    // And this session's own.
+    opencode_session(&store, "ses_mine", &worktree, 0).await;
+    opencode_record(
+        &store,
+        "ses_mine",
+        0,
+        "session.created.1",
+        &format!(r#"{{"info":{{"title":"Rate limiting","directory":"{worktree}"}}}}"#),
+    )
+    .await;
+
+    let first = fixture.transcript_of(event, 1).await;
+
+    assert_eq!(
+        first,
+        [
+            r#"{"kind":"session.created.1","seq":0,"record":{"info":{"title":"Rate limiting","directory":"WORKTREE"}}}"#,
+        ]
+        .map(|line| line.replace("WORKTREE", &worktree)),
+        "the session in the store that opened in this Worktree after this session \
+         started is the one followed, and its record should reach the Transcript \
+         whole — opencode's own kind and its place in the sequence around the \
+         payload as the store holds it",
+    );
+
+    // And a second poll takes what arrived since and only that, which is what a
+    // cursor into a store means where a byte offset into a file meant it before.
+    opencode_record(
+        &store,
+        "ses_mine",
+        1,
+        "message.part.updated.1",
+        r#"{"part":{"type":"text","text":"Where does the counter live?"}}"#,
+    )
+    .await;
+
+    let both = fixture.transcript_of(event, 2).await;
+
+    assert_eq!(
+        both,
+        [
+            first[0].clone(),
+            r#"{"kind":"message.part.updated.1","seq":1,"record":{"part":{"type":"text","text":"Where does the counter live?"}}}"#.to_owned(),
+        ],
+        "and the record that arrived after it should be added rather than the \
+         whole of the session read again",
+    );
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("Reading the brief.\n"),
+        "following the store should not cost the Capture anything: {said:?}"
+    );
+
+    let view = fixture.view().await;
+    let printed = output(&view).expect("the session is on the Timeline");
+
+    assert_eq!(
+        printed.turns,
+        Some(1),
+        "and the row counts the reading the pane draws: the text put to the \
+         session is the one turn of it, and the session's own row is opencode's \
+         bookkeeping",
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// And a store this build cannot read leaves the session Capture-only, which is
+/// what ADR-0006 gives every session with no record of its own. opencode's
+/// layout is its own and moves between releases — a table renamed, a column gone
+/// — and none of that may fail a session.
+#[tokio::test]
+async fn an_opencode_store_this_build_cannot_read_leaves_the_session_capture_only() {
+    let spill = tempfile::tempdir().unwrap();
+    let ran_in = spill.path().join("ran-in");
+
+    let fixture = grilling_spilling_on_opencode(
+        spill,
+        &format!(
+            r#"
+            printf '%s' "$(pwd)" > {ran_in}
+            printf 'Reading the brief.\n'
+            "#,
+            ran_in = ran_in.display(),
+        ),
+    )
+    .await;
+
+    until_written(&ran_in).await;
+
+    // A release that renamed the column the directory is recorded under, which
+    // stands for the whole class: the database is there and readable, and the
+    // question Verkstead asks of it has no answer.
+    let store = opencode_store(&fixture.opencode_account()).await;
+
+    store
+        .execute("ALTER TABLE session RENAME COLUMN directory TO cwd")
+        .await
+        .unwrap();
+
+    let summary = fixture
+        .until(|view| output(view).filter(|output| !output.running).cloned())
+        .await;
+
+    assert!(
+        fixture.transcript(summary.id).await.is_empty(),
+        "a session whose store this build cannot read has no Transcript"
+    );
+    assert_eq!(
+        summary.turns, None,
+        "and its row shows no metric rather than a count of none"
+    );
+    assert_eq!(
+        fixture.capture(summary.id).await,
+        "Reading the brief.\r\n",
+        "and what it said is on the Capture, which is a complete record on its own"
+    );
+}
+
+/// opencode's store, made where opencode would have made it — under the data
+/// half of the account, in the file whose name the sandbox pinned.
+///
+/// Only the columns Verkstead reads, for the reason the reader's own fixtures
+/// hold only those: what the rest of that database holds is opencode's business,
+/// and a fixture that copied it would be this suite claiming to know more of
+/// somebody else's schema than Verkstead reads.
+async fn opencode_store(account: &Path) -> SqlitePool {
+    let data = account.join(".local/share/opencode");
+    std::fs::create_dir_all(&data).unwrap();
+
+    let store = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(data.join("opencode.db"))
+            .create_if_missing(true)
+            // The mode opencode keeps its own store in, which is what a reader
+            // of it has to be able to read.
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+    )
+    .await
+    .unwrap();
+
+    store
+        .execute(
+            "CREATE TABLE session (
+                 id           TEXT PRIMARY KEY,
+                 parent_id    TEXT,
+                 directory    TEXT NOT NULL,
+                 time_created INTEGER NOT NULL
+             );
+             CREATE TABLE event (
+                 id           TEXT PRIMARY KEY,
+                 aggregate_id TEXT NOT NULL,
+                 seq          INTEGER NOT NULL,
+                 type         TEXT NOT NULL,
+                 data         TEXT NOT NULL
+             );",
+        )
+        .await
+        .unwrap();
+
+    store
+}
+
+/// A session in that store, opened in `directory` `when` milliseconds from now.
+async fn opencode_session(store: &SqlitePool, session: &str, directory: &str, when: i64) {
+    let created = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+        + when;
+
+    sqlx::query(
+        "INSERT INTO session (id, parent_id, directory, time_created) VALUES (?, NULL, ?, ?)",
+    )
+    .bind(session)
+    .bind(directory)
+    .bind(created)
+    .execute(store)
+    .await
+    .unwrap();
+}
+
+/// And a record it wrote inside one.
+async fn opencode_record(store: &SqlitePool, session: &str, seq: i64, kind: &str, data: &str) {
+    sqlx::query("INSERT INTO event (id, aggregate_id, seq, type, data) VALUES (?, ?, ?, ?, ?)")
+        .bind(format!("{session}-{seq}"))
+        .bind(session)
+        .bind(seq)
+        .bind(kind)
+        .bind(data)
+        .execute(store)
+        .await
+        .unwrap();
 }
 
 /// A session that keeps no log of itself leaves no Transcript, and nothing about
@@ -4587,7 +5710,7 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
 /// which is the half under test.
 const A_BACKLOG_OF_ONE: &str = r#"
 case "$1" in
-claude-grilling-5)
+claude-grilling-5|gpt-5-codex-grilling)
     printf 'grilling\n'
     mkdir -p .tasks
     printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
@@ -4759,6 +5882,11 @@ async fn worked_to_empty(fixture: &Grilling) {
 
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // And nobody is asking again from here, which the sessions that come after
+    // this one have to be told — see [`Grilling::asked_nothing`]. A wrap-up's
+    // review is one of them, and it talks until the test puts its Set up.
+    fixture.asked_nothing();
 
     fixture
         .until(|view| {
@@ -6250,6 +7378,7 @@ const REVIEW_THEN_DIE_ON_THE_ANSWERS: &str = "    SAYING='reading the branch'\n 
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'gh: the connection dropped\\n'\n    \
      exit 1";
+
 /// One that finds nothing, says so as the last thing it prints, and stops.
 const REVIEW_AND_FIND_NOTHING: &str =
     "    printf 'I read the whole branch and found nothing worth raising\n'";
@@ -6263,6 +7392,30 @@ const REVIEW_AND_FIND_NOTHING: &str =
 /// session that simply sits there, which is every session there is.
 const REVIEW_AND_FIND_NOTHING_THEN_IDLE: &str =
     "    printf 'I read the whole branch and found nothing worth raising\n'\n    sleep 300";
+
+/// One that stores its ask, ends its turn, and reads what is typed into it when
+/// the Answers land — which is what a session on a store-and-nudge backend does
+/// with the rest of its life.
+///
+/// **Two reads, with the terminal out of canonical mode for them.** What says
+/// the line and its Enter arrived as two keystrokes is a session that took two
+/// reads to get them: a burst would come back from the first read whole, which
+/// is the paste an agent's interface would have read it as. So `stty` is set
+/// before the wait rather than after it — the line may land while the stub is
+/// still getting there — and each read writes down what it got.
+///
+/// Then it carries on, as a session told its Answers are there does: it says
+/// what it did and idles, which is what ends the review on quiet.
+const REVIEW_THEN_READ_THE_NUDGE: &str = "    SAYING='reading the branch'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     stty -icanon min 1 time 0\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     LINE=$(dd bs=4096 count=1 2>/dev/null)\n    \
+     printf '%s\\n' \"$LINE\" >> /tmp/verkstead/nudges\n    \
+     ENTER=$(dd bs=4096 count=1 2>/dev/null | od -An -c)\n    \
+     printf '%s\\n' \"$ENTER\" >> /tmp/verkstead/nudges\n    \
+     printf 'fetched the answers and left the rest\\n'\n    \
+     sleep 300";
 
 /// One that reads the branch, waits on the human, does what they accepted — and
 /// then idles rather than exiting, as a real one does.
@@ -6914,6 +8067,595 @@ async fn a_deferred_ask_of_a_reviews_own_does_not_hold_its_session_open() {
         "and it is still there to be answered in their own time: {:?}",
         where_it_stands(&view, set),
     );
+}
+
+/// The same review on a backend whose sessions cannot hold a shell command open
+/// for hours: the ask comes back stored the moment it lands, and the session it
+/// came from is left standing all the same.
+///
+/// Which is the whole of the third state. The Set is stored as a Deferred Ask
+/// is — nothing is waiting on the wire, so the CLI returns and the session ends
+/// its turn — and a session *is* idling on it, waiting for the line Verkstead
+/// types when the Response lands. Read as a Deferred Ask it would be ended on
+/// quiet and prodded by the rescue before the human had answered, leaving the
+/// Response with nothing to nudge; read as a blocking one the CLI would sit
+/// there for hours. So it is counted as open by the enders and by the rescue,
+/// and stored by the reply.
+///
+/// Nothing is nudged here — that is the next step's — so the stub waits on the
+/// marker the test writes, exactly as the blocking one does.
+#[tokio::test]
+async fn an_ask_on_a_store_and_nudge_backend_is_stored_and_holds_its_session_open() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling_on_codex(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    // The ask itself says nothing about the channel — it is the same `verkstead
+    // ask` it would be anywhere — and what comes back says the Set was stored.
+    let set = fixture.ask_stored(REVIEW).await;
+
+    // Several graces of a session saying nothing at all, which on this backend
+    // is what a session with its turn ended looks like from outside.
+    tokio::time::sleep(BRISKLY.proposing * 4).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session is still there to be nudged: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        !review_settled(&fixture).await,
+        "and nothing settled a review whose questions are still open",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nor was it prodded and stopped over a question the human has not \
+         answered: {:?}",
+        notices(&view),
+    );
+    assert!(
+        matches!(
+            where_it_stands(&view, set),
+            Some(verkstead_render::Standing::Waiting(
+                verkstead_schema::Liveness::Deferred
+            ))
+        ),
+        "and the human sees a deferred-shaped ask, because nothing is holding a \
+         connection open on it: {:?}",
+        where_it_stands(&view, set),
+    );
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the answers were in and the session that read them was never ended",
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| !output.running),
+        "the session that sat on the ask is over: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// And `--deferred` on that same backend still means an ask nobody is idling on:
+/// the session that sent one is ended on quiet like any other.
+///
+/// The one thing the backend does not decide. `--deferred` is the agent saying
+/// it will carry straight on, and a backend that stores every ask does not make
+/// that untrue — so the review settles over the top of one and the question
+/// stays open for the human to answer in their own time, exactly as on Claude.
+#[tokio::test]
+async fn a_deferred_ask_on_a_store_and_nudge_backend_still_holds_nothing_open() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling_on_codex(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask_deferred(REVIEW).await;
+
+    // Which is the whole assertion: it returns only once the session that sent
+    // the Set is over, and an ask read as one somebody was idling on would hold
+    // this open until the deadline instead.
+    fixture
+        .until(|view| {
+            outputs(view)
+                .last()
+                .and_then(|output| (!output.running).then_some(()))
+        })
+        .await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the session was seen out and the review never settled: {:?}",
+            notices(&fixture.view().await),
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped over a question nobody was waiting on: {:?}",
+        notices(&view),
+    );
+    assert!(
+        matches!(
+            where_it_stands(&view, set),
+            Some(verkstead_render::Standing::Waiting(_))
+        ),
+        "and it is still there to be answered in their own time: {:?}",
+        where_it_stands(&view, set),
+    );
+}
+
+/// The far end of a store-and-nudge ask: the Response lands, and the session
+/// that stored the Set is told so in its own terminal.
+///
+/// Which is the one thing that end of the ask cannot do for itself. The session
+/// asked, `verkstead ask` came back with the id, and the turn ended there — so
+/// there is nothing on the wire to hand a Response to and nothing on that end
+/// listening for one. What there is is a terminal, and one line goes into it
+/// naming the Set and the command that fetches it, down the channel the rescue
+/// already types through.
+///
+/// **Two keystrokes**, which is what the stub's two reads are for: an agent's
+/// interface reads a line and its carriage return arriving together as a paste,
+/// and a paste's return is a line break rather than a send. And what the session
+/// does with the line is take another turn, which is the whole point of typing
+/// one — no marker is written here, unlike every other test of a session being
+/// answered, because the line *is* the Response reaching it.
+#[tokio::test]
+async fn a_response_to_a_store_and_nudge_ask_is_typed_into_the_session_that_stored_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling_on_codex(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_READ_THE_NUDGE),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask_stored(REVIEW).await;
+
+    // Long enough for the session to have ended its turn and be sitting at the
+    // read, which is what the two keystrokes are told apart by: a line typed at
+    // one that had not got there yet would be waiting in the terminal with its
+    // Enter behind it, and the first read would take both.
+    pause(BRISKLY.proposing * 2).await;
+
+    assert!(
+        outputs(&fixture.view().await)
+            .last()
+            .is_some_and(|output| output.running),
+        "the session is still there to be nudged: {}",
+        standing(&fixture.view().await),
+    );
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    let read = typed_into(&fixture, "nudges", 2).await;
+
+    assert!(
+        read[0].contains(&format!("Question Set {set}")),
+        "the line names the Set, which is what an agent that stored more than \
+         one has no other way of knowing: {read:?}",
+    );
+    assert!(
+        read[0].contains(&format!("verkstead answers {set}")),
+        "and the command that fetches it, so that reading the line is enough \
+         without going back to the Guide: {read:?}",
+    );
+    assert!(
+        !read[0].contains('\r') && !read[0].contains('\n'),
+        "the first read got the line and nothing that would submit it: {read:?}",
+    );
+    assert!(
+        read[1].trim() == r"\n",
+        "and the second got the Enter on its own, a moment behind — one read for \
+         each keystroke, where a burst would have arrived as a paste. A newline \
+         rather than the carriage return that was typed, because that is what a \
+         terminal hands a program reading one: {read:?}",
+    );
+
+    // And the session takes another turn on it, which is the whole of what the
+    // line is for: it fetches, says what it did and goes quiet, and going quiet
+    // with nothing open is what ends a review.
+    let deadline = Instant::now() + *PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the session was told and never carried on: {}",
+            standing(&fixture.view().await),
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped along the way: {:?}",
+        notices(&view),
+    );
+    let said = nudges_about(&fixture, set).await;
+
+    assert_eq!(
+        said.len(),
+        1,
+        "the line is in the session's own Capture and nowhere else — a terminal \
+         says what is typed into it, and that is the whole of the account \
+         Verkstead gives of having spoken: {said:?}",
+    );
+}
+
+/// A backlog of one whose step session falls over with its ask still standing,
+/// and works the task once the human has pressed Resume — with every session
+/// writing down the prompt it was started on.
+///
+/// What a stored ask whose session dies wants around it: a Set stored by a
+/// session that is gone before the Response lands, and a session after it whose
+/// prompt can be read. A step's ask is an ordinary one — unlike a review's,
+/// which is closed unanswered when the session that was to act on it goes, there
+/// being nothing left that could act on it.
+///
+/// Held up by markers of the test's own: `dropped` is when the session falls
+/// over, which is after the test has asked, and `mended` is the human having
+/// been round to it, which is what the press finds.
+fn a_backlog_of_one_dying_on_its_ask(prompts: &Path) -> String {
+    format!(
+        r#"
+case "$1" in
+{CODEX_GRILLING_MODEL})
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks 2>/dev/null | grep -E "^$number-" | head -n 1)
+    printf '===== %s\n%s\n' "${{next:-finish}}" "$2" >> {prompts}
+    if [ ! -f /tmp/verkstead/mended ]; then
+        while [ ! -f /tmp/verkstead/dropped ]; do printf 'reading the task\n'; sleep 0.1; done
+        printf 'gh: the connection dropped\n'
+        exit 1
+    fi
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: $next"
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+esac
+"#,
+        prompts = quoted(prompts),
+    )
+}
+
+/// A session that has gone before the Response lands is the folding rule's
+/// case: nothing is typed anywhere, and its Answers open the next session's
+/// prompt.
+///
+/// The two ends of a stored ask do not overlap, and this is which of them takes
+/// a Set whose session died. Nothing about the folding is new — an answered
+/// stored ask goes into the prompt of the next session started on its
+/// Conversation, under the documents that prompt is built from, and folded once
+/// — and the whole of what is under test is that the nudge stays out of it.
+#[tokio::test]
+async fn a_store_and_nudge_ask_whose_session_died_is_folded_in_and_nothing_is_typed() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling_on_codex(
+        spill,
+        &a_backlog_of_one_dying_on_its_ask(&written),
+        PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let proposal = fixture.ask_stored(PROPOSING).await;
+    assert_eq!(
+        fixture.pick(proposal, "task-list").await,
+        Submitted::Accepted
+    );
+
+    // The step session, started on the task and asking something about it.
+    until_written_by(&written, 1).await;
+
+    let set = fixture.ask_stored(DEFERRED).await;
+
+    // And then it goes, with the Set standing and nobody left to fetch it.
+    std::fs::write(handoff_directory(&fixture).join("dropped"), "").unwrap();
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("the connection dropped"),
+        "the run stopped over the session rather than over the question: {:?}",
+        stopped.html,
+    );
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([{
+                    "label": "Q9",
+                    "selected": 1,
+                    "free_text": "and say which limit it hit",
+                }]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("mended"), "").unwrap();
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    // The step over again, and the finish step behind it — which is what says
+    // the Answers went in once rather than into every session after them.
+    until_written_by(&written, 3).await;
+
+    let started = prompts_by_step(&written);
+    let (_, first) = &started[0];
+    let (_, second) = &started[1];
+    let (_, third) = &started[2];
+
+    assert!(
+        second.contains("# What I have since said about the deferred questions"),
+        "the session after the one that asked opens with the Answers: {second:?}",
+    );
+    assert!(
+        second.contains("429 Too Many Requests") && second.contains("and say which limit it hit"),
+        "and it is the exchange itself — the Option picked and what the human \
+         wrote beside it: {second:?}",
+    );
+    assert!(
+        !first.contains("429 Too Many Requests"),
+        "the session that asked was started before it had asked: {first:?}",
+    );
+    assert!(
+        !third.contains("429 Too Many Requests"),
+        "and folded once: the step after it is primed with the work rather than \
+         with a decision it has already been told: {third:?}",
+    );
+
+    assert!(
+        nudges_about(&fixture, set).await.is_empty(),
+        "and nothing was typed at anything: the session the Answers belonged to \
+         had gone, and the one the press started reads them off its prompt",
+    );
+}
+
+/// A Response to a `--deferred` Set types nothing, on the backend that stores
+/// every ask as much as anywhere else.
+///
+/// The one thing a backend does not decide. `--deferred` is the agent saying
+/// nobody is idling on this, and a nudge typed at a session that never stopped
+/// working would be Verkstead interrupting it about a question it has already
+/// carried on past.
+#[tokio::test]
+async fn a_response_to_a_deferred_ask_types_nothing_into_the_session_that_stored_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    // One that never goes quiet, so that it is still there to be typed at when
+    // the Response lands: a session that has carried on is exactly the session
+    // this must not speak to.
+    let fixture = grilling_spilling_on_codex(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THAT_KEEPS_TALKING),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask_deferred(REVIEW).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    // A window with the Response settled and the session still printing, which
+    // is where a nudge would land if one were coming.
+    pause(BRISKLY.proposing * 2).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session is still there for a line to have been typed at: {}",
+        standing(&view),
+    );
+    assert!(
+        nudges_about(&fixture, set).await.is_empty(),
+        "and nothing was typed at it: nobody is idling on a Deferred Ask, \
+         whatever the backend it was sent from",
+    );
+}
+
+/// And a Response to a Blocking Ask types nothing either: the wait is what
+/// delivers it.
+///
+/// Claude behaves exactly as it did. The session is sitting on `verkstead ask`
+/// with the Response about to come back down it, and a line typed into that
+/// terminal would be Verkstead talking over the answer on its way in.
+#[tokio::test]
+async fn a_response_to_a_blocking_ask_types_nothing_into_the_session_waiting_on_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    // What stands in for the Response arriving down the wait, as it does in
+    // every other test of an answered blocking session: a stub cannot idle on
+    // one and wake up.
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the answered session was never seen out: {}",
+            standing(&fixture.view().await),
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    assert!(
+        nudges_about(&fixture, set).await.is_empty(),
+        "and nothing was typed at it on the way: what a blocking ask is is a \
+         session already holding the connection its Answers come back down",
+    );
+}
+
+/// Every line Verkstead has typed at one of this Conversation's sessions about
+/// this Set, as their own Captures hold it.
+///
+/// Read off the Capture rather than from inside a session, because a terminal
+/// says what is typed into it: the keystrokes are echoed straight back out and
+/// land in the session's own account of itself, whatever the session then does
+/// about them. Which is what makes *nothing was typed* something that can be
+/// asserted from out here at all — a stub that was never spoken to and one that
+/// ignored what it was told look alike from everywhere else.
+///
+/// By the Set, because a Conversation run on this backend has more than one
+/// stored ask in it: the proposal every one of these fixtures is directed by is
+/// itself an ordinary ask, and its own session is told about it in the same
+/// breath. What each of these tests is about is one Set.
+async fn nudges_about(fixture: &Grilling, set_id: i64) -> Vec<String> {
+    let view = fixture.view().await;
+    let fetching = format!("verkstead answers {set_id}`");
+    let mut typed = Vec::new();
+
+    for output in outputs(&view) {
+        let capture = fixture.capture(output.id).await;
+
+        typed.extend(
+            capture
+                .lines()
+                .filter(|line| line.contains(&fetching))
+                .map(str::to_owned),
+        );
+    }
+
+    typed
 }
 
 /// Where this Set of the Conversation's stands, or `None` where the Conversation
@@ -11201,10 +12943,41 @@ async fn a_backlog_entry_with_no_task_file_stops_the_run() {
 /// what it costs is the reading behind it, twice a second for as long as the
 /// wait lasts.
 fn out_of_window(sentence: &str) -> String {
+    out_of_window_marked("'✻' '✽' '✳' '✢'", sentence)
+}
+
+/// And the same for a backend that puts something else in front of its own
+/// sentence: `marks` is the shell word list the stub draws the banner with, one
+/// repaint apiece and the whole list twice over.
+///
+/// A list of one is a display that redraws the *same* string, which is the other
+/// half of what the latch is for: claude's spinner turns, and a backend that
+/// draws a still mark repeats itself exactly. Neither is a second wait.
+fn out_of_window_marked(marks: &str, sentence: &str) -> String {
+    out_of_window_saying(&format!(
+        r#"
+                    for pass in 1 2; do
+                        for turning in {marks}
+                        do
+                            printf "$turning {sentence}\r\n"
+                            sleep 0.125
+                        done
+                    done
+        "#
+    ))
+}
+
+/// And the same again for a backend that *draws* it rather than printing it:
+/// `banner` is the shell the stub says it with, run where the account runs out.
+///
+/// Which is what a full-screen display does — a cursor move per row and no
+/// newline anywhere — and what the two above come to as well, their printing
+/// being the ordinary case of the same thing.
+fn out_of_window_saying(banner: &str) -> String {
     format!(
         r#"
         case "$1" in
-        claude-grilling-5)
+        claude-grilling-5|gpt-5-codex-grilling|grok-4.6-grilling)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             mkdir -p .tasks
             printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
@@ -11229,11 +13002,12 @@ fn out_of_window(sentence: &str) -> String {
                 if [ "$next" = 01-count.md ]; then
                     # The wait itself, in miniature: the task lands, the account
                     # runs out before the next one, and the agent holds with its
-                    # banner up. Redrawn eight times over a second — more than
-                    # the half a second Verkstead writes down what a session
-                    # printed on, so the banner is looked at more than once —
-                    # with claude's own spinner turning in front of it, which is
-                    # what makes each repaint a different line.
+                    # banner up. Said twice over — more than the half a second
+                    # Verkstead writes down what a session printed on, so the
+                    # banner is looked at more than once — with whatever that
+                    # backend puts in front of it, which is what makes each
+                    # repaint a different line where a mark turns and the same
+                    # line where it does not.
                     # The glyphs themselves rather than `\xe2\x9c\xbb` and its
                     # kind. `\xNN` is bash's extension to `printf` and not
                     # POSIX: a `/bin/sh` that is dash — which is what Debian and
@@ -11243,14 +13017,10 @@ fn out_of_window(sentence: &str) -> String {
                     # refuse. ASCII punctuation is not decoration there,
                     # deliberately, so it does not open a status line. This file
                     # is UTF-8 and the shell passes the bytes through, which
-                    # needs no escape at either end.
-                    for pass in 1 2; do
-                        for turning in '✻' '✽' '✳' '✢'
-                        do
-                            printf "$turning {sentence}\r\n"
-                            sleep 0.125
-                        done
-                    done
+                    # needs no escape at either end. `\033` is the one escape
+                    # POSIX does give a format, which is what a frame is drawn
+                    # with.
+                    {banner}
                 fi
             else
                 printf 'finishing\n'
@@ -11404,6 +13174,320 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
         git(&worktree, &["status", "--porcelain"]),
         "",
         "the Worktree is exactly as the session left it",
+    );
+}
+
+/// The wording is the backend's, so a Codex session is stopped by codex's own
+/// sentence — and by that one alone.
+///
+/// One phrase per backend, matched off the Capture exactly as claude's is: the
+/// stop is the ordinary stop, naming the Profile whose account ran out and
+/// keeping the line the session drew. What follows codex's phrase is the plan's
+/// — an upgrade, credits to buy, an admin to ask — so the sentence here carries
+/// decoration the matcher has never seen and the stop lands all the same.
+///
+/// The mark in front is still rather than turning, which is the other half of
+/// what the latch is for: eight repaints of the *same* string are still one
+/// wait.
+#[tokio::test]
+async fn a_codex_account_out_of_window_stops_the_run_on_codexs_own_sentence() {
+    let fixture = grilling_spilling_on_codex(
+        tempfile::tempdir().unwrap(),
+        &out_of_window_marked(
+            "'▌'",
+            "You've hit your usage limit. Upgrade to Plus to continue using Codex \
+             (https://chatgpt.com/explore/plus)",
+        ),
+        PULL_REQUEST,
+    )
+    .await;
+
+    running_out(&fixture).await;
+
+    let notice = fixture.stopped().await;
+
+    assert!(
+        notice
+            .html
+            .contains("the account <strong>codex</strong> was being spent is out of window"),
+        "naming the Profile whose account ran out, which is the Codex one every \
+         role of this run is on: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice.html.contains("▌ You've hit your usage limit."),
+        "with codex's own sentence kept as it was drawn, the plan's decoration and \
+         all: {:?}",
+        notice.html,
+    );
+
+    let stop = fixture.stop_on_the_record().await;
+
+    assert_eq!(
+        stop.decision,
+        Decision::Verkstead,
+        "Verkstead pulled the brake, exactly as it does on the other backend",
+    );
+    assert_eq!(
+        stop.resets, None,
+        "and codex names no reset, so the stop carries none: what the sentence \
+         does not say, nothing here invents",
+    );
+
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(notice.id),
+        "a run that has stopped carries *blocked on you*, whatever backend it was on",
+    );
+
+    let sessions = outputs(&fixture.view().await).len();
+
+    // Long enough for several more turns of a runner that was still turning.
+    pause(Duration::from_secs(3)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        sessions,
+        "while it is stopped the run does not advance: no next Step, no fresh session",
+    );
+    assert_eq!(
+        notices(&fixture.view().await).len(),
+        1,
+        "and the same line redrawn is the same wait, however many times it is drawn",
+    );
+    assert!(
+        outputs(&fixture.view().await)
+            .iter()
+            .all(|session| !session.running),
+        "and no session is running behind the stop",
+    );
+}
+
+/// And the other record a session leaves behind: a Codex session that says its
+/// account is spent in its own rollout and never on its display is stopped off
+/// the Transcript.
+///
+/// Both records are read, on either backend and for the same reason — a backend
+/// that says so in one and not the other would otherwise go unnoticed until the
+/// terminal happened to speak. Nothing of codex's limit line reaches the
+/// Capture here, so the Transcript is the only thing that could have stopped it.
+#[tokio::test]
+async fn a_codex_session_saying_so_only_in_its_rollout_is_stopped_off_the_transcript() {
+    let fixture = grilling_on_codex(
+        r#"
+        day=$HOME/.codex/sessions/$(date +%Y/%m/%d)
+        mkdir -p "$day"
+        log=$day/rollout-2026-08-30T17-47-02-cccc.jsonl
+
+        printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$(pwd)" > "$log"
+        printf 'reading the brief\n'
+        printf '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"m-1","content":[{"type":"Text","text":"You'"'"'ve hit your usage limit. Upgrade to Plus to continue using Codex."}]}}}\n' >> "$log"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let notice = fixture.stopped().await;
+
+    assert!(
+        notice
+            .html
+            .contains("the account <strong>codex</strong> was being spent is out of window"),
+        "the stop is the same stop, named for the same Profile: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice
+            .html
+            .contains("You've hit your usage limit. Upgrade to Plus"),
+        "carrying the sentence as the rollout held it: {:?}",
+        notice.html,
+    );
+
+    let event = fixture
+        .until(|view| output(view).map(|output| output.id))
+        .await;
+
+    assert!(
+        !fixture.capture(event).await.contains("usage limit"),
+        "and the terminal never said a word about it, so the Transcript is the \
+         only record that could have stopped this run",
+    );
+
+    assert_eq!(
+        fixture.stop_on_the_record().await.decision,
+        Decision::Verkstead,
+        "Verkstead pulled the brake",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(notice.id),
+        "and the run is blocked on the human until they press Resume",
+    );
+}
+
+/// And the third backend, which says it by *drawing* it: a Grok session that
+/// puts its card up stops the run off the frame that card is on.
+///
+/// The same claim as the Codex one above and the harder half of it. Grok heads a
+/// bordered card with `You hit your free usage limit.` and offers three tiers
+/// under it — read off grok 1.0.13 driven until it drew one — and it draws that
+/// card the way a full-screen display draws anything: a cursor move to each row
+/// and not one newline in the frame. So what the session *printed* is a single
+/// line with the spinner it was turning at the front of it and the sentence
+/// somewhere in the middle, which is a line that says nothing; what it drew is a
+/// grid, and the sentence is a line of that with the card's border in front. The
+/// stub says it exactly that way round, so a build that read only the bytes
+/// would run this backlog to the end.
+///
+/// A paid account's card is headed differently and nobody has watched one drawn,
+/// so a paid stop stalls instead — the accepted state rather than a gap, and
+/// nothing this can stand for.
+#[tokio::test]
+async fn a_grok_account_out_of_window_stops_the_run_on_the_card_it_draws() {
+    let fixture = grilling_on_grok(&out_of_window_saying(
+        r#"
+                    for pass in 1 2 3 4; do
+                        printf '\033[?2026h\033[23;5H⠴ 7s\033[19;3H┃  You hit your free usage limit.\033[?2026l'
+                        sleep 0.125
+                    done
+        "#,
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    let notice = fixture.stopped().await;
+
+    assert!(
+        notice
+            .html
+            .contains("the account <strong>grok</strong> was being spent is out of window"),
+        "naming the Profile whose account ran out, which is the Grok Build one \
+         every role of this run is on: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice.html.contains("You hit your free usage limit."),
+        "with the card's own heading kept as it was drawn, the border in front \
+         of it and all: {:?}",
+        notice.html,
+    );
+
+    let stop = fixture.stop_on_the_record().await;
+
+    assert_eq!(
+        stop.decision,
+        Decision::Verkstead,
+        "Verkstead pulled the brake, exactly as it does on the other two backends",
+    );
+    assert_eq!(
+        stop.resets, None,
+        "and grok names no reset, so the stop carries none: what the sentence \
+         does not say, nothing here invents",
+    );
+
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(notice.id),
+        "a run that has stopped carries *blocked on you*, whatever backend it was on",
+    );
+
+    let sessions = outputs(&fixture.view().await).len();
+
+    // Long enough for several more turns of a runner that was still turning.
+    pause(Duration::from_secs(3)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        sessions,
+        "while it is stopped the run does not advance: no next Step, no fresh session",
+    );
+    assert_eq!(
+        notices(&fixture.view().await).len(),
+        1,
+        "and the banner turning is the same wait, however many times it is drawn",
+    );
+    assert!(
+        outputs(&fixture.view().await)
+            .iter()
+            .all(|session| !session.running),
+        "and no session is running behind the stop",
+    );
+}
+
+/// And off the last of the three: a Grok session that says its account is spent
+/// in the log it keeps, and neither prints nor draws it, is stopped off the
+/// Transcript.
+///
+/// Every record is read on this backend as on the others — a backend that said
+/// so in one and not the rest would otherwise go unnoticed until the terminal
+/// happened to speak — and what carries it here is grok's own kind for the prose
+/// it streams, a session update being what grok's log is made of.
+///
+/// **This one is a guard rather than a path grok walks.** Driven to a real
+/// refusal, grok 1.0.13 puts nothing about it in its log but a `retry_state`
+/// line whose reason is the server's own error string — bookkeeping, which the
+/// reader folds under its own name and the summary never reads. So today a Grok
+/// limit is caught on the frame and only there; what this holds is the case
+/// where a release starts saying it in prose.
+#[tokio::test]
+async fn a_grok_session_saying_so_only_in_its_log_is_stopped_off_the_transcript() {
+    let fixture = grilling_on_grok(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        mine=$HOME/.grok/sessions/$(pwd | sed 's|/|%2F|g')/$name
+        mkdir -p "$mine"
+        log=$mine/updates.jsonl
+
+        printf 'reading the brief\n'
+        printf '{"method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"You hit your free usage limit."}}}}\n' "$name" > "$log"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let notice = fixture.stopped().await;
+
+    assert!(
+        notice
+            .html
+            .contains("the account <strong>grok</strong> was being spent is out of window"),
+        "the stop is the same stop, named for the same Profile: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice.html.contains("You hit your free usage limit."),
+        "carrying the sentence as the log held it: {:?}",
+        notice.html,
+    );
+
+    let event = fixture
+        .until(|view| output(view).map(|output| output.id))
+        .await;
+
+    assert!(
+        !fixture.capture(event).await.contains("usage limit"),
+        "and the terminal never said a word about it, so the Transcript is the \
+         only record that could have stopped this run",
+    );
+
+    assert_eq!(
+        fixture.stop_on_the_record().await.decision,
+        Decision::Verkstead,
+        "Verkstead pulled the brake",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(notice.id),
+        "and the run is blocked on the human until they press Resume",
     );
 }
 
@@ -17097,7 +19181,17 @@ async fn a_gone_follow_up_session_takes_the_question_it_left_with_it() {
 /// rescue arrives at the session's own terminal, and what proves it arrived is
 /// the session having read it.
 async fn told(fixture: &Grilling, times: usize) -> Vec<String> {
-    let written = handoff_directory(fixture).join("rescues");
+    typed_into(fixture, "rescues", times).await
+}
+
+/// The same for anything else typed into a session: `file` is what that stub
+/// writes each read down to, in the handoff directory every sandbox has.
+///
+/// One loop for the two things Verkstead types at a session — the rescue and the
+/// nudge — because from out here they are the same claim: a line went into a
+/// terminal, and the session read it.
+async fn typed_into(fixture: &Grilling, file: &str, times: usize) -> Vec<String> {
+    let written = handoff_directory(fixture).join(file);
     let deadline = Instant::now() + *PATIENCE;
 
     loop {
@@ -17110,7 +19204,7 @@ async fn told(fixture: &Grilling, times: usize) -> Vec<String> {
 
         assert!(
             Instant::now() < deadline,
-            "the follow-up session was told {} times rather than {times}: {lines:?}",
+            "the session read {} of the {times} lines typed into it: {lines:?}",
             lines.len(),
         );
 
@@ -17602,6 +19696,947 @@ async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_stopped() {
         stopped.html,
     );
     assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// A backlog of one worked by sessions that draw a full screen rather than
+/// printing lines, which is what every backend after Claude does.
+///
+/// None of these is ever silent for long: a frame goes out every twentieth of a
+/// second, on the alternate screen an interface takes over, so the byte clock
+/// alone would never call one idle — nothing would end it, rescue it or mark it,
+/// and a run of them would sit there for ever. What says a turn is over here is
+/// `prompt` standing on the Screen.
+///
+/// And each of them leaves a silence in the middle of its turn that is longer
+/// than the grace a printing session is ended on, which is the other half of the
+/// same claim: a TUI that stops to think is not a TUI that has finished.
+///
+/// `frames` is how many times the prompt is drawn before the session falls
+/// silent, and `-1` is for ever — a backend that goes on repainting the prompt
+/// it is sitting at, which is the case the signature exists for. A bounded one
+/// says so in the handoff directory as it stops, so a test waiting for the
+/// silence to start has something to wait for.
+///
+/// `commits` is whether the step does what its task asked. One that does is
+/// ended on its landing and its judgement together; one that does not is a run
+/// nobody can move, which is the rescue's.
+fn a_backlog_drawing(prompt: &str, frames: i32, commits: bool) -> String {
+    let working = if commits {
+        r#"
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+    fi"#
+    } else {
+        ""
+    };
+
+    // A span of the suite's own, and one that has to sit between two of the
+    // Pace's: past the grace, so that a session ended inside it would be one
+    // ended by the byte clock, and well short of the long-stop, so that it is
+    // not the long-stop catching it either.
+    let thinking = (BRISKLY.proposing * 3 / 2).as_secs_f64();
+
+    format!(
+        r#"
+frame() {{ printf '\033[2J\033[H%s\n' "$1"; }}
+drawing() {{
+    printf '\033[?1049h'
+    LEFT={frames}
+    while [ "$LEFT" -ne 0 ]; do
+        frame '{prompt}'
+        sleep 0.05
+        if [ "$LEFT" -gt 0 ]; then LEFT=$((LEFT - 1)); fi
+    done
+    printf 'silent\n' > "/tmp/verkstead/silent-$1"
+    sleep 300
+}}
+case "$1" in
+gpt-5-codex-grilling)
+    frame 'breaking the work down'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    drawing grilling
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
+    frame 'reading the task'
+    sleep {thinking:.2}
+    frame 'still reading the task'{working}
+    drawing step &
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#
+    )
+}
+
+/// A backlog worked by sessions that never fall silent is worked to the end, on
+/// the prompt each of them draws when its turn is over.
+///
+/// The judgement moved off the byte clock and onto the Screen, and this is the
+/// whole of what that buys: every session here repaints for as long as it lives,
+/// so under the three-second mark not one of them would ever be idle and the run
+/// would stop at its first step for ever. What ends each of them is the frame it
+/// leaves standing.
+///
+/// **And the silence each leaves mid-turn ends nothing.** It is longer than the
+/// grace a printing session is ended on and longer than the one the rescue waits
+/// out, and on this backend it is not idle at all — a TUI that stops to think
+/// would otherwise be prodded, or reaped, in the middle of its work.
+#[tokio::test]
+async fn sessions_that_repaint_are_ended_on_the_prompt_they_draw_rather_than_on_silence() {
+    let fixture =
+        grilling_drawing(&a_backlog_drawing(AT_THE_PROMPT, -1, true), AT_THE_PROMPT).await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: every session was ended where it stood, on its own \
+         prompt: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into any of them: the silence each left in the \
+         middle of its turn is longer than the grace, and on this backend a \
+         session that has stopped printing has not stopped working",
+    );
+}
+
+/// And one that draws its prompt without doing what it was sent for is told and
+/// then stopped, on the same judgement.
+///
+/// The rescue's precondition is idle, so a backend judged only on its silence
+/// would be one the rescue never reached: this session repaints for ever, and
+/// what says it is sitting there with nothing to do is the prompt it is
+/// repainting.
+#[tokio::test]
+async fn a_step_that_draws_its_prompt_without_committing_is_told_and_then_stopped() {
+    let fixture =
+        grilling_drawing(&a_backlog_drawing(AT_THE_PROMPT, -1, false), AT_THE_PROMPT).await;
+
+    picked(&fixture, "task-list").await;
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        said[0].contains("summarize your status"),
+        "the same line as anywhere else, in the words somebody watching would \
+         have typed: {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("01-count.md"),
+        "the Notice names the step, a human wanting to know which task: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and says why it stopped: {:?}",
+        stopped.html,
+    );
+    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// And a prompt the signature no longer matches is caught by the long-stop,
+/// which is the whole reason there is one.
+///
+/// A signature drifts — the wording is the backend's and it will move in a
+/// release — and a session drawing a prompt Verkstead does not know reads as one
+/// that never stops working. Nothing else here would catch it: the rescue's
+/// precondition is idle, every ender waits on the same judgement, and no session
+/// carries a cap on its life. So the byte clock stays behind it as a long-stop,
+/// and what the human gets is the ordinary would-not-ask stop — one slow round
+/// rather than never.
+///
+/// **And it is slow**, deliberately: the session draws its unknown prompt for
+/// longer than the grace and nothing is typed into it, because on this backend a
+/// session that is printing is a session at work whatever it is printing. Only
+/// once it has stopped printing altogether does the long-stop start, and only
+/// once that is out is it idle.
+#[tokio::test]
+async fn a_prompt_the_signature_does_not_know_is_caught_by_the_long_stop() {
+    let fixture = grilling_drawing(
+        &a_backlog_drawing(A_PROMPT_THAT_DRIFTED, 40, false),
+        AT_THE_PROMPT,
+    )
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    // The step session has drawn its prompt for a window longer than the grace,
+    // and has now stopped printing altogether — which is where the long-stop
+    // starts.
+    until_written(&handoff_directory(&fixture).join("silent-step")).await;
+    let fell_silent = Instant::now();
+
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "nothing was typed into it while it was drawing: a prompt Verkstead \
+         does not know is a session still at work, however long it sits there",
+    );
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        fell_silent.elapsed() >= BRISKLY.proposing * 2,
+        "and what caught it was the long-stop rather than the grace, which \
+         would have had it in under half the time",
+    );
+    assert!(
+        said[0].contains("summarize your status"),
+        "the ordinary line, this being the ordinary rules arriving late: \
+         {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and the ordinary stop under them: {:?}",
+        stopped.html,
+    );
+    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// What the real codex has on its Screen while it is working, which is the whole
+/// of what says a Codex session has not stopped — see the server's `sessions`
+/// module, where Verkstead's own copy of this wording is kept.
+///
+/// Written out here rather than reached for out of the server, and deliberately:
+/// what these prove is that Verkstead already knows codex's line, so the stub
+/// draws what codex draws and nothing is handed in to meet it.
+const AT_WORK: &str = "◦ Working (12s • esc to interrupt)";
+
+/// And the frame it leaves when its turn is over: the composer, which is drawn
+/// exactly the same while it works.
+///
+/// That is the reason a Codex session is read the other way round from a session
+/// that draws a prompt of its own — there is nothing in this line to tell the two
+/// states apart, and the line above is the only thing that changes.
+const AT_ITS_PROMPT: &str = "› Ask Codex to do anything";
+
+/// And what a stub draws where that wording has moved on without Verkstead: an
+/// at-work line that says the same thing in words Verkstead has never seen.
+const AT_WORK_IN_OTHER_WORDS: &str = "◦ Thinking (12s • press escape to stop)";
+
+/// A backlog of one worked by sessions that draw the way codex draws: an at-work
+/// line while they work, the composer when they are waiting, and — this being
+/// what makes codex codex — not one byte once they are.
+///
+/// The mirror of [`a_backlog_drawing`], and the shape is the same but for which
+/// frame says the turn is over. There the prompt appearing says it; here the
+/// at-work line *going* says it, and the quiet behind it is the other half.
+///
+/// Each of these leaves a silence in the middle of its turn that is longer than
+/// the grace a printing session is ended on, with its at-work line standing
+/// through it: a TUI that stops to think is not a TUI that has finished, and on
+/// this reading the line standing is what says so.
+///
+/// `at_work` is what it draws while it works — the backend's own where the test
+/// is about Verkstead knowing it, and something else where it is about a wording
+/// that has moved on. `resting` is the frame it leaves when its turn is over.
+///
+/// `grilling_model` is the model the session that breaks the work down is
+/// launched on, which is how these stubs tell it from the ones that build it —
+/// so it is the caller's, one backend's Profile listing different models from
+/// another's.
+///
+/// `commits` is whether the step does what its task asked, as it is there: one
+/// that does is ended on its landing and its judgement together, and one that
+/// does not is a run nobody can move, which is the rescue's.
+///
+/// **The Brief is read where the backend it is launched under puts it.** Three
+/// of the four take it as the one positional argument and opencode takes it
+/// under `--prompt`, so the two are put back into the order the rest of this
+/// reads them in before anything looks at either.
+fn a_backlog_at_work(grilling_model: &str, at_work: &str, resting: &str, commits: bool) -> String {
+    let working = if commits {
+        r#"
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+    fi"#
+    } else {
+        ""
+    };
+
+    // The same span [`a_backlog_drawing`] thinks for, and between the same two
+    // of the Pace's: past the grace, so that a session ended inside it would be
+    // one ended by the byte clock, and well short of the long-stop.
+    let thinking = (BRISKLY.proposing * 3 / 2).as_secs_f64();
+
+    format!(
+        r#"
+frame() {{ printf '\033[2J\033[H%s\n' "$1"; }}
+working() {{
+    LEFT=$1
+    while [ "$LEFT" -ne 0 ]; do
+        frame '{at_work}'
+        sleep 0.05
+        LEFT=$((LEFT - 1))
+    done
+}}
+resting() {{
+    frame '{resting}'
+    printf 'silent\n' > "/tmp/verkstead/silent-$1"
+    sleep 300
+}}
+[ "$2" = --prompt ] && set -- "$1" "$3"
+case "$1" in
+{grilling_model})
+    working 10
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    resting grilling
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
+    working 10
+    sleep {thinking:.2}
+    working 10{working}
+    resting step &
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#
+    )
+}
+
+/// A backlog worked by sessions that draw codex's at-work line is worked to the
+/// end, on that line going rather than on any frame they leave standing.
+///
+/// Nothing is handed in here: the stub draws what codex draws, and what finds it
+/// is Verkstead's own constant for this backend. That is the whole of what this
+/// covers — a Codex session judged by the line the real codex draws.
+///
+/// **And the silence each leaves mid-turn ends nothing.** It is longer than the
+/// grace a printing session is ended on, and the at-work line stands through it:
+/// a TUI that stops to think has not stopped working, whatever its terminal is
+/// doing.
+#[tokio::test]
+async fn codex_sessions_are_ended_on_the_at_work_line_going_rather_than_on_the_frame_they_leave() {
+    let fixture = grilling_at_work(&a_backlog_at_work(
+        CODEX_GRILLING_MODEL,
+        AT_WORK,
+        AT_ITS_PROMPT,
+        true,
+    ))
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: every session was ended where it stood, its at-work \
+         line gone and its terminal quiet: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into any of them: the silence each left in the \
+         middle of its turn is longer than the grace, and its at-work line was \
+         standing through the whole of it",
+    );
+}
+
+/// And a step that draws its composer without doing what it was sent for is told
+/// and then stopped, on the same judgement.
+///
+/// The rescue's precondition is idle, so this is the other half of the reading
+/// being right: a session that has stopped has to *reach* the rescue, and what
+/// says this one has stopped is the at-work line no longer on its Screen.
+#[tokio::test]
+async fn a_codex_step_that_stops_without_committing_is_told_and_then_stopped() {
+    let fixture = grilling_at_work(&a_backlog_at_work(
+        CODEX_GRILLING_MODEL,
+        AT_WORK,
+        AT_ITS_PROMPT,
+        false,
+    ))
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        said[0].contains("summarize your status"),
+        "the same line as anywhere else, in the words somebody watching would \
+         have typed: {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("01-count.md"),
+        "the Notice names the step, a human wanting to know which task: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and says why it stopped: {:?}",
+        stopped.html,
+    );
+    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// An at-work line that has moved on without Verkstead costs the run nothing:
+/// the quiet behind it is what says the session has stopped, and it says it
+/// alone.
+///
+/// This is the direction a wording moves in most often — a release renames the
+/// line, and Verkstead is left looking for words nothing draws. A session
+/// drawing them reads as one that has stopped *by the screen*, from its very
+/// first frame, and nothing goes wrong: the [`IDLE_AFTER`]-length quiet asked
+/// for beside the screen is not there while it works, because a TUI at work
+/// repaints. So the backlog is worked to the end, on the byte clock alone —
+/// which is Claude's own rule, and the right one to fall back to.
+#[tokio::test]
+async fn an_at_work_line_that_has_moved_on_leaves_the_run_on_the_byte_clock() {
+    let fixture = grilling_at_work(&a_backlog_at_work(
+        CODEX_GRILLING_MODEL,
+        AT_WORK_IN_OTHER_WORDS,
+        AT_ITS_PROMPT,
+        true,
+    ))
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: a wording Verkstead does not know is a session read \
+         on its quiet, not a session nothing ever ends: {:?}",
+        notices(&view),
+    );
+}
+
+/// And an at-work line that never goes is caught by the long-stop, which is the
+/// whole reason there is one.
+///
+/// The other way a signature drifts, and the dangerous one: the line stops
+/// telling the two states apart — a release draws it at the prompt as well, or
+/// the frame Verkstead reads is not the frame it thought — and a session then
+/// reads as one that never stops working. Nothing else here would catch it: the
+/// rescue's precondition is idle, every ender waits on the same judgement, and
+/// no session carries a cap on its life. So the byte clock stays behind it as a
+/// long-stop, and what the human gets is the ordinary would-not-ask stop — one
+/// slow round rather than never.
+///
+/// **And it is slow**, deliberately: the step draws its at-work line for longer
+/// than the grace and nothing is typed into it, because a session showing that
+/// it is at work is at work whatever else its terminal is doing. Only once it
+/// has stopped printing altogether does the long-stop start, and only once that
+/// is out is it idle.
+#[tokio::test]
+async fn an_at_work_line_that_never_goes_is_caught_by_the_long_stop() {
+    let fixture = grilling_at_work(&a_backlog_at_work(
+        CODEX_GRILLING_MODEL,
+        AT_WORK,
+        AT_WORK,
+        false,
+    ))
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    // The step session has drawn its at-work line for a window longer than the
+    // grace, and has now stopped printing altogether — which is where the
+    // long-stop starts.
+    until_written(&handoff_directory(&fixture).join("silent-step")).await;
+    let fell_silent = Instant::now();
+
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "nothing was typed into it while it was drawing: a session drawing that \
+         it is at work is at work, however long it sits there saying so",
+    );
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        fell_silent.elapsed() >= BRISKLY.proposing * 2,
+        "and what caught it was the long-stop rather than the grace, which \
+         would have had it in under half the time",
+    );
+    assert!(
+        said[0].contains("summarize your status"),
+        "the ordinary line, this being the ordinary rules arriving late: \
+         {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and the ordinary stop under them: {:?}",
+        stopped.html,
+    );
+}
+
+/// What the real grok has at the foot of every frame while it is working, which
+/// is the whole of what says a Grok session has not stopped — see the server's
+/// `sessions` module, where Verkstead's own copy of this wording is kept.
+///
+/// Written out here rather than reached for out of the server, and deliberately,
+/// the way codex's is: what these prove is that Verkstead already knows grok's
+/// row, so the stub draws what grok draws and nothing is handed in to meet it.
+const GROK_AT_WORK: &str = "Shift+Tab:mode  │  Esc:cancel  │  Ctrl+x:shortcuts";
+
+/// And the row it leaves when its turn is over: the same hints but for the one
+/// that says the turn can be cancelled.
+///
+/// That is the reason a Grok session is read the same way round as a Codex one:
+/// grok's composer, the model on its border and the rest of these hints are
+/// drawn exactly the same while it works, and this row is where the two states
+/// differ.
+const GROK_AT_ITS_PROMPT: &str = "Shift+Tab:mode  │  Ctrl+x:shortcuts";
+
+/// A backlog worked by sessions that draw grok's at-work hint is worked to the
+/// end, on that hint going.
+///
+/// The same claim as the Codex one above, on the other backend's own wording and
+/// with nothing handed in to read it by. What it covers is the shape — a Grok
+/// session ended where it stood, and not one prodded through the silence it
+/// leaves mid-turn with the hint standing. What pins the wording itself is the
+/// test below: a hint Verkstead does not know costs a run nothing here, because
+/// the quiet behind the screen carries it either way.
+#[tokio::test]
+async fn grok_sessions_are_ended_on_their_own_at_work_hint_rather_than_on_codexs() {
+    let fixture = grilling_on_grok(&a_backlog_at_work(
+        GROK_GRILLING_MODEL,
+        GROK_AT_WORK,
+        GROK_AT_ITS_PROMPT,
+        true,
+    ))
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: every session was ended where it stood, its at-work \
+         hint gone and its terminal quiet: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into any of them: the silence each left in the \
+         middle of its turn is longer than the grace, and its at-work hint was \
+         standing through the whole of it",
+    );
+}
+
+/// And a grok hint that never goes is caught by the long-stop, as codex's is.
+///
+/// The dangerous drift on this reading, and the one worth proving per backend
+/// rather than once: a release draws the hint at the prompt as well, or the row
+/// Verkstead reads is not the row it thought, and the session then reads as one
+/// that never stops working. Nothing else here would catch it — the rescue's
+/// precondition is idle and every ender waits on the same judgement — so the
+/// byte clock stays behind it, and what the human gets is the ordinary
+/// would-not-ask stop.
+#[tokio::test]
+async fn a_grok_at_work_hint_that_never_goes_is_caught_by_the_long_stop() {
+    let fixture = grilling_on_grok(&a_backlog_at_work(
+        GROK_GRILLING_MODEL,
+        GROK_AT_WORK,
+        GROK_AT_WORK,
+        false,
+    ))
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    // The step session has drawn its at-work hint for a window longer than the
+    // grace, and has now stopped printing altogether — which is where the
+    // long-stop starts.
+    until_written(&handoff_directory(&fixture).join("silent-step")).await;
+    let fell_silent = Instant::now();
+
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "nothing was typed into it while it was drawing: a Grok session drawing \
+         that it is at work is at work, however long it sits there saying so",
+    );
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        fell_silent.elapsed() >= BRISKLY.long_stop,
+        "and what caught it was the long-stop rather than the grace or the \
+         three seconds behind the screen — which is the whole of what says \
+         Verkstead is reading grok's own hint here: a hint it did not know \
+         would have had this session in half the time",
+    );
+    assert!(
+        said[0].contains("summarize your status"),
+        "the ordinary line, this being the ordinary rules arriving late: \
+         {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and the ordinary stop under them: {:?}",
+        stopped.html,
+    );
+}
+
+/// What the real opencode has in the status bar at the foot of every frame
+/// while it is working, which is the whole of what says an OpenCode session has
+/// not stopped — see the server's `sessions` module, where Verkstead's own copy
+/// of this wording is kept.
+///
+/// Written out here rather than reached for out of the server, and deliberately,
+/// the way codex's and grok's are: what these prove is that Verkstead already
+/// knows opencode's label, so the stub draws what opencode draws and nothing is
+/// handed in to meet it.
+const OPENCODE_AT_WORK: &str = "  ⬝⬝⬝⬝⬝■■■  esc interrupt          tab agents  ctrl+p commands";
+
+/// And the bar it leaves when its turn is over: the project's path where the
+/// dial and the label were, and the same two hints on the right of it.
+///
+/// That is the reason an OpenCode session is read the same way round as the two
+/// before it: opencode's composer, the `Build auto` label on its border and
+/// these hints are drawn exactly the same while it works, and this bar is where
+/// the two states differ.
+const OPENCODE_AT_ITS_PROMPT: &str = "  /work/verkstead                tab agents  ctrl+p commands";
+
+/// A backlog worked by sessions that draw opencode's at-work label is worked to
+/// the end, on that label going.
+///
+/// The same claim as the two above, on the fourth backend's own wording and with
+/// nothing handed in to read it by. It is worth making once per backend rather
+/// than once: this label is two words where codex's is three — `esc interrupt`
+/// against `esc to interrupt` — so a Verkstead that reached for codex's constant
+/// here would find nothing in any frame and read every session as stopped from
+/// its first one.
+#[tokio::test]
+async fn opencode_sessions_are_ended_on_their_own_at_work_label_rather_than_on_codexs() {
+    let fixture = grilling_on_opencode(&a_backlog_at_work(
+        OPENCODE_GRILLING_MODEL,
+        OPENCODE_AT_WORK,
+        OPENCODE_AT_ITS_PROMPT,
+        true,
+    ))
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: every session was ended where it stood, its at-work \
+         label gone and its terminal quiet: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into any of them: the silence each left in the \
+         middle of its turn is longer than the grace, and its at-work label was \
+         standing through the whole of it",
+    );
+}
+
+/// And an opencode label that never goes is caught by the long-stop, as the two
+/// before it are.
+///
+/// The dangerous drift on this reading, and the one worth proving per backend
+/// rather than once: a release draws the label at the prompt as well, or the bar
+/// Verkstead reads is not the bar it thought, and the session then reads as one
+/// that never stops working. Nothing else here would catch it — the rescue's
+/// precondition is idle and every ender waits on the same judgement — so the
+/// byte clock stays behind it, and what the human gets is the ordinary
+/// would-not-ask stop.
+#[tokio::test]
+async fn an_opencode_at_work_label_that_never_goes_is_caught_by_the_long_stop() {
+    let fixture = grilling_on_opencode(&a_backlog_at_work(
+        OPENCODE_GRILLING_MODEL,
+        OPENCODE_AT_WORK,
+        OPENCODE_AT_WORK,
+        false,
+    ))
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    // The step session has drawn its at-work label for a window longer than the
+    // grace, and has now stopped printing altogether — which is where the
+    // long-stop starts.
+    until_written(&handoff_directory(&fixture).join("silent-step")).await;
+    let fell_silent = Instant::now();
+
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "nothing was typed into it while it was drawing: an OpenCode session \
+         drawing that it is at work is at work, however long it sits there \
+         saying so",
+    );
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        fell_silent.elapsed() >= BRISKLY.long_stop,
+        "and what caught it was the long-stop rather than the grace or the \
+         three seconds behind the screen — which is the whole of what says \
+         Verkstead is reading opencode's own label here: a label it did not \
+         know would have had this session in half the time",
+    );
+    assert!(
+        said[0].contains("summarize your status"),
+        "the ordinary line, this being the ordinary rules arriving late: \
+         {said:?}",
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("without asking you anything"),
+        "and the ordinary stop under them: {:?}",
+        stopped.html,
+    );
+}
+
+/// A Set of the step session's own, which is what a session blocked on
+/// `verkstead ask` is waiting for. Q9, because that is the Question
+/// [`Grilling::answer`] answers.
+const A_STEPS_QUESTION: &str = r#"
+title: Which clock does the window roll on?
+questions:
+  - label: Q9
+    text: The request's own timestamp, or the server's?
+    options:
+      - n: 1
+        text: The server's
+        recommended: true
+      - n: 2
+        text: The request's
+"#;
+
+/// A backlog of one whose step session holds a blocking ask: at work until the
+/// Set is up, then not a byte and no at-work label until it is answered, and
+/// then the work it was sent to do.
+///
+/// **Which is the strictest shape the wait can take from out here, and not the
+/// shape the real opencode wears.** A held ask under the real thing is a
+/// session at work: the shell tool runs the command inside the model's own
+/// turn, and opencode animates the dial beside its `esc interrupt` label the
+/// whole time it does — so it draws its at-work label and is never byte-quiet.
+/// What this stub draws instead is what an OpenCode session would look like the
+/// day that stops being true: a label that has moved on, or a renderer that
+/// settles while a tool call runs. The session is then idle by every reading
+/// Verkstead has, the long-stop included, and the unanswered Set of its own is
+/// the whole of what stands between the human's answer and a session ended
+/// before it could read it.
+///
+/// `hold` is the marker the test writes once the Set is up, which is what puts
+/// the ask and the silence into the order they happen in on a real session —
+/// [`WHILE_NOBODY_HAS_ASKED`] is the same trick for a stub that prints. A
+/// marker of its own rather than the one [`Grilling::ask`] writes, because the
+/// pick that starts the backlog is an ask as well.
+fn a_step_that_holds_an_ask(grilling_model: &str, at_work: &str, resting: &str) -> String {
+    format!(
+        r#"
+frame() {{ printf '\033[2J\033[H%s\n' "$1"; }}
+working() {{
+    LEFT=$1
+    while [ "$LEFT" -ne 0 ]; do
+        frame '{at_work}'
+        sleep 0.05
+        LEFT=$((LEFT - 1))
+    done
+}}
+[ "$2" = --prompt ] && set -- "$1" "$3"
+case "$1" in
+{grilling_model})
+    working 10
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    frame '{resting}'
+    sleep 300
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
+    working 10
+    while [ ! -f /tmp/verkstead/hold ]; do
+        frame '{at_work}'
+        sleep 0.05
+    done
+    frame '{resting}'
+    printf 'holding\n' > /tmp/verkstead/holding
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    working 10
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+    fi
+    frame '{resting}'
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+esac
+"#
+    )
+}
+
+/// An OpenCode session holding a blocking ask is left where it stands however
+/// long the human takes, and ended by the ordinary rules once they have
+/// answered and its work is done.
+///
+/// **The half of the blocking ask this backend does not bring with it.** The
+/// asking is the CLI's and is the same everywhere; what is this backend's own
+/// is that its sessions are judged by what they draw, and a session waiting on
+/// the human draws nothing new. Every ender waits on that judgement and the
+/// rescue's precondition is idle, so a wait that read as silence would be
+/// reaped mid-question — and the byte-quiet long-stop behind the screen would
+/// have it whatever its frame said. What holds it is the unanswered Set of its
+/// own, which every one of them reads.
+///
+/// So the stub here is quiet and shows no at-work label for longer than the
+/// long-stop, which is the worst case rather than the real one — see
+/// [`a_step_that_holds_an_ask`]. Nothing ends it, nothing is typed into it, and
+/// the Answers are in front of the session when it goes on.
+#[tokio::test]
+async fn an_opencode_session_holding_a_blocking_ask_is_neither_ended_nor_prodded() {
+    let fixture = grilling_on_opencode(&a_step_that_holds_an_ask(
+        OPENCODE_GRILLING_MODEL,
+        OPENCODE_AT_WORK,
+        OPENCODE_AT_ITS_PROMPT,
+    ))
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    // The step session's own Set, and then the marker that tells the stub it is
+    // up — which is what puts the ask before the silence, as it is on a real
+    // session.
+    let set = fixture.ask(A_STEPS_QUESTION).await;
+    std::fs::write(handoff_directory(&fixture).join("hold"), "").unwrap();
+
+    until_written(&handoff_directory(&fixture).join("holding")).await;
+    let holding = Instant::now();
+
+    // Longer than the long-stop, which is the longest clock in here: the grace
+    // is spent several times over, and the byte quiet that catches a signature
+    // nobody has caught up with has run past its own mark.
+    tokio::time::sleep(BRISKLY.long_stop + BRISKLY.proposing * 2).await;
+
+    assert!(
+        holding.elapsed() >= BRISKLY.long_stop,
+        "the session was quiet past the one clock that ends a drawing session \
+         whatever its screen says",
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session is still there to read what they say: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into it: a session with a question standing in \
+         front of the human is not one to prod, however quiet it is",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "nor was it stopped over a question the human has not answered: {:?}",
+        notices(&view),
+    );
+
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    // And then the ordinary rules: the step lands, the backlog empties, and the
+    // sessions are ended where they stand.
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: every session was ended where it stood: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was ever typed into any of them",
+    );
 }
 
 /// And an inline implementation that goes quiet without committing anything is
@@ -21220,7 +24255,7 @@ async fn no_grilling_builds_from_the_brief_alone_and_carries_it_to_a_pull_reques
          there: {sent}",
     );
     assert!(
-        sent.contains("blocking ask"),
+        sent.contains("ordinary ask"),
         "with what to do about what the Brief leaves open: {sent}",
     );
 

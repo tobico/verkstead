@@ -81,7 +81,7 @@ use crate::drivers::Driving;
 use crate::follow_ups::FollowUp;
 use crate::github;
 use crate::repos::git;
-use crate::sessions::{Quiet, Session};
+use crate::sessions::{Idle, Session};
 use crate::skills;
 use crate::store;
 use crate::tasks::{BACKLOG, TODO};
@@ -145,6 +145,23 @@ pub struct Pace {
     /// long one that never will is left before Verkstead says so.
     pub waking: Duration,
 
+    /// And how long a session judged on the screen it draws may print nothing
+    /// before it is idle whatever that screen says.
+    ///
+    /// The long-stop behind a signature read off the screen — see
+    /// [`crate::sessions::Idle`]. Five minutes: minutes rather than seconds,
+    /// because a backend that repaints leaves gaps a few seconds long in the
+    /// middle of its work and a session reaped inside one would be reaped at
+    /// work. What it is for is a signature that has drifted, which is a session
+    /// nothing else here catches — Rescue's precondition is quiet, every ender
+    /// gates on the same judgement, and no session carries a cap on its life —
+    /// so what this decides is not how fast that is noticed but whether it ever
+    /// is.
+    ///
+    /// Nothing to a session judged on what it prints, which is measured by
+    /// [`crate::sessions`]'s own three seconds and never by this.
+    pub long_stop: Duration,
+
     /// And how long a wrap-up's review waits before it takes the Worktree.
     ///
     /// Zero in a server, where nothing is waiting for anything: this is a seam
@@ -185,6 +202,7 @@ impl Default for Pace {
             checks: crate::checks::ASKED_EVERY,
             proposing: Duration::from_secs(60),
             waking: Duration::from_secs(300),
+            long_stop: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
             reviewing: Duration::ZERO,
@@ -1174,12 +1192,12 @@ async fn submitted(state: &AppState, conversation_id: i64) -> Option<i64> {
     let mut session = launch_in_turn(state, conversation_id, Prompt::Submitting).await?;
 
     let event_id = session.event_id;
-    let quiet = session.quiet.clone();
+    let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        () = quiet_and_nothing_asked(state, conversation_id, event_id, &quiet, pace) => None,
+        () = quiet_and_nothing_asked(state, conversation_id, event_id, &idle, pace) => None,
     };
 
     match ended {
@@ -1335,7 +1353,7 @@ async fn follow_inline(
         }
     };
 
-    let quiet = session.quiet.clone();
+    let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
     let ended = tokio::select! {
@@ -1346,7 +1364,7 @@ async fn follow_inline(
         // interactive agent idles when its work is done rather than exiting —
         // which is [`instructed`]'s rule, on a session whose whole job is the
         // same shape.
-        () = committed_and_quiet(&state, conversation_id, already, &quiet, pace) => None,
+        () = committed_and_quiet(&state, conversation_id, already, &idle, pace) => None,
         // And one that is idle with nothing committed and nothing put to the
         // human: the whole of an inline run come to nothing, with a process
         // still holding the Worktree and nothing on the page to press. Told
@@ -1356,7 +1374,7 @@ async fn follow_inline(
             &state,
             conversation_id,
             event_id,
-            &quiet,
+            &idle,
             pace,
             crate::rescues::Done::Committed { already },
         ) => {
@@ -1550,12 +1568,12 @@ pub(crate) async fn instructed(
     };
 
     let event_id = session.event_id;
-    let quiet = session.quiet.clone();
+    let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        () = committed_and_quiet(&state, conversation_id, already, &quiet, pace) => None,
+        () = committed_and_quiet(&state, conversation_id, already, &idle, pace) => None,
         // Nothing committed and nothing asked, with the session sitting there:
         // an instruction that has come to nothing and nobody to say so to.
         // Told twice and then stopped where it stands, which is the same ending
@@ -1564,7 +1582,7 @@ pub(crate) async fn instructed(
             &state,
             conversation_id,
             event_id,
-            &quiet,
+            &idle,
             pace,
             crate::rescues::Done::Committed { already },
         ) => {
@@ -1839,12 +1857,12 @@ pub(crate) async fn following_up(
     };
 
     let event_id = session.event_id;
-    let quiet = session.quiet.clone();
+    let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        () = nothing_else_and_quiet(&state, conversation_id, &quiet, pace) => None,
+        () = nothing_else_and_quiet(&state, conversation_id, &idle, pace) => None,
         // The session is still there and still saying nothing, having been asked
         // twice to say it where the human would hear. So it is ended here rather
         // than waited on any longer, and the stop written over it is one the
@@ -1855,7 +1873,7 @@ pub(crate) async fn following_up(
             &state,
             conversation_id,
             event_id,
-            &quiet,
+            &idle,
             pace,
             crate::rescues::Done::NothingElse,
         ) => {
@@ -2091,7 +2109,7 @@ async fn left_open(state: &AppState, conversation_id: i64) {
 /// than here, by the one loop that watches for it in every state. See
 /// [`crate::rescues::until_it_will_not_ask`], which takes the mark as its
 /// done-indicator.
-async fn nothing_else_and_quiet(state: &AppState, conversation_id: i64, quiet: &Quiet, pace: Pace) {
+async fn nothing_else_and_quiet(state: &AppState, conversation_id: i64, idle: &Idle, pace: Pace) {
     // When a Set of the Conversation's was last seen open. An answer arriving is
     // something the session has just been given to act on, and one that has just
     // been given something has had no time to act on it yet — so the grace runs
@@ -2099,7 +2117,7 @@ async fn nothing_else_and_quiet(state: &AppState, conversation_id: i64, quiet: &
     let mut asked: Option<Instant> = None;
 
     loop {
-        let owed = pace.proposing.saturating_sub(quiet.for_how_long());
+        let owed = pace.proposing.saturating_sub(idle.for_how_long());
 
         if !owed.is_zero() {
             tokio::time::sleep(owed).await;
@@ -2284,12 +2302,12 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
     .await?;
 
     let event_id = session.event_id;
-    let quiet = session.quiet.clone();
+    let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        _ = committed_and_quiet(state, conversation_id, already, &quiet, pace) => None,
+        _ = committed_and_quiet(state, conversation_id, already, &idle, pace) => None,
         // Idle, with nothing committed and nothing put to the human, which is a
         // fix nobody can move on. Told twice and then ended where it stands; the
         // stop, where there is to be one, is the wrap-up's own once the branch
@@ -2298,7 +2316,7 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
             state,
             conversation_id,
             event_id,
-            &quiet,
+            &idle,
             pace,
             crate::rescues::Done::Committed { already },
         ) => {
@@ -2444,18 +2462,18 @@ async fn proposing(
     };
 
     let event_id = session.event_id;
-    let quiet = session.quiet.clone();
+    let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
     let ended = tokio::select! {
         ended = session.ended() => ended,
-        () = quiet_and_nothing_asked(state, conversation_id, event_id, &quiet, pace) => {
+        () = quiet_and_nothing_asked(state, conversation_id, event_id, &idle, pace) => {
             // Whether that was a session finishing or one that never got going,
             // which is the whole of what its own words can be asked. Ended
             // either way — a session with nothing to say is not one to leave
             // holding the Worktree — and the difference is in what is made of
             // it.
-            let said_anything = quiet.said_anything();
+            let said_anything = idle.said_anything();
 
             tracing::info!(
                 conversation_id,
@@ -2530,7 +2548,7 @@ const SAID_NOTHING: &str =
 ///
 /// The grace is asked first because it is the cheap half: a session still talking
 /// is not one to ask the store about. And anything it prints puts the whole grace
-/// back on the clock — see [`crate::sessions::Quiet`] — so a session mid-sentence
+/// back on the clock — see [`crate::sessions::Idle`] — so a session mid-sentence
 /// is never one this ends, however long it goes on for.
 ///
 /// An Answer arriving does the same, which is the other half of that rule: a
@@ -2543,7 +2561,7 @@ async fn quiet_and_nothing_asked(
     state: &AppState,
     conversation_id: i64,
     event_id: i64,
-    quiet: &Quiet,
+    idle: &Idle,
     pace: Pace,
 ) {
     // When it was last seen with an ask of its own open, and `None` while it has
@@ -2551,7 +2569,7 @@ async fn quiet_and_nothing_asked(
     let mut asked: Option<Instant> = None;
 
     loop {
-        let owed = pace.proposing.saturating_sub(quiet.for_how_long());
+        let owed = pace.proposing.saturating_sub(idle.for_how_long());
 
         if !owed.is_zero() {
             tokio::time::sleep(owed).await;
@@ -2577,14 +2595,16 @@ async fn quiet_and_nothing_asked(
     }
 }
 
-/// Whether the session has a Blocking Ask of its own that nothing has answered.
+/// Whether the session is idling on an ask of its own that nothing has
+/// answered.
 ///
 /// Its own, which is what the Event id says: nothing on the record names the
 /// session a Set was asked by, and nothing has to — one Worktree holds one agent,
 /// so every Set that landed after this session's Event is this session's. A
 /// Deferred Ask is not one of them, and neither is a Set the human closed
-/// unanswered: both are Sets nobody is idling on. See
-/// [`store::unanswered_set_since`].
+/// unanswered: both are Sets nobody is idling on. A store-and-nudge one is,
+/// stored though it is — the session that sent it has its turn ended and is
+/// waiting to be nudged. See [`store::unanswered_set_since`].
 ///
 /// A store that will not answer reads as *asking*, which is the right way round
 /// for the one thing this decides: a session is ended on the strength of it, and
@@ -2615,7 +2635,7 @@ async fn committed_and_quiet(
     state: &AppState,
     conversation_id: i64,
     already: usize,
-    quiet: &Quiet,
+    idle: &Idle,
     pace: Pace,
 ) {
     loop {
@@ -2626,7 +2646,7 @@ async fn committed_and_quiet(
         }
 
         loop {
-            let owed = pace.grace.saturating_sub(quiet.for_how_long());
+            let owed = pace.grace.saturating_sub(idle.for_how_long());
 
             if owed.is_zero() {
                 break;
@@ -2742,12 +2762,12 @@ async fn see_out(
     // Taken before the session is waited on: the two are asked about together
     // below, and the clock is shared with the relay rather than owned by the
     // handle.
-    let quiet = session.quiet.clone();
+    let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        _ = landed_and_quiet(&worktree, &landing, &quiet, pace) => None,
+        _ = landed_and_quiet(&worktree, &landing, &idle, pace) => None,
         // The step is not landing and the session is not asking about it: it has
         // gone idle with nothing open and nothing on the branch, which is a run
         // nobody can move. Told twice and then stopped where it stands — see
@@ -2756,7 +2776,7 @@ async fn see_out(
             state,
             conversation_id,
             event_id,
-            &quiet,
+            &idle,
             pace,
             crate::rescues::Done::Landed {
                 worktree: worktree.clone(),
@@ -2860,7 +2880,7 @@ async fn see_out(
 /// the step is done, what is left is sleeping out whatever quiet is still owed
 /// and looking again. Output arriving in the meantime lengthens the wait rather
 /// than ending it, and there is no cap on how long that may go on for.
-async fn landed_and_quiet(worktree: &Path, landing: &Landing, quiet: &Quiet, pace: Pace) {
+async fn landed_and_quiet(worktree: &Path, landing: &Landing, idle: &Idle, pace: Pace) {
     loop {
         tokio::time::sleep(pace.poll).await;
 
@@ -2869,7 +2889,7 @@ async fn landed_and_quiet(worktree: &Path, landing: &Landing, quiet: &Quiet, pac
         }
 
         loop {
-            let owed = pace.grace.saturating_sub(quiet.for_how_long());
+            let owed = pace.grace.saturating_sub(idle.for_how_long());
 
             if owed.is_zero() {
                 break;

@@ -7,6 +7,60 @@
 //! nothing here recognises is still on the Transcript, and is still shown — as
 //! the JSON it is.
 //!
+//! **Four backends, and the line says which.** Claude Code writes a line per
+//! thing said; codex writes a rollout, whose lines are a timestamp, an ordinal
+//! and a `type` around a payload; grok writes the session updates its own
+//! protocol is made of, keyed on `sessionUpdate` and carrying no `type` at all;
+//! and an OpenCode line is one record out of the store opencode keeps of its
+//! session, keyed on the `kind` opencode filed that record under. Nothing has
+//! to be told which is which: the keys are disjoint, so a line falls to the
+//! reader that knows its own kind and to the fold below all four where none
+//! does. The same lines are rendered in three places and none of them carries
+//! the agent type, which is what makes reading it off the line the only answer
+//! that works everywhere.
+//!
+//! **Two of the four use the same two words, and the key is what tells them
+//! apart.** opencode tags a message `user` or `assistant` — the words Claude's
+//! lines carry — and nothing hangs off them the same way: Claude puts what was
+//! said under the message, where opencode writes the message's envelope as one
+//! record and each thing said in a record of its own. What keeps the two apart
+//! is that neither word is ever read as a line's own kind here. Claude's is the
+//! line's `type`; opencode's is a `role` two levels down, inside a record whose
+//! line carries no `type` at all. A reader that keyed on the word wherever it
+//! found it would send every opencode record down Claude's arm and draw the lot
+//! as unreadable, so what is read is **the key rather than the value** — and
+//! that is the thing a fifth backend's arrival will test again.
+//!
+//! **opencode writes a part over and over as it grows, and the last of them is
+//! the turn.** One id and one record per growth — an empty text as the model
+//! starts speaking, the sentence so far, the sentence finished — where grok's
+//! store writes one line once the message is over. So what is drawn is the
+//! emission that finished, and every one before it folds away: the same
+//! judgement grok's reader makes of a tool call that has not settled. A turn is
+//! drawn once it is over rather than held open, exactly as everywhere else
+//! here.
+//!
+//! **Grok writes what the agent said whole, and the name of the kind says
+//! otherwise.** Its `agent_message_chunk` is a chunk of the stream by name and
+//! a finished message in the file: grok's store writes one line when the
+//! message is over, however slowly the model streamed it — driven for real
+//! against grok 1.0.13, in its TUI and headless, with a second and a half
+//! between one fragment of a sentence and the next, and one line landed at the
+//! end of it every time. So a chunk is a turn, the count is the count of them,
+//! and nothing here holds a turn open waiting for the rest of it to arrive. A
+//! release that starts writing the fragments would show as a Transcript of
+//! fragments rather than as a hole, which is the failure worth having: it is
+//! visible, and it is one reading away from fixed.
+//!
+//! **A rollout writes every turn down twice, and one of the two is the
+//! conversation.** Its `response_item` lines are what the model was sent — the
+//! developer preamble and the environment block among them — and its `event_msg`
+//! lines are what the TUI drew. The drawn one is what the pane draws, because it
+//! is what the human at that terminal would have seen; rendering both would
+//! double every turn and open every Transcript on pages of injected prompt. The
+//! other stream folds away under its own name, where nothing is hidden and it
+//! opens for whoever wants it.
+//!
 //! **Split on the content, not the line.** A tool's answer arrives inside a line
 //! the log types `user`, which is the same type a turn put by the human arrives
 //! under. Keying off the type alone would draw a directory listing as though a
@@ -35,7 +89,9 @@
 //! JSON it is. One folded away silently would be a turn with a hole in it,
 //! which is what ADR 0006's treatment is there to prevent. A line that is not
 //! JSON at all, and a line that does not say what type it is, stay inline for
-//! the same reason — neither has a name to be filed under.
+//! the same reason — neither has a name to be filed under. A rollout's item is
+//! a block by this reckoning, and so is the content a Grok chunk carries: each
+//! is one thing said inside the line that says it was.
 //!
 //! **A reading can be carried on.** A running session's Transcript is re-read
 //! every time it says anything, which late in a session is megabytes twice a
@@ -287,6 +343,102 @@ const BOOKKEEPING: &[&str] = &[
     "system",
 ];
 
+/// The same for a rollout: the kinds of line codex writes that are not the
+/// conversation it drew.
+///
+/// `response_item` is the largest of them and the one that matters most, since
+/// it is the whole of the talk over again as the model was sent it — see this
+/// module's own documentation. The rest are the session's own record of itself:
+/// the meta line it opens with, the context each turn ran under, the state of
+/// the world it was given, what it scored a command's risk at, what it said to
+/// another agent, and the summary it replaced a long conversation with.
+///
+/// A closed list and a fall-back past it, exactly as above: codex adds kinds
+/// without announcing them — `world_state` was not in the brief this backend was
+/// built from — and one nobody here has heard of folds away under its own name
+/// rather than standing in the conversation (ADR 0006).
+const ROLLOUT: &[&str] = &[
+    "compacted",
+    "inter_agent_communication",
+    "inter_agent_communication_metadata",
+    "response_item",
+    "security_risk_score",
+    "session_meta",
+    "turn_context",
+    "world_state",
+];
+
+/// And the same for grok's session updates: the kinds it writes that are not
+/// the conversation it kept.
+///
+/// Grok's own record of the session rather than anything anybody said — the
+/// hooks it ran, the plan it is keeping, the usage a finished turn cost, the
+/// commands and modes and options its client is offered, and the retries it
+/// made of a request that failed.
+///
+/// A closed list and a fall-back past it, for the third time: grok's own
+/// extensions to the protocol are a long tail — compaction, memory, recovery,
+/// diff review — and every one of them folds away under its own name rather
+/// than standing in the conversation (ADR 0006).
+const GROK: &[&str] = &[
+    "available_commands_update",
+    "config_option_update",
+    "current_mode_update",
+    "hook_execution",
+    "plan",
+    "retry_state",
+    "session_info_update",
+    "turn_completed",
+    "usage_update",
+];
+
+/// And the same for the records opencode keeps of a session: the kinds that are
+/// not the conversation.
+///
+/// The session's own row as it is made and every time it is touched, and the
+/// envelope around each message — its role, the model and agent it ran under,
+/// what it cost, whether it has finished — which carries none of the words. The
+/// words are in the parts of a message and nowhere else.
+///
+/// A closed list and a fall-back past it, for the fourth time — and opencode's
+/// tail is the longest of the four. Its own schema at 1.18.25 names a whole
+/// second family of records beside these, `session.next.*`: the turn put to it,
+/// the shell it ran, the agent and the model it switched to, the summary it
+/// replaced a long conversation with. No session driven the way Verkstead
+/// drives one has been seen to write one, so nothing here draws them; every one
+/// folds away under its own name until one is observed, which is what makes it
+/// findable to whoever meets it first (ADR 0006).
+const OPENCODE: &[&str] = &[
+    "message.part.removed.1",
+    "message.removed.1",
+    "message.updated.1",
+    "session.created.1",
+    "session.deleted.1",
+    "session.updated.1",
+];
+
+/// And the kinds of *part* that are opencode's own bookkeeping rather than
+/// anything anybody said: the step boundaries a turn is made of, the snapshots
+/// and patches it takes of the files, the agent it switched to, the attempt it
+/// retried, the summary it replaced a long conversation with, the subagent it
+/// sent off, and the files attached to a turn.
+///
+/// A closed list and a fall-back past it, as above. One more thing folds here
+/// that is not on the list and is not unknown either: an emission of a text, a
+/// reasoning or a tool part that has not finished growing, which is the
+/// conversation, only not yet — see [`parted`].
+const OPENCODE_PART: &[&str] = &[
+    "agent",
+    "compaction",
+    "file",
+    "patch",
+    "retry",
+    "snapshot",
+    "step-finish",
+    "step-start",
+    "subtask",
+];
+
 /// The keys of a tool's input that say what the call was about, best first.
 ///
 /// Keys rather than tools. Verkstead does not know what tools a session has —
@@ -297,6 +449,7 @@ const ABOUT: &[&str] = &[
     "description",
     "command",
     "file_path",
+    "filePath",
     "path",
     "pattern",
     "prompt",
@@ -317,24 +470,27 @@ const ABOUT_LIMIT: usize = 120;
 /// its Timeline row and the evidence a stop's Notice carries, and both of those
 /// are asking what the session last *said*.
 ///
+/// The same reading the pane draws, as [`turns`] is: the lines go through
+/// [`read`], and [`Reads::Quoting`] takes the prose out of it unrendered.
+/// Reading it a second way would be a second answer to what counts as the
+/// agent's own words, and two backends' worth of that is two places for the two
+/// to come apart.
+///
 /// Markdown as it stands rather than rendered, because neither of those two
 /// draws HTML: a Timeline row is one line of text and evidence is a block of it.
 pub fn statements(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .filter(|entry| entry["type"].as_str() == Some("assistant"))
-        .flat_map(|entry| {
-            let Some(blocks) = entry["message"]["content"].as_array() else {
-                return Vec::new();
-            };
+    let mut reading = Reading::new(Cursor::default(), Reads::Quoting);
 
-            blocks
-                .iter()
-                .filter(|block| block["type"].as_str() == Some("text"))
-                .map(|block| block["text"].as_str().unwrap_or_default().trim().to_owned())
-                .filter(|said| !said.is_empty())
-                .collect()
+    for line in lines {
+        read(line, &mut reading);
+    }
+
+    reading
+        .turns
+        .into_iter()
+        .filter_map(|turn| match turn {
+            Turn::Prose(Prose { html, .. }) => Some(html),
+            _ => None,
         })
         .collect()
 }
@@ -363,6 +519,30 @@ pub fn turns(lines: &[String]) -> usize {
 
     reading.turns.len()
 }
+
+/// The directory a Codex rollout's opening line says its session was working
+/// in — and `None` for any other line, and for anything that is not one.
+///
+/// The one thing about a rollout that is read anywhere but here, and it is read
+/// here for the reason everything else about somebody else's file format is:
+/// this crate is the one place that knows the shape of it (ADR 0006). What
+/// wants it is the finder, because a Codex session's log is found rather than
+/// named — codex takes no session id at launch, so what identifies its log is
+/// the `cwd` it wrote in its own first line.
+pub fn rollout_cwd(line: &str) -> Option<String> {
+    let line: Value = serde_json::from_str(line).ok()?;
+
+    if line.get("type")?.as_str()? != SESSION_META {
+        return None;
+    }
+
+    Some(line.get("payload")?.get("cwd")?.as_str()?.to_owned())
+}
+
+/// What codex calls the line it opens a rollout with. Named because it is
+/// somebody else's spelling, the same bargain the usage-limit phrase and the
+/// idle signature make: one place to edit when it moves.
+const SESSION_META: &str = "session_meta";
 
 /// The Transcript's lines, read into the conversation they record.
 ///
@@ -431,6 +611,12 @@ enum Reads {
     /// The turns alone. Everything rendered comes out empty, and nothing else
     /// about the reading changes.
     Counting,
+
+    /// The prose as the agent wrote it, for the row and the Notice that quote
+    /// the session in a line. Markdown rather than HTML, and everything that is
+    /// not prose comes out empty the way counting leaves it — see
+    /// [`statements`].
+    Quoting,
 }
 
 impl Reading {
@@ -518,14 +704,27 @@ fn read(line: &str, into: &mut Reading) {
     match entry["type"].as_str() {
         Some("assistant") => said(&entry, into),
         Some("user") => put(&entry, into),
-        Some(kind) if BOOKKEEPING.contains(&kind) => into.keep(kind.to_owned(), raw(&entry, reads)),
+        Some(EVENT_MSG) => drawn(&entry, into),
+        Some(kind) if BOOKKEEPING.contains(&kind) || ROLLOUT.contains(&kind) => {
+            into.keep(kind.to_owned(), raw(&entry, reads))
+        }
         // And a whole line of a kind nobody here has heard of, the same way:
         // folded under the name the log gave it rather than stood in the
         // conversation — see [`BOOKKEEPING`].
         Some(kind) => into.keep(kind.to_owned(), raw(&entry, reads)),
-        // A line that does not say what it is has no name to file it under, so
-        // it is shown, the way a line that is not JSON at all is.
-        None => into.take(unread(&entry, reads)),
+        // And a line with no type at all is one of the two backends that key
+        // theirs on something else: an OpenCode line carries the kind opencode
+        // filed the record under, and a Grok line carries the kind of update it
+        // is. A line that says none of the three has no name to file it under,
+        // so it is shown, the way a line that is not JSON at all is.
+        None => match (
+            entry[KIND].as_str(),
+            entry["params"]["update"][SESSION_UPDATE].as_str(),
+        ) {
+            (Some(kind), _) => recorded(kind, &entry, into),
+            (None, Some(kind)) => updated(kind, &entry, into),
+            (None, None) => into.take(unread(&entry, reads)),
+        },
     }
 }
 
@@ -615,6 +814,7 @@ fn rendered(markdown: &str, reads: Reads) -> Option<String> {
     match (markdown.trim().is_empty(), reads) {
         (true, _) => None,
         (false, Reads::Counting) => Some(String::new()),
+        (false, Reads::Quoting) => Some(markdown.trim().to_owned()),
         (false, Reads::Drawing) => Some(crate::markdown::to_html(markdown)),
     }
 }
@@ -629,7 +829,7 @@ fn called(block: &Value, reads: Reads) -> ToolUse {
         call: text(block["id"].as_str().unwrap_or_default(), reads),
         about: match reads {
             Reads::Drawing => about(input),
-            Reads::Counting => String::new(),
+            _ => String::new(),
         },
         input: raw(input, reads),
     }
@@ -664,7 +864,7 @@ fn one_line(text: &str) -> String {
 /// a screenshot arrives — keeps the text of it and says what the rest was,
 /// because a picture nobody can draw here is still something that happened.
 fn answered(block: &Value, reads: Reads) -> ToolResult {
-    if reads == Reads::Counting {
+    if reads != Reads::Drawing {
         return ToolResult {
             id: UNPLACED,
             call: String::new(),
@@ -693,6 +893,703 @@ fn answered(block: &Value, reads: Reads) -> ToolResult {
     }
 }
 
+/// What codex types the lines its TUI drew from, and what it types the event
+/// saying it finished drawing one item of a turn.
+///
+/// Somebody else's spellings, named for the reason [`SESSION_META`] is: one
+/// place to edit when they move.
+const EVENT_MSG: &str = "event_msg";
+const ITEM_COMPLETED: &str = "item_completed";
+
+/// What a tool item calls the status of a call that went through. Codex spells
+/// the rest of its statuses differently from item to item, and this is the one
+/// word all of them share.
+const COMPLETED: &str = "completed";
+
+/// One line of what codex drew: an item of the conversation, or the session's
+/// own bookkeeping about the turn it was drawing.
+///
+/// Filed under the event's own name rather than the line's. Every one of these
+/// lines is typed `event_msg`, so a group of them all called that would say
+/// nothing about any of them — where `token_count` and `task_complete` say what
+/// they are and are findable by it. A line whose payload never said what it was
+/// keeps the name the line had, which is the only name it has.
+fn drawn(entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+    let payload = &entry["payload"];
+
+    match payload["type"].as_str() {
+        Some(ITEM_COMPLETED) => match payload.get("item") {
+            Some(item) => completed(item, into),
+            // An event that says an item was drawn and names no item drew
+            // nothing, whatever else it is.
+            None => into.keep(ITEM_COMPLETED.to_owned(), raw(entry, reads)),
+        },
+        Some(event) => into.keep(event.to_owned(), raw(entry, reads)),
+        None => into.keep(EVENT_MSG.to_owned(), raw(entry, reads)),
+    }
+}
+
+/// One item of the conversation as the TUI drew it, put where it belongs.
+///
+/// The kinds are codex's own spellings, and an item of one nothing here knows
+/// stays where it was drawn as the JSON it is. That is the opposite of what a
+/// line of an unknown kind does, and deliberately: an item is part of a turn
+/// rather than a line beside it, and one folded away silently would leave a
+/// hole in the conversation (ADR 0006).
+fn completed(item: &Value, into: &mut Reading) {
+    let reads = into.reads;
+
+    match item["type"].as_str() {
+        Some("UserMessage") => {
+            if let Some(html) = rendered(&spoken(item), reads) {
+                into.take(Turn::Put(Put { id: UNPLACED, html }));
+            }
+        }
+        Some("AgentMessage") => {
+            if let Some(html) = rendered(&spoken(item), reads) {
+                into.take(Turn::Prose(Prose { id: UNPLACED, html }));
+            }
+        }
+        Some("Reasoning") => {
+            if let Some(html) = rendered(&thought(item), reads) {
+                into.take(Turn::Reasoning(Reasoning { id: UNPLACED, html }));
+            }
+        }
+        _ => match tool(item, reads) {
+            Some(called) => called.take(item, into),
+            None => into.take(unread(item, reads)),
+        },
+    }
+}
+
+/// The words of a message item, whichever of the two kinds it is.
+///
+/// What is read is the `text` an element of the content carries rather than
+/// what the element calls itself, because the two kinds spell that differently
+/// — codex types a person's element `text` and the agent's `Text` — and the
+/// words are in the same place either way. An element with no words in it says
+/// what it was instead, the way a tool's answer does: a picture nobody can draw
+/// here is still something that was said.
+fn spoken(item: &Value) -> String {
+    let Some(content) = item["content"].as_array() else {
+        return String::new();
+    };
+
+    content
+        .iter()
+        .map(
+            |element| match (element["text"].as_str(), element["type"].as_str()) {
+                (Some(said), _) => said.to_owned(),
+                (None, Some(kind)) => format!("[{kind}]"),
+                (None, None) => String::new(),
+            },
+        )
+        .collect::<Vec<String>>()
+        .join("")
+}
+
+/// The agent's thinking out of a reasoning item: the summary it wrote for the
+/// screen, and the raw chain where the model was asked for that instead and
+/// there is no summary to show.
+fn thought(item: &Value) -> String {
+    let summary = words(&item["summary_text"], "\n\n");
+
+    match summary.is_empty() {
+        true => words(&item["raw_content"], "\n\n"),
+        false => summary,
+    }
+}
+
+/// A tool item read into the two turns the pane draws it as.
+///
+/// Codex writes a call and the answer to it as one item — the command and what
+/// it printed, the tool and what it returned — where Claude Code writes two
+/// lines. The pane draws a card out of a call and an answer naming each other,
+/// so the one item becomes that pair, both carrying the item's own id as the
+/// name that joins them.
+struct Tool {
+    /// What the log calls the tool: the name it gives where it gives one, and
+    /// the item's own kind where the item *is* the tool.
+    name: String,
+
+    /// The one line about it, uncut — [`Tool::take`] cuts it to a row.
+    about: String,
+
+    /// What it was called with.
+    input: String,
+
+    /// What it said back.
+    answer: String,
+
+    /// Whether it failed.
+    failed: bool,
+}
+
+impl Tool {
+    /// The call and the answer to it, taken into the conversation in that
+    /// order.
+    fn take(self, item: &Value, into: &mut Reading) {
+        let call = text(item["id"].as_str().unwrap_or_default(), into.reads);
+
+        into.take(Turn::ToolUse(ToolUse {
+            id: UNPLACED,
+            name: self.name,
+            call: call.clone(),
+            about: one_line(&self.about),
+            input: self.input,
+        }));
+        into.take(Turn::ToolResult(ToolResult {
+            id: UNPLACED,
+            call,
+            failed: self.failed,
+            text: self.answer,
+        }));
+    }
+}
+
+/// A tool item read — and nothing at all for an item that is not a tool, which
+/// is what leaves everything else to be drawn as what it is.
+fn tool(item: &Value, reads: Reads) -> Option<Tool> {
+    let kind = item["type"].as_str()?;
+
+    // The first of `keys` the item carries, which is how an item that says the
+    // same thing under two names — a command's aggregated output and the
+    // formatted output beside it — is read without asking for both.
+    let first = |keys: &[&str]| {
+        text(
+            keys.iter()
+                .find_map(|key| item[*key].as_str())
+                .unwrap_or_default(),
+            reads,
+        )
+    };
+
+    let tool = match kind {
+        "CommandExecution" => Tool {
+            name: text(kind, reads),
+            about: summarised(|| ran(item), reads),
+            input: raw(&item["command"], reads),
+            answer: first(&["aggregated_output", "formatted_output", "stdout"]),
+            failed: failed(item),
+        },
+        "FileChange" => Tool {
+            name: text(kind, reads),
+            about: summarised(|| changed(item), reads),
+            input: raw(&item["changes"], reads),
+            answer: first(&["stdout", "stderr"]),
+            failed: failed(item),
+        },
+        "WebSearch" => Tool {
+            name: text(kind, reads),
+            about: first(&["query"]),
+            input: raw(&item["action"], reads),
+            answer: shown(&item["results"], reads),
+            failed: false,
+        },
+        "McpToolCall" => Tool {
+            name: qualified(item, "server", reads),
+            about: summarised(|| about(&item["arguments"]), reads),
+            input: raw(&item["arguments"], reads),
+            answer: answer(item, "result", reads),
+            failed: failed(item),
+        },
+        "DynamicToolCall" => Tool {
+            name: qualified(item, "namespace", reads),
+            about: summarised(|| about(&item["arguments"]), reads),
+            input: raw(&item["arguments"], reads),
+            answer: answer(item, "content_items", reads),
+            failed: failed(item),
+        },
+        _ => return None,
+    };
+
+    Some(tool)
+}
+
+/// A summary worked out only where somebody is going to read it, which is what
+/// keeps a reading that is only counting from walking a call's arguments.
+fn summarised(said: impl FnOnce() -> String, reads: Reads) -> String {
+    match reads {
+        Reads::Drawing => said(),
+        _ => String::new(),
+    }
+}
+
+/// The name a tool item gives itself: the two halves the log names it in, and
+/// the tool alone where the log named no first half.
+fn qualified(item: &Value, first: &str, reads: Reads) -> String {
+    let tool = item["tool"].as_str().unwrap_or_default();
+
+    summarised(
+        || match item[first].as_str() {
+            Some(prefix) if !prefix.is_empty() => format!("{prefix}.{tool}"),
+            _ => tool.to_owned(),
+        },
+        reads,
+    )
+}
+
+/// What a tool that answers in structure said back: its error where it failed
+/// with one, and what it returned under `key` where it did not.
+fn answer(item: &Value, key: &str, reads: Reads) -> String {
+    match item["error"]["message"].as_str() {
+        Some(message) => text(message, reads),
+        None => shown(&item[key], reads),
+    }
+}
+
+/// JSON laid out to be read, and nothing at all where there is nothing to read
+/// — which is what keeps a tool that answered with nothing from answering
+/// `null`.
+fn shown(value: &Value, reads: Reads) -> String {
+    match value.is_null() {
+        true => String::new(),
+        false => raw(value, reads),
+    }
+}
+
+/// Whether a tool item failed, which is anything the item did not call
+/// completed: a command that came back non-zero, a call the human declined, a
+/// tool that answered with an error.
+fn failed(item: &Value) -> bool {
+    item["status"].as_str() != Some(COMPLETED) || item["success"] == Value::Bool(false)
+}
+
+/// The one line a command execution is summarised by: the command as codex
+/// parsed it for its own screen, and the argv it actually ran where it parsed
+/// nothing — which is a shell, a flag, and the command as one string.
+fn ran(item: &Value) -> String {
+    if let Some(parsed) = item["parsed_cmd"][0]["cmd"].as_str() {
+        return parsed.to_owned();
+    }
+
+    words(&item["command"], " ")
+}
+
+/// And the one line a patch is summarised by: the files it changed.
+fn changed(item: &Value) -> String {
+    item["changes"]
+        .as_object()
+        .map(|changes| {
+            changes
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<&str>>()
+                .join(", ")
+        })
+        .unwrap_or_default()
+}
+
+/// The strings of an array, joined by `between`.
+fn words(value: &Value, between: &str) -> String {
+    value
+        .as_array()
+        .map(|said| {
+            said.iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<&str>>()
+                .join(between)
+        })
+        .unwrap_or_default()
+}
+
+/// One of grok's session updates, put where it belongs.
+///
+/// The kinds are the agent protocol's, and grok's own past them. The three
+/// chunks are the conversation — the turn put to it, its thinking, its prose —
+/// a `tool_call` is a call, and a `tool_call_update` is the answer to one once
+/// the call has finished. Everything else is grok keeping its own record, and
+/// folds away under the name grok gave it.
+fn updated(kind: &str, entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+    let update = &entry["params"]["update"];
+
+    match kind {
+        "user_message_chunk" => chunk(update, into, |html| Turn::Put(Put { id: UNPLACED, html })),
+        "agent_message_chunk" => chunk(update, into, |html| {
+            Turn::Prose(Prose { id: UNPLACED, html })
+        }),
+        "agent_thought_chunk" => chunk(update, into, |html| {
+            Turn::Reasoning(Reasoning { id: UNPLACED, html })
+        }),
+        "tool_call" => into.take(Turn::ToolUse(calling(update, reads))),
+        // An update to a call that has not finished is the call still running —
+        // the title its own screen drew for it, the input as its tool parsed it
+        // — and drawing one as an answer would put two answers under a call
+        // that was answered once.
+        "tool_call_update" => match settled(update) {
+            Some(failed) => into.take(Turn::ToolResult(answering(update, failed, reads))),
+            None => into.keep(kind.to_owned(), raw(entry, reads)),
+        },
+        // Grok's own record of the session, and — the arm below it — a kind
+        // nobody here has heard of, folded the same way and for the same
+        // reason: see [`GROK`].
+        kind if GROK.contains(&kind) => into.keep(kind.to_owned(), raw(entry, reads)),
+        kind => into.keep(kind.to_owned(), raw(entry, reads)),
+    }
+}
+
+/// One chunk of what somebody said, drawn as whichever turn it is.
+///
+/// What the chunk carries is one content block, and a block of a kind nothing
+/// here can draw stays in the conversation as the JSON it is rather than
+/// folding away — a chunk is part of a turn, so one folded silently would leave
+/// a hole where somebody spoke (ADR 0006).
+fn chunk(update: &Value, into: &mut Reading, said: impl FnOnce(String) -> Turn) {
+    let reads = into.reads;
+    let content = &update["content"];
+
+    match content["type"].as_str() {
+        Some("text") => {
+            if let Some(Prose { html, .. }) = prose(content, "text", reads) {
+                into.take(said(html));
+            }
+        }
+        _ => into.take(unread(content, reads)),
+    }
+}
+
+/// A tool call as grok writes one: the name grok's own metadata gives the tool,
+/// the id its answer names back, and the input as the model sent it.
+///
+/// The title is the fall-back for the name rather than the first choice. On the
+/// call itself the two are the same word, but grok rewrites the title as the
+/// call runs — `run_terminal_command` becomes ``Execute `ls .tasks` `` — so the
+/// name that stays the tool's is the one under `x.ai/tool`.
+fn calling(update: &Value, reads: Reads) -> ToolUse {
+    let input = &update["rawInput"];
+
+    ToolUse {
+        id: UNPLACED,
+        name: text(tool_name(update), reads),
+        call: text(update["toolCallId"].as_str().unwrap_or_default(), reads),
+        about: summarised(|| about(input), reads),
+        input: raw(input, reads),
+    }
+}
+
+/// What grok calls the tool a call is a call to.
+fn tool_name(update: &Value) -> &str {
+    update["_meta"][XAI_TOOL]["name"]
+        .as_str()
+        .or_else(|| update["title"].as_str())
+        .unwrap_or_default()
+}
+
+/// What a Grok tool answered: the content of the update that finished the call,
+/// or — where it finished carrying none — what grok told the model it answered.
+///
+/// Both, because grok writes an answer under whichever of the two its tool
+/// reaches for, and some tools reach only for the second: a plan update finishes
+/// with its own `rawOutput` and no content at all, so a call read out of the
+/// blocks alone draws as an answer with nothing in it. The same shape codex's
+/// reader takes and for the same reason — an item that says one thing under two
+/// names is read without asking for both.
+fn answering(update: &Value, failed: bool, reads: Reads) -> ToolResult {
+    ToolResult {
+        id: UNPLACED,
+        call: text(update["toolCallId"].as_str().unwrap_or_default(), reads),
+        failed,
+        text: match reads {
+            Reads::Drawing => match said_back(&update["content"]) {
+                // Nothing in the blocks covers both a call that answered in none
+                // of them and one whose blocks held nothing to draw: either way
+                // what there is to show is under the tool's own output.
+                said if said.is_empty() => for_the_prompt(&update["rawOutput"]).unwrap_or_default(),
+                said => said,
+            },
+            _ => String::new(),
+        },
+    }
+}
+
+/// The text of what a call answered with, out of the blocks it answered in.
+///
+/// A block that is not text says what it was instead — a diff, a terminal, a
+/// picture — the way a tool's answer does everywhere else here: something
+/// nobody can draw as text is still something that happened. Empty where the
+/// update carried no content at all, which is where [`for_the_prompt`] takes
+/// over.
+fn said_back(content: &Value) -> String {
+    content
+        .as_array()
+        .map(|blocks| {
+            blocks
+                .iter()
+                .map(|block| {
+                    // A content block wraps the thing itself; every other kind
+                    // is the thing.
+                    let said = match block.get("content") {
+                        Some(inside) if inside.is_object() => inside,
+                        _ => block,
+                    };
+
+                    match (said["text"].as_str(), said["type"].as_str()) {
+                        (Some(text), _) => text.to_owned(),
+                        (None, Some(kind)) => format!("[{kind}]"),
+                        (None, None) => String::new(),
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+}
+
+/// And what grok told the model a call answered with, out of the tool's own raw
+/// output.
+///
+/// Grok writes an answer twice over: once as the protocol's content blocks, and
+/// once as whatever the tool itself produced — with the words the model was
+/// actually handed under a key ending [`FOR_THE_PROMPT`]. `output_for_prompt` on
+/// a command that ran, `summary_for_prompt` on a plan that was rewritten.
+///
+/// **The suffix rather than the keys there are**, for the reason [`ABOUT`] is
+/// keys rather than tools: what tools a session has is grok's business and half
+/// of them are whatever the project added, where the convention for naming what
+/// the model was told is one thing and shared. And found at whatever depth it
+/// sits at, because the shape around it is the tool's own — a command puts it
+/// beside its exit code and a plan puts it inside the update it made.
+///
+/// `None` where there is none, which is a call that answered its caller and had
+/// nothing to show for it.
+fn for_the_prompt(output: &Value) -> Option<String> {
+    match output {
+        Value::Object(fields) => fields.iter().find_map(|(key, value)| match value.as_str() {
+            Some(said) if key.ends_with(FOR_THE_PROMPT) => Some(said.to_owned()),
+            _ => for_the_prompt(value),
+        }),
+        Value::Array(values) => values.iter().find_map(for_the_prompt),
+        _ => None,
+    }
+}
+
+/// Whether an update to a tool call is the answer to it, and whether the call
+/// failed: `Some(true)` for one that ended badly, `Some(false)` for one that
+/// went through, and `None` for a call that is still running.
+fn settled(update: &Value) -> Option<bool> {
+    match update["status"].as_str()? {
+        GROK_COMPLETED => Some(false),
+        GROK_FAILED => Some(true),
+        // `pending` and `in_progress` are the two the protocol has, and a
+        // status this has never met is treated as the same thing: a call that
+        // has not answered yet. The line is on the Transcript either way.
+        _ => None,
+    }
+}
+
+/// What grok keys its session updates on, where the two backends before it key
+/// their lines on `type`.
+const SESSION_UPDATE: &str = "sessionUpdate";
+
+/// Where grok writes what it knows about a tool of its own, beside the
+/// protocol's own fields.
+const XAI_TOOL: &str = "x.ai/tool";
+
+/// And how it ends the key holding what a tool handed the model — see
+/// [`for_the_prompt`].
+const FOR_THE_PROMPT: &str = "_for_prompt";
+
+/// What grok calls a tool call that ran to the end, and what it calls one that
+/// ended badly.
+///
+/// The first is the same word codex and opencode spell their own statuses with,
+/// and a constant of its own all the same: backends that happen to agree on a
+/// word are that many spellings rather than one, and any of them can move
+/// without the others.
+const GROK_COMPLETED: &str = "completed";
+const GROK_FAILED: &str = "failed";
+
+/// One record out of the store an OpenCode session keeps of itself, put where
+/// it belongs.
+///
+/// The record is under [`RECORD`] exactly as opencode wrote it, with the kind
+/// opencode filed it under beside it — the server crate's `records` module is
+/// what puts the two together, and this is the other end of that.
+///
+/// The conversation is in the parts of a message and nowhere else. Everything
+/// opencode records about the session itself, and the envelope it records
+/// around each message, is bookkeeping: none of it is anything anybody said.
+fn recorded(kind: &str, entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+
+    match kind {
+        PART_UPDATED => match entry[RECORD][PART]["type"].as_str() {
+            Some(part) => parted(part, &entry[RECORD][PART], entry, into),
+            // A record that says a part was written and names no kind of part
+            // keeps the name the record had, which is the only name it has —
+            // the same answer a rollout's event with no payload type gets.
+            None => into.keep(kind.to_owned(), raw(entry, reads)),
+        },
+        // opencode's own record of the session and of the messages in it, and —
+        // the arm below it — a kind nobody here has heard of, folded the same
+        // way and for the same reason: see [`OPENCODE`].
+        kind if OPENCODE.contains(&kind) => into.keep(kind.to_owned(), raw(entry, reads)),
+        kind => into.keep(kind.to_owned(), raw(entry, reads)),
+    }
+}
+
+/// One part of a message, drawn as the turn it is.
+///
+/// Filed under the part's own kind rather than the record's, for the reason a
+/// rollout's event is filed under the event's: every part arrives under
+/// [`PART_UPDATED`], so a group of them all called that would say nothing about
+/// any of them.
+///
+/// **A part is written again every time it grows**, under the one id, so what
+/// is drawn is the emission that finished and every one before it folds away.
+/// Drawing them all would put a sentence on the Transcript once per piece of it
+/// the model streamed.
+fn parted(kind: &str, part: &Value, entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+
+    match kind {
+        // Text opencode wrote to itself rather than anything the session said:
+        // a prompt it synthesised, or one it has since stopped sending.
+        "text" if part[SYNTHETIC] == Value::Bool(true) || part[IGNORED] == Value::Bool(true) => {
+            into.keep(kind.to_owned(), raw(entry, reads))
+        }
+        // A part opencode was handed rather than one it streamed is the turn
+        // put to the session — see [`handed`].
+        "text" if handed(part) => {
+            if let Some(Prose { html, .. }) = prose(part, "text", reads) {
+                into.take(Turn::Put(Put { id: UNPLACED, html }));
+            }
+        }
+        "text" => match grown(part) {
+            true => {
+                if let Some(prose) = prose(part, "text", reads) {
+                    into.take(Turn::Prose(prose));
+                }
+            }
+            false => into.keep(kind.to_owned(), raw(entry, reads)),
+        },
+        "reasoning" => match grown(part) {
+            true => {
+                if let Some(Prose { html, .. }) = prose(part, "text", reads) {
+                    into.take(Turn::Reasoning(Reasoning { id: UNPLACED, html }));
+                }
+            }
+            false => into.keep(kind.to_owned(), raw(entry, reads)),
+        },
+        "tool" => tooled(part, entry, into),
+        // opencode's own bookkeeping, and — the arm below it — a kind of part
+        // nobody here has heard of: see [`OPENCODE_PART`].
+        kind if OPENCODE_PART.contains(&kind) => into.keep(kind.to_owned(), raw(entry, reads)),
+        kind => into.keep(kind.to_owned(), raw(entry, reads)),
+    }
+}
+
+/// Whether a part is one opencode was handed whole rather than one it streamed,
+/// which is what says a piece of text is the turn put to the session rather
+/// than the agent's own prose.
+///
+/// **The times, because they are what is actually different.** The role is on
+/// the message and the words are on the part, and a part arrives as a record of
+/// its own — so the record with the words in it does not say whose they are,
+/// and holding one back until the other arrived would not survive an
+/// incremental reading, where the two can fall in different batches. What the
+/// record does carry is the timing: opencode stamps a part it streams as the
+/// model starts it and again as the model ends it, and a part it was handed —
+/// the Brief a session was launched on, a turn typed at the prompt — is written
+/// once with no times at all.
+///
+/// Read off opencode 1.18.25, whose own schema makes a text part's times
+/// optional and a reasoning part's required: only the agent streams.
+fn handed(part: &Value) -> bool {
+    part[TIME].is_null()
+}
+
+/// And whether a part opencode streamed has finished growing, which is the
+/// emission of it that is drawn.
+fn grown(part: &Value) -> bool {
+    !part[TIME]["end"].is_null()
+}
+
+/// A tool call as opencode writes one: a single part, re-written as the call is
+/// made, runs and answers, carrying its input and what it said back inside its
+/// own state.
+///
+/// The pane draws a call and an answer as one card, so the finished part becomes
+/// that pair — both carrying the call's own id as the name that joins them, the
+/// way a rollout's tool item does. A part whose call has not settled is the call
+/// still running, and folds away: drawing one as an answer would put an answer
+/// under a call that has not made one.
+fn tooled(part: &Value, entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+    let state = &part[STATE];
+
+    let failed = match state["status"].as_str() {
+        Some(OPENCODE_COMPLETED) => false,
+        Some(OPENCODE_ERROR) => true,
+        // `pending` and `running` are the two the schema has, and a status this
+        // has never met is treated as the same thing: a call that has not
+        // answered yet. The record is on the Transcript either way.
+        _ => return into.keep("tool".to_owned(), raw(entry, reads)),
+    };
+
+    let call = text(part["callID"].as_str().unwrap_or_default(), reads);
+
+    into.take(Turn::ToolUse(ToolUse {
+        id: UNPLACED,
+        name: text(part["tool"].as_str().unwrap_or_default(), reads),
+        call: call.clone(),
+        about: summarised(|| titled(state), reads),
+        input: raw(&state["input"], reads),
+    }));
+    into.take(Turn::ToolResult(ToolResult {
+        id: UNPLACED,
+        call,
+        failed,
+        text: text(
+            state[match failed {
+                true => "error",
+                false => "output",
+            }]
+            .as_str()
+            .unwrap_or_default(),
+            reads,
+        ),
+    }));
+}
+
+/// The one line an OpenCode call is collapsed to: the title opencode drew for
+/// it on its own screen, and whatever the input says about itself where
+/// opencode drew none — which is a call that ended badly, since only one that
+/// went through is given a title.
+fn titled(state: &Value) -> String {
+    match state["title"].as_str() {
+        Some(title) if !title.trim().is_empty() => one_line(title),
+        _ => about(&state["input"]),
+    }
+}
+
+/// What Verkstead writes around a record it took out of an OpenCode session's
+/// store: the kind opencode filed it under, and the record itself. The server
+/// crate's `records` module chose both spellings, and reading them is the whole
+/// of what this end knows about how a record got here.
+const KIND: &str = "kind";
+const RECORD: &str = "record";
+
+/// What opencode calls the record carrying one part of a message, which is the
+/// only kind of record the conversation is in.
+const PART_UPDATED: &str = "message.part.updated.1";
+
+/// And opencode's own spellings inside a part: where a part keeps the moments
+/// it was streamed between, where a tool call keeps its input and its answer,
+/// and the two flags that say a piece of text was opencode talking to itself.
+const PART: &str = "part";
+const TIME: &str = "time";
+const STATE: &str = "state";
+const SYNTHETIC: &str = "synthetic";
+const IGNORED: &str = "ignored";
+
+/// What opencode calls a tool call that ran to the end, and what it calls one
+/// that ended badly.
+const OPENCODE_COMPLETED: &str = "completed";
+const OPENCODE_ERROR: &str = "error";
+
 /// Whatever this is, shown as the JSON it is.
 fn unread(value: &Value, reads: Reads) -> Turn {
     Turn::Unread(Unread {
@@ -707,7 +1604,7 @@ fn unread(value: &Value, reads: Reads) -> Turn {
 fn raw(value: &Value, reads: Reads) -> String {
     match reads {
         Reads::Drawing => serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()),
-        Reads::Counting => String::new(),
+        _ => String::new(),
     }
 }
 
@@ -716,7 +1613,7 @@ fn raw(value: &Value, reads: Reads) -> String {
 fn text(said: &str, reads: Reads) -> String {
     match reads {
         Reads::Drawing => said.to_owned(),
-        Reads::Counting => String::new(),
+        _ => String::new(),
     }
 }
 
@@ -1186,5 +2083,1023 @@ mod tests {
             .collect();
 
         assert!(statements(&lines).is_empty(), "{:?}", statements(&lines));
+    }
+
+    /// A Codex rollout's opening line, as codex 0.149.0 writes one — cut off
+    /// after the field the finder is after, because the rest of it is the
+    /// session's whole system prompt and eighteen kilobytes of it.
+    const SESSION_META_LINE: &str = r#"{"timestamp":"2026-08-30T07:47:01.017Z","ordinal":0,"type":"session_meta","payload":{"session_id":"01a051a2-d4e0-7f03-8839-d771ca4d0e73","cwd":"/srv/worktrees/rate-limiting","originator":"codex_exec"}}"#;
+
+    /// What says a rollout is this session's: the directory codex says it was
+    /// launched in, which for a Verkstead session is the Conversation's
+    /// Worktree.
+    #[test]
+    fn a_rollouts_opening_line_says_where_its_session_was_working() {
+        assert_eq!(
+            rollout_cwd(SESSION_META_LINE).as_deref(),
+            Some("/srv/worktrees/rate-limiting")
+        );
+    }
+
+    /// And every other line of the file says nothing about it. The rest of a
+    /// rollout carries a `cwd` of its own in places — a `turn_context` does —
+    /// and reading one of those would be identifying a session by a directory
+    /// it happened to be in for a turn.
+    #[test]
+    fn no_other_line_of_a_rollout_says_where_the_session_was_working() {
+        for line in [
+            r#"{"type":"turn_context","payload":{"cwd":"/srv/worktrees/rate-limiting"}}"#,
+            r#"{"type":"session_meta","payload":{"session_id":"01a051a2"}}"#,
+            r#"{"type":"session_meta"}"#,
+            r#"{"payload":{"cwd":"/srv/worktrees/rate-limiting"}}"#,
+            "not JSON at all",
+            "",
+        ] {
+            assert_eq!(rollout_cwd(line), None, "{line:?}");
+        }
+    }
+
+    /// A rollout codex 0.149.0 wrote of a session that was asked something,
+    /// thought about it, said what it was going to do, ran a command and
+    /// answered — every line of it as codex wrote it, but for the four bulky
+    /// ones, which are cut to what is read of them: the meta line's whole
+    /// system prompt, the world it was given, the turn's context and the
+    /// developer preamble each run to kilobytes, and the worktree's path is
+    /// shortened throughout so that the fixture reads.
+    ///
+    /// The shape to see in it is the doubling. Ordinals 7 to 19 are the turn
+    /// said twice — the `event_msg` lines are what the screen drew, and the
+    /// `response_item` lines beside them are the same turn as the model was
+    /// sent it, in among the preamble nobody said.
+    const ROLLOUT: &[&str] = &[
+        r#"{"timestamp":"2026-08-30T08:11:27.307Z","ordinal":0,"type":"session_meta","payload":{"session_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","cwd":"/srv/worktrees/tables","originator":"codex_exec"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.307Z","ordinal":1,"type":"event_msg","payload":{"type":"task_started","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","started_at":1788077487,"model_context_window":258400,"collaboration_mode_kind":"default"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":2,"type":"response_item","payload":{"type":"message","id":"msg_01a051b9-34cf-75b2-93a0-acaca50f73a3","role":"developer","content":[{"type":"input_text","text":"<skills_instructions>\n## Skills\nA skill is a set of instructions provided through a `SKILL.md` source."}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":3,"type":"response_item","payload":{"type":"message","id":"msg_01a051b9-34cf-75b2-93a0-acb06c799843","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/srv/worktrees/tables</cwd>\n  <shell>bash</shell>\n</environment_context>"}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":4,"type":"world_state","payload":{"full":true,"state":{"agents_md":{},"apps_instructions":false}}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":5,"type":"turn_context","payload":{"turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","cwd":"/srv/worktrees/tables"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.316Z","ordinal":6,"type":"response_item","payload":{"type":"message","id":"msg_01a051b9-34d4-7612-95dc-1001c4fb2884","role":"user","content":[{"type":"input_text","text":"What is in the task list?"}],"internal_chat_message_metadata_passthrough":{"turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","create_time":1788077487.3162456}}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.316Z","ordinal":7,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"UserMessage","id":"01a051b9-34d4-7612-95dc-10185af451bf","content":[{"type":"text","text":"What is in the task list?","text_elements":[]}]},"started_at_ms":1788077487316,"completed_at_ms":1788077487316}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.335Z","ordinal":8,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"Reasoning","id":"rs-1","summary_text":["**Reading the task list**\n\nThe backlog is where to start."],"raw_content":[]},"started_at_ms":1788077487335,"completed_at_ms":1788077487335}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.335Z","ordinal":9,"type":"response_item","payload":{"type":"reasoning","id":"rs-1","summary":[{"type":"summary_text","text":"**Reading the task list**\n\nThe backlog is where to start."}],"content":null,"encrypted_content":null}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.336Z","ordinal":10,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"I'll look at the **task list** first."}]},"started_at_ms":1788077487336,"completed_at_ms":1788077487336}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.336Z","ordinal":11,"type":"response_item","payload":{"type":"message","id":"msg-1","role":"assistant","content":[{"type":"output_text","text":"I'll look at the **task list** first."}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.337Z","ordinal":12,"type":"response_item","payload":{"type":"function_call","id":"fc_01a051b9-34e9-7e33-b5b0-7ec74bfd68c9","name":"exec_command","arguments":"{\"cmd\":\"ls .tasks\"}","call_id":"call-1"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.369Z","ordinal":13,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"CommandExecution","id":"call-1","process_id":"45936","command":["/bin/bash","-lc","ls .tasks"],"cwd":"file:///srv/worktrees/tables","parsed_cmd":[{"type":"list_files","cmd":"ls .tasks","path":".tasks"}],"source":"unified_exec_startup","status":"completed","stdout":"04-render.md\n05-summaries.md\n","stderr":"","aggregated_output":"04-render.md\n05-summaries.md\n","exit_code":0,"duration":{"secs":0,"nanos":2425},"formatted_output":"04-render.md\n05-summaries.md\n"},"started_at_ms":1788077487369,"completed_at_ms":1788077487369}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.370Z","ordinal":14,"type":"response_item","payload":{"type":"function_call_output","id":"fco_01a051b9-350a-7a20-932c-94ffaad12aba","call_id":"call-1","output":"Chunk ID: 57be28\nProcess exited with code 0\nOutput:\n04-render.md\n05-summaries.md\n"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.371Z","ordinal":15,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1200,"output_tokens":40,"total_tokens":1240},"model_context_window":258400}}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.388Z","ordinal":16,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"AgentMessage","id":"msg-2","content":[{"type":"Text","text":"Two files: `04-render.md` and `05-summaries.md`."}]},"started_at_ms":1788077487388,"completed_at_ms":1788077487388}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.388Z","ordinal":17,"type":"response_item","payload":{"type":"message","id":"msg-2","role":"assistant","content":[{"type":"output_text","text":"Two files: `04-render.md` and `05-summaries.md`."}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.390Z","ordinal":19,"type":"event_msg","payload":{"type":"task_complete","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","last_agent_message":"Two files: `04-render.md` and `05-summaries.md`.","started_at":1788077487,"completed_at":1788077487,"duration_ms":85}}"#,
+    ];
+
+    fn rollout() -> TranscriptView {
+        transcript_view(&lines(ROLLOUT))
+    }
+
+    /// What the human at that terminal saw, and only that: the turn put to it,
+    /// its thinking, its prose, the command it ran and what the command printed.
+    #[test]
+    fn a_real_rollout_draws_as_the_conversation_the_screen_drew() {
+        let view = rollout();
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Put(Put {
+                    id: 1,
+                    html: "<p>What is in the task list?</p>\n".to_owned()
+                }),
+                Turn::Reasoning(Reasoning {
+                    id: 2,
+                    html: "<p><strong>Reading the task list</strong></p>\n<p>The backlog is where \
+                           to start.</p>\n"
+                        .to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 3,
+                    html: "<p>I'll look at the <strong>task list</strong> first.</p>\n".to_owned()
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 4,
+                    name: "CommandExecution".to_owned(),
+                    call: "call-1".to_owned(),
+                    about: "ls .tasks".to_owned(),
+                    input: serde_json::to_string_pretty(&serde_json::json!([
+                        "/bin/bash",
+                        "-lc",
+                        "ls .tasks",
+                    ]))
+                    .unwrap(),
+                }),
+                Turn::ToolResult(ToolResult {
+                    id: 5,
+                    call: "call-1".to_owned(),
+                    failed: false,
+                    text: "04-render.md\n05-summaries.md\n".to_owned(),
+                }),
+                Turn::Prose(Prose {
+                    id: 6,
+                    html: "<p>Two files: <code>04-render.md</code> and \
+                           <code>05-summaries.md</code>.</p>\n"
+                        .to_owned()
+                }),
+            ]
+        );
+    }
+
+    /// The other half of the doubling: the turn as the model was sent it, which
+    /// is the same words again with pages of injected prompt around them.
+    /// Drawing both would draw every turn twice and open every Transcript on
+    /// the preamble.
+    #[test]
+    fn the_stream_the_model_was_sent_folds_away_under_its_own_name() {
+        let view = rollout();
+
+        assert!(
+            !view
+                .turns
+                .iter()
+                .any(|turn| format!("{turn:?}").contains("environment_context")),
+            "nobody said the environment block: {:?}",
+            view.turns
+        );
+
+        let folded: Vec<&str> = view
+            .bookkeeping
+            .iter()
+            .map(|line| line.kind.as_str())
+            .collect();
+
+        assert_eq!(
+            folded,
+            [
+                "session_meta",
+                "task_started",
+                "response_item",
+                "response_item",
+                "world_state",
+                "turn_context",
+                "response_item",
+                "response_item",
+                "response_item",
+                "response_item",
+                "response_item",
+                "token_count",
+                "response_item",
+                "task_complete",
+            ],
+            "and every line of it is on the Transcript, under the name codex gave it"
+        );
+    }
+
+    /// The count the Timeline row shows and the turns the pane draws are the
+    /// one reading on a rollout too — and so is the last thing the session said,
+    /// which is the other half of what the row is summarised by.
+    #[test]
+    fn a_rollouts_row_is_counted_and_quoted_off_the_reading_the_pane_draws() {
+        let said = lines(ROLLOUT);
+
+        assert_eq!(turns(&said), rollout().turns.len());
+        assert_eq!(turns(&said), 6, "and the bookkeeping is none of it");
+        assert_eq!(
+            statements(&said),
+            vec![
+                "I'll look at the **task list** first.",
+                "Two files: `04-render.md` and `05-summaries.md`.",
+            ],
+            "the agent's prose, as it wrote it"
+        );
+    }
+
+    /// A command that came back non-zero is an answer that failed, whatever
+    /// else it printed — which is what the pane draws the card in red on. And a
+    /// command codex parsed nothing out of is summarised by the argv it ran,
+    /// which is a shell, a flag and the command as one string.
+    #[test]
+    fn a_command_that_failed_is_an_answer_that_says_so() {
+        let view = transcript_view(&[
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"call-9","command":["/bin/bash","-lc","cargo test"],"status":"failed","aggregated_output":"error: could not compile","exit_code":101}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolUse(call), Turn::ToolResult(answer)]
+                    if call.about == "/bin/bash -lc cargo test"
+                        && call.call == answer.call
+                        && answer.failed
+                        && answer.text == "error: could not compile"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// A tool the log gives a name of its own is called by that name rather
+    /// than by the kind of item it arrived in, and what it answered with is
+    /// what it said — which for a call that failed is the error rather than the
+    /// nothing it returned.
+    #[test]
+    fn a_tool_the_log_names_is_called_what_the_log_calls_it() {
+        let view = transcript_view(&[
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"mcp-1","server":"github","tool":"list_issues","arguments":{"query":"is:open label:bug"},"status":"failed","error":{"message":"the token is not authorised"}}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolUse(call), Turn::ToolResult(answer)]
+                    if call.name == "github.list_issues"
+                        && call.about == "is:open label:bug"
+                        && answer.failed
+                        && answer.text == "the token is not authorised"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// Codex adds kinds without announcing them, and the two halves of ADR
+    /// 0006's rule are what that costs. A whole line of one folds away under its
+    /// own name…
+    #[test]
+    fn a_rollout_line_of_a_kind_nobody_knows_folds_under_its_own_name() {
+        let view = transcript_view(&[
+            r#"{"timestamp":"2026-08-30T08:11:27.390Z","ordinal":20,"type":"seance","payload":{"heard":"a kind from a later version"}}"#
+                .to_owned(),
+        ]);
+
+        assert!(view.turns.is_empty(), "nobody said this: {:?}", view.turns);
+        assert_eq!(
+            view.bookkeeping.first().map(|line| line.kind.as_str()),
+            Some("seance")
+        );
+    }
+
+    /// …and an event of one folds under the event's own name rather than the
+    /// line's, since every one of these lines is called `event_msg` and a group
+    /// of thirty rows all called that would say nothing about any of them.
+    #[test]
+    fn an_event_folds_under_its_own_name_rather_than_the_lines() {
+        let view = transcript_view(&[
+            r#"{"type":"event_msg","payload":{"type":"stream_error","message":"retrying"}}"#
+                .to_owned(),
+        ]);
+
+        assert!(view.turns.is_empty(), "{:?}", view.turns);
+        assert_eq!(
+            view.bookkeeping.first().map(|line| line.kind.as_str()),
+            Some("stream_error")
+        );
+    }
+
+    /// …while an item of one stays in the conversation as the JSON it is. An
+    /// item is part of a turn rather than a line beside it, and one folded away
+    /// silently would leave a hole where something was drawn.
+    #[test]
+    fn an_item_of_a_kind_nobody_knows_is_drawn_where_it_was_drawn() {
+        let view = transcript_view(&[
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Telepathy","id":"tp-1","thought":"a kind from a later version"}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(&view.turns[..], [Turn::Unread(unread)] if unread.line.contains("Telepathy")),
+            "{:?}",
+            view.turns
+        );
+        assert!(view.bookkeeping.is_empty());
+        assert_eq!(
+            turns(&lines(&[
+                r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Telepathy","id":"tp-1","thought":"a kind from a later version"}}}"#,
+            ])),
+            1,
+            "and the count does not drop it either"
+        );
+    }
+
+    /// Which reader a line gets is decided by the line. Nothing a Transcript
+    /// carries says which backend wrote it — the same lines are rendered in
+    /// three places and none of them is told the agent type — so the two kinds
+    /// are told apart by their own kinds, and read side by side when they are
+    /// put side by side.
+    #[test]
+    fn which_reader_a_line_gets_is_decided_by_what_the_line_is() {
+        let view = transcript_view(&lines(&[
+            FIXTURE[2],
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"And the *rollout* was read too."}]}}}"#,
+        ]));
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Prose(Prose {
+                    id: 1,
+                    html: "<p>I'll start with the <em>tables</em>.</p>\n".to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 2,
+                    html: "<p>And the <em>rollout</em> was read too.</p>\n".to_owned()
+                }),
+            ]
+        );
+    }
+
+    /// A Grok session's log as grok 1.0.13 wrote one — a turn put to it, its
+    /// thinking, its prose, a command run and what the command printed, the
+    /// plan it wrote itself, and the answer it finished on. Every line as grok
+    /// wrote it, but for the working directory, which is shortened throughout
+    /// so that the fixture reads, and the command's output as raw bytes, which
+    /// is cut to two of them.
+    ///
+    /// The shape to see in it is the pairing. A call is one line and the answer
+    /// to it is another, as Claude writes them — with grok's own middle line
+    /// between the two, the update that says the call has started and carries
+    /// the title its screen drew for it.
+    const UPDATES: &[&str] = &[
+        r#"{"timestamp":1788098123,"method":"_x.ai/session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"hook_execution","event_name":"session_start","runs":[{"name":"global/settings:session_start[0].hooks[0]","status":{"status":"success","elapsed_ms":5}}]},"_meta":{"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-2","agentTimestampMs":1788098123642}}}"#,
+        r#"{"timestamp":1788098123,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"What is in the task list?"},"_meta":{"modelId":"grok-4.6","promptIndex":0}},"_meta":{"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-3","agentTimestampMs":1788098123644}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"**Reading the task list**\n\nThe backlog is where to start."}},"_meta":{"totalTokens":1456,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-8","agentTimestampMs":1788098124127,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098123646,"turnStartMs":1788098123645,"updateType":"AgentThoughtChunk","chunkId":5}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I'll look at the **task list** first."}},"_meta":{"totalTokens":1456,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-12","agentTimestampMs":1788098124608,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098123646,"turnStartMs":1788098123645,"updateType":"AgentMessageChunk","chunkId":9}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call","toolCallId":"call_1","title":"run_terminal_command","rawInput":{"command":"ls .tasks","description":"List the task files"},"_meta":{"x.ai/tool":{"version":1,"name":"run_terminal_command","kind":"execute","namespace":"grok_build","label":"Run Command","read_only":false}}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-14","agentTimestampMs":1788098124849,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098123646,"turnStartMs":1788098123645,"updateType":"ToolCall","updateParams":{"toolCallId":"call_1","title":"run_terminal_command","kind":"Other","status":"Pending"}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","kind":"execute","title":"Execute `ls .tasks`","content":[{"type":"content","content":{"type":"text","text":"List the task files"}}],"locations":[],"rawInput":{"variant":"Bash","command":"ls .tasks","description":"List the task files","is_background":false},"_meta":{"x.ai/tool":{"version":1,"name":"run_terminal_command","kind":"execute","namespace":"grok_build","label":"Run Command","read_only":false,"input":{"command":"ls .tasks","description":"List the task files"}}}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-15","agentTimestampMs":1788098124849,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098123646,"turnStartMs":1788098123645,"updateType":"ToolCallUpdate","updateParams":{"toolCallId":"call_1","status":null}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"04-render.md\n05-summaries.md\n"}}],"rawOutput":{"type":"Bash","output":[48,52],"output_for_prompt":"exit: 0\n04-render.md\n05-summaries.md\n","exit_code":0,"command":"ls .tasks","truncated":false,"signal":null,"timed_out":false,"description":"List the task files","current_dir":"/srv/worktrees/tables","output_file":"/srv/worktrees/tables/.grok/terminal/call_1.log","total_bytes":29}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-16","agentTimestampMs":1788098124854,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098123646,"turnStartMs":1788098123645,"updateType":"ToolCallUpdate","updateParams":{"toolCallId":"call_1","status":"Completed"}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call","toolCallId":"call_2","title":"todo_write","rawInput":{"merge":false,"todos":[{"id":"1","content":"Read the renderer task","status":"in_progress"}]},"_meta":{"x.ai/tool":{"version":1,"name":"todo_write","kind":"plan","namespace":"grok_build","label":"Plan","read_only":false}}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-18","agentTimestampMs":1788098124976,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098124855,"turnStartMs":1788098123645,"updateType":"ToolCall","updateParams":{"toolCallId":"call_2","title":"todo_write","kind":"Other","status":"Pending"}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_2","kind":"think","title":"Updating plan","locations":[],"rawInput":{"variant":"TodoWrite","merge":false,"todos":[{"id":"1","content":"Read the renderer task","status":"in_progress"}]},"_meta":{"x.ai/tool":{"version":1,"name":"todo_write","kind":"plan","namespace":"grok_build","label":"Plan","read_only":false}}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-19","agentTimestampMs":1788098124976,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098124855,"turnStartMs":1788098123645,"updateType":"ToolCallUpdate","updateParams":{"toolCallId":"call_2","status":null}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_2","status":"completed","rawOutput":{"type":"Todo","TodosUpdated":{"summary_for_prompt":"- [in_progress] 1: Read the renderer task\n","todos":[{"content":"Read the renderer task","priority":"medium","status":"in_progress"}],"state":{"todos":{"1":{"content":"Read the renderer task","priority":"medium","status":"in_progress"}}}}}},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-20","agentTimestampMs":1788098124977,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098124855,"turnStartMs":1788098123645,"updateType":"ToolCallUpdate","updateParams":{"toolCallId":"call_2","status":"Completed"}}}}"#,
+        r#"{"timestamp":1788098124,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"plan","entries":[{"content":"Read the renderer task","priority":"medium","status":"in_progress"}]},"_meta":{"totalTokens":1240,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-21","agentTimestampMs":1788098124977,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098124855,"turnStartMs":1788098123645,"updateType":"Plan","updateParams":{"planSteps":1}}}}"#,
+        r#"{"timestamp":1788098125,"method":"session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Two files: `04-render.md` and `05-summaries.md`."}},"_meta":{"totalTokens":1250,"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-26","agentTimestampMs":1788098125458,"promptId":"03bb7bf2-5c2a-45cd-9047-52469bbde518","streamStartMs":1788098124977,"turnStartMs":1788098123645,"updateType":"AgentMessageChunk","chunkId":5}}}"#,
+        r#"{"timestamp":1788098125,"method":"_x.ai/session/update","params":{"sessionId":"01a052f4-1766-7fe2-a21c-067d5b29331b","update":{"sessionUpdate":"turn_completed","prompt_id":"03bb7bf2-5c2a-45cd-9047-52469bbde518","stop_reason":"end_turn","usage":{"inputTokens":3600,"outputTokens":120,"totalTokens":3720,"cachedReadTokens":0,"cacheCreationTokens":0,"reasoningTokens":36,"modelCalls":3,"apiDurationMs":1926,"modelUsage":{"grok-4.6":{"inputTokens":3600,"outputTokens":120,"totalTokens":3720,"cachedReadTokens":0,"cacheCreationTokens":0,"reasoningTokens":36,"modelCalls":3,"apiDurationMs":1926}},"numTurns":3},"elapsed_ms":1938},"_meta":{"eventId":"01a052f4-1766-7fe2-a21c-067d5b29331b-28","agentTimestampMs":1788098125581}}}"#,
+    ];
+
+    fn updates() -> TranscriptView {
+        transcript_view(&lines(UPDATES))
+    }
+
+    /// The conversation grok kept: what was put to it, what it thought, what it
+    /// said, the two tools it called and what each of them answered.
+    #[test]
+    fn a_real_grok_session_draws_as_the_conversation_it_records() {
+        let view = updates();
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Put(Put {
+                    id: 1,
+                    html: "<p>What is in the task list?</p>\n".to_owned()
+                }),
+                Turn::Reasoning(Reasoning {
+                    id: 2,
+                    html: "<p><strong>Reading the task list</strong></p>\n<p>The backlog is where \
+                           to start.</p>\n"
+                        .to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 3,
+                    html: "<p>I'll look at the <strong>task list</strong> first.</p>\n".to_owned()
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 4,
+                    name: "run_terminal_command".to_owned(),
+                    call: "call_1".to_owned(),
+                    about: "List the task files".to_owned(),
+                    input: serde_json::to_string_pretty(&serde_json::json!({
+                        "command": "ls .tasks",
+                        "description": "List the task files",
+                    }))
+                    .unwrap(),
+                }),
+                Turn::ToolResult(ToolResult {
+                    id: 5,
+                    call: "call_1".to_owned(),
+                    failed: false,
+                    text: "04-render.md\n05-summaries.md\n".to_owned(),
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 6,
+                    name: "todo_write".to_owned(),
+                    call: "call_2".to_owned(),
+                    about: String::new(),
+                    input: serde_json::to_string_pretty(&serde_json::json!({
+                        "merge": false,
+                        "todos": [{
+                            "id": "1",
+                            "content": "Read the renderer task",
+                            "status": "in_progress",
+                        }],
+                    }))
+                    .unwrap(),
+                }),
+                // Answered in no content block at all, so what it drew with is
+                // what grok handed the model — the plan as the tool rewrote it.
+                Turn::ToolResult(ToolResult {
+                    id: 7,
+                    call: "call_2".to_owned(),
+                    failed: false,
+                    text: "- [in_progress] 1: Read the renderer task\n".to_owned(),
+                }),
+                Turn::Prose(Prose {
+                    id: 8,
+                    html: "<p>Two files: <code>04-render.md</code> and \
+                           <code>05-summaries.md</code>.</p>\n"
+                        .to_owned()
+                }),
+            ]
+        );
+    }
+
+    /// And what was not the conversation: the hooks grok ran, the update that
+    /// said each call had started, the plan it kept beside the call that wrote
+    /// it, and the usage the finished turn cost.
+    #[test]
+    fn what_grok_kept_for_itself_is_kept_out_of_the_conversation() {
+        let view = updates();
+        let folded: Vec<&str> = view
+            .bookkeeping
+            .iter()
+            .map(|line| line.kind.as_str())
+            .collect();
+
+        assert_eq!(
+            folded,
+            [
+                "hook_execution",
+                "tool_call_update",
+                "tool_call_update",
+                "plan",
+                "turn_completed",
+            ],
+            "every line of it on the Transcript, under the name grok gave it"
+        );
+    }
+
+    /// The count the Timeline row shows and the turns the pane draws are the
+    /// one reading on a Grok log too — and so is the last thing the session
+    /// said, which is the other half of what the row is summarised by.
+    #[test]
+    fn a_grok_rows_count_and_quote_are_the_reading_the_pane_draws() {
+        let said = lines(UPDATES);
+
+        assert_eq!(turns(&said), updates().turns.len());
+        assert_eq!(turns(&said), 8, "and grok's own bookkeeping is none of it");
+        assert_eq!(
+            statements(&said),
+            vec![
+                "I'll look at the **task list** first.",
+                "Two files: `04-render.md` and `05-summaries.md`.",
+            ],
+            "the agent's prose, as it wrote it"
+        );
+    }
+
+    /// A running session's Transcript is re-read a batch at a time, and a batch
+    /// ends wherever grok had got to — between a call and its answer, here.
+    /// What comes out has to be the record read whole, turn for turn and
+    /// numbering included.
+    #[test]
+    fn a_grok_record_read_in_two_goes_is_the_record_read_whole() {
+        let said = lines(UPDATES);
+
+        let whole = transcript_view(&said);
+        let first = transcript_view(&said[..5]);
+        let rest = transcript_after(first.cursor.parse().unwrap(), &said[5..]);
+
+        assert_eq!([first.turns.clone(), rest.turns].concat(), whole.turns);
+        assert_eq!(
+            [first.bookkeeping.clone(), rest.bookkeeping].concat(),
+            whole.bookkeeping
+        );
+        assert_eq!(rest.cursor, whole.cursor);
+    }
+
+    /// A call is answered once. The updates before that one are the call
+    /// running — the title grok's screen drew for it, the input as its own tool
+    /// parsed it — and one drawn as an answer would put two answers under a
+    /// call that answered once.
+    #[test]
+    fn a_call_that_has_not_finished_is_not_an_answer_to_it() {
+        let view = transcript_view(&lines(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","kind":"execute","title":"Execute `ls .tasks`","content":[{"type":"content","content":{"type":"text","text":"List the task files"}}]}}}"#,
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"in_progress"}}}"#,
+        ]));
+
+        assert!(view.turns.is_empty(), "{:?}", view.turns);
+        assert_eq!(view.bookkeeping.len(), 2);
+    }
+
+    /// A call that ended badly is an answer that says so, which is what the
+    /// pane draws the card in red on.
+    #[test]
+    fn a_grok_call_that_failed_is_an_answer_that_says_so() {
+        let view = transcript_view(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"failed","content":[{"type":"content","content":{"type":"text","text":"Failed to parse arguments for tool `run_terminal_command`"}}]}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolResult(answer)]
+                    if answer.failed
+                        && answer.call == "call_1"
+                        && answer.text.starts_with("Failed to parse arguments")
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// An answer that came back as something other than text says what it was
+    /// instead — a patch grok reviewed, a terminal it left running — the way
+    /// every other answer that cannot be drawn as text does here.
+    #[test]
+    fn a_grok_answer_that_is_not_text_says_what_it_was() {
+        let view = transcript_view(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_3","status":"completed","content":[{"type":"content","content":{"type":"text","text":"one file changed"}},{"type":"diff","path":"tables.rs","oldText":"a","newText":"b"}]}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolResult(answer)] if answer.text == "one file changed\n[diff]"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// A call that answered in no content block at all is drawn with what grok
+    /// handed the model instead, wherever inside the tool's own output that sat.
+    ///
+    /// Which is the case the plan tool is, and it is called on most turns: the
+    /// blocks are the protocol's and the raw output is the tool's, and a tool
+    /// that only wrote the second would otherwise draw as an answer with nothing
+    /// in it. The key is looked for by its ending, at whatever depth the tool put
+    /// it — a command beside its exit code, a plan inside the update it made.
+    #[test]
+    fn a_grok_answer_kept_only_as_the_tools_own_output_is_drawn_from_it() {
+        let view = transcript_view(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_2","status":"completed","rawOutput":{"type":"Todo","TodosUpdated":{"summary_for_prompt":"- [in_progress] 1: Read the renderer task\n","todos":[{"content":"Read the renderer task","status":"in_progress"}]}}}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolResult(answer)]
+                    if answer.text == "- [in_progress] 1: Read the renderer task\n"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// And the blocks win where a tool wrote both, which is what most of them do.
+    ///
+    /// The raw output is the tool's own record and says more than the answer —
+    /// a command keeps its exit code in there — so it is the fall-back rather
+    /// than the reading, and a call that answered in blocks is drawn from them.
+    #[test]
+    fn a_grok_answer_in_blocks_is_drawn_from_them_rather_than_the_raw_output() {
+        let view = transcript_view(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"04-render.md\n"}}],"rawOutput":{"type":"Bash","exit_code":0,"output_for_prompt":"exit: 0\n04-render.md\n"}}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolResult(answer)] if answer.text == "04-render.md\n"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// And a call that answered its caller with nothing at all is still an
+    /// answer, drawn empty: there is no third place to look.
+    #[test]
+    fn a_grok_call_that_showed_nothing_is_an_answer_with_nothing_in_it() {
+        let view = transcript_view(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call_4","status":"completed"}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolResult(answer)] if answer.text.is_empty() && answer.call == "call_4"
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// Grok's own extensions to the protocol are a long tail — compaction,
+    /// memory, recovery, diff review — and it adds to them without announcing
+    /// it. A whole line of a kind nobody here knows folds away under its own
+    /// name rather than standing in the conversation (ADR 0006).
+    #[test]
+    fn a_session_update_of_a_kind_nobody_knows_folds_under_its_own_name() {
+        let view = transcript_view(&[
+            r#"{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"seance","heard":"a kind from a later version"}}}"#
+                .to_owned(),
+        ]);
+
+        assert!(view.turns.is_empty(), "nobody said this: {:?}", view.turns);
+        assert_eq!(
+            view.bookkeeping.first().map(|line| line.kind.as_str()),
+            Some("seance")
+        );
+    }
+
+    /// …while the content of a chunk goes the other way: it is part of what
+    /// somebody said, so a kind nothing here can draw stays in the conversation
+    /// as the JSON it is rather than leaving a hole where they spoke.
+    #[test]
+    fn a_chunk_of_a_kind_nobody_knows_is_shown_where_it_was_said() {
+        let said = lines(&[
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"image","data":"iVBOR","mimeType":"image/png"}}}}"#,
+        ]);
+        let view = transcript_view(&said);
+
+        assert!(
+            matches!(&view.turns[..], [Turn::Unread(unread)] if unread.line.contains("image/png")),
+            "{:?}",
+            view.turns
+        );
+        assert!(view.bookkeeping.is_empty());
+        assert_eq!(turns(&said), 1, "and the count does not drop it either");
+    }
+
+    /// Which reader a line gets is decided by the line, for the third backend
+    /// as for the first two: grok's lines carry no `type` at all, so they are
+    /// told apart by the kind of update they are, and the three read side by
+    /// side when they are put side by side.
+    #[test]
+    fn a_grok_line_is_told_apart_by_the_update_it_is() {
+        let view = transcript_view(&lines(&[
+            FIXTURE[2],
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"And the *rollout* was read too."}]}}}"#,
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"And so was the *update*."}}}}"#,
+        ]));
+
+        assert_eq!(
+            view.turns
+                .iter()
+                .map(|turn| matches!(turn, Turn::Prose(_)))
+                .collect::<Vec<bool>>(),
+            [true, true, true],
+            "{:?}",
+            view.turns
+        );
+        assert!(
+            matches!(&view.turns[2], Turn::Prose(prose) if prose.html.contains("<em>update</em>")),
+            "{:?}",
+            view.turns
+        );
+    }
+
+    /// The records an OpenCode session left in its store, as opencode 1.18.25
+    /// wrote them and as the server crate's `records` module puts them on the
+    /// Transcript: a turn put to it, its thinking, its prose, a command it ran
+    /// and what the command printed, a call that ended badly, and the answer it
+    /// finished on. Every record as opencode wrote it, but for the worktree's
+    /// path and the session, message and part ids, which are shortened
+    /// throughout so that the fixture reads.
+    ///
+    /// The shape to see in it is the growing. One part is written again every
+    /// time it grows, under the one id — `prt_4` is an empty text and then the
+    /// sentence, `prt_5` is a call pending and then a call answered — so the
+    /// record that finished is the turn and the ones before it fold away.
+    const RECORDS: &[&str] = &[
+        r#"{"kind":"session.created.1","seq":0,"record":{"sessionID":"ses_1","info":{"id":"ses_1","slug":"misty-lagoon","projectID":"global","directory":"/srv/worktrees/tables","path":"srv/worktrees/tables","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"title":"New session - 2026-08-30T18:14:31.738Z","agent":"build","model":{"id":"big-pickle","providerID":"standin"},"version":"1.18.25","time":{"created":1788113671738,"updated":1788113671738}}}}"#,
+        r#"{"kind":"message.updated.1","seq":1,"record":{"sessionID":"ses_1","info":{"id":"msg_1","sessionID":"ses_1","role":"user","time":{"created":1788113671749},"agent":"build","model":{"providerID":"standin","modelID":"big-pickle"}}}}"#,
+        r#"{"kind":"message.part.updated.1","seq":2,"record":{"sessionID":"ses_1","part":{"id":"prt_1","sessionID":"ses_1","messageID":"msg_1","type":"text","text":"List the task files and tell me what you see."},"time":1788113671752}}"#,
+        r#"{"kind":"message.updated.1","seq":4,"record":{"sessionID":"ses_1","info":{"id":"msg_2","sessionID":"ses_1","role":"assistant","time":{"created":1788113671761},"parentID":"msg_1","modelID":"big-pickle","providerID":"standin","mode":"build","agent":"build","path":{"cwd":"/srv/worktrees/tables","root":"/"},"cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}}}}"#,
+        r#"{"kind":"message.part.updated.1","seq":8,"record":{"sessionID":"ses_1","part":{"id":"prt_2","sessionID":"ses_1","messageID":"msg_2","type":"step-start"},"time":1788113672770}}"#,
+        r#"{"kind":"message.part.updated.1","seq":9,"record":{"sessionID":"ses_1","part":{"id":"prt_3","sessionID":"ses_1","messageID":"msg_2","type":"reasoning","text":"","time":{"start":1788113672771}},"time":1788113672771}}"#,
+        r#"{"kind":"message.part.updated.1","seq":10,"record":{"sessionID":"ses_1","part":{"id":"prt_3","sessionID":"ses_1","messageID":"msg_2","type":"reasoning","text":"The tables are the awkward part.","time":{"start":1788113672771,"end":1788113672772}},"time":1788113672772}}"#,
+        r#"{"kind":"message.part.updated.1","seq":11,"record":{"sessionID":"ses_1","part":{"id":"prt_4","sessionID":"ses_1","messageID":"msg_2","type":"text","text":"","time":{"start":1788113672773}},"time":1788113672773}}"#,
+        r#"{"kind":"message.part.updated.1","seq":12,"record":{"sessionID":"ses_1","part":{"id":"prt_5","sessionID":"ses_1","messageID":"msg_2","type":"tool","callID":"call_standin_1","tool":"bash","state":{"status":"pending","input":{},"raw":""}},"time":1788113672775}}"#,
+        r#"{"kind":"message.part.updated.1","seq":14,"record":{"sessionID":"ses_1","part":{"id":"prt_4","sessionID":"ses_1","messageID":"msg_2","type":"text","text":"I'll start with the *tables*.","time":{"start":1788113672773,"end":1788113672781}},"time":1788113672781}}"#,
+        r#"{"kind":"message.part.updated.1","seq":17,"record":{"sessionID":"ses_1","part":{"id":"prt_5","sessionID":"ses_1","messageID":"msg_2","type":"tool","callID":"call_standin_1","tool":"bash","state":{"status":"completed","input":{"command":"ls .tasks","description":"List the task files"},"output":"04-render.md\n05-summaries.md\n","title":"ls .tasks","metadata":{"output":"04-render.md\n05-summaries.md\n","exit":0,"truncated":false},"time":{"start":1788113672812,"end":1788113672815}}},"time":1788113672815}}"#,
+        r#"{"kind":"message.part.updated.1","seq":18,"record":{"sessionID":"ses_1","part":{"id":"prt_6","sessionID":"ses_1","messageID":"msg_2","type":"step-finish","reason":"tool-calls","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}},"time":1788113672817}}"#,
+        r#"{"kind":"message.updated.1","seq":20,"record":{"sessionID":"ses_1","info":{"id":"msg_2","sessionID":"ses_1","role":"assistant","time":{"created":1788113671761,"completed":1788113672820},"parentID":"msg_1","modelID":"big-pickle","providerID":"standin","mode":"build","agent":"build","path":{"cwd":"/srv/worktrees/tables","root":"/"},"cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"finish":"tool-calls"}}}"#,
+        r#"{"kind":"message.updated.1","seq":21,"record":{"sessionID":"ses_1","info":{"id":"msg_3","sessionID":"ses_1","role":"assistant","time":{"created":1788113672821},"parentID":"msg_1","modelID":"big-pickle","providerID":"standin","mode":"build","agent":"build","path":{"cwd":"/srv/worktrees/tables","root":"/"},"cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}}}}"#,
+        r#"{"kind":"message.part.updated.1","seq":24,"record":{"sessionID":"ses_1","part":{"id":"prt_7","sessionID":"ses_1","messageID":"msg_3","type":"step-start"},"time":1788113672836}}"#,
+        r#"{"kind":"message.part.updated.1","seq":25,"record":{"sessionID":"ses_1","part":{"id":"prt_8","sessionID":"ses_1","messageID":"msg_3","type":"tool","callID":"call_standin_2","tool":"read","state":{"status":"pending","input":{},"raw":""}},"time":1788113672838}}"#,
+        r#"{"kind":"message.part.updated.1","seq":27,"record":{"sessionID":"ses_1","part":{"id":"prt_8","sessionID":"ses_1","messageID":"msg_3","type":"tool","callID":"call_standin_2","tool":"read","state":{"status":"error","input":{"filePath":"/no/such/file.md"},"error":"File not found: /no/such/file.md","time":{"start":1788113672843,"end":1788113672859}}},"time":1788113672859}}"#,
+        r#"{"kind":"message.updated.1","seq":31,"record":{"sessionID":"ses_1","info":{"id":"msg_4","sessionID":"ses_1","role":"assistant","time":{"created":1788113672864},"parentID":"msg_1","modelID":"big-pickle","providerID":"standin","mode":"build","agent":"build","path":{"cwd":"/srv/worktrees/tables","root":"/"},"cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}}}}"#,
+        r#"{"kind":"message.part.updated.1","seq":34,"record":{"sessionID":"ses_1","part":{"id":"prt_9","sessionID":"ses_1","messageID":"msg_4","type":"step-start"},"time":1788113672880}}"#,
+        r#"{"kind":"message.part.updated.1","seq":35,"record":{"sessionID":"ses_1","part":{"id":"prt_10","sessionID":"ses_1","messageID":"msg_4","type":"text","text":"","time":{"start":1788113672881}},"time":1788113672881}}"#,
+        r#"{"kind":"message.part.updated.1","seq":36,"record":{"sessionID":"ses_1","part":{"id":"prt_10","sessionID":"ses_1","messageID":"msg_4","type":"text","text":"Two files: `04-render.md` and `05-summaries.md`. Done.","time":{"start":1788113672881,"end":1788113672882}},"time":1788113672882}}"#,
+        r#"{"kind":"message.part.updated.1","seq":37,"record":{"sessionID":"ses_1","part":{"id":"prt_11","sessionID":"ses_1","messageID":"msg_4","type":"step-finish","reason":"stop","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}},"time":1788113672883}}"#,
+        r#"{"kind":"message.updated.1","seq":39,"record":{"sessionID":"ses_1","info":{"id":"msg_4","sessionID":"ses_1","role":"assistant","time":{"created":1788113672864,"completed":1788113672885},"parentID":"msg_1","modelID":"big-pickle","providerID":"standin","mode":"build","agent":"build","path":{"cwd":"/srv/worktrees/tables","root":"/"},"cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"finish":"stop"}}}"#,
+    ];
+
+    fn records() -> TranscriptView {
+        transcript_view(&lines(RECORDS))
+    }
+
+    /// The conversation opencode kept: what was put to it, what it thought,
+    /// what it said, the two tools it called and what each of them answered.
+    #[test]
+    fn a_real_opencode_session_draws_as_the_conversation_it_records() {
+        let view = records();
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Put(Put {
+                    id: 1,
+                    html: "<p>List the task files and tell me what you see.</p>\n".to_owned()
+                }),
+                Turn::Reasoning(Reasoning {
+                    id: 2,
+                    html: "<p>The tables are the awkward part.</p>\n".to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 3,
+                    html: "<p>I'll start with the <em>tables</em>.</p>\n".to_owned()
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 4,
+                    name: "bash".to_owned(),
+                    call: "call_standin_1".to_owned(),
+                    about: "ls .tasks".to_owned(),
+                    input: serde_json::to_string_pretty(&serde_json::json!({
+                        "command": "ls .tasks",
+                        "description": "List the task files",
+                    }))
+                    .unwrap(),
+                }),
+                Turn::ToolResult(ToolResult {
+                    id: 5,
+                    call: "call_standin_1".to_owned(),
+                    failed: false,
+                    text: "04-render.md\n05-summaries.md\n".to_owned()
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 6,
+                    name: "read".to_owned(),
+                    call: "call_standin_2".to_owned(),
+                    about: "/no/such/file.md".to_owned(),
+                    input: serde_json::to_string_pretty(&serde_json::json!({
+                        "filePath": "/no/such/file.md",
+                    }))
+                    .unwrap(),
+                }),
+                Turn::ToolResult(ToolResult {
+                    id: 7,
+                    call: "call_standin_2".to_owned(),
+                    failed: true,
+                    text: "File not found: /no/such/file.md".to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 8,
+                    html: "<p>Two files: <code>04-render.md</code> and <code>05-summaries.md</code>. Done.</p>\n"
+                        .to_owned()
+                }),
+            ],
+            "and none of opencode's own record of itself is among them"
+        );
+    }
+
+    /// What opencode kept for itself: the session's row, the envelope around
+    /// each message, the steps a turn is made of — and every emission of a part
+    /// that had not finished growing, filed under the kind of part it was
+    /// growing into.
+    #[test]
+    fn what_opencode_kept_for_itself_is_kept_out_of_the_conversation() {
+        let view = records();
+
+        assert_eq!(
+            view.bookkeeping
+                .iter()
+                .map(|kept| kept.kind.as_str())
+                .collect::<Vec<&str>>(),
+            [
+                "session.created.1",
+                "message.updated.1",
+                "message.updated.1",
+                "step-start",
+                "reasoning",
+                "text",
+                "tool",
+                "step-finish",
+                "message.updated.1",
+                "message.updated.1",
+                "step-start",
+                "tool",
+                "message.updated.1",
+                "step-start",
+                "text",
+                "step-finish",
+                "message.updated.1",
+            ]
+        );
+        assert_eq!(
+            view.bookkeeping[0].id, 1,
+            "and it is numbered by its own count rather than the conversation's"
+        );
+    }
+
+    /// The turn count the Timeline row shows and the sentence a Notice quotes
+    /// are the reading the pane draws, for a fourth backend as for the three
+    /// before it.
+    #[test]
+    fn an_opencode_rows_count_and_quote_are_the_reading_the_pane_draws() {
+        let said = lines(RECORDS);
+
+        assert_eq!(turns(&said), records().turns.len());
+        assert_eq!(turns(&said), 8);
+        assert_eq!(
+            statements(&said).last().map(String::as_str),
+            Some("Two files: `04-render.md` and `05-summaries.md`. Done."),
+            "the agent's own words, and the finished emission of them"
+        );
+    }
+
+    /// A part is written again every time it grows, so the reading has to draw
+    /// the one that finished and no other: a sentence drawn once per piece of
+    /// it the model streamed would be a Transcript of fragments.
+    #[test]
+    fn a_part_still_growing_is_not_a_turn_until_it_has_finished() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":9,"record":{"part":{"id":"prt_1","type":"text","text":"Two files: ","time":{"start":1788113672881}}}}"#,
+            r#"{"kind":"message.part.updated.1","seq":10,"record":{"part":{"id":"prt_1","type":"text","text":"Two files: `04-render.md` and `05-summaries.md`.","time":{"start":1788113672881,"end":1788113672882}}}}"#,
+        ]));
+
+        assert_eq!(
+            view.turns,
+            vec![Turn::Prose(Prose {
+                id: 1,
+                html: "<p>Two files: <code>04-render.md</code> and <code>05-summaries.md</code>.</p>\n"
+                    .to_owned()
+            })],
+            "one sentence, once"
+        );
+        assert_eq!(
+            view.bookkeeping.len(),
+            1,
+            "and the growth of it folded away"
+        );
+    }
+
+    /// The distinction the role would make if the role were on the record with
+    /// the words in it. It is not — it is on the message, one record away — so
+    /// what says a piece of text is the turn put to the session is that
+    /// opencode was handed it rather than streaming it, and a part it was
+    /// handed carries no times at all.
+    #[test]
+    fn a_turn_put_to_an_opencode_session_is_told_from_its_prose_by_the_times() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":2,"record":{"part":{"id":"prt_1","messageID":"msg_1","type":"text","text":"What is in the task list?"}}}"#,
+            r#"{"kind":"message.part.updated.1","seq":14,"record":{"part":{"id":"prt_2","messageID":"msg_2","type":"text","text":"Two files.","time":{"start":1788113672773,"end":1788113672781}}}}"#,
+        ]));
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Put(Put {
+                    id: 1,
+                    html: "<p>What is in the task list?</p>\n".to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 2,
+                    html: "<p>Two files.</p>\n".to_owned()
+                }),
+            ]
+        );
+    }
+
+    /// Text opencode wrote to itself in the session's voice, which is
+    /// bookkeeping wearing a turn's clothes — the same thing Claude's `isMeta`
+    /// line is, said in opencode's own spelling.
+    #[test]
+    fn text_an_opencode_session_wrote_to_itself_is_bookkeeping() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":3,"record":{"part":{"id":"prt_1","type":"text","text":"Called the Read tool with the following input: …","synthetic":true}}}"#,
+        ]));
+
+        assert!(view.turns.is_empty(), "nobody said this: {:?}", view.turns);
+        assert_eq!(view.bookkeeping.len(), 1);
+        assert_eq!(view.bookkeeping[0].kind, "text");
+    }
+
+    /// A whole record of a kind nobody here has heard of folds under the name
+    /// opencode filed it under. `session.next.prompted.1` is one of a family
+    /// 1.18.25's own schema names and no session driven this way has been seen
+    /// to write — findable by whoever meets one first, and out of the way until
+    /// then.
+    #[test]
+    fn an_opencode_record_of_a_kind_nobody_knows_folds_under_its_own_name() {
+        let line = r#"{"kind":"session.next.prompted.1","seq":4,"record":{"delivery":"steer"}}"#;
+        let view = transcript_view(&[line.to_owned()]);
+
+        assert!(view.turns.is_empty(), "nobody said this: {:?}", view.turns);
+        assert_eq!(
+            view.bookkeeping,
+            vec![Bookkeeping {
+                id: 1,
+                kind: "session.next.prompted.1".to_owned(),
+                line: pretty(line),
+            }]
+        );
+    }
+
+    /// And a part of a kind nobody knows folds under the part's own kind rather
+    /// than the record's, because every part arrives under the one record kind
+    /// and a group of them all called that would say nothing about any of them.
+    #[test]
+    fn a_part_of_a_kind_nobody_knows_folds_under_the_parts_own_name() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":5,"record":{"part":{"id":"prt_1","type":"telepathy","thought":"a kind from a later version"}}}"#,
+        ]));
+
+        assert!(view.turns.is_empty(), "nobody said this: {:?}", view.turns);
+        assert_eq!(view.bookkeeping[0].kind, "telepathy");
+    }
+
+    /// A record that says a part was written and names no kind of part keeps
+    /// the name the record had, which is the only name it has.
+    #[test]
+    fn a_part_record_that_names_no_part_keeps_the_records_own_name() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":6,"record":{"part":{"id":"prt_1"}}}"#,
+        ]));
+
+        assert!(view.turns.is_empty(), "{:?}", view.turns);
+        assert_eq!(view.bookkeeping[0].kind, "message.part.updated.1");
+    }
+
+    /// A call is answered once. The records before that one are the call being
+    /// made and the call running, and one of them drawn as an answer would put
+    /// an answer under a call that had not made one.
+    #[test]
+    fn an_opencode_call_that_has_not_settled_is_not_an_answer_to_it() {
+        let view = transcript_view(&lines(&[
+            r#"{"kind":"message.part.updated.1","seq":12,"record":{"part":{"id":"prt_1","type":"tool","callID":"call_1","tool":"bash","state":{"status":"pending","input":{},"raw":""}}}}"#,
+            r#"{"kind":"message.part.updated.1","seq":13,"record":{"part":{"id":"prt_1","type":"tool","callID":"call_1","tool":"bash","state":{"status":"running","input":{"command":"ls .tasks"},"time":{"start":1788113672843}}}}}"#,
+        ]));
+
+        assert!(view.turns.is_empty(), "{:?}", view.turns);
+        assert_eq!(view.bookkeeping.len(), 2);
+        assert_eq!(view.bookkeeping[1].kind, "tool");
+    }
+
+    /// A reading of an OpenCode session ends wherever the poll before it had
+    /// got to — between a call and its answer, here — and what comes out has to
+    /// be the record read whole, turn for turn and numbering included.
+    #[test]
+    fn an_opencode_record_read_in_two_goes_is_the_record_read_whole() {
+        let said = lines(RECORDS);
+
+        let whole = transcript_view(&said);
+        let first = transcript_view(&said[..10]);
+        let rest = transcript_after(first.cursor.parse().unwrap(), &said[10..]);
+
+        assert_eq!([first.turns.clone(), rest.turns].concat(), whole.turns);
+        assert_eq!(
+            [first.bookkeeping.clone(), rest.bookkeeping].concat(),
+            whole.bookkeeping
+        );
+        assert_eq!(rest.cursor, whole.cursor);
+    }
+
+    /// The four backends side by side, which is the whole of what tells them
+    /// apart: the key a line is written on. Claude's and opencode's both carry
+    /// the words `user` and `assistant`, and neither is read as the other's,
+    /// because Claude's is the line's own `type` and opencode's is a role
+    /// inside a record whose line has none.
+    #[test]
+    fn an_opencode_line_is_told_apart_by_the_key_it_is_written_on() {
+        let view = transcript_view(&lines(&[
+            FIXTURE[2],
+            r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"And the *rollout* was read too."}]}}}"#,
+            r#"{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"And so was the *update*."}}}}"#,
+            r#"{"kind":"message.part.updated.1","seq":14,"record":{"sessionID":"ses_1","part":{"id":"prt_1","messageID":"msg_1","type":"text","text":"And the *record* with it.","time":{"start":1788113672773,"end":1788113672781}}}}"#,
+        ]));
+
+        assert_eq!(
+            view.turns
+                .iter()
+                .map(|turn| matches!(turn, Turn::Prose(_)))
+                .collect::<Vec<bool>>(),
+            [true, true, true, true],
+            "{:?}",
+            view.turns
+        );
+        assert!(
+            matches!(&view.turns[3], Turn::Prose(prose) if prose.html.contains("<em>record</em>")),
+            "{:?}",
+            view.turns
+        );
     }
 }

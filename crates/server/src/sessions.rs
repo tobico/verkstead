@@ -23,9 +23,10 @@
 //! reading back a live one out of a database.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
@@ -58,7 +59,8 @@ const CHUNK: usize = 8 * 1024;
 /// delay and two orders of magnitude off what a redraw costs.
 const FLUSH_EVERY: Duration = Duration::from_millis(500);
 
-/// How long a session has to print nothing before it is called idle.
+/// How long a session judged on what it prints has to print nothing before it
+/// is called idle.
 ///
 /// Short, because what it measures is a terminal rather than an agent: claude
 /// repaints its spinner many times a second while it is working, so a session
@@ -66,7 +68,12 @@ const FLUSH_EVERY: Duration = Duration::from_millis(500);
 /// a Blocking Ask, or waiting for the human. Three seconds is clear
 /// of the longest gap a working session leaves, and short enough that the mark
 /// says so while it still matters.
-pub(crate) const IDLE_AFTER: Duration = Duration::from_secs(3);
+///
+/// Claude's, and calibrated on what claude draws. A backend that repaints a
+/// full screen for ever is never silent for three seconds while it works and
+/// need not be silent at all when it stops, so this says nothing about one —
+/// see [`Judged`], which is where a session's backend decides how it is read.
+const IDLE_AFTER: Duration = Duration::from_secs(3);
 
 /// How a Conversation's agents are run: the home a sandbox reads the machine's
 /// identity out of, where Verkstead itself is reachable from inside one, the
@@ -109,16 +116,39 @@ pub struct Agents {
     handoffs: Handoffs,
     settings: Settings,
 
-    /// What a Profile's agent is run as, before its model and its prompt.
+    /// Something to run where a Profile's own binary goes, or `None` to run the
+    /// one its agent type names — see [`binary`].
     ///
-    /// A field rather than a match on the agent type, and the reason is that
-    /// what this module has to be able to prove is that a session's output
-    /// reaches the Timeline while it is still running. Proving it against the
-    /// real claude would be a test that needed an account, a network and a
-    /// model's patience — so a test stands its own program where claude goes,
-    /// and everything from the sandbox outwards is the same code the server
-    /// runs.
-    agent: Vec<String>,
+    /// An override rather than the answer itself, and the reason is that what
+    /// this module has to be able to prove is that a session's output reaches
+    /// the Timeline while it is still running. Proving it against the real
+    /// claude would be a test that needed an account, a network and a model's
+    /// patience — so a test stands its own program where the agent goes, and
+    /// everything from the sandbox outwards is the same code the server runs.
+    ///
+    /// One override for every type rather than one per type: what a stub stands
+    /// in for is *an agent*, and which line it is handed is still its Profile's
+    /// type's own — see [`Agents::argv`] — so a backend's launch line stays
+    /// provable without an account and the stubs go on reading what they read.
+    ///
+    /// `None` in a server, which runs the binary the Profile's type names.
+    agent: Option<Vec<String>>,
+
+    /// What a TUI backend's session has on its Screen, where anything is
+    /// standing where that backend's binary goes — see [`Agents::signature`],
+    /// whose answer this stands in for.
+    ///
+    /// A field for [`Agents::agent`]'s reason. What this module has to be able
+    /// to prove is that a session drawing a full screen is judged idle off the
+    /// frame rather than off its silence, and the backends that draw one are
+    /// exactly the ones no test can launch — so a test stands a program that
+    /// draws one where the backend goes, and hands its signature in here.
+    ///
+    /// `None` in a server, which is every signature a backend ships with — see
+    /// [`Agents::signature`], where they are kept. Claude is judged on its
+    /// silence whatever this holds: three seconds is its answer, and it draws no
+    /// screen to read a prompt off.
+    signature: Option<Signature>,
 
     /// How fast the runner works the backlog these sessions are launched for.
     ///
@@ -132,35 +162,10 @@ pub struct Agents {
 }
 
 impl Agents {
-    /// The real thing: claude, under whichever account the Profile names.
+    /// The real thing: each Profile's own binary — see [`binary`] — under
+    /// whichever account it names.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        home: Home,
-        reachable: Reachable,
-        config: SandboxConfig,
-        cache: BuildCache,
-        skills: Skills,
-        verkstead: Option<Executable>,
-        handoffs: Handoffs,
-        settings: Settings,
-    ) -> Agents {
-        Agents::running(
-            vec!["claude".to_owned()],
-            home,
-            reachable,
-            config,
-            cache,
-            skills,
-            verkstead,
-            handoffs,
-            settings,
-        )
-    }
-
-    /// The same, with something else where claude goes — see [`Agents::agent`].
-    #[allow(clippy::too_many_arguments)]
-    pub fn running(
-        agent: Vec<String>,
         home: Home,
         reachable: Reachable,
         config: SandboxConfig,
@@ -179,14 +184,46 @@ impl Agents {
             verkstead,
             handoffs,
             settings,
-            agent,
+            agent: None,
+            signature: None,
             pace: Pace::default(),
+        }
+    }
+
+    /// The same, with something else where every type's binary goes — see
+    /// [`Agents::agent`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn running(
+        agent: Vec<String>,
+        home: Home,
+        reachable: Reachable,
+        config: SandboxConfig,
+        cache: BuildCache,
+        skills: Skills,
+        verkstead: Option<Executable>,
+        handoffs: Handoffs,
+        settings: Settings,
+    ) -> Agents {
+        Agents {
+            agent: Some(agent),
+            ..Agents::new(
+                home, reachable, config, cache, skills, verkstead, handoffs, settings,
+            )
         }
     }
 
     /// The same, working the backlog at `pace` — see [`Agents::pace`].
     pub fn at_pace(self, pace: Pace) -> Agents {
         Agents { pace, ..self }
+    }
+
+    /// The same, with the prompt `signature` draws where a TUI backend's own
+    /// goes — see [`Agents::signature`].
+    pub fn drawing(self, signature: &str) -> Agents {
+        Agents {
+            signature: Some(Signature::AtThePrompt(signature.to_owned())),
+            ..self
+        }
     }
 
     /// What the installation configured as Sandbox Configuration, for the
@@ -197,15 +234,22 @@ impl Agents {
         &self.config
     }
 
-    /// What a session under `pairing` on `prompt`, named `session`, runs.
+    /// What a session under `pairing` on `prompt`, named `session`, working in
+    /// `worktree`, runs.
+    ///
+    /// The binary is the Profile's agent type's — see [`binary`] — or whatever
+    /// is standing where every type's goes, which is how a test proves this
+    /// without an account.
     ///
     /// The model is the Pairing's, said on the command line rather than left to
     /// whatever the account's own settings hold: which model a session runs is
     /// the half of the choice the Profile does not make. A Conversation that
     /// chose its Profile before there was a model to choose beside it runs on
-    /// the one that Profile carried — see [`store::Pairing::runs_on`]. The
-    /// prompt follows it as the one positional argument, which is where an
-    /// interactive claude takes the thing it is to start on.
+    /// the one that Profile carried — see [`store::Pairing::runs_on`]. What the
+    /// flag is spelled is the backend's — see [`Line::model`]. The prompt
+    /// follows it: as the one positional argument for the three backends that
+    /// take it that way, and under the flag its own line names where a backend
+    /// takes it flagged instead — see [`Line::prompt`].
     ///
     /// A Profile listing no models is refused when it is saved, so the flag is
     /// only ever left off for a row somebody edited by hand — and left off
@@ -216,62 +260,377 @@ impl Agents {
     /// side of that choice is everything that already reads this line: an agent
     /// is run as its model and then its Brief, and a flag pushed in between the
     /// two would move the Brief under every stub agent the test suite stands
-    /// where claude goes. Options added here go on the end, so nothing that was
-    /// already there moves.
+    /// where an agent goes. Options added here go on the end, so nothing that
+    /// was already there moves — which holds for every type but the one that
+    /// asks for its prompt flagged, whose Brief the stub reads one place later
+    /// and which is not a type the suite stands a stub in front of.
     ///
     /// `None` is a session Verkstead could not name — see [`session_name`] —
     /// and the flag is then left off entirely rather than passed empty: an agent
     /// told to run under no name at all would refuse to start, where one not
-    /// told anything picks its own.
+    /// told anything picks its own. A backend that takes no session id at all is
+    /// told none whatever Verkstead named it — see [`Line::names_the_session`].
     ///
-    /// Last of all come the flags the backend itself needs — see [`flags`] —
-    /// which is the one part of this line that reads differently for one agent
-    /// type than for another.
-    fn argv(&self, pairing: &store::Pairing, prompt: &str, session: Option<&str>) -> Vec<String> {
-        let mut argv = self.agent.clone();
+    /// Last of all comes the tail the backend itself needs — see [`Line::tail`]
+    /// — which with the two above is the whole of what reads differently for one
+    /// agent type than for another.
+    fn argv(
+        &self,
+        pairing: &store::Pairing,
+        prompt: &str,
+        session: Option<&str>,
+        worktree: Option<&Path>,
+    ) -> Vec<String> {
+        let agent_type = pairing.profile.agent_type();
+        let line = line(agent_type, worktree);
+
+        let mut argv = match &self.agent {
+            Some(standing) => standing.clone(),
+            None => vec![binary(agent_type).to_owned()],
+        };
 
         if let Some(model) = pairing.runs_on() {
-            argv.push("--model".to_owned());
+            argv.push(line.model.to_owned());
             argv.push(model.to_owned());
+        }
+
+        if let Some(flag) = line.prompt {
+            argv.push(flag.to_owned());
         }
 
         argv.push(prompt.to_owned());
 
-        if let Some(session) = session {
+        if let Some(session) = session.filter(|_| line.names_the_session) {
             argv.push("--session-id".to_owned());
             argv.push(session.to_owned());
         }
 
-        argv.extend(
-            flags(pairing.profile.agent_type())
-                .iter()
-                .map(|flag| (*flag).to_owned()),
-        );
+        argv.extend(line.tail);
 
         argv
     }
-}
 
-/// The flags a backend needs on its own launch line, beyond the model, the
-/// prompt and the session name every one of them is given.
-///
-/// Claude's is `--dangerously-skip-permissions`. Running unattended is what
-/// Verkstead promises rather than something the account's own configuration is
-/// trusted to have been left holding: a session that stopped to ask for
-/// approval would be asking it in front of nobody, with the whole backlog
-/// behind it waiting on an answer that is not coming. What stops a session
-/// doing harm is the Sandbox, which this does not touch and which is still the
-/// boundary.
-///
-/// A later backend adds one arm here and nothing else, which is the whole
-/// reason this is a mapping rather than a flag pushed straight onto the line.
-/// The type comes off the Pairing's Profile, so nothing has to be plumbed
-/// through to say which agent is being launched.
-fn flags(agent_type: store::AgentType) -> &'static [&'static str] {
-    match agent_type {
-        store::AgentType::Claude => &["--dangerously-skip-permissions"],
+    /// What a session of `agent_type` has on its Screen that says whether it has
+    /// stopped, and `None` where its idle is the silence itself.
+    ///
+    /// **One constant per backend**, the same bargain the usage-limit phrase
+    /// makes — see [`crate::limits`]: the wording is the backend's and it will
+    /// move, so it is kept in one place and costs one edit when it does. What
+    /// puts a signature that has drifted in front of the human rather than
+    /// leaving a session nothing ever catches is the long-stop behind it — see
+    /// [`Judged::Drawing`].
+    ///
+    /// Claude has none, and none rather than an unknown one: it draws inline
+    /// rather than repainting a screen, so there is no frame to read a prompt
+    /// off, and three seconds of silence is an answer that works.
+    ///
+    /// Codex's is [`CODEX_AT_WORK`], Grok Build's is [`GROK_AT_WORK`] and
+    /// OpenCode's is [`OPENCODE_AT_WORK`], and all three are the same one of
+    /// the two readings — see [`Signature`]. Every backend that draws a screen
+    /// has now been measured and every one of them came out that way round, so
+    /// the at-the-prompt reading stands unused: what it is there for is the
+    /// backend that turns out to differ, and none has. What stands where any of
+    /// the three goes instead is whatever the suite handed in, which is the
+    /// prompt drawn by the stub it stands where an agent goes: no backend here
+    /// draws a prompt of its own, so that reading is proved against a stub
+    /// rather than against an account.
+    fn signature(&self, agent_type: store::AgentType) -> Option<Signature> {
+        match agent_type {
+            store::AgentType::Claude => None,
+            store::AgentType::Codex => Some(
+                self.signature
+                    .clone()
+                    .unwrap_or_else(|| Signature::AtWork(CODEX_AT_WORK.to_owned())),
+            ),
+            store::AgentType::Grok => Some(
+                self.signature
+                    .clone()
+                    .unwrap_or_else(|| Signature::AtWork(GROK_AT_WORK.to_owned())),
+            ),
+            store::AgentType::OpenCode => Some(
+                self.signature
+                    .clone()
+                    .unwrap_or_else(|| Signature::AtWork(OPENCODE_AT_WORK.to_owned())),
+            ),
+        }
+    }
+
+    /// And how a session of that type is judged idle — see [`Judged`].
+    fn judged(&self, agent_type: store::AgentType) -> Judged {
+        match self.signature(agent_type) {
+            Some(signature) => Judged::Drawing {
+                signature,
+                long_stop: self.pace.long_stop,
+            },
+            None => Judged::Printing,
+        }
     }
 }
+
+/// The program a Profile of each agent type is run as.
+///
+/// The host provides them, as it provides `claude` (ADR-0011): the installer
+/// puts each backend's binary on the system profile the sandbox already reads,
+/// and a Profile whose binary is missing fails at session start, named in the
+/// Capture of the session that could not run.
+///
+/// A later backend adds one arm here and nothing else, which is the whole
+/// reason this is a mapping rather than a name written into the line. The type
+/// comes off the Pairing's Profile, so nothing has to be plumbed through to say
+/// which agent is being launched.
+fn binary(agent_type: store::AgentType) -> &'static str {
+    match agent_type {
+        store::AgentType::Claude => "claude",
+        store::AgentType::Codex => "codex",
+        store::AgentType::Grok => "grok",
+        store::AgentType::OpenCode => "opencode",
+    }
+}
+
+/// The rest of a backend's launch line: how it is told its model, how it is
+/// given the Brief, whether it takes the session id Verkstead named, and what
+/// goes on the end.
+///
+/// One value rather than a mapping apiece, because they are one fact — what
+/// this backend's command line looks like — and a stage that lands a backend
+/// writes it once here.
+struct Line {
+    /// What the model is said with. `--model` reads as claude's own; codex
+    /// takes `-m`.
+    model: &'static str,
+
+    /// The flag the Brief goes under, or `None` where it is the one positional
+    /// argument.
+    ///
+    /// The positional is what every backend up to this one takes, and opencode
+    /// is the first that does not: its positional is the project to start in,
+    /// and the prompt is `--prompt`. Said here rather than assumed, so that a
+    /// backend taking either shape is one arm of the mapping below rather than
+    /// a branch in the builder.
+    prompt: Option<&'static str>,
+
+    /// Whether the session Verkstead named is named on the line.
+    ///
+    /// False for a backend that takes no session id at all, whose log is
+    /// therefore found rather than named — see [`crate::transcript`].
+    names_the_session: bool,
+
+    /// The flags and configuration overrides that go last, after the prompt.
+    ///
+    /// Owned rather than borrowed, because the trust pre-seed below names the
+    /// Worktree this session is being launched in.
+    tail: Vec<String>,
+}
+
+/// Which line `agent_type` takes, for a session working in `worktree`.
+///
+/// **Every backend is launched with its approval bypass on.** Running
+/// unattended is what Verkstead promises rather than something the account's
+/// own configuration is trusted to have been left holding: a session that
+/// stopped to ask for approval would be asking it in front of nobody, with the
+/// whole backlog behind it waiting on an answer that is not coming. What stops
+/// a session doing harm is the Sandbox, which this does not touch and which is
+/// still the boundary — and codex's own sandbox is off rather than nested,
+/// because it will not start inside bwrap and bwrap is already the boundary.
+///
+/// Codex and grok both draw a full-screen TUI, and `--no-alt-screen` keeps each
+/// drawing inline instead: the Capture and the Screen are the record of what a
+/// session did, and an alternate screen is a record that is thrown away as the
+/// program leaves it.
+///
+/// **opencode has no such flag and takes the alternate screen**, which is a
+/// finding rather than an oversight (ADR-0011): its Screen reads either way,
+/// since the screen model tracks which buffer is in front, and what its Capture
+/// then replays to is the farewell banner opencode leaves on the ordinary
+/// buffer as it exits rather than anything the session did. The record this
+/// backend is read back from is its session store, which is what the Timeline
+/// draws from. `--mini` — the minimal interface, which draws inline and carries
+/// the same at-work label — is what to reach for the day the Capture has to be
+/// that record instead.
+///
+/// **Grok Build is the one backend after Claude that takes the session id.** It
+/// takes it under the spelling [`Agents::argv`] writes, it insists on a valid
+/// UUID and it refuses one it already has a session for — all three of which
+/// Verkstead's own names satisfy, being version-4 UUIDs drawn fresh per session.
+/// So its log is named at launch rather than found afterwards, which is
+/// Claude's shape and the opposite of Codex's. Its own sandbox is off for the
+/// reason codex's is, and nothing about its account is said on the line: grok
+/// reads its whole configuration out of the home the Profile named.
+///
+/// **What its account needs is said on the line rather than written into it.**
+/// Codex takes `-c key=value` overrides, which is how the home is configured
+/// without Verkstead writing into a directory that belongs to the human's
+/// account: the credential store file-backed, since there is no keyring inside
+/// the sandbox and a login that reached for one would find nothing; and the
+/// Worktree pre-seeded as trusted, since some versions still put the trust
+/// prompt up despite the bypass and a session stopped at a prompt is a run
+/// waiting on nobody.
+///
+/// **OpenCode's is the shortest line here.** The model as `-m provider/model`
+/// — the whole string is what the human typed on the Profile — the Brief under
+/// `--prompt`, and `--auto` for the approvals, which is where the other three
+/// backends' bypasses sit. `--prompt` submits rather than only prefilling
+/// (checked against opencode 1.18.25: the home screen fills the prompt in and
+/// sends it as soon as the model store is ready), so nothing is typed into the
+/// terminal to start the session working. It has no sandbox of its own to
+/// switch off, and it takes no session id at launch: `--session` means
+/// *continue this one* and is validated against the store before the TUI
+/// starts, so a fresh name would be a session that never starts rather than a
+/// session named — which is why its log is found rather than named, as codex's
+/// is. Everything else about the account is in the directories the Profile
+/// named — see [`crate::sandbox`].
+fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
+    match agent_type {
+        store::AgentType::Claude => Line {
+            model: "--model",
+            prompt: None,
+            names_the_session: true,
+            tail: vec!["--dangerously-skip-permissions".to_owned()],
+        },
+        store::AgentType::Codex => {
+            let mut tail = vec![
+                "--dangerously-bypass-approvals-and-sandbox".to_owned(),
+                "--no-alt-screen".to_owned(),
+                "-c".to_owned(),
+                format!("{CODEX_CREDENTIAL_STORE}=\"file\""),
+            ];
+
+            // A session with no Worktree is one that never starts — see
+            // [`Sessions::start`] — so what this leaves off is the trust of a
+            // directory there is none of, rather than a prompt let through.
+            //
+            // The whole table rather than the one key under it, because codex
+            // splits a `-c` key on every dot it finds and does not stop at the
+            // quotes: a Worktree named for a Repo or a branch with a dot in it
+            // — and either may have one — is a path
+            // `projects."…".trust_level` addresses some other way, and the
+            // session then sits on the trust prompt for ever. A table on the
+            // right-hand side is read as the TOML it is.
+            if let Some(worktree) = worktree {
+                tail.push("-c".to_owned());
+                tail.push(format!(
+                    "projects={{\"{}\"={{trust_level=\"trusted\"}}}}",
+                    worktree.display()
+                ));
+            }
+
+            Line {
+                model: "-m",
+                prompt: None,
+                names_the_session: false,
+                tail,
+            }
+        }
+        store::AgentType::Grok => Line {
+            model: "-m",
+            prompt: None,
+            names_the_session: true,
+            tail: vec![
+                "--always-approve".to_owned(),
+                "--sandbox".to_owned(),
+                "off".to_owned(),
+                "--no-alt-screen".to_owned(),
+            ],
+        },
+        store::AgentType::OpenCode => Line {
+            model: "-m",
+            prompt: Some("--prompt"),
+            names_the_session: false,
+            tail: vec!["--auto".to_owned()],
+        },
+    }
+}
+
+/// Where codex keeps the credentials a login writes, which inside the sandbox
+/// has to be the file beside the configuration rather than a keyring.
+///
+/// Named because it is somebody else's spelling, the same bargain the
+/// usage-limit phrase and the idle signature make: one place to edit when it
+/// moves.
+const CODEX_CREDENTIAL_STORE: &str = "cli_auth_credentials_store";
+
+/// What codex has on its Screen while it is working, and nothing of what it has
+/// there when it is waiting for a human — see [`Signature::AtWork`].
+///
+/// Read off codex 0.149.0 rather than guessed at, and the reading is the whole
+/// reason this backend's answer is an at-work line rather than a prompt: the
+/// frame codex leaves when its turn is over and the frame it draws mid-turn are
+/// the same screen but for this one line. The composer, its placeholder — `Ask
+/// Codex to do anything` — and the bar under it stand in both, so none of them
+/// says anything about whether the session has stopped.
+///
+/// The fragment rather than the whole line, because the rest of it moves while
+/// this does not: the spinner glyph in front changes every frame, and the
+/// seconds count up.
+///
+/// Named for the same reason the spelling above is, and it is the same bargain
+/// the usage-limit phrase makes: the wording is codex's and it will move, and
+/// moving it costs one edit here.
+const CODEX_AT_WORK: &str = "esc to interrupt";
+
+/// What grok has on its Screen while it is working, and nothing of what it has
+/// there when it is waiting for a human — see [`Signature::AtWork`].
+///
+/// Read off grok 1.0.13 driven on a hundred-column terminal rather than guessed
+/// at, and it comes out where codex came out: the frame grok leaves when its
+/// turn is over and the frame it draws mid-turn are the same screen but for the
+/// live status line — `⠧ Responding… 5.7s … [stop]` — and this hint on the row
+/// under the composer. The composer itself, its `❯`, the `grok-4.6 ·
+/// always-approve` label on its border and the `Shift+Tab:mode` and
+/// `Ctrl+x:shortcuts` hints beside this one stand in both, so none of them says
+/// whether the session has stopped.
+///
+/// The hint rather than the `[stop]` chip, which goes and comes with it: the
+/// hints are the row grok draws at the foot of every frame, where the status
+/// line is there only while a turn runs, and a keybinding label is a harder
+/// thing to find by accident in what the session printed than a bracketed word
+/// is.
+///
+/// The fragment rather than the whole row, because the rest of it moves while
+/// this does not: a turn that has backgrounded something adds `Ctrl+b:send to
+/// bg` beside it, and the hints at rest change with what the composer is
+/// offering.
+///
+/// Named for the same reason [`CODEX_AT_WORK`] is, and it is the same bargain
+/// the usage-limit phrase makes: the wording is grok's and it will move, and
+/// moving it costs one edit here.
+const GROK_AT_WORK: &str = "Esc:cancel";
+
+/// What opencode has on its Screen while it is working, and nothing of what it
+/// has there when it is waiting for a human — see [`Signature::AtWork`].
+///
+/// Read off opencode 1.18.25 driven on a hundred-column terminal rather than
+/// guessed at, and it comes out where the two before it came out: the frame
+/// opencode leaves when its turn is over and the frame it draws mid-turn are
+/// the same screen but for the status bar at its foot. Mid-turn that bar is a
+/// progress dial and this label — `⬝⬝⬝⬝⬝■■■  esc interrupt` — and at rest it is
+/// the project's path instead. The composer above it, the `Build auto ·
+/// <model>` label on its border and the `tab agents` and `ctrl+p commands`
+/// hints beside this one stand in both, so none of them says whether the
+/// session has stopped. Across two turns of one session sampled once a second —
+/// a tool call and then a streamed reply, twice — the label was in every
+/// working frame and in none of the resting ones.
+///
+/// The label rather than the dial in front of it, which goes and comes with it:
+/// the dial's cells fill and empty every frame where this does not move, and a
+/// keybinding label is a harder thing to find by accident in what the session
+/// printed than a run of block characters is.
+///
+/// Two words where codex's is three — opencode writes `esc interrupt` where
+/// codex writes `esc to interrupt` — so neither backend's constant reads the
+/// other's frame, which is what the tests on this reading turn on.
+///
+/// **And it is the same label in either interface opencode offers.** The
+/// minimal one — `--mini`, which is what draws inline rather than taking the
+/// alternate screen — puts it in a status bar of its own, and it goes there
+/// when the turn is over exactly as it goes here. So the reading does not turn
+/// on which of the two a session was started in, whatever a later stage
+/// decides about the Capture (ADR-0011).
+///
+/// Named for the same reason [`CODEX_AT_WORK`] is, and it is the same bargain
+/// the usage-limit phrase makes: the wording is opencode's and it will move,
+/// and moving it costs one edit here.
+const OPENCODE_AT_WORK: &str = "esc interrupt";
 
 /// The sessions this server has running, by the Conversation each belongs to.
 ///
@@ -313,8 +672,8 @@ pub(crate) struct Session {
     /// The Timeline Event it is printing into.
     pub(crate) event_id: i64,
 
-    /// How long it has been printing nothing.
-    pub(crate) quiet: Quiet,
+    /// Whether it has stopped, and how long ago — see [`Idle`].
+    pub(crate) idle: Idle,
 
     /// Word that it is over, and how it ended.
     ///
@@ -401,23 +760,157 @@ impl Session {
     }
 }
 
-/// How long a session has been printing nothing, and whether it has ever
-/// printed anything at all.
+/// Whether a session is idle, how long it has been, and whether it has ever
+/// said anything at all.
+///
+/// **One judgement, read by everything that has ever asked**: the mark on the
+/// sidebar and on the Conversation, every ender's grace, and Rescue — both the
+/// span it waits out and the moment it proves a stir by. What makes it one
+/// judgement rather than a rule per caller is that idle means different things
+/// on different backends, and a caller keeping its own reading of the clock
+/// would be a backend judged one way by the sidebar and another by the thing
+/// that ends it. See [`Judged`].
 ///
 /// Shared with the relay, which puts it back to now on everything that arrives.
 /// That is what makes a grace period safe to end a session on: a session still
-/// talking is never one to end, however long it goes on for, and the work a
+/// working is never one to end, however long it goes on for, and the work a
 /// session does after its commit — a message, a summary, a push — runs to
 /// completion rather than being cut off mid-sentence.
 ///
-/// The second half is for the driver that has nothing else to read. A session
+/// The last part is for the driver that has nothing else to read. A session
 /// ended on its own quiet is one being taken at its word, and a session that
-/// never said a word has given none: see [`Quiet::said_anything`].
+/// never said a word has given none: see [`Idle::said_anything`].
 #[derive(Debug, Clone)]
-pub(crate) struct Quiet(Arc<Mutex<Silence>>);
+pub(crate) struct Idle {
+    /// How this session's backend is read — the same for the whole of its life,
+    /// because it is a fact about which agent is running.
+    judged: Judged,
 
-/// What the clock holds: when the session last said anything, and whether that
-/// was ever it saying anything rather than it starting.
+    /// And what the relay has seen of it, which is what the judgement is made
+    /// of.
+    silence: Arc<Mutex<Silence>>,
+}
+
+/// How a session's backend says it has stopped.
+///
+/// Two readings of the one terminal, and which of them a session gets is its
+/// agent type's — see [`Agents::signature`], which is where each backend's
+/// answer is kept.
+#[derive(Debug, Clone)]
+enum Judged {
+    /// By what it prints: [`IDLE_AFTER`] with nothing arriving. Claude's, and
+    /// the rule every session was read by before there was a second backend.
+    Printing,
+
+    /// By what it draws: this backend's signature read off the Screen, with a
+    /// long byte-quiet behind it.
+    ///
+    /// A full-screen interface is never reliably silent — it repaints while it
+    /// works and may go on repainting its prompt after it has stopped — so
+    /// silence says nothing about one either way, and what does is the frame it
+    /// leaves on the terminal. Which of the two things a frame can say is this
+    /// backend's — see [`Signature`].
+    ///
+    /// **The long-stop is what a drifted signature lands in.** The wording is
+    /// the backend's and will move, and a signature that no longer matches
+    /// reads as a session that never stops: Rescue's precondition is idle,
+    /// every ender waits on the same judgement, and no session carries a cap on
+    /// its life. So a session that has printed nothing for `long_stop` is idle
+    /// whatever its screen says, and what the human gets is the ordinary
+    /// would-not-ask stop — one slow round rather than never. See
+    /// [`crate::runner::Pace::long_stop`].
+    Drawing {
+        signature: Signature,
+        long_stop: Duration,
+    },
+}
+
+/// The one line a backend draws that says whether it has stopped, and which of
+/// the two things it says.
+///
+/// A backend is read either way round, and which way is a fact about what it
+/// draws rather than a choice:
+///
+/// - one that draws a prompt of its own when it is waiting says so by that line
+///   *standing*, and
+/// - one whose waiting frame is indistinguishable from its working frame says so
+///   by its at-work line *going*.
+///
+/// Codex is the second, and it is the reason there are two — see
+/// [`CODEX_AT_WORK`], where the frames it draws are set out.
+///
+/// **The two read the silence differently, and they have to.** A prompt standing
+/// is a whole answer: the backend has drawn the thing it draws only when it is
+/// waiting, and nothing else has to agree with it. An at-work line *gone* is
+/// half of one — the line is missing from the frame before the first frame is
+/// drawn, and it is missing again from every frame of a session drawing
+/// something Verkstead has never seen — so the ordinary [`IDLE_AFTER`] quiet is
+/// asked for beside it. That is what keeps a drifted at-work phrase from
+/// stopping a session in the middle of its work: a working TUI repaints, and one
+/// that is repainting is never quiet.
+#[derive(Debug, Clone)]
+pub(crate) enum Signature {
+    /// The line this backend draws when it is sitting at its prompt: standing
+    /// says the session has stopped, and it is the whole of the judgement.
+    AtThePrompt(String),
+
+    /// The line this backend draws while it is working, where it draws nothing
+    /// of its own when it is waiting: gone says the session has stopped, once
+    /// [`IDLE_AFTER`] of quiet says so too.
+    AtWork(String),
+}
+
+impl Signature {
+    /// Whether the frame on `screen` says the session has stopped.
+    fn at_rest(&self, screen: &Live) -> bool {
+        match self {
+            Signature::AtThePrompt(line) => screen.showing(line),
+            Signature::AtWork(line) => !screen.showing(line),
+        }
+    }
+
+    /// And when a session whose frame has said so since `at_rest` — having last
+    /// printed at `printed` — is idle.
+    ///
+    /// At once for a prompt, which is an answer on its own; [`IDLE_AFTER`] after
+    /// the last byte for an at-work line, which is half of one.
+    fn settled(&self, at_rest: Instant, printed: Instant) -> Instant {
+        match self {
+            Signature::AtThePrompt(_) => at_rest,
+            Signature::AtWork(_) => printed + IDLE_AFTER,
+        }
+    }
+
+    /// And the moment such a session stopped, which is what every span of idle
+    /// is measured from and what *last seen at work* answers with.
+    ///
+    /// When its prompt first stood, for a backend that draws one — it has been
+    /// sitting there since, whatever else its terminal has done. Its last byte
+    /// for a backend read by its at-work line, because a backend that draws only
+    /// while it works was working right up to the moment it went quiet.
+    fn stopped_at(&self, at_rest: Instant, printed: Instant) -> Instant {
+        match self {
+            Signature::AtThePrompt(_) => at_rest,
+            Signature::AtWork(_) => printed,
+        }
+    }
+
+    /// Whether a session that has drawn nothing at all is at rest under this
+    /// reading.
+    ///
+    /// It is under an at-work one: a session that has drawn nothing is not
+    /// drawing that it is at work, and what says it has stopped is then the
+    /// quiet alone — which is Claude's own rule, and the right one for a
+    /// launched session that never got going. Under a prompt it is not: nothing
+    /// drawn is no prompt drawn.
+    fn at_rest_undrawn(&self) -> bool {
+        matches!(self, Signature::AtWork(_))
+    }
+}
+
+/// What the clock holds: when the session last printed anything, whether that
+/// was ever it saying anything rather than it starting, and when the judgement
+/// last turned to idle.
 #[derive(Debug)]
 struct Silence {
     /// The moment it was last put back — the session's last word, or the moment
@@ -426,26 +919,145 @@ struct Silence {
 
     /// Whether it has said anything since it started.
     spoke: bool,
+
+    /// When the judgement last said the session had stopped, and `None` while it
+    /// says the session is at work.
+    ///
+    /// Only ever moved by something arriving, because that is the only thing
+    /// that changes what is drawn: a prompt redrawn is the same silence going
+    /// on rather than a new one, so a signature already standing keeps the
+    /// moment it first stood.
+    ///
+    /// Set from the launch under an at-work reading, where a session that has
+    /// drawn nothing is a session not drawing that it is at work — see
+    /// [`Signature::at_rest_undrawn`].
+    ///
+    /// Never set at all under [`Judged::Printing`], where the silence itself is
+    /// the judgement and [`Silence::at`] is the whole of it.
+    idling_since: Option<Instant>,
 }
 
-impl Quiet {
-    fn started() -> Quiet {
-        Quiet(Arc::new(Mutex::new(Silence {
-            at: Instant::now(),
-            spoke: false,
-        })))
+impl Idle {
+    fn started(judged: Judged) -> Idle {
+        let now = Instant::now();
+        let undrawn = match &judged {
+            Judged::Printing => false,
+            Judged::Drawing { signature, .. } => signature.at_rest_undrawn(),
+        };
+
+        Idle {
+            judged,
+            silence: Arc::new(Mutex::new(Silence {
+                at: now,
+                spoke: false,
+                idling_since: undrawn.then_some(now),
+            })),
+        }
     }
 
-    /// The session said something, so it has been quiet for no time at all.
-    fn spoke(&self) {
-        let mut silence = self.held();
+    /// The session printed, and `screen` has what it printed on it: put the
+    /// clock back, and read the judgement off the frame it left.
+    ///
+    /// After the Screen has been fed rather than before it, which is the whole
+    /// of what makes the reading exact — the frame a backend's prompt appears on
+    /// is drawn by the very text this is being told about.
+    fn printed(&self, screen: &Live) {
+        // Outside the lock, because it takes the Screen's: two locks held at
+        // once are two locks that can be taken in two orders.
+        let at_rest = match &self.judged {
+            Judged::Printing => false,
+            Judged::Drawing { signature, .. } => signature.at_rest(screen),
+        };
 
-        silence.at = Instant::now();
+        let mut silence = self.silence();
+        let now = Instant::now();
+
+        silence.at = now;
         silence.spoke = true;
+
+        if at_rest {
+            silence.idling_since.get_or_insert(now);
+        } else {
+            silence.idling_since = None;
+        }
     }
 
+    /// Whether the session is idle as of now.
+    ///
+    /// What the sidebar and the Conversation's own row are drawn from, and the
+    /// mark the relay announces the crossing of.
+    pub(crate) fn idling(&self) -> bool {
+        let silence = self.silence();
+
+        match &self.judged {
+            Judged::Printing => silence.at.elapsed() >= IDLE_AFTER,
+            Judged::Drawing {
+                signature,
+                long_stop,
+            } => {
+                let settled = silence
+                    .idling_since
+                    .is_some_and(|since| signature.settled(since, silence.at) <= Instant::now());
+
+                settled || silence.at.elapsed() >= *long_stop
+            }
+        }
+    }
+
+    /// And how long it has been, which is what every grace is measured against.
+    ///
+    /// [`Duration::ZERO`] where it is not idle at all: a backend judged on its
+    /// screen is at work however long it has been between frames, which is the
+    /// point of judging it that way — a TUI that falls silent for a moment
+    /// mid-turn would otherwise be reaped out from under its own work.
+    ///
+    /// Past the long-stop the whole silence counts, rather than the part of it
+    /// after the long-stop: the session *was* stopped for all of it, and this is
+    /// the moment Verkstead is willing to say so.
     pub(crate) fn for_how_long(&self) -> Duration {
-        self.held().at.elapsed()
+        let silence = self.silence();
+
+        match &self.judged {
+            Judged::Printing => silence.at.elapsed(),
+            Judged::Drawing {
+                signature,
+                long_stop,
+            } => {
+                let drawn = silence
+                    .idling_since
+                    .filter(|since| signature.settled(*since, silence.at) <= Instant::now())
+                    .map(|since| signature.stopped_at(since, silence.at).elapsed())
+                    .unwrap_or_default();
+                let printed = silence.at.elapsed();
+
+                if printed >= *long_stop {
+                    drawn.max(printed)
+                } else {
+                    drawn
+                }
+            }
+        }
+    }
+
+    /// When it will be idle if nothing else arrives, for whoever wants to sleep
+    /// until it is rather than to keep asking.
+    ///
+    /// A moment already past where it is idle now, which is a sleep that is over
+    /// before it starts — exactly what a caller waiting for the crossing wants
+    /// of a session that has already crossed.
+    pub(crate) fn crossing(&self) -> Instant {
+        let silence = self.silence();
+
+        match &self.judged {
+            Judged::Printing => silence.at + IDLE_AFTER,
+            Judged::Drawing {
+                signature,
+                long_stop,
+            } => match silence.idling_since {
+                Some(since) => signature.settled(since, silence.at),
+                None => silence.at + *long_stop,
+            },
+        }
     }
 
     /// Whether the session has said anything at all since it started.
@@ -455,30 +1067,45 @@ impl Quiet {
     /// propose-then-fix rule. A session that reports through the repository has a
     /// commit or an artifact to be read as done; one that reports through nothing
     /// but its own words has said nothing, and *nothing* is not a report.
+    ///
+    /// Every byte counts here, whatever the judgement makes of it: what this
+    /// asks is whether the session ever got going, and a frame drawn is a
+    /// session that did.
     pub(crate) fn said_anything(&self) -> bool {
-        self.held().spoke
+        self.silence().spoke
     }
 
-    /// When it last said anything, for whoever wants to sleep until it has been
-    /// quiet long enough rather than to ask how long it has been.
+    /// When it was last seen at work, for whoever wants to know whether that was
+    /// *after* something else — an answer handed to the session, a line typed
+    /// into it — which is a question about the order of two moments rather than
+    /// about a span. See [`crate::rescues::until_it_will_not_ask`], where a
+    /// session seen working later than the stir is the proof that the stir
+    /// reached it at all.
     ///
-    /// And for whoever wants to know whether a word came *after* something else
-    /// — an answer handed to the session, a line typed into it — which is a
-    /// question about the order of two moments rather than about a span. See
-    /// [`crate::rescues::until_it_will_not_ask`], where a word later than the
-    /// stir is the proof that the stir reached the session at all.
+    /// The same judgement read as a moment rather than as a span, and it has to
+    /// be: a byte is free on a backend that repaints, so a session's last *word*
+    /// would prove nothing there.
     ///
-    /// The moment it was launched, where it has said nothing yet: a session
-    /// that never spoke has been quiet since it started, which is exactly what
-    /// both readers want of it.
+    /// The moment it was launched, where it has done nothing yet: a session that
+    /// never got going has been stopped since it started, which is exactly what
+    /// this reader wants of one.
     pub(crate) fn since(&self) -> Instant {
-        self.held().at
+        let silence = self.silence();
+
+        match &self.judged {
+            Judged::Printing => silence.at,
+            Judged::Drawing { signature, .. } => silence
+                .idling_since
+                .filter(|since| signature.settled(*since, silence.at) <= Instant::now())
+                .map(|since| signature.stopped_at(since, silence.at))
+                .unwrap_or(silence.at),
+        }
     }
 
-    fn held(&self) -> std::sync::MutexGuard<'_, Silence> {
-        self.0
+    fn silence(&self) -> std::sync::MutexGuard<'_, Silence> {
+        self.silence
             .lock()
-            .expect("a session's quiet clock is not poisoned")
+            .expect("a session's idle clock is not poisoned")
     }
 }
 
@@ -529,13 +1156,17 @@ struct Running {
 
     /// The two halves a driver is handed, kept so that a session already running
     /// can be given one — see [`Sessions::following`].
-    quiet: Quiet,
+    idle: Idle,
     ended: watch::Receiver<Option<Ended>>,
 
     /// Whether the process has gone, set the moment the relay reads
     /// end-of-file — see [`Sessions::alive`], which is the whole of what it is
     /// for.
     gone: Arc<AtomicBool>,
+
+    /// Which backend it is, so that a Set it asks is stored the way that backend
+    /// asks — see [`Sessions::channel`].
+    agent_type: store::AgentType,
 }
 
 impl Sessions {
@@ -612,23 +1243,47 @@ impl Sessions {
             .map(|running| running.event_id)
     }
 
-    /// Whether a Conversation's running session has stopped printing.
+    /// How a Conversation's running session asks: the channel its backend's
+    /// agent type names — see [`store::AgentType::channel`].
+    ///
+    /// The register rather than the Conversation's Pairings, because what this
+    /// decides is how *this* session's Set is stored and a Conversation runs its
+    /// roles under Pairings that need not agree — a wrap-up's review may be on
+    /// one backend and the work on another.
+    ///
+    /// [`store::Channel::Blocking`] where nothing is running, which is what a
+    /// Set arriving from outside a session is: a router with no agents at all,
+    /// and the human's own devices, which never post one here. It is also the
+    /// safe way round — a wait opened on a Set nobody will nudge about ends
+    /// when the CLI that opened it does, where a Set stored for a session that
+    /// is not idling would be one nobody ever comes back for.
+    pub(crate) fn channel(&self, conversation_id: i64) -> store::Channel {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .get(&conversation_id)
+            .map(|running| running.agent_type.channel())
+            .unwrap_or(store::Channel::Blocking)
+    }
+
+    /// Whether a Conversation's running session has stopped — its backend's own
+    /// judgement of that, see [`Idle`].
     ///
     /// `false` for a Conversation with nothing running, which is the answer
     /// that reads right wherever it is asked: idle is a thing a *running*
     /// session is, and a session that has ended is neither.
     ///
     /// Read at the moment a Conversation is drawn rather than stored, as
-    /// [`Sessions::writing`] is and for the same reason — how long a process has
-    /// been quiet is a fact about a process. The crossing is announced as it
-    /// happens too, because a session going quiet is exactly when it stops
+    /// [`Sessions::writing`] is and for the same reason — whether a process has
+    /// stopped is a fact about a process. The crossing is announced as it
+    /// happens too, because a session going idle is exactly when it stops
     /// producing the Nudges an open page re-reads on; see [`relay`].
     pub(crate) fn idling(&self, conversation_id: i64) -> bool {
         self.running
             .lock()
             .expect("the sessions registry is not poisoned")
             .get(&conversation_id)
-            .is_some_and(|running| running.quiet.for_how_long() >= IDLE_AFTER)
+            .is_some_and(|running| running.idle.idling())
     }
 
     /// What a Conversation's running session is drawing, or `None` where the
@@ -685,7 +1340,7 @@ impl Sessions {
             .get(&conversation_id)
             .map(|running| Session {
                 event_id: running.event_id,
-                quiet: running.quiet.clone(),
+                idle: running.idle.clone(),
                 ended: running.ended.clone(),
             })
     }
@@ -705,19 +1360,19 @@ impl Sessions {
             .collect()
     }
 
-    /// And which of those have stopped printing — [`Sessions::idling`] for the
-    /// whole sidebar at once, and one lock rather than one per row for the same
-    /// reason [`Sessions::working`] is.
+    /// And which of those have stopped — [`Sessions::idling`] for the whole
+    /// sidebar at once, and one lock rather than one per row for the same reason
+    /// [`Sessions::working`] is.
     ///
     /// A subset of [`Sessions::working`] by construction, because both are the
     /// same register read: idle is a thing a running session is, and a
     /// Conversation with nothing in it is in neither set.
-    pub(crate) fn quiet(&self) -> HashSet<i64> {
+    pub(crate) fn idle(&self) -> HashSet<i64> {
         self.running
             .lock()
             .expect("the sessions registry is not poisoned")
             .iter()
-            .filter(|(_, running)| running.quiet.for_how_long() >= IDLE_AFTER)
+            .filter(|(_, running)| running.idle.idling())
             .map(|(conversation_id, _)| *conversation_id)
             .collect()
     }
@@ -823,7 +1478,12 @@ impl Sessions {
         // [`skills::naming`].
         let prompt = skills::naming(&prompt, conversation.naming);
 
-        let argv = agents.argv(pairing, &prompt, session.as_deref());
+        let argv = agents.argv(
+            pairing,
+            &prompt,
+            session.as_deref(),
+            conversation.worktree.as_deref(),
+        );
         let conversation_id = conversation.id;
 
         // The sandbox asks git where the worktree's object database is, and the
@@ -903,6 +1563,13 @@ impl Sessions {
             }
         };
 
+        // The moment the session started, taken before it starts. A backend
+        // whose log is found rather than named is looking for a file that
+        // appeared after this — and a moment read afterwards could be later
+        // than the log it is meant to be earlier than, which would be a session
+        // that never found its own record. See [`crate::transcript`].
+        let at_launch = SystemTime::now();
+
         let child = match terminal.spawn(&mut captured(&sandbox, &argv)) {
             Ok(child) => child,
             Err(error) => {
@@ -937,29 +1604,45 @@ impl Sessions {
         let event_id =
             store::start_capture(pool, conversation_id, session.as_deref(), Some(pairing)).await?;
 
-        // The log the agent keeps of itself is followed under the name Verkstead
-        // gave the session, inside the directory of the Profile it is running
-        // under. A session with no name has no log to look for — see
-        // [`crate::transcript`].
-        let tail = session
-            .as_deref()
-            .map(|session| Tail::of(conversation_id, &pairing.profile, session));
+        // The log the agent keeps of itself is followed inside the directory of
+        // the Profile it is running under — under the name Verkstead gave the
+        // session on a backend that takes one, and by the Worktree it opened in
+        // and the moment it started on a backend that does not. A session with
+        // no name has no log to look for — see [`crate::transcript`].
+        let tail = session.as_deref().map(|session| {
+            Tail::of(
+                conversation_id,
+                &pairing.profile,
+                session,
+                conversation.worktree.as_deref(),
+                at_launch,
+            )
+        });
 
         // And the same output watched for the one thing a session says that is
         // about the account rather than about the work: that its window is
         // spent. The Profile is taken now because that is what the stop names,
-        // and a Profile renamed while a session runs was not the account this
-        // one is on — see [`crate::limits`].
-        let limits =
-            crate::limits::Watch::on(conversation_id, event_id, pairing.profile.name.clone());
+        // and its agent type because that is what says which sentence to read
+        // for — one per backend, as the idle signature is. A Profile renamed
+        // while a session runs was not the account this one is on — see
+        // [`crate::limits`].
+        let limits = crate::limits::Watch::on(
+            conversation_id,
+            event_id,
+            pairing.profile.name.clone(),
+            pairing.profile.agent_type(),
+        );
 
         let (stop, stopping) = oneshot::channel();
 
-        // The two halves of what a driver holds a session by: the clock the
+        // The two halves of what a driver holds a session by: the judgement the
         // relay keeps as it reads, and the word that the relay has finished. A
         // watch rather than a oneshot, because one session may be handed to more
         // than one driver over its life — see [`Sessions::following`].
-        let quiet = Quiet::started();
+        //
+        // How this one is read is settled here and never again: it is the
+        // backend's, and the backend is the Pairing's Profile.
+        let idle = Idle::started(agents.judged(pairing.profile.agent_type()));
         let (over, ended) = watch::channel(None);
 
         // And the third: whether the process itself has gone. Set the moment the
@@ -993,7 +1676,7 @@ impl Sessions {
                 let sessions = self.clone();
                 let pool = pool.clone();
                 let nudges = nudges.clone();
-                let quiet = quiet.clone();
+                let idle = idle.clone();
                 let gone = gone.clone();
 
                 async move {
@@ -1027,7 +1710,7 @@ impl Sessions {
                             event_id,
                         },
                         &mut launched,
-                        &quiet,
+                        &idle,
                         tail,
                         limits,
                         stopping,
@@ -1106,9 +1789,10 @@ impl Sessions {
                     stop,
                     relay,
                     screen,
-                    quiet: quiet.clone(),
+                    idle: idle.clone(),
                     ended: ended.clone(),
                     gone,
+                    agent_type: pairing.profile.agent_type(),
                 },
             );
         }
@@ -1124,7 +1808,7 @@ impl Sessions {
 
         Ok(Some(Session {
             event_id,
-            quiet,
+            idle,
             ended,
         }))
     }
@@ -1255,26 +1939,30 @@ struct Printing {
 /// amount of the session's talking. `tail` is `None` where there is no log to
 /// look for, which is every session Verkstead could not name.
 ///
-/// `quiet` is put back to now on everything read rather than on everything
-/// written down: what it is measuring is whether the session is still talking,
-/// and a redraw the summariser throws away is a session talking.
+/// `idle` is told about everything read rather than everything written down:
+/// what it is judging is whether the session is still working, and a redraw the
+/// summariser throws away is a session working.
 ///
 /// The session's Screen is fed the same text, and immediately rather than every
 /// [`FLUSH_EVERY`]. The store is a record and half a second is nothing to one;
 /// the Screen is a terminal somebody may be watching, and half a second is a
 /// long time to watch a terminal not move.
 ///
+/// And the Screen is fed *before* the judgement is told, because on a backend
+/// judged by what it draws the two are one act: the frame that says a session is
+/// back at its prompt is drawn by the very text that arrived.
+///
 /// And `limits` is fed the same text a third time, watching for the one thing a
 /// session says that is about the account rather than about the work — see
 /// [`crate::limits`].
 ///
 /// The one thing this loop announces that is not something it wrote down is the
-/// session falling quiet, and then waking: a page draws a session that has
-/// stopped differently from one getting on with it, and going quiet is
+/// session falling idle, and then waking: a page draws a session that has
+/// stopped differently from one getting on with it, and going idle is
 /// precisely when a session stops producing the Nudges that would carry the
 /// news. So both crossings are announced on the Conversation's own kind, once
-/// each — into idle [`IDLE_AFTER`] after the last thing read, and out of it on
-/// the first thing read after that. The waking one is for the sidebar alone:
+/// each — into idle when the judgement says so, and out of it on the first thing
+/// read that says it is working again. The waking one is for the sidebar alone:
 /// what a session prints is announced on the Screen's kind, which reaches the
 /// Conversation being watched and not the list of them.
 ///
@@ -1290,7 +1978,7 @@ async fn relay(
     nudges: &Nudges,
     printing: Printing,
     session: &mut Launched,
-    quiet: &Quiet,
+    idle: &Idle,
     mut tail: Option<Tail>,
     mut limits: crate::limits::Watch,
     mut stopping: oneshot::Receiver<()>,
@@ -1313,14 +2001,14 @@ async fn relay(
     let mut tailed = Instant::now();
     let mut ending = false;
 
-    // Whether the session has already been said to be quiet, so that it is said
-    // once per silence rather than every time round the loop.
-    let mut idle = false;
+    // Whether the session has already been said to have stopped, so that it is
+    // said once per silence rather than every time round the loop.
+    let mut announced = false;
 
     loop {
         let deadline = tokio::time::Instant::from_std(flushed + FLUSH_EVERY);
         let following = tokio::time::Instant::from_std(tailed + FLUSH_EVERY);
-        let idling = tokio::time::Instant::from_std(quiet.since() + IDLE_AFTER);
+        let idling = tokio::time::Instant::from_std(idle.crossing());
 
         tokio::select! {
             read = terminal.read(&mut buffer) => match read {
@@ -1328,22 +2016,29 @@ async fn relay(
                 // gone.
                 Ok(0) => break,
                 Ok(taken) => {
-                    quiet.spoke();
+                    let text = reading.take(&buffer[..taken]);
+
+                    // The grid first and the judgement off it, which on a
+                    // backend read by what it draws is one act — see [`Idle`].
+                    screen.printed(&text);
+                    idle.printed(screen);
+
                     // Coming back out of the silence is a crossing too, and the
                     // sidebar hears about it on nothing else: what a session
                     // prints is announced on the Screen's kind, which reaches
                     // the Conversation being watched rather than the list of
-                    // them. Said once, on the way out.
-                    if idle {
-                        idle = false;
+                    // them. Said once, on the way out — and only where what
+                    // arrived was the session going back to work, because a TUI
+                    // repainting the prompt it is sitting at has printed
+                    // without waking.
+                    if announced && !idle.idling() {
+                        announced = false;
 
                         nudges.announce(Nudge::Conversation {
                             conversation: printing.conversation_id,
                         });
                     }
 
-                    let text = reading.take(&buffer[..taken]);
-                    screen.printed(&text);
                     limits.printed(&text);
                     pending.push_str(&text);
                 }
@@ -1364,7 +2059,12 @@ async fn relay(
                 // leaves the ending here because this is the task it is running
                 // inside.
                 if limits
-                    .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
+                    .look(
+                        pool,
+                        nudges,
+                        &screen.drawn(),
+                        tail.as_ref().and_then(Tail::latest),
+                    )
                     .await
                     && !ending
                 {
@@ -1389,7 +2089,12 @@ async fn relay(
                     // in its own log and not on its display would otherwise go
                     // unnoticed until the terminal happened to say something.
                     if limits
-                        .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
+                        .look(
+                            pool,
+                            nudges,
+                            &screen.drawn(),
+                            tail.as_ref().and_then(Tail::latest),
+                        )
                         .await
                         && !ending
                     {
@@ -1400,8 +2105,8 @@ async fn relay(
 
                 tailed = Instant::now();
             }
-            _ = tokio::time::sleep_until(idling), if !idle => {
-                idle = true;
+            _ = tokio::time::sleep_until(idling), if !announced => {
+                announced = true;
 
                 // The row on the Timeline and the sidebar card alike, which is
                 // what the Conversation's own kind reaches. Nothing was written
@@ -1598,9 +2303,72 @@ mod tests {
         }
     }
 
-    fn agents(agent: Vec<String>, state: &std::path::Path) -> Agents {
-        Agents::running(
-            agent,
+    /// And the same on the second backend: one home, and the model its account
+    /// can launch.
+    fn codex_pairing() -> store::Pairing {
+        store::Pairing {
+            profile: store::Profile {
+                id: 2,
+                name: "work".to_owned(),
+                account: store::Account::Codex {
+                    home: PathBuf::from("/srv/accounts/work/.codex"),
+                },
+                models: vec!["gpt-5-codex".to_owned()],
+            },
+            model: Some("gpt-5-codex".to_owned()),
+        }
+    }
+
+    /// And on the third, whose account is one home as the second's is.
+    fn grok_pairing() -> store::Pairing {
+        store::Pairing {
+            profile: store::Profile {
+                id: 3,
+                name: "xai".to_owned(),
+                account: store::Account::Grok {
+                    home: PathBuf::from("/srv/accounts/work/.grok"),
+                },
+                models: vec!["grok-4.6".to_owned()],
+            },
+            model: Some("grok-4.6".to_owned()),
+        }
+    }
+
+    /// And on the fourth, whose model is the `provider/model` string the human
+    /// typed on the Profile and whose home is the directory opencode's XDG
+    /// paths resolve inside.
+    fn opencode_pairing() -> store::Pairing {
+        store::Pairing {
+            profile: store::Profile {
+                id: 4,
+                name: "zen".to_owned(),
+                account: store::Account::OpenCode {
+                    home: PathBuf::from("/srv/accounts/zen/opencode"),
+                },
+                models: vec!["opencode/big-pickle".to_owned()],
+            },
+            model: Some("opencode/big-pickle".to_owned()),
+        }
+    }
+
+    /// The Worktree a session of either fixture is launched in, which is the
+    /// directory codex is told to trust.
+    ///
+    /// **With a dot in it**, and that is the point: a Worktree is named for its
+    /// Repo and the branch it holds, and either may carry one. Codex splits a
+    /// `-c` key on every dot and does not stop at the quotes, so a path like
+    /// this one is what tells a trust pre-seed that lands from one that leaves
+    /// the session sitting on the trust prompt for ever.
+    const WORKTREE: &str = "/srv/worktrees/verkstead-rate-limiting-v1.2";
+
+    fn worktree() -> Option<&'static Path> {
+        Some(Path::new(WORKTREE))
+    }
+
+    /// A server's own: the binary is the Profile's agent type's, with nothing
+    /// standing where it goes.
+    fn real(state: &std::path::Path) -> Agents {
+        Agents::new(
             Home {
                 path: PathBuf::from("/home/verkstead"),
             },
@@ -1619,6 +2387,14 @@ mod tests {
         )
     }
 
+    /// And the same with `agent` standing where every type's binary goes.
+    fn agents(agent: Vec<String>, state: &std::path::Path) -> Agents {
+        Agents {
+            agent: Some(agent),
+            ..real(state)
+        }
+    }
+
     /// The prompt is what the grilling starts from, and an interactive claude
     /// takes what it is to start on as a positional argument.
     #[test]
@@ -1628,6 +2404,7 @@ mod tests {
             &pairing(),
             "# Rate limiting\n",
             None,
+            worktree(),
         );
 
         assert_eq!(
@@ -1656,6 +2433,7 @@ mod tests {
             &unpaired,
             "# Rate limiting\n",
             None,
+            worktree(),
         );
 
         assert_eq!(
@@ -1679,6 +2457,7 @@ mod tests {
             &pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
         );
 
         assert_eq!(
@@ -1695,10 +2474,198 @@ mod tests {
         );
     }
 
-    /// A name claude will take as a session id, which is a version 4 UUID and
-    /// nothing else — a malformed one is refused, and the session never starts.
+    /// A Profile is launched on the binary its agent type names, so that a
+    /// Codex Profile runs codex rather than whatever the first backend was.
     #[test]
-    fn a_session_is_named_something_claude_will_accept() {
+    fn a_profile_is_run_on_its_own_agent_types_binary() {
+        let state = tempfile::tempdir().unwrap();
+        let agents = real(state.path());
+
+        assert_eq!(
+            agents
+                .argv(&pairing(), "# Rate limiting\n", None, worktree())
+                .first()
+                .map(String::as_str),
+            Some("claude")
+        );
+        assert_eq!(
+            agents
+                .argv(&codex_pairing(), "# Rate limiting\n", None, worktree())
+                .first()
+                .map(String::as_str),
+            Some("codex")
+        );
+        assert_eq!(
+            agents
+                .argv(&grok_pairing(), "# Rate limiting\n", None, worktree())
+                .first()
+                .map(String::as_str),
+            Some("grok")
+        );
+        assert_eq!(
+            agents
+                .argv(&opencode_pairing(), "# Rate limiting\n", None, worktree())
+                .first()
+                .map(String::as_str),
+            Some("opencode")
+        );
+    }
+
+    /// And the whole of codex's line: the model as `-m`, the prompt as the one
+    /// positional, and everything the account and the sandbox need after it.
+    ///
+    /// No session id, because codex takes none — which is why its log is found
+    /// rather than named. The credential store is file-backed because there is
+    /// no keyring inside the sandbox, and the Worktree is trusted from the line
+    /// rather than from anything written into the Profile's own directory —
+    /// trusted as a whole table rather than as a key under one, which is what a
+    /// Worktree with a dot in its name needs. See [`WORKTREE`].
+    #[test]
+    fn a_codex_session_takes_the_line_codex_takes() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["codex".to_owned()], state.path()).argv(
+            &codex_pairing(),
+            "# Rate limiting\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "codex".to_owned(),
+                "-m".to_owned(),
+                "gpt-5-codex".to_owned(),
+                "# Rate limiting\n".to_owned(),
+                "--dangerously-bypass-approvals-and-sandbox".to_owned(),
+                "--no-alt-screen".to_owned(),
+                "-c".to_owned(),
+                "cli_auth_credentials_store=\"file\"".to_owned(),
+                "-c".to_owned(),
+                format!("projects={{\"{WORKTREE}\"={{trust_level=\"trusted\"}}}}"),
+            ]
+        );
+    }
+
+    /// A Conversation with no worktree is one no session starts in, so what is
+    /// left off is the trust of a directory there is none of — and the rest of
+    /// the line, the account's own half included, stands.
+    #[test]
+    fn a_codex_session_with_no_worktree_trusts_nothing() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["codex".to_owned()], state.path()).argv(
+            &codex_pairing(),
+            "# Rate limiting\n",
+            None,
+            None,
+        );
+
+        assert!(
+            !argv.iter().any(|arg| arg.contains("trust_level")),
+            "there is no worktree to trust: {argv:?}"
+        );
+        assert!(
+            argv.contains(&"cli_auth_credentials_store=\"file\"".to_owned()),
+            "and the account still needs its credential store file-backed: {argv:?}"
+        );
+    }
+
+    /// And the whole of grok's line: the model as `-m`, the prompt as the one
+    /// positional, the session id it is named by after it, and the two bypasses
+    /// and the inline screen last.
+    ///
+    /// The session id because grok is the one backend after Claude that takes
+    /// one at launch — which is what makes its log named rather than found —
+    /// and it takes it after the positional prompt, which is where this line
+    /// builder puts it. Verified against grok 1.0.13, which parsed this line
+    /// and got as far as wanting a terminal.
+    #[test]
+    fn a_grok_session_takes_the_line_grok_takes() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["grok".to_owned()], state.path()).argv(
+            &grok_pairing(),
+            "# Rate limiting\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "grok".to_owned(),
+                "-m".to_owned(),
+                "grok-4.6".to_owned(),
+                "# Rate limiting\n".to_owned(),
+                "--session-id".to_owned(),
+                "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
+                "--always-approve".to_owned(),
+                "--sandbox".to_owned(),
+                "off".to_owned(),
+                "--no-alt-screen".to_owned(),
+            ]
+        );
+    }
+
+    /// And the whole of opencode's line: the model as `-m provider/model`, the
+    /// Brief under `--prompt` rather than as a positional, and `--auto` for the
+    /// approvals.
+    ///
+    /// The flagged prompt is what makes this line a shape of its own — the
+    /// positional opencode takes is the project to start in, not the thing to
+    /// start on. No session id, because `--session` means *continue this one*
+    /// and is validated against the store before the TUI starts, so a fresh
+    /// name would be a session that never starts: opencode's log is found
+    /// rather than named, as codex's is. Verified against opencode 1.18.25,
+    /// which parsed this line on a pseudo-terminal, submitted the Brief without
+    /// anything being typed, and answered it.
+    #[test]
+    fn an_opencode_session_takes_the_line_opencode_takes() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["opencode".to_owned()], state.path()).argv(
+            &opencode_pairing(),
+            "# Rate limiting\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "opencode".to_owned(),
+                "-m".to_owned(),
+                "opencode/big-pickle".to_owned(),
+                "--prompt".to_owned(),
+                "# Rate limiting\n".to_owned(),
+                "--auto".to_owned(),
+            ]
+        );
+    }
+
+    /// The stub the suite stands where an agent goes stands there for every
+    /// type, and reads the line it reads today: the model first and the prompt
+    /// after it, whichever backend's line that is.
+    #[test]
+    fn a_stub_stands_where_every_types_binary_goes() {
+        let state = tempfile::tempdir().unwrap();
+        let stub = vec!["/bin/sh".to_owned(), "-c".to_owned(), "printf x".to_owned()];
+        let argv = agents(stub.clone(), state.path()).argv(
+            &codex_pairing(),
+            "# Rate limiting\n",
+            None,
+            worktree(),
+        );
+
+        assert_eq!(argv[..stub.len()], stub[..]);
+        assert_eq!(argv[stub.len() + 1], "gpt-5-codex".to_owned());
+        assert_eq!(argv[stub.len() + 2], "# Rate limiting\n".to_owned());
+    }
+
+    /// A name every backend that takes a session id will take, which is a
+    /// version 4 UUID and nothing else — claude refuses a malformed one and so
+    /// does grok, and the session then never starts. Fresh each time, which is
+    /// grok's other condition: it refuses an id it already has a session for.
+    #[test]
+    fn a_session_is_named_something_a_backend_will_accept() {
         let mut seen = std::collections::HashSet::new();
 
         for _ in 0..64 {

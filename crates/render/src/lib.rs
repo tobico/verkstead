@@ -72,7 +72,7 @@ pub use sharing::{
 };
 pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
-    statements, transcript_after, transcript_view, turns,
+    rollout_cwd, statements, transcript_after, transcript_view, turns,
 };
 pub use update::UpdateNotice;
 pub use view::{

@@ -25,7 +25,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ProfileEdit, ProfileEntry } from "../src/api/types";
+import type {
+  ProfileAccount,
+  ProfileEdit,
+  ProfileEntry,
+} from "../src/api/types";
 import { KNOWN_MODELS, prettify } from "../src/models";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
@@ -134,9 +138,47 @@ function theCard(name: string): HTMLElement {
 
 /// Fill the form in, whichever profile it is about.
 ///
+/// The pair an account is, where it is a Claude one — which every fixture here
+/// is. The account is a union now, so reading a path off one is narrowing to
+/// the type that keeps it, and a fixture of another type would be a different
+/// test rather than the same one read past its discriminator.
+function pair(account: ProfileAccount) {
+  if (account.agent_type !== "Claude") {
+    throw new Error(
+      `this fixture should be a Claude account, not ${account.agent_type}`,
+    );
+  }
+
+  return account;
+}
+
+/// And the same narrowing for the types whose whole account is one home, which
+/// is every type after the first.
+function home(account: ProfileAccount) {
+  if (account.agent_type === "Claude") {
+    throw new Error(
+      `this fixture should be an account kept under one home, not ${account.agent_type}`,
+    );
+  }
+
+  return account;
+}
+
+/// A saved profile of the second type, built from the fixture rather than served
+/// as one of its own: what a Codex account is, and what the server does with one,
+/// is `crates/server`'s subject — what is read here is that the form draws and
+/// sends that type's own shape.
+const CODEX: ProfileEntry = {
+  ...FABLE,
+  id: 9,
+  name: "work",
+  account: { agent_type: "Codex", home: "/srv/accounts/work/.codex" },
+  models: ["gpt-5-codex"],
+};
+
 /// The account's fields are the ones its agent type has, which is a Claude
 /// pair here — the form draws them off the type, and this fills in what it
-/// drew.
+/// drew. The picker is left where it opens, Claude being the type it opens on.
 function fillIn(profile: ProfileEdit) {
   fireEvent.input(screen.getByLabelText("Name"), {
     target: { value: profile.name },
@@ -145,10 +187,10 @@ function fillIn(profile: ProfileEdit) {
     fireEvent.click(screen.getByLabelText(prettify(model)));
   }
   fireEvent.input(screen.getByLabelText(/Claude directory/), {
-    target: { value: profile.account.claude_dir },
+    target: { value: pair(profile.account).claude_dir },
   });
   fireEvent.input(screen.getByLabelText(/Config file/), {
-    target: { value: profile.account.config_file },
+    target: { value: pair(profile.account).config_file },
   });
 }
 
@@ -159,6 +201,39 @@ const NEW: ProfileEdit = {
     agent_type: "Claude",
     claude_dir: "/home/you/accounts/personal/.claude",
     config_file: "/home/you/accounts/personal/.claude.json",
+  },
+};
+
+/// And one of the second type, whose account is the one home that type keeps
+/// everything under.
+const NEW_CODEX: ProfileEdit = {
+  name: "work",
+  models: ["gpt-5-codex"],
+  account: {
+    agent_type: "Codex",
+    home: "/home/you/accounts/work/.codex",
+  },
+};
+
+/// And one of the third, which keeps its account the same way under a directory
+/// of its own.
+const NEW_GROK: ProfileEdit = {
+  name: "xai",
+  models: ["grok-4.6"],
+  account: {
+    agent_type: "Grok",
+    home: "/home/you/accounts/xai/.grok",
+  },
+};
+
+/// And one of the fourth, whose one home is the directory opencode reads its
+/// XDG paths inside rather than a dot-directory of its own.
+const NEW_OPENCODE: ProfileEdit = {
+  name: "zen",
+  models: ["opencode/big-pickle"],
+  account: {
+    agent_type: "OpenCode",
+    home: "/home/you/accounts/zen/opencode",
   },
 };
 
@@ -207,8 +282,8 @@ describe("the cards", () => {
     await waitFor(() => screen.getByText(FABLE.name));
 
     const face = theCard(FABLE.name);
-    expect(face.textContent).not.toContain(FABLE.account.claude_dir);
-    expect(face.textContent).not.toContain(FABLE.account.config_file);
+    expect(face.textContent).not.toContain(pair(FABLE.account).claude_dir);
+    expect(face.textContent).not.toContain(pair(FABLE.account).config_file);
     expect(face.textContent).not.toContain(FABLE.account.agent_type);
   });
 
@@ -323,10 +398,10 @@ describe("the pane a card opens", () => {
     expect(ticked()).toEqual(FABLE.models);
     expect(
       (screen.getByLabelText(/Claude directory/) as HTMLInputElement).value,
-    ).toBe(FABLE.account.claude_dir);
+    ).toBe(pair(FABLE.account).claude_dir);
     expect(
       (screen.getByLabelText(/Config file/) as HTMLInputElement).value,
-    ).toBe(FABLE.account.config_file);
+    ).toBe(pair(FABLE.account).config_file);
   });
 
   /// The form asks for what this profile's agent type keeps an account in, and
@@ -349,22 +424,111 @@ describe("the pane a card opens", () => {
     ).toEqual([
       "profile-name",
       "profile-model",
+      "profile-agent_type",
       "profile-claude_dir",
       "profile-config_file",
     ]);
   });
 
+  /// And a profile of the second type is asked for that type's own account,
+  /// which is one home rather than a pair — the fields come off the
+  /// discriminator, so this is the same form drawing a different shape.
+  it("asks for the second type's own account when the profile is one", async () => {
+    serving(whenever("/api/ui/profiles", json([CODEX])));
+    const { container } = mountPane(CODEX.id);
+
+    await waitFor(() => screen.getByLabelText(/Home directory/));
+
+    expect(
+      [...container.querySelectorAll("form label[for]")].map((label) =>
+        label.getAttribute("for"),
+      ),
+    ).toEqual([
+      "profile-name",
+      "profile-model",
+      "profile-agent_type",
+      "profile-home",
+    ]);
+    expect(
+      (screen.getByLabelText(/Home directory/) as HTMLInputElement).value,
+    ).toBe(home(CODEX.account).home);
+    expect(
+      (screen.getByLabelText("Agent") as HTMLSelectElement).value,
+    ).toBe("Codex");
+  });
+
   /// The paths shown are the resolved ones the server recorded rather than
   /// whatever was typed to save them — those are what will be bind-mounted, and
   /// the point of showing them is that they can be checked. The agent type is
-  /// said beside them rather than offered, there being one of it.
-  it("says what is on the record but not in the form", async () => {
+  /// among the fields rather than said beside them: it is on the record and it
+  /// is also the human's to change, and what is left standing under the form is
+  /// the one press that is neither.
+  it("keeps only the removal out of the form", async () => {
     theProfiles();
     const { container } = mountPane(FABLE.id);
 
     const standing = await drawn(container, `.${styles.standing}`);
-    expect(standing.textContent).toContain(FABLE.account.agent_type);
-    expect(container.querySelector("select")).toBeNull();
+    expect(
+      [...standing.querySelectorAll("button")].map(
+        (press) => press.textContent,
+      ),
+    ).toEqual(["Remove"]);
+    expect(
+      (screen.getByLabelText("Agent") as HTMLSelectElement).value,
+    ).toBe(FABLE.account.agent_type);
+  });
+
+  /// Every backend that can launch, by its own name, and no other.
+  ///
+  /// The list written down rather than every type there is, which is the point
+  /// of writing it down: a picker offering a backend that cannot launch would
+  /// be a lie, and a discriminator lands in the wire types before the stage
+  /// that makes it run. So a type added to the record alone leaves this passing
+  /// — it is drawable and not offered, which is right — and widening the picker
+  /// fails it, which is what makes offering a backend a thing somebody decided
+  /// rather than a thing that happened.
+  it("offers every backend that can launch, by its own name", async () => {
+    theProfiles();
+    mountPane(FABLE.id);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Agent"),
+    )) as HTMLSelectElement;
+
+    expect([...picker.options].map((option) => option.value)).toEqual([
+      "Claude",
+      "Codex",
+      "Grok",
+      "OpenCode",
+    ]);
+    expect([...picker.options].map((option) => option.textContent)).toEqual([
+      "Claude Code",
+      "Codex",
+      "Grok Build",
+      "OpenCode",
+    ]);
+  });
+
+  /// Picking another type is asking for that type's account, so the fields under
+  /// the picker are that type's and what was typed into the old one's does not
+  /// come with them: a path meant for `~/.claude` means nothing under `~/.codex`.
+  it("swaps the account's fields when another type is picked", async () => {
+    theProfiles();
+    const { container } = mountPane(FABLE.id);
+
+    await waitFor(() => screen.getByLabelText(/Claude directory/));
+
+    fireEvent.change(screen.getByLabelText("Agent"), {
+      target: { value: "Codex" },
+    });
+
+    await waitFor(() => screen.getByLabelText(/Home directory/));
+    expect(screen.queryByLabelText(/Claude directory/)).toBeNull();
+    expect(screen.queryByLabelText(/Config file/)).toBeNull();
+    expect(
+      (screen.getByLabelText(/Home directory/) as HTMLInputElement).value,
+    ).toBe("");
+    expect(container.querySelector("form")).toBeTruthy();
   });
 
   /// The way back out of it, in the slot every pane keeps for it: a change of
@@ -488,6 +652,45 @@ describe("the pane the plus opens", () => {
     await waitFor(() => expect(done).toHaveBeenCalled());
   });
 
+  /// A profile of a backend after the first is written here rather than over the
+  /// API: the type is picked from the form, the one home is asked for under it,
+  /// and what goes over is that type's own account.
+  ///
+  /// Every one of the types that keep one, because the shape they share is the
+  /// whole of what could make the form send one of them as another.
+  it.each([NEW_CODEX, NEW_GROK, NEW_OPENCODE])(
+    "saves a $account.agent_type profile of the type that was picked",
+    async (profile) => {
+      const fetching = theProfiles(json("Saved"));
+      mountPane("new");
+
+      fireEvent.input(screen.getByLabelText("Name"), {
+        target: { value: profile.name },
+      });
+
+      // By hand rather than by tick: the picker draws the models this build
+      // knows and neither of these backends' is one of them, which is exactly
+      // what the field beside the ticks is there for.
+      fireEvent.input(screen.getByLabelText("Another model id"), {
+        target: { value: profile.models[0] },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+      fireEvent.change(screen.getByLabelText("Agent"), {
+        target: { value: profile.account.agent_type },
+      });
+      fireEvent.input(
+        await waitFor(() => screen.getByLabelText(/Home directory/)),
+        { target: { value: home(profile.account).home } },
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(sent(fetching, "/api/ui/profiles")).toEqual(profile),
+      );
+    },
+  );
+
   /// Each refusal is a different sentence, and each names which of the two paths
   /// it is about: pointing the config field at a directory is an easy mistake,
   /// and "that path is wrong" would not say which one.
@@ -583,18 +786,23 @@ describe("removing a profile", () => {
   });
 });
 
-describe("a profile whose pair has gone", () => {
-  /// The pair was there when it was saved, and a directory can be moved
+describe("a profile whose account has gone", () => {
+  /// The account was there when it was saved, and a directory can be moved
   /// afterwards. The server reports it on every read; the card is where it is
   /// said, because a list is scanned before it is read.
   ///
   /// Built from the real payload rather than served as one of its own: whether
   /// the server reports it, and when, is `crates/server/tests/profiles.rs`'s
-  /// subject — what is being read here is that the page says which half it was.
+  /// subject — what is being read here is that the page says which part of the
+  /// account it was.
   it.each([
     ["DirMissing", "Its claude directory is gone."],
     ["ConfigMissing", "Its config file is gone."],
-    ["OutsideWatchedPaths", "Its pair now points outside the watched paths."],
+    ["HomeMissing", "The home it kept its account under is gone."],
+    [
+      "OutsideWatchedPaths",
+      "Its account now points outside the watched paths.",
+    ],
   ])("says of %s what is wrong with it", async (broken, said) => {
     const gone: ProfileEntry[] = [
       { ...FABLE, broken: broken as ProfileEntry["broken"] },

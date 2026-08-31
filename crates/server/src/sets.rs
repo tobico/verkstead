@@ -27,14 +27,18 @@ use verkstead_schema::{ApiError, Nudge, QuestionSet};
 use crate::reply::yaml;
 use crate::{AppState, store};
 
-/// Which of the two kinds of ask the session is making, as the query string
+/// Whether the session says nobody is to idle on this Set, as the query string
 /// carries it: `?deferred=true` for a Deferred Ask, and nothing at all for the
-/// blocking one every ask was until now.
+/// ordinary one.
 ///
 /// A query parameter rather than a field of the Set, because it is not part of
 /// what was asked: the body is the agent's own words, kept as they were
 /// written, and this is how the CLI was run. It also means an older CLI, which
 /// says nothing, keeps asking exactly as it did.
+///
+/// The whole of what the agent says about how it asked, at that. Whether an
+/// ordinary ask is waited on or stored is the backend's fact rather than the
+/// agent's — see [`Asking::kind`].
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub(crate) struct Asking {
@@ -42,10 +46,20 @@ pub(crate) struct Asking {
 }
 
 impl Asking {
-    fn kind(&self) -> store::Ask {
-        match self.deferred {
-            true => store::Ask::Deferred,
-            false => store::Ask::Blocking,
+    /// Which of the three kinds this ask is: what the agent said, read against
+    /// the channel its backend asks on.
+    ///
+    /// `--deferred` means an ask nobody is idling on, on every backend — it is
+    /// the agent saying it will carry straight on, and no backend makes that
+    /// untrue. What is left is the ordinary ask, and that is the backend's to
+    /// answer: a session that can hold `verkstead ask` open for hours idles on
+    /// it, and one whose shell tool yields after seconds has the Set stored and
+    /// is nudged when the Response lands (ADR-0011).
+    fn kind(&self, channel: store::Channel) -> store::Ask {
+        match (self.deferred, channel) {
+            (true, _) => store::Ask::Deferred,
+            (false, store::Channel::Blocking) => store::Ask::Blocking,
+            (false, store::Channel::StoreAndNudge) => store::Ask::StoreAndNudge,
         }
     }
 }
@@ -59,11 +73,15 @@ impl Asking {
 /// Conversation that is not there is a 404: there is nowhere for the Set to land
 /// and nobody who would ever see it.
 ///
-/// A Deferred Ask takes this same path and is answered the same way, id and all
-/// — what differs is that nobody opens a wait on the id. So it lands on the
-/// Timeline, leaves the Conversation *blocked on you* and notifies the human's
-/// devices exactly as a blocking one does: both are something to answer, and the
-/// human is not the one who is waiting.
+/// A stored ask takes this same path and is answered the same way, id and all —
+/// what differs is that nobody opens a wait on the id, and the reply says so.
+/// So it lands on the Timeline, leaves the Conversation *blocked on you* and
+/// notifies the human's devices exactly as a blocking one does: both are
+/// something to answer, and the human is not the one who is waiting.
+///
+/// Which of the two an ordinary ask is depends on the backend that sent it and
+/// not on anything in the request — see [`Asking::kind`], and
+/// [`crate::sessions::Sessions::channel`] for where the backend is known.
 pub(crate) async fn create_set(
     State(state): State<AppState>,
     Path(conversation_id): Path<i64>,
@@ -99,7 +117,11 @@ pub(crate) async fn create_set(
     set.diff = None;
     set.diffs = crate::diffs::compose(&state.pool, conversation_id).await;
 
-    match store::ask(&state.pool, conversation_id, &set, asking.kind()).await {
+    // How this session asks, which is the backend's fact and so the server's to
+    // supply: the CLI asked the same way it would have on any of them.
+    let kind = asking.kind(state.sessions.channel(conversation_id));
+
+    match store::ask(&state.pool, conversation_id, &set, kind).await {
         Ok(Some(created)) => {
             // Behind the answer, never in front of it: the agent hears that its
             // Set is stored the moment it is, and a push service that cannot be
@@ -139,10 +161,16 @@ pub(crate) async fn create_set(
 /// takes nothing from one, so a relaunch leaves it standing; a Conversation
 /// closing takes away every session there will ever be, so nothing is left to
 /// fold the answer into and the question is over too.
+///
+/// A store-and-nudge ask is on the narrow side of that line with the blocking
+/// ones, stored though it is: the session idling on one has gone in both cases
+/// this is asked in, and a stored Set nobody is coming back for is a question
+/// with no reader exactly as a blocking one is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Open {
-    /// Blocking Asks alone: the ones a session is idling on.
-    Blocking,
+    /// The ones a session was idling on — see [`store::Ask::idled`], which is
+    /// the one place that question is answered.
+    Idled,
 
     /// Every Set the human could still answer, whichever kind of ask it was.
     Either,
@@ -155,8 +183,8 @@ pub(crate) fn open(timeline: &[store::TimelineEvent], wanted: Open) -> Vec<i64> 
         .iter()
         .filter_map(|event| match &event.event {
             store::Event::QuestionSet(asked) => (asked.settlement.is_none()
-                && (wanted == Open::Either || !asked.deferred))
-                .then_some(asked.set_id),
+                && (wanted == Open::Either || asked.ask.idled()))
+            .then_some(asked.set_id),
             _ => None,
         })
         .collect()
@@ -237,7 +265,7 @@ questions:
     /// says — or still waiting on the human, where they say nothing.
     fn on_timeline(
         set_id: i64,
-        deferred: bool,
+        ask: store::Ask,
         settlement: Option<store::Settlement>,
     ) -> store::TimelineEvent {
         store::TimelineEvent {
@@ -249,7 +277,7 @@ questions:
                     QuestionSet::from_yaml(ASKED).expect("the example Set parses"),
                 ),
                 settlement,
-                deferred,
+                ask,
             })),
         }
     }
@@ -266,22 +294,62 @@ questions:
     #[test]
     fn a_settled_set_is_open_to_neither_reading() {
         let timeline = vec![
-            on_timeline(11, false, Some(locked(11))),
-            on_timeline(12, true, Some(locked(12))),
+            on_timeline(11, store::Ask::Blocking, Some(locked(11))),
+            on_timeline(12, store::Ask::Deferred, Some(locked(12))),
         ];
 
-        assert!(open(&timeline, Open::Blocking).is_empty());
+        assert!(open(&timeline, Open::Idled).is_empty());
         assert!(open(&timeline, Open::Either).is_empty());
     }
 
     /// And the Deferred Ask is the whole of what the two readings differ over: a
     /// relaunch leaves one standing for the session after it, and a Conversation
     /// closing has no session after it to leave one for.
+    ///
+    /// A store-and-nudge ask is not one of them, stored though it is: the
+    /// session idling on it has gone either way, so it locks with the blocking
+    /// ones.
     #[test]
     fn a_deferred_ask_is_open_only_to_the_wider_reading() {
-        let timeline = vec![on_timeline(11, false, None), on_timeline(12, true, None)];
+        let timeline = vec![
+            on_timeline(11, store::Ask::Blocking, None),
+            on_timeline(12, store::Ask::Deferred, None),
+            on_timeline(13, store::Ask::StoreAndNudge, None),
+        ];
 
-        assert_eq!(open(&timeline, Open::Blocking), vec![11]);
-        assert_eq!(open(&timeline, Open::Either), vec![11, 12]);
+        assert_eq!(open(&timeline, Open::Idled), vec![11, 13]);
+        assert_eq!(open(&timeline, Open::Either), vec![11, 12, 13]);
+    }
+
+    /// The ordinary ask is the backend's to answer, and `--deferred` is the
+    /// agent's on every backend.
+    ///
+    /// Which is the whole of the mapping: nothing the CLI sends says which
+    /// channel it is on, and nothing about the backend makes an ask the agent
+    /// said it would not wait for into one somebody is idling on.
+    #[test]
+    fn the_backend_decides_an_ordinary_ask_and_the_agent_decides_a_deferred_one() {
+        let ordinary = Asking { deferred: false };
+        let deferred = Asking { deferred: true };
+
+        assert_eq!(
+            ordinary.kind(store::Channel::Blocking),
+            store::Ask::Blocking
+        );
+        assert_eq!(
+            ordinary.kind(store::Channel::StoreAndNudge),
+            store::Ask::StoreAndNudge
+        );
+
+        assert_eq!(
+            deferred.kind(store::Channel::Blocking),
+            store::Ask::Deferred
+        );
+        assert_eq!(
+            deferred.kind(store::Channel::StoreAndNudge),
+            store::Ask::Deferred,
+            "a backend that stores every ask does not make one nobody is idling \
+             on into one somebody is",
+        );
     }
 }

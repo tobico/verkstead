@@ -56,6 +56,8 @@ mod limits;
 /// [`checks`] for the watcher that covers a wrap-up, which this takes over from.
 mod merges;
 mod nudge;
+/// Telling a session idling on a stored ask that its Answers are there to fetch.
+mod nudging;
 /// Every Watched Path and every Sandbox Configuration bind as the settings page
 /// reads them: which of the two places said each one, and whether the server can
 /// see it.
@@ -65,6 +67,8 @@ mod profiles;
 /// GitHub.
 mod publishing;
 mod push;
+/// The store an OpenCode session keeps of itself, followed while it runs.
+mod records;
 /// Following a Conversation's branch to the name a session renamed it to,
 /// rather than repairing a checkout that has not come adrift after all.
 mod renames;
@@ -127,6 +131,9 @@ mod tasks;
 /// what proves a terminal is a terminal is a process running on one saying so.
 pub mod terminal;
 mod transcript;
+/// What Verkstead says to a running session: the keystrokes the rescue and the
+/// nudge both go in as.
+mod typing;
 mod ui;
 mod updates;
 mod viewer;
@@ -614,6 +621,14 @@ fn routed(
     // branch nobody is working on, and a wrap-up's watchers stop at Done. See
     // [`merges`].
     merges::sweeping(&state);
+
+    // And a listener on the one channel a Set is settled through, so that a
+    // session idling on a stored ask is told its Answers have landed whether the
+    // human answered from the viewer or an agent answered over the API — see
+    // [`nudging::listening`]. Here rather than in either of those endpoints,
+    // because a nudge sent from one and silently not from the other is a session
+    // waiting for a line nobody is going to type.
+    nudging::listening(&state);
 
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up

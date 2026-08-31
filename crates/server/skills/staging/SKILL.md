@@ -77,7 +77,7 @@ Split the effort into sequential stages. Each one must be:
 ## 3. Put the stage list to the human
 
 The staging is a decision they own, so it goes to them as an ordinary Question
-Set — the same blocking ask a grilling uses, and the way described under *How the
+Set — the same ordinary ask a grilling uses, and the way described under *How the
 questions reach them* below.
 
 Give the whole stage list in the Preface: each stage's title and a one-line
@@ -232,11 +232,12 @@ nobody will ever see.
 
 - **Read `verkstead guide` before the first ask.** It is everything the binary
   knows about asking well — how a Set is labelled, how much belongs in one, the
-  shape it goes over the wire in, and how to run an ask that blocks for hours —
+  shape it goes over the wire in, and how this backend runs one —
   and it ships inside the binary, so nothing else has to be found.
-- **Put every round through `verkstead ask`.** It blocks until the answers come
-  back, which may be hours. Idling is this working rather than this failing, so
-  do only work the answers cannot invalidate while you wait.
+- **Put every round through `verkstead ask`.** The answers come back in the
+  human's own time, which may be hours, and the Guide is what says how to run
+  one here and what to do until they arrive. Waiting is this working rather than
+  this failing, so do only work the answers cannot invalidate.
 - **Never answer on their behalf.** If the ask itself fails — the server
   unreachable, any non-zero exit that is not a refused Set — say so and stop.
   Approving your own staging decides in their place the very thing worth asking

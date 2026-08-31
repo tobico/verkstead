@@ -15,7 +15,7 @@
 //! will later be run under; the bind-mounting arrives with the stage that runs
 //! one.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
@@ -202,18 +202,29 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// this is called once per Profile in a list, and the settings half of the
 /// boundary is a file to read — see [`WatchedPaths::standing`].
 fn broken(watched: &Boundary, profile: &store::Profile) -> Option<Broken> {
-    let paths = match &profile.account {
+    let paths: Vec<(PathBuf, Broken)> = match &profile.account {
         store::Account::Claude {
             claude_dir,
             config_file,
-        } => [
-            (claude_dir, Broken::DirMissing),
-            (config_file, Broken::ConfigMissing),
+        } => vec![
+            (claude_dir.clone(), Broken::DirMissing),
+            (config_file.clone(), Broken::ConfigMissing),
         ],
+        store::Account::Codex { home } | store::Account::Grok { home } => {
+            vec![(home.clone(), Broken::HomeMissing)]
+        }
+
+        // An OpenCode home is judged by the two directories opencode keeps an
+        // account in rather than by the directory holding them: those are what
+        // is mounted, and a home that has never had opencode run in it has
+        // neither. See [`crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME`].
+        store::Account::OpenCode { home } => {
+            xdg(home).map(|path| (path, Broken::HomeMissing)).collect()
+        }
     };
 
     for (path, missing) in paths {
-        match watched.admit(path) {
+        match watched.admit(&path) {
             Admission::Inside(_) => {}
             Admission::Missing | Admission::NotAbsolute => return Some(missing),
             Admission::Outside => return Some(Broken::OutsideWatchedPaths),
@@ -276,46 +287,119 @@ async fn checked(
 /// config field at the directory is an easy mistake, and "that path is wrong"
 /// would not say which one.
 ///
-/// Both of them against one boundary, taken once here: an account is more than
-/// one path, and the two halves of a Profile are meant to be judged by the same
-/// answer to what a Watched Path is.
+/// Every one of them against one boundary, taken once here: an account can be
+/// more than one path, and every path a Profile names is meant to be judged by
+/// the same answer to what a Watched Path is.
 fn inspect(
     watched: &WatchedPaths,
     account: &ProfileAccount,
 ) -> Result<store::Account, ProfileSaved> {
-    let ProfileAccount::Claude {
-        claude_dir,
-        config_file,
-    } = account;
-
     let boundary = watched.standing();
 
-    let dir = match boundary.admit(Path::new(claude_dir.trim())) {
+    match account {
+        ProfileAccount::Claude {
+            claude_dir,
+            config_file,
+        } => {
+            let dir = match boundary.admit(Path::new(claude_dir.trim())) {
+                Admission::Inside(path) => path,
+                Admission::NotAbsolute => return Err(ProfileSaved::DirNotAbsolute),
+                Admission::Missing => return Err(ProfileSaved::DirMissing),
+                Admission::Outside => return Err(ProfileSaved::DirOutsideWatchedPaths),
+            };
+
+            if !dir.is_dir() {
+                return Err(ProfileSaved::NotADirectory);
+            }
+
+            let config = match boundary.admit(Path::new(config_file.trim())) {
+                Admission::Inside(path) => path,
+                Admission::NotAbsolute => return Err(ProfileSaved::ConfigNotAbsolute),
+                Admission::Missing => return Err(ProfileSaved::ConfigMissing),
+                Admission::Outside => return Err(ProfileSaved::ConfigOutsideWatchedPaths),
+            };
+
+            if !config.is_file() {
+                return Err(ProfileSaved::NotAFile);
+            }
+
+            Ok(store::Account::Claude {
+                claude_dir: dir,
+                config_file: config,
+            })
+        }
+
+        ProfileAccount::Codex { home } => Ok(store::Account::Codex {
+            home: kept(&boundary, home)?,
+        }),
+
+        ProfileAccount::Grok { home } => Ok(store::Account::Grok {
+            home: kept(&boundary, home)?,
+        }),
+
+        // An OpenCode home is the directory the two opencode keeps an account
+        // in sit under, so both of those are judged as well as the home itself
+        // — they are what a session mounts, and a directory that has never had
+        // opencode run in it holds neither. Each is judged by the same rule and
+        // refused in the same words, because for this type they *are* the home
+        // the account is kept under.
+        ProfileAccount::OpenCode { home } => {
+            let home = kept(&boundary, home)?;
+
+            for path in xdg(&home) {
+                admitted(&boundary, &path)?;
+            }
+
+            Ok(store::Account::OpenCode { home })
+        }
+    }
+}
+
+/// The two directories an OpenCode account is kept in, under the home a Profile
+/// names.
+///
+/// opencode reads the XDG base directories rather than keeping a dot-directory
+/// of its own, and a Profile's home is a home to resolve them inside — see
+/// [`crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME`], which is where the same two
+/// relative paths are bound from and to.
+fn xdg(home: &Path) -> impl Iterator<Item = PathBuf> {
+    [
+        crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME,
+        crate::sandbox::OPENCODE_DATA_INSIDE_HOME,
+    ]
+    .map(|inside| home.join(inside))
+    .into_iter()
+}
+
+/// The one directory a type whose whole account is one home named, judged the
+/// way each of Claude's pair is.
+///
+/// One check for every such type rather than one apiece: what differs between
+/// them is which account the directory is, and that is the arm above, not this.
+///
+/// Against the boundary the arm above took, for the reason it took one: every
+/// path a Profile names is judged by the same answer to what a Watched Path is.
+fn kept(boundary: &Boundary, home: &str) -> Result<PathBuf, ProfileSaved> {
+    admitted(boundary, Path::new(home.trim()))
+}
+
+/// The same, of a path rather than of something typed into the form.
+///
+/// What an OpenCode home holds is judged this way: the two directories under it
+/// are derived rather than typed, so there is nothing to trim off either.
+fn admitted(boundary: &Boundary, home: &Path) -> Result<PathBuf, ProfileSaved> {
+    let home = match boundary.admit(home) {
         Admission::Inside(path) => path,
-        Admission::NotAbsolute => return Err(ProfileSaved::DirNotAbsolute),
-        Admission::Missing => return Err(ProfileSaved::DirMissing),
-        Admission::Outside => return Err(ProfileSaved::DirOutsideWatchedPaths),
+        Admission::NotAbsolute => return Err(ProfileSaved::HomeNotAbsolute),
+        Admission::Missing => return Err(ProfileSaved::HomeMissing),
+        Admission::Outside => return Err(ProfileSaved::HomeOutsideWatchedPaths),
     };
 
-    if !dir.is_dir() {
-        return Err(ProfileSaved::NotADirectory);
+    if !home.is_dir() {
+        return Err(ProfileSaved::HomeNotADirectory);
     }
 
-    let config = match boundary.admit(Path::new(config_file.trim())) {
-        Admission::Inside(path) => path,
-        Admission::NotAbsolute => return Err(ProfileSaved::ConfigNotAbsolute),
-        Admission::Missing => return Err(ProfileSaved::ConfigMissing),
-        Admission::Outside => return Err(ProfileSaved::ConfigOutsideWatchedPaths),
-    };
-
-    if !config.is_file() {
-        return Err(ProfileSaved::NotAFile);
-    }
-
-    Ok(store::Account::Claude {
-        claude_dir: dir,
-        config_file: config,
-    })
+    Ok(home)
 }
 
 /// Choose the Pairing a Conversation's grilling session will run under — or the
@@ -448,6 +532,15 @@ fn account(account: &store::Account) -> ProfileAccount {
         } => ProfileAccount::Claude {
             claude_dir: claude_dir.to_string_lossy().into_owned(),
             config_file: config_file.to_string_lossy().into_owned(),
+        },
+        store::Account::Codex { home } => ProfileAccount::Codex {
+            home: home.to_string_lossy().into_owned(),
+        },
+        store::Account::Grok { home } => ProfileAccount::Grok {
+            home: home.to_string_lossy().into_owned(),
+        },
+        store::Account::OpenCode { home } => ProfileAccount::OpenCode {
+            home: home.to_string_lossy().into_owned(),
         },
     }
 }

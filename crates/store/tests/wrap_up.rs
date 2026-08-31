@@ -942,6 +942,48 @@ async fn a_deferred_ask_is_no_proposal_of_the_wraps() {
     );
 }
 
+/// A store-and-nudge ask is a proposal like any other, stored though it is.
+///
+/// The line the reading above draws is *who is idling on it* rather than *was it
+/// waited on*: the session that sent one has ended its turn and is waiting for
+/// the nudge, so a review settled over the top of one would be settled over a
+/// question its own session is still standing behind.
+#[tokio::test]
+async fn a_store_and_nudge_ask_is_a_proposal_of_the_wraps() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let stored = ask(&pool, id, &reviewing(), Ask::StoreAndNudge)
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from");
+
+    assert!(
+        stored.stored,
+        "the reply says there is nothing to wait on, which is what the CLI reads",
+    );
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        Some(stored.id),
+        "and the wrap-up counts it, because a session is idling on it",
+    );
+
+    settle_wrap_up(&pool, id, WaitingOn::Review).await.unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    let batch = ask(&pool, id, &answering_the_comments(), Ask::StoreAndNudge)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        last_batch_proposal(&pool, id).await.unwrap(),
+        Some(batch.id),
+        "and one asked after the review settled is the batch's proposal",
+    );
+}
+
 /// The Set a batch session asked with, which is the review's shape about what
 /// somebody said rather than about the branch.
 fn answering_the_comments() -> verkstead_schema::QuestionSet {

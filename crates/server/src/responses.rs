@@ -1,5 +1,6 @@
-//! The Response endpoints: the human's reply in, and the waiting agent's
-//! long-poll out.
+//! The Response endpoints: the human's reply in, and the agent's Answers out —
+//! whether it held a long-poll open for them or came back for them in one poll,
+//! which is the same request asked to hold for nothing.
 //!
 //! Both are reached through the Conversation the Set was asked from, because
 //! that is what the session's base URL says — see [`crate::sets`]. A Set id that
@@ -102,6 +103,14 @@ pub(crate) struct Wait {
 /// A Set the human locked unanswered ends the wait with a 410 instead: nothing
 /// is ever coming, and the client is told so rather than left polling a Set
 /// nobody will answer.
+///
+/// And a **Deferred Ask** is refused outright with a 409, answered or not — see
+/// [`deferred`]. Its Answers belong to a later session's prompt by the agent's
+/// own word, and this is the one door they could have been taken out of first.
+///
+/// Handing the Response over is a delivery either way, and is written down as
+/// one — see [`delivered`], which is what keeps a session's own Answers from
+/// also arriving under the next session's prompt.
 pub(crate) async fn wait_for_response(
     State(state): State<AppState>,
     Path((conversation_id, id)): Path<(i64, i64)>,
@@ -124,6 +133,18 @@ pub(crate) async fn wait_for_response(
         Err(refusal) => return refusal,
     }
 
+    // And how it was asked, because one of the three kinds does not come out of
+    // this door at all — see [`deferred`]. Asked before the slot is taken, so a
+    // refusal leaves no more trace in the registry than a 404 does.
+    match store::asked_as(&state.pool, id).await {
+        Ok(store::Ask::Deferred) => return deferred(id),
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading how a Question Set was asked failed");
+            return unavailable("the Question Set could not be read");
+        }
+    }
+
     // Taken once the Set is known to exist, so a 404 leaves no trace in the
     // registry, and held for exactly as long as this future lives: a client that
     // vanishes mid-hold has its future dropped rather than returned, and the
@@ -136,6 +157,9 @@ pub(crate) async fn wait_for_response(
     loop {
         match store::settlement(&state.pool, id).await {
             Ok(Some(Settlement::Answered(stored))) => {
+                // Handing it over is the delivery, whether this was a wait held
+                // open or a fetch that came back for it.
+                delivered(&state, id).await;
                 return yaml(StatusCode::OK, &stored.response);
             }
             Ok(Some(Settlement::LockedUnanswered(_))) => return gone(id),
@@ -212,6 +236,29 @@ impl Drop for Watched {
     }
 }
 
+/// Record that a session has been handed Set `id`'s Answers, so the folding
+/// rule passes over it.
+///
+/// A fetch is a delivery: the Answers reach the session that asked or a later
+/// session's prompt, never both — see [`crate::deferrals`]. Written here, in the
+/// request that hands the Response over, rather than by anything the CLI says
+/// afterwards, so a session that read its Answers and then died still counts as
+/// having read them.
+///
+/// Nothing to write for a Blocking Ask, which has no folding record at all, and
+/// nothing is refused for a write that fails: the cost of one is the human's
+/// Answers arriving twice, which is worse than losing the Response they were.
+///
+/// Never reached for a Deferred Ask, which is refused above rather than handed
+/// anything — see [`deferred`]. Which is what leaves a Deferred Ask's folding
+/// its own: it is spent by the prompt that carried the Answers, and by nothing
+/// else.
+async fn delivered(state: &AppState, id: i64) {
+    if let Err(error) = store::record_folded(&state.pool, &[id]).await {
+        tracing::error!(error = ?error, set_id = id, "recording a fetched Question Set as folded failed");
+    }
+}
+
 /// Wait until this Set is settled, one way or the other. `false` when the
 /// channel is gone, which only happens as the server itself does.
 async fn settled(settlements: &mut broadcast::Receiver<store::SettledSet>, id: i64) -> bool {
@@ -252,6 +299,34 @@ fn not_found(id: i64) -> HttpResponse {
     yaml(
         StatusCode::NOT_FOUND,
         &ApiError::new(format!("there is no Question Set {id}")),
+    )
+}
+
+/// The Set was asked deferred, so its Answers are not handed over here.
+///
+/// **The one promise `--deferred` makes, kept rather than merely written
+/// down.** The agent that sent one said it would carry straight on, and what
+/// the Guide tells it in return is that the Answers go into the prompt of a
+/// later session of the same Conversation — so nothing *this* session does will
+/// ever see them. Handing them over here would make that untrue twice over: the
+/// session that asked would see them, and the folding record spent on the
+/// handover would mean the later session never did.
+///
+/// A 409 rather than a 404, because the Set is there and is this Conversation's
+/// own: what is wrong is the door rather than the id, and saying which sends the
+/// agent to the Timeline instead of back for another number.
+///
+/// Refused whether or not it has been answered, and refused to the wait as well
+/// as to the fetch. Nothing ever opens a wait on a Deferred Ask — `verkstead ask
+/// --deferred` returns the moment the Set is stored — so there is no reading of
+/// this that costs a waiting agent anything.
+fn deferred(id: i64) -> HttpResponse {
+    yaml(
+        StatusCode::CONFLICT,
+        &ApiError::new(format!(
+            "Question Set {id} was asked deferred, so its Answers are not fetched here \
+             — they go into the prompt of a later session of this Conversation"
+        )),
     )
 }
 

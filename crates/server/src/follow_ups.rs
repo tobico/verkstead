@@ -45,8 +45,8 @@ pub(crate) struct FollowUp {
     ///
     /// What turns on it is what the session before this one left behind. A
     /// follow-up that is being picked up had a session that died mid-round, and
-    /// a Blocking Ask it left standing is a question with nobody behind it —
-    /// locked as the fresh session starts, exactly as a relaunched grilling
+    /// an ask it was idling on when it went is a question with nobody behind it
+    /// — locked as the fresh session starts, exactly as a relaunched grilling
     /// locks what its dead interview left. See [`crate::runner::following_up`].
     ///
     /// `false` where a steer opened it, which is a launch with nothing of its

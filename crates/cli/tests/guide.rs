@@ -1,22 +1,70 @@
 //! The Guide as the binary hands it over: `verkstead guide`, bare
-//! `verkstead`, and the promise that the CLI contract it quotes is the one
-//! this binary has.
+//! `verkstead`, the asking sections tailored to the backend reading them, and
+//! the promise that the CLI contract it quotes is the one this binary has.
 
 use std::process::{Command, Output};
 
 use verkstead_schema::{Question, QuestionSet};
 
+/// Which backend a Guide is being printed for, as the sandbox says it.
+const AGENT_TYPE: &str = "VERKSTEAD_AGENT";
+
 /// Run the binary with `args` and insist it had something to say.
+///
+/// With no agent type set, whatever the environment running the suite happens
+/// to hold: every assertion here that is not about tailoring is about the
+/// blocking Guide, which is what nothing set means — and a suite run from
+/// inside a sandbox would otherwise be asking those questions of whichever
+/// backend it happened to be running on.
 fn run(args: &[&str]) -> Output {
-    let output = Command::new(env!("CARGO_BIN_EXE_verkstead"))
-        .args(args)
-        .output()
-        .expect("the verkstead binary should be built for its own tests");
-    eprintln!(
-        "verkstead {args:?} stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    output
+    running(args).env_remove(AGENT_TYPE).output()
+}
+
+/// And the same as a session of `agent_type` runs it, which is the whole of
+/// what tailors the Guide.
+fn run_as(agent_type: &str, args: &[&str]) -> Output {
+    running(args).env(AGENT_TYPE, agent_type).output()
+}
+
+/// One run, however the environment is set — see the two above.
+fn running(args: &[&str]) -> Running {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_verkstead"));
+    command.args(args);
+
+    Running {
+        args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+        command,
+    }
+}
+
+struct Running {
+    args: Vec<String>,
+    command: Command,
+}
+
+impl Running {
+    fn env(mut self, key: &str, value: &str) -> Self {
+        self.command.env(key, value);
+        self
+    }
+
+    fn env_remove(mut self, key: &str) -> Self {
+        self.command.env_remove(key);
+        self
+    }
+
+    fn output(mut self) -> Output {
+        let output = self
+            .command
+            .output()
+            .expect("the verkstead binary should be built for its own tests");
+        eprintln!(
+            "verkstead {:?} stderr:\n{}",
+            self.args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    }
 }
 
 fn stdout(output: &Output) -> String {
@@ -511,5 +559,244 @@ fn the_guide_teaches_no_findings_grammar() {
             "the Guide should carry no trace of the findings grammar, and it has \
              {phrase} in:\n{guide}"
         );
+    }
+}
+
+/// The Guide is one document tailored at print time, and what it tailors is
+/// this end of an ask: how one is run, and what comes back from it.
+///
+/// A backend whose shell tool cannot hold a command open for hours reads that
+/// its ask returns at once, that the turn ends there, and that `verkstead
+/// answers` is what fetches the Answers when the nudge lands. Read the blocking
+/// advice, such a session would hold an ask open by polling it — a paid model
+/// turn per poll, for hours.
+#[test]
+fn a_store_and_nudge_backend_reads_its_own_channel() {
+    let guide = stdout(&run_as("codex", &["guide"]));
+    let kinds = section(&guide, "## Two kinds of ask");
+    let running = section(&guide, "## Running the ask");
+
+    assert!(
+        kinds.contains("the turn ends there"),
+        "the two kinds should say that an ask on this channel ends the turn, \
+         got:\n{kinds}"
+    );
+    assert!(
+        running.contains("verkstead answers"),
+        "and running one should name the command that fetches the Answers, \
+         got:\n{running}"
+    );
+    assert!(
+        !running.contains("run_in_background"),
+        "and none of the hold-the-ask advice should survive: it is Claude \
+         Code's mechanism and is false of this backend, got:\n{running}"
+    );
+}
+
+/// And a Claude session reads what it always read. Claude Code holds the ask
+/// open in a background shell call its harness wakes it from, which is the
+/// whole of how it asks — and is Claude Code's own rather than every blocking
+/// backend's, which is what the test below this one is about.
+#[test]
+fn a_blocking_backend_reads_the_guide_it_always_read() {
+    let claude = stdout(&run_as("claude", &["guide"]));
+
+    assert_eq!(
+        claude,
+        stdout(&run(&["guide"])),
+        "Claude's is what nothing set prints, so a Claude session and a human \
+         at a terminal read the same document"
+    );
+
+    let running = section(&claude, "## Running the ask");
+    assert!(
+        running.contains("run_in_background"),
+        "Claude Code keeps the advice about holding the ask open in a \
+         background shell call, got:\n{running}"
+    );
+    assert!(
+        !running.contains("verkstead answers"),
+        "and never sends a session that is already holding the Response to \
+         fetch it again, got:\n{running}"
+    );
+}
+
+/// And the second backend that blocks reads how *it* holds an ask, which is
+/// not how Claude Code holds one.
+///
+/// The two share a channel and not a mechanism. Claude Code makes the call a
+/// background one and is woken when it returns; opencode's shell tool runs the
+/// command synchronously in the turn and kills it at the timeout it was given,
+/// so what an OpenCode session has to be told is to pass a large one. Handed
+/// Claude's instruction it would go looking for a harness feature it has not
+/// got — and handed no instruction at all it would take the tool's own default
+/// and lose the ask minutes into a wait measured in hours.
+#[test]
+fn opencode_reads_how_it_holds_an_ask_rather_than_how_claude_does() {
+    let opencode = stdout(&run_as("opencode", &["guide"]));
+    let claude = stdout(&run_as("claude", &["guide"]));
+
+    let running = section(&opencode, "## Running the ask");
+
+    assert!(
+        running.contains("timeout"),
+        "the section should name the thing that decides whether the ask \
+         survives the wait, got:\n{running}"
+    );
+    assert!(
+        running.contains("86400000"),
+        "and say a value in the units the tool takes, rather than leaving \
+         'large' to be guessed at, got:\n{running}"
+    );
+    assert!(
+        !running.contains("run_in_background") && !running.contains("background shell"),
+        "and none of Claude Code's mechanism should survive: an OpenCode \
+         session told to background the call goes looking for a harness \
+         feature it has not got, got:\n{running}"
+    );
+    assert!(
+        !running.contains("verkstead answers"),
+        "nor should one already holding the Response be sent to fetch it, \
+         got:\n{running}"
+    );
+    assert_ne!(
+        running,
+        section(&claude, "## Running the ask"),
+        "which is the whole of what says this section is the backend's rather \
+         than its channel's",
+    );
+
+    assert_eq!(
+        section(&opencode, "## Two kinds of ask"),
+        section(&claude, "## Two kinds of ask"),
+        "the kinds *are* the channel's, though: both of these block, and what \
+         a blocking ask is is the same thing on either",
+    );
+}
+
+/// Every backend reads one Guide, so everything about writing a Set is written
+/// once and read the same whichever is reading. What differs is this end and
+/// nothing else.
+#[test]
+fn only_the_two_asking_sections_differ_between_the_backends() {
+    let blocking = stdout(&run_as("claude", &["guide"]));
+    let store_and_nudge = stdout(&run_as("codex", &["guide"]));
+    let opencode = stdout(&run_as("opencode", &["guide"]));
+
+    for heading in [
+        "## Question labels",
+        "## Pacing",
+        "## The CLI contract",
+        "## Authoring the Set",
+        "## Reading the Response",
+    ] {
+        assert_eq!(
+            section(&blocking, heading),
+            section(&store_and_nudge, heading),
+            "{heading} is about the Set rather than about this end, so every \
+             backend should read the same words"
+        );
+        assert_eq!(
+            section(&blocking, heading),
+            section(&opencode, heading),
+            "{heading} is about the Set rather than about this end, so every \
+             backend should read the same words"
+        );
+    }
+
+    assert_ne!(
+        section(&blocking, "## Two kinds of ask"),
+        section(&store_and_nudge, "## Two kinds of ask"),
+    );
+    assert_ne!(
+        section(&blocking, "## Running the ask"),
+        section(&store_and_nudge, "## Running the ask"),
+    );
+}
+
+/// And nothing anywhere else in a store-and-nudge Guide tells its reader the
+/// ask blocks.
+///
+/// The two asking sections are what the tailoring splits, but the sections
+/// around them are shared — so a sentence written for the blocking channel and
+/// left in the common half reaches a backend it is false of, which is exactly
+/// what tailoring the Guide was for. The whole document rather than the two
+/// sections, because that is where such a sentence hides.
+///
+/// Its own voice rather than what it quotes: the CLI contract is `verkstead ask
+/// --help` verbatim, and what that says is pinned by
+/// [`the_guides_quoted_cli_contract_is_the_real_one`] against the binary itself.
+#[test]
+fn nothing_in_a_store_and_nudge_guide_says_the_ask_blocks() {
+    let store_and_nudge = prose(&stdout(&run_as("codex", &["guide"])));
+    let blocking = prose(&stdout(&run_as("claude", &["guide"])));
+
+    for mechanism in [
+        "run_in_background",
+        "background shell",
+        "blocks until",
+        "reconnect",
+        "While waiting",
+    ] {
+        assert!(
+            !store_and_nudge.contains(mechanism),
+            "{mechanism:?} is the blocking channel's own mechanism and is false \
+             of a backend that cannot hold an ask open",
+        );
+        assert!(
+            blocking.contains(mechanism),
+            "{mechanism:?} should still be somewhere in the blocking Guide — a \
+             phrase that has gone from both is one this test stopped checking",
+        );
+    }
+}
+
+/// A word this binary has not got is refused by name.
+///
+/// Read past as blocking, a Guide would hand the hold-the-ask advice to a
+/// backend that cannot hold one — which is a session wedged for hours rather
+/// than an error anybody sees. The variable is Verkstead's own to set, so
+/// anything else in it is a mistake worth stopping on.
+#[test]
+fn an_agent_type_this_binary_has_not_got_is_refused_by_name() {
+    let output = run_as("nonesuch", &["guide"]);
+
+    assert!(
+        !output.status.success(),
+        "a Guide printed for a backend this binary does not know should fail"
+    );
+    assert_eq!(
+        stdout(&output),
+        "",
+        "stdout stays clean, so no channel's instructions are mistaken for \
+         another's"
+    );
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("nonesuch") && stderr.contains(AGENT_TYPE),
+        "the error should name the word and where it came from, got:\n{stderr}"
+    );
+}
+
+/// Bare `verkstead` is tailored too: it is the same call by another route, and
+/// an agent that runs the binary to see what it is reads its own channel.
+#[test]
+fn bare_verkstead_is_tailored_the_same_way() {
+    assert_eq!(
+        stdout(&run_as("codex", &[])),
+        stdout(&run_as("codex", &["guide"])),
+    );
+}
+
+/// The tailored halves stand alone the way the whole does: no chat to fall back
+/// to, no transport to detect, and the human is somewhere else entirely. Every
+/// backend's, because each of the three sections is written for one of them and
+/// a passage that leans on a conversation would be in whichever was written
+/// last.
+#[test]
+fn every_backends_guide_stands_alone() {
+    for agent_type in ["claude", "codex", "grok", "opencode"] {
+        stands_alone(&stdout(&run_as(agent_type, &["guide"])));
     }
 }

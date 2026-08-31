@@ -470,13 +470,46 @@ use, its reasoning, and what was put to it — kept word for word as the agent's
 backend wrote it, and rendered readable in the details pane. What summaries and a
 stop Notice's evidence draw from, falling back to the Capture when a session
 left none.
+
+**Which record it is read from is the backend's to say.** A backend that takes
+a session id at launch — Claude Code and Grok Build both do — is told the name
+Verkstead chose, so its log is looked up under it rather than searched for; grok
+keeps a directory per session under one per working directory, and the outer
+name being grok's own encoding of that path is why the store is walked for the
+session's name rather than the path worked out. A backend that takes none —
+Codex is the first — writes a log of its own choosing, so the session's is
+*found* rather than named: the one that appeared in the account's own session
+store after this session was launched and whose opening line names this
+Conversation's Worktree.
+
+**And a backend may keep no file of lines at all.** opencode writes its
+sessions into one database under its account — a row per session and a row per
+record within it — so the session is found by the same rule as a rollout asked
+of a store instead of a directory: the row recording this Conversation's
+Worktree that was created after this session was launched, the newest where
+more than one matches. What is followed is the sequence number of the last
+record taken rather than a byte offset into a file, and each record still
+reaches the Transcript verbatim, with the kind opencode filed it under and its
+place in that sequence around it.
+
+**And a record may be written over and over.** opencode writes a part of a
+message again every time it grows — an empty sentence, the sentence so far, the
+sentence finished — so what is drawn is the record that finished, and every one
+before it folds away with the backend's own bookkeeping. A turn is drawn once it
+is over rather than held open, which is what keeps one sentence one turn
+wherever the record is drawn, counted or quoted.
+
+A session whose record never appears has the Capture as its whole record, which
+is what a session with no log has always had — and so does a session whose store
+is of a shape this Verkstead cannot read, which is what a backend free to move
+its own layout between releases costs.
 _Avoid_: messages, chat log, session log (the backend's file, not Verkstead's
 record), transcript-as-bytes (that is the Capture)
 
 **Capture**:
 The terminal bytes of a session, kept byte for byte, escapes and all — how it
-looked rather than what it said. What quiet-detection listens to, what the
-Screen replays, and the record of last resort for a session that left no
+looked rather than what it said. What says a printing session has gone **Idle**,
+what the Screen replays, and the record of last resort for a session that left no
 Transcript.
 _Avoid_: transcript (that is the readable record), raw output, tape
 
@@ -494,16 +527,54 @@ holds the run off while they do; a session typed into while a run is still
 driving it is ended and advanced by the ordinary rules.
 _Avoid_: terminal, console, attach view, pane
 
+**Idle**:
+A running session that has stopped — not gone, but sitting there with its turn
+over and nothing to do. One judgement, read by everything that acts on one: the
+mark on the sidebar card and the Timeline row, the grace every ender waits out
+before it ends a session, and the **Rescue** — both the silence it waits on and
+the proof that a line it typed arrived.
+
+**How it is judged is the backend's.** Claude Code draws inline and repaints
+while it works, so three seconds with nothing printed is a session that has
+stopped. A backend that draws a full-screen interface is never reliably silent —
+it repaints while it works and may go on repainting its prompt after it has
+stopped — so what says one has stopped is a line on its **Screen**, read one of
+two ways: an at-the-prompt line *standing* there, or an at-work line *gone* from
+it. Which way is a fact about the backend, and every one measured so far —
+Codex, Grok Build and OpenCode — is the second: the frame each leaves when its
+turn is over and the frame it draws mid-turn are the same screen but for the
+line saying it is working. One signature per backend, kept in one place and
+accepted to drift the way the usage-limit phrase does. The at-work reading asks
+for the ordinary silence beside it, because the line is equally missing from a
+session that has drawn nothing yet; the at-the-prompt one does not, and a
+silence mid-turn is not idle either way — a TUI that stops to think would
+otherwise be reaped out from under its own work.
+
+**With a long silence behind it as the long-stop.** A signature that has drifted
+reads as a session that never stops, and nothing else here would catch one: the
+Rescue waits on idle, every ender waits on idle, and no session carries a cap on
+its life. So a session judged on its screen that has printed nothing at all for
+five minutes is idle whatever its screen says, and what the human gets is the
+ordinary would-not-ask stop — one slow round rather than never.
+_Avoid_: quiet (one backend's answer, not the question), silent, asleep, stalled
+(that is a Conversation nothing is driving)
+
 **Agent Profile**:
 A named coding-agent account Verkstead can run a session under: an agent type,
 the account itself, and the models that account can run. **The account's shape
 is its type's**, rather than one shape every Profile is assumed to have — Claude
 Code's is the directory and config file pair bind-mounted at `~/.claude` /
 `~/.claude.json` inside the sandbox, and every backend after it keeps its whole
-account under one relocatable home. Whichever it is, mounting it is what keeps
-accounts separate. The type is not offered while there is one of it: a picker
-with a single option is theatre, and one naming a backend that cannot launch yet
-would be a lie. The models are a list and the list is the Profile's own, because
+account under one relocatable home — Codex's at `~/.codex`, Grok Build's at
+`~/.grok`, and OpenCode's at neither, opencode keeping no dot-directory of its
+own: its home is the directory its XDG config and data directories sit inside,
+and both are bound at those defaults in a HOME that is fresh enough for them to
+resolve there. Whichever it is, mounting it is what keeps accounts separate. A
+type is offered to the human only once it can launch the real thing: one that
+cannot would be a lie in a picker, so the form offers Claude, Codex, Grok Build
+and OpenCode, and a Profile of a type whose stage has not landed is one saved
+over the API until it does. Picking a type on the form asks for that type's own
+account paths. The models are a list and the list is the Profile's own, because
 different Profiles reach different accounts and each can launch different
 things; none of them is a default, so which one a session runs is always picked
 — as a Pairing, alongside the Profile itself.
@@ -796,14 +867,31 @@ neither does the human's own Stop.
 Profile has exhausted its window stops the way everything else does, and all
 that tells it apart is what it carries: the Profile that ran out, and — where
 the sentence the session printed carried a time this build could read — when the
-window comes back, as words on the status button's second line, where what
-is running is otherwise said. Information rather than a timer: nothing counts down to it, and nothing starts when it passes.
-Recognition is one phrase read off the Capture and the Transcript, kept in one
-place because the wording is the backend's and will move. The session is ended
-along with the stop, the agent's own wait for the same reset being no reason to
-have work going on inside a Conversation that reads as stopped. And **no
-auto-switching between Profiles**: an exhausted account is a wait, never a
-reason to spend a different one.
+window comes back, as words on the status button's second line, where what is
+running is otherwise said. Information rather than a timer: nothing counts down
+to it, and nothing starts when it passes. Recognition is one phrase per backend,
+kept in one place because the wording is the backend's and will move — the same
+bargain the idle signature makes — and it is read off all three records a session
+leaves: what it printed, the **Screen** that printing drew, and its
+**Transcript**. The frame is read because a full-screen backend never says it in
+what it printed: a cursor move per row and no newlines makes a whole frame one
+line of bytes with the sentence somewhere in the middle of it, and grok says it
+by drawing a card. A session is read against its own backend's sentence and
+against no other, so a wording one of them stops on is one another may print in
+the middle of its work. **Or against none**: a backend nobody has watched run out
+has no phrase, and is skipped rather than matched against nothing — the empty
+string would open every line there is and would stop such a session at its first
+flush, where skipping leaves its limit landing as the ordinary stall it would
+have been anyway. OpenCode is the first of those, and may be one for a long time:
+it retries a provider's limit internally before anything reaches the screen. A
+phrase covering only some accounts of a backend comes to the same thing for the
+rest: Grok Build ships the heading of the card a free account gets, a paid plan's
+card is headed differently, and its stop stalls until somebody has watched one
+drawn. The session is ended along with the stop, the agent's own wait for the
+same reset
+being no reason to have work going on inside a Conversation that reads as
+stopped. And **no auto-switching between Profiles**: an exhausted account is a
+wait, never a reason to spend a different one.
 _Avoid_: halt and pause (the two names this had before there was one of it),
 hold (gone, and nothing replaced it), interruption, error, failure, crash,
 incident, alert, block, rate limit, throttle
@@ -1153,12 +1241,13 @@ a watcher's keystrokes go through, and told the one thing it cannot see from
 inside: that nothing it prints reaches anybody, and that a Set is the whole of
 how the human is spoken to.
 
-**Three things at once**, and none of them is enough alone: idle for the grace,
-nothing open on the Conversation, and nothing landed. A session still printing
-is at work, one sitting on a Blocking Ask is waiting on the human — for as long
-as they take — and one that has landed what it was sent for is already being
-ended by the driver beside this. An answer arriving, or a line typed in, starts
-the grace again.
+**Three things at once**, and none of them is enough alone: **Idle** for the
+grace, nothing open on the Conversation, and nothing landed. A session still at
+work is at work — which is its backend's judgement rather than one rule for all
+of them — one sitting on a Blocking Ask is waiting on the human, for as long as
+they take, and one that has landed what it was sent for is already being ended by
+the driver beside this. An answer arriving, or a line typed in, starts the grace
+again, and the session being seen at work after it is what says the line landed.
 
 **Every session Verkstead launches**, one loop with the state's own
 done-indicator as its parameter: a grilling's artifact, a backlog Step's task
@@ -1247,23 +1336,52 @@ to answer is asking for a reply, one with news is only asking to be read.
 _Avoid_: unread (nothing here is a message), badge, alert, notification (that is
 the push, this is what is left behind it), new
 
-**Blocking Ask** / **Deferred Ask**:
-The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles
+**Blocking Ask** / **Store-and-nudge Ask** / **Deferred Ask**:
+The three ways an agent puts a Question Set to the human. A **Blocking Ask** idles
 the session until the Response arrives, as every ask does in askance. A
 **Deferred Ask** does not idle it: the Set waits in the Timeline and its
 Answers are folded into a later session's prompt. Work blocks only on Questions
 whose Answers affect work about to be done.
 
-`verkstead ask --deferred` is the second one, and the difference is the session's
-alone. Both land on the Timeline, both leave the Conversation *blocked on you*
+`verkstead ask --deferred` is the third one, and that difference is the session's
+alone: it is the agent saying it will carry straight on, on every backend. Both
+land on the Timeline, both leave the Conversation *blocked on you*
 and both notify the human's devices; a deferred one says on the Timeline that it
 is deferred, and its badge says no agent is waiting rather than that one has
 disconnected. What is deferred is how it was asked rather than anything in the
 Set, so it is kept beside the stored body rather than in it.
 
+A **Store-and-nudge Ask** is the two halves the other way round, and is the
+ordinary ask on a backend that cannot hold a shell command open for hours: the
+Set is *stored* as a deferred one is, so `verkstead ask` returns at once and the
+session ends its turn — and a session is *idling* on it all the same, waiting
+for the line Verkstead types into its terminal when the Response lands, which it
+answers by fetching the Answers with `verkstead answers`. Which of the two an
+ordinary ask is is the backend's fact rather than the Set's: the CLI asks the
+same way everywhere, and the server reads the agent type of the session that
+asked. What the human sees is a deferred-shaped ask, because nothing is holding
+a connection open on it; what differs is underneath, where everything that
+decides a session's fate — the quiet grace, the Rescue, a wrap-up's proposals,
+the locking of what a gone session left open — counts it as a question somebody
+is standing behind.
+
+The **nudge** in that name is one line typed into the session's terminal, down
+the channel the Rescue types through and a watcher's keystrokes take — not the
+viewer's **Nudge**, which is a signal to a browser and reaches no agent. It is
+written as the human would write it and names the Set and the command that
+fetches it, because a session that has ended its turn has neither in front of
+it; the line and the Enter behind it are typed a moment apart, an interface
+reading a burst as a paste. It is typed wherever the Response arrived from and
+only where there is a session idling on that Set to type it at. Nothing goes on
+the Timeline for it — it is Verkstead speaking to an agent rather than anything
+the work has got to — and the session's own Capture holds it, the same account
+the Rescue gives of itself.
+
 The **folding** is the far end: when a session is started to build, every
-answered Deferred Ask of that Conversation nobody has been told about goes into
-its prompt, oldest first, under the documents the prompt is built from. Each is
+answered stored ask of that Conversation nobody has been told about goes into
+its prompt, oldest first, under the documents the prompt is built from — a
+Deferred Ask, which had nobody to tell from the start, and a store-and-nudge one
+whose session went before it fetched. Each is
 folded once, and that it was folded is recorded rather than worked out from what
 is answered. The one session never folded into is a relaunched grilling, which
 is already primed with everything the Conversation has answered.
@@ -1397,7 +1515,14 @@ _Avoid_: margin, sidebar, left rail
 The agent-facing usage instructions shipped inside the CLI and printed by
 it, so an agent needs nothing beyond the binary to learn how to ask. A core
 that every ask needs, plus any Topics fetched when their task arises — since
-the gates Topic was retired the core is the whole of it.
+the gates Topic was retired the core is the whole of it. **One document,
+tailored at print time**: what an ask waits for is the backend's channel, and
+how one is *run* is the backend itself — a synchronous shell call given a long
+timeout is not a backgrounded one a harness wakes — so those two sections are
+spliced in at their own grains and everything about writing a Set is written
+once. Which backend the reader is comes off the agent type Verkstead sets in
+every sandbox; a Guide printed outside one is Claude's, which is the blocking
+ask a human at a terminal has.
 _Avoid_: help, manual, docs
 
 **Topic**:
@@ -1435,6 +1560,10 @@ to visibility each fall back to re-reading everything — which is also the
 whole meaning of the push-relayed Nudge. A query whose rendering holds reader
 state must still reconcile its re-reads, or be `static` where its payload
 cannot change (ADR-0005).
+
+Not the nudge in **Store-and-nudge Ask**, which is a line of English typed into
+an agent's terminal. This one is a signal to a browser and never leaves the
+viewer.
 _Avoid_: tick, refresh signal, ping, change event, notification
 
 **Update Notice**:

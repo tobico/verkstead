@@ -1061,6 +1061,9 @@ describe("the path a details pane stands at", () => {
     // for them: the account's paths are the form's own fields.
     const details = panes(container)[2]!;
     const account = PROFILES[0]!.account;
+    if (account.agent_type !== "Claude") {
+      throw new Error("this fixture should be a Claude account");
+    }
     expect(
       (screen.getByLabelText(/Claude directory/) as HTMLInputElement).value,
     ).toBe(account.claude_dir);

@@ -66,7 +66,7 @@ answers:
 struct Grilling {
     /// Kept alive for as long as the fixture is: the directories go when these
     /// drop, and a worktree that vanished mid-ask would fail obscurely.
-    _watched: tempfile::TempDir,
+    watched: tempfile::TempDir,
     state: tempfile::TempDir,
     home: tempfile::TempDir,
 
@@ -85,11 +85,18 @@ impl Grilling {
     /// The sandbox this Conversation's session would run in, equipped with the
     /// binary the server would equip it with.
     fn sandbox(&self) -> Sandbox {
+        self.sandbox_under(&self.profile)
+    }
+
+    /// And one around a Profile of another agent type, which is how the Guide's
+    /// tailoring is asked of a real sandbox rather than of an environment a test
+    /// set by hand.
+    fn sandbox_under(&self, profile: &store::Profile) -> Sandbox {
         let settings = Settings::in_data_dir(self.state.path());
 
         Sandbox::for_conversation(
             &self.conversation,
-            &self.profile,
+            profile,
             Home {
                 path: self.home.path().to_owned(),
             },
@@ -112,11 +119,41 @@ impl Grilling {
         .expect("a grilling Conversation has a worktree to build a sandbox around")
     }
 
+    /// A Profile whose whole account is one home, saved into the same store the
+    /// fixture's own was — the second agent type, which asks by store-and-nudge.
+    fn codex_profile(&self) -> store::Profile {
+        let home = self.watched.path().join("codex-account/.codex");
+        std::fs::create_dir_all(&home).unwrap();
+
+        self.runtime.block_on(async {
+            let pool = verkstead_server::open_database(&self.database)
+                .await
+                .unwrap();
+            let profile = store::create_profile(
+                &pool,
+                &store::ProfileFacts {
+                    name: "codex".to_owned(),
+                    account: store::Account::Codex { home },
+                    models: vec!["gpt-5-codex".to_owned()],
+                },
+            )
+            .await
+            .unwrap()
+            .expect("nothing is called that yet");
+            pool.close().await;
+            profile
+        })
+    }
+
     /// Run `argv` inside the sandbox and hand back what it printed, insisting it
     /// worked.
     fn inside(&self, argv: &[&str]) -> String {
-        let output = self
-            .sandbox()
+        self.inside_sandbox(&self.sandbox(), argv)
+    }
+
+    /// The same inside a sandbox of the caller's choosing.
+    fn inside_sandbox(&self, sandbox: &Sandbox, argv: &[&str]) -> String {
+        let output = sandbox
             .command(argv)
             .stdin(Stdio::null())
             .output()
@@ -273,7 +310,7 @@ fn grilling() -> Grilling {
     });
 
     Grilling {
-        _watched: watched,
+        watched,
         state,
         home,
         conversation,
@@ -315,6 +352,45 @@ fn the_binary_a_session_finds_is_the_one_that_equipped_it() {
     assert!(
         guide.contains("Question Set"),
         "and the Guide it prints comes out of that same build, got:\n{guide}"
+    );
+}
+
+/// And the Guide it finds is the one for the backend it is running.
+///
+/// Asked inside a real sandbox rather than of a variable a test set, because
+/// what has to hold is that the sandbox says which backend a session is — a
+/// Guide tailored off an environment nothing sets is a Guide every session
+/// reads as blocking.
+#[test]
+fn a_session_reads_the_guide_for_the_backend_it_is_running() {
+    let fixture = grilling();
+
+    let blocking = fixture.inside(&["verkstead", "guide"]);
+
+    assert!(
+        blocking.contains("run_in_background"),
+        "a Claude session reads the blocking ask's own mechanics, got:\n{blocking}"
+    );
+    // What it is never sent to do, rather than a command it never names: the CLI
+    // contract every channel quotes says `verkstead answers` refuses a Deferred
+    // Ask, which is worth a blocking session's knowing too.
+    assert!(
+        !blocking.contains("Fetch the Answers"),
+        "and is never sent to fetch a Response it is already holding, got:\n{blocking}"
+    );
+
+    let codex = fixture.codex_profile();
+    let store_and_nudge =
+        fixture.inside_sandbox(&fixture.sandbox_under(&codex), &["verkstead", "guide"]);
+
+    assert!(
+        store_and_nudge.contains("Fetch the Answers"),
+        "a session that cannot hold an ask open reads that it ends its turn and \
+         fetches the Answers when the nudge lands, got:\n{store_and_nudge}"
+    );
+    assert!(
+        !store_and_nudge.contains("run_in_background"),
+        "and none of the hold-the-ask advice, which is false of it"
     );
 }
 

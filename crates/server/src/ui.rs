@@ -405,7 +405,7 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
         state,
         id,
         settlement,
-        stored.deferred,
+        stored.ask.deferred_shaped(),
         &stored.created_at,
         OffsetDateTime::now_utc(),
     );
@@ -456,7 +456,7 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
 /// registry either way: whichever of the two the human is looking at, it is the
 /// page they act on.
 ///
-/// Except for a Deferred Ask, which the registry has nothing to say about: no
+/// Except for a stored ask, which the registry has nothing to say about: no
 /// wait was ever held on one, so ageing it against the clock would report an
 /// agent that had gone where none was ever there. `deferred` is what the record
 /// says about how it was asked, and it is the whole verdict where it is true.
@@ -737,11 +737,11 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
     // between them any more meaningfully than it changes between reads.
     let working = state.sessions.working();
 
-    // And which of those have gone quiet, which is the other half of what the
+    // And which of those have stopped, which is the other half of what the
     // card's mark says. A second read of the same register rather than one
     // answer: `working` is what the whole sidebar is drawn from and this is a
     // fact about the few rows in it.
-    let quiet = state.sessions.quiet();
+    let idling = state.sessions.idle();
 
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
@@ -759,7 +759,7 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // Idle is a thing a running session is, and the two sets are
                 // read a moment apart — so the pair is made consistent here
                 // rather than left to the page that draws it.
-                idle: working && quiet.contains(&conversation.id),
+                idle: working && idling.contains(&conversation.id),
                 waiting: conversation.waiting,
                 // And the same pairing again for the wrap-up that has got down
                 // to its checks: the settle facts came out of the query above,
@@ -1420,7 +1420,7 @@ pub(crate) async fn conversation_view(
                                 state,
                                 asked.set_id,
                                 asked.settlement,
-                                asked.deferred,
+                                asked.ask.deferred_shaped(),
                                 &event.at,
                                 now,
                             );

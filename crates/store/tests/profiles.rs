@@ -29,9 +29,15 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
 /// A Profile to save, named — the account is made up, because whether it is
 /// really there is not this crate's question.
 fn facts(name: &str) -> ProfileFacts {
+    facts_for(name, claude(name))
+}
+
+/// And the same with an account of some other type, for the Profiles that are
+/// about the shape rather than about the name.
+fn facts_for(name: &str, account: Account) -> ProfileFacts {
     ProfileFacts {
         name: name.to_owned(),
-        account: claude(name),
+        account,
         models: vec!["claude-opus-5".to_owned()],
     }
 }
@@ -42,6 +48,28 @@ fn claude(name: &str) -> Account {
     Account::Claude {
         claude_dir: PathBuf::from(format!("/watched/accounts/{name}/.claude")),
         config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
+    }
+}
+
+/// And a Codex one: the single home its whole account is kept under.
+fn codex(name: &str) -> Account {
+    Account::Codex {
+        home: PathBuf::from(format!("/watched/accounts/{name}/.codex")),
+    }
+}
+
+/// And a Grok Build one, which is the same shape under a directory of its own.
+fn grok(name: &str) -> Account {
+    Account::Grok {
+        home: PathBuf::from(format!("/watched/accounts/{name}/.grok")),
+    }
+}
+
+/// And an OpenCode one, which keeps one home too — the directory opencode's
+/// XDG paths resolve inside rather than a dot-directory of its own.
+fn opencode(name: &str) -> Account {
+    Account::OpenCode {
+        home: PathBuf::from(format!("/watched/accounts/{name}/opencode")),
     }
 }
 
@@ -110,6 +138,37 @@ async fn a_profile_naming_an_agent_type_this_binary_has_not_got_is_refused_by_na
     .bind("work")
     .bind("")
     .bind("")
+    .bind("grok-code")
+    .bind("grok")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let refused = profiles(&pool).await.unwrap_err().to_string();
+    assert!(
+        refused.contains("grok"),
+        "the refusal should name the word it did not know, and said {refused:?}"
+    );
+}
+
+/// And a Profile of a type whose whole account is one home, with no home
+/// recorded, is refused the same way.
+///
+/// Nothing above the store can write one: a home is put down with the Profile
+/// and taken away with it. So what this catches is a row somebody edited by
+/// hand — and reading it past as a home of the empty string would be a bind
+/// landing on `/`.
+#[tokio::test]
+async fn a_profile_whose_account_is_a_home_it_has_not_got_is_refused() {
+    let (_dir, pool) = fresh_pool().await;
+
+    sqlx::query(
+        "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("work")
+    .bind("")
+    .bind("")
     .bind("gpt-5-codex")
     .bind("codex")
     .execute(&pool)
@@ -118,14 +177,13 @@ async fn a_profile_naming_an_agent_type_this_binary_has_not_got_is_refused_by_na
 
     let refused = profiles(&pool).await.unwrap_err().to_string();
     assert!(
-        refused.contains("codex"),
-        "the refusal should name the word it did not know, and said {refused:?}"
+        refused.contains("home"),
+        "the refusal should say what is missing, and said {refused:?}"
     );
 }
 
 /// The table the account of every type after Claude lives in: one home per
-/// Profile, keyed by its id, made with the rest of the schema so that the stage
-/// which first writes to it has no migration to do.
+/// Profile, keyed by its id.
 #[tokio::test]
 async fn a_profiles_single_home_directory_has_a_table_of_its_own() {
     let (_dir, pool) = fresh_pool().await;
@@ -140,6 +198,154 @@ async fn a_profiles_single_home_directory_has_a_table_of_its_own() {
         .unwrap();
 
     assert_eq!(home.0, "/watched/accounts/work");
+}
+
+/// A Profile whose account is one home round-trips whole: saved with it, listed
+/// with it, loaded with it, and read back as its own type.
+///
+/// The account's shape is what says the type, so what this settles is that a
+/// row written as `codex` comes back as a Codex account and not as a pair of
+/// empty strings — the two path columns are NOT NULL and it has nothing to say
+/// in them.
+#[tokio::test]
+async fn a_profile_whose_account_is_one_home_round_trips_with_it() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let saved = create_profile(&pool, &facts_for("work", codex("work")))
+        .await
+        .unwrap()
+        .expect("nothing is called that yet");
+
+    assert_eq!(saved.account, codex("work"));
+    assert_eq!(saved.agent_type(), AgentType::Codex);
+
+    let loaded = load_profile(&pool, saved.id)
+        .await
+        .unwrap()
+        .expect("the Profile was just saved");
+    assert_eq!(loaded, saved, "one Profile read back is the one written");
+
+    assert_eq!(
+        profiles(&pool).await.unwrap(),
+        vec![saved],
+        "and so is the same Profile read off the list"
+    );
+}
+
+/// And the types that each keep one home are told apart by the column rather
+/// than by the shape they share.
+///
+/// What is written down is the same in all of them — nothing in the pair
+/// columns, one row in `profile_homes` — so the word in `agent_type` is the
+/// whole of what says which account a home is. A Grok Profile read back as a
+/// Codex one would be a session launched on the wrong binary under the right
+/// directory, and an OpenCode one is a third word over the same two columns.
+#[tokio::test]
+async fn the_types_that_each_keep_one_home_read_back_as_themselves() {
+    let (_dir, pool) = fresh_pool().await;
+
+    create_profile(&pool, &facts_for("work", codex("work")))
+        .await
+        .unwrap()
+        .expect("nothing is called that yet");
+
+    let saved = create_profile(&pool, &facts_for("xai", grok("xai")))
+        .await
+        .unwrap()
+        .expect("nothing is called that yet");
+
+    let latest = create_profile(&pool, &facts_for("zen", opencode("zen")))
+        .await
+        .unwrap()
+        .expect("nothing is called that yet");
+
+    assert_eq!(saved.account, grok("xai"));
+    assert_eq!(saved.agent_type(), AgentType::Grok);
+
+    assert_eq!(latest.account, opencode("zen"));
+    assert_eq!(latest.agent_type(), AgentType::OpenCode);
+
+    for profile in [&saved, &latest] {
+        let loaded = load_profile(&pool, profile.id)
+            .await
+            .unwrap()
+            .expect("the Profile was just saved");
+        assert_eq!(&loaded, profile, "one Profile read back is the one written");
+    }
+
+    assert_eq!(
+        profiles(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|profile| profile.agent_type())
+            .collect::<Vec<_>>(),
+        vec![AgentType::Codex, AgentType::Grok, AgentType::OpenCode],
+        "and each of them off the list is its own type"
+    );
+}
+
+/// Rewriting one replaces the home rather than adding a second, which is what a
+/// table keyed by profile id would otherwise refuse on the second save.
+#[tokio::test]
+async fn rewriting_a_profile_with_a_home_replaces_the_home() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let saved = create_profile(&pool, &facts_for("work", codex("work")))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        update_profile(&pool, saved.id, &facts_for("work", codex("moved")))
+            .await
+            .unwrap(),
+        Saving::Saved
+    );
+    assert_eq!(homes(&pool).await, 1, "one home, the one it is under now");
+    assert_eq!(
+        load_profile(&pool, saved.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .account,
+        codex("moved"),
+    );
+}
+
+/// And removing one takes the home with it, as it takes the models.
+#[tokio::test]
+async fn removing_a_profile_with_a_home_takes_the_home_it_wrote() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let saved = create_profile(&pool, &facts_for("work", codex("work")))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        delete_profile(&pool, saved.id).await.unwrap(),
+        Deleting::Deleted
+    );
+    assert_eq!(homes(&pool).await, 0);
+}
+
+/// A Profile whose type keeps no home writes none: an installation with nothing
+/// but Claude Profiles has the empty table it always had.
+#[tokio::test]
+async fn a_claude_profile_writes_no_home_at_all() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let saved = saved(&pool, "work").await;
+    assert_eq!(homes(&pool).await, 0);
+
+    assert_eq!(
+        update_profile(&pool, saved.id, &facts("work"))
+            .await
+            .unwrap(),
+        Saving::Saved
+    );
+    assert_eq!(homes(&pool).await, 0);
 }
 
 /// And removing a Profile takes the home with it.

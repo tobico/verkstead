@@ -92,7 +92,9 @@ pub async fn ended_on(pool: &SqlitePool, set_id: i64) -> Result<bool> {
 ///
 /// **And never a Deferred Ask**, as nothing else here counts one: its Answers
 /// are for a later session by design, so a deferred Set answered in passing is
-/// not the round's own last word.
+/// not the round's own last word. A store-and-nudge round is the round's own
+/// last word all the same — the session that asked it is idling on the Answer
+/// with its turn ended, which is exactly the session this mark ends.
 pub async fn nothing_else(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
     let found: Option<(i64,)> = sqlx::query_as(
         "SELECT q.id
@@ -102,7 +104,7 @@ pub async fn nothing_else(pool: &SqlitePool, conversation_id: i64) -> Result<boo
          JOIN responses r ON r.set_id = q.id
          LEFT JOIN deferrals d ON d.set_id = q.id
          WHERE e.conversation_id = ?
-           AND d.set_id IS NULL
+           AND (d.set_id IS NULL OR d.idled)
            AND e.id > COALESCE(
                    (SELECT MAX(w.id) FROM timeline_events w
                     WHERE w.conversation_id = ? AND w.kind = ? AND w.body = ?),

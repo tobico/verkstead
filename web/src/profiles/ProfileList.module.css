@@ -66,10 +66,8 @@
   color: var(--ink-soft);
 }
 
-/* What is quoted rather than said: every model name the account can launch, and
-   the pair's two paths where the pane shows them. */
-.profile .model,
-.standing code {
+/* What is quoted rather than said: every model name the account can launch. */
+.profile .model {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
@@ -88,10 +86,10 @@
   font-size: 0.85rem;
 }
 
-/* One form for both saving and rewriting — a profile is four fields with nothing
-   built from them yet, so editing one is filling the same form in with what it
-   already says. It is the details pane now rather than a modal over the page, so
-   there is nothing around it but the pane's own head. */
+/* One form for both saving and rewriting — a profile is a handful of fields with
+   nothing built from them yet, so editing one is filling the same form in with
+   what it already says. It is the details pane now rather than a modal over the
+   page, so there is nothing around it but the pane's own head. */
 .form label {
   display: block;
   margin-bottom: 0.35rem;
@@ -103,10 +101,14 @@
   font-size: 0.9em;
 }
 
-/* The typed fields — the name, the two paths, and the model id added by hand.
-   Said by type rather than by element, because the ticks the models are picked
-   with are inputs too and a width of the pane is not what a checkbox wants. */
-.form input[type="text"] {
+/* The typed fields — the name, the account's paths, and the model id added by
+   hand — and the agent type, which is picked rather than typed and drawn as the
+   rest of them because it is another of the form's rows, not a control of its
+   own kind. The typed ones are said by type rather than by element, because the
+   ticks the models are picked with are inputs too and a width of the pane is not
+   what a checkbox wants. */
+.form input[type="text"],
+.form select {
   display: block;
   width: 100%;
   margin-bottom: 0.85rem;
@@ -232,20 +234,14 @@
   font-size: 0.9rem;
 }
 
-/* What is on the record about a saved Profile but not in the form: the agent
-   type, and the press that takes the whole thing away. Set well below the form
-   and behind a rule: a destructive press in among the fields, or beside the
-   button that saves them, is one waiting to be made by mistake. */
+/* The press that takes a saved Profile away, which is the one thing in this pane
+   that is not the form. Set well below it and behind a rule: a destructive press
+   in among the fields, or beside the button that saves them, is one waiting to
+   be made by mistake. */
 .standing {
   margin-top: 1.5rem;
   padding-top: 1.25rem;
   border-top: 1px solid var(--edge);
-}
-
-.standing .agentType {
-  margin: 0 0 0.85rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
 }
 
 .actions {
@@ -262,9 +258,10 @@
   border-color: var(--edge);
 }
 
-/* The field being typed in, which is no pointer's doing: the border says which
+/* The field being worked in, which is no pointer's doing: the border says which
    of them the words are going into. */
-.form input[type="text"]:focus-visible {
+.form input[type="text"]:focus-visible,
+.form select:focus-visible {
   border-color: var(--accent);
 }
 
@@ -272,7 +269,8 @@
    accent it is filled with, and the outline takes the colour its own words are
    in — the remove's red. */
 @media (hover: hover) {
-  .form input[type="text"]:hover {
+  .form input[type="text"]:hover,
+  .form select:hover {
     border-color: var(--ink-soft);
   }
 

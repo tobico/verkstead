@@ -300,7 +300,7 @@ pub(crate) fn ungrilled(brief: &str) -> String {
          the Brief above is the whole of the plan, and there is no handoff \
          because there was no interview to write one. Build what it describes. \
          Where it leaves a real decision open — one that changes what gets built \
-         rather than how it is spelled — put that to me as a blocking ask rather \
+         rather than how it is spelled — put that to me as an ordinary ask rather \
          than guessing at it.\n",
         implementing(brief, None),
     )
@@ -1446,7 +1446,7 @@ mod tests {
     }
 
     /// The breakdown quiz, which is the one thing in a whole roadmap's run that
-    /// stops it — and stops it naturally, being a blocking ask.
+    /// stops it — and stops it naturally, being an ask somebody is idling on.
     #[test]
     fn the_next_stage_fork_puts_its_breakdown_to_the_human() {
         let next_stage = skill("next-stage/SKILL.md");
@@ -2085,7 +2085,7 @@ mod tests {
              {reviewing}"
         );
         assert!(
-            reviewing.contains("Idling is the ask working"),
+            reviewing.contains("Waiting is the ask working"),
             "the wait being the ask working rather than the ask failing: {reviewing}"
         );
         assert!(
@@ -2528,7 +2528,7 @@ mod tests {
             "and with no handoff, there having been no interview: {prompt:?}"
         );
         assert!(
-            prompt.contains("Nothing was grilled") && prompt.contains("blocking ask"),
+            prompt.contains("Nothing was grilled") && prompt.contains("ordinary ask"),
             "said in words, along with what to do about what the Brief leaves \
              open: {prompt:?}"
         );
@@ -3156,21 +3156,41 @@ mod tests {
     }
 
     /// Every skill is read by every backend, so none of them names a mechanism
-    /// only one agent has. Holding a shell command open for hours is Claude
-    /// Code's own trick and false of a backend whose shell tool yields after
-    /// seconds — what a skill keeps saying is what is true of all of them, and
-    /// how to run the ask is the Guide's, which every skill already sends the
-    /// session to first.
+    /// only one agent has, and none of them says which channel the reader's ask
+    /// is on.
+    ///
+    /// Holding a shell command open for hours is Claude Code's own trick and
+    /// false of a backend whose shell tool yields after seconds — and *the ask
+    /// blocks* is that same trick asserted rather than described. A skill saying
+    /// it reaches a session whose `verkstead ask` returns at once, told by the
+    /// document its own prompt names that it will not: two instructions about
+    /// the one thing it has to get right, disagreeing.
+    ///
+    /// So what a skill keeps saying is what is true of all of them — that the
+    /// human answers in their own time, that waiting is the ask working, and
+    /// that `verkstead guide` says how one is run here. The Guide is tailored to
+    /// the backend reading it (ADR-0011), which is where the answer can be the
+    /// reader's own; a skill is one document for every backend, mounted at one
+    /// neutral path with no fork per type, so it is the one place the answer
+    /// cannot live.
     #[test]
     fn no_skill_says_how_to_hold_an_ask_open() {
         for name in Bundled::iter() {
             let text = flowed(&name);
 
-            assert!(
-                !text.contains("background command"),
-                "{name} names one agent's way of waiting, which the Guide says \
-                 instead:\n{text}"
-            );
+            for said in [
+                "background command",
+                "blocking ask",
+                "blocks until",
+                "blocks for hours",
+            ] {
+                assert!(
+                    !text.contains(said),
+                    "{name} says {said:?}, which is one agent's way of waiting \
+                     stated as every agent's — the Guide says it instead, and \
+                     says it per backend:\n{text}"
+                );
+            }
 
             if !text.contains("verkstead ask") {
                 continue;
@@ -3178,16 +3198,17 @@ mod tests {
 
             assert!(
                 text.contains("may be hours"),
-                "{name} asks, so it says the wait may be hours:\n{text}"
+                "{name} asks, so it says the answers may be hours away:\n{text}"
             );
             assert!(
-                text.contains("Idling is the ask working rather than the ask failing")
-                    || text.contains("Idling is this working rather than this failing"),
-                "and that idling is the ask working rather than the ask failing:\n{text}"
+                text.contains("Waiting is the ask working rather than the ask failing")
+                    || text.contains("Waiting is this working rather than this failing"),
+                "and that waiting is the ask working rather than the ask failing:\n{text}"
             );
             assert!(
                 text.contains("verkstead guide"),
-                "and sends the session to the Guide, which says how to run one:\n{text}"
+                "and sends the session to the Guide, which says how to run one \
+                 on the backend reading it:\n{text}"
             );
         }
     }

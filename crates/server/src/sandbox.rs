@@ -101,6 +101,108 @@ pub(crate) const SYSTEM: [&str; 7] = [
 /// executable and nothing else, and goes first on [`PATH`].
 const VERKSTEAD_INSIDE: &str = "/verkstead/bin/verkstead";
 
+/// Where each agent type's account lands in HOME.
+///
+/// Claude's pair, and the one directory each backend after it keeps its whole
+/// account under. Written out rather than derived, because they are the paths
+/// those programs look in and not a scheme any of them follows — and named
+/// apart from [`skills::CLAUDE_INSIDE_HOME`], which is the directory *inside*
+/// the first of them that a sandbox covers.
+const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
+const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
+const CODEX_INSIDE_HOME: &str = ".codex";
+const GROK_INSIDE_HOME: &str = ".grok";
+
+/// And OpenCode's, which is two of them rather than one: it keeps no
+/// dot-directory of its own and reads the XDG base directories instead,
+/// appending `opencode` to each — read off opencode 1.18.25, which is the
+/// release this backend is pinned at, and which makes all four at startup.
+///
+/// **These are the paths inside the Profile's home as well as inside HOME.**
+/// The sandbox's HOME is made fresh and empty, so the XDG defaults resolve
+/// inside it and nothing has to be set in the environment (ADR-0011 allowed
+/// either shape, and this is the cheaper one); and a Profile's home is an
+/// opencode home too, being the directory left behind by running
+/// `HOME=<it> opencode` once to log the account in. So one relative path
+/// serves both ends of each bind, which is what says the two homes are the
+/// same shape.
+///
+/// **The config and the data, and not the other two.** The data directory is
+/// the account — `auth.json` and the session store are in it — and the config
+/// directory is what the human configures that account with, so both travel
+/// with the Profile. The cache and the state directories are neither: the
+/// cache holds what opencode downloaded for this machine and the state holds
+/// the TUI's own furniture, and both are derived things that a session is
+/// welcome to make fresh in the HOME it is thrown away with. What that costs
+/// is a re-download of whatever tooling opencode fetches, once per session.
+pub(crate) const OPENCODE_CONFIG_INSIDE_HOME: &str = ".config/opencode";
+pub(crate) const OPENCODE_DATA_INSIDE_HOME: &str = ".local/share/opencode";
+
+/// What opencode is told to call the store it writes under the data directory.
+///
+/// Said rather than left to opencode, which names the file after the release
+/// channel the install came from — a beta build writes `opencode-beta.db`
+/// beside a stable build's `opencode.db`. Whichever channel the host installed,
+/// a session under Verkstead writes the one file Verkstead named, so the reader
+/// that follows a session's Transcript opens a path this chose rather than
+/// guessing which of several is this session's — see [`crate::records`], which
+/// reads this very constant.
+///
+/// A bare filename rather than a path: opencode resolves a relative
+/// `OPENCODE_DB` against its own data directory, which is the account.
+///
+/// Named for the reason the idle signature and the usage-limit phrase are: it
+/// is somebody else's spelling, and moving it costs one edit here. Read off
+/// opencode 1.18.25, which is the release this backend is pinned at: a stable
+/// install of that names the file `opencode.db` on its own, so what this is
+/// worth is the day the host installs a beta.
+const OPENCODE_DB: &str = "OPENCODE_DB";
+pub(crate) const OPENCODE_DB_FILE: &str = "opencode.db";
+
+/// And how long a command opencode's shell tool will run before it kills it,
+/// where the model passed no timeout of its own.
+///
+/// **This is what keeps a blocking ask from being killed under a session that
+/// ignored its Guide.** `verkstead ask` blocks until the human answers and the
+/// human is on a phone, so the wait is measured in hours; the shell tool's own
+/// default is two minutes, and its description tells the model that a command
+/// with no timeout is killed after it. So the Guide tells an OpenCode session
+/// to pass a large one — see the CLI's `running-opencode.md` — and this raises
+/// what a session that passed nothing gets. Both, because the instruction is
+/// the mechanism and this is what stands under a drifted instruction: an ask
+/// killed two minutes in is an answer the human gave to nobody.
+///
+/// A day, which is the same order as the wait itself: a Set asked at the end of
+/// an evening is answered the next morning, and nothing about an ask expires
+/// before that — see ADR-0001. What it costs is the tool's own guard against a
+/// command that hangs for reasons of its own: with the default in place such a
+/// command is killed after two minutes and the model carries on, and with this
+/// it is not. Nothing else here would catch one either — opencode repaints its
+/// at-work label for as long as the tool holds a command, so the session reads
+/// at work and the byte-quiet long-stop behind the screen never comes — so
+/// what is left of that case is the Stop the human presses. Taken deliberately:
+/// a hung command is rare and is drawn on the Screen while it hangs, and an ask
+/// killed under a session waiting on the human loses an answer that was given.
+///
+/// Read off opencode 1.18.25, the release this backend is pinned at, and named
+/// for the reason the store's name above is: the spelling is opencode's, it
+/// says `EXPERIMENTAL` on it, and moving it costs one edit here. A value it
+/// cannot read as a positive integer is ignored rather than refused, so the
+/// number is written out in milliseconds rather than computed into one.
+const OPENCODE_BASH_DEFAULT_TIMEOUT: &str = "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS";
+const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
+
+/// Which backend a session is running, in its own environment.
+///
+/// Set for the Guide alone. Nothing else inside a sandbox needs to know — the
+/// asking channel and the idle judgement are both decided server-side — but
+/// `verkstead guide` prints the asking instructions for the backend reading it,
+/// and there is nothing else inside a sandbox that says which one that is.
+///
+/// A Guide printed where this is unset is the blocking one, which is what a
+/// `verkstead` run outside a sandbox altogether gets.
+pub const AGENT_TYPE: &str = "VERKSTEAD_AGENT";
+
 /// And where the sccache the shared build cache compiles through is mounted,
 /// beside it.
 ///
@@ -593,12 +695,15 @@ pub struct Sandbox {
     /// database and the refs, which is what a commit and a push need.
     git_dir: PathBuf,
 
-    /// The Profile's claude directory, mounted over `~/.claude`.
-    claude_dir: PathBuf,
-
-    /// And its config file, over `~/.claude.json`. The pair is what keeps
-    /// accounts apart, so the two travel together or not at all.
-    config_file: PathBuf,
+    /// The Profile's account, in the shape its agent type keeps one — what is
+    /// mounted into HOME, and where.
+    ///
+    /// Claude's pair goes over `~/.claude` and `~/.claude.json`, and travels
+    /// together or not at all: the pair is what keeps accounts apart. Every type
+    /// after it is one home over the one directory that backend keeps its whole
+    /// account under. Which arm this is also says which backend a session is
+    /// running, which is what [`AGENT_TYPE`] carries inside.
+    account: store::Account,
 
     /// The bundled skills, mounted read-only at [`skills::INSIDE`] — see
     /// [`crate::skills`] for why they are Verkstead's rather than the account's,
@@ -737,19 +842,10 @@ impl Sandbox {
             conversation,
         ));
 
-        // One arm per agent type: what is bound over where is that type's own
-        // shape, and a backend arriving with an account of its own lands here
-        // rather than in whatever the pair happened to mean.
-        let store::Account::Claude {
-            claude_dir,
-            config_file,
-        } = &profile.account;
-
         Some(Sandbox {
             worktree,
             git_dir,
-            claude_dir: claude_dir.clone(),
-            config_file: config_file.clone(),
+            account: profile.account.clone(),
             skills: skills.path().to_owned(),
             nothing: skills.nothing().to_owned(),
             verkstead: verkstead.path().to_owned(),
@@ -807,13 +903,66 @@ impl Sandbox {
             .arg(&self.worktree)
             .arg("--bind")
             .arg(&self.git_dir)
-            .arg(&self.git_dir)
-            .arg("--bind")
-            .arg(&self.claude_dir)
-            .arg(self.home.path.join(".claude"))
-            .arg("--bind")
-            .arg(&self.config_file)
-            .arg(self.home.path.join(".claude.json"));
+            .arg(&self.git_dir);
+
+        // And the account, in the shape its agent type keeps one: what is bound
+        // over where is that type's own business, and a backend arriving with an
+        // account of its own lands here rather than in whatever the pair
+        // happened to mean.
+        match &self.account {
+            store::Account::Claude {
+                claude_dir,
+                config_file,
+            } => {
+                bwrap
+                    .arg("--bind")
+                    .arg(claude_dir)
+                    .arg(self.home.path.join(CLAUDE_DIR_INSIDE_HOME))
+                    .arg("--bind")
+                    .arg(config_file)
+                    .arg(self.home.path.join(CLAUDE_CONFIG_INSIDE_HOME));
+            }
+            store::Account::Codex { home } => {
+                bwrap
+                    .arg("--bind")
+                    .arg(home)
+                    .arg(self.home.path.join(CODEX_INSIDE_HOME));
+            }
+            store::Account::Grok { home } => {
+                bwrap
+                    .arg("--bind")
+                    .arg(home)
+                    .arg(self.home.path.join(GROK_INSIDE_HOME));
+            }
+            // Two binds rather than one, and the same relative path on both
+            // sides of each: an OpenCode Profile's home is an opencode home,
+            // and the XDG defaults resolve inside the fresh HOME — see
+            // [`OPENCODE_CONFIG_INSIDE_HOME`]. And the two things this backend
+            // is told about itself said while the account is being said: the
+            // store, because where opencode writes it is inside the second of
+            // the two directories, and the shell tool's default timeout,
+            // because what it is there for is the ask this backend holds open.
+            store::Account::OpenCode { home } => {
+                for inside in [OPENCODE_CONFIG_INSIDE_HOME, OPENCODE_DATA_INSIDE_HOME] {
+                    bwrap
+                        .arg("--bind")
+                        .arg(home.join(inside))
+                        .arg(self.home.path.join(inside));
+                }
+
+                bwrap
+                    .arg("--setenv")
+                    .arg(OPENCODE_DB)
+                    .arg(OPENCODE_DB_FILE)
+                    // And how long its shell tool holds a command the model
+                    // gave no timeout of its own, which is what a blocking ask
+                    // under this backend stands on — see
+                    // [`OPENCODE_BASH_DEFAULT_TIMEOUT`].
+                    .arg("--setenv")
+                    .arg(OPENCODE_BASH_DEFAULT_TIMEOUT)
+                    .arg(OPENCODE_BASH_DEFAULT_TIMEOUT_MS);
+            }
+        }
 
         // After `/tmp` is made, and inside it: the tmpfs above would otherwise
         // land over this and leave the session writing its handoff into memory
@@ -834,10 +983,35 @@ impl Sandbox {
         // applied in the order it is given and the one that lands second is the
         // one that wins. Read-only as the mount that used to stand here was, so
         // a session cannot fill the directory in and then read from it.
-        bwrap
-            .arg("--ro-bind")
-            .arg(&self.nothing)
-            .arg(self.home.path.join(skills::CLAUDE_INSIDE_HOME));
+        //
+        // Claude's, and so far Claude's alone. Each backend after it has a
+        // discovery path of its own, covered the same way by the stage that
+        // lands it — except where that path is *inside* the account home
+        // itself, as Codex's `~/.codex/skills` and Grok Build's `~/.grok/skills`
+        // both are: covering one would hide the skills those programs ship as
+        // well as the ones the account added, and the home is the whole of what
+        // such a Profile names, so it is left as the account keeps it
+        // (ADR-0011).
+        //
+        // OpenCode adds none either, and for a reason of its own. Its two
+        // global paths — `~/.claude/skills` and `~/.agents/skills` — are
+        // Claude-shaped and sit under HOME rather than under its account, and
+        // an OpenCode Profile binds neither of them into the sandbox: HOME
+        // inside is fresh, so there is nothing at either to hide and an empty
+        // directory over one would cover nothing. Its own is inside the config
+        // directory the Profile names, which is the exception above. So every
+        // backend that has landed adds nothing here, and a stage that adds no
+        // bind is following the rule rather than forgetting one.
+        //
+        // And the account's type at all, rather than every home there is,
+        // because a bind into a home no session is running under would cover
+        // nothing and make a directory the account never had.
+        if matches!(self.account, store::Account::Claude { .. }) {
+            bwrap
+                .arg("--ro-bind")
+                .arg(&self.nothing)
+                .arg(self.home.path.join(skills::CLAUDE_INSIDE_HOME));
+        }
 
         // And the binary the session asks with, in a directory of its own that
         // goes first on `PATH` — see [`Executable`]. The bind makes the
@@ -898,7 +1072,14 @@ impl Sandbox {
             // either.
             .arg("--setenv")
             .arg("VERKSTEAD_SERVER")
-            .arg(&self.server);
+            .arg(&self.server)
+            // And which backend this session is, which is what tailors the
+            // Guide it reads — see [`AGENT_TYPE`]. Off the account's own shape,
+            // so nothing has to be plumbed through to say which agent is being
+            // launched.
+            .arg("--setenv")
+            .arg(AGENT_TYPE)
+            .arg(self.account.agent_type().word());
 
         // Where a Rust build inside puts what it downloads and what it
         // compiles. Nothing but a Rust build ever reads any of them, which is

@@ -585,10 +585,10 @@ pub struct SetOnTimeline {
     /// How it was settled, or `None` while it is still waiting on the human.
     pub settlement: Option<super::Settlement>,
 
-    /// Whether it was a Deferred Ask, which is what tells one still waiting on
-    /// the human from a blocking one: both are something to answer, and nothing
-    /// is idling on this one — see [`super::deferrals`].
-    pub deferred: bool,
+    /// How it was asked, which is what tells one still waiting on the human from
+    /// a blocking one: both are something to answer, and only one of them has a
+    /// session standing still behind it — see [`super::deferrals`].
+    pub ask: super::Ask,
 }
 
 impl Event {
@@ -2272,11 +2272,11 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // query that nearly always comes back with nothing.
     let mut pauses = super::pauses::on_timeline(pool, conversation_id).await?;
 
-    // And which of the Sets above were asked deferred, for the arithmetic again
-    // — see [`super::deferrals::deferred_on_timeline`]. Cheaper than any of
-    // them: one indexed column, and most Conversations have no deferred Set at
-    // all.
-    let deferred = super::deferrals::deferred_on_timeline(pool, conversation_id).await?;
+    // And how each of the Sets above was asked, for the arithmetic again — see
+    // [`super::deferrals::stored_on_timeline`]. Cheaper than any of them: one
+    // indexed column, and most Conversations have no stored ask at all, which
+    // is what a Set this does not name comes back as.
+    let stored = super::deferrals::stored_on_timeline(pool, conversation_id).await?;
 
     // And what each of those sessions ran under, for the arithmetic again and
     // at the Capture summaries' cost: one row per session, and a Timeline with
@@ -2337,7 +2337,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                         // [`super::Asked`].
                         set: super::Asked::read(body),
                         settlement: settled(set_id, answered_at, answer, locked_at)?,
-                        deferred: deferred.contains(&set_id),
+                        ask: stored.get(&set_id).copied().unwrap_or(super::Ask::Blocking),
                     })
                 })
                 .transpose()?;
@@ -2410,8 +2410,8 @@ fn settled(
 /// The Set is expected to have been validated already — the store is not where
 /// the question grammar is enforced.
 ///
-/// `ask` is which of the two kinds it is, and the deferral is written in this
-/// same transaction where it is a Deferred Ask: a Set that was stored a moment
+/// `ask` is which of the three kinds it is, and the row that records a stored
+/// one is written in this same transaction: a Set that was stored a moment
 /// before the record of how it was asked is one that reads as blocking for that
 /// moment, and what reads it in that moment is a driver deciding whether a quiet
 /// session is still waiting on an Answer.
@@ -2463,13 +2463,21 @@ pub async fn ask(
         .await
         .with_context(|| format!("putting Question Set {id} on the Timeline"))?;
 
-    if ask == super::Ask::Deferred {
-        super::deferrals::defer(&mut tx, id).await?;
+    if ask.deferred_shaped() {
+        super::deferrals::defer(&mut tx, id, ask.idled()).await?;
     }
 
     tx.commit().await.context("putting a Question Set")?;
 
-    Ok(Some(SetCreated { id, created_at }))
+    // The stored kinds say so in the reply, which is what tells the CLI there
+    // is nothing to wait on — see [`verkstead_schema::SetCreated`]. Said by the
+    // server rather than assumed by the CLI, because which channel a Set was
+    // asked on is the backend's fact and the backend is what the server knows.
+    Ok(Some(SetCreated {
+        id,
+        created_at,
+        stored: ask.deferred_shaped(),
+    }))
 }
 
 /// Whether this Set is on this Conversation's Timeline.
@@ -2543,9 +2551,10 @@ pub async fn last_batch_proposal(pool: &SqlitePool, conversation_id: i64) -> Res
         .next_back())
 }
 
-/// Every Blocking Set this wrap has put to the human, oldest first.
+/// Every Set this wrap has put to the human with somebody idling on it, oldest
+/// first.
 ///
-/// **Every Blocking Set**, because a wrap-up's asks are all of them proposals:
+/// **Every one of them**, because a wrap-up's asks are all of them proposals:
 /// the review reads the branch and proposes what to do about what it found, and
 /// a batch session proposes what to do about what was said on the pull request.
 /// Nothing marks one as such and nothing needs to — a Set that says which kind
@@ -2558,16 +2567,18 @@ pub async fn last_batch_proposal(pool: &SqlitePool, conversation_id: i64) -> Res
 /// what is on the other side is a run stopping, and a question nobody is coming
 /// back to answer is worth stopping over whoever asked it.
 ///
-/// **Blocking, though, and never Deferred**, which is the one thing that width
-/// must not swallow. A Deferred Ask idles nobody: the session that sent one
-/// carried straight on, its Answers reach a later session by design, and it is
+/// **Idled, though, and never Deferred**, which is the one thing that width must
+/// not swallow. A Deferred Ask idles nobody: the session that sent one carried
+/// straight on, its Answers reach a later session by design, and it is
 /// unanswered for as long as the human likes without anything being owed. So a
 /// Deferred Set is not a proposal left standing — and reading one as such would
 /// stop the run over a question that was working exactly as it was meant to,
-/// and close it on the human's behalf into the bargain. This is the same
-/// question [`unanswered_set_since`] asks of a quiet session, and the two have
-/// to answer it the same way: a Set that holds no session open holds no wrap-up
-/// open either.
+/// and close it on the human's behalf into the bargain. A store-and-nudge ask
+/// is on the other side of that line, stored though it is: a session is idling
+/// on it with its turn ended, so it is a proposal like any other. This is the
+/// same question [`unanswered_set_since`] asks of a quiet session, and the two
+/// have to answer it the same way: a Set that holds no session open holds no
+/// wrap-up open either.
 ///
 /// **This wrap's**, because a Conversation can wrap up more than once: a review
 /// that splits its findings out into a backlog leaves Wrapping to build them and
@@ -2593,7 +2604,7 @@ async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Propos
          LEFT JOIN deferrals d ON d.set_id = q.id
          WHERE e.conversation_id = ?
            AND a.set_id IS NULL
-           AND d.set_id IS NULL
+           AND (d.set_id IS NULL OR d.idled)
            AND e.id > COALESCE(
                    (SELECT MAX(w.id) FROM timeline_events w
                     WHERE w.conversation_id = ? AND w.kind = ? AND w.body = ?),
@@ -2640,10 +2651,16 @@ struct Proposal {
 /// idling on a Blocking Ask prints nothing for hours, and quiet alone would reap
 /// it mid-question.
 ///
-/// Blocking Asks alone, for that same reason read the other way: a Deferred Ask
-/// idles nobody, so a session that has gone quiet behind one has finished rather
-/// than being mid-question, and a driver that waited on it would wait for as
-/// long as the human took to answer something nothing was waiting for.
+/// The Sets somebody is idling on, for that same reason read the other way: a
+/// Deferred Ask idles nobody, so a session that has gone quiet behind one has
+/// finished rather than being mid-question, and a driver that waited on it would
+/// wait for as long as the human took to answer something nothing was waiting
+/// for.
+///
+/// A store-and-nudge ask is one somebody is idling on, whatever the row beside
+/// it looks like: the session that sent one has ended its turn and is waiting
+/// for the nudge, so ending it on quiet would leave the Response with nothing to
+/// nudge — see [`super::Ask`].
 pub async fn unanswered_set_since(
     pool: &SqlitePool,
     conversation_id: i64,
@@ -2658,7 +2675,8 @@ pub async fn unanswered_set_since(
          LEFT JOIN archivings a ON a.set_id = q.id
          LEFT JOIN deferrals d ON d.set_id = q.id
          WHERE e.conversation_id = ? AND e.id > ?
-           AND r.set_id IS NULL AND a.set_id IS NULL AND d.set_id IS NULL
+           AND r.set_id IS NULL AND a.set_id IS NULL
+           AND (d.set_id IS NULL OR d.idled)
          ORDER BY q.id
          LIMIT 1",
     )
@@ -2684,10 +2702,10 @@ pub async fn unanswered_set_since(
 /// Every Timeline Event's id is positive, so opening the window at zero leaves
 /// nothing out.
 ///
-/// Blocking Asks alone and never a Deferred one, exactly as the read it is made
-/// of: a Deferred Ask idles nobody and holds nothing open, so a follow-up that
-/// waited on one would be waiting on a question that was working exactly as it
-/// was meant to.
+/// The Sets somebody is idling on, and never a Deferred one, exactly as the read
+/// it is made of: a Deferred Ask idles nobody and holds nothing open, so a
+/// follow-up that waited on one would be waiting on a question that was working
+/// exactly as it was meant to.
 pub async fn open_set(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
     unanswered_set_since(pool, conversation_id, 0).await
 }
