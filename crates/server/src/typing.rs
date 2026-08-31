@@ -39,7 +39,8 @@ use crate::AppState;
 /// terminal, not a wait on anything.
 const BEFORE_THE_ENTER: Duration = Duration::from_millis(250);
 
-/// And how long after the Enter what was typed is still arriving back.
+/// How long the terminal has to say nothing before what was typed is taken to
+/// have finished arriving back.
 ///
 /// **Because a terminal says what is typed into it.** The keystrokes go in and
 /// are echoed straight back out — by the line discipline where the agent left it
@@ -49,13 +50,13 @@ const BEFORE_THE_ENTER: Duration = Duration::from_millis(250);
 /// with its terminal open echoes exactly as well as one that is about to take a
 /// turn.
 ///
-/// So a caller that reads what the session says next has to let this pass first
-/// — see [`crate::rescues::until_it_will_not_ask`], where a stir the typing
+/// So a caller that reads what the session says next has to wait the echo out
+/// first — see [`crate::rescues::after_the_echo`], where a stir the typing
 /// itself answered would be no stir at all.
 ///
-/// One turnaround of a terminal again, for [`BEFORE_THE_ENTER`]'s reason: an
-/// echo is drawn as it is read, and anything arriving later than this is the
-/// session rather than the keyboard.
+/// One turnaround of a terminal, for [`BEFORE_THE_ENTER`]'s reason: an echo is
+/// drawn as it is read, so a window this long with nothing in it is one no echo
+/// is still arriving inside.
 pub(crate) const AFTER_THE_ECHO: Duration = Duration::from_millis(250);
 
 /// Type `line` into the session, and say whether it reached one.

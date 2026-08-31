@@ -29,6 +29,18 @@ import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
 
 const TOLD = told as SettingsView;
+
+/// The paths the fixture holds, as a save puts them back on the wire: the
+/// settings' own entries, and a Repo's bind in the `name=path` grammar the file
+/// keeps them in. Every section's save carries them, because one request writes
+/// the whole of `config.yaml` — a list left out would be a list emptied.
+const PATHS = {
+  watched_paths: ["/home/ada/src"],
+  sandbox_binds: [
+    "/var/cache/verkstead-node",
+    "verkstead=/var/cache/verkstead-cargo",
+  ],
+};
 const UNSET = unset as SettingsView;
 
 /// The same settings with an sccache the server did find, which no fixture
@@ -276,6 +288,11 @@ describe("changing the build cache", () => {
           enabled: false,
           size: TOLD.rust_build_cache.size,
         },
+        share_viewer_url: TOLD.share_viewer_url,
+        // Untouched by this form, and sent back as it stands: one request
+        // writes the whole of `config.yaml`.
+        conflict_resolution: TOLD.conflict_resolution,
+        ...PATHS,
       }),
     );
 
@@ -312,6 +329,11 @@ describe("changing the build cache", () => {
         git_author: TOLD.git_author,
         github_token: "Keep",
         rust_build_cache: { enabled: true, size: "80G" },
+        share_viewer_url: TOLD.share_viewer_url,
+        // Untouched by this form, and sent back as it stands: one request
+        // writes the whole of `config.yaml`.
+        conflict_resolution: TOLD.conflict_resolution,
+        ...PATHS,
       }),
     );
   });

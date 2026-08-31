@@ -6,6 +6,14 @@
 //! it belongs to, and the timeline is read again every time the page hears the
 //! world moved.
 //!
+//! Two components, because there are two places a commit is read from. [`Commit`]
+//! is the workbench's: it fetches, and it says what is standing where the diff
+//! goes while the fetch is out or after it failed. [`Opened`] is the pane itself,
+//! drawn from a commit somebody has already read — which is what a share hands
+//! it, the whole of every commit having travelled in the file (`share/Details`).
+//! One drawing either way, so the patch a colleague reads and the patch the human
+//! reviewed are the same page.
+//!
 //! The diff arrives as HTML the server already rendered — parsed per file,
 //! highlighted, and folded — which is the same diff renderer the question sets'
 //! attached diff goes through. So there is nothing here to render, no diff
@@ -60,9 +68,10 @@ import {
 
 import app from "../App.module.css";
 import { Card } from "../Card";
+import { PaneSticky } from "../Panes";
 import { Switch as Toggle } from "../Switch";
 import { loadCommitPane } from "../api/client";
-import type { CommitEvent, ConversationView } from "../api/types";
+import type { CommitEvent, CommitPane, ConversationView } from "../api/types";
 import { setWrapping, wrapping } from "../device";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
@@ -137,6 +146,12 @@ function Message(props: { html: string; diagrams: boolean }): JSX.Element {
   );
 }
 
+/// A commit the workbench opened: read when the card is pressed, and drawn as
+/// [`Opened`] once it is here.
+///
+/// What this owns is the fetch and the three things that can be true of one — it
+/// is still out, it failed, or it came back — each of which is a sentence
+/// standing where the diff would be.
 export function Commit(props: {
   conversation: ConversationView;
   commit: CommitEvent;
@@ -157,6 +172,46 @@ export function Commit(props: {
     freshness: "static",
   }));
 
+  return (
+    <Opened
+      commit={props.commit}
+      pane={opened.data}
+      back={props.back}
+      instead={
+        <Switch fallback={<Empty>This commit changed no files.</Empty>}>
+          <Match when={opened.isPending}>
+            <Empty>Loading…</Empty>
+          </Match>
+          <Match when={opened.isError}>
+            <ErrorLine>
+              Could not read this commit: {opened.error?.message}
+            </ErrorLine>
+          </Match>
+        </Switch>
+      }
+    />
+  );
+}
+
+/// The pane itself: what the commit was, what it said about itself, and what it
+/// changed.
+///
+/// Handed the reading rather than making one, so that the workbench and a share
+/// draw one page from two sources — see this module's own note. The header, the
+/// table of contents and the Message come off the pair it is given; the diff is
+/// the server's markup, assigned whole.
+export function Opened(props: {
+  commit: CommitEvent;
+  /// The commit as it was read, and `undefined` where it has not been: a fetch
+  /// still out, or a share not carrying this one.
+  pane: CommitPane | undefined;
+  back: () => void;
+  /// What stands where the diff would be when there is none to draw. Every
+  /// reason for that is the caller's to word — a fetch in flight, a fetch that
+  /// failed, a commit that changed nothing, a commit the repository has lost —
+  /// and only the caller knows which of them this is.
+  instead: JSX.Element;
+}): JSX.Element {
   // How this device wants diffs drawn — the same setting a question set's
   // attached diff is read with, because it is a setting about reading diffs
   // rather than about any one page.
@@ -176,7 +231,7 @@ export function Commit(props: {
   // to jump to; one that changed nothing has no Diff line either, and a pane with
   // neither gets no nav at all.
   const sections = createMemo((): Section[] => {
-    const pane = opened.data;
+    const pane = props.pane;
     const listed: Section[] = [];
 
     if (pane?.summary) {
@@ -197,7 +252,9 @@ export function Commit(props: {
 
   return (
     <>
-      <PaneHead back={{ to: "Timeline", go: props.back }} title="Commit" />
+      <PaneSticky>
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Commit" />
+      </PaneSticky>
 
       <div class={styles.header}>
         <p class={styles.subject}>{props.commit.subject}</p>
@@ -222,56 +279,39 @@ export function Commit(props: {
           Message empty. A commit with neither a message nor a file changed has
           nothing to list, and gets no nav. */}
       <Show when={sections().length > 0}>
-        <Contents sections={sections()} watched={watched()} nav={nav} paned />
+        <Contents sections={sections()} watched={watched()} nav={nav} />
       </Show>
 
       {/* Between the header and the diff, which is the order it is read in:
           what the commit says about itself, then what it changed. A commit that
           said nothing — a bookkeeping one, or any commit recorded before
           summaries were kept — has nothing here at all. */}
-      <Show when={opened.data?.summary}>
+      <Show when={props.pane?.summary}>
         {(summary) => (
-          <Message html={summary()} diagrams={opened.data?.diagrams ?? false} />
+          <Message html={summary()} diagrams={props.pane?.diagrams ?? false} />
         )}
       </Show>
 
-      <Switch>
-        <Match when={opened.isPending}>
-          <Empty>Loading…</Empty>
-        </Match>
-        <Match when={opened.isError}>
-          <ErrorLine>
-            Could not read this commit: {opened.error?.message}
-          </ErrorLine>
-        </Match>
-        <Match when={opened.data}>
-          {(read) => (
-            <Show
-              when={read().diff}
-              fallback={<Empty>This commit changed no files.</Empty>}
-            >
-              {(diff) => (
-                <section
-                  class={
-                    wrapped()
-                      ? `${diffStyles.diff} ${diffStyles.wrapped}`
-                      : diffStyles.diff
-                  }
-                  id={DIFF}
-                >
-                  <div class={app.sectionHead}>
-                    <h2 class={app.sectionHeading}>Diff</h2>
-                    <Toggle label="Word wrap" on={wrapped()} flip={flip} />
-                  </div>
-                  {/* The per-file folds and their anchors are stamped by the
-                      renderer, since this arrives already rendered. */}
-                  <div class={diffStyles.diffFiles} innerHTML={diff().html} />
-                </section>
-              )}
-            </Show>
-          )}
-        </Match>
-      </Switch>
+      <Show when={props.pane?.diff} fallback={props.instead}>
+        {(diff) => (
+          <section
+            class={
+              wrapped()
+                ? `${diffStyles.diff} ${diffStyles.wrapped}`
+                : diffStyles.diff
+            }
+            id={DIFF}
+          >
+            <div class={app.sectionHead}>
+              <h2 class={app.sectionHeading}>Diff</h2>
+              <Toggle label="Word wrap" on={wrapped()} flip={flip} />
+            </div>
+            {/* The per-file folds and their anchors are stamped by the
+                renderer, since this arrives already rendered. */}
+            <div class={diffStyles.diffFiles} innerHTML={diff().html} />
+          </section>
+        )}
+      </Show>
     </>
   );
 }

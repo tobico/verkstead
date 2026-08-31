@@ -46,8 +46,8 @@ use verkstead_store::{
     Commit, Decision, Event, Finished, Lifecycle, PullRequest, WaitingOn, asked_to_stop,
     clear_stop, commit_repo, conversations, finish_wrap_up, fix_attempts, load_conversation,
     open_database, pull_request, pull_request_repo, record_another_pull_request, record_commit,
-    record_fix_attempt, recorded_commits, register_repo, start_conversation, start_grilling,
-    start_unnamed_conversation, stop, stopped, timeline, wrap_up_settled,
+    record_fix_attempt, recorded_commits, register_repo, settle_wrap_up, start_conversation,
+    start_grilling, start_unnamed_conversation, stop, stopped, timeline, wrap_up_settled,
 };
 
 /// A database with the old table in it, and a Conversation to hang stops off.
@@ -1383,7 +1383,8 @@ async fn every_fix_session_counted_before_this_was_the_conversations_own_reposit
 /// Which together are what keeps a wrap-up that was nearly over from starting
 /// again: what it had settled is still settled, so a server that came back up to
 /// this database is waiting on what it was waiting on before — which here is
-/// nothing at all.
+/// nothing but the one thing this Verkstead asks and the one that wrote the
+/// database did not.
 #[tokio::test]
 async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() {
     let dir = tempfile::tempdir().unwrap();
@@ -1407,8 +1408,20 @@ async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() 
          pull request's they could have been",
     );
 
-    // And the rule that ends a wrap-up reads them as it always did: everything
-    // this wrap-up was waiting on it had already settled, so it is over.
+    // And the rule that ends a wrap-up reads them as it always did, with one
+    // more thing to read: whether GitHub can merge the pull request, which the
+    // Verkstead that wrote this database never asked. Nothing has asked it here
+    // either, and *not asked* is not *conflicted* — so the wrap-up waits for the
+    // answer the watcher brings a poll after the server comes up.
+    assert_eq!(
+        finish_wrap_up(&pool, id).await.unwrap(),
+        Finished::StillWaiting,
+    );
+
+    settle_wrap_up(&pool, id, WaitingOn::Mergeable(repo))
+        .await
+        .unwrap();
+
     assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
 
     pool.close().await;
@@ -1424,7 +1437,7 @@ async fn every_settled_suite_of_before_is_the_conversations_own_pull_requests() 
         1,
         "what a check had been given is where the first run left it",
     );
-    assert_eq!(wrap_up_settled(&pool, id).await.unwrap().len(), 3);
+    assert_eq!(wrap_up_settled(&pool, id).await.unwrap().len(), 4);
 }
 
 /// A Conversation written before there was a Review role opens with the column

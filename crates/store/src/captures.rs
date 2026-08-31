@@ -114,10 +114,16 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// [`crate::session_id`] — and it is written in the same transaction, so an
 /// Event and the name of the session writing into it arrive together. `None`
 /// where the session has no name to record.
+///
+/// `ran_under` is the Pairing it is being launched under, written down beside
+/// the name in the same transaction and for the same reason — see
+/// [`crate::RanUnder`], which is where the copy rather than the reference is
+/// argued. `None` where nothing paired this session with anything.
 pub async fn start_capture(
     pool: &SqlitePool,
     conversation_id: i64,
     session_id: Option<&str>,
+    ran_under: Option<&super::Pairing>,
 ) -> Result<i64> {
     let mut tx = super::writing(pool, "starting a Capture").await?;
 
@@ -127,7 +133,7 @@ pub async fn start_capture(
          RETURNING id",
     )
     .bind(conversation_id)
-    .bind(Event::AgentOutput(Summary::default()).kind())
+    .bind(Event::AgentOutput(Summary::default(), None).kind())
     .fetch_one(&mut *tx)
     .await
     .with_context(|| format!("putting a session's output on the Timeline of {conversation_id}"))?;
@@ -140,6 +146,10 @@ pub async fn start_capture(
 
     if let Some(session_id) = session_id {
         super::session_names::name_session(&mut tx, event_id, session_id).await?;
+    }
+
+    if let Some(ran_under) = ran_under {
+        super::session_pairings::pair_session(&mut tx, event_id, ran_under).await?;
     }
 
     tx.commit().await.context("starting a Capture")?;

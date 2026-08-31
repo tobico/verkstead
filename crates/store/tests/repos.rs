@@ -1,13 +1,18 @@
 //! Registering Repos: what a registration records, what it refuses, that it is
 //! still there after the server has been restarted, and what taking one away
 //! does to all of that.
+//!
+//! And the one thing a registration is told afterwards: how a merge conflict on
+//! its pull requests is resolved, which is an override of the global setting and
+//! so is nothing at all until somebody says something.
 
 use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Adding, Lifecycle, Unregistering, add_companion, load_repo, open_database, register_repo,
-    registered_repos, set_state, start_adoption, start_conversation, unregister_repo,
+    Adding, ConflictResolution, Lifecycle, Unregistering, add_companion, load_repo, open_database,
+    recorded_repos, register_repo, registered_repos, repo_resolution, set_repo_resolution,
+    set_state, start_adoption, start_conversation, unregister_repo,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -311,4 +316,109 @@ async fn an_unregistered_repo_is_no_companion() {
         add_companion(&pool, conversation, beside.id).await.unwrap(),
         Adding::NoSuchRepo,
     );
+}
+
+/// Taking a Repo away does not take it off the list of Repos there *are*. The
+/// directory is untouched by an unregistering, so git goes on holding whatever
+/// registrations it held — and the sweep of orphaned worktrees has to prune it
+/// like any other, whatever the settings list is offering now.
+#[tokio::test]
+async fn a_repo_taken_away_is_still_one_to_prune() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let kept = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let taken = register_repo(&pool, Path::new("/watched/askance"), "askance", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    unregister_repo(&pool, taken.id).await.unwrap();
+
+    assert_eq!(registered_repos(&pool).await.unwrap(), vec![kept.clone()]);
+    assert_eq!(
+        recorded_repos(&pool).await.unwrap(),
+        vec![kept.path, taken.path],
+    );
+}
+
+/// A Repo nobody has said anything about overrides nothing: what resolves a
+/// conflict in it is whatever the settings file says for every Repo at once,
+/// and *nothing here* is how that is spelled.
+#[tokio::test]
+async fn a_repo_nobody_has_told_resolves_conflicts_the_way_everything_else_does() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(repo_resolution(&pool, repo.id).await.unwrap(), None);
+}
+
+/// And one that has been told keeps what it was told, either way round, until
+/// somebody takes it back.
+///
+/// Taking it back is `None` rather than the word the global happens to hold
+/// today: what *use the global setting* means is that there is nothing written
+/// here, and a Repo holding this morning's global would be a choice nobody made.
+#[tokio::test]
+async fn a_repo_told_how_to_resolve_a_conflict_keeps_it_until_it_is_taken_back() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    set_repo_resolution(&pool, repo.id, Some(ConflictResolution::Rebase))
+        .await
+        .unwrap();
+    assert_eq!(
+        repo_resolution(&pool, repo.id).await.unwrap(),
+        Some(ConflictResolution::Rebase),
+    );
+
+    // Said again, which is the settings page being pressed twice.
+    set_repo_resolution(&pool, repo.id, Some(ConflictResolution::Merge))
+        .await
+        .unwrap();
+    assert_eq!(
+        repo_resolution(&pool, repo.id).await.unwrap(),
+        Some(ConflictResolution::Merge),
+    );
+
+    set_repo_resolution(&pool, repo.id, None).await.unwrap();
+    assert_eq!(repo_resolution(&pool, repo.id).await.unwrap(), None);
+}
+
+/// One Repo's override is one Repo's. Two registered repositories are two
+/// answers, and the one nobody has been to is still the global's.
+#[tokio::test]
+async fn an_override_is_one_repos_alone() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let told = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let untold = register_repo(&pool, Path::new("/watched/askance"), "askance", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    set_repo_resolution(&pool, told.id, Some(ConflictResolution::Rebase))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        repo_resolution(&pool, told.id).await.unwrap(),
+        Some(ConflictResolution::Rebase),
+    );
+    assert_eq!(repo_resolution(&pool, untold.id).await.unwrap(), None);
 }

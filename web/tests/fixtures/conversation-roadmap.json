@@ -105,6 +105,7 @@
       }
     }
   },
+  "shared": null,
   "state": "Grilling",
   "stop_asked": false,
   "stopped_by_hand": false,
@@ -167,6 +168,7 @@
       }
     }
   ],
+  "waiting": false,
   "waiting_on_checks": false,
   "working": false,
   "worktree": {

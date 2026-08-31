@@ -182,7 +182,27 @@ running: boolean,
  * gone quiet — so a page opened onto a session that has been idle for an
  * hour says so at once rather than waiting to be told.
  */
-idle: boolean, };
+idle: boolean, 
+/**
+ * The name of the Agent Profile this session was launched from.
+ *
+ * Off the record rather than off what is running: it is written down as
+ * the session starts and stays true afterwards, so a Profile renamed or
+ * deleted since — and a Verkstead restarted since — leaves this saying
+ * what actually ran. `null` for a session started before Verkstead wrote
+ * it down.
+ */
+profile: string | null, 
+/**
+ * And the model it was launched on, as the raw id: `claude-opus-5` rather
+ * than "Opus 5". Prettifying is the viewer's, so a model nothing here has
+ * heard of still reaches the human as its id.
+ *
+ * `null` beside a `profile` that is there is a Pairing that named no model
+ * at all; `null` beside a `profile` that is not is a session from before
+ * either was recorded.
+ */
+model: string | null, };
 
 /**
  * One question's slot in a Response: either an Answer — a selected Option
@@ -316,6 +336,22 @@ branch: string | null, };
  * What became of choosing the branch the work comes off.
  */
 export type BaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "NoSuchBranch";
+
+/**
+ * And one Sandbox Configuration bind.
+ */
+export type BindEntry = { 
+/**
+ * The directory bound in, read out of the entry — and the whole entry as
+ * it was written, where nothing could be read out of it at all. A row
+ * nobody can see is a row nobody can correct.
+ */
+path: string, 
+/**
+ * The Repo this bind is only for, by the name it is registered under, or
+ * `null` for one every sandbox gets.
+ */
+repo: string | null, source: PathSource, resolution: PathResolution, };
 
 /**
  * One line of the backend's own bookkeeping.
@@ -480,6 +516,26 @@ export type CheckRollup = "Passed" | "Running" | "Failed";
  * rest are green.
  */
 export type Checked = "Passed" | "Running" | "Failed";
+
+/**
+ * One pull request the comment landed on.
+ */
+export type CommentedOn = { 
+/**
+ * The number GitHub gave it, which is what a human calls it by.
+ */
+number: number, 
+/**
+ * Which repository that number is in, where it is not the Conversation's
+ * own — the same label a pull request's card draws, and `null` for the
+ * same reason: an unlabeled one means the repo the work is in.
+ */
+repo: string | null, 
+/**
+ * The comment itself, as GitHub gave it back, so the human can go and read
+ * what was left in their name.
+ */
+url: string, };
 
 /**
  * A commit as the Timeline shows it: what it was called, and how much of the
@@ -736,6 +792,31 @@ worktree: Worktree | null,
  * Verkstead kept the commit.
  */
 base_commit: string | null, };
+
+/**
+ * How a merge conflict between a pull request and its base branch is resolved.
+ *
+ * Two words for two ways of putting the base's work on a branch that has
+ * diverged from it, and what tells them apart is what happens to the commits
+ * already pushed: a merge leaves every one of them where it is, and a rebase
+ * writes them again and has to be force-pushed — which rewrites what reviewers
+ * have read and breaks anything stacked on the branch.
+ *
+ * Which is why the page says so beside the choice rather than leaving it to be
+ * found later, and why merge is what nobody choosing anything gets.
+ */
+export type ConflictResolution = "Merge" | "Rebase";
+
+/**
+ * How one Repo is to resolve a conflict from now on, which is the one thing
+ * there is to *say* to a registered Repo besides taking it away.
+ *
+ * `null` takes the override back rather than writing the global's word down:
+ * what *use the global setting* means is that this Repo says nothing, and a
+ * Repo holding a copy of today's global would go on holding it after the global
+ * moved.
+ */
+export type ConflictResolutionEdit = { resolution: ConflictResolution | null, };
 
 /**
  * And what became of archiving one: putting a Closed Conversation away, so the
@@ -1101,36 +1182,51 @@ direction: Direction | null,
  * Which Event the Conversation is blocked on, or `null` where nothing is
  * stopping it.
  *
- * What the *blocked on you* badge is drawn from. The Event id and not a
- * flag, so that a header saying the work has stopped can point at the thing
- * that stopped it — a Timeline is long by the time a run gets far enough to
- * stop, and *blocked on you* with nowhere to go would be a badge the human
- * had to go hunting behind.
+ * The Event id and not a flag, so that the Notice a run stopped at can be
+ * marked where it stands on the record — a Timeline is long by the time a
+ * run gets far enough to stop, and the status button at the head of it
+ * saying the work has stopped is half an answer without somewhere to read
+ * why.
  *
- * *Blocked on you* is a badge on an active state and never a state of its
+ * Being stopped is a condition of an active state and never a state of its
  * own, which is why this sits beside `state` rather than in it.
  *
- * Set for every stop, however it stopped. Which of the two marks the
- * header draws is `stopped_by_hand` below — both of them point here, a
- * stop the human has to find being the same Notice as a stop they made
- * themselves.
+ * Set for every stop, however it stopped. Which word the status button
+ * says over it is `stopped_by_hand` below; the Notice is the same Notice
+ * either way, a stop the human has to find being no different on the
+ * record from a stop they made themselves.
  */
 blocked_on: number | null, 
 /**
  * Whether that stop is the human's own press, or a row from before the
  * two were told apart and read as one.
  *
- * Which of the two marks the header draws, decided here rather than in the
- * browser: `false` is the accent *Blocked on you* badge — Verkstead pulled
- * the brake, or a crash took the driver away — and `true` is the quiet
- * **Stopped** label, which goes to the same Notice and says nothing about
- * anybody waiting. The sidebar's disc follows the same rule from its own
- * end of the wire, where the row's `waiting` has already folded it in.
+ * Which word the status button says over the stop, decided here rather
+ * than in the browser: `false` is the accented one — Verkstead pulled the
+ * brake, or a crash took the driver away, so the Conversation is *Waiting
+ * on you*, or *Blocked* where somehow it is not — and `true` is the quiet
+ * *Stopped*, which says nothing about anybody waiting. The sidebar's disc
+ * follows the same rule from its own end of the wire, where the row's
+ * `waiting` has already folded it in.
  *
  * `false` where nothing has stopped, which is the ordinary Conversation:
- * there is no mark to choose between.
+ * there is no word to choose between.
  */
 stopped_by_hand: boolean, 
+/**
+ * Whether something about this Conversation is waiting on the human: an ask
+ * left open, or driving that has stopped without them.
+ *
+ * The same fact the sidebar row carries — see [`ConversationEntry::waiting`]
+ * — folded by the same rule in the same place, so the row and the page it
+ * opens can never come to disagree about the one Conversation. What the
+ * page does with it is its own: the row draws a disc, and the head of the
+ * Timeline draws the status word in the accent colour.
+ *
+ * A Draft is never one of them, and neither is a Closed Conversation: the
+ * first is drawn as a draft and the second has nothing left to want.
+ */
+waiting: boolean, 
 /**
  * Whether the wrap-up has narrowed to its checks: the review answered, the
  * comments dealt with, the checks alone outstanding, and nothing running in
@@ -1155,10 +1251,11 @@ waiting_on_checks: boolean,
  * `null` on every stop that is not a usage window's — which is nearly all
  * of them, and every Conversation that has not stopped.
  *
- * Words to draw beside Resume rather than a moment anything acts on: no
- * stop resumes itself, so what a stopped run waits for is a press whatever
- * stopped it. The one thing that tells a run stopped by an exhausted window
- * from a run stopped by anything else — same card, same badge, same button.
+ * Words for the status button's second line, where what is running is
+ * otherwise said, rather than a moment anything acts on: no stop resumes
+ * itself, so what a stopped run waits for is a press whatever stopped it.
+ * The one thing that tells a run stopped by an exhausted window from a run
+ * stopped by anything else — same card, same status, same row to press.
  *
  * As the session printed it, because the wording is the backend's: `3pm`
  * stays `3pm`, which is what somebody looks at their own clock for.
@@ -1225,7 +1322,20 @@ archived: boolean,
  * state of something the work is against. Empty is the ordinary case — a
  * Conversation with no backlog has nothing to pin.
  */
-pinned: Array<PinnedEvent>, };
+pinned: Array<PinnedEvent>, 
+/**
+ * Where the latest share of this Conversation was published, and when.
+ *
+ * `null` on every Conversation nobody has published one of, which is most
+ * of them: downloading a share leaves no trace, and this is only about the
+ * one that was put somewhere a link can reach.
+ *
+ * Replaced rather than added to. Publishing again is a fresh snapshot of a
+ * Conversation that has moved on, so what the workbench draws is where to
+ * send somebody *now* — see the store's `shares`, which says what becomes
+ * of the link it replaced.
+ */
+shared: ShareView | null, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -1333,6 +1443,27 @@ at: string,
  * markdown on this wire is.
  */
 html: string, };
+
+/**
+ * And whether it merges into its base.
+ *
+ * The store's own word again, and two rather than GitHub's three for the reason
+ * it keeps two: a GitHub that has not worked the answer out yet is *not known*,
+ * and not knowing is the absence of this rather than a word in it — the same
+ * card with no mark on it that a pull request nothing has asked about draws.
+ */
+export type Merging = "Cleanly" | "Conflicting";
+
+/**
+ * And one it did not.
+ */
+export type MissedOut = { number: number, repo: string | null, 
+/**
+ * What `gh` said about it, in its own words. A pull request that has gone
+ * and one the token may not write on are two afternoons apart, and neither
+ * is anything Verkstead can put right on the human's behalf.
+ */
+why: string, };
 
 /**
  * A move as the page receives it: when, and to what.
@@ -1460,6 +1591,48 @@ export type PairingView = { profile: ProfileEntry,
  * here has to say — its Pairings are fixed and there is no picking left.
  */
 model: string | null, };
+
+/**
+ * Whether the server can see what an entry names, at the moment it was asked.
+ *
+ * Reported rather than refused: a save lands whatever it was told, so an entry
+ * naming a directory nobody has made yet is something to say on the row rather
+ * than something to turn a save down over. It is also how a nix install learns
+ * that a path added here needs the installer to widen the unit's namespace
+ * before it can do anything — the file says it, and the server cannot see it.
+ */
+export type PathResolution = "Resolves" | { "Unresolved": { why: string, } };
+
+/**
+ * Which of the two places an entry was said in.
+ *
+ * What decides whether the page will let it be edited: the installation's are
+ * the unit's word or the command line's and are read-only wherever they are
+ * drawn, and the settings' own are the human's to add to and take away.
+ */
+export type PathSource = "Installation" | "Settings";
+
+/**
+ * Every path Verkstead has been told about, from both sources at once: the
+ * directories it may operate inside, and the extra directories a sandbox is
+ * given beyond the surface every one of them has.
+ *
+ * Two lists rather than one, because they are two different permissions — a
+ * Watched Path says where the human may point Verkstead, and a bind says what
+ * a session may write in — and the page draws them apart for that reason.
+ *
+ * The installation's own entries come first in each list, and the settings'
+ * follow in the order they were written down. That is the order the two were
+ * decided in: a flag is said once when the machine is set up, and the file is
+ * where somebody has been adding to it since.
+ */
+export type PathsView = { watched: Array<WatchedPathEntry>, 
+/**
+ * Every configured bind, the ones every sandbox gets and the ones one Repo
+ * does together — see [`BindEntry::repo`], which is what says which of the
+ * two an entry is.
+ */
+binds: Array<BindEntry>, };
 
 /**
  * What a Conversation has settled about one of its roles, as the page shows
@@ -1745,7 +1918,23 @@ repo: string | null,
  * will be: what keeps it fresh is the checks watcher, and that stops when
  * the wrap-up is over.
  */
-checks: CheckRollup | null, };
+checks: CheckRollup | null, 
+/**
+ * And whether it merges into its base, as the last look at GitHub found it
+ * — or nothing where nothing has looked.
+ *
+ * Beside the rollup because it is the same kind of fact: a reading of
+ * GitHub written down when something asked, drawn as a mark on the card,
+ * and stale on a Conversation nothing is watching. What keeps this one
+ * fresh outlives the wrap-up, though — a sweep asks about a Done
+ * Conversation's pull requests every quarter of an hour until each is
+ * merged or closed.
+ *
+ * Unlike the rollup, a companion's card carries its own: whether a branch
+ * conflicts with its base is a fact about that branch, and it is written
+ * down per pull request rather than per Conversation.
+ */
+merging: Merging | null, };
 
 /**
  * The public half of the server's VAPID keypair, base64url-encoded from the
@@ -1777,9 +1966,9 @@ id: number, html: string, };
  * was asked from, and the Timeline is re-read every time an open page hears the
  * world moved.
  *
- * `set_id` is what the details pane fetches the document by — the same
- * `/api/ui/sets/{id}` the standalone page reads, because it is the same Set
- * reached another way.
+ * `set_id` is what the details pane fetches the document by, through
+ * `/api/ui/sets/{id}` — the Set's own id rather than this Event's, because a
+ * Set answered anywhere is the same Set here.
  */
 export type QuestionSetEvent = { id: number, 
 /**
@@ -1793,7 +1982,7 @@ at: string, set_id: number, title: string,
 rows: Array<SetRow>, 
 /**
  * Whether it is still waiting on the human, and what became of it if not.
- * The same verdict the Set's own page carries, from the same registry of
+ * The same verdict the Set's own sheet carries, from the same registry of
  * held waits — this is a Timeline the human answers from.
  */
 standing: Standing, };
@@ -1944,7 +2133,53 @@ finished: number,
  * new-conversation box finds them. Empty where there are none, which is
  * most repositories most days.
  */
-roadmaps: Array<AbandonedRoadmap>, };
+roadmaps: Array<AbandonedRoadmap>, 
+/**
+ * How a conflicted pull request in this repository is resolved, where this
+ * Repo has been told something other than what every other one does.
+ *
+ * `null` is *whatever the global setting says* rather than *merge*: the two
+ * are the same answer today and stop being the same the moment the global
+ * is changed, and a Repo that had quietly frozen this morning's global
+ * would be a choice nobody made. What that global is, is on the settings
+ * themselves — see [`crate::SettingsView::conflict_resolution`].
+ */
+conflict_resolution: ConflictResolution | null, };
+
+/**
+ * The **Resolve conflicts** press as the page receives it: when, and nothing
+ * else.
+ *
+ * Nothing else because there is nothing else. Where it sends the work is always
+ * Wrapping, which the move under it says; what it was about is the pull
+ * requests the record says conflict, which the cards above it draw. The row is
+ * the deciding, and the deciding is the whole of what it holds.
+ *
+ * So the words are the viewer's, as a move's are — see [`SteerEvent`], whose
+ * sentence this one stands beside and must not be mistaken for.
+ */
+export type ResolveConflictsEvent = { id: number, 
+/**
+ * When it was pressed, RFC 3339.
+ */
+at: string, };
+
+/**
+ * What became of pressing **Resolve conflicts** on a finished Conversation's
+ * pull request.
+ *
+ * Named the way [`Resumed`]'s refusals are, and for the same reason: the press
+ * either sets a resolution going or it does not, and a button that quietly did
+ * nothing would leave the human waiting on a session that was never dispatched.
+ *
+ * The refusals are of two kinds. Two of them are readings that have moved on
+ * rather than anything for the human to correct — the button is drawn off the
+ * record, and the record is what this is answered from — so each says what has
+ * changed since the pane was drawn. The other two are about the checkout the
+ * resolution session would work in, which a Conversation left Done for weeks is
+ * the likeliest of any to have lost.
+ */
+export type Resolved = "Resolving" | "NoSuchConversation" | "NotDone" | "NothingConflicts" | "NowhereToWork" | "WorktreeRefused";
 
 /**
  * The submitted collection of Answers and Unanswered markers for one Question
@@ -2207,7 +2442,39 @@ export type SettingsEdit = { git_author: Author, github_token: TokenEdit,
  * there is nothing secret about either, so a save says where they are to
  * stand and the server writes that down.
  */
-rust_build_cache: BuildCacheEdit, };
+rust_build_cache: BuildCacheEdit, 
+/**
+ * And where the human hosts a share viewer of their own, as a value for
+ * the same reason: an empty one is nothing configured, which is what
+ * clearing the field means and what puts Verkstead's own hosted copy back.
+ */
+share_viewer_url: string, 
+/**
+ * And how a conflicted pull request is resolved where its Repo says
+ * nothing, as a value for the same reason: there are two answers and a save
+ * says which of them this is to be.
+ */
+conflict_resolution: ConflictResolution, 
+/**
+ * The Watched Paths the settings own, as values again: what is sent is
+ * what `config.yaml` holds afterwards, so a row taken off the page is a
+ * row taken out of the file.
+ *
+ * The installation's own are not here and cannot be sent. They are the
+ * unit's word rather than this page's, and a save leaves them exactly
+ * where they are — see [`PathSource`].
+ */
+watched_paths: Array<string>, 
+/**
+ * And the Sandbox Configuration binds the settings own, in the grammar
+ * `--sandbox-bind` uses: `/abs/path` for a bind every sandbox gets, and
+ * `name=/abs/path` for one the Repo registered under that name gets.
+ *
+ * Strings rather than a shape of their own, because a string is what the
+ * file holds — and one grammar for both of the places a bind is said is
+ * one thing to learn rather than two.
+ */
+sandbox_binds: Array<string>, };
 
 /**
  * What became of a save.
@@ -2243,7 +2510,173 @@ github_token: TokenSaved | null,
 /**
  * And how the shared Rust build cache stands.
  */
-rust_build_cache: BuildCacheView, };
+rust_build_cache: BuildCacheView, 
+/**
+ * Where the human hosts a share viewer of their own, or empty where they
+ * host none.
+ *
+ * A string rather than an optional, empty for nothing configured, the way
+ * the author's two halves are: the field on the page holds it either way,
+ * and clearing the box is how it is taken away.
+ *
+ * Empty is not *no viewer*. Links are then composed through the copy
+ * Verkstead hosts, and this field is the override — which is why nothing
+ * fills it in on the human's behalf: a field holding an address nobody
+ * typed is a setting they cannot tell they have not chosen.
+ *
+ * Configuration rather than a secret — it is a public page, and its URL
+ * goes in a comment on a pull request — so unlike the token it reads back
+ * exactly as it was written.
+ */
+share_viewer_url: string, 
+/**
+ * And how a conflicted pull request is resolved in every Repo that has not
+ * said otherwise.
+ *
+ * Never null, the way the build cache's switch is never null: nothing
+ * configured is a merge, so what comes back is where the setting sits
+ * rather than whether anybody has been here. A Repo's own override is on
+ * the Repo — see [`crate::RepoView::conflict_resolution`].
+ */
+conflict_resolution: ConflictResolution, 
+/**
+ * And the Watched Paths and the Sandbox Configuration binds, from both of
+ * the places either of them is said.
+ */
+paths: PathsView, };
+
+/**
+ * What became of sharing a Conversation to the pull requests its work is on.
+ *
+ * One press is three acts — the file, the publish, and a comment on every pull
+ * request the Conversation holds — so what comes back has to say how far it
+ * got. The two ways it stops before saying anything anywhere are the publish's
+ * own, carried in [`SharePublished`]'s words rather than said again here: a
+ * share nobody could publish is a comment with no link in it, and there is
+ * nothing to leave on a pull request.
+ */
+export type ShareCommented = { "Commented": { share: ShareView, on: Array<CommentedOn>, missed: Array<MissedOut>, } } | { "NotPublished": { why: SharePublished, } } | "NoPullRequest";
+
+/**
+ * What became of publishing a share: where it went, or why it did not go.
+ *
+ * A publish is Verkstead's own write to GitHub rather than a session's, and
+ * every way it can fail is something for the human to go and do — which is why
+ * each is named rather than folded into one refusal. Two of the three are about
+ * the token on the settings page, and the page is where they are answered.
+ */
+export type SharePublished = { "Published": { share: ShareView, } } | "NoToken" | "NoGistScope" | { "Refused": { why: string, } };
+
+/**
+ * One published share, as the workbench draws it: the link, and the moment the
+ * snapshot was taken.
+ */
+export type ShareView = { 
+/**
+ * The page to send somebody to: the gist's id in the share viewer's
+ * fragment, which is what draws the share as the conversation rather than
+ * as source.
+ *
+ * Composed by the server on the way out rather than read off the record —
+ * what the record holds is the gist as GitHub gave it, and which viewer a
+ * reader goes through is a fact about the settings at the moment the page
+ * is drawn. See `link` in `crates/server/src/sharing.rs`.
+ */
+url: string, 
+/**
+ * When it was published, RFC 3339 — drawn beside the link, because a link
+ * with no date says nothing about how far the work has moved since.
+ */
+at: string, };
+
+/**
+ * One commit as a share carries it: the pane the workbench would have fetched,
+ * beside the Event whose card opens it.
+ */
+export type SharedCommit = { 
+/**
+ * Which Timeline Event this is the pane of.
+ *
+ * The Event rather than the hash, because that is what the card opening it
+ * is known by — and a Conversation works in more than one repository, so a
+ * hash is not a name for one commit here either.
+ */
+id: number, 
+/**
+ * What the workbench's details pane draws: the Commit Summary rendered,
+ * and the diff with every fold and every colour already in it.
+ *
+ * The endpoint's own rendering rather than a second one, so that a
+ * colleague reading a patch and the human who reviewed it are reading one
+ * drawing of it.
+ */
+pane: CommitPane, 
+/**
+ * Whether the repository still had the commit when the share was taken.
+ *
+ * `false` is a commit git can no longer show — rebased away, collected, or
+ * in a repository that has moved out from under Verkstead — and the pane
+ * says the diff is not in the file rather than that the commit changed
+ * nothing. The workbench answers that case with a 404, which a share
+ * cannot: one commit nobody can read is no reason to refuse the export of
+ * everything around it, and what the Timeline says about it — the subject,
+ * the hash, how much it moved — is on the card either way.
+ */
+held: boolean, };
+
+/**
+ * One Conversation as a share carries it, which is what the shared file boots
+ * from.
+ *
+ * The Conversation whole rather than a shape of its own: the share is drawn by
+ * the workbench's own components, so what they are handed has to be what they
+ * are always handed. What differs is that this one has been through
+ * [`shared`].
+ */
+export type SharedConversation = { 
+/**
+ * The record, curated — see [`shared`].
+ */
+conversation: ConversationView, 
+/**
+ * The sheet of every Question Set on that Timeline, in its order.
+ *
+ * Carried rather than fetched, which is the difference between a share and
+ * the workbench: the live viewer asks for a Set when somebody opens one,
+ * and a share has nothing to ask. So the whole of every Set the record
+ * holds — the Preface, every Option of every Question, the Diff it was
+ * asked over and what was decided — rides in the file, rendered by the
+ * endpoint the workbench reads a Set through, so that a colleague's sheet
+ * and the human's are one rendering of one decision.
+ *
+ * Read-only regardless of how a Set stood when the share was taken: what
+ * makes it so is the sheet being drawn as a record — see the share's
+ * details pane — because a Set still waiting on somebody is part of the
+ * record too, and a reader with no server behind them cannot answer it.
+ */
+sets: Array<SetView>, 
+/**
+ * The pane behind every commit on that Timeline, in its order.
+ *
+ * Carried for the reason the sheets are: the workbench fetches a commit
+ * when somebody opens one, and a share has nothing to fetch with. So the
+ * whole of every one of them rides in the file — the Commit Summary
+ * rendered, and the diff parsed, highlighted and folded per file.
+ *
+ * No cap on any of it, and nothing summarised on the way out. What a
+ * colleague is being shown is the work, and a patch cut off at a size is
+ * a different document from the one the human reviewed.
+ */
+commits: Array<SharedCommit>, 
+/**
+ * When the share was taken, RFC 3339.
+ *
+ * A share is a snapshot of a moment rather than a window onto a
+ * Conversation that goes on moving, so the moment is on the file: the
+ * reader is owed the date of the thing in their hands, and sharing again
+ * makes another one rather than freshening this.
+ */
+exported_at: string, };
 
 /**
  * Whether the sidebar is drawing what the human has archived.
@@ -2719,7 +3152,7 @@ list: TaskListEvent | null, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent } | { "PullRequest": PullRequestEvent } | { "TaskList": TaskListReached } | { "StageList": StageListReached };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent } | { "ResolveConflicts": ResolveConflictsEvent } | { "PullRequest": PullRequestEvent } | { "TaskList": TaskListReached } | { "StageList": StageListReached };
 
 /**
  * What is to become of the configured token.
@@ -2922,7 +3355,26 @@ export type UpdateNotice = "Current" | { "Available": { version: string, } };
  * one: the token is written down, and this says what happened when it was
  * tried.
  */
-export type Verified = { "Account": { login: string, } } | { "Refused": { why: string, } };
+export type Verified = { "Account": { login: string, 
+/**
+ * The scopes Verkstead needs that GitHub says this token has not been
+ * given — empty on one that can do everything asked of it.
+ *
+ * `gist` is the whole of the list, and it is a list because the answer
+ * is *what to go and tick*: publishing a share writes a secret gist,
+ * which is Verkstead's own write to GitHub rather than a session's, and
+ * a token issued for reading repositories does not carry it. The
+ * scopes a *session* needs are not checked here — a session
+ * authenticates as this token too, but what it does with it is the
+ * repository's review process rather than anything this server asks
+ * for.
+ *
+ * Empty as well where GitHub said nothing about scopes at all, which is
+ * what a fine-grained token comes back as: it has permissions rather
+ * than scopes, and reporting the absence of a header as a missing scope
+ * would be sending the human to re-issue a token that works.
+ */
+missing: Array<string>, } } | { "Refused": { why: string, } };
 
 /**
  * One way a Set fails the question grammar.
@@ -2933,6 +3385,18 @@ export type Violation = {
  * the Set as a whole.
  */
 label?: string | null, message: string, };
+
+/**
+ * One Watched Path, whichever of the two places said it.
+ */
+export type WatchedPathEntry = { 
+/**
+ * The directory: resolved, for the installation's own, which were resolved
+ * when the server started; and exactly as it was written, for one out of
+ * the settings — that is what a save sends back, so it has to come back as
+ * it went in.
+ */
+path: string, source: PathSource, resolution: PathResolution, };
 
 /**
  * And what a watcher says back up it.

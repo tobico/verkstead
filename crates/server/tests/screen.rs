@@ -53,7 +53,7 @@ async fn session_that_printed(pool: &SqlitePool, printed: &str) -> (i64, i64) {
         .unwrap()
         .unwrap();
 
-    let event = store::start_capture(pool, conversation, None)
+    let event = store::start_capture(pool, conversation, None, None)
         .await
         .unwrap();
 

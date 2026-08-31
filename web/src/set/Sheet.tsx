@@ -13,16 +13,17 @@
 //! nothing to press — except that there is no Response to show, because there
 //! never was one.
 //!
-//! Its own module rather than the page's, because a Set is reached two ways: as
-//! a page of its own, and as the details pane of the Timeline Event it landed on
-//! — see `workbench/Asked`. The rendering is the same either way, and a second
-//! copy of it would be a second reading of one decision.
+//! Its own module rather than the pane's, because what a Set looks like is one
+//! question and where it is read is another: the pane fetches the Set and says
+//! what became of the read — see `workbench/Asked` — and this draws whatever
+//! came back.
 
 import type { JSX } from "solid-js";
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 
 import app from "../App.module.css";
 import { Card } from "../Card";
+import { PaneSticky } from "../Panes";
 import type {
   Answer,
   AskView,
@@ -36,18 +37,18 @@ import type {
 } from "../api/types";
 import { setWrapping, wrapping } from "../device";
 import { DIRECTION, DIRECTION_LABEL, DIRECTIONS } from "../directions";
+import { PaneHead } from "../workbench/PaneHead";
 import { Answering } from "./Answering";
 import { AskText } from "./AskText";
-import { Contents, PageHeader, navigation } from "./Contents";
+import { Contents, navigation } from "./Contents";
 import { Diff } from "./Diff";
 import { Postscript } from "./Postscript";
 import styles from "./Sheet.module.css";
-import { Standing } from "./Standing";
+import { Badge, Standing } from "./Standing";
 import { drawDiagrams } from "./diagrams";
 import { anchor, outline, spied } from "./outline";
 import { Head, starred } from "./table";
 import { settledAge, utcStamp } from "./when";
-
 
 /// One Set, top to bottom: how it stands and its own material — what the agent
 /// asked about and the evidence for it — and then the record of what became of
@@ -56,22 +57,26 @@ import { settledAge, utcStamp } from "./when";
 /// The material above is the same however it stands: a settled Set is read for
 /// what was decided *and* for what the decision was about.
 ///
-/// `lead` is whatever the sheet is reached through — the way back to the list it
-/// is on, or the pane header of the Timeline Event it belongs to. Nothing is
-/// drawn where there is none.
+/// The sheet draws its own pane header, titled by what the Set asked: a pane
+/// titled over the top of that would name the same thing twice. `back` is what
+/// the way out of the pane does, and there is no way out where nothing was
+/// handed one.
 ///
-/// `contents` is where the table of contents is being drawn, and what decides
-/// which width it picks its shape from: the window on a page, and the pane's own
-/// width in a details pane — where the 60rem cap leaves a margin of its own for
-/// the sidebar to stand in. `"none"` is a sheet drawn without one at all.
+/// The table of contents comes with it, in whichever of its two shapes the pane
+/// has room for: the sidebar in the margin the 60rem cap leaves, or the bar with
+/// the list folded into it where the human has dragged the pane narrower than
+/// that. Which is the nav's own question — see `Contents`.
 ///
-/// The floating header belongs to the page alone. It names where the reader is
-/// across the top of the column, and a pane already has a header of its own
-/// there.
+/// `readOnly` is a sheet with nobody behind it — the share, where a colleague is
+/// reading a Conversation out of a file. It is drawn as the record however the
+/// Set stood: a Set still waiting on somebody is part of what was shared, and a
+/// form on a page with no server to submit through would be an offer that could
+/// not be taken up. The badge stays and the menu behind it goes, for the same
+/// reason.
 export function Sheet(props: {
   set: SetView;
-  lead?: JSX.Element;
-  contents?: "page" | "pane" | "none";
+  back?: () => void;
+  readOnly?: boolean;
 }): JSX.Element {
   // The renderer, named by a Set that has a Diagram on it to draw and by no
   // other: mermaid is megabytes, so a Set without one loads none of them. What a
@@ -174,41 +179,19 @@ export function Sheet(props: {
     return null;
   };
 
-  /// Where the table of contents is drawn — the page by default, because the
-  /// page is what a Set is usually read as.
-  const where = () => props.contents ?? "page";
-
-  /// Whether it is drawn at all.
-  const listed = () => where() !== "none";
-
   return (
     <>
-      {props.lead}
-      <h1>{props.set.title}</h1>
-      {/* After the title and before the rest: the page says what it is, then
+      <PaneSticky>
+        <PaneHead
+          back={props.back && { to: "Timeline", go: props.back }}
+          title={props.set.title}
+        />
+      </PaneSticky>
+      {/* After the title and before the rest: the sheet says what it is, then
           what is in it. It is taken out of the flow and put in the margin by
           the stylesheet, so where it sits here is a reading order rather than
           a position. */}
-      <Show when={listed()}>
-        <Contents
-          sections={sections()}
-          watched={watched()}
-          nav={nav}
-          paned={where() === "pane"}
-        />
-        {/* Under the nav in reading order and pinned to the top edge by the
-            stylesheet, which is also what keeps it off a narrow viewport: there
-            the nav's own bar is already doing this job. And off a pane, which
-            has the pane header across its top already. */}
-        <Show when={where() === "page"}>
-          <PageHeader
-            watched={watched()}
-            nav={nav}
-            wrapped={wrapped()}
-            flip={flip}
-          />
-        </Show>
-      </Show>
+      <Contents sections={sections()} watched={watched()} nav={nav} />
       {/* One line about the Set rather than from it: where it came from at the
           near end, and how it stands at the far end — the date it settled, or
           the badge and the menu for a Set still waiting. Never empty, because
@@ -234,7 +217,19 @@ export function Sheet(props: {
             than about answering it — and because locking is decided with the
             badge and the Questions in view, not from a list row. */}
         <Show when={waiting()}>
-          {(liveness) => <Standing id={props.set.id} liveness={liveness()} />}
+          {(liveness) => (
+            /* The badge either way, and the menu only where there is something
+               behind it: locking a Set is a thing done to the record, and a
+               reader holding a file has no record to do it to. What the badge
+               says is still worth saying — a share of a Set nobody had answered
+               yet is a share of a Set nobody had answered yet. */
+            <Show
+              when={!props.readOnly}
+              fallback={<Badge liveness={liveness()} />}
+            >
+              <Standing id={props.set.id} liveness={liveness()} />
+            </Show>
+          )}
         </Show>
       </div>
       {/* The Preface, as the shared card: the heading a jump from the table of
@@ -249,8 +244,12 @@ export function Sheet(props: {
       <Show when={props.set.diff.length > 0}>
         <Diff blocks={props.set.diff} wrapped={wrapped()} flip={flip} />
       </Show>
+      {/* The record, or the sheet to fill in — and on a read-only sheet the
+          record whichever it is. Which of the two is decided from the Set as it
+          was loaded rather than from anything that happens after, so a settled
+          Set never flashes a form. */}
       <Show
-        when={decided()}
+        when={decided() || props.readOnly}
         fallback={
           <Answering
             id={props.set.id}
@@ -264,6 +263,7 @@ export function Sheet(props: {
         <Questions
           questions={props.set.questions}
           response={response()}
+          open={!decided()}
           postscript={props.set.postscript_html}
           proposal={props.set.proposal}
         />
@@ -279,15 +279,22 @@ export function Sheet(props: {
 /// list, so a jump lands on the name of the thing rather than just above its
 /// first row. A Set still waiting is asked on the sheet instead — see
 /// [`Answering`] — which draws the same heading and the same anchors.
+///
+/// `open` is the Set that has not settled at all, which reaches here only on a
+/// read-only sheet: a share carries a Set exactly as it stood, and one nobody
+/// had got to yet is a record of questions still out rather than of a decision.
+/// It is told apart from a Set that was locked, because the two are opposite
+/// things — one is waiting and the other never will be again.
 function Questions(props: {
   questions: QuestionView[];
   response: Response | null;
+  open?: boolean;
   postscript: string | null;
   proposal: ProposalView | null;
 }): JSX.Element {
   /// A Set that settled with no Response behind it, which is the one standing
   /// that was never answered by anybody.
-  const orphaned = () => props.response === null;
+  const orphaned = () => props.response === null && !props.open;
 
   /// What to say at the head of a Response that resolved nothing.
   const nothing = () => {
@@ -312,6 +319,14 @@ function Questions(props: {
           This Set was locked unanswered: nobody answered these questions, and
           no Response was ever sent. The agent was told the Set had been
           locked.
+        </p>
+      </Show>
+      {/* And the Set that had simply not been got to yet, which only a
+          read-only sheet ever draws. */}
+      <Show when={props.open}>
+        <p class={styles.counterQuestion}>
+          This Set was still open when this record was made: nobody had answered
+          these questions yet.
         </p>
       </Show>
       <Show when={nothing()}>

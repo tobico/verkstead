@@ -8,10 +8,10 @@
 //! Question, and the whole uncommitted Diff of the repository it was asked from —
 //! is read when somebody opens the one Event it belongs to.
 //!
-//! What draws it is [`Sheet`], which is what the standalone Set page draws too.
-//! The rendering is not this stage's to rewrite: a Set reached through its
-//! Conversation is the same Set, and a second copy of the drawing would be a
-//! second reading of one decision.
+//! What draws it is [`Sheet`], header and all: the sheet is the whole of what a
+//! Set looks like, and this pane is where a Set is read. What is left here is
+//! the fetch and the four things a read can come back as — waiting, refused, a
+//! record this build cannot draw, and the Set itself.
 //!
 //! Answering it here ends the wait the session is holding, exactly as answering
 //! it on a phone does — both go through the one endpoint, and the Nudge that
@@ -19,6 +19,7 @@
 
 import { Match, Switch, type JSX } from "solid-js";
 
+import { PaneSticky } from "../Panes";
 import { loadSet } from "../api/client";
 import type {
   QuestionSetEvent,
@@ -35,25 +36,30 @@ import { PaneHead } from "./PaneHead";
 
 /// Either row a Set gets on the Timeline. What they have in common is the only
 /// thing this pane needs — which Set to fetch — and what comes back is what says
-/// which of the two it is drawing, exactly as it does on the standalone page.
+/// which of the two it is drawing.
 export function Asked(props: {
   asked: QuestionSetEvent | UnreadableSetEvent;
   back: () => void;
 }): JSX.Element {
   const set = useReading(() => ({
-    // The same key the standalone page reads a Set under, so answering it in
-    // either place puts the other right.
+    // Under the Set's own id rather than the Event's, so that a Set answered
+    // anywhere is the same Set here: the key is what a Nudge invalidates.
     queryKey: ["set", String(props.asked.set_id)],
     queryFn: () => loadSet(String(props.asked.set_id)),
 
-    // And the same merge, for the same fold: this pane draws the same Sheet,
-    // attached Diff and all — see the standalone page.
+    // Merged into what is already drawn rather than replacing it, which is what
+    // keeps a re-read from closing the folds the reader has opened down the
+    // attached Diff — see `freshness.ts`.
     freshness: { reconcile: "id" },
   }));
 
-  // No title: the Set draws its own heading, and a pane titled over the top of
-  // it would name the same thing twice.
-  const head = <PaneHead back={{ to: "Timeline", go: props.back }} />;
+  // What there is of a header before there is a Set to title it with: the way
+  // back out of the pane, and nothing else to say yet.
+  const head = (
+    <PaneSticky>
+      <PaneHead back={{ to: "Timeline", go: props.back }} />
+    </PaneSticky>
+  );
 
   return (
     <Switch>
@@ -65,21 +71,20 @@ export function Asked(props: {
         {head}
         <ErrorLine>Could not read this set: {set.error?.message}</ErrorLine>
       </Match>
-      {/* A stored body this build cannot read is the record drawn as itself,
-          the same one the standalone page draws — the narrower match, so it
-          goes first. */}
+      {/* A stored body this build cannot read is the record drawn as itself —
+          the narrower match, so it goes first. Both of these draw their own
+          header, the way back included: a Set is titled by what it asked. */}
       <Match when={set.data && unreadable(set.data)}>
-        {(unreadable) => <Unreadable set={unreadable()} lead={head} />}
+        {(unreadable) => <Unreadable set={unreadable()} back={props.back} />}
       </Match>
       <Match when={set.data && readable(set.data)}>
         {(set) => (
-          // With its table of contents, drawn from the pane's width rather than
-          // the window's: the pane caps what it holds at the same 60rem every
-          // other column is read at and centres it, so there is a margin here
-          // for the sidebar to stand in again — and where the human has left
-          // the pane narrower than that, the nav folds into its bar exactly as
-          // it does on a narrow window.
-          <Sheet set={set()} lead={head} contents="pane" />
+          // With its table of contents, which takes its shape from the pane's
+          // width: the pane caps what it holds at the same 60rem every other
+          // column is read at and centres it, so there is a margin for the
+          // sidebar to stand in — and where the human has left the pane
+          // narrower than that, the nav folds into its bar.
+          <Sheet set={set()} back={props.back} />
         )}
       </Match>
     </Switch>

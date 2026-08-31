@@ -1,13 +1,19 @@
 {
+  "conflict_resolution": "Merge",
   "git_author": {
     "email": "",
     "name": ""
   },
   "github_token": null,
+  "paths": {
+    "binds": [],
+    "watched": []
+  },
   "rust_build_cache": {
     "compiles_cached": false,
     "enabled": true,
     "size": "30G",
     "size_configured": false
-  }
+  },
+  "share_viewer_url": ""
 }

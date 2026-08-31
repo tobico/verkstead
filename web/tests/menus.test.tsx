@@ -30,6 +30,9 @@ import contents from "../src/set/Contents.module.css?raw";
 import standing from "../src/set/Standing.module.css?raw";
 import actions from "../src/workbench/Actions.module.css?raw";
 import sidebar from "../src/workbench/Conversations.module.css?raw";
+// And the one caller that hands in a trigger of its own, which is where that
+// button is painted.
+import status from "../src/workbench/StatusButton.module.css?raw";
 
 /// A menu with one row in it, which is enough of one to press.
 function mount(): { container: HTMLElement; opened: () => number } {
@@ -138,6 +141,61 @@ describe("a dropdown menu", () => {
     shut();
 
     await waitFor(() => expect(drop(container)).toBeNull());
+  });
+
+  /// And gives the trigger back the focus on the way, exactly as Escape does.
+  ///
+  /// The row the press was made in goes with the menu — the rows are built when
+  /// it opens and thrown away when it closes — so a shut that said nothing
+  /// about the focus would drop whoever is working by keyboard onto the
+  /// document body, and anything the press opens over the page would hand them
+  /// back there when they closed it.
+  it("gives the trigger back the focus when it is shut that way", async () => {
+    let shut = (): void => {};
+    const { container } = render(() => (
+      <Menu class="example" trigger="⋯" closer={(close) => (shut = close)}>
+        {() => <button type="button">Do the thing</button>}
+      </Menu>
+    ));
+
+    fireEvent.click(trigger(container));
+    const row = drop(container)!.querySelector("button")!;
+    row.focus();
+    expect(document.activeElement).toBe(row);
+
+    shut();
+
+    await waitFor(() => expect(drop(container)).toBeNull());
+    expect(document.activeElement).toBe(trigger(container));
+  });
+
+  /// But not where the menu has already gone. A press on the backdrop leaves
+  /// the focus where the hand put it, and a shut arriving after that — the
+  /// answer to a press that was still in flight — is not a reason to send
+  /// somebody who has moved on back to the trigger.
+  it("leaves the focus alone where the menu has already gone", async () => {
+    let shut = (): void => {};
+    const { container } = render(() => (
+      <>
+        <Menu class="example" trigger="⋯" closer={(close) => (shut = close)}>
+          {() => <button type="button">Do the thing</button>}
+        </Menu>
+        <button type="button" class="elsewhere">
+          Something else
+        </button>
+      </>
+    ));
+
+    fireEvent.click(trigger(container));
+    fireEvent.click(container.querySelector(`.${menu.backdrop}`)!);
+    await waitFor(() => expect(drop(container)).toBeNull());
+
+    const elsewhere = container.querySelector<HTMLButtonElement>(".elsewhere")!;
+    elsewhere.focus();
+
+    shut();
+
+    expect(document.activeElement).toBe(elsewhere);
   });
 
   /// The rows are built on the way open and thrown away on the way shut, which
@@ -350,13 +408,14 @@ describe("a nested level of a menu", () => {
   });
 });
 
-/// The ⋯ at the head of a Conversation, which is the one left of the two that
-/// were: the sidebar's became a gear that opens the settings, being a way into
-/// a pane rather than a menu of things to do. The two of them were a rule each,
-/// hashed off a class each, written apart and drifted into two sizes across the
-/// divider between the panes — so the mark and the paint under it are the
-/// menu's, and the pane that still has one says nothing about a trigger at all.
-describe("the ⋯ at the head of a pane", () => {
+/// The ⋯ a pane drops a menu from, which the escape hatch is the last of: the
+/// sidebar's became a gear that opens the settings, being a way into a pane
+/// rather than a menu of things to do, and the Conversation's became the status
+/// button, which says where the work stands before it opens anything. The two
+/// were a rule each, hashed off a class each, written apart and drifted into
+/// two sizes across the divider between the panes — so the mark and the paint
+/// under it are the menu's, and no caller of it says anything about a trigger.
+describe("the ⋯ a pane drops a menu from", () => {
   it("is the menu's own mark, not the caller's", () => {
     const { container } = render(() => (
       <Menu class="example" label="Example actions" mark>
@@ -376,11 +435,16 @@ describe("the ⋯ at the head of a pane", () => {
     );
   });
 
-  /// The point of moving it: the pane keeps no trigger of its own, and the
-  /// sidebar keeps no menu at its head at all.
-  it("leaves neither pane a button to paint", () => {
+  /// The point of moving it: the escape hatch, which is what still takes the
+  /// mark, keeps no trigger of its own to paint, and the sidebar keeps no menu
+  /// at its head at all. The Conversation's menu is the exception that proves
+  /// it — it hands in a trigger of its own, which is a button about the work
+  /// rather than a mark, and paints it in the module it is built in rather than
+  /// beside the rows it drops.
+  it("leaves a caller that takes it no button to paint", () => {
     expect(sidebar).not.toContain(".workbenchActions");
     expect(actions).not.toContain(".conversationActions > button");
+    expect(status).toContain(".status > button {");
   });
 });
 

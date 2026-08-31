@@ -30,6 +30,17 @@
 //! git read or a count, and a list that carried them would pay for all of them
 //! on every visit to this page.
 //!
+//! Two things on that pane are written rather than read. The first is how a
+//! conflicted pull request in this repository is resolved: merge, rebase, or
+//! whatever the settings page says for every Repo — which is what a Repo nobody
+//! has been to holds, and is nothing at all rather than a copy of today's
+//! answer. What a rebase costs is said there in the same words the settings page
+//! says it in, because it is the same choice.
+//!
+//! The second is the Repo's own Sandbox Configuration — the binds only its
+//! sessions get — which is a section of its own, out of the settings the rest of
+//! this page is edited through. See `RepoBinds.tsx`.
+//!
 //! Taking one away is in the pane that opened it, and it is an unregistering
 //! rather than a delete: Verkstead stops offering the repository and leaves the
 //! directory where it is, so every Conversation ever worked in it goes on saying
@@ -51,17 +62,28 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { IconButton } from "../IconButton";
+import { PaneSticky } from "../Panes";
+import { RESOLUTION, RESOLVES, forcePushed } from "../settings/Conflicts";
+import { Picker } from "../picking";
 import {
   RefusedError,
   listRepos,
   loadRepo,
   registerRepo,
   removeRepo,
+  setRepoResolution,
 } from "../api/client";
-import type { Registered, RepoEntry, RepoRemoved } from "../api/types";
+import type {
+  Registered,
+  RepoEntry,
+  RepoRemoved,
+  RepoView,
+  ConflictResolution,
+} from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
+import { RepoBinds } from "./RepoBinds";
 import app from "../App.module.css";
 import styles from "./RepoList.module.css";
 
@@ -95,7 +117,7 @@ export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
     "A conversation that is still going is on it. Finish or close that conversation first.",
 };
 
-/// The Repos as they stand, read once for the two panes that draw them.
+/// The Repos as they stand, read once for the panes that draw them.
 ///
 /// Read when the page opens, like the Profiles above them: nothing here changes
 /// on its own, and what does change is this section's own doing.
@@ -103,7 +125,13 @@ export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
 /// Merged by the id each entry carries flat, and not frozen: registering one
 /// reads the list again, and a frozen query is one invalidation cannot reach —
 /// the new repo would never appear behind the pane that added it.
-function useRepos() {
+///
+/// Exported because the Paths pane asks it too — see `settings/Paths.tsx`,
+/// which needs the registered names to tell a bind written for a Repo from one
+/// written for a name nothing is registered under. One query definition rather
+/// than a second saying the same thing: the two would share a key and have to
+/// agree about freshness anyway.
+export function useRepos() {
   return useReading(() => ({
     queryKey: ["repos"],
     queryFn: listRepos,
@@ -212,11 +240,17 @@ function RepoCard(props: {
 
 /// One registered Repo opened, which is the details pane a card leads to.
 ///
-/// Everything on it but one press is the repository's own answer or the store's
-/// count of what has been done in it. The press is Remove, which is the one
-/// thing there is to *do* to a Repo — and it is an unregistering rather than a
-/// delete: Verkstead stops offering it, the directory is left where it is, and
-/// every Conversation ever worked in it goes on saying so.
+/// Everything on it but one section and one press is the repository's own answer
+/// or the store's count of what has been done in it. The section is its Sandbox
+/// Configuration, which is settings rather than facts — see `RepoBinds.tsx` —
+/// and it is here because a bind written for this repository is about this
+/// repository, and a page listing every path on the machine is not where
+/// somebody would look for one.
+///
+/// The press is Remove, which is the one thing there is to *do* to a Repo — and
+/// it is an unregistering rather than a delete: Verkstead stops offering it, the
+/// directory is left where it is, and every Conversation ever worked in it goes
+/// on saying so.
 ///
 /// That press stands under the facts and behind a rule, the way the Profile
 /// pane's does: a press that undoes something, set among the things it would
@@ -295,10 +329,12 @@ export function RepoDetails(props: {
           one thing is named by that thing. What it falls back to is a word: the
           head is drawn before the read lands, and there is nothing else to call
           it until it does. */}
-      <PaneHead
-        back={{ to: "Settings", go: props.back }}
-        title={opened.data?.name ?? "Repo"}
-      />
+      <PaneSticky>
+        <PaneHead
+          back={{ to: "Settings", go: props.back }}
+          title={opened.data?.name ?? "Repo"}
+        />
+      </PaneSticky>
 
       <Switch>
         <Match when={opened.isPending}>
@@ -382,6 +418,17 @@ export function RepoDetails(props: {
                 </Show>
               </section>
 
+              {/* How a conflicted pull request in this repository is resolved,
+                  which is one of the two things about a Repo that are written
+                  rather than read. Over the removal because it is something to
+                  change about a Repo that is staying. */}
+              <ConflictResolution repo={repo()} />
+              {/* And what only this repository's sessions are given, which is
+                  the other: the binds scoped to its name. Drawn whether or not
+                  it has any, because the pane is where somebody learns the
+                  section exists. */}
+              <RepoBinds repo={repo().name} />
+
               {/* And the one press there is to make about a Repo, under
                   everything it is about. What the line says is what the press
                   does: Verkstead stops offering the repository, and nothing on
@@ -425,6 +472,75 @@ export function RepoDetails(props: {
         </Match>
       </Switch>
     </>
+  );
+}
+
+/// How this Repo resolves a merge conflict, as the picker that says so.
+///
+/// Three answers rather than the settings page's two, and the third is the one
+/// most Repos are on: *use the global setting*, which is this Repo saying
+/// nothing at all. It is nothing rather than a copy of what the global says
+/// today, so a Repo left alone follows that setting when it is changed.
+///
+/// The picker is its own press, the way the build cache's switch is: a choice
+/// that needed confirming afterwards would be a choice made twice. What the
+/// answer in force costs is said under it, in the words the settings page uses —
+/// the same sentence in both places, because it is the same choice.
+function ConflictResolution(props: { repo: RepoView }): JSX.Element {
+  const queries = useQueryClient();
+
+  const save = useMutation(() => ({
+    mutationFn: (resolution: ConflictResolution | null) =>
+      setRepoResolution(props.repo.id, resolution),
+    // The answer *is* a fresh read of the Repo, so a second read would learn
+    // nothing and could only disagree with what is on screen.
+    onSuccess: (saved: RepoView) =>
+      queries.setQueryData(["repo", props.repo.id], saved),
+  }));
+
+  /// What is chosen now, as the picker writes it: the empty string is the option
+  /// that sends nothing, which is this Repo overriding nothing.
+  const chosen = (): string => props.repo.conflict_resolution ?? "";
+
+  return (
+    <section class={styles.resolving}>
+      <h2>Conflict resolution</h2>
+
+      <label for="repo-conflict-resolution">
+        How a pull request that will not merge is resolved here
+      </label>
+      <Picker
+        id="repo-conflict-resolution"
+        options={["", "Merge", "Rebase"]}
+        value={(option) => option}
+        label={(option) =>
+          option === ""
+            ? "Use the global setting"
+            : RESOLUTION[option as ConflictResolution]
+        }
+        chosen={chosen()}
+        disabled={save.isPending}
+        pick={(picked) =>
+          save.mutate(picked === "" ? null : (picked as ConflictResolution))
+        }
+      />
+
+      <p class={styles.resolves}>
+        {props.repo.conflict_resolution === null
+          ? "Whatever the settings page says for every repo."
+          : RESOLVES[props.repo.conflict_resolution]}
+      </p>
+
+      <Show when={props.repo.conflict_resolution === "Rebase"}>
+        {forcePushed()}
+      </Show>
+
+      <Show when={save.isError}>
+        <ErrorLine class={styles.failure}>
+          That could not be saved: {save.error?.message}
+        </ErrorLine>
+      </Show>
+    </section>
   );
 }
 
@@ -487,7 +603,9 @@ export function RepoPane(props: {
 
   return (
     <>
-      <PaneHead back={{ to: "Settings", go: props.back }} title="Add a repo" />
+      <PaneSticky>
+        <PaneHead back={{ to: "Settings", go: props.back }} title="Add a repo" />
+      </PaneSticky>
 
       {/* Every way it can be refused is said inside it, because a refusal is
           answered by correcting the path. */}

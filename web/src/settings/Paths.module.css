@@ -1,0 +1,65 @@
+/* The watched paths and the global sandbox binds — see `Paths.tsx`.
+
+   Two halves in two panes, like the sections above it: the card carries how the
+   two lists stand and what is wrong with either, and the rows that rewrite them
+   stand in the details pane beside it.
+
+   What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
+   while its pane is open, and what it does under the pointer. What a row is is
+   `PathEditor.module.css`'s, shared with the Repo pane that draws the same rows
+   for one Repo's own binds. What is here is only what stands around them. */
+
+.pathsCard {
+  margin-bottom: 1.5rem;
+}
+
+.pathsCard h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+/* How the two lists stand, in a line: the same quiet the build cache says what
+   is configured in. */
+.standing {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* Something the human cannot fix from this page alone — a boundary around
+   nothing, or an entry naming what the server cannot see. Drawn as a notice
+   rather than as an error, the way the build cache's is: nothing has failed, and
+   what it says is what will not work until somebody acts on it.
+
+   No fill of its own: on the card it stands on a surface that shifts a step
+   under the hand and another while its pane is open, and an edge with the red
+   down its side says it on all three. */
+.warning {
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--stopped);
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+}
+
+/* And the details pane: the two lists, one under the other. */
+.list + .list {
+  margin-top: 1.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--edge);
+}
+
+.list h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.list .warning {
+  margin: 0.85rem 0 0;
+}
+
+.failure {
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+}

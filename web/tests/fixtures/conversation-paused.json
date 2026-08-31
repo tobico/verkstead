@@ -59,6 +59,7 @@
   },
   "resets": "3pm",
   "review_pairing": "Nothing",
+  "shared": null,
   "state": "Implementing",
   "stop_asked": false,
   "stopped_by_hand": false,
@@ -101,6 +102,7 @@
       }
     }
   ],
+  "waiting": true,
   "waiting_on_checks": false,
   "working": false,
   "worktree": {
