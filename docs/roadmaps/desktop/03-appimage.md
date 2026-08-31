@@ -66,8 +66,13 @@ stages 04 and 05 to reuse.
    fails; a desktop artifact that was built and not attached fails too;
    `publish` waits on the desktop legs.
 5. **Docs** — `docs/releasing.md` still says the workflow "publishes the four";
-   it names what a tag now produces. Accepts: no count in it that the workflow
-   contradicts.
+   it names what a tag now produces. And the install story gains its Linux
+   desktop half: `README.md` and `docs/adoption.md` both tell it as the flake
+   and nothing else, while the AppImage is now the other way onto a Linux
+   machine — and the flake stays daemon-only (Q11), so the two are told apart
+   rather than merged. Accepts: no count in `releasing.md` that the workflow
+   contradicts; a Linux reader can find the AppImage and can tell which of the
+   two they want.
 
 ## Re-verify at start
 

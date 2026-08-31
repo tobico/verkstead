@@ -36,8 +36,9 @@ the unsigned-app approval steps.
    the app launches from the mounted dmg on a fresh runner.
 3. **Release leg and docs** — the macOS desktop job joins `release.yml` on the
    plumbing stage 03 laid: a build leg and an artifact name, and nothing about
-   `publish`. The README gains the unsigned-open steps. Accepts: tag run
-   attaches the dmg.
+   `publish`. The dmg joins the install story stage 03 started, and the README
+   gains the unsigned-open steps beside it. Accepts: tag run attaches the dmg;
+   a mac reader can find it and get past Gatekeeper with it.
 
 ## Re-verify at start
 

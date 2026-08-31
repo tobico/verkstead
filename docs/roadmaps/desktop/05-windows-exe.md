@@ -39,9 +39,12 @@ stage 04's UI state — attached to releases by a Windows leg of the workflow.
    tray libs allow.
 3. **Release leg** — a `windows-latest` job builds the exe on the plumbing
    stage 03 laid: a build leg and an artifact name, and nothing about
-   `publish` — with launch assertions of its own. Accepts: tag run attaches
+   `publish` — with launch assertions of its own. The exe joins the install
+   story stage 03 started, which is also where the README's "NixOS only for
+   now" stops being true. Accepts: tag run attaches
    `verkstead-desktop-windows-x64.exe` (naming per the existing scheme, and per
-   what stage 03 taught `publish` to carry).
+   what stage 03 taught `publish` to carry); a Windows reader can find it, and
+   nothing left in the docs says the product is Linux-only.
 
 ## Re-verify at start
 
