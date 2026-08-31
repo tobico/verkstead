@@ -445,6 +445,31 @@ every quoted line, so the marker no longer begins one.
 _Avoid_: announce, notify, post, broadcast (a comment is left, once, by a press
 the human made)
 
+**Ignore rule**:
+One class of comment nobody wants addressed, written in the workbench settings:
+a regex over who said it, a regex over what it says, or both. A rule matches
+where every field it gives does, and the list combines with OR — so a comment
+any one rule matches is skipped wherever Wrapping reads comments, in the fresh
+ones a session would be dispatched about and the standing ones folded into the
+review alike, on a Companion Repo's pull request as much as on the
+Conversation's own.
+What they are for is a bot nobody can turn off: a review service set up with no
+billing information on it, filing the same word about billing on every pull
+request, where the alternative is a session spun up to address it each time.
+**A skipped comment is written down as addressed**, which is what makes deleting
+a rule change what happens next rather than what happened — months of a bot's
+nagging would otherwise all come back as sessions on the poll after the rule
+went. And the rules are read off the file every poll, so one written on a phone
+takes effect on the next one.
+**About agent work and nothing else.** A skipped comment still appears wherever
+the workbench lists what is on a pull request: a comment nobody is being sent to
+answer is still one the human wrote a rule about, and hiding it would leave them
+no way to see what the rule is doing.
+The marker Share to Pull Request leaves is not one of these. That one is
+Verkstead's own comment, dropped by inspection for ever and never configurable.
+_Avoid_: filter, mute, block, spam rule, exclusion (a rule says what nobody is
+sent to address, not what is hidden)
+
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose
 first, a delta Diagram after it — kept by the sweep of whichever repository it
