@@ -64,6 +64,7 @@ import { PaneSticky } from "../Panes";
 import { ran, reading } from "../agents";
 import { listProfiles, loadCapture, loadTranscript } from "../api/client";
 import { useReading } from "../freshness";
+import { HarnessMark } from "../HarnessMark";
 import { Empty, ErrorLine } from "../notices";
 import { followBottom } from "../scrolling";
 import { Mark } from "./Mark";
@@ -236,7 +237,18 @@ export function Output(props: {
       <PaneSticky>
         <PaneHead
           back={{ to: "Timeline", go: props.back }}
-          title={reading(ran(props.output), profiles.data) || "Agent run"}
+          title={
+            <>
+              {/* The same mark the card that opened this pane draws, in front of
+                  the same reading: one session read at two distances, and the
+                  harness is said the same way at both. */}
+              <HarnessMark
+                of={props.output.agent_type}
+                class={styles.harness!}
+              />
+              {reading(ran(props.output), profiles.data) || "Agent run"}
+            </>
+          }
         >
           {/* The two ways of reading the one session, beside the title rather than
               across the pane under it: two words is all the width it ever needs,

@@ -19,6 +19,7 @@ import type {
   AbandonedRepo,
   Adopted,
   AgentOutputEvent,
+  AgentType,
   BacklogPane,
   BriefEvent,
   Capture,
@@ -75,6 +76,16 @@ import pressableCss from "../src/CardButton.module.css?raw";
 // And the pressable icon, which is the other thing in a pane that opens into a
 // subpane: the gear at the head of the sidebar is one.
 import button from "../src/IconButton.module.css";
+// The brand mark of the harness a session runs under, three ways: the hashed
+// name a drawn mark is queried by, and the four files it is drawn out of — read
+// here as lobehub published them, so that a test naming a mark and the component
+// drawing it are two independent statements about the same art, the way the
+// check marks below are named from Font Awesome rather than off `Checks.tsx`.
+import harnessMark from "../src/HarnessMark.module.css";
+import claudeMarkFile from "../src/marks/claude-color.svg?raw";
+import codexMarkFile from "../src/marks/codex.svg?raw";
+import grokMarkFile from "../src/marks/grok.svg?raw";
+import opencodeMarkFile from "../src/marks/opencode.svg?raw";
 import dropdown from "../src/Menu.module.css";
 import menuCss from "../src/Menu.module.css?raw";
 import notices from "../src/notices.module.css";
@@ -6016,6 +6027,226 @@ describe("a session's output on the timeline", () => {
     await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.prose}`);
 
     expect(scrolled.mock.calls.length).toBe(landed);
+  });
+});
+
+/// The brand mark of the harness, in front of the words that name the run.
+///
+/// The reading says who runs a session and the mark is what makes a column of
+/// those readings scannable: a reader picks the Claude run out of five by its
+/// shape before reading a word of any of them. So it is drawn everywhere the
+/// reading is and JSX can put an `svg` — the card, the pane it opens, the status
+/// button's running line and the Brief's three pairing facts — and it is one
+/// component, so those four cannot come to draw four different pictures of the
+/// one harness.
+///
+/// What is asserted is the drawing rather than a class: the four files are read
+/// here exactly as lobehub published them, so a mark drawn from the wrong file
+/// fails even though both files would carry the same class.
+describe("the mark of the harness a session ran under", () => {
+  /// The path inside one of lobehub's files, which is the whole of the drawing:
+  /// all four are a single path in a 24-square box.
+  const art = (file: string): string => / d="([^"]+)"/.exec(file)![1]!;
+
+  /// And the drawing a scope has actually put on the page — `null` where it drew
+  /// no mark at all.
+  const marked = (scope: Element): string | null =>
+    scope
+      .querySelector(`.${harnessMark.mark} path`)
+      ?.getAttribute("d") ?? null;
+
+  /// Every harness, against the file its mark is drawn out of. A fifth backend
+  /// arrives in this list because it arrives in the component's own record,
+  /// which will not compile without a mark beside it.
+  const MARKS = [
+    ["Claude", claudeMarkFile],
+    ["Codex", codexMarkFile],
+    ["Grok", grokMarkFile],
+    ["OpenCode", opencodeMarkFile],
+  ] satisfies Array<[AgentType, string]>;
+
+  /// The Agent run card on the record, which is where a reader meets a run
+  /// first.
+  it.each(MARKS)(
+    "draws %s's own mark on the card that names the run",
+    async (harness, file) => {
+      theGrillingOutput({ agent_type: harness, profile: "Work", model: null });
+      const { container } = mount(`/conversations/${GRILLING.id}`);
+
+      const head = await drawn(
+        container,
+        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+      );
+
+      await waitFor(() => expect(marked(head)).toBe(art(file)));
+    },
+  );
+
+  /// And the details pane the card opens carries the same one, for the reason it
+  /// carries the same words: one session read at two distances.
+  it("carries the same mark into the details pane", async () => {
+    theGrillingOutput({
+      agent_type: "OpenCode",
+      profile: "Work",
+      model: "minimax/minimax-m2.1",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    const head = await drawn(
+      container,
+      `.${shell.detailsPane} .${paneHead.head} h1`,
+    );
+
+    await waitFor(() => expect(marked(head)).toBe(art(opencodeMarkFile)));
+    expect(head.textContent).toBe("OpenCode Minimax M2.1 — Work");
+  });
+
+  /// The status button's second line, off the same record: what is running is
+  /// what was launched, and the mark says which harness launched it.
+  it("marks the harness on the status button's running line", async () => {
+    theGrillingOutput({
+      running: true,
+      agent_type: "Grok",
+      profile: "Work",
+      model: "grok-4.6",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const line = await drawn(
+      container,
+      `.${statusButton.status} .${statusButton.agent}`,
+    );
+
+    await waitFor(() => expect(marked(line)).toBe(art(grokMarkFile)));
+  });
+
+  /// A line saying nothing is running has no harness to mark, which is the same
+  /// nothing its words say.
+  it("marks nothing on a line with no session behind it", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const line = await drawn(
+      container,
+      `.${statusButton.status} .${statusButton.agent}`,
+    );
+
+    expect(line.textContent).toBe("No agent running");
+    expect(line.querySelector(`.${harnessMark.mark}`)).toBeNull();
+  });
+
+  /// And the Brief's three pairing facts, which say what each role *will* run
+  /// under. All three of the fixture's accounts are Claude Code ones, so all
+  /// three rows wear the one mark — what is being asked is that the rows carry a
+  /// mark at all, the four harnesses being covered on the card above.
+  it("marks the backend on each of the Brief's pairing facts", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`),
+    );
+
+    const summary = await drawn(
+      container,
+      `.${shell.detailsPane} .${briefPane.configuration}`,
+    );
+
+    await waitFor(() =>
+      expect(
+        ["Grilling", "Implementation", "Review"].map((term) =>
+          marked(
+            [...summary.querySelectorAll(`.${briefPane.fact}`)].find(
+              (fact) => fact.querySelector("dt")!.textContent === term,
+            )!,
+          ),
+        ),
+      ).toEqual([
+        art(claudeMarkFile),
+        art(claudeMarkFile),
+        art(claudeMarkFile),
+      ]),
+    );
+  });
+
+  /// A run recorded before Verkstead wrote the harness down draws no mark, and
+  /// no element either: the space in front of the words is the mark's own
+  /// margin, so a card with nothing to draw has nothing to leave a gap.
+  it("draws no mark, and no gap, where no harness was recorded", async () => {
+    theGrillingOutput({
+      agent_type: null,
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const head = await drawn(
+      container,
+      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+    );
+
+    await waitFor(() => expect(head.textContent).toBe("Fable 5 — Work"));
+    expect(head.querySelector(`.${harnessMark.mark}`)).toBeNull();
+  });
+
+  /// Claude Code's is lobehub's colour variant, which names its own fill and so
+  /// stands in its own orange wherever it is drawn — colour where lobehub has it
+  /// was the pick, and of these four it has it for Claude alone.
+  it("keeps Claude Code's mark in its own colour", async () => {
+    theGrillingOutput({ agent_type: "Claude", profile: "Work", model: null });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const head = await drawn(
+      container,
+      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+    );
+
+    const path = await drawn(head, `.${harnessMark.mark} path`);
+
+    expect(path.getAttribute("fill")).toBe("#D97757");
+    expect(head.querySelector(`.${harnessMark.mark} svg`)!.getAttribute("fill"))
+      .toBeNull();
+  });
+
+  /// And the other three follow the ink of whatever line they were put beside,
+  /// the way an `Icon` does: soft on the status button's second line, the
+  /// heading's own on a card.
+  it.each(MARKS.filter(([harness]) => harness !== "Claude"))(
+    "leaves %s's mark in the ink around it",
+    async (harness, _file) => {
+      theGrillingOutput({ agent_type: harness, profile: "Work", model: null });
+      const { container } = mount(`/conversations/${GRILLING.id}`);
+
+      const head = await drawn(
+        container,
+        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+      );
+
+      const svg = await drawn(head, `.${harnessMark.mark} svg`);
+
+      expect(svg.getAttribute("fill")).toBe("currentColor");
+      expect(svg.querySelector("path")!.getAttribute("fill")).toBeNull();
+    },
+  );
+
+  /// The mark says nothing to a screen reader: the words beside it are the whole
+  /// of what it means, and a mark read out as "Claude" in front of them would be
+  /// the line saying itself twice.
+  it("says nothing of itself to a reader who cannot see it", async () => {
+    theGrillingOutput({ agent_type: "Codex", profile: "Work", model: null });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const mark = await drawn(
+      container,
+      `.${timeline.agentOutput} .${harnessMark.mark}`,
+    );
+
+    expect(mark.getAttribute("aria-hidden")).toBe("true");
+    // Nor as a tooltip, which is what the `<title>` lobehub ships would have
+    // drawn — taken out of every one of the four files as they were copied.
+    expect(mark.querySelector("title")).toBeNull();
   });
 });
 

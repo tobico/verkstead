@@ -41,6 +41,7 @@ import type {
   Worktree,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { HarnessMark } from "../HarnessMark";
 import { PaneSticky } from "../Panes";
 import { Empty } from "../notices";
 import * as pairing from "../pairing";
@@ -347,9 +348,9 @@ function Where(props: { worktree: Worktree | null }): JSX.Element {
   );
 }
 
-/// One of the Pairings, said the way every picker of one says it: the backend,
-/// the model that account runs on, and the account's name where that is what
-/// tells two of them apart.
+/// One of the Pairings, said the way every picker of one says it: the backend's
+/// mark, the backend, the model that account runs on, and the account's name
+/// where that is what tells two of them apart.
 ///
 /// A Profile chosen before models were paired beside them is half a choice, and
 /// the pane says the half there is rather than inventing the other — there is no
@@ -366,7 +367,17 @@ function Paired(props: {
       when={props.pairing}
       fallback={<span class={styles.rule}>Not chosen.</span>}
     >
-      {(paired) => <>{pairing.label(paired(), props.saved)}</>}
+      {(paired) => (
+        <>
+          {/* The backend's own mark in front of its name, as every other site
+              that says who runs a session draws it. A Profile always carries a
+              backend, so a paired row always has one to draw — the missing
+              half here is the model rather than the harness. The space after it
+              is the row's own `column-gap`, this `dd` being a flex row. */}
+          <HarnessMark of={paired().profile.account.agent_type} />
+          {pairing.label(paired(), props.saved)}
+        </>
+      )}
     </Show>
   );
 }

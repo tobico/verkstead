@@ -6,6 +6,14 @@
    here is the switch, the Capture that stands in for a session that kept no log,
    and the Transcript. */
 
+/* The harness's mark in front of the pane's title, spaced the way the card that
+   opened the pane spaces its own — a margin rather than a gap, the title being a
+   run of text, so a session that recorded no harness leaves no space where a
+   mark would have been. */
+.harness {
+  margin-inline-end: 0.4em;
+}
+
 /* The two ways of reading one session, switched between in the pane's header.
    A pair rather than a row of tabs, because there are two of them and there is
    no third coming: what says which is showing is the pressed one, not a rule

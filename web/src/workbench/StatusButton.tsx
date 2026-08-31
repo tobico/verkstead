@@ -48,6 +48,7 @@ import type {
   ProfileEntry,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { HarnessMark } from "../HarnessMark";
 import { Actions } from "./Actions";
 import { WAITING_ON_CHECKS } from "./conditions";
 import { ENDED, STATE } from "./states";
@@ -206,6 +207,14 @@ export function StatusButton(props: {
     freshness: { reconcile: "id" },
   }));
 
+  // And the harness that session was launched under, for the mark in front of
+  // the words. Off the same record the words are read from, so the two cannot
+  // disagree: no session running, or one that recorded no harness, is no mark —
+  // which is the same nothing the line's own reading says about it.
+  const under = createMemo(
+    () => running(props.conversation)?.agent_type ?? null,
+  );
+
   return (
     <Actions
       conversation={props.conversation}
@@ -232,6 +241,7 @@ export function StatusButton(props: {
             </span>
 
             <span class={styles.agent}>
+              <HarnessMark of={under()} class={styles.harness!} />
               {agent(props.conversation, profiles.data)}
             </span>
           </span>

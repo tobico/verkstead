@@ -118,6 +118,7 @@ import app from "../App.module.css";
 import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
 import { useReading } from "../freshness";
+import { HarnessMark } from "../HarnessMark";
 import { Empty, ErrorLine, Note } from "../notices";
 import { followBottom } from "../scrolling";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
@@ -1580,8 +1581,9 @@ function ConflictsResolved(): JSX.Element {
 /// the same three words over every card on a record that may hold a dozen of
 /// them, and what tells one from another is what it was run under — so the head
 /// is the shared reading in [`../agents`], off the three facts the session wrote
-/// down as it started. A session from before Verkstead wrote any of them down
-/// has nothing to be named by, and keeps the words.
+/// down as it started, with the harness's mark in front of it. A session from
+/// before Verkstead wrote any of them down has nothing to be named by, and keeps
+/// the words — and no mark, there being no harness to draw one for.
 ///
 /// It moves while the session runs, which is the point: the page hears the world
 /// moved and reads this back, so a session that has just asked something says so
@@ -1602,6 +1604,12 @@ function AgentOutput(props: {
     >
       <span class={styles.eventHead}>
         <span class={styles.what}>
+          {/* The harness's own mark in front of the words, which is what makes a
+              column of these scannable: a reader picks the Claude run out of
+              five by its shape before reading a word of any of them. Inside the
+              heading rather than beside it, so the two stay together where the
+              head wraps. */}
+          <HarnessMark of={props.output.agent_type} class={styles.harness!} />
           {reading(ran(props.output), props.saved) || "Agent run"}
         </span>
         {/* How far the conversation has got. A session with no Transcript to
