@@ -1370,10 +1370,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
                 return Err(Adopted::FetchFailed);
             }
 
-            let named = match picked {
-                Some(picked) => picked,
-                None => worktrees::default_ref(&repo, &default),
-            };
+            // Both, because the stacking question below is *is this the default
+            // branch or something else*, and the default's own name is half of
+            // that. Resolved after the fetch, like everything else here.
+            let default = worktrees::default_ref(&repo, &default);
+
+            let named = picked.unwrap_or_else(|| default.clone());
 
             let Some(commit) = worktrees::resolve(&repo, &named) else {
                 return Err(Adopted::NoBaseCommit);
@@ -1385,7 +1387,11 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             // have moved since. Which clause refused it is the answer to the
             // button: each of them is a different thing to go and do about it.
             match crate::stages::startable(&repo, &commit, &roadmap) {
-                Startable::Stage(abandoned) => Ok((commit, named, abandoned.stage)),
+                Startable::Stage(abandoned) => {
+                    let stacks_on = predecessor(&repo, &commit, &named, &default);
+
+                    Ok((commit, named, abandoned.stage, stacks_on))
+                }
                 Startable::NoRoadmap => Err(Adopted::NoRoadmap),
                 Startable::Complete => Err(Adopted::RoadmapComplete),
                 Startable::InFlight => Err(Adopted::StageInFlight),
@@ -1399,7 +1405,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // `named` comes back out rather than being worked out again up here: what an
     // unpicked base resolved through is decided inside, after the fetch, and the
     // Timeline is owed the name the branch actually came off.
-    let (commit, named, stage) = match read {
+    let (commit, named, stage, stacks_on) = match read {
         Ok(read) => read,
         Err(refusal) => return Ok(refusal),
     };
@@ -1469,9 +1475,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     };
 
     // And now the store, in the order the record is read in: the branch it is on,
-    // the Brief it works from, and then the move that freezes both. Adoption
-    // never stacks — there is no predecessor Conversation to stand on, and
-    // standing on an unmerged one is the base commit the human fixed above.
+    // the Brief it works from, and then the move that freezes both.
     store::rename_branch(pool, id, Some(branch.as_str())).await?;
     store::save_brief(pool, id, &stage.brief).await?;
 
@@ -1480,7 +1484,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // that said it was implementing without saying where its companions went
     // would be one nothing could bind into a sandbox and nothing would come back
     // and remove.
-    match store::start_stage(pool, id, &commit, &path, None, &checkouts).await? {
+    match store::start_stage(pool, id, &commit, &path, stacks_on.as_deref(), &checkouts).await? {
         store::Staged::Started => {}
         store::Staged::NoSuchConversation => return Ok(Adopted::NoSuchConversation),
         store::Staged::NotDrafting => return Ok(Adopted::NotDrafting),
@@ -1494,7 +1498,13 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // Conversation's own Timeline, because that is the only Timeline there is:
     // adoption has no predecessor Conversation for the human to have been
     // watching.
-    if let Err(error) = store::note(pool, id, &adopted(&stage, &branch, &named)).await {
+    if let Err(error) = store::note(
+        pool,
+        id,
+        &adopted(&stage, &branch, stacks_on.as_deref(), &named),
+    )
+    .await
+    {
         tracing::error!(error = ?error, conversation_id = id, "recording what was adopted failed");
     }
 
@@ -1520,7 +1530,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // [`crate::runner::plan_stage`].
     let driving = state.drivers.driving(id);
 
-    tokio::spawn(crate::runner::plan_stage(state.clone(), id, None, driving));
+    tokio::spawn(crate::runner::plan_stage(
+        state.clone(),
+        id,
+        stacks_on,
+        driving,
+    ));
 
     Ok(Adopted::Adopted)
 }
@@ -1530,19 +1545,72 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
 ///
 /// [`crate::continuing::begun`]'s wording, with the two things adoption changes
 /// taken out of it. *With nobody asked* goes, because somebody did: a human
-/// pressed this. And only the came-off half is ever said, because an adopted
-/// stage has no predecessor Conversation to stack on — where its branch stands
-/// is the base commit, which is the human's to fix and theirs alone.
-fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
+/// pressed this. What stays is both halves: an adopted stage stacks on the base
+/// the human fixed it to, wherever that base is a predecessor there is anything
+/// left to stack on, and the half it did not take is as much worth saying as
+/// the half it did.
+fn adopted(
+    stage: &crate::stages::Stage,
+    branch: &str,
+    stacks_on: Option<&str>,
+    from: &str,
+) -> String {
     // The brief named rather than linked, as the unattended start names it: it
     // is a path in a Worktree the workbench has no route to, and a link that
     // went nowhere would be worse than the path itself.
-    format!(
-        "Stage {} of the `{}` roadmap — *{}* — was adopted from `{}`. Its branch `{branch}` came \
-         off `{from}`: an adopted stage has no Conversation before it to stack on, so where it \
-         stands is the base commit this one was fixed to.",
+    let started = format!(
+        "Stage {} of the `{}` roadmap — *{}* — was adopted from `{}`.",
         stage.label, stage.roadmap, stage.title, stage.brief_path,
-    )
+    );
+
+    match stacks_on {
+        Some(predecessor) => format!(
+            "{started} Its branch `{branch}` stacks on `{predecessor}`, the base this \
+             Conversation was fixed to, the way this repository's `{}` records.",
+            crate::stages::GIT_WORKFLOW,
+        ),
+        None => format!(
+            "{started} Its branch `{branch}` came off `{from}` and stacks on nothing: the base \
+             is the default branch, or work already in it, or this repository's `{}` records no \
+             way to stack a roadmap stage on the one before it.",
+            crate::stages::GIT_WORKFLOW,
+        ),
+    }
+}
+
+/// The branch an adopted stage stacks on, where there is one to stack on.
+///
+/// Stacking is what a stage does when the work it builds on is finished and not
+/// yet merged, and for an adopted stage that work is whatever the human fixed
+/// the base to — there being no predecessor Conversation here to take it from,
+/// which is the one thing adoption does differently. Four things have to hold,
+/// and each of them is a way of there being nothing to stack on rather than a
+/// failure:
+///
+/// - **The base is not the default branch.** A stage off the default branch is
+///   the ordinary unstacked case: there is no predecessor, which is what
+///   picking no base means.
+/// - **It names a local branch.** A stack holds branches, so a base given as a
+///   raw commit or as a remote-tracking ref is not one a stack could be told
+///   about. Asked as [`worktrees::branch_exists`] rather than the fail-safe
+///   reading, because a git that would not answer is a reason to leave the
+///   bookkeeping alone rather than to invent some.
+/// - **It is not already in the default branch.** A merged predecessor is work
+///   that has landed, and its pull request is closed: there is nothing left for
+///   a stack to hold it in.
+/// - **The repository records a stacking mechanism**, at the base commit, which
+///   is [`crate::stages::stacks_at`]'s question and the same one the unattended
+///   path asks of a Worktree. Verkstead carries no mechanism of its own.
+fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<String> {
+    if named == default || !worktrees::branch_exists(repo, named) {
+        return None;
+    }
+
+    if worktrees::merged(repo, commit, default) != Some(false) {
+        return None;
+    }
+
+    crate::stages::stacks_at(repo, commit).then(|| named.to_owned())
 }
 
 /// Stop a Conversation wherever it has got to: its session ended, its worktree
@@ -2016,5 +2084,129 @@ mod tests {
         for taken in ["main", "rate-limiting", "feature/rate-limiting", "v2"] {
             assert!(is_branch_name(taken), "{taken:?} should be taken");
         }
+    }
+
+    /// The whole of what an adopted stage stacks on: a base that is a local
+    /// branch, is not the default branch, has not been merged into it, in a
+    /// repository that records a mechanism.
+    #[test]
+    fn an_adopted_stage_stacks_on_the_unmerged_branch_it_was_based_on() {
+        let repo = stacking();
+        let tip = worktrees::resolve(&repo, "predecessor").expect("the branch resolves");
+
+        assert_eq!(
+            predecessor(&repo, &tip, "predecessor", "main"),
+            Some("predecessor".to_owned()),
+        );
+    }
+
+    /// Each of the four ways there is nothing to stack on, which are ways of
+    /// this being an ordinary unstacked stage rather than ways of failing.
+    #[test]
+    fn a_base_with_nothing_left_to_stack_on_stacks_on_nothing() {
+        let repo = stacking();
+        let tip = worktrees::resolve(&repo, "predecessor").expect("the branch resolves");
+        let main = worktrees::resolve(&repo, "main").expect("main resolves");
+
+        assert_eq!(
+            predecessor(&repo, &main, "main", "main"),
+            None,
+            "the default branch is what an unstacked stage comes off",
+        );
+
+        assert_eq!(
+            predecessor(&repo, &tip, &tip, "main"),
+            None,
+            "a raw commit is not a branch a stack could be told about",
+        );
+
+        assert_eq!(
+            predecessor(&repo, &tip, "nothing-by-that-name", "main"),
+            None,
+            "and neither is a name with no local branch behind it",
+        );
+
+        run(
+            &repo,
+            &["merge", "-q", "--no-ff", "-m", "merge it", "predecessor"],
+        );
+
+        assert_eq!(
+            predecessor(&repo, &tip, "predecessor", "main"),
+            None,
+            "and a predecessor already in the default branch is finished work",
+        );
+    }
+
+    /// The mechanism is the repository's, so a repository that records none has
+    /// nothing to follow and the stage comes off its base unstacked.
+    #[test]
+    fn a_repository_recording_no_mechanism_stacks_nothing() {
+        let repo = stacking();
+
+        std::fs::write(
+            repo.join(crate::stages::GIT_WORKFLOW),
+            "# Git workflow\n\n## Review process\n\n### Finish sequence\n\nPush it.\n",
+        )
+        .unwrap();
+
+        run(&repo, &["add", "-A"]);
+        run(&repo, &["commit", "-m", "docs: no stacking here"]);
+        run(&repo, &["checkout", "-q", "-B", "predecessor"]);
+        run(&repo, &["checkout", "-q", "main"]);
+
+        let tip = worktrees::resolve(&repo, "predecessor").expect("the branch resolves");
+
+        assert_eq!(predecessor(&repo, &tip, "predecessor", "main"), None);
+    }
+
+    /// A repository that records a stacking mechanism, with one unmerged branch
+    /// off its default branch to stand a stage on.
+    fn stacking() -> PathBuf {
+        // Leaked rather than returned beside the path: these tests are a handful
+        // of git calls each, and a temporary directory that outlives the test
+        // binary is the tidier of the two shapes to read.
+        let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
+        let repo = dir.path().to_path_buf();
+
+        run(&repo, &["init", "--initial-branch", "main"]);
+        run(&repo, &["config", "user.email", "test@verkstead.invalid"]);
+        run(&repo, &["config", "user.name", "Verkstead Test"]);
+
+        let workflow = repo.join(crate::stages::GIT_WORKFLOW);
+        std::fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+        std::fs::write(
+            &workflow,
+            "# Git workflow\n\n## Review process\n\n\
+             ### Finish sequence\n\nPush it.\n\n\
+             ### Stacking roadmap stages\n\n`gh stack init <predecessor> <new>`\n",
+        )
+        .unwrap();
+
+        run(&repo, &["add", "-A"]);
+        run(
+            &repo,
+            &["commit", "-m", "chore: how this repository reviews"],
+        );
+
+        run(&repo, &["checkout", "-q", "-b", "predecessor"]);
+        std::fs::write(repo.join("predecessor.md"), "# the stage before\n").unwrap();
+        run(&repo, &["add", "-A"]);
+        run(&repo, &["commit", "-m", "feat: the stage before this one"]);
+        run(&repo, &["checkout", "-q", "main"]);
+
+        repo
+    }
+
+    fn run(dir: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .expect("git should be on the PATH for these tests");
+
+        assert!(output.status.success(), "git {args:?} failed");
     }
 }

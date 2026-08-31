@@ -160,10 +160,26 @@ const STACKING: &str = "### Stacking roadmap stages";
 /// is where the section belongs and a file that mentioned stacking in passing —
 /// a note, a changelog entry — would not be a repository that had recorded one.
 pub(crate) fn stacks(worktree: &Path) -> bool {
-    let Ok(workflow) = std::fs::read_to_string(worktree.join(GIT_WORKFLOW)) else {
-        return false;
-    };
+    std::fs::read_to_string(worktree.join(GIT_WORKFLOW)).is_ok_and(|workflow| stacking(&workflow))
+}
 
+/// The same question asked of a Repo at a commit, with no Worktree anywhere in
+/// it — [`abandoned`]'s way of reading, for [`abandoned`]'s reason.
+///
+/// What adoption needs. A stage adopted off an unmerged predecessor stacks on
+/// it exactly as an unattended one does, and the file that says whether this
+/// repository stacks at all is a file in the repository — read here at the
+/// commit the stage branches from, which is the commit whose contents the stage
+/// will be working against.
+pub(crate) fn stacks_at(repo: &Path, commit: &str) -> bool {
+    at(repo, commit, GIT_WORKFLOW).is_some_and(|workflow| stacking(&workflow))
+}
+
+/// Whether a `git-workflow.md`'s text records a stacking mechanism.
+///
+/// The bytes are the caller's to fetch — off a checkout or out of a git
+/// directory — and what counts as recording one is the same either way.
+fn stacking(workflow: &str) -> bool {
     workflow
         .lines()
         .map(str::trim_end)
@@ -1792,6 +1808,35 @@ Turns this askance clone into Verkstead.
         );
 
         assert!(stacks(repo.path()), "and this one has");
+    }
+
+    /// And the same mechanism read the way adoption has to read it: out of a git
+    /// directory at a commit, there being no Worktree anywhere in that path.
+    ///
+    /// A file that is only in the working tree is not one a commit holds, which
+    /// is the whole difference between the two readings and worth asserting: the
+    /// stage adoption starts works against the commit, not against whatever the
+    /// human's checkout happens to be showing.
+    #[test]
+    fn the_stacking_mechanism_reads_out_of_a_commit_too() {
+        let repo = Repo::with(&[]);
+        repo.workflow(
+            "# Git workflow\n\n## Review process\n\n\
+             ### Finish sequence\n\nPush it.\n\n\
+             ### Stacking roadmap stages\n\n`gh stack init <predecessor> <new>`\n",
+        );
+
+        assert!(
+            !stacks_at(repo.path(), &repo.tip()),
+            "written and not committed is nothing the commit holds",
+        );
+
+        repo.commit();
+
+        assert!(
+            stacks_at(repo.path(), &repo.tip()),
+            "and committed, it is what the commit records",
+        );
     }
 
     /// Under the review process rather than anywhere in the file: a repository

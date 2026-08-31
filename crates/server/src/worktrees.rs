@@ -402,6 +402,25 @@ pub(crate) fn resolve(repo: &Path, named: &str) -> Option<String> {
     (!commit.is_empty()).then(|| commit.to_owned())
 }
 
+/// Whether `into`'s history already holds `commit`, or `None` where git would
+/// not say.
+///
+/// What adoption asks about the base a human fixed: a branch already merged
+/// into the default branch is not a predecessor to stack on, because there is
+/// nothing left of it for a stack to hold — the work is in the default branch
+/// and the pull request that carried it is closed.
+///
+/// Asked as a merge base rather than as `--is-ancestor`, which answers by exit
+/// code alone: the answer here is wanted apart from *git could not read this
+/// repository*, and an exit code cannot tell the caller which of the two it got.
+/// `commit` is a full commit id, as everything that resolves one here produces,
+/// so it is the merge base exactly when its history is contained.
+pub(crate) fn merged(repo: &Path, commit: &str, into: &str) -> Option<bool> {
+    let base = git(repo, &["merge-base", "--end-of-options", commit, into])?;
+
+    Some(base.trim() == commit)
+}
+
 /// Make the directory a worktree goes under, and say whether it is there.
 ///
 /// Git creates the worktree directory but not the `worktrees/` above it, which
@@ -1699,6 +1718,53 @@ mod tests {
     fn a_server_with_no_data_directory_sweeps_nothing() {
         assert!(sweeping(Path::new(""), &[], &[]).is_empty());
     }
+    /// Whether the default branch has already swallowed a branch, which is what
+    /// says a predecessor is finished work rather than something to stack on.
+    #[test]
+    fn a_branch_is_merged_once_the_default_branch_holds_its_commits() {
+        let (_dir, repo) = repository();
+
+        run(&repo, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(repo.join("feature.md"), "# a feature\n").unwrap();
+        run(&repo, &["add", "-A"]);
+        run(&repo, &["commit", "-m", "feat: the feature"]);
+
+        let tip = resolve(&repo, "feature").expect("the branch resolves");
+
+        assert_eq!(
+            merged(&repo, &tip, "main"),
+            Some(false),
+            "unmerged, which is a predecessor with something left to stack on",
+        );
+
+        run(&repo, &["checkout", "-q", "main"]);
+        run(
+            &repo,
+            &["merge", "-q", "--no-ff", "-m", "merge it", "feature"],
+        );
+
+        assert_eq!(
+            merged(&repo, &tip, "main"),
+            Some(true),
+            "and merged, which is work that has landed",
+        );
+
+        // The default branch's own tip is in its own history, which is the
+        // answer that keeps a stage off the default branch from stacking on it.
+        let main = resolve(&repo, "main").expect("main resolves");
+
+        assert_eq!(merged(&repo, &main, "main"), Some(true));
+    }
+
+    /// And a repository git will not read says nothing rather than saying no —
+    /// the difference the caller turns on, because *no* is what makes it stack.
+    #[test]
+    fn a_repository_git_will_not_read_says_nothing_about_merging() {
+        let dir = tempfile::tempdir().unwrap();
+
+        assert_eq!(merged(dir.path(), "abc123", "main"), None);
+    }
+
     /// A repository with one commit on it and a branch to check out, and the
     /// directory that keeps it alive.
     fn repository() -> (tempfile::TempDir, PathBuf) {
