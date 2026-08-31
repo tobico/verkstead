@@ -15,8 +15,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SetView } from "../src/api/types";
-// The nav's own names, which are the module's now rather than the page's.
+// The nav's own names, which are the module's now rather than the page's, and
+// the source of the same file, for the one question below that is the
+// stylesheet's alone to answer.
 import contents from "../src/set/Contents.module.css";
+import stylesheet from "../src/set/Contents.module.css?raw";
 import { reading, texts } from "./reading";
 import { readable } from "./serving";
 import alongside from "./fixtures/set-alongside.json" with { type: "json" };
@@ -540,5 +543,108 @@ describe("the bar", () => {
     line(nav, "q1").click();
 
     expect(down(nav), "the list has done what it was opened for").toBe(false);
+  });
+});
+
+/// Which of the two shapes the nav takes is the stylesheet's answer alone, and
+/// it is the one thing in this file jsdom cannot be asked: it settles a cascade
+/// by source order and never weighs a selector, so a rule that loses in every
+/// real browser wins in a test. The rules are read out of the stylesheet here
+/// and weighed the way a browser weighs them — which is exactly what the
+/// sidebar once went missing for, a `:not()` counting for as much as the class
+/// written inside it and the shut rule quietly outranking the margin's own.
+describe("which shape the nav takes", () => {
+  /// One rule about whether the nav's list is drawn: what the nav has to be
+  /// wearing for it to apply, what it must not be, and what the rule then says.
+  type Shape = {
+    has: string[];
+    hasNot: string[];
+    display: string;
+    /// Where in the file it stands, which is what settles a tie.
+    at: number;
+  };
+
+  /// Every `display` the stylesheet sets on the nav's list, read as the state
+  /// of the nav each of them is written under.
+  ///
+  /// The selectors are all one shape — a compound about the nav, then the list
+  /// under it — so the compound is what is taken apart, and a stylesheet that
+  /// grew a selector of any other shape fails the check below rather than being
+  /// quietly misread.
+  function shapes(css: string): Shape[] {
+    const found: Shape[] = [];
+
+    for (const [, selector, body] of css
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const display = /(?:^|;)\s*display:\s*([\w-]+)/.exec(body ?? "")?.[1];
+      const nav = /^\s*([\w.:()-]+)\s+\.sections\s*$/.exec(selector ?? "")?.[1];
+
+      if (display === undefined || nav === undefined) {
+        continue;
+      }
+
+      const has: string[] = [];
+      const hasNot: string[] = [];
+      let counted = 0;
+
+      for (const [, not, plain] of nav.matchAll(
+        /:not\(\.([\w-]+)\)|\.([\w-]+)/g,
+      )) {
+        (not === undefined ? has : hasNot).push(not ?? plain!);
+        counted += 1;
+      }
+
+      // Nothing but classes and `:not` of one, which is what makes a rule's
+      // weight the count of them. A selector with anything else in it would be
+      // weighed wrong here and read right by a browser, which is the one way
+      // this check could pass over a real difference.
+      expect(nav.replace(/:not\(\.[\w-]+\)|\.[\w-]+/g, "")).toBe("");
+      expect(counted).toBeGreaterThan(0);
+
+      found.push({ has, hasNot, display, at: found.length });
+    }
+
+    return found;
+  }
+
+  /// What a nav wearing these classes draws its list as, settled the way a
+  /// browser settles it: the most specific rule that applies, and the last one
+  /// in the file where two are equally specific.
+  function drawn(...worn: string[]): string {
+    const applies = (shape: Shape) =>
+      shape.has.every((name) => worn.includes(name)) &&
+      shape.hasNot.every((name) => !worn.includes(name));
+
+    // An `ol` nothing has spoken about is a block, which is a list drawn.
+    let display = "block";
+    let weight = -1;
+
+    for (const shape of shapes(stylesheet).filter(applies)) {
+      const its = shape.has.length + shape.hasNot.length;
+
+      if (its >= weight) {
+        weight = its;
+        display = shape.display;
+      }
+    }
+
+    return display;
+  }
+
+  it("keeps the sidebar's list in the margin, asked for or not", () => {
+    expect(
+      drawn("contents", "roomy"),
+      "the margin's list is never asked for — it is simply there",
+    ).toBe("block");
+
+    // And a nav that was tapped open and then widened into a margin is the
+    // sidebar too, rather than a list wearing half of each shape.
+    expect(drawn("contents", "roomy", "open")).toBe("block");
+  });
+
+  it("keeps the bar's list away until it is asked for", () => {
+    expect(drawn("contents")).toBe("none");
+    expect(drawn("contents", "open")).toBe("block");
   });
 });

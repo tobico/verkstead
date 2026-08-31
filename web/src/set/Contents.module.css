@@ -106,8 +106,11 @@
 }
 
 /* Shut, the list is not drawn at all: the bar is the whole of the nav until it
-   is asked for. */
-.contents:not(.open) .sections {
+   is asked for. Said of the bar's shape alone: a sidebar's list is never asked
+   for — it is the margin's, and it is simply there — and left unsaid this rule
+   would beat the one that puts it out there, a `:not()` counting for as much as
+   the class written inside it. */
+.contents:not(.roomy):not(.open) .sections {
   display: none;
 }
 
