@@ -52,6 +52,7 @@ function ran(over: Partial<AgentOutputEvent>): AgentOutputEvent {
     idle: false,
     profile: "Work",
     model: "claude-fable-5",
+    agent_type: "Claude",
     ...over,
   };
 }

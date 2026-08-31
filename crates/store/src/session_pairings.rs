@@ -1,6 +1,6 @@
 //! What each session ran under: the name of the Agent Profile it was launched
-//! from and the id of the model it was launched on, by the Timeline Event that
-//! session printed into.
+//! from, the id of the model it was launched on and the agent that ran it, by
+//! the Timeline Event that session printed into.
 //!
 //! Written down rather than looked up, because it is history rather than
 //! status. The server has the Pairing in hand at the moment it starts a session
@@ -15,10 +15,17 @@
 //! fact that arrived after the Capture did can be added beside it without one.
 //! One row per Event, because one Event is one session.
 //!
+//! Which agent ran it is a second table beside that one, for the same reason
+//! once more: it is a fact that arrived after the pairing did. Written in the
+//! same transaction, so an Event carries the whole of what its session ran
+//! under or none of it.
+//!
 //! An Event with no row is a session started before any of this was written
 //! down, and it is not an error anywhere: what it means is a session whose
 //! pairing was never recorded, which every reader shows as nothing rather than
-//! as a guess.
+//! as a guess. An Event with a pairing and no agent type is that one table
+//! later — a session from after the pairing was written down and before the
+//! agent was — and it reads the same way.
 
 use std::collections::HashMap;
 
@@ -42,9 +49,19 @@ pub struct RanUnder {
     /// somebody left without one: the session was launched on whatever its
     /// agent defaults to, and there is nothing true to write down.
     pub model: Option<String>,
+
+    /// And which agent ran it: the harness rather than the model, which is what
+    /// says whose mark goes beside the reading.
+    ///
+    /// A copy for the name's reason. What a Profile runs is the shape of the
+    /// account it holds, so a Profile retyped or deleted since would take this
+    /// answer with it too.
+    ///
+    /// `None` for a session started before this was written down.
+    pub agent_type: Option<super::AgentType>,
 }
 
-/// The table the pairings live in.
+/// The table the pairings live in, and the one the agents do.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS session_pairings (
@@ -57,6 +74,20 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the session_pairings table")?;
 
+    // Beside that one rather than a column in it: the pairing was written down
+    // first and there is no migration machinery here to widen its row with. The
+    // word is [`super::AgentType::word`]'s, which is the one spelling a
+    // Profile's own column is written in.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS session_agents (
+             event_id   INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             agent_type TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the session_agents table")?;
+
     Ok(())
 }
 
@@ -64,7 +95,9 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 ///
 /// Takes a connection rather than the pool, for [`super::session_names`]'s
 /// reason: this happens inside the transaction that opens the Capture, so the
-/// Event and what its session runs under arrive together or not at all.
+/// Event and what its session runs under arrive together or not at all. Both
+/// rows in the one call for the same reason again — a Pairing and the agent
+/// running it are one fact written in two tables.
 pub(crate) async fn pair_session(
     conn: &mut sqlx::SqliteConnection,
     event_id: i64,
@@ -74,9 +107,16 @@ pub(crate) async fn pair_session(
         .bind(event_id)
         .bind(&ran_under.profile.name)
         .bind(ran_under.runs_on())
-        .execute(conn)
+        .execute(&mut *conn)
         .await
         .with_context(|| format!("recording what the session of Event {event_id} ran under"))?;
+
+    sqlx::query("INSERT INTO session_agents (event_id, agent_type) VALUES (?, ?)")
+        .bind(event_id)
+        .bind(ran_under.profile.agent_type().word())
+        .execute(conn)
+        .await
+        .with_context(|| format!("recording which agent ran the session of Event {event_id}"))?;
 
     Ok(())
 }
@@ -86,15 +126,17 @@ pub(crate) async fn pair_session(
 ///
 /// Read for the whole Timeline rather than per Event, for the Capture
 /// summaries' reason — see [`super::captures::on_timeline`]. An Event with no
-/// row is simply absent from the map.
+/// row is simply absent from the map, and one whose agent was never written down
+/// is in it without one.
 pub(crate) async fn on_timeline(
     pool: &SqlitePool,
     conversation_id: i64,
 ) -> Result<HashMap<i64, RanUnder>> {
-    let rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(
-        "SELECT p.event_id, p.profile, p.model
+    let rows: Vec<(i64, String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT p.event_id, p.profile, p.model, a.agent_type
          FROM session_pairings p
          JOIN timeline_events e ON e.id = p.event_id
+         LEFT JOIN session_agents a ON a.event_id = p.event_id
          WHERE e.conversation_id = ?",
     )
     .bind(conversation_id)
@@ -104,8 +146,27 @@ pub(crate) async fn on_timeline(
         format!("reading what the sessions of Conversation {conversation_id} ran under")
     })?;
 
-    Ok(rows
-        .into_iter()
-        .map(|(event_id, profile, model)| (event_id, RanUnder { profile, model }))
-        .collect())
+    rows.into_iter()
+        .map(|(event_id, profile, model, agent_type)| {
+            // Read back into the type rather than passed along as the word, so a
+            // word nothing here wrote is heard about where it is read instead of
+            // reaching the wire as something no reader has a case for.
+            let agent_type = agent_type
+                .as_deref()
+                .map(super::AgentType::read)
+                .transpose()
+                .with_context(|| {
+                    format!("reading which agent ran the session of Event {event_id}")
+                })?;
+
+            Ok((
+                event_id,
+                RanUnder {
+                    profile,
+                    model,
+                    agent_type,
+                },
+            ))
+        })
+        .collect()
 }

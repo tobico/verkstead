@@ -678,8 +678,9 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // same Event for the same reason.
     session_names::apply_schema(pool).await?;
 
-    // And what each of them was launched under, which hangs off the same Event
-    // again — one session is one Event, and one Event is one Pairing.
+    // And what each of them was launched under — the Pairing and the agent that
+    // ran it — which hangs off the same Event again: one session is one Event,
+    // and one Event is one launch.
     session_pairings::apply_schema(pool).await?;
 
     // And the record those sessions kept of themselves, which hangs off the

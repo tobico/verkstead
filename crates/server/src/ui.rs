@@ -1390,9 +1390,13 @@ pub(crate) async fn conversation_view(
                     // renamed and a Pairing repicked, and what this Event is is
                     // the account of one session that has already happened.
                     store::Event::AgentOutput(summary, ran_under) => {
-                        let (profile, model) = match ran_under {
-                            Some(ran_under) => (Some(ran_under.profile), ran_under.model),
-                            None => (None, None),
+                        let (profile, model, agent_type) = match ran_under {
+                            Some(ran_under) => (
+                                Some(ran_under.profile),
+                                ran_under.model,
+                                ran_under.agent_type.map(crate::profiles::agent_type),
+                            ),
+                            None => (None, None, None),
                         };
 
                         verkstead_render::agent_output_event(
@@ -1405,6 +1409,7 @@ pub(crate) async fn conversation_view(
                             idling,
                             profile,
                             model,
+                            agent_type,
                         )
                     }
                     // The table of what was asked against what was decided, and no

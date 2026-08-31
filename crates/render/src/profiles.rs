@@ -19,6 +19,25 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
+/// Which agent a session runs, on its own rather than as an account's shape.
+///
+/// The same four words [`ProfileAccount`]'s discriminator is written in, so a
+/// viewer narrowing on one narrows on the other: what a Profile runs and what a
+/// finished session ran are the same fact about the same set of backends, and
+/// two spellings of it would be two things for the viewer to keep in step.
+///
+/// Its own type because the account is not always there to carry it — a Timeline
+/// Event says which agent ran a session and holds no account at all, the
+/// Profile it was launched from being a thing that can since have gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum AgentType {
+    Claude,
+    Codex,
+    Grok,
+    OpenCode,
+}
+
 /// The account a Profile names, in the shape the agent type running it keeps
 /// one.
 ///

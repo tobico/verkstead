@@ -16,7 +16,7 @@ every row can carry its mark.
 
 ## Tasks
 
-- [ ] 01: Record the harness a session ran under — [details](01-record-harness.md)
+- [x] 01: Record the harness a session ran under — [details](01-record-harness.md)
 - [ ] 02: The shared reading — [details](02-shared-reading.md)
 - [ ] 03: The historical sites — [details](03-historical-sites.md)
 - [ ] 04: The harness marks — [details](04-harness-marks.md)
