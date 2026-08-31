@@ -414,6 +414,9 @@ describe("saving", () => {
           email: "ada@analytical.engine",
         },
         github_token: "Keep",
+        // The rules ride along as an action rather than a value: nothing this
+        // form does says anything about them — see [`IgnoredCommentsEdit`].
+        ignored_comments: "Keep",
         // The build cache rides along as it stands, because the endpoint
         // writes the whole of `config.yaml` and this form only means to
         // change the author.
@@ -438,6 +441,7 @@ describe("saving", () => {
         git_author: { name: "Ada Lovelace", email: "ada@analytical.engine" },
       },
       verified: null,
+      refused: [],
     };
     theSettings(TOLD, json(rewritten));
     const { container } = mountBoth();
@@ -519,6 +523,7 @@ describe("saving", () => {
     const unscoped: SettingsSaved = {
       settings: SAVED.settings,
       verified: { Account: { login: "ada", missing: ["gist"] } },
+      refused: [],
     };
     theSettings(UNSET, json(unscoped));
     const { container } = mountPane();
@@ -561,6 +566,7 @@ describe("saving", () => {
     const unverified: SettingsSaved = {
       settings: SAVED.settings,
       verified: { Refused: { why: "gh: Bad credentials (HTTP 401)" } },
+      refused: [],
     };
     theSettings(UNSET, json(unverified));
     mountPane();
@@ -650,8 +656,10 @@ describe("replacing and clearing the token", () => {
         share_viewer_url: TOLD.share_viewer_url,
         conflict_resolution: TOLD.conflict_resolution,
         paths: TOLD.paths,
+        ignored_comments: TOLD.ignored_comments,
       },
       verified: null,
+      refused: [],
     };
     const fetching = theSettings(TOLD, json(cleared));
     const { container } = mountBoth();
@@ -663,6 +671,9 @@ describe("replacing and clearing the token", () => {
       expect(sent(fetching)).toEqual({
         git_author: TOLD.git_author,
         github_token: "Clear",
+        // The rules ride along as an action rather than a value: nothing this
+        // form does says anything about them — see [`IgnoredCommentsEdit`].
+        ignored_comments: "Keep",
         rust_build_cache: {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,

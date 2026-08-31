@@ -34,16 +34,17 @@ use verkstead_render::{
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
     ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
-    GrillingStarted, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RepoEntry, Resolved, Resumed, RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved,
-    SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
+    PushKey, Registration, RepoEntry, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission,
+    Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
-use crate::settings::{Config, GitAuthor, RustBuildCache, Secrets};
+use crate::settings::{Config, GitAuthor, RuleTrouble, RustBuildCache, Secrets};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -3384,6 +3385,40 @@ async fn save_settings(
     let installed = state.binds.clone();
 
     let saved = tokio::task::spawn_blocking(move || {
+        // What the rules are to be afterwards, and what is wrong with them —
+        // both before a byte of either file is written, because a refusal here
+        // is the whole request refused. A save that wrote the author down and
+        // turned the rules away would leave the human working out which half of
+        // the page they are looking at.
+        let (rules, refused) = match &edit.ignored_comments {
+            // Whatever is written down, carried through untouched — a pattern
+            // that will not compile included. The reading half keeps one of
+            // those and this half is not entitled to drop it: a save about the
+            // build cache has no business quietly rewriting a rule, and no
+            // business being refused over one either.
+            IgnoredCommentsEdit::Keep => {
+                (settings.config().ignored_comments().to_vec(), Vec::new())
+            }
+
+            IgnoredCommentsEdit::Set { rules } => {
+                let rules: Vec<_> = rules.iter().map(as_stored).collect();
+                let refused = refusals(&rules);
+
+                (rules, refused)
+            }
+        };
+
+        if !refused.is_empty() {
+            return Ok(SettingsSaved {
+                // How things stand, which is how they stood: nothing was
+                // written, and the page draws the errors over what the human
+                // still has in front of them.
+                settings: as_told(&settings, caches_compiles, &watched, &installed),
+                verified: None,
+                refused,
+            });
+        }
+
         settings.save_config(&Config::of(
             GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
             // The size as it was typed, and an empty field as nothing
@@ -3407,6 +3442,9 @@ async fn save_settings(
             // them if they were.
             edit.sandbox_binds,
             edit.watched_paths,
+            // And the rules, decided above: either what was already written down
+            // or the whole list the page sent, in the order it sent it.
+            rules,
         ))?;
 
         let verifying = match &edit.github_token {
@@ -3443,6 +3481,9 @@ async fn save_settings(
         Ok::<_, std::io::Error>(SettingsSaved {
             settings: as_told(&settings, caches_compiles, &watched, &installed),
             verified,
+            // Nothing turned down: a save that got this far was one there was
+            // nothing wrong with.
+            refused: Vec::new(),
         })
     })
     .await;
@@ -3528,6 +3569,12 @@ fn as_told(
         // the file again rather than off the `config` above, because that is
         // where the whole of this one question is answered.
         paths: crate::paths::told(watched, binds, settings),
+
+        // And the ignore rules exactly as the file holds them, a pattern that
+        // will not compile included: this is what the editor draws back into
+        // its rows, and a rule left out of the read would be one the human
+        // could not correct.
+        ignored_comments: config.ignored_comments().iter().map(as_written).collect(),
         github_token: secrets.github_token().map(|token| TokenSaved {
             last_four: last_four(token),
             at: settings
@@ -3536,6 +3583,56 @@ fn as_told(
                 .unwrap_or_default(),
         }),
     }
+}
+
+/// One ignore rule as the settings file holds it, out of what the page sent:
+/// two patterns, each blank one no constraint on that part at all.
+fn as_stored(rule: &IgnoreRule) -> crate::settings::IgnoreRule {
+    crate::settings::IgnoreRule::of(Some(rule.author.clone()), Some(rule.body.clone()))
+}
+
+/// And the other way round, for the read: a pattern that is not there is an
+/// empty box on the page, which is the same thing said in the shape a form
+/// holds.
+fn as_written(rule: &crate::settings::IgnoreRule) -> IgnoreRule {
+    IgnoreRule {
+        author: rule.author().unwrap_or_default().to_owned(),
+        body: rule.body().unwrap_or_default().to_owned(),
+    }
+}
+
+/// What is wrong with the rules a save is asking for, one entry per row at
+/// fault, and empty where there is nothing wrong with any of them.
+///
+/// Every row rather than the first: the page draws the error at the row, so a
+/// human who mistyped two patterns should be told about two of them rather than
+/// finding the second after fixing the first.
+fn refusals(rules: &[crate::settings::IgnoreRule]) -> Vec<RuleRefused> {
+    rules
+        .iter()
+        .enumerate()
+        .filter_map(|(at, rule)| {
+            let (field, why) = match rule.trouble()? {
+                RuleTrouble::Empty => (
+                    None,
+                    "a rule with neither field would ignore every comment there is, so it \
+                     needs an author, a body, or both"
+                        .to_owned(),
+                ),
+                RuleTrouble::Author(why) => (Some(RuleField::Author), why),
+                RuleTrouble::Body(why) => (Some(RuleField::Body), why),
+            };
+
+            Some(RuleRefused {
+                // Saturating rather than wrapping, because a row that pointed
+                // at the wrong one would be worse than a row that points at the
+                // last: a list this long is a request nobody typed.
+                rule: u32::try_from(at).unwrap_or(u32::MAX),
+                field,
+                why,
+            })
+        })
+        .collect()
 }
 
 /// The last four characters of a token, or the fewer there are.

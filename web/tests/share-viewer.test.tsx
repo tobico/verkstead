@@ -90,7 +90,7 @@ function theSettings(
 
 /// What a save answers with, which is the settings as they now stand.
 function answering(standing: SettingsView): SettingsSaved {
-  return { settings: standing, verified: null };
+  return { settings: standing, verified: null, refused: [] };
 }
 
 /// The same settings with the viewer hosted somewhere else, which is what a
@@ -231,6 +231,9 @@ describe("the pane", () => {
       expect(sent(fetching)).toEqual({
         git_author: TOLD.git_author,
         github_token: "Keep",
+        // The rules ride along as an action rather than a value: nothing this
+        // form does says anything about them — see [`IgnoredCommentsEdit`].
+        ignored_comments: "Keep",
         rust_build_cache: {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,

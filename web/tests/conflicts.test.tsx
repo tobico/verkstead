@@ -72,7 +72,7 @@ function theSettings(
 
 /// What a save answers with, which is the settings as they now stand.
 function answering(standing: SettingsView): SettingsSaved {
-  return { settings: standing, verified: null };
+  return { settings: standing, verified: null, refused: [] };
 }
 
 /// The same settings resolving conflicts the other way, which is what a save of
@@ -156,6 +156,9 @@ describe("the pane", () => {
         // this section has no business with any of the rest.
         git_author: UNSET.git_author,
         github_token: "Keep",
+        // The rules ride along as an action rather than a value: nothing this
+        // form does says anything about them — see [`IgnoredCommentsEdit`].
+        ignored_comments: "Keep",
         rust_build_cache: { enabled: UNSET.rust_build_cache.enabled, size: "" },
         share_viewer_url: UNSET.share_viewer_url,
         watched_paths: [],

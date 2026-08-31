@@ -462,6 +462,7 @@ mod tests {
                 crate::store::ConflictResolution::Merge,
                 vec![],
                 paths,
+                vec![],
             ))
             .unwrap();
     }

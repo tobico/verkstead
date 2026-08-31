@@ -1400,6 +1400,33 @@ at: string,
 html: string, };
 
 /**
+ * One class of comment nobody wants an agent addressing.
+ *
+ * Two patterns, either of which may be empty for *no constraint on that part*
+ * — strings rather than optionals, and empty for nothing, the way the author's
+ * two halves are: the row on the page holds a box either way, and clearing one
+ * is how the constraint is taken off.
+ *
+ * Regular expressions in the regex crate's syntax, matched anywhere in their
+ * text rather than against the whole of it, and case-sensitive unless the
+ * pattern opens with `(?i)`. The author's is matched against the login of
+ * whoever wrote the comment and the body's against the markdown as it was
+ * written.
+ */
+export type IgnoreRule = { author: string, body: string, };
+
+/**
+ * What is to become of the ignore rules on a save.
+ *
+ * An action rather than a value, for the reason [`TokenEdit`] is one and not
+ * the same reason: nothing about a rule is secret, but the rules are the one
+ * thing a save can be refused over, and a section that is not about them
+ * should not be able to have its own save turned down by a pattern it never
+ * showed anybody.
+ */
+export type IgnoredCommentsEdit = "Keep" | { "Set": { rules: Array<IgnoreRule>, } };
+
+/**
  * Where a Conversation has got to.
  *
  * The whole ladder, though only the first two are reachable yet: the states are
@@ -2296,6 +2323,37 @@ diagrams: boolean, };
 export type RoleChoice = { pairing: ProfileChoice | null, };
 
 /**
+ * Which of a rule's two patterns something is about.
+ */
+export type RuleField = "Author" | "Body";
+
+/**
+ * One rule a save was turned down over, by where it stood in what was sent.
+ *
+ * By position rather than by content, because the row it names is the row the
+ * human is looking at: what they typed is still in front of them, and a
+ * refusal that described the rule instead would leave the page matching it up
+ * against its own boxes.
+ */
+export type RuleRefused = { 
+/**
+ * Where it stood among the rules that were sent, counting from zero.
+ */
+rule: number, 
+/**
+ * Which of the two patterns is at fault, or `null` where the rule itself
+ * is — a rule giving neither field is refused as a whole, and there is no
+ * box to draw that at.
+ */
+field: RuleField | null, 
+/**
+ * Why, in words to put on the row. The regex engine's own for a pattern it
+ * would not take, on one line: what draws this is a small box under a text
+ * field, and the engine's message is a diagram across three or four.
+ */
+why: string, };
+
+/**
  * One session's Screen: the grid its Capture leaves on a terminal.
  *
  * Not the bytes and not a picture of them — the escape sequences that would
@@ -2474,15 +2532,29 @@ watched_paths: Array<string>,
  * file holds — and one grammar for both of the places a bind is said is
  * one thing to learn rather than two.
  */
-sandbox_binds: Array<string>, };
+sandbox_binds: Array<string>, 
+/**
+ * And what is to become of the ignore rules, which is an action rather
+ * than a value — the one other field here that is.
+ *
+ * The token's half is an action because it is write-only. This one is
+ * because it is the only setting a save can be *refused* over: a pattern
+ * that will not compile is turned down, and a section that rode the rules
+ * along as values would have the build cache's switch refused over a
+ * pattern somebody hand-edited into the file weeks ago. So a save that is
+ * not about the rules says nothing about them, and the ones on disk are
+ * left exactly where they are.
+ */
+ignored_comments: IgnoredCommentsEdit, };
 
 /**
  * What became of a save.
  *
- * No refusals to name: there is nothing about a name, an address or a token
- * this server declines to write down, and a file it could not write at all is
- * the one failure — which is a status code, because it is something to try
- * again rather than something to read.
+ * One refusal to name, and it is the ignore rules' — see [`RuleRefused`].
+ * There is nothing about a name, an address or a token this server declines to
+ * write down, and a file it could not write at all is the other failure —
+ * which is a status code rather than a named outcome, because it is something
+ * to try again rather than something to read.
  */
 export type SettingsSaved = { 
 /**
@@ -2495,7 +2567,19 @@ settings: SettingsView,
  * What GitHub made of the token that was just saved, or `null` where the
  * save was not about a token.
  */
-verified: Verified | null, };
+verified: Verified | null, 
+/**
+ * The rules that would not be written down, or empty where the save
+ * landed — which is every save that did not send any.
+ *
+ * A refusal here is the whole request refused: not one rule dropped and
+ * the rest kept, and not the author written while the rules were turned
+ * down. Neither file is touched, so `settings` above is how things stood
+ * before the save as much as after it, and the page has one thing to do
+ * with it — draw the errors at the rows and leave what the human typed
+ * where it is.
+ */
+refused: Array<RuleRefused>, };
 
 /**
  * The settings as they stand, read off the two files at the moment they are
@@ -2543,7 +2627,17 @@ conflict_resolution: ConflictResolution,
  * And the Watched Paths and the Sandbox Configuration binds, from both of
  * the places either of them is said.
  */
-paths: PathsView, };
+paths: PathsView, 
+/**
+ * And the comments nobody wants addressed, in the order they were written
+ * down — empty on a Verkstead that has been told to ignore nothing, which
+ * is the ordinary condition rather than a setting half made.
+ *
+ * Exactly as the file holds them, a pattern that will not compile
+ * included: this is what the editor draws back into its rows, and a rule
+ * quietly left out of the read would be one the human could not correct.
+ */
+ignored_comments: Array<IgnoreRule>, };
 
 /**
  * What became of sharing a Conversation to the pull requests its work is on.

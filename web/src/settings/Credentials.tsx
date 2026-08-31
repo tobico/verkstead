@@ -287,6 +287,12 @@ export function GithubPane(props: {
       // reason — a list this form left out would be a list it emptied, and one
       // of them is the boundary itself. See [`heldPaths`].
       ...heldPaths(told()),
+      // And the ignore rules left exactly where they are. Alone among the
+      // settings they travel as an action rather than a value: this form has
+      // nothing to say about them, and one that spoke for them could have its
+      // own save refused over a pattern it never showed anybody — see
+      // [`IgnoredCommentsEdit`].
+      ignored_comments: "Keep",
     });
 
   const submit = (ev: SubmitEvent) => {

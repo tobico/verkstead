@@ -29,7 +29,8 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    ConflictResolution, PathResolution, PathSource, SettingsSaved, SettingsView, Verified,
+    ConflictResolution, IgnoreRule, PathResolution, PathSource, RuleField, SettingsSaved,
+    SettingsView, Verified,
 };
 use verkstead_server::sandbox::SandboxConfig;
 use verkstead_server::{Gh, WatchedPaths, open_database, router_asking_github, router_installed};
@@ -83,6 +84,24 @@ async fn app() -> (tempfile::TempDir, Router) {
     app_asking(SAYS_ITS_TOKEN).await
 }
 
+/// And a second server over a Data Directory something has already been written
+/// in, which is what a restart looks like from here: the files are where the
+/// settings are, and nothing is carried from one process to the next.
+async fn app_over(data_dir: &Path) -> Router {
+    let pool = open_database(&data_dir.join("verkstead.db")).await.unwrap();
+
+    router_asking_github(
+        pool,
+        data_dir.to_owned(),
+        Gh::running(vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            SAYS_ITS_TOKEN.to_owned(),
+            "gh".to_owned(),
+        ]),
+    )
+}
+
 async fn settings(app: &Router) -> SettingsView {
     get(app, "/api/ui/settings").await
 }
@@ -99,6 +118,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
+            "ignored_comments": "Keep",
         }),
     )
     .await
@@ -117,6 +137,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
+            "ignored_comments": "Keep",
         }),
     )
     .await
@@ -133,6 +154,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
+            "ignored_comments": "Keep",
         }),
     )
     .await
@@ -248,6 +270,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
+            "ignored_comments": "Keep",
         }),
     )
     .await;
@@ -473,6 +496,7 @@ async fn a_save_carrying_the_paths_as_they_stand_leaves_them() {
             "conflict_resolution": "Merge",
             "watched_paths": ["/home/ada/src"],
             "sandbox_binds": ["/var/cache/verkstead-node"],
+            "ignored_comments": "Keep",
         }),
     )
     .await;
@@ -545,6 +569,7 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
             "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
+            "ignored_comments": "Keep",
         }),
     )
     .await;
@@ -597,6 +622,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "conflict_resolution": "Rebase",
             "watched_paths": [],
             "sandbox_binds": [],
+            "ignored_comments": "Keep",
         }),
     )
     .await;
@@ -631,6 +657,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
+            "ignored_comments": "Keep",
         }),
     )
     .await;
@@ -657,6 +684,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
+            "ignored_comments": "Keep",
         }),
     )
     .await;
@@ -671,6 +699,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
+            "ignored_comments": "Keep",
         }),
     )
     .await;
@@ -771,6 +800,7 @@ async fn save_viewer(app: &Router, url: &str) -> SettingsSaved {
             "conflict_resolution": "Merge",
             "watched_paths": [],
             "sandbox_binds": [],
+            "ignored_comments": "Keep",
         }),
     )
     .await
@@ -882,6 +912,7 @@ async fn save_paths(app: &Router, watched: &[&str], binds: &[&str]) -> SettingsS
             "conflict_resolution": "Merge",
             "watched_paths": watched,
             "sandbox_binds": binds,
+            "ignored_comments": "Keep",
         }),
     )
     .await
@@ -1164,4 +1195,281 @@ async fn a_save_replaces_the_settings_paths_and_leaves_the_installations() {
         vec![PathSource::Installation],
         "the installation's bind stands and the settings' is gone"
     );
+}
+
+/// Save a list of ignore rules and leave the rest of both files alone, which is
+/// what the rules section's own press sends.
+async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
+    save(
+        app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "share_viewer_url": "",
+            "conflict_resolution": "Merge",
+            "watched_paths": [],
+            "sandbox_binds": [],
+            "ignored_comments": { "Set": { "rules": rules } },
+        }),
+    )
+    .await
+}
+
+fn rule(author: &str, body: &str) -> serde_json::Value {
+    serde_json::json!({ "author": author, "body": body })
+}
+
+#[tokio::test]
+async fn a_verkstead_nobody_has_told_to_ignore_anything_ignores_nothing() {
+    let (_dir, app) = app().await;
+
+    assert!(settings(&app).await.ignored_comments.is_empty());
+}
+
+#[tokio::test]
+async fn the_ignore_rules_go_in_and_come_back() {
+    let (_dir, app) = app().await;
+
+    let saved = save_rules(
+        &app,
+        serde_json::json!([rule("coderabbitai", "billing"), rule("", "^nit:")]),
+    )
+    .await;
+
+    assert!(saved.refused.is_empty(), "{:?}", saved.refused);
+    assert_eq!(
+        saved.settings.ignored_comments,
+        vec![
+            IgnoreRule {
+                author: "coderabbitai".to_owned(),
+                body: "billing".to_owned(),
+            },
+            IgnoreRule {
+                author: String::new(),
+                body: "^nit:".to_owned(),
+            },
+        ]
+    );
+
+    // And a read of its own says the same, which is the half that survives a
+    // restart: the file is where they are, and nothing is held in the process.
+    assert_eq!(
+        settings(&app).await.ignored_comments,
+        saved.settings.ignored_comments
+    );
+}
+
+/// The file rather than the process, said as plainly as a test can say it: a
+/// second server over the same Data Directory reads what the first one wrote.
+#[tokio::test]
+async fn the_rules_are_in_the_config_file_and_outlive_the_server() {
+    let (dir, app) = app().await;
+
+    save_rules(&app, serde_json::json!([rule("coderabbitai", "billing")])).await;
+
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+
+    assert!(written.contains("ignored_comments"), "{written}");
+    assert!(written.contains("coderabbitai"), "{written}");
+
+    let restarted = app_over(dir.path()).await;
+
+    assert_eq!(
+        settings(&restarted).await.ignored_comments,
+        vec![IgnoreRule {
+            author: "coderabbitai".to_owned(),
+            body: "billing".to_owned(),
+        }]
+    );
+}
+
+/// The one refusal either settings file has, and it turns the whole save down:
+/// a pattern nothing can compile is a rule that would silence nothing while
+/// reading as though it silenced something.
+#[tokio::test]
+async fn a_pattern_that_will_not_compile_is_refused_at_its_own_row() {
+    let (_dir, app) = app().await;
+
+    save_rules(&app, serde_json::json!([rule("coderabbitai", "billing")])).await;
+
+    let saved = save_rules(
+        &app,
+        serde_json::json!([rule("dependabot", ""), rule("", "[oh")]),
+    )
+    .await;
+
+    assert_eq!(saved.refused.len(), 1, "{:?}", saved.refused);
+    assert_eq!(saved.refused[0].rule, 1);
+    assert_eq!(saved.refused[0].field, Some(RuleField::Body));
+    assert!(!saved.refused[0].why.is_empty());
+
+    // And nothing was written: what was there is what is there.
+    assert_eq!(
+        saved.settings.ignored_comments,
+        vec![IgnoreRule {
+            author: "coderabbitai".to_owned(),
+            body: "billing".to_owned(),
+        }]
+    );
+    assert_eq!(
+        settings(&app).await.ignored_comments,
+        saved.settings.ignored_comments
+    );
+}
+
+/// The other way a rule is refused, and the one that has no box to draw the
+/// error at: a rule constraining nothing matches every comment there is.
+#[tokio::test]
+async fn a_rule_with_both_fields_empty_is_refused_as_a_whole() {
+    let (_dir, app) = app().await;
+
+    let saved = save_rules(&app, serde_json::json!([rule("", "")])).await;
+
+    assert_eq!(saved.refused.len(), 1, "{:?}", saved.refused);
+    assert_eq!(saved.refused[0].rule, 0);
+    assert_eq!(saved.refused[0].field, None);
+    assert!(saved.settings.ignored_comments.is_empty());
+}
+
+/// Every row at fault rather than the first, because the page draws the error
+/// at the row and a human who mistyped two should be told about two.
+#[tokio::test]
+async fn every_refused_row_is_named() {
+    let (_dir, app) = app().await;
+
+    let saved = save_rules(
+        &app,
+        serde_json::json!([rule("[oh", ""), rule("ada", "fine"), rule("", "(")]),
+    )
+    .await;
+
+    assert_eq!(
+        saved
+            .refused
+            .iter()
+            .map(|refused| (refused.rule, refused.field))
+            .collect::<Vec<_>>(),
+        vec![(0, Some(RuleField::Author)), (2, Some(RuleField::Body))]
+    );
+}
+
+/// A refusal is the whole request refused, and not the author written while the
+/// rules were turned away.
+#[tokio::test]
+async fn a_refused_save_writes_nothing_at_all() {
+    let (_dir, app) = app().await;
+
+    save_author(&app, "Ada Lovelace", "ada@example.com").await;
+
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
+            "github_token": { "Set": { "token": "ghp_thetoken" } },
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "share_viewer_url": "",
+            "conflict_resolution": "Merge",
+            "watched_paths": [],
+            "sandbox_binds": [],
+            "ignored_comments": { "Set": { "rules": [rule("", "[oh")] } },
+        }),
+    )
+    .await;
+
+    assert_eq!(saved.refused.len(), 1);
+    assert!(saved.verified.is_none(), "no token was tried");
+    assert_eq!(saved.settings.git_author.name, "Ada Lovelace");
+    assert!(saved.settings.github_token.is_none());
+    assert_eq!(settings(&app).await.git_author.name, "Ada Lovelace");
+}
+
+/// What every section but the rules' own sends, and what makes those saves ones
+/// that cannot be refused.
+#[tokio::test]
+async fn a_save_from_another_section_leaves_the_rules_where_they_are() {
+    let (_dir, app) = app().await;
+
+    save_rules(&app, serde_json::json!([rule("coderabbitai", "billing")])).await;
+
+    let saved = save_author(&app, "Ada Lovelace", "ada@example.com").await;
+
+    assert!(saved.refused.is_empty());
+    assert_eq!(
+        saved.settings.ignored_comments,
+        vec![IgnoreRule {
+            author: "coderabbitai".to_owned(),
+            body: "billing".to_owned(),
+        }]
+    );
+}
+
+/// A rule somebody hand-edited badly is the case this whole arrangement is for:
+/// it comes back on the read so the human can correct it, and it refuses
+/// nothing until they save the section it is on.
+#[tokio::test]
+async fn a_hand_edited_bad_pattern_reads_back_and_refuses_no_other_save() {
+    let (dir, app) = app().await;
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "ignored_comments:\n  - body: '[oh'\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        settings(&app).await.ignored_comments,
+        vec![IgnoreRule {
+            author: String::new(),
+            body: "[oh".to_owned(),
+        }]
+    );
+
+    let saved = save_author(&app, "Ada Lovelace", "ada@example.com").await;
+
+    assert!(saved.refused.is_empty(), "{:?}", saved.refused);
+    assert_eq!(saved.settings.git_author.name, "Ada Lovelace");
+    assert_eq!(
+        saved.settings.ignored_comments,
+        vec![IgnoreRule {
+            author: String::new(),
+            body: "[oh".to_owned(),
+        }]
+    );
+}
+
+/// And the hand-edit the reading half does drop, because it is the one that
+/// fails the other way: a rule constraining nothing would silence every comment
+/// on every pull request.
+#[tokio::test]
+async fn a_hand_edited_rule_that_constrains_nothing_is_not_read_back() {
+    let (dir, app) = app().await;
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "ignored_comments:\n  - author: ''\n    body: ''\n  - author: dependabot\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        settings(&app).await.ignored_comments,
+        vec![IgnoreRule {
+            author: "dependabot".to_owned(),
+            body: String::new(),
+        }]
+    );
+}
+
+/// The last rule taken off the page is the list emptied, which is a save that
+/// sends none rather than a save that says nothing.
+#[tokio::test]
+async fn sending_no_rules_takes_the_ones_that_were_there_away() {
+    let (_dir, app) = app().await;
+
+    save_rules(&app, serde_json::json!([rule("coderabbitai", "billing")])).await;
+
+    let saved = save_rules(&app, serde_json::json!([])).await;
+
+    assert!(saved.settings.ignored_comments.is_empty());
+    assert!(settings(&app).await.ignored_comments.is_empty());
 }

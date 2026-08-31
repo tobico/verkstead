@@ -2883,6 +2883,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // wrote it would be a diff on every run.
             "watched_paths": ["/home/ada/src"],
             "sandbox_binds": ["/var/cache/verkstead-node", "verkstead=/var/cache/verkstead-cargo"],
+
+            // And one comment nobody wants addressed, for the reason the size
+            // above is typed: this is the fixture of a Verkstead that has been
+            // told everything, and `settings-unset.json` is the one that has
+            // been told nothing. The rules are the one setting sent as an
+            // action rather than a value — every other section sends `Keep`,
+            // and this is the section that owns them.
+            "ignored_comments": {
+                "Set": { "rules": [{ "author": "coderabbitai", "body": "billing" }] }
+            },
         }),
     )
     .await;
