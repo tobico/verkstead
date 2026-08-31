@@ -645,6 +645,18 @@ pub(crate) struct Sessions {
 
     running: Arc<Mutex<HashMap<i64, Running>>>,
 
+    /// And the backend of the session each Conversation is *launching*, held
+    /// from before its process exists until it is on the register above — see
+    /// [`Sessions::launching`].
+    ///
+    /// The register cannot answer for that stretch, and there is one thing that
+    /// has to be answered in it: how a session asks. A process is spawned and
+    /// then written down, and between the two it is running and already able to
+    /// reach the server — so a Set it sends in that window would be read as one
+    /// from outside a session and waited on, on a backend whose sessions cannot
+    /// wait. See [`Sessions::channel`], which is the whole of what this is for.
+    launching: Arc<Mutex<HashMap<i64, store::AgentType>>>,
+
     /// Whose turn it is in each Conversation's Worktree — see [`Sessions::turn`].
     turns: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
 }
@@ -655,6 +667,27 @@ pub(crate) struct Sessions {
 /// rather than taken to start one: what it is protecting is not the launching but
 /// the working.
 pub(crate) type Turn = tokio::sync::OwnedMutexGuard<()>;
+
+/// The note that a Conversation is launching a session, held for as long as the
+/// launch takes — see [`Sessions::launching`].
+///
+/// A guard rather than a pair of calls, because what it is covering has three
+/// ways out: a process that would not start, a Capture that could not be opened,
+/// and the one that worked. Only the last of them leaves anything on the
+/// register, and none of them should leave this behind.
+struct Launching {
+    launching: Arc<Mutex<HashMap<i64, store::AgentType>>>,
+    conversation_id: i64,
+}
+
+impl Drop for Launching {
+    fn drop(&mut self) {
+        self.launching
+            .lock()
+            .expect("the launching registry is not poisoned")
+            .remove(&self.conversation_id);
+    }
+}
 
 /// A session that has been started, as whatever is driving it holds one.
 ///
@@ -1175,6 +1208,7 @@ impl Sessions {
         Sessions {
             agents: Some(Arc::new(agents)),
             running: Arc::new(Mutex::new(HashMap::new())),
+            launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -1185,6 +1219,7 @@ impl Sessions {
         Sessions {
             agents: None,
             running: Arc::new(Mutex::new(HashMap::new())),
+            launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -1251,19 +1286,58 @@ impl Sessions {
     /// roles under Pairings that need not agree — a wrap-up's review may be on
     /// one backend and the work on another.
     ///
-    /// [`store::Channel::Blocking`] where nothing is running, which is what a
-    /// Set arriving from outside a session is: a router with no agents at all,
-    /// and the human's own devices, which never post one here. It is also the
-    /// safe way round — a wait opened on a Set nobody will nudge about ends
-    /// when the CLI that opened it does, where a Set stored for a session that
-    /// is not idling would be one nobody ever comes back for.
+    /// The register **or the launch that has not reached it yet**, because a
+    /// session is running before it is written down: [`Sessions::start`] spawns
+    /// the process and then opens the Capture it prints into, and an agent that
+    /// asks in between would be asking from a Conversation the register says has
+    /// nothing running. It is the fixture's stub that does that every time and a
+    /// loaded machine that lets a real one, and the answer is wrong either way —
+    /// so the backend is written down before there is a process to ask, and taken
+    /// off again when the register has it. See [`Sessions::launching`].
+    ///
+    /// [`store::Channel::Blocking`] where neither has one, which is what a Set
+    /// arriving from outside a session is: a router with no agents at all, and
+    /// the human's own devices, which never post one here. It is also the safe
+    /// way round — a wait opened on a Set nobody will nudge about ends when the
+    /// CLI that opened it does, where a Set stored for a session that is not
+    /// idling would be one nobody ever comes back for.
     pub(crate) fn channel(&self, conversation_id: i64) -> store::Channel {
-        self.running
+        let running = self
+            .running
             .lock()
             .expect("the sessions registry is not poisoned")
             .get(&conversation_id)
-            .map(|running| running.agent_type.channel())
+            .map(|running| running.agent_type);
+
+        running
+            .or_else(|| {
+                self.launching
+                    .lock()
+                    .expect("the launching registry is not poisoned")
+                    .get(&conversation_id)
+                    .copied()
+            })
+            .map(store::AgentType::channel)
             .unwrap_or(store::Channel::Blocking)
+    }
+
+    /// Write down that this Conversation is launching a session on `agent_type`,
+    /// and hand back the note to hold while it does.
+    ///
+    /// Taken before the process is spawned and dropped when [`Sessions::start`]
+    /// returns, which is after the session is on the register — so the two
+    /// answers meet rather than leaving a gap, and a launch that failed leaves
+    /// nothing behind for the next Set to read.
+    fn launching(&self, conversation_id: i64, agent_type: store::AgentType) -> Launching {
+        self.launching
+            .lock()
+            .expect("the launching registry is not poisoned")
+            .insert(conversation_id, agent_type);
+
+        Launching {
+            launching: self.launching.clone(),
+            conversation_id,
+        }
     }
 
     /// Whether a Conversation's running session has stopped — its backend's own
@@ -1569,6 +1643,16 @@ impl Sessions {
         // than the log it is meant to be earlier than, which would be a session
         // that never found its own record. See [`crate::transcript`].
         let at_launch = SystemTime::now();
+
+        // And which backend this Conversation is launching on, put down before
+        // there is a process that could ask anything. It is off the register
+        // that a Set is read for how the session that sent it asks, and the
+        // register does not learn of this one until its Capture is open — which
+        // is a database write away, and a process that starts talking in the
+        // meantime is a session asking as some other backend would. Held until
+        // this returns, by which time the register has it or there is no session
+        // to have. See [`Sessions::channel`].
+        let _launching = self.launching(conversation_id, pairing.profile.agent_type());
 
         let child = match terminal.spawn(&mut captured(&sandbox, &argv)) {
             Ok(child) => child,
