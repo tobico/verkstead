@@ -20,5 +20,5 @@ Roadmap stage: [01: Platform directories](docs/roadmaps/desktop/01-platform-dire
 
 ## Tasks
 
-- [ ] 01: The platform data directory, by default — [details](01-platform-data-dir.md)
+- [x] 01: The platform data directory, by default — [details](01-platform-data-dir.md)
 - [ ] 02: The state/log directory, and the term for it — [details](02-state-log-dir.md)

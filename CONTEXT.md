@@ -142,10 +142,14 @@ The one directory Verkstead keeps what it makes in — the database, at
 `verkstead.db` inside it, the Worktrees, the installed Skills, the handoff
 directories, the settings files it is told the human's credentials and identity
 in, and whatever later stages need to put somewhere. Said once, as
-`--data-dir`, and the working directory when nothing says otherwise; everything
-in it is named by Verkstead rather than by whoever started it. Not a Watched
-Path and not the same kind of thing: a Watched Path bounds what the human may
-point Verkstead at, and this is Verkstead's own.
+`--data-dir`, and the platform's own place for it when nothing says otherwise —
+`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
+on macOS, `%APPDATA%\Verkstead` on Windows, whichever binary was started, so
+that a Verkstead launched from an icon finds what one launched from a shell
+left. A run out of a checkout asks for the old behaviour by name, with
+`--data-dir .`. Everything in it is named by Verkstead rather than by whoever
+started it. Not a Watched Path and not the same kind of thing: a Watched Path
+bounds what the human may point Verkstead at, and this is Verkstead's own.
 _Avoid_: state directory, work dir, scratch space, cache
 
 **Sandbox**:

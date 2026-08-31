@@ -73,6 +73,15 @@ each is a boundary rather than a convenience:
   than being skipped. A bare path goes to every session; `name=path` goes only
   to sessions working in the Repo registered under that name.
 
+The **Data Directory** is not one of the three and is not a choice on this
+module: the unit keeps it in its own state directory, `/var/lib/verkstead`, and
+passes it as `--data-dir`. Started without that flag — the same package run by
+hand — Verkstead keeps it in the platform's own place instead:
+`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
+on macOS, `%APPDATA%\Verkstead` on Windows. One directory either way, holding
+the database, the Worktrees, the Skills, the handoff directories and both
+settings files.
+
 The workbench says both lists as well, on the settings page's **Paths** section
 and on each Repo's own pane, and what a session gets is the union of the two.
 Those entries are saved into `config.yaml` in the data directory, read afresh
@@ -101,8 +110,9 @@ The server binds loopback and speaks plain HTTP. Answering from a phone needs
 HTTPS, which is `tailscale serve --bg 8422` in front of it — and push
 notifications need that HTTPS to work at all.
 
-Out of a checkout instead, which is the same server with `verkstead.db` in the
-working directory, is [development.md](development.md#quickstart).
+Out of a checkout instead — the same server, told `--data-dir .` so that
+`verkstead.db` and the rest land in the checkout rather than in the platform
+directory — is [development.md](development.md#quickstart).
 
 ## A day's work
 

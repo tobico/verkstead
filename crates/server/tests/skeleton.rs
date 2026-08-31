@@ -3,14 +3,14 @@
 //! defaults.
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use clap::Parser;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use verkstead_server::{Config, open_database, router};
+use verkstead_server::{Config, database, open_database, router};
 
 #[tokio::test]
 async fn opening_the_database_creates_a_missing_file() {
@@ -70,10 +70,11 @@ fn config_defaults_to_localhost() {
 
     assert_eq!(config.listen.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
 
-    // The working directory, so a dev run out of a checkout keeps everything it
-    // makes there — with the database at the one name it is ever kept under.
-    assert_eq!(config.data_dir.to_str().unwrap(), ".");
-    assert_eq!(config.database().to_str().unwrap(), "./verkstead.db");
+    // And nothing at all for the Data Directory, which is the flag holding what
+    // was said rather than where that resolves to: the platform's own directory
+    // is what a run with nothing said gets, and where that is is resolved at
+    // startup — see `verkstead_server::platform`.
+    assert_eq!(config.data_dir, None);
 }
 
 #[test]
@@ -89,10 +90,14 @@ fn config_is_overridable_by_flag() {
     ]);
 
     assert_eq!(config.listen.to_string(), "0.0.0.0:9999");
-    assert_eq!(config.data_dir.to_str().unwrap(), "/srv/verkstead");
     assert_eq!(
-        config.database().to_str().unwrap(),
-        "/srv/verkstead/verkstead.db"
+        config.data_dir.as_deref(),
+        Some(Path::new("/srv/verkstead"))
+    );
+    assert_eq!(
+        database(Path::new("/srv/verkstead")).to_str().unwrap(),
+        "/srv/verkstead/verkstead.db",
+        "the database is that one name inside whichever directory won",
     );
 }
 

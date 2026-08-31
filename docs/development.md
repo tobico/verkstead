@@ -26,7 +26,7 @@ Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 
 ```console
 $ (cd web && pnpm install && pnpm build)
-$ cargo run -p verkstead-cli -- serve --watched-path ~/src
+$ cargo run -p verkstead-cli -- serve --data-dir . --watched-path ~/src
   INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 data_dir=. watched=["/home/you/src"]
 ```
 
@@ -37,9 +37,9 @@ than one, or set `VERKSTEAD_WATCHED_PATHS` with them separated by `:`. A path
 that is not there refuses startup, because a flag is the installation's own word
 and nobody is watching when it is wrong.
 
-It is not required, though, and neither is anything else here: `cargo run -p
-verkstead-cli -- serve` on its own comes up watching nothing, which admits
-nothing, and the settings page is where it is pointed at its first directory.
+It is not required, though: `cargo run -p verkstead-cli -- serve --data-dir .` on
+its own comes up watching nothing, which admits nothing, and the settings page is
+where it is pointed at its first directory.
 Watched paths and sandbox binds are said in both places and what the server uses
 is the union — see the `"paths"` payload further down this section. The flag is
 the shape a service unit wants, where startup is the moment to hear about a
@@ -50,8 +50,12 @@ fatal.
 Everything Verkstead makes goes in one place, the **Data Directory**: the
 database at `verkstead.db`, the worktrees, the installed skills, the handoff
 directories and the settings files. `--data-dir` says where, or
-`VERKSTEAD_DATA_DIR`; it defaults to the working directory, which is what a dev
-run out of a checkout wants.
+`VERKSTEAD_DATA_DIR`. Said nothing, it is the platform's own place for it —
+`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
+on macOS — which is what an installed Verkstead wants and not what a dev run
+out of a checkout does: `--data-dir .` is why every command here says it, and
+it keeps the database, the worktrees and the settings beside the checkout where
+they can be deleted with it.
 
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
@@ -239,8 +243,9 @@ comment rather than rewriting the one before it. A pull request the comment
 could not land on is named beside the ones that worked.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
-on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory
-on first run. Leave it running; check it in a third terminal if you like:
+on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the Data Directory on
+first run, which `--data-dir .` above makes the checkout. Leave it running;
+check it in a third terminal if you like:
 
 ```console
 $ curl http://127.0.0.1:8422/api/v1/health
