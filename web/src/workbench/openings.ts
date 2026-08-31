@@ -6,12 +6,14 @@
 //! URL is lost the moment the page is navigated away from and back, and a link
 //! to a pane is a link to nothing.
 //!
-//! Three shapes under a Conversation, because there are three kinds of thing
-//! the pane draws:
+//! Four shapes under a Conversation, because there are four kinds of thing the
+//! pane draws:
 //!
 //! - `events/:id` — a Timeline Event with a full self.
 //! - `backlog` — the backlog, there being one per Conversation.
 //! - `roadmaps/:name` — a roadmap, by the directory name that is its identity.
+//! - `share` — sharing the Conversation, there being one of that per
+//!   Conversation as well.
 //!
 //! The `events/` segment is what keeps the ids and the word-named panes apart.
 //! A bare `:event` segment would have read the same as `backlog` the moment
@@ -40,11 +42,15 @@ import type { TimelineEvent } from "../api/types";
 /// one per conversation; a roadmap carries its own name after it, a worktree
 /// being allowed any number of those.
 ///
+/// And a word for the Share pane, which no card opens at all: it is the icon
+/// button on the Timeline's header that opens it, and there is one share of a
+/// Conversation the way there is one backlog of it.
+///
 /// One channel for all of them, so that opening any closes the rest — a details
 /// pane shows one thing. A string rather than an object for the same reason:
 /// what is open is compared against what a card would open, and two of the same
 /// selection have to be the same value.
-export type Opening = number | "backlog" | `roadmap:${string}`;
+export type Opening = number | "backlog" | "share" | `roadmap:${string}`;
 
 /// What opens the named roadmap, by the directory name that is its identity.
 export function opensRoadmap(name: string): Opening {
@@ -71,8 +77,8 @@ export function pathTo(
 ): string {
   const under = pathOf(conversation);
 
-  if (opening === "backlog") {
-    return `${under}/backlog`;
+  if (opening === "backlog" || opening === "share") {
+    return `${under}/${opening}`;
   }
 
   const roadmap = roadmapOpened(opening);
@@ -104,8 +110,8 @@ export function openingAt(pathname: string): Opening | null {
     return null;
   }
 
-  if (what === "backlog" && which === undefined) {
-    return "backlog";
+  if ((what === "backlog" || what === "share") && which === undefined) {
+    return what;
   }
 
   if (which === undefined) {

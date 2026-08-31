@@ -353,8 +353,8 @@ A read-only copy of one Conversation as a single HTML file, for showing
 somebody what was asked, answered and built without giving them the workbench.
 It is the viewer built to one document with every byte it needs inside it, and
 the record written into it on the way out, so it opens off a disk with no
-network and nothing to install. Taken from the **Share** row in the
-Conversation's actions, and named for the branch and the day.
+network and nothing to install. Taken from **Download** on the **Share Pane**,
+and named for the branch and the day.
 **A curated record rather than the whole one**: the Brief, the Question Sets,
 the commits, the Steers and the lifecycle lines board; a session's output, the
 Notices, the Handoff and the pinned cards do not, and nothing marks where they
@@ -374,10 +374,14 @@ report
 **Published Share**:
 A Share put where a link reaches it, rather than handed over as a file: a
 **secret gist**, made by Verkstead itself through the GitHub token on the
-settings page. Taken from the **Publish** row beside the download, and drawn
-back in the same menu as the link and the day it was taken. What the token needs
-for it is the **`gist` scope**, and a token without it is named on the settings
-page when it is saved rather than found by a press weeks later.
+settings page. Taken from **Publish** on the **Share Pane**, and drawn back on
+that same pane: the link to send somebody, the day it was taken, and the gist
+behind both. What the token needs for it is the **`gist` scope**, and a token
+without it is named on the settings page when it is saved rather than found by a
+press weeks later.
+**Verkstead deletes none of them.** A gist is deleted at GitHub, which is why
+the gist's own URL is drawn beside the link: the way to be rid of a Published
+Share is the only way there is.
 **The API makes it and git fills it**: the Gists API's cap on what a gist may be
 created with is undocumented and reported at a megabyte, and a Share is several
 — so the gist is created holding a placeholder and the file arrives over a push,
@@ -413,6 +417,19 @@ server, so the host sees only that somebody opened the page, and the frame keeps
 the Share's own scripts off that host's origin.
 _Avoid_: proxy, server, renderer, gateway (nothing passes through it — the
 reader's browser fetches from GitHub itself)
+
+**Share Pane**:
+Where everything about handing a Conversation to somebody is done: the Published
+Share where there is one — the link with a button that copies it, when it was
+taken, and the gist behind it — and under that the three ways of handing the
+record over: **Download**, **Publish** (or *Publish again*), and **Share to Pull
+Request** where the record holds one.
+A details pane like any other, at a path of its own, opened by the **share icon
+on the Timeline's header** rather than by anything on the record: sharing belongs
+to the Conversation rather than to a moment in it. It was four rows of the
+Conversation's actions, and none of them did anything to the Conversation, which
+is what that menu is for.
+_Avoid_: share dialog, export panel, share menu
 
 **Share to Pull Request**:
 The one press that hands the record to whoever is reviewing the work: it takes a

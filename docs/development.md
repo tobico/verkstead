@@ -175,7 +175,7 @@ draws it in a browser — a gist link on its own shows source. It is not
 configurable and there is nothing to configure: Verkstead keeps the one copy on
 its own GitHub Pages, at
 <https://tobico.github.io/verkstead/share-viewer.html>, and every link it hands
-out — the toast, the Share row and the comment on a pull request — is composed
+out — the toast, the Share pane and the comment on a pull request — is composed
 through that, as `<share-viewer-url>#<gist-id>`. The page is published by
 `.github/workflows/pages.yml` whenever `crates/server/share-viewer.html` lands
 on `main`; its address is `HOSTED` in `crates/server/src/sharing.rs`, and
@@ -211,7 +211,16 @@ alone follows the setting above when it is changed.
 The link is composed as a page is drawn rather than written down at the publish.
 What the record holds is the gist's own URL, so a share published before there
 was a viewer to compose through links through one now, and the viewer moving
-retargets every link there is without republishing anything.
+retargets every link there is without republishing anything. The gist's own URL
+travels beside it to the workbench, because the Share pane draws both: the
+viewer's link is what a reader is sent, and the gist is where the file is and
+the only place a share can be deleted — Verkstead deletes none of them.
+
+Everything about sharing is on one pane of the workbench, opened by the share
+icon on the timeline pane's header: where the last share went, and the download,
+the publish and the share to the pull requests under it. It was four rows of the
+conversation's actions menu, and none of them did anything to the conversation,
+which is what that menu is for.
 
 That link is what **Share to pull request** leaves behind. One press on a
 conversation whose work is on a pull request publishes a share and comments on

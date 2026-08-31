@@ -1228,6 +1228,10 @@ async fn a_commit_the_repository_has_lost_says_so_rather_than_stopping_the_expor
 /// that gist's id in the viewer's fragment. A Verkstead nobody has configured
 /// gets Verkstead's own hosted copy, and there is nothing to have configured:
 /// every Verkstead composes through the one hosted page.
+///
+/// The gist's own URL travels beside it, because the Share pane draws both: the
+/// viewer's link is what a reader is sent, and the gist is where the file is and
+/// the only place a share can be deleted.
 #[tokio::test]
 async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
     let (_dir, pool, app) = app_asking_github().await;
@@ -1250,6 +1254,7 @@ async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
     let shared = after.shared.expect("the published share");
 
     assert_eq!(shared.url, format!("{HOSTED}#9f1"));
+    assert_eq!(shared.gist, "https://gist.github.com/tobico/9f1");
     assert!(
         shared.at.starts_with("20"),
         "an RFC 3339 stamp, not {:?}",

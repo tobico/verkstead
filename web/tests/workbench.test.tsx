@@ -132,6 +132,9 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
+// Sharing the Conversation, which is a details pane of its own: the published
+// share it draws, and the presses that came out of the actions menu.
+import sharePane from "../src/workbench/Share.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
 // themselves come straight from Font Awesome, so that a test naming one and the
@@ -1704,7 +1707,6 @@ describe("what a right-click on a card offers", () => {
       [...menu.querySelectorAll("button")].map((button) => button.className),
     ).toEqual([
       actions.resume,
-      actions.publish,
       actions.stop,
       actions.forceStop,
       actions.steer,
@@ -6775,10 +6777,9 @@ function theGrillingStanding(
 }
 
 describe("stopping a conversation", () => {
-  /// The two stops sit in the same menu as the resume, the share, the steer and
-  /// the close, in the order of what each one costs: get going again, take a
-  /// copy away, pause after this task, stop now, move the work somewhere else,
-  /// end the conversation. Each
+  /// The two stops sit in the same menu as the resume, the steer and the close,
+  /// in the order of what each one costs: get going again, pause after this
+  /// task, stop now, move the work somewhere else, end the conversation. Each
   /// says what it does, because *stop* and *force stop* are two words apart and
   /// hours of work apart — and each says it *inside* the row, so what the press
   /// is called and what it means are one thing to read and one thing to aim at.
@@ -6793,7 +6794,6 @@ describe("stopping a conversation", () => {
 
     expect(offered).toEqual([
       actions.resume,
-      actions.publish,
       actions.stop,
       actions.forceStop,
       actions.steer,
@@ -6992,53 +6992,247 @@ describe("stopping a conversation", () => {
   });
 });
 
-/// Where the share is published, which is the one press in this menu that
+/// Where the share is published, which is the one press on this pane that
 /// reaches outside the machine.
 const PUBLISHING = `/api/ui/conversations/${GRILLING.id}/share/publish`;
 
 /// And what comes back from it: the link the server composed, which is the
-/// gist's id in the share viewer's fragment rather than the gist. Whose viewer
-/// it is — Verkstead's hosted one or the human's own — is settled over there;
-/// what this side has to do is hand out whatever arrived.
+/// gist's id in the share viewer's fragment rather than the gist. Which page
+/// composes it is settled over there — every Verkstead goes through the one
+/// hosted copy — and what this side has to do is hand out whatever arrived.
 const PUBLISHED = "https://tobico.github.io/verkstead/share-viewer.html#9f1";
 
+/// And the gist itself, which travels beside it: where the file actually is,
+/// and the only place a share can be deleted.
+const GIST = "https://gist.github.com/tobico/9f1";
+
+/// One published share, as the record carries it.
+const SHARED = { url: PUBLISHED, gist: GIST, at: "2026-08-30T01:02:03Z" };
+
+/// The share icon on the Timeline's header, which is the whole of the way into
+/// the pane: no card opens it, sharing belonging to the Conversation rather
+/// than to any moment on its record.
+function shareIcon(container: ParentNode): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(
+    `.${shell.middlePane} .${button.iconButton}[aria-label="Share"]`,
+  );
+}
+
+/// Press it, and wait for the pane it opens.
+async function openShare(container: ParentNode): Promise<HTMLElement> {
+  fireEvent.click(await drawn(container, `.${shell.middlePane} .${button.iconButton}[aria-label="Share"]`));
+  return drawn(container, `.${shell.detailsPane} .${sharePane.doing}`);
+}
+
+describe("the way into the share pane", () => {
+  /// Drawn the way the settings gear beside the Verkstead wordmark is, and for
+  /// the same reason: it is another thing standing in a pane that is selected
+  /// and opened into the pane beside it.
+  it("stands on the timeline's header as an icon button", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const icon = await drawn(
+      container,
+      `.${shell.middlePane} .${button.iconButton}[aria-label="Share"]`,
+    );
+
+    // The label is the whole of what a screen reader has: the shape says
+    // nothing when it is read aloud.
+    expect(icon.getAttribute("aria-label")).toBe("Share");
+    expect(icon.querySelector("svg")).toBeTruthy();
+  });
+
+  /// And it reads as open while its pane is what the details are showing, which
+  /// is what the open card in the sidebar says about itself, in the same fill.
+  it("reads as open while the pane it opened is showing", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const icon = await drawn(
+      container,
+      `.${shell.middlePane} .${button.iconButton}[aria-label="Share"]`,
+    );
+    expect(icon.getAttribute("aria-pressed")).toBe("false");
+    expect(icon.className).not.toContain(button.open);
+
+    fireEvent.click(icon);
+
+    await waitFor(() =>
+      expect(shareIcon(container)!.getAttribute("aria-pressed")).toBe("true"),
+    );
+    expect(shareIcon(container)!.className).toContain(button.open);
+  });
+
+  /// The press is two acts, exactly as pressing a card on the record is: the
+  /// selection, and the walk into the details. Which is what makes it work on a
+  /// narrow window, where the two panes are two levels.
+  it("walks a narrow window into the details, and back out again", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+    expect(frame(container).dataset.pane).toBe("middle");
+
+    fireEvent.click(shareIcon(container)!);
+    expect(frame(container).dataset.pane).toBe("details");
+
+    await drawn(container, `.${shell.detailsPane} .${sharePane.doing}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "← Timeline" }));
+    expect(frame(container).dataset.pane).toBe("middle");
+  });
+
+  /// And it can be linked to, like every other details pane: what is open is in
+  /// the URL, so a cold load of this path opens on it.
+  it("stands at a path of its own", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}/share`);
+
+    await drawn(container, `.${shell.detailsPane} .${sharePane.doing}`);
+    await waitFor(() =>
+      expect(shareIcon(container)!.getAttribute("aria-pressed")).toBe("true"),
+    );
+  });
+
+  /// And the menus it came out of carry none of it. Four rows left both of them
+  /// together — the pane's own status button and the sidebar's right-click are
+  /// one set of rows — because not one of them did anything to the Conversation,
+  /// which is what those menus are for.
+  it("takes the share rows out of both menus", async () => {
+    theGrillingStanding({ pinned: WRAPPING.pinned, shared: SHARED });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+
+    for (const words of [
+      "Download",
+      "Publish",
+      "Published share",
+      "Share to pull request",
+    ]) {
+      expect(menu.textContent).not.toContain(words);
+    }
+
+    // Nothing that is not a press, either: the published-share row was a link
+    // in a menu of buttons, and it goes with them.
+    expect(menu.querySelector("a")).toBeNull();
+  });
+});
+
+describe("the share pane", () => {
+  /// What most visits to this pane are for: the link to send somebody, and the
+  /// button that takes it. The URL is the server's own composition — the gist's
+  /// id in the share viewer's fragment rather than the gist — so what is drawn
+  /// is whatever the record came back carrying. See `link` in
+  /// `crates/server/src/sharing.rs`.
+  it("draws the viewer's link, the moment and the gist", async () => {
+    theGrillingStanding({ shared: SHARED });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openShare(container);
+
+    const link = await drawn<HTMLAnchorElement>(
+      container,
+      `.${sharePane.link} a`,
+    );
+    expect(link.getAttribute("href")).toBe(PUBLISHED);
+
+    expect(screen.getByText(/^Taken /)).toBeTruthy();
+
+    // And the gist beside it, which is where the file is and the only place a
+    // share can be deleted: nothing in Verkstead deletes one.
+    const gist = await drawn<HTMLAnchorElement>(
+      container,
+      `.${sharePane.gist} a`,
+    );
+    expect(gist.getAttribute("href")).toBe(GIST);
+    expect(
+      screen.getByText(/the only place a share can be deleted/),
+    ).toBeTruthy();
+  });
+
+  /// The copy button beside it, which is silent otherwise: a clipboard write
+  /// changes nothing on the screen, and a press that looks like it did nothing
+  /// gets pressed again.
+  it("copies the viewer's link, and says it did", async () => {
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (said: string) => {
+          written.push(said);
+          return Promise.resolve();
+        },
+      },
+    });
+
+    theGrillingStanding({ shared: SHARED });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.copy}`));
+
+    await waitFor(() => expect(written).toEqual([PUBLISHED]));
+    await waitFor(() =>
+      expect(container.querySelector(`.${sharePane.copy}`)!.textContent).toBe(
+        "Copied",
+      ),
+    );
+  });
+
+  /// And a Conversation nobody has published one of says so plainly, rather
+  /// than drawing a block of facts with nothing in it.
+  it("says so plainly where nothing has been published", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openShare(container);
+
+    expect(container.querySelector(`.${sharePane.published}`)).toBeNull();
+    expect(
+      screen.getByText(/This conversation has not been published\./),
+    ).toBeTruthy();
+  });
+});
+
 describe("publishing a share", () => {
-  /// Two rows and one thing: the file to attach, and the same file put where a
-  /// link reaches it. Both are offered on every conversation there is, because
+  /// Two presses and one thing: the file to attach, and the same file put where
+  /// a link reaches it. Both are offered on every conversation there is, because
   /// a share is the record as it stands and a record stands from the moment
   /// there is one.
+  ///
+  /// The download is a link rather than a press, because that is what a browser
+  /// is for: the server answers as an attachment and names the file.
   it("offers publishing beside the download, with nothing to send", async () => {
     const fetching = theGrillingStanding(
       {},
       whenever(
         PUBLISHING,
-        json({
-          Published: {
-            share: {
-              url: PUBLISHED,
-              at: "2026-08-30T01:02:03Z",
-            },
-          },
-        } satisfies SharePublished),
+        json({ Published: { share: SHARED } } satisfies SharePublished),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    expect(
-      screen.getByText("Publish it as a secret gist and get a link to send."),
-    ).toBeTruthy();
+    await openShare(container);
 
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
+    const download = await drawn<HTMLAnchorElement>(
+      container,
+      `.${sharePane.download}`,
     );
+    expect(download.getAttribute("href")).toBe(
+      `/api/ui/conversations/${GRILLING.id}/share`,
+    );
+    expect(download.hasAttribute("download")).toBe(true);
+
+    fireEvent.click(await drawn(container, `.${sharePane.publish}`));
 
     await waitFor(() => expect(sent(fetching, PUBLISHING)).toEqual({}));
   });
 
-  /// And the moment itself carries the link, because the menu it was pressed
-  /// from is shut by the time the toast is read.
+  /// And the moment itself carries the link, because it is worth reaching for
+  /// while it is still what the human is thinking about.
   ///
   /// The link is the share viewer's rather than the gist's — composed by the
   /// server, so what this asks is that the toast opens what came back rather
@@ -7049,20 +7243,14 @@ describe("publishing a share", () => {
       {},
       whenever(
         PUBLISHING,
-        json({
-          Published: {
-            share: { url: PUBLISHED, at: "2026-08-30T01:02:03Z" },
-          },
-        } satisfies SharePublished),
+        json({ Published: { share: SHARED } } satisfies SharePublished),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.publish}`));
 
     const said = await waitFor(() =>
       screen.getByText("The share is published.", { exact: false }),
@@ -7074,51 +7262,23 @@ describe("publishing a share", () => {
     ).toBe(PUBLISHED);
   });
 
-  /// A published share is a link the human can send again without publishing a
-  /// second snapshot, so it stands in the menu with the day it was taken.
-  ///
-  /// The URL is the server's own composition — the gist's id in the share
-  /// viewer's fragment, rather than the gist — so what this draws is whatever
-  /// the record came back carrying. See `link` in
-  /// `crates/server/src/sharing.rs`, which is where that is decided and proved.
-  it("draws where the last one went, and when", async () => {
-    theGrillingStanding({
-      shared: {
-        url: "https://tobico.github.io/verkstead/share-viewer.html#9f1",
-        at: "2026-08-30T01:02:03Z",
-      },
-    });
+  /// And the press says what a second one would be: publishing again is a fresh
+  /// snapshot rather than a second go at the same one.
+  it("says publishing again where there is already a share", async () => {
+    theGrillingStanding({ shared: SHARED });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    const link = await drawn<HTMLAnchorElement>(
-      container,
-      `.${actions.conversationActions} .${actions.published}`,
-    );
+    await openShare(container);
 
-    expect(link.getAttribute("href")).toBe(
-      "https://tobico.github.io/verkstead/share-viewer.html#9f1",
-    );
     expect(
-      screen.getByText(/Taken .* Opens it in the share viewer\./),
-    ).toBeTruthy();
-
-    // And the press says so: publishing again is a fresh snapshot rather than a
-    // second go at the same one.
-    expect(
-      (await drawn(container, `.${actions.conversationActions} .${actions.publish}`))
-        .textContent,
-    ).toContain("Publish again");
+      (await drawn(container, `.${sharePane.publish}`)).textContent,
+    ).toBe("Publish again");
   });
 
   /// The one press here whose failures are the human's to read. A token that
-  /// cannot write gists is not a page drawn against a conversation that moved:
+  /// cannot write gists is not a pane drawn against a conversation that moved:
   /// nothing moved, and a re-read would correct nothing — so what is wrong is
   /// said, with the way to the page it is fixed on inside the sentence.
-  ///
-  /// In a toast rather than in the row that was pressed, and the menu shuts as
-  /// it arrives: an outcome is a moment, and a row here is a drawing of the
-  /// conversation it is about — see `Toasts.tsx`.
   it("says which token trouble stopped it, and where to fix it", async () => {
     theGrillingStanding(
       {},
@@ -7126,10 +7286,8 @@ describe("publishing a share", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.publish}`));
 
     const said = await waitFor(() =>
       screen.getByText("The saved GitHub token may not write gists.", {
@@ -7141,53 +7299,6 @@ describe("publishing a share", () => {
     expect(
       said.querySelector<HTMLAnchorElement>('a[href="/settings/github"]'),
     ).toBeTruthy();
-
-    // And the menu it was pressed from has gone: what it said is on the toast,
-    // and a row still holding it would go on saying it over whatever
-    // conversation is opened next.
-    await waitFor(() =>
-      expect(
-        container.querySelector(`.${actions.conversationActions} .${actions.publish}`),
-      ).toBeNull(),
-    );
-  });
-
-  /// And nothing of it is left on the next conversation's menu, which is the
-  /// whole reason an outcome is not kept in a row: the sidebar's right-click is
-  /// one menu for the whole list, and the pane's own ⋯ outlives a walk from one
-  /// conversation to the next.
-  it("leaves nothing behind on the menu of another conversation", async () => {
-    theGrillingStanding(
-      {},
-      whenever(PUBLISHING, json("NoToken" satisfies SharePublished), "POST"),
-    );
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
-    );
-
-    const said = await waitFor(() =>
-      screen.getByText("Verkstead has no GitHub token to publish as.", {
-        exact: false,
-      }),
-    );
-
-    // Done with, the way the human is done with it.
-    fireEvent.click(
-      said.closest(`.${toasts.toast}`)!.querySelector("button")!,
-    );
-
-    await openActions(container);
-    expect(
-      (
-        await drawn(
-          container,
-          `.${actions.conversationActions} .${actions.publish}`,
-        )
-      ).textContent,
-    ).toBe("PublishPublish it as a secret gist and get a link to send.");
   });
 
   /// And a Verkstead nobody has given a token is the other half of the same
@@ -7200,10 +7311,8 @@ describe("publishing a share", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.publish}`));
 
     await waitFor(() =>
       screen.getByText("Verkstead has no GitHub token to publish as.", {
@@ -7239,9 +7348,9 @@ describe("sharing a conversation to its pull requests", () => {
     theGrillingStanding({});
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const menu = await openActions(container);
+    const pane = await openShare(container);
 
-    expect(menu.querySelector(`.${actions.comment}`)).toBeNull();
+    expect(pane.querySelector(`.${sharePane.comment}`)).toBeNull();
   });
 
   it("publishes and comments the link on every one of them", async () => {
@@ -7251,10 +7360,7 @@ describe("sharing a conversation to its pull requests", () => {
         SHARING_TO_PRS,
         json({
           Commented: {
-            share: {
-              url: "https://gist.github.com/tobico/9f1",
-              at: "2026-08-30T01:02:03Z",
-            },
+            share: SHARED,
             on: [ON_ITS_OWN, { ...MISSED, url: "https://github.com/x#1" }],
             missed: [],
           },
@@ -7264,14 +7370,8 @@ describe("sharing a conversation to its pull requests", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    expect(
-      screen.getByText("Publish it and comment the link on every pull request."),
-    ).toBeTruthy();
-
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.comment}`));
 
     await waitFor(() => expect(sent(fetching, SHARING_TO_PRS)).toEqual({}));
 
@@ -7291,24 +7391,15 @@ describe("sharing a conversation to its pull requests", () => {
       whenever(
         SHARING_TO_PRS,
         json({
-          Commented: {
-            share: {
-              url: "https://gist.github.com/tobico/9f1",
-              at: "2026-08-30T01:02:03Z",
-            },
-            on: [ON_ITS_OWN],
-            missed: [MISSED],
-          },
+          Commented: { share: SHARED, on: [ON_ITS_OWN], missed: [MISSED] },
         } satisfies ShareCommented),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.comment}`));
 
     await waitFor(() =>
       screen.getByText(
@@ -7334,10 +7425,8 @@ describe("sharing a conversation to its pull requests", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.comment}`));
 
     const said = await waitFor(() =>
       screen.getByText("The saved GitHub token may not write gists.", {

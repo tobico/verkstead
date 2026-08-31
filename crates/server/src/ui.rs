@@ -1287,6 +1287,7 @@ pub(crate) async fn conversation_view(
     let shared = match store::share(&state.pool, id).await {
         Ok(shared) => shared.map(|shared| verkstead_render::ShareView {
             url: crate::sharing::link(&shared.url),
+            gist: shared.url,
             at: shared.at,
         }),
         Err(error) => {
@@ -1835,6 +1836,7 @@ async fn publishing(
     let share = match store::record_share(&state.pool, conversation_id, &url).await {
         Ok(share) => verkstead_render::ShareView {
             url: crate::sharing::link(&share.url),
+            gist: share.url,
             at: share.at,
         },
         Err(error) => {

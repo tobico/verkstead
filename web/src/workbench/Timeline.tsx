@@ -74,6 +74,7 @@
 //! chooser drawn on the Set itself — so both happen on the page the Set is
 //! answered on and land here as the answered Set.
 
+import { faShare } from "@fortawesome/free-solid-svg-icons";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
   For,
@@ -114,6 +115,7 @@ import type {
 } from "../api/types";
 import app from "../App.module.css";
 import { CardButton } from "../CardButton";
+import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import { Empty, ErrorLine, Note } from "../notices";
 import { followBottom } from "../scrolling";
@@ -367,9 +369,10 @@ export function Timeline(props: {
   ///
   /// What it takes off is everything that is not a moment on the record: the
   /// status button, which is where the work stands and what is running in it
-  /// and the whole of the actions menu behind one press, and the block that
-  /// says what happens next. The cards themselves are untouched — a share is
-  /// read by opening them, exactly as the workbench is.
+  /// and the whole of the actions menu behind one press; the share icon, which
+  /// offers a reader a publish of somebody else's Conversation; and the block
+  /// that says what happens next. The cards themselves are untouched — a share
+  /// is read by opening them, exactly as the workbench is.
   ///
   /// Nothing about a *card* is decided here, and that is deliberate: a shared
   /// Conversation arrives with every field a control is drawn from already
@@ -434,20 +437,50 @@ export function Timeline(props: {
           heading={styles.paneName}
           title={<PaneName conversation={props.conversation} />}
         >
-          {/* And the way on to the next level, drawn only where there is a next
-              level to reach: the details pane holds the selected Event and
-              nothing else, so with nothing selected it is bare paper and a
-              control that paged into it would page into nothing. Hidden by the
-              stylesheet anyway where all three panes are on screen at once. */}
-          <Show when={props.selected !== null}>
-            <button
-              type="button"
-              class={styles.paneForward}
-              onClick={props.details}
-            >
-              Details →
-            </button>
-          </Show>
+          {/* The pane's own controls, in the slot the settings gear stands in
+              at the head of the conversations. Both of them page into the
+              details, so they are one group at the end of the row rather than
+              two things the header holds apart. */}
+          <div class={styles.paneControls}>
+            {/* And the way on to the next level, drawn only where there is a
+                next level to reach: the details pane holds the selected Event
+                and nothing else, so with nothing selected it is bare paper and
+                a control that paged into it would page into nothing. Hidden by
+                the stylesheet anyway where all three panes are on screen at
+                once. */}
+            <Show when={props.selected !== null}>
+              <button
+                type="button"
+                class={styles.paneForward}
+                onClick={props.details}
+              >
+                Details →
+              </button>
+            </Show>
+
+            {/* Sharing the Conversation, which was four rows of the actions
+                menu and is now a pane of its own — see `Share.tsx`. Drawn
+                exactly as the settings gear beside the Verkstead wordmark is:
+                the same [`IconButton`](../IconButton.tsx), open while its pane
+                is what the details are showing, because it is another thing
+                standing in a pane that is selected and opened into the pane
+                beside it.
+
+                The press walks into the details as pressing a card does, which
+                is what makes it work on a narrow window: the selection and the
+                level are two acts, exactly as they are for every card below. */}
+            <Show when={!props.readOnly}>
+              <IconButton
+                of={faShare}
+                label="Share"
+                open={props.selected === "share"}
+                press={() => {
+                  props.select("share");
+                  props.details();
+                }}
+              />
+            </Show>
+          </div>
         </PaneHead>
 
         {/* And under the title, where the eye lands: where the work stands,
