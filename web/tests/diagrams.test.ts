@@ -5,7 +5,7 @@
 //! whose colours change is drawn again — none of which needs mermaid to be here
 //! to be asked.
 
-import { waitFor } from "@solidjs/testing-library";
+import { fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { drawDiagrams } from "../src/set/diagrams";
@@ -100,6 +100,27 @@ function renderer(drawing: (text: string) => string | null) {
 /// another without a renderer in the room.
 function drawn(text: string): string {
   return `<svg data-source="${text.trim()}"></svg>`;
+}
+
+/// The same drawing, carrying what mermaid writes onto a real one: the width as
+/// `100%`, which is what it says whenever a diagram may fill the room it is given,
+/// the height as the length it measured, the shape in the `viewBox`, and the
+/// measurement again as the inline ceiling it puts on itself.
+function sized(text: string): string {
+  const measured = 'width="100%" height="200" viewBox="0 0 400 200"';
+  const ceiling = 'style="max-width: 400px;"';
+
+  return `<svg ${measured} ${ceiling} data-source="${text.trim()}"></svg>`;
+}
+
+/// The declarations of the block `selector` opens, which is what a rule about a
+/// drawn diagram has to be read out of: the SVG is mermaid's and the chrome around
+/// it is `diagrams.ts`'s, so there is no component to query either off.
+function block(selector: string): string {
+  const opened = markdown.indexOf(`${selector} {`);
+  expect(opened, `the stylesheet should have a \`${selector}\` rule`).not.toBe(-1);
+
+  return markdown.slice(opened, markdown.indexOf("}", opened));
 }
 
 afterEach(() => {
@@ -339,18 +360,6 @@ describe("the colours a Diagram is drawn in", () => {
 });
 
 describe("a drawn Diagram on the page", () => {
-  /// The declarations of the block `selector` opens, which is what a rule about a
-  /// drawn diagram has to be read out of: the SVG is mermaid's and there is no
-  /// component to query it off.
-  function block(selector: string): string {
-    const opened = markdown.indexOf(`${selector} {`);
-    expect(opened, `the stylesheet should have a \`${selector}\` rule`).not.toBe(
-      -1,
-    );
-
-    return markdown.slice(opened, markdown.indexOf("}", opened));
-  }
-
   it("fits the width it is given", () => {
     const svg = block(".markdown .diagram svg");
 
@@ -373,5 +382,228 @@ describe("a drawn Diagram on the page", () => {
 
     expect(reduced).toContain(".diagram");
     expect(reduced).toContain("animation: none !important");
+  });
+});
+
+describe("expanding a Diagram", () => {
+  /// A page of one drawing, drawn and then expanded: what the lightbox is, and
+  /// the button it was opened from.
+  async function expanded(drawing: (text: string) => string | null = sized) {
+    scheme();
+    const { bundle, asked } = renderer(drawing);
+    page("graph LR;\n  a--&gt;b;\n");
+
+    const stop = drawDiagrams({ bundle });
+    await waitFor(() => expect(asked).toHaveLength(1));
+
+    const expand = document.querySelector<HTMLButtonElement>(
+      "div.diagram button",
+    );
+    expect(expand).toBeTruthy();
+
+    fireEvent.click(expand!);
+
+    const lightbox = document.querySelector<HTMLDialogElement>(
+      "dialog.diagram-lightbox",
+    );
+    expect(lightbox).toBeTruthy();
+
+    return { lightbox: lightbox!, expand: expand!, stop };
+  }
+
+  it("hangs a button on every drawing that landed, and on nothing else", async () => {
+    scheme();
+    const { bundle, asked } = renderer((text) =>
+      text.includes("not a diagram") ? null : drawn(text),
+    );
+    page("not a diagram at all\n", "graph LR;\n  a--&gt;b;\n");
+
+    drawDiagrams({ bundle });
+    await waitFor(() => expect(asked).toHaveLength(2));
+
+    // One button for the one drawing, inside the figure and not in the card
+    // around it. The block that would not draw is the source the agent wrote and
+    // nothing else — there is nothing there to expand.
+    const buttons = document.querySelectorAll("button");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]!.closest("div.diagram")).toBeTruthy();
+    expect(document.querySelector("pre.mermaid button")).toBeNull();
+
+    // The icon says nothing when it is read aloud, so the label is the whole of
+    // what the button is called.
+    expect(buttons[0]!.getAttribute("aria-label")).toBe("Expand");
+    expect(buttons[0]!.querySelector("svg")!.getAttribute("aria-hidden")).toBe(
+      "true",
+    );
+  });
+
+  it("draws a copy of it over the page, and leaves the page whole", async () => {
+    const { lightbox } = await expanded();
+
+    expect(lightbox.open).toBe(true);
+
+    // The same drawing, in the box the collapse button is positioned against.
+    const copy = lightbox.querySelector("div.diagram-drawing > svg");
+    expect(copy!.getAttribute("data-source")).toBe("graph LR;\n  a-->b;");
+
+    // A copy: the card behind the blanker still holds the drawing it was opened
+    // from, which is what the letterboxed bands show through to.
+    expect(document.querySelector("div.diagram svg")).toBeTruthy();
+
+    const collapse = lightbox.querySelector("button");
+    expect(collapse!.getAttribute("aria-label")).toBe("Collapse");
+  });
+
+  it("letterboxes the copy, and stops at twice what mermaid measured", async () => {
+    const { lightbox } = await expanded();
+
+    const box = lightbox.querySelector<HTMLElement>("div.diagram-drawing")!;
+
+    // The width worked back out of the height and the shape, mermaid having
+    // written the width itself as `100%`; and the shape, which is what keeps a
+    // tall diagram's bottom on the screen.
+    expect(box.style.getPropertyValue("--diagram-size")).toBe("400px");
+    expect(box.style.getPropertyValue("--diagram-ratio")).toBe("2");
+
+    // And what the stylesheet spends them on: the smallest of twice the
+    // measurement, the window's width, and the width this shape may have in the
+    // window's height.
+    const rule = block(".diagram-lightbox > .diagram-drawing");
+    expect(rule).toContain("calc(var(--diagram-size, 100%) * 2)");
+    expect(rule).toContain("var(--diagram-ratio, 1)");
+
+    // The one thing the copy may not keep: mermaid writes the size it measured
+    // onto the drawing as an inline ceiling, and the lightbox is the one place a
+    // diagram is drawn deliberately bigger than that.
+    const copy = box.querySelector<SVGElement>("svg")!;
+    expect(copy.style.maxWidth).toBe("none");
+  });
+
+  it("caps the drawing in its card at the width mermaid measured", async () => {
+    scheme();
+    const { bundle, asked } = renderer(sized);
+    page("graph LR;\n  a--&gt;b;\n");
+
+    drawDiagrams({ bundle });
+    await waitFor(() => expect(asked).toHaveLength(1));
+
+    // The box the button is positioned against is the drawing's own width, so the
+    // corner it floats in is the drawing's corner rather than the figure's.
+    const box = document.querySelector<HTMLElement>("div.diagram-drawing")!;
+    expect(box.style.getPropertyValue("--diagram-size")).toBe("400px");
+    expect(block(".markdown .diagram > .diagram-drawing")).toContain(
+      "max-width: var(--diagram-size, 100%)",
+    );
+  });
+
+  it("closes on the collapse button, on the drawing, and on the blanker", async () => {
+    for (const pressed of [
+      (lightbox: HTMLDialogElement) => lightbox.querySelector("button")!,
+      (lightbox: HTMLDialogElement) => lightbox.querySelector("svg")!,
+      (lightbox: HTMLDialogElement) => lightbox,
+    ]) {
+      const { lightbox } = await expanded();
+
+      fireEvent.click(pressed(lightbox));
+
+      // Closed and gone: a dialog merely closed would still be in the document
+      // for the next press to find.
+      expect(lightbox.open).toBe(false);
+      expect(document.querySelector("dialog.diagram-lightbox")).toBeNull();
+
+      document.body.innerHTML = "";
+    }
+  });
+
+  it("closes on Escape, which is the platform's", async () => {
+    const { lightbox } = await expanded();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(lightbox.open).toBe(false);
+    expect(document.querySelector("dialog.diagram-lightbox")).toBeNull();
+  });
+
+  it("opens again after it has been closed", async () => {
+    const { lightbox, expand } = await expanded();
+    fireEvent.click(lightbox);
+
+    fireEvent.click(expand);
+
+    // The button is still the page's own and still opens: a redraw puts the same
+    // one back, and a close takes only the dialog.
+    expect(document.querySelector("dialog.diagram-lightbox")).toBeTruthy();
+  });
+
+  it("follows the page's colours while it is open", async () => {
+    const colours = scheme();
+
+    // The same source drawn twice over comes back differently, which is what a
+    // change of scheme is: the drawing is mermaid's idea of the page's colours at
+    // the moment it was asked.
+    let pass = 0;
+    const { bundle, asked } = renderer(() => {
+      pass += 1;
+      return `<svg data-pass="${pass}"></svg>`;
+    });
+    page("graph LR;\n  a--&gt;b;\n");
+
+    drawDiagrams({ bundle });
+    await waitFor(() => expect(asked).toHaveLength(1));
+
+    fireEvent.click(document.querySelector("div.diagram button")!);
+
+    const copy = () =>
+      document
+        .querySelector("dialog.diagram-lightbox svg")!
+        .getAttribute("data-pass");
+
+    expect(copy()).toBe("1");
+
+    colours.flip();
+    await waitFor(() => expect(asked).toHaveLength(2));
+
+    // Both of them: an expanded diagram in last scheme's colours is the one thing
+    // the page behind it would not be.
+    await waitFor(() => expect(copy()).toBe("2"));
+    expect(
+      document.querySelector("div.diagram svg")!.getAttribute("data-pass"),
+    ).toBe("2");
+  });
+
+  it("takes the lightbox with it when the page goes", async () => {
+    const { lightbox, stop } = await expanded();
+
+    stop();
+
+    // Closed rather than removed, which is how the focus finds its way back out
+    // of the top layer.
+    expect(lightbox.open).toBe(false);
+    expect(document.querySelector("dialog.diagram-lightbox")).toBeNull();
+  });
+});
+
+describe("the lightbox a Diagram is expanded into", () => {
+  it("dims the page the way the app's other dialog does", () => {
+    // The same strength as `.modal::backdrop`, and for the same reason: what the
+    // drawing does not cover is the page, still there under it.
+    expect(block(".diagram-lightbox::backdrop")).toContain("rgb(0 0 0 / 45%)");
+  });
+
+  it("floats the button until the diagram is looked at, where anything hovers", () => {
+    // Nothing about the button at rest says it is hidden: on a device that cannot
+    // hover, hidden until hover is hidden for good.
+    // The transition is what it appears through, not what it is at rest.
+    expect(block(".diagram-button")).not.toContain("opacity:");
+
+    const hovers = markdown.slice(markdown.indexOf("@media (hover: hover)"));
+
+    // Out of the way until the diagram is hovered — in the card and in the
+    // lightbox alike — or until a keyboard reaches the button, hovering being the
+    // one way to it a keyboard has not got.
+    expect(hovers).toContain("opacity: 0");
+    expect(hovers).toContain(".diagram:hover .diagram-button");
+    expect(hovers).toContain(".diagram-lightbox:hover .diagram-button");
+    expect(hovers).toContain(".diagram-button:focus-visible");
   });
 });
