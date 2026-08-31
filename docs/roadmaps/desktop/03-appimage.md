@@ -21,15 +21,6 @@ stages 04 and 05 to reuse.
   ordinary answer, and the CLI legs stay musl exactly as they are.
 - **Artifact naming follows the release's existing scheme** where it applies;
   the AppImage keeps the format's own `Name-arch.AppImage` convention.
-- **The packaging assets live outside `assets/`.** `web/vite.config.ts` sets
-  `publicDir: "../assets"`, so everything under it is copied untouched into the
-  viewer build — and the viewer is embedded in every binary, the headless CLI
-  included. A `.desktop` file and a set of packaging icons served at the web
-  root and carried inside the CLI is neither's business, so they get a
-  directory of their own, made by the first packaging stage to run and reused
-  by the other two — which by the ordering above is this one. The one piece of
-  artwork stays where it is: `assets/icons/verkstead-hammer.png` is the viewer's
-  own source too.
 - **The shared release plumbing is this stage's, laid once.** A leg does not
   attach anything: the four CLI legs upload workflow artifacts and one
   `publish` job collects them, counts them and creates the Release. Carrying a
@@ -37,6 +28,15 @@ stages 04 and 05 to reuse.
   `needs`, the upload glob — is written here, so that stages 04 and 05 add a
   build leg and an artifact name and touch `publish` no further. Which is why
   this stage runs first of the three.
+- **The packaging assets live outside `assets/`.** `web/vite.config.ts` sets
+  `publicDir: "../assets"`, so everything under it is copied untouched into the
+  viewer build — and the viewer is embedded in every binary, the headless CLI
+  included. A `.desktop` file and a set of packaging icons served at the web
+  root and carried inside the CLI is neither's business, so they get a
+  directory of their own, made by the first packaging stage to run and reused
+  by the other two — which by the ordering above is this one. The one piece of
+  artwork stays where it is: `assets/icons/verkstead-hammer.png` is the
+  viewer's own source too.
 - Release legs are added per packaging stage — this stage builds only the
   Linux one, plus the shared icon generation.
 
@@ -85,7 +85,7 @@ stages 04 and 05 to reuse.
 - What stage 02 settled about the Linux tray backend — appindicator vs ksni
   decides what must ride inside the AppImage.
 - What the viewer copies whole when the stage starts (`publicDir` in
-  `web/vite.config.ts`), which is what the packaging assets have to stay out of.
+  `web/vite.config.ts`) — what the packaging assets have to stay out of.
 - GitHub Actions billing on this account has blocked runs before; a leg that
   dies in seconds with no steps is billing, not the workflow.
 

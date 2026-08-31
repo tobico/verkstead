@@ -32,8 +32,8 @@ the unsigned-app approval steps.
    vitest coverage of the state; a mac (or gated Linux) build answers the API
    honestly.
 2. **Bundle and dmg** — scripted `.app` layout (Info.plist, icns from stage
-   03's packaging assets), `lipo`, dmg packing. Accepts: script runs on a macos runner;
-   the app launches from the mounted dmg on a fresh runner.
+   03's packaging assets), `lipo`, dmg packing. Accepts: script runs on a
+   macos runner; the app launches from the mounted dmg on a fresh runner.
 3. **Release leg and docs** — the macOS desktop job joins `release.yml` on the
    plumbing stage 03 laid: a build leg and an artifact name, and nothing about
    `publish`. The dmg joins the install story stage 03 started, and the README
