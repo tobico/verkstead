@@ -284,11 +284,29 @@ impl Stage {
 /// annotated with the branch it was worked on. That annotation is the roadmap
 /// saying *this one is in flight*, and the branch in it is what says whose.
 ///
-/// Blocking work: a git read and two file reads.
+/// *Which* roadmap comes first, where the branch touched more than one. Writing
+/// to a roadmap is what says a Conversation is a stage of it, and a stage
+/// session that amends another roadmap's briefs in passing — retiring a
+/// deferral, correcting a decision a later effort recorded — has written to two.
+/// Taken in name order that reads as the alphabet deciding which roadmap a
+/// Conversation belongs to, and a stage of the second one carries on into the
+/// first. So the Conversation's own roadmap is settled first, by
+/// [`belongs_to`], and where there is one it is the only one read: a roadmap
+/// this branch merely edited is a roadmap somebody else's Conversation is
+/// carrying on.
+///
+/// Blocking work: a git read and a file read per roadmap the branch touched.
 pub(crate) fn next_stage(worktree: &Path, base: &str, branch: &str) -> Next {
+    let touched = touched(worktree, base);
+
+    let considered = match belongs_to(worktree, &touched, branch) {
+        Some(own) => BTreeSet::from([own]),
+        None => touched,
+    };
+
     let mut complete = None;
 
-    for name in touched(worktree, base) {
+    for name in considered {
         let directory = worktree.join(ROADMAPS).join(&name);
 
         let Ok(list) = std::fs::read_to_string(directory.join(INDEX)) else {
@@ -339,6 +357,50 @@ pub(crate) fn next_stage(worktree: &Path, base: &str, branch: &str) -> Next {
         Some(roadmap) => Next::Complete { roadmap },
         None => Next::NoRoadmap,
     }
+}
+
+/// Which of the roadmaps this branch touched the Conversation on `branch` is a
+/// stage *of*, where it is a stage of one at all.
+///
+/// Two ways a roadmap says a branch is its own, and they are the roadmap's own
+/// records rather than anything Verkstead stores:
+///
+/// - **Its index annotates a stage with the branch.** `/next-stage` writes that
+///   annotation when it starts the stage, so the roadmap holding it is the one
+///   that claimed this branch. The same reading [`ours`] does, asked the other
+///   way round.
+/// - **The branch is named for it.** A stage branch is `<roadmap>/<NN>-<slug>`,
+///   built by [`Stage::branch`] and by nothing else, so its first component
+///   names the roadmap the stage came from. The fallback for a roadmap whose
+///   annotation never landed — a plan commit that failed to edit the index
+///   leaves the stage in flight all the same.
+///
+/// `None` for a branch no roadmap claims and no roadmap named, which is the
+/// Conversation that *wrote* a roadmap rather than one that is a stage of one:
+/// its branch is a name the human chose, and the roadmap it wrote has every box
+/// unchecked and nothing in flight. Whatever it touched is what it planned, so
+/// there is nothing to prefer between them and the caller reads them all.
+fn belongs_to(worktree: &Path, touched: &BTreeSet<String>, branch: &str) -> Option<String> {
+    if branch.is_empty() {
+        return None;
+    }
+
+    let claimed = touched.iter().find(|name| {
+        let index = worktree.join(ROADMAPS).join(name).join(INDEX);
+
+        std::fs::read_to_string(index).is_ok_and(|list| {
+            list.lines()
+                .filter_map(checklist::entry)
+                .any(|entry| ours(entry.after, branch))
+        })
+    });
+
+    claimed
+        .or_else(|| {
+            let (named, _) = branch.split_once('/')?;
+            touched.get(named)
+        })
+        .cloned()
 }
 
 /// Whether what a roadmap wrote after a stage's link says the stage is in
@@ -1561,6 +1623,121 @@ Turns this askance clone into Verkstead.
                 roadmap: "mvp".to_owned()
             },
         );
+    }
+
+    /// A stage session that amended another roadmap's briefs in passing has
+    /// written to two roadmaps, and only one of them is the one it is a stage
+    /// of. Read in name order the alphabet would decide it — and a stage of
+    /// `missing-roles` would carry on into `brain-chat-parity`, which is a
+    /// different effort entirely.
+    #[test]
+    fn a_roadmap_this_branch_only_amended_is_not_the_one_carried_on() {
+        let repo = Repo::with(&[]);
+
+        // Sorts first, and is somebody else's effort with work left in it.
+        repo.write(
+            "brain-chat-parity",
+            "# Brain chat parity roadmap\n\n\
+             - [x] 13: The agent chat — [brief](13-agent-chat.md)\n\
+             - [ ] 14: The widget — [brief](14-brain-chat-widget.md)\n",
+        );
+        repo.brief("brain-chat-parity", "14-brain-chat-widget.md", "# 14.\n");
+
+        // And this Conversation's own, which says so by annotating its stage.
+        repo.write(
+            "missing-roles",
+            "# Missing roles roadmap\n\n\
+             - [x] 01: Project config — [brief](01-project-config.md)\n\
+             - [ ] 02: Grant filters — [brief](02-grant-filters.md) \
+             *(in progress: `missing-roles/02-grant-filters`)*\n\
+             - [ ] 03: Workflow permissions — [brief](03-workflow-permissions.md)\n",
+        );
+        repo.brief("missing-roles", "03-workflow-permissions.md", "# 03.\n");
+
+        let Next::Stage(stage) = repo.next("missing-roles/02-grant-filters") else {
+            panic!("stage 03 of this Conversation's own roadmap is the one to start");
+        };
+
+        assert_eq!(stage.roadmap, "missing-roles");
+        assert_eq!(stage.label, "03");
+    }
+
+    /// The annotation is the roadmap claiming the branch, and a plan commit that
+    /// failed to write one leaves the stage in flight all the same. The branch's
+    /// own name is what says which roadmap then — it is built out of it.
+    #[test]
+    fn a_branch_named_for_a_roadmap_is_that_roadmaps_stage() {
+        let repo = Repo::with(&[]);
+
+        repo.write(
+            "brain-chat-parity",
+            "# Brain chat parity roadmap\n\n- [ ] 14: The widget — [brief](14-widget.md)\n",
+        );
+        repo.brief("brain-chat-parity", "14-widget.md", "# 14.\n");
+
+        // No annotation anywhere in it: nothing claims this branch.
+        repo.write(
+            "missing-roles",
+            "# Missing roles roadmap\n\n\
+             - [x] 01: Project config — [brief](01-project-config.md)\n\
+             - [ ] 02: Grant filters — [brief](02-grant-filters.md)\n\
+             - [ ] 03: Workflow permissions — [brief](03-workflow-permissions.md)\n",
+        );
+        repo.brief("missing-roles", "02-grant-filters.md", "# 02.\n");
+
+        let Next::Stage(stage) = repo.next("missing-roles/02-grant-filters") else {
+            panic!("the branch names the roadmap it is a stage of");
+        };
+
+        assert_eq!(stage.roadmap, "missing-roles");
+        assert_eq!(
+            stage.label, "02",
+            "unannotated, its own stage is still open and is the lowest one left",
+        );
+    }
+
+    /// And a roadmap of the Conversation's own with nothing left in it is the
+    /// roadmap complete, rather than a licence to start somebody else's.
+    #[test]
+    fn its_own_roadmap_running_out_does_not_carry_on_into_another() {
+        let repo = Repo::with(&[]);
+
+        repo.write(
+            "brain-chat-parity",
+            "# Brain chat parity roadmap\n\n- [ ] 14: The widget — [brief](14-widget.md)\n",
+        );
+        repo.brief("brain-chat-parity", "14-widget.md", "# 14.\n");
+
+        repo.write(
+            "missing-roles",
+            "# Missing roles roadmap\n\n\
+             - [x] 01: Project config — [brief](01-project-config.md)\n\
+             - [ ] 02: Grant filters — [brief](02-grant-filters.md) \
+             *(in progress: `missing-roles/02-grant-filters`)*\n",
+        );
+
+        assert_eq!(
+            repo.next("missing-roles/02-grant-filters"),
+            Next::Complete {
+                roadmap: "missing-roles".to_owned()
+            },
+        );
+    }
+
+    /// The Conversation that *wrote* a roadmap is a stage of nothing: its branch
+    /// is a name the human chose and every box it wrote is unchecked. What it
+    /// touched is what it planned, so stage 01 of it is what starts.
+    #[test]
+    fn the_conversation_that_wrote_a_roadmap_starts_its_first_stage() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", MVP);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+        let Next::Stage(stage) = repo.next("teal-beacon") else {
+            panic!("nothing claims this branch, so what it wrote is what carries on");
+        };
+
+        assert_eq!(stage.roadmap, "mvp");
     }
 
     /// An ordinary feature: its branch has written to no roadmap, so there is no
