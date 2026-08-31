@@ -55,7 +55,12 @@ import card from "../src/CardButton.module.css";
 import { GithubCard, GithubPane } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
 import buildCache from "../src/settings/BuildCache.module.css";
-import { SettingsPage } from "../src/settings/SettingsPage";
+import shareViewer from "../src/settings/ShareViewer.module.css";
+import paths from "../src/settings/Paths.module.css";
+import {
+  SettingsPage,
+  panes as settingsPanes,
+} from "../src/settings/SettingsPage";
 import {
   openingAt,
   opensProfile,
@@ -76,6 +81,18 @@ import saved from "./fixtures/settings-saved.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
 
 const TOLD = told as SettingsView;
+
+/// The paths the fixture holds, as a save puts them back on the wire: the
+/// settings' own entries, and a Repo's bind in the `name=path` grammar the file
+/// keeps them in. Every section's save carries them, because one request writes
+/// the whole of `config.yaml` — a list left out would be a list emptied.
+const PATHS = {
+  watched_paths: ["/home/ada/src"],
+  sandbox_binds: [
+    "/var/cache/verkstead-node",
+    "verkstead=/var/cache/verkstead-cargo",
+  ],
+};
 const PROFILES = profiles as ProfileEntry[];
 const REPOS = repos as RepoEntry[];
 const FIRST_REPO = REPOS[0]!;
@@ -404,6 +421,9 @@ describe("saving", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
+        share_viewer_url: TOLD.share_viewer_url,
+        conflict_resolution: TOLD.conflict_resolution,
+        ...PATHS,
       }),
     );
   });
@@ -488,6 +508,50 @@ describe("saving", () => {
 
     await waitFor(() => screen.getByText(/GitHub says it is/));
     expect(container.querySelector(`.${styles.login}`)!.textContent).toBe("ada");
+  });
+
+  /// A token can be whose it should be and still not do what Verkstead needs of
+  /// it. Publishing a share writes a secret gist, which is the `gist` scope, and
+  /// a token issued for reading repositories does not carry it — so the pane
+  /// says so here, where the human already is, rather than leaving it to be
+  /// found by a press on a conversation weeks later.
+  it("says which scope a verified token is missing", async () => {
+    const unscoped: SettingsSaved = {
+      settings: SAVED.settings,
+      verified: { Account: { login: "ada", missing: ["gist"] } },
+    };
+    theSettings(UNSET, json(unscoped));
+    const { container } = mountPane();
+    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+
+    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+      target: { value: TOKEN },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Whose it is, and what it may not do: two lines, because they are two
+    // different things to do about it.
+    await waitFor(() => screen.getByText(/GitHub says it is/));
+    await waitFor(() => screen.getByText(/It cannot publish a share/));
+    expect(container.querySelector(`.${styles.scope}`)!.textContent).toBe(
+      "gist",
+    );
+  });
+
+  /// And a token that can do everything asked of it says nothing extra, which
+  /// is what most tokens are.
+  it("says nothing about scopes on a token that has them all", async () => {
+    theSettings(UNSET, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+
+    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+      target: { value: TOKEN },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => screen.getByText(/GitHub says it is/));
+    expect(screen.queryByText(/It cannot publish a share/)).toBeNull();
   });
 
   /// A token GitHub would not vouch for is saved all the same — it is pasted
@@ -581,8 +645,11 @@ describe("replacing and clearing the token", () => {
         git_author: TOLD.git_author,
         github_token: null,
         // Untouched by this form, and so untouched in what the save answers
-        // with — see the section below it for what does change these.
+        // with — see the sections below it for what does change these.
         rust_build_cache: TOLD.rust_build_cache,
+        share_viewer_url: TOLD.share_viewer_url,
+        conflict_resolution: TOLD.conflict_resolution,
+        paths: TOLD.paths,
       },
       verified: null,
     };
@@ -600,6 +667,9 @@ describe("replacing and clearing the token", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
+        share_viewer_url: TOLD.share_viewer_url,
+        conflict_resolution: TOLD.conflict_resolution,
+        ...PATHS,
       }),
     );
 
@@ -645,15 +715,15 @@ function thePage(at = "/settings") {
     ...render(() => (
       <QueryClientProvider client={queries}>
         <MemoryRouter history={history}>
-          {/* Nested exactly as `App.tsx` nests them: the nesting is what keeps
+          {/* Nested exactly as `App.tsx` nests them, out of the page's own
+              `panes()` rather than written out again: the nesting is what keeps
               the middle pane up while the leaf under it changes, so a mount that
-              flattened them would be testing a page the app does not build. */}
+              flattened them would be testing a page the app does not build —
+              and a list spelled out here would be a second opinion about where
+              a card leads, which is the drift that left the share viewer's card
+              opening the catch-all. */}
           <Route path="/settings" component={SettingsPage}>
-            <Route path="/" />
-            <Route path="/github" />
-            <Route path="/build-cache" />
-            <Route path="/profiles/:profile" />
-            <Route path="/repos/:repo" />
+            {settingsPanes()}
           </Route>
           <Route path="*" component={() => <p>somewhere else</p>} />
         </MemoryRouter>
@@ -693,7 +763,7 @@ describe("the settings page", () => {
   /// One page for everything the human configures: what Verkstead itself was
   /// told, and the two things a Conversation is settled against — in the reading
   /// order a fresh install needs them in.
-  it("holds the credentials, the build cache, the profiles and the repos", async () => {
+  it("holds the credentials, the build cache, the paths, the profiles and the repos", async () => {
     const { container } = thePage();
 
     const settings = panes(container)[1]!;
@@ -702,6 +772,7 @@ describe("the settings page", () => {
     // so each list is waited for inside the pane it belongs to.
     await drawn(settings, `.${styles.githubCard}`);
     await drawn(settings, `.${buildCache.buildCacheCard}`);
+    await drawn(settings, `.${paths.pathsCard}`);
     await drawn(settings, `.${profileList.profiles} .${profileList.profile}`);
     await drawn(settings, `.${repoList.repos} .${repoList.repo}`);
 
@@ -821,6 +892,59 @@ describe("the path a details pane stands at", () => {
 
     history.back();
     await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// And the third pane a word names: where the share viewer is hosted.
+  it("opens the share viewer at /settings/share-viewer, replacing", async () => {
+    const { container, history } = thePage();
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${shareViewer.shareViewerCard}`,
+    );
+    fireEvent.click(face);
+
+    await waitFor(() => expect(history.get()).toBe("/settings/share-viewer"));
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  /// And the fourth: the paths Verkstead may work inside, and what a sandbox is
+  /// given beyond its worktree.
+  it("opens the paths at /settings/paths, replacing", async () => {
+    const { container, history } = thePage();
+
+    const face = await drawn<HTMLElement>(container, `.${paths.pathsCard}`);
+    fireEvent.click(face);
+
+    await waitFor(() => expect(history.get()).toBe("/settings/paths"));
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("draws the two lists in the details pane, and reads the paths card as open", async () => {
+    const { container } = thePage("/settings/paths");
+
+    await waitFor(() => screen.getByLabelText("Add a watched path"));
+
+    const face = await drawn<HTMLElement>(container, `.${paths.pathsCard}`);
+    expect(face.getAttribute("aria-pressed")).toBe("true");
+    expect(face.classList).toContain(card.open);
+  });
+
+  it("draws the viewer's field in the details pane, and reads its card as open", async () => {
+    const { container } = thePage("/settings/share-viewer");
+
+    await waitFor(() => screen.getByLabelText(/Where you hosted it/));
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${shareViewer.shareViewerCard}`,
+    );
+    expect(face.getAttribute("aria-pressed")).toBe("true");
+    expect(face.classList).toContain(card.open);
   });
 
   it("draws the switch in the details pane, and reads the cache card as open", async () => {
@@ -1105,6 +1229,7 @@ describe("where a settings details pane stands", () => {
   it("puts an id behind a segment of its own, and a word beside it", () => {
     expect(pathTo("github")).toBe("/settings/github");
     expect(pathTo("build-cache")).toBe("/settings/build-cache");
+    expect(pathTo("share-viewer")).toBe("/settings/share-viewer");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
     expect(pathTo(opensRepo(7))).toBe("/settings/repos/7");
@@ -1115,6 +1240,7 @@ describe("where a settings details pane stands", () => {
     for (const opening of [
       "github",
       "build-cache",
+      "share-viewer",
       opensProfile(7),
       opensProfile("new"),
       opensRepo(7),

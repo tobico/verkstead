@@ -174,7 +174,8 @@ pub(crate) async fn click(state: &AppState, conversation_id: i64) -> anyhow::Res
 /// [`crate::stopping::stopped`] — so anything started behind one would find the
 /// Conversation stopped and start nothing. Into Done there is nothing to start,
 /// and the stop is cleared all the same: a Conversation Verkstead has finished
-/// with wearing *blocked on you* would be a badge with no press to answer it.
+/// with wearing *blocked on you* would be a word with nothing behind it to
+/// answer.
 pub(crate) async fn submit(
     state: &AppState,
     conversation_id: i64,
@@ -245,6 +246,12 @@ pub(crate) async fn submit(
         );
     }
 
+    // From here to the record naming what this makes, as a grill start holds it
+    // and for its reason: a directory made and not yet recorded is one the sweep
+    // of orphaned worktrees would read as nobody's. See
+    // [`crate::AppState::checkouts`].
+    let making = state.checkouts.lock().await;
+
     let made = match make(planned).await? {
         Making::Refused(refusal) => return Ok(refusal),
         Making::Ready(made) => made,
@@ -303,6 +310,10 @@ pub(crate) async fn submit(
         store::Steering::NoSuchProfile => return Ok(ConversationSteered::NoSuchProfile),
         store::Steering::Steered => {}
     }
+
+    // Recorded, so the sweep would keep them. What follows is a launch, and
+    // holding a lock across one would hold every other start behind it.
+    drop(making);
 
     match submission.target {
         // A grilling from the beginning, which is the only kind there is: an

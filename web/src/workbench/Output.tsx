@@ -60,6 +60,7 @@ import {
   type JSX,
 } from "solid-js";
 
+import { PaneSticky } from "../Panes";
 import { loadCapture, loadTranscript } from "../api/client";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
@@ -220,51 +221,53 @@ export function Output(props: {
 
   return (
     <>
-      <PaneHead back={{ to: "Timeline", go: props.back }} title="Agent run">
-        {/* The two ways of reading the one session, beside the title rather than
-            across the pane under it: two words is all the width it ever needs,
-            and the header is where a pane's own controls belong. Buttons that
-            say which they are rather than tabs — there are two of them, both are
-            always there, and `aria-pressed` is the one word that says which is
-            showing.
+      <PaneSticky>
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Agent run">
+          {/* The two ways of reading the one session, beside the title rather than
+              across the pane under it: two words is all the width it ever needs,
+              and the header is where a pane's own controls belong. Buttons that
+              say which they are rather than tabs — there are two of them, both are
+              always there, and `aria-pressed` is the one word that says which is
+              showing.
 
-            The mark under the pressed one is presentation and nothing else, so
-            it is hidden from anybody being read to: what it draws is what
-            `aria-pressed` has already said, and it exists so that switching
-            reads as one thing moving rather than two things blinking. */}
-        <div
-          class={styles.recordSwitch}
-          role="group"
-          aria-label="How to read this session"
-        >
-          <span
-            class={styles.indicator}
-            aria-hidden="true"
-            style={{
-              transform: `translateX(${mark().at}px)`,
-              width: `${mark().wide}px`,
-            }}
-          />
-          <button
-            type="button"
-            class={styles.transcriptTab}
-            ref={transcriptTab}
-            aria-pressed={showing() === "transcript"}
-            onClick={() => setShowing("transcript")}
+              The mark under the pressed one is presentation and nothing else, so
+              it is hidden from anybody being read to: what it draws is what
+              `aria-pressed` has already said, and it exists so that switching
+              reads as one thing moving rather than two things blinking. */}
+          <div
+            class={styles.recordSwitch}
+            role="group"
+            aria-label="How to read this session"
           >
-            Transcript
-          </button>
-          <button
-            type="button"
-            class={styles.screenTab}
-            ref={screenTab}
-            aria-pressed={showing() === "screen"}
-            onClick={() => setShowing("screen")}
-          >
-            Screen
-          </button>
-        </div>
-      </PaneHead>
+            <span
+              class={styles.indicator}
+              aria-hidden="true"
+              style={{
+                transform: `translateX(${mark().at}px)`,
+                width: `${mark().wide}px`,
+              }}
+            />
+            <button
+              type="button"
+              class={styles.transcriptTab}
+              ref={transcriptTab}
+              aria-pressed={showing() === "transcript"}
+              onClick={() => setShowing("transcript")}
+            >
+              Transcript
+            </button>
+            <button
+              type="button"
+              class={styles.screenTab}
+              ref={screenTab}
+              aria-pressed={showing() === "screen"}
+              onClick={() => setShowing("screen")}
+            >
+              Screen
+            </button>
+          </div>
+        </PaneHead>
+      </PaneSticky>
 
       {/* The same metric the Timeline row shows, and absent for the same
           reason: a session with no Transcript has no turns to count. A finished

@@ -52,6 +52,7 @@
         "at": "2026-08-03T09:07:11.000Z",
         "checks": "Running",
         "id": 33,
+        "merging": "Cleanly",
         "number": 41,
         "repo": null,
         "title": "Rate limiting",
@@ -88,6 +89,7 @@
       }
     }
   },
+  "shared": null,
   "state": "Wrapping",
   "stop_asked": false,
   "stopped_by_hand": false,
@@ -133,6 +135,7 @@
         "at": "2026-08-03T09:07:11.000Z",
         "checks": "Running",
         "id": 33,
+        "merging": "Cleanly",
         "number": 41,
         "repo": null,
         "title": "Rate limiting",
@@ -154,6 +157,7 @@
       }
     }
   ],
+  "waiting": false,
   "waiting_on_checks": false,
   "working": false,
   "worktree": {

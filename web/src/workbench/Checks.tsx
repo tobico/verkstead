@@ -23,6 +23,10 @@
 //! no CI, one nothing has asked about yet, and one opened before Verkstead wrote
 //! this down. *Not known* is a third thing beside green and red, and an icon
 //! guessing at it would be worse than no icon.
+//!
+//! Whether the pull request merges at all is the mark beside these rather than a
+//! fourth of them: it is another reading of GitHub, written down another way and
+//! about something else. See `Merging.tsx`.
 
 import { faCircle } from "@fortawesome/free-regular-svg-icons";
 import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";

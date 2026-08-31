@@ -9,8 +9,10 @@
 //! folded together they are sections of one pane, read down in the order a
 //! fresh install needs them: credentials first, because without them nothing a
 //! session does with a Repo can be pushed, then the shared Rust build cache
-//! every session builds into, then the Agent Profiles and the Repos a
-//! Conversation is settled against.
+//! every session builds into, then where the share viewer is hosted, then the
+//! paths Verkstead may work inside at all, then how a conflicted pull request
+//! is resolved, then the Agent Profiles and the Repos a Conversation is settled
+//! against.
 //!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
@@ -39,10 +41,10 @@
 //! released. Both belong here for the same reason everything else does, and
 //! neither is a card: the switch is one control and the banner asks for nothing.
 
-import { useLocation, useNavigate } from "@solidjs/router";
+import { Route, useLocation, useNavigate } from "@solidjs/router";
 import { Match, Switch, createMemo, createSignal, type JSX } from "solid-js";
 
-import { Panes, type Pane } from "../Panes";
+import { Panes, PaneSticky, type Pane } from "../Panes";
 import { ProfileList, ProfilePane } from "../profiles/ProfileList";
 import { Notifications } from "../push/Notifications";
 import { RepoDetails, RepoList, RepoPane } from "../repos/RepoList";
@@ -51,9 +53,13 @@ import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
 import { BuildCacheCard, BuildCachePane } from "./BuildCache";
+import { ConflictsCard, ConflictsPane } from "./Conflicts";
 import { GithubCard, GithubPane } from "./Credentials";
+import { PathsCard, PathsPane } from "./Paths";
+import { ShareViewerCard, ShareViewerPane } from "./ShareViewer";
 import {
   SETTINGS,
+  WORDS,
   openingAt,
   opensProfile,
   opensRepo,
@@ -63,6 +69,44 @@ import {
   type Opening,
 } from "./openings";
 import styles from "./SettingsPage.module.css";
+
+/// Every details pane of this page, as the routes that reach one.
+///
+/// Declared here rather than in `App.tsx` because they are this page's own
+/// arithmetic: what a pane is reached at is [`pathTo`]'s answer, and a route
+/// table written somewhere else is a second opinion about it — one that agreed
+/// with this page for as long as somebody remembered to keep the two in step,
+/// and then quietly stopped. That is what happened to the share viewer: card,
+/// pane and path all in hand, and *No such page* at the end of it, because a
+/// nested route with no matching child falls to the app's catch-all.
+///
+/// So the ones named by a word are written from [`WORDS`], which is what
+/// [`openingAt`] reads a path against — a section added there arrives with the
+/// route that reaches it. The two named by an id keep their own line: what
+/// stands in that segment is an id or the word `new`, and no id the server
+/// issues is `new`.
+///
+/// The leaves draw nothing. What they are is what the path says, and this page
+/// reads that off the URL — they are here so the parent route matches, and so
+/// that pressing a card does not take the middle pane down with it.
+///
+/// A plain function rather than a component: the router reads the routes out of
+/// the JSX handed to it rather than out of anything a component renders, so this
+/// is called where they are written.
+export function panes(): JSX.Element {
+  return (
+    <>
+      <Route path="/" />
+      {WORDS.map((word) => (
+        <Route path={`/${word}`} />
+      ))}
+      {/* The blank form rides in the same segment an id does, as
+          `/settings/profiles/new`. */}
+      <Route path="/profiles/:profile" />
+      <Route path="/repos/:repo" />
+    </>
+  );
+}
 
 /// The settings page, whole.
 export function SettingsPage(): JSX.Element {
@@ -152,9 +196,11 @@ function Settings(props: {
           whether this device is told about a Question Set is one switch, and a
           switch is small enough to live in the space the title was leaving
           empty anyway. */}
-      <PaneHead back={{ to: "Conversations", go: props.back }} title="Settings">
-        <Notifications />
-      </PaneHead>
+      <PaneSticky>
+        <PaneHead back={{ to: "Conversations", go: props.back }} title="Settings">
+          <Notifications />
+        </PaneHead>
+      </PaneSticky>
 
       <div class={styles.settings}>
         {/* Under the head and above everything else: it is about the server the
@@ -170,11 +216,39 @@ function Settings(props: {
         />
         {/* Under the credentials and above the lists: it is the other thing
             Verkstead itself was told rather than anything a Conversation is
-            settled against, and the one setting on this page about what a
-            session runs inside. */}
+            settled against. One of the two sections about what a session runs
+            inside, and the one that is on without anybody having been here —
+            which is why it reads beside the credentials rather than down with
+            the Paths, where everything is somebody's own typing. */}
         <BuildCacheCard
           open={props.opening === "build-cache"}
           press={() => props.select("build-cache")}
+        />
+        {/* And the last of the three things Verkstead itself was told: where the
+            page that draws a published share is hosted. Under the other two
+            because it is the one a machine works perfectly without — what it
+            costs to leave alone is a worse read for whoever a share is sent
+            to. */}
+        <ShareViewerCard
+          open={props.opening === "share-viewer"}
+          press={() => props.select("share-viewer")}
+        />
+        {/* The one thing here under the lists rather than beside them: where
+            Verkstead may work at all, and what a session is given beyond its
+            worktree. Under the three above because it is what a Repo is
+            registered from — a machine with no watched path has nothing to put
+            on that list. */}
+        <PathsCard
+          open={props.opening === "paths"}
+          press={() => props.select("paths")}
+        />
+        {/* And the last thing Verkstead itself was told: what a session sent at
+            a pull request that will not merge is told to do about it. Last
+            because it is the one nobody has to read — what it does with nothing
+            configured is the safe half of the choice. */}
+        <ConflictsCard
+          open={props.opening === "conflicts"}
+          press={() => props.select("conflicts")}
         />
         {/* Told which of its own things is open rather than the whole opening:
             where a Profile's pane stands is this page's arithmetic, and a
@@ -239,6 +313,15 @@ function Details(props: {
       </Match>
       <Match when={props.opening === "build-cache"}>
         <BuildCachePane back={props.back} />
+      </Match>
+      <Match when={props.opening === "share-viewer"}>
+        <ShareViewerPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "paths"}>
+        <PathsPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "conflicts"}>
+        <ConflictsPane back={props.back} />
       </Match>
       {/* The Repos' two panes are two components rather than one asked about a
           Repo that does not exist yet, the way the Profiles' one form is: what

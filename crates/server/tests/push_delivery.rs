@@ -368,6 +368,13 @@ async fn a_set_arriving_is_pushed_once_to_every_device() {
 
     let key = store::vapid_keys(&pool).await.unwrap().public_key;
 
+    // Where the Set is read, which is what the notification has to open: the
+    // details pane of the Timeline Event it landed on.
+    let (conversation, event) = store::opened_at(&pool, created.id)
+        .await
+        .expect("the store answers")
+        .expect("a stored Set is on a Timeline");
+
     for device in [&phone, &laptop] {
         let push = taken
             .iter()
@@ -387,8 +394,8 @@ async fn a_set_arriving_is_pushed_once_to_every_device() {
         let notice = device.read(push);
         assert_eq!(
             notice["path"],
-            format!("/sets/{}", created.id),
-            "a Set's push has to open that Set",
+            format!("/conversations/{conversation}/events/{event}"),
+            "a Set's push has to open the pane that Set is read in",
         );
         assert_eq!(notice["title"], "Rate limiting for the public API");
         assert_eq!(notice["project"], "verkstead");
@@ -469,7 +476,7 @@ async fn answering_or_locking_a_set_sends_nothing() {
 #[tokio::test]
 async fn a_deferred_set_notifies_every_device_the_same_way() {
     let (service, received) = push_service().await;
-    let (_dir, _pool, app) = fresh_app().await;
+    let (_dir, pool, app) = fresh_app().await;
 
     let phone = Device::new(&service, "take", "phone");
     subscribe(&app, &phone).await;
@@ -481,11 +488,16 @@ async fn a_deferred_set_notifies_every_device_the_same_way() {
     settle().await;
     assert_eq!(received.lock().unwrap().len(), 1, "one device, one push");
 
+    let (conversation, event) = store::opened_at(&pool, created.id)
+        .await
+        .expect("the store answers")
+        .expect("a stored Set is on a Timeline");
+
     let notice = phone.read(&taken[0]);
     assert_eq!(
         notice["path"],
-        format!("/sets/{}", created.id),
-        "and it opens the Set, which is the page the human answers it on",
+        format!("/conversations/{conversation}/events/{event}"),
+        "and it opens the pane the human answers it in",
     );
     assert_eq!(notice["title"], "Rate limiting for the public API");
 }

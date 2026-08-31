@@ -1794,9 +1794,9 @@ async fn a_read_write_companion_takes_a_commit_on_its_own_branch() {
 /// What a companion repo's own Sandbox Configuration asks for is inside and
 /// writable, whatever the companion's mode.
 ///
-/// A build cache is the installer's own hole and it sits outside the repository:
-/// a read-only companion is a checkout not to be changed rather than a
-/// repository whose builds should fail on a cold cache.
+/// A build cache is a hole somebody opened on purpose, and it sits outside the
+/// repository: a read-only companion is a checkout not to be changed rather
+/// than a repository whose builds should fail on a cold cache.
 #[tokio::test]
 async fn a_read_only_companions_own_configured_binds_are_still_writable() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
@@ -1865,6 +1865,155 @@ async fn a_repos_own_binds_compose_over_the_global_ones() {
         ],
         "the global set, then the Conversation's own Repo's, then its companion's — \
          and a Repo it has nothing to do with brings nothing"
+    );
+}
+
+/// The same configuration said in `config.yaml` instead: the binds are inside,
+/// they are writable, and they are added to what the installation configured
+/// rather than standing in for it.
+///
+/// Which is the whole of what a standalone install needs — a bare binary whose
+/// sandbox is set up from the settings page, with no flag and no environment
+/// variable in front of it.
+#[tokio::test]
+async fn the_binds_the_settings_file_holds_are_inside_and_writable_too() {
+    let fixture = grilling().await;
+
+    let installed = fixture.state.path().join("the-installations-cache");
+    let global = fixture.state.path().join("the-settings-cache");
+    let per_repo = fixture.state.path().join("the-settings-verkstead-cargo");
+    for made in [&installed, &global, &per_repo] {
+        std::fs::create_dir_all(made).unwrap();
+    }
+
+    fixture.configure(&format!(
+        "sandbox_binds:\n  - {global}\n  - verkstead={per_repo}\n  - something-else={other}\n",
+        global = global.display(),
+        per_repo = per_repo.display(),
+        other = fixture.sibling.display(),
+    ));
+
+    // And one on the command line beside them, which is the composition worth
+    // asking about: neither set is the other's replacement.
+    let installation = SandboxConfig::resolve(&[installed.display().to_string()]).unwrap();
+    let sandbox = fixture.sandbox(installation.binds_for(&fixture.conversation));
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            dir {installed} installed
+            dir {global} global
+            dir {per_repo} per-repo
+            dir {other} another-repos
+            "#,
+            installed = quoted(&installed),
+            global = quoted(&global),
+            per_repo = quoted(&per_repo),
+            other = quoted(&fixture.sibling),
+        ),
+    );
+
+    assert_eq!(
+        reported["installed"], "write",
+        "what the installation configured is still there"
+    );
+    assert_eq!(
+        reported["global"], "write",
+        "and what the settings file adds to it"
+    );
+    assert_eq!(
+        reported["per-repo"], "write",
+        "including what it adds for this Repo by name"
+    );
+    assert_eq!(
+        reported["another-repos"], "absent",
+        "and what it adds for a Repo this Conversation has nothing to do with"
+    );
+}
+
+/// A settings-held bind naming a directory that is not there is skipped, and the
+/// session starts without it.
+///
+/// The opposite answer to the flag's, and deliberately: a file edited from a
+/// phone is a file with typos in it, and a Conversation that would not start
+/// because one of its binds was misspelled is a worse failure than a build
+/// running without its cache. The line in the log is what says which.
+#[tokio::test]
+async fn a_settings_bind_that_is_not_there_is_skipped_and_the_session_still_starts() {
+    let fixture = grilling().await;
+
+    let there = fixture.state.path().join("the-cache-that-is-there");
+    std::fs::create_dir_all(&there).unwrap();
+    let missing = fixture.state.path().join("never-made");
+
+    fixture.configure(&format!(
+        "sandbox_binds:\n  - {missing}\n  - {there}\n",
+        missing = missing.display(),
+        there = there.display(),
+    ));
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        &format!(
+            r#"
+            dir {there} there
+            dir {missing} missing
+            "#,
+            there = quoted(&there),
+            missing = quoted(&missing),
+        ),
+    );
+
+    assert_eq!(
+        reported["there"], "write",
+        "the bind beside the one that would not resolve is still handed over"
+    );
+    assert_eq!(
+        reported["missing"], "absent",
+        "and the one that would not resolve is simply not there"
+    );
+}
+
+/// What the settings-held set comes to for a Conversation, without a sandbox to
+/// run in: the global entries, then its own Repo's, then its companions' — the
+/// composition the installation's own set has — and everything that will not
+/// resolve taken out of it.
+#[tokio::test]
+async fn the_settings_held_binds_compose_the_way_the_installations_do() {
+    let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let cache = dir.path().join("cache");
+    let cargo = dir.path().join("cargo");
+    let node = dir.path().join("node");
+    let nobodys = dir.path().join("nobodys");
+    for made in [&cache, &cargo, &node, &nobodys] {
+        std::fs::create_dir(made).unwrap();
+    }
+
+    let binds = [
+        cache.display().to_string(),
+        format!("verkstead={}", cargo.display()),
+        format!("askance={}", node.display()),
+        format!("something-nobody-added={}", nobodys.display()),
+        // And the three shapes that go in the log instead of into the sandbox:
+        // a directory nobody made, a path that is not one, and a `=` with no
+        // Repo in front of it.
+        dir.path().join("never-made").display().to_string(),
+        "relative/cache".to_owned(),
+        "=/var/cache".to_owned(),
+    ];
+
+    assert_eq!(
+        SandboxConfig::settings_binds(&binds, &fixture.conversation),
+        vec![
+            Bind::writable(cache),
+            Bind::writable(cargo),
+            Bind::writable(node),
+        ],
+        "the global set, then the Conversation's own Repo's, then its companion's — \
+         and nothing that would not resolve"
     );
 }
 

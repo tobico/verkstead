@@ -5,5 +5,6 @@
 *.db-wal
 /web/node_modules
 /web/dist
+/web/dist-share
 .direnv
 /.pnpm-store

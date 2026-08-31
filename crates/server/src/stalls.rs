@@ -245,7 +245,7 @@ pub(crate) async fn said_last(state: &AppState, conversation_id: i64) -> Option<
     timeline
         .iter()
         .rev()
-        .find_map(|event| matches!(event.event, store::Event::AgentOutput(_)).then_some(event.id))
+        .find_map(|event| matches!(event.event, store::Event::AgentOutput(..)).then_some(event.id))
 }
 
 #[cfg(test)]

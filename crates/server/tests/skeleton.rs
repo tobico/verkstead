@@ -96,12 +96,16 @@ fn config_is_overridable_by_flag() {
     );
 }
 
-/// The one piece of configuration with no default: what Verkstead may touch is
-/// the machine owner's to say, and a guess at it is a guess at a security
-/// boundary.
+/// Configuration with no default and no requirement either: what Verkstead may
+/// touch is the machine owner's to say, and a guess at it would be a guess at a
+/// security boundary — but a standalone install says it on the settings page
+/// rather than in flags, so a server given none of them here parses and comes
+/// up watching nothing.
 #[test]
-fn config_refuses_to_parse_without_a_watched_path() {
-    assert!(Config::try_parse_from(["verkstead serve"]).is_err());
+fn config_parses_without_a_watched_path_and_watches_nothing() {
+    let config = Config::parse_from(["verkstead serve"]);
+
+    assert!(config.watched_paths.is_empty());
 }
 
 /// Several of them, as `PATH` is written — which is how they arrive from a

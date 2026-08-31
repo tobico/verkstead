@@ -27,8 +27,8 @@
 //! restart and a second device without any of the three being a case.
 //!
 //! A card also answers a right-click with what there is to do about the
-//! Conversation it stands for — the same rows the ⋯ at the head of the
-//! Conversation pane would offer it, drawn by the same component and acting on
+//! Conversation it stands for — the same rows the status button at the head of
+//! the Conversation pane offers, drawn by the same component and acting on
 //! the card that was pressed rather than on whatever is open. Both menus are
 //! `Actions.tsx`, which is where the rows and everything behind them live.
 //!
@@ -66,6 +66,7 @@ import { CardButton } from "../CardButton";
 import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
 import { Menu } from "../Menu";
+import { PaneSticky } from "../Panes";
 import { Switch as Toggle } from "../Switch";
 import {
   listAbandonedRoadmaps,
@@ -85,6 +86,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { CardActions } from "./Actions";
+import shell from "../Panes.module.css";
 import styles from "./Conversations.module.css";
 import { SPOKEN } from "./Mark";
 // The rings and the badge a card carries at its right edge. Drawn here rather
@@ -260,10 +262,14 @@ export function Conversations(props: {
     // held by a hand that is no longer on it.
     drop();
 
-    // The card keeps the pointer for the length of the drag, so nothing it is
-    // carried over lights up under a hand that is already holding something —
-    // and so the browser has something to say, below, on the day it takes the
-    // pointer back. Where the drag is actually watched is the window.
+    // The card takes the pointer for as long as the browser will leave it
+    // there, so nothing it is carried over lights up under a hand that is
+    // already holding something. For as long as it will leave it and no longer:
+    // the list moving this very card is what the drag is for, and a card that
+    // moves in the DOM has the pointer taken back off it. So the capture is a
+    // courtesy that can go at any moment rather than the thing the drag runs
+    // on — what the drag runs on is the window, which hears the pointer
+    // whoever is holding it.
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 
     const began: NonNullable<typeof press> = {
@@ -280,11 +286,15 @@ export function Conversations(props: {
     // The rest of the gesture is watched at the window rather than at the card,
     // which is what the pane dividers next door do: a pointer that has outrun
     // the card is still dragging it, and a release out beyond the sidebar — or
-    // beyond the window — is still the release. Lost capture is listened for
-    // as well, for the endings that are neither: a card taken out from under
-    // the hand by a re-render, or a gesture the browser has taken over. Every
-    // one of them puts the card down, so there is no way for a drag to end that
-    // leaves the list held.
+    // beyond the window — is still the release. A cancel is an ending too,
+    // being what the browser says when it has taken the gesture over. Both of
+    // them put the card down, so there is no way for a drag to end that leaves
+    // the list held.
+    //
+    // The capture going is not an ending, whatever it looks like: the first row
+    // the drag moves takes the capture with it, so a drag that ended there
+    // would be a drag of exactly one place — press, one row, and then nothing
+    // until the hand let go and took the card again.
     const moved = (at: PointerEvent) => {
       if (at.pointerId === began.pointer) drag(at);
     };
@@ -296,13 +306,11 @@ export function Conversations(props: {
       window.removeEventListener("pointermove", moved);
       window.removeEventListener("pointerup", ended);
       window.removeEventListener("pointercancel", ended);
-      window.removeEventListener("lostpointercapture", ended);
     };
 
     window.addEventListener("pointermove", moved);
     window.addEventListener("pointerup", ended);
     window.addEventListener("pointercancel", ended);
-    window.addEventListener("lostpointercapture", ended);
 
     // A finger lifts a card by holding still. No distance tells a drag from a
     // scroll on a phone — both of them are the finger moving — so what tells
@@ -351,10 +359,10 @@ export function Conversations(props: {
   /// The drag is over: what is on the screen is what the human meant, so that
   /// is what is sent.
   ///
-  /// Every ending comes through here — the release, a cancel, a capture lost,
-  /// a press that turned out to be a scroll, and the next press finding this
-  /// one still standing — so there is one place the listeners come off and one
-  /// place the held card is put down.
+  /// Every ending comes through here — the release, a cancel, a press that
+  /// turned out to be a scroll, and the next press finding this one still
+  /// standing — so there is one place the listeners come off and one place the
+  /// held card is put down.
   const drop = () => {
     const at = press;
 
@@ -445,17 +453,19 @@ export function Conversations(props: {
           The wordmark is the class the pane head is handed for its `<h1>`, and
           it is styled with the rest of what this pane draws — no way back
           either, this being the level every other pane is entered from. */}
-      <PaneHead
-        heading={styles.wordmark}
-        title={
-          <>
-            <img src="/icons/icon-192.png" alt="" />
-            Verkstead
-          </>
-        }
-      >
-        <Settings />
-      </PaneHead>
+      <PaneSticky>
+        <PaneHead
+          heading={styles.wordmark}
+          title={
+            <>
+              <img src="/icons/icon-192.png" alt="" />
+              Verkstead
+            </>
+          }
+        >
+          <Settings />
+        </PaneHead>
+      </PaneSticky>
 
       <NewConversation open={props.open} />
 
@@ -560,13 +570,12 @@ function Settings(): JSX.Element {
 /// The one setting that is about this list rather than about the rest of
 /// Verkstead: whether the conversations the human has archived are drawn in it.
 ///
-/// At the foot of the pane, under the list it is about. Pushed there by the
-/// room left over rather than stuck over the cards — see `.showArchived`, and
-/// the column the pane is made into in `Panes.module.css` — so a list that
-/// does not fill the screen leaves this against the bottom of it, and a list
-/// that does leaves it after the last card, behind the scroll. A strip laid
-/// across the list would have covered a card for the whole life of the pane to
-/// save the human a scroll they make once.
+/// At the foot of the pane, under the list it is about, and kept there: it
+/// wears the frame's `paneFoot`, so a list too short to scroll leaves it
+/// against the bottom of the pane and a long one keeps it there with the cards
+/// going under it. What it costs is the strip of list behind it; what it saves
+/// is having to reach the end of a list with no end in sight to say whether the
+/// conversations put away are among them.
 ///
 /// A switch rather than something that presses, because it is a state the list
 /// is in rather than something to do to it. *Show archived* rather than the
@@ -604,7 +613,7 @@ function ShowArchived(): JSX.Element {
     flip.isPending ? (flip.variables ?? false) : (showing.data ?? false);
 
   return (
-    <div class={styles.showArchived}>
+    <div class={`${styles.showArchived} ${shell.paneFoot}`}>
       <Toggle
         label="Show archived"
         on={on()}

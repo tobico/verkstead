@@ -1,0 +1,94 @@
+/* How a conflicted pull request is resolved — see `Conflicts.tsx`.
+
+   Two halves in two panes, like every other section of this page: the card says
+   which of the two strategies is in force, and the pane beside it carries the
+   picker that changes it and the cost of the choice that rewrites branches.
+
+   What a card *is* is `CardButton.module.css`'s. What is here is only what
+   stands on it. */
+
+.conflictsCard {
+  margin-bottom: 1.5rem;
+}
+
+.conflictsCard h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+/* Which strategy is in force, in a line: the same quiet the sections above say
+   what is configured in. */
+.standing {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* The strategy itself, picked out of that sentence, because it is the word
+   somebody scanning the page came for. */
+.strategy {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* What a rebase costs, drawn on the card and in both panes that offer one: the
+   same sentence in all three, and drawn the way the build cache draws the thing
+   the browser cannot fix — the stopped red down its edge, because a branch
+   rewritten under a reviewer is not a detail.
+
+   No fill of its own: on the card it stands on a surface that shifts under the
+   hand and again while its pane is open, and an edge says it on all three. */
+.warning {
+  margin: 0.75rem 0 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--stopped);
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.choosing {
+  margin-top: 1rem;
+}
+
+.choosing label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.choosing select {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+/* What the choice in force does to the pull request, under the picker: the
+   whole of the difference between the two, said where it is being made. */
+.resolves {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.failure {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+}
+
+.choosing select:focus-visible {
+  border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .choosing select:hover {
+    border-color: var(--ink-soft);
+  }
+}

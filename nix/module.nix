@@ -129,9 +129,8 @@ in
 
         A security boundary rather than a convenience: nothing outside these
         directories is ever touched, and a Repo is registered only from within
-        one. There is no default and no scan — the server refuses to start until
-        this says what it may have, because guessing at what a machine's owner
-        meant to expose is not a guess worth making.
+        one. There is no default and no scan — guessing at what a machine's
+        owner meant to expose is not a guess worth making.
 
         Each is resolved at startup, so it has to exist; symlinks and `..` are
         taken out of every path checked against them, and a path that merely
@@ -141,6 +140,15 @@ in
         hardening otherwise leaves nothing but the state directory reachable,
         so a watched path under `/home` would be one the service cannot see at
         all. What the sandbox exposes is therefore exactly this list.
+
+        Which is why this list may not be empty, and why the assertion below
+        refuses a build with none. The server itself no longer requires any —
+        the workbench settings say Watched Paths too, and the boundary is the
+        union of the two, so a bare binary is pointed at its first directory
+        from its own settings page. Under this module that route stops at the
+        namespace: a directory typed into the settings page is saved and
+        reported as one the server cannot see, and stays functionless until it
+        is named here.
       '';
     };
 
@@ -168,13 +176,21 @@ in
         This is the Sandbox Configuration. A session otherwise sees its own
         worktree, its Repo's git directory and its Agent Profile's claude pair
         and nothing else of the machine, so each entry here is a hole in that
-        boundary — which is why it is set at installation, beside the watched
-        paths, rather than anywhere the web UI can reach.
+        boundary — which is why one that is not there refuses startup rather
+        than being skipped for the session that wanted it.
 
-        Each is bound into the service's own sandbox as well, for the reason
-        the watched paths are: the hardening leaves nothing but the state
-        directory reachable, and a directory the service cannot see is not one
-        it can hand to a session. A path that is not there refuses startup.
+        The workbench settings say binds too, in the same two grammars, and a
+        session gets the union of the two. Those are saved into `config.yaml`,
+        re-read at every spawn and never fatal. Under this module they are still
+        bounded by what is written here: the unit's namespace holds the paths
+        these options name and nothing else, so a bind typed into the settings
+        page is saved, reported on the page as one the server cannot see, and
+        does nothing until it is named here as well.
+
+        Each is bound into the service's own sandbox, for the reason the watched
+        paths are: the hardening leaves nothing but the state directory
+        reachable, and a directory the service cannot see is not one it can hand
+        to a session.
       '';
     };
 
@@ -195,16 +211,21 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # Said here as well as by the server itself, because a boundary nobody drew
-    # is worth refusing at build time rather than at the first start.
+    # Kept even though the server itself starts with none: what it would come up
+    # with is a boundary around nothing, and the way out of that on a bare binary
+    # — typing a path into the settings page — cannot work here, because this
+    # unit's namespace holds only what is named above. So a build with none is
+    # refused at build time rather than left to be discovered as a settings entry
+    # that saves and does nothing.
     assertions = [
       {
         assertion = cfg.watchedPaths != [ ];
         message = ''
           services.verkstead.watchedPaths must name at least one directory.
           Verkstead operates only inside the directories it is given, so with
-          none of them it has nothing it may touch and the server refuses to
-          start.
+          none of them it has nothing it may touch. The settings page can add
+          more, but only inside this unit's namespace: what is not named here is
+          not somewhere the hardened service can see.
         '';
       }
     ];
@@ -439,6 +460,14 @@ in
         #
         # The Sandbox Configuration's binds come in the same way and for the
         # same reason: what the service cannot see it cannot hand to a session.
+        #
+        # This list is therefore the ceiling on what the settings page can add.
+        # A Watched Path or a bind typed there is saved into `config.yaml` and
+        # read at every use, but it resolves inside this namespace like anything
+        # else — so one naming a directory not here is reported on the page as
+        # unseen and does nothing until it is named here as well. That is the
+        # deliberate shape of it: a phone may widen what the server does with
+        # what the unit already exposes, and only the unit widens the exposure.
         #
         # The build cache is first, and it is here by the same rule rather than
         # because something is currently hiding it: `CacheDirectory` above

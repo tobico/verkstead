@@ -12,12 +12,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Locked } from "../src/api/types";
 // The one menu, which the standing badge is the trigger of.
 import menu from "../src/Menu.module.css";
+import paneHead from "../src/workbench/PaneHead.module.css";
 import notices from "../src/notices.module.css";
 // The page's own vocabulary and the badge's, which is where these names live
 // now.
 import sheet from "../src/set/Sheet.module.css";
 import standing from "../src/set/Standing.module.css";
-import setPage from "../src/set/SetPage.module.css";
 import { draftKey } from "../src/set/sheet";
 import { answering, posts } from "./reading";
 import { json, readable } from "./serving";
@@ -158,11 +158,11 @@ describe("the offer to close a Set unanswered", () => {
 
 describe("closing a Set unanswered", () => {
   it("settles it as locked and reads it back where it stands", async () => {
-    const { page, fetching, history, settles } = await answering(
+    const { page, fetching, back, settles } = await answering(
       WAITING,
       locked("Closed"),
     );
-    // What the page reads back once the Set is closed: it stays put, so the
+    // What the pane reads back once the Set is closed: it stays put, so the
     // sheet it redraws is the record of a Set nobody ever answered.
     settles(LOCKED);
 
@@ -177,13 +177,13 @@ describe("closing a Set unanswered", () => {
     expect(path).toBe(`/api/ui/sets/${WAITING.id}/lock`);
     expect(init?.method).toBe("POST");
 
-    // The Set was not discarded, it was closed — so the page stays on it and
-    // says so, which is the confirmation that nothing was lost. The way out
-    // leads where it always did: the Conversation this Set was asked from.
+    // The Set was not discarded, it was closed — so the pane stays on it and
+    // says so, which is the confirmation that nothing was lost. The way out is
+    // where it always was, and nothing has taken it.
     await waitFor(() => expect(page.querySelector(`.${sheet.lockedAt}`)).toBeTruthy());
-    expect(history.get()).toBe(`/sets/${WAITING.id}`);
-    expect(page.querySelector(`a.${setPage.back}`)!.getAttribute("href")).toBe(
-      `/conversations/${WAITING.conversation}`,
+    expect(back).not.toHaveBeenCalled();
+    expect(page.querySelector(`.${paneHead.back}`)!.textContent).toBe(
+      "← Timeline",
     );
   });
 

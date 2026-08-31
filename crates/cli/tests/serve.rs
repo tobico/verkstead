@@ -67,6 +67,10 @@ impl Serve {
             .args(args)
             .current_dir(dir)
             .env_remove("RUST_LOG")
+            // Before the caller's own, which is applied below and wins: a
+            // machine that happens to have Verkstead configured for real must
+            // not be what a test about the boundary reads.
+            .env_remove("VERKSTEAD_WATCHED_PATHS")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -87,9 +91,9 @@ impl Serve {
 
     /// The plain form: the flags every test but the environment one uses.
     ///
-    /// `dir` is the Watched Path as well as the working directory. The server
-    /// refuses to start without one, and a test that is not about the boundary
-    /// still has to give it something real to watch.
+    /// `dir` is the Watched Path as well as the working directory. A test that
+    /// is not about the boundary still has to give the server something real to
+    /// watch, whether or not it would have started without it.
     fn with_flags(dir: &Path, port: u16, data_dir: &Path) -> Self {
         Self::start(
             dir,
@@ -273,17 +277,72 @@ fn refused_to_start(args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// The one piece of configuration with no default and no guess behind it: a
-/// server that has not been told what it may touch has no business coming up,
-/// because the alternative to a stated boundary is an assumed one.
+/// A standalone install: no unit, no flags, nothing configured anywhere. It
+/// comes up, because a server that would not start before it was configured
+/// could never be reached to configure — and it admits nothing, because the
+/// alternative to a stated boundary is an assumed one.
 #[test]
-fn serving_without_a_watched_path_refuses_to_start() {
-    let refusal = refused_to_start(&[]);
+fn serving_without_a_watched_path_starts_and_admits_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let repo = repo_with_a_commit(elsewhere.path());
+    let port = free_port();
+
+    let mut serving = Serve::start(
+        tmp.path(),
+        port,
+        &[
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+            "--data-dir",
+            tmp.path().to_str().unwrap(),
+        ],
+        &[],
+    );
+
+    let registered: serde_json::Value = serving.through_the_viewer(
+        "/api/ui/repos",
+        &serde_json::json!({ "path": repo.to_str().unwrap() }),
+    );
+
+    assert_eq!(
+        registered,
+        serde_json::json!("OutsideWatchedPaths"),
+        "a server watching nothing should hold every path outside it"
+    );
+
+    let logged = uncoloured(&serving.stop());
 
     assert!(
-        refusal.contains("--watched-path"),
-        "the refusal should name the flag that is missing, got:\n{refusal}"
+        logged.contains("watched=[]"),
+        "the startup line should say what is watched, and that nothing is, \
+         got:\n{logged}"
     );
+}
+
+/// `logged` with the terminal colouring taken out.
+///
+/// The subscriber colours its field names whether or not anything is a
+/// terminal, so `watched=[]` reaches a pipe with escapes between the name and
+/// the value. A test reading a field name has to take them off first.
+fn uncoloured(logged: &str) -> String {
+    let mut plain = String::with_capacity(logged.len());
+    let mut characters = logged.chars();
+
+    while let Some(character) = characters.next() {
+        if character == '\u{1b}' {
+            // An SGR escape, which is everything up to and including its `m`.
+            for skipped in characters.by_ref() {
+                if skipped == 'm' {
+                    break;
+                }
+            }
+        } else {
+            plain.push(character);
+        }
+    }
+
+    plain
 }
 
 /// A Watched Path that is not there covers nothing, so every repo inside it

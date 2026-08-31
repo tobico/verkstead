@@ -25,7 +25,7 @@ use verkstead_render::{
 };
 
 use crate::store;
-use crate::watched::{Admission, WatchedPaths};
+use crate::watched::{Admission, Boundary, WatchedPaths};
 
 /// Save a new Profile, or say why not.
 pub(crate) async fn create(
@@ -127,11 +127,17 @@ async fn entries(
     let watched = watched.clone();
 
     Ok(tokio::task::spawn_blocking(move || {
+        // The boundary read once for the whole list rather than once per look:
+        // each Profile is two paths, and the settings half of the boundary is a
+        // file to open and a `canonicalize` per entry in it. One hop off the
+        // runtime deserves one reading of what the boundary is.
+        let boundary = watched.standing();
+
         profiles
             .into_iter()
             .map(|profile| ProfileEntry {
                 id: profile.id,
-                broken: broken(&watched, &profile),
+                broken: broken(&boundary, &profile),
                 name: profile.name,
                 account: account(&profile.account),
                 models: profile.models,
@@ -191,7 +197,11 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// Each of an account's paths is named by what it is, for the reason the
 /// refusals are: a Profile whose config file has gone and one whose directory
 /// has gone are two different things to go and put right.
-fn broken(watched: &WatchedPaths, profile: &store::Profile) -> Option<Broken> {
+///
+/// Asked of a boundary already taken rather than of [`WatchedPaths`] itself:
+/// this is called once per Profile in a list, and the settings half of the
+/// boundary is a file to read — see [`WatchedPaths::standing`].
+fn broken(watched: &Boundary, profile: &store::Profile) -> Option<Broken> {
     let paths: Vec<(PathBuf, Broken)> = match &profile.account {
         store::Account::Claude {
             claude_dir,
@@ -276,16 +286,22 @@ async fn checked(
 /// Every path is judged the same way and refused by its own name: pointing the
 /// config field at the directory is an easy mistake, and "that path is wrong"
 /// would not say which one.
+///
+/// Every one of them against one boundary, taken once here: an account can be
+/// more than one path, and every path a Profile names is meant to be judged by
+/// the same answer to what a Watched Path is.
 fn inspect(
     watched: &WatchedPaths,
     account: &ProfileAccount,
 ) -> Result<store::Account, ProfileSaved> {
+    let boundary = watched.standing();
+
     match account {
         ProfileAccount::Claude {
             claude_dir,
             config_file,
         } => {
-            let dir = match watched.admit(Path::new(claude_dir.trim())) {
+            let dir = match boundary.admit(Path::new(claude_dir.trim())) {
                 Admission::Inside(path) => path,
                 Admission::NotAbsolute => return Err(ProfileSaved::DirNotAbsolute),
                 Admission::Missing => return Err(ProfileSaved::DirMissing),
@@ -296,7 +312,7 @@ fn inspect(
                 return Err(ProfileSaved::NotADirectory);
             }
 
-            let config = match watched.admit(Path::new(config_file.trim())) {
+            let config = match boundary.admit(Path::new(config_file.trim())) {
                 Admission::Inside(path) => path,
                 Admission::NotAbsolute => return Err(ProfileSaved::ConfigNotAbsolute),
                 Admission::Missing => return Err(ProfileSaved::ConfigMissing),
@@ -314,11 +330,11 @@ fn inspect(
         }
 
         ProfileAccount::Codex { home } => Ok(store::Account::Codex {
-            home: kept(watched, home)?,
+            home: kept(&boundary, home)?,
         }),
 
         ProfileAccount::Grok { home } => Ok(store::Account::Grok {
-            home: kept(watched, home)?,
+            home: kept(&boundary, home)?,
         }),
 
         // An OpenCode home is the directory the two opencode keeps an account
@@ -328,10 +344,10 @@ fn inspect(
         // refused in the same words, because for this type they *are* the home
         // the account is kept under.
         ProfileAccount::OpenCode { home } => {
-            let home = kept(watched, home)?;
+            let home = kept(&boundary, home)?;
 
             for path in xdg(&home) {
-                admitted(watched, &path)?;
+                admitted(&boundary, &path)?;
             }
 
             Ok(store::Account::OpenCode { home })
@@ -360,16 +376,19 @@ fn xdg(home: &Path) -> impl Iterator<Item = PathBuf> {
 ///
 /// One check for every such type rather than one apiece: what differs between
 /// them is which account the directory is, and that is the arm above, not this.
-fn kept(watched: &WatchedPaths, home: &str) -> Result<PathBuf, ProfileSaved> {
-    admitted(watched, Path::new(home.trim()))
+///
+/// Against the boundary the arm above took, for the reason it took one: every
+/// path a Profile names is judged by the same answer to what a Watched Path is.
+fn kept(boundary: &Boundary, home: &str) -> Result<PathBuf, ProfileSaved> {
+    admitted(boundary, Path::new(home.trim()))
 }
 
 /// The same, of a path rather than of something typed into the form.
 ///
 /// What an OpenCode home holds is judged this way: the two directories under it
 /// are derived rather than typed, so there is nothing to trim off either.
-fn admitted(watched: &WatchedPaths, home: &Path) -> Result<PathBuf, ProfileSaved> {
-    let home = match watched.admit(home) {
+fn admitted(boundary: &Boundary, home: &Path) -> Result<PathBuf, ProfileSaved> {
+    let home = match boundary.admit(home) {
         Admission::Inside(path) => path,
         Admission::NotAbsolute => return Err(ProfileSaved::HomeNotAbsolute),
         Admission::Missing => return Err(ProfileSaved::HomeMissing),
