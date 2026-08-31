@@ -20,14 +20,15 @@ use crate::{
     AbandonedRepo, Adopted, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename,
     BranchRenamed, BriefEdit, BriefSaved, Capture, CommitPane, CompanionAdded,
     CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen,
-    CompanionRemoved, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
-    GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RepoEntry, RepoRemoved, RepoView, Resumed, RoadmapPane,
-    RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived,
-    Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
-    TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    CompanionRemoved, ConflictResolutionEdit, ConversationArchived, ConversationClosed,
+    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
+    ConversationView, GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation,
+    NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry, RepoRemoved,
+    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, SetReading, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
+    ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -41,11 +42,10 @@ fn the_viewers_types_are_written_from_these() {
     // see `.cargo/config.toml`, which is where both are said once.
     let config = ts_rs::Config::from_env();
 
-    // One Set, whole — which is what both the standalone page and the details
-    // pane of the Timeline it landed on are drawn from. The whole reading
-    // rather than the `SetView` inside it: what comes back says whether this
-    // build could read the stored body at all, and the page has to be able to
-    // draw either answer.
+    // One Set, whole — which is what the details pane of the Timeline it
+    // landed on is drawn from. The whole reading rather than the `SetView`
+    // inside it: what comes back says whether this build could read the stored
+    // body at all, and the pane has to be able to draw either answer.
     SetReading::export_all(&config).unwrap();
 
     // Answering a Set, and closing it unanswered. What goes *in* to the first of
@@ -63,6 +63,11 @@ fn the_viewers_types_are_written_from_these() {
     Registered::export_all(&config).unwrap();
     RepoRemoved::export_all(&config).unwrap();
 
+    // And the one thing there is to say to a registered Repo: how it resolves a
+    // conflict, which is an override of the global setting or nothing at all.
+    // Its own type rather than a field of a view, being what a press sends.
+    ConflictResolutionEdit::export_all(&config).unwrap();
+
     // The workbench: the sidebar, one Conversation with its Timeline, and the
     // three things the human changes about a drafting one. Each edit brings its
     // own request shape and its own named outcome, because each of them is a
@@ -74,6 +79,23 @@ fn the_viewers_types_are_written_from_these() {
     AbandonedRepo::export_all(&config).unwrap();
     ConversationView::export_all(&config).unwrap();
     NewConversation::export_all(&config).unwrap();
+
+    // And the same Conversation as a share carries it: the curated record, and
+    // when the share was taken. The share is drawn by the workbench's own
+    // components, so what a shared file boots from is this around a
+    // `ConversationView` — see [`crate::shared`].
+    SharedConversation::export_all(&config).unwrap();
+
+    // And what became of publishing one somewhere a link reaches — see
+    // [`crate::SharePublished`], which is the one press on this page that writes
+    // to GitHub and so the one with refusals about a token.
+    SharePublished::export_all(&config).unwrap();
+
+    // And what became of the press that does the lot: publishes one and leaves the
+    // link on every pull request the Conversation holds — see
+    // [`crate::ShareCommented`], which carries the publish's own refusals rather
+    // than saying them over again.
+    ShareCommented::export_all(&config).unwrap();
 
     // And the order the human dragged that sidebar into, which is the one thing
     // they say about the list itself rather than about anything on it.
@@ -179,6 +201,12 @@ fn the_viewers_types_are_written_from_these() {
     // What comes back is the outcome — a start, or the named reason there was
     // nothing to start.
     Resumed::export_all(&config).unwrap();
+
+    // And the press that sends a finished Conversation back to a wrap-up over a
+    // pull request that has stopped merging. No request shape either: which
+    // Conversation it is is the whole of what it says, and what comes back is
+    // whether a resolution is going.
+    Resolved::export_all(&config).unwrap();
 
     // And the two presses that stop it, which take no request shape either and
     // answer with one outcome between them: the run is stopping, or the named

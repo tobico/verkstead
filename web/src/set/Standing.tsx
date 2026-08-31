@@ -192,3 +192,19 @@ function unlocked(
       return "This Set is no longer here.";
   }
 }
+
+/// The badge on its own, with nothing behind it: how a Set stood, said to
+/// somebody who cannot do anything about it.
+///
+/// What a read-only sheet draws in place of [`Standing`] — the share, where a
+/// colleague is reading a Conversation out of a file. The words and the colour
+/// are the same, because it is the same fact: this Set was waiting on somebody
+/// when the record was made. What is gone is the menu, which offers the one act
+/// on this page that cannot be taken back and has no server here to take it.
+export function Badge(props: { liveness: Liveness }): JSX.Element {
+  return (
+    <span class={`${styles.standing} ${styles.liveness} ${styles[props.liveness]}`}>
+      {BADGE[props.liveness]}
+    </span>
+  );
+}

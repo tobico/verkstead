@@ -23,7 +23,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Registered, RepoEntry, RepoView } from "../src/api/types";
+import type {
+  Registered,
+  RepoEntry,
+  RepoView,
+  ConflictResolution,
+  SettingsView,
+} from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
 import { RepoDetails, RepoList, RepoPane } from "../src/repos/RepoList";
@@ -33,6 +39,7 @@ import { drawn } from "./bench";
 import { json, serving, whenever } from "./serving";
 import repos from "./fixtures/repos.json" with { type: "json" };
 import opened from "./fixtures/repo.json" with { type: "json" };
+import settings from "./fixtures/settings.json" with { type: "json" };
 
 const REPOS = repos as RepoEntry[];
 const FIRST = REPOS[0]!;
@@ -40,6 +47,11 @@ const FIRST = REPOS[0]!;
 /// One of them opened, which is the pane's own read — the same repository the
 /// first card is about, so a test can mount the pair and have them agree.
 const OPENED: RepoView = { ...(opened as RepoView), id: FIRST.id };
+
+/// And the settings the pane's own Sandbox Configuration is drawn out of, which
+/// hold one bind for this repository by name. What that section is *about* is
+/// `paths.test.tsx`'s; what is asked here is only that the pane carries it.
+const SETTINGS = settings as SettingsView;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -114,16 +126,50 @@ function theOpened(
 ) {
   return serving(
     whenever(`/api/ui/repos/${view.id}`, json(view)),
+    // The pane reads the settings as well as the Repo, for the binds scoped to
+    // it — the same read every other section of this page makes.
+    whenever("/api/ui/settings", json(SETTINGS)),
     ...(removal
       ? [whenever(`/api/ui/repos/${view.id}/remove`, removal, "POST")]
       : []),
   );
 }
 
-/// Press the Remove in the opened pane, once the read behind it has landed.
+/// The same, with the pane's other write answered: how this Repo resolves a
+/// conflict, which comes back as the Repo itself read afresh.
+function theOpenedResolving(view: RepoView, saved: RepoView) {
+  return serving(
+    whenever(`/api/ui/repos/${view.id}`, json(view)),
+    whenever("/api/ui/settings", json(SETTINGS)),
+    whenever(`/api/ui/repos/${view.id}/resolution`, json(saved), "POST"),
+  );
+}
+
+/// One Repo resolving conflicts a stated way — `null` being the override taken
+/// back, which is what nearly every Repo holds.
+function resolving(resolution: ConflictResolution | null): RepoView {
+  return { ...OPENED, conflict_resolution: resolution };
+}
+
+/// The picker on the opened pane, once the read behind it has landed.
+async function thePicker(): Promise<HTMLSelectElement> {
+  return (await waitFor(() =>
+    screen.getByLabelText(/How a pull request that will not merge/),
+  )) as HTMLSelectElement;
+}
+
+/// Press the Remove that unregisters the Repo, once the read behind it has
+/// landed.
+///
+/// By where it stands rather than by its word: the binds section above it draws
+/// a Remove on every row the settings own, and both presses say the same thing
+/// about two different things.
 async function removePressed() {
   fireEvent.click(
-    await waitFor(() => screen.getByRole("button", { name: "Remove" })),
+    await drawn<HTMLButtonElement>(
+      document,
+      `.${styles.actions} .${styles.remove}`,
+    ),
   );
 }
 
@@ -392,6 +438,21 @@ describe("the pane a card opens", () => {
     await waitFor(() => screen.getByText("Nothing is waiting to be adopted."));
   });
 
+  /// The one section on this pane that is settings rather than facts, carrying
+  /// the binds written against this repository's own name. What it draws and
+  /// what a press on it saves is `paths.test.tsx`'s; what is asked here is that
+  /// the pane holds it at all, out of the settings read beside the Repo's own.
+  it("carries the binds scoped to this repo", async () => {
+    theOpened();
+    mountOpened();
+
+    await waitFor(() => screen.getByText("/var/cache/verkstead-cargo"));
+    expect(screen.getByText("Sandbox configuration")).toBeTruthy();
+
+    // And not the bind every sandbox gets, which is the Paths section's.
+    expect(screen.queryByText("/var/cache/verkstead-node")).toBeNull();
+  });
+
   /// A link followed after somebody took the repo away, which the server says
   /// with a 404: a line rather than an error the human is meant to act on.
   it("says the repo is gone where there is no such id", async () => {
@@ -432,6 +493,88 @@ describe("the pane a card opens", () => {
 
     fireEvent.click(out);
     expect(back).toHaveBeenCalled();
+  });
+});
+
+describe("how a repo resolves a conflict", () => {
+  /// The state nearly every Repo is in: nothing said here, so what happens is
+  /// whatever the settings page says for every Repo. Nothing at all rather than
+  /// a copy of today's global, which is why the picker's third option is the
+  /// one that sends nothing.
+  it("offers the global setting, a merge and a rebase", async () => {
+    theOpened(resolving(null));
+    mountOpened();
+
+    const picker = await thePicker();
+
+    expect(picker.value).toBe("");
+    expect([...picker.options].map((option) => option.value)).toEqual([
+      "",
+      "Merge",
+      "Rebase",
+    ]);
+    expect(picker.options[0]!.textContent).toBe("Use the global setting");
+  });
+
+  /// Picking is the save: a choice that needed confirming afterwards would be a
+  /// choice the human has to make twice.
+  it("sends the override the moment one is picked", async () => {
+    const fetching = theOpenedResolving(
+      resolving(null),
+      resolving("Rebase"),
+    );
+    mountOpened();
+
+    fireEvent.change(await thePicker(), { target: { value: "Rebase" } });
+
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        `/api/ui/repos/${FIRST.id}/resolution`,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ resolution: "Rebase" }),
+        }),
+      ),
+    );
+  });
+
+  /// And taking it back sends nothing rather than the word the global happens to
+  /// hold today — the whole reason the option that sends nothing is there.
+  it("sends nothing at all when the override is taken back", async () => {
+    const fetching = theOpenedResolving(resolving("Rebase"), resolving(null));
+    mountOpened();
+
+    fireEvent.change(await thePicker(), { target: { value: "" } });
+
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        `/api/ui/repos/${FIRST.id}/resolution`,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ resolution: null }),
+        }),
+      ),
+    );
+  });
+
+  /// What a rebase costs, said in the pane the choice is made in rather than
+  /// found weeks later by a stage that will not push. Drawn only where a rebase
+  /// is the answer, because a warning drawn everywhere is one nobody reads.
+  it("says what a rebase costs, wherever a rebase is the answer", async () => {
+    theOpened(resolving("Rebase"));
+    const { container } = mountOpened();
+
+    await waitFor(() => screen.getByText(/rewrites what reviewers/));
+    expect(container.textContent).toContain("force-pushed");
+  });
+
+  it("says nothing about force-pushing where the answer is a merge", async () => {
+    theOpened(resolving("Merge"));
+    const { container } = mountOpened();
+
+    await thePicker();
+
+    expect(container.textContent).not.toContain("force-pushed");
   });
 });
 

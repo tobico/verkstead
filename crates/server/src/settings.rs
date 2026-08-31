@@ -24,6 +24,13 @@
 //! rust_build_cache:
 //!   enabled: true
 //!   size: 30G
+//! share_viewer_url: https://ada.github.io/verkstead-share-viewer/
+//! conflict_resolution: merge
+//! sandbox_binds:
+//!   - /var/cache/verkstead-node
+//!   - verkstead=/var/cache/verkstead-cargo
+//! watched_paths:
+//!   - /home/tobi/src
 //! ```
 //!
 //! Who a session commits as is said here for the reason the token is: it used
@@ -47,6 +54,12 @@
 //! because it is the one sandbox control the human may reasonably want to reach
 //! from a phone — see [`RustBuildCache`], and
 //! [`crate::build_cache`] for what it switches.
+//!
+//! `conflict_resolution` is written that way too, and the default it falls back
+//! to is the safe half of the choice: a conflicted pull request has its base
+//! merged in rather than its branch rebased and force-pushed. One Repo may say
+//! otherwise — that override is a fact about the Repo and lives in the store
+//! beside it, not here.
 
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -54,6 +67,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+
+use crate::store::ConflictResolution;
 
 /// What the secrets file is called inside the Data Directory. Fixed rather than
 /// configurable, for the reason the database's name is: the directory is what an
@@ -347,6 +362,72 @@ pub struct Config {
     /// the switch is the one that *closes* it.
     #[serde(default)]
     rust_build_cache: RustBuildCache,
+
+    /// Where the human put a **share viewer** of their own — the small page
+    /// Verkstead ships that draws a Published Share in a browser, hosted on a
+    /// public site of theirs.
+    ///
+    /// Configuration rather than a secret, and the plainest thing in either
+    /// file: a URL, or nothing. Nothing is a Verkstead that has never been to
+    /// that section, and it costs nothing — links are composed through the copy
+    /// Verkstead itself hosts, `HOSTED` in [`crate::sharing`]. This is an
+    /// override for a human who would rather serve the page themselves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    share_viewer_url: Option<String>,
+
+    /// And how a pull request that will not merge is resolved: the base merged
+    /// in, which is what nobody choosing anything gets, or the branch rebased
+    /// onto the base and force-pushed.
+    ///
+    /// Written the way `rust_build_cache` is, and for the same reason: an absent
+    /// key, an absent file and one nothing can parse all mean a merge. A human
+    /// should never have a worse experience for not having checked the settings,
+    /// and the worse experience here is a branch rewritten under whoever was
+    /// reading it.
+    ///
+    /// One Repo can say otherwise — that override is a fact about the Repo and
+    /// lives in the store beside it, and this is what it falls back to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    conflict_resolution: Option<ConflictResolution>,
+
+    /// And the Sandbox Configuration binds said here rather than at the
+    /// installation: a flat list in the grammar `--sandbox-bind` takes,
+    /// `/abs/path` for a bind every sandbox gets and `name=/abs/path` for one
+    /// only the Repo registered under that name does.
+    ///
+    /// They compose with the installation's own set rather than replacing it,
+    /// and they are read at the moment a session spawns, like the author above
+    /// and the build cache beside it. Which is why nothing here is checked as it
+    /// is read: an entry naming a directory that is not there is skipped at that
+    /// moment with a word in the log, where a startup flag naming one refuses to
+    /// start — see [`crate::sandbox::SandboxConfig::settings_binds`].
+    #[serde(
+        default,
+        deserialize_with = "rows_written",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    sandbox_binds: Vec<String>,
+
+    /// And the Watched Paths said here rather than at the installation: a flat
+    /// list of absolute directories, the same thing `--watched-path` names.
+    ///
+    /// They widen the boundary rather than standing in for the part of it the
+    /// installation drew, and they are read at the moment an admission is
+    /// decided, so a directory added here admits from the next request on. Which
+    /// is why nothing here is checked as it is read: an entry naming a directory
+    /// that is not there covers nothing at that moment, with a word in the log,
+    /// where a startup flag naming one refuses to start — see
+    /// [`crate::WatchedPaths::admit`].
+    ///
+    /// An empty list is what a standalone install starts with, and it is a
+    /// closed boundary rather than an open one: the type fails closed whatever
+    /// is here, so a Verkstead nobody has configured may touch nothing at all.
+    #[serde(
+        default,
+        deserialize_with = "rows_written",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    watched_paths: Vec<String>,
 }
 
 impl Config {
@@ -368,14 +449,33 @@ impl Config {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
             },
+            share_viewer_url: config.share_viewer_url.and_then(blank_is_nothing),
+            conflict_resolution: config.conflict_resolution,
+            sandbox_binds: entries_written(config.sandbox_binds),
+            watched_paths: entries_written(config.watched_paths),
         })
     }
 
     /// The config a settings page has just been told.
-    pub fn of(git_author: GitAuthor, rust_build_cache: RustBuildCache) -> Config {
+    pub fn of(
+        git_author: GitAuthor,
+        rust_build_cache: RustBuildCache,
+        share_viewer_url: Option<String>,
+        conflict_resolution: ConflictResolution,
+        sandbox_binds: Vec<String>,
+        watched_paths: Vec<String>,
+    ) -> Config {
         Config {
             git_author,
             rust_build_cache,
+            share_viewer_url: share_viewer_url.and_then(blank_is_nothing),
+            // Written down as it stands rather than left out where it is the
+            // default, the way the build cache's switch is: what the page sends
+            // is where the setting is to sit, and a key that appeared only for
+            // one of the two answers would read as a file half-written.
+            conflict_resolution: Some(conflict_resolution),
+            sandbox_binds: entries_written(sandbox_binds),
+            watched_paths: entries_written(watched_paths),
         }
     }
 
@@ -388,6 +488,44 @@ impl Config {
     /// nobody has said otherwise.
     pub fn rust_build_cache(&self) -> &RustBuildCache {
         &self.rust_build_cache
+    }
+
+    /// And where the human hosts a share viewer of their own, or `None` where
+    /// they host none.
+    ///
+    /// `None` rather than the address links are actually composed through, and
+    /// deliberately: this is what the settings page draws back into its field,
+    /// and a field filled in with something nobody typed is a setting the human
+    /// cannot tell they have not chosen. What a blank one *means* is
+    /// [`crate::sharing::link`]'s to say.
+    pub fn share_viewer_url(&self) -> Option<&str> {
+        self.share_viewer_url.as_deref()
+    }
+
+    /// And how a conflict is resolved where the Repo it is in says nothing,
+    /// which is a merge until somebody says otherwise.
+    ///
+    /// Where the switch above answers rather than the field beside it: there is
+    /// no third state to draw, so what comes back is where the setting *sits*
+    /// and not whether anybody has been here.
+    pub fn conflict_resolution(&self) -> ConflictResolution {
+        self.conflict_resolution
+            .unwrap_or(ConflictResolution::Merge)
+    }
+
+    /// And the binds it holds, in the order they were written down. An empty
+    /// list where nobody has added any, which is a sandbox with whatever the
+    /// installation configured and nothing beside it.
+    pub fn sandbox_binds(&self) -> &[String] {
+        &self.sandbox_binds
+    }
+
+    /// And the Watched Paths it holds, in the order they were written down. An
+    /// empty list where nobody has added any, which is a boundary drawn by
+    /// whatever the installation configured — and, on an installation that
+    /// configured none, a boundary around nothing.
+    pub fn watched_paths(&self) -> &[String] {
+        &self.watched_paths
     }
 }
 
@@ -479,6 +617,28 @@ impl GitAuthor {
     }
 }
 
+/// A list of rows as somebody left them, with the ones they emptied out taken
+/// away.
+///
+/// A row with nothing after its `-` is YAML's null rather than YAML's empty
+/// string, and a `Vec<String>` reading one refuses the whole file — which under
+/// this module's own rule would throw the author and the build cache away over a
+/// half-deleted line. So the rows are read as nullable and the nulls dropped,
+/// which is what an emptied row was always going to mean.
+fn rows_written<'de, D: serde::Deserializer<'de>>(rows: D) -> Result<Vec<String>, D::Error> {
+    Ok(Vec::<Option<String>>::deserialize(rows)?
+        .into_iter()
+        .flatten()
+        .collect())
+}
+
+/// A written list with its blank entries taken out and the rest trimmed: a row
+/// the human emptied rather than deleted says as little as a field they cleared
+/// does, and an entry with a stray space around it is the path they meant.
+fn entries_written(entries: Vec<String>) -> Vec<String> {
+    entries.into_iter().filter_map(blank_is_nothing).collect()
+}
+
 /// A configured value that is only whitespace is no value: a field left empty by
 /// hand reads as the human having cleared it, and a variable set to nothing at
 /// all is a session that fails obscurely rather than one that says plainly what
@@ -494,7 +654,7 @@ fn blank_is_nothing(value: String) -> Option<String> {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
-    use super::{Config, GitAuthor, RustBuildCache, Secrets, Settings};
+    use super::{Config, ConflictResolution, GitAuthor, RustBuildCache, Secrets, Settings};
 
     #[test]
     fn the_token_is_what_the_file_says() {
@@ -588,6 +748,130 @@ mod tests {
             None,
             "an empty address is one the human cleared, and git says so for itself"
         );
+    }
+
+    #[test]
+    fn where_the_share_viewer_is_hosted_is_what_the_config_file_says() {
+        let config = Config::read("share_viewer_url: https://ada.github.io/shares/\n").unwrap();
+
+        assert_eq!(
+            config.share_viewer_url(),
+            Some("https://ada.github.io/shares/")
+        );
+    }
+
+    /// How a conflict is resolved is the human's word for it, and what they
+    /// wrote is what comes back.
+    #[test]
+    fn how_a_conflict_is_resolved_is_what_the_config_file_says() {
+        assert_eq!(
+            Config::read("conflict_resolution: rebase\n")
+                .unwrap()
+                .conflict_resolution(),
+            ConflictResolution::Rebase,
+        );
+        assert_eq!(
+            Config::read("conflict_resolution: merge\n")
+                .unwrap()
+                .conflict_resolution(),
+            ConflictResolution::Merge,
+        );
+    }
+
+    /// And the whole point of the shape: nothing configured is a merge.
+    ///
+    /// An absent key, an absent file and one nothing can parse all say the same
+    /// thing, because the alternative is a human who never found this section
+    /// having their branch rewritten and force-pushed under whoever was reading
+    /// it.
+    #[test]
+    fn a_conflict_nobody_has_said_anything_about_is_merged() {
+        for text in [
+            "",
+            "git_author:\n  name: Tobias Cohen\n",
+            "conflict_resolution:\n",
+        ] {
+            assert_eq!(
+                Config::read(text).unwrap().conflict_resolution(),
+                ConflictResolution::Merge,
+                "nothing said here is a merge: {text:?}",
+            );
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        assert_eq!(
+            settings.config().conflict_resolution(),
+            ConflictResolution::Merge,
+            "and so is a Data Directory with no config file in it at all",
+        );
+
+        std::fs::write(settings.config_path(), "conflict_resolution: [oh\n").unwrap();
+
+        assert_eq!(
+            settings.config().conflict_resolution(),
+            ConflictResolution::Merge,
+            "and so is a file nothing can parse",
+        );
+    }
+
+    /// The word a save writes is one the next read understands, which is what
+    /// the settings page depends on: it saves and then draws what came back.
+    #[test]
+    fn how_a_conflict_is_resolved_goes_through_the_file_and_comes_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                None,
+                ConflictResolution::Rebase,
+                vec![],
+                vec![],
+            ))
+            .unwrap();
+
+        assert_eq!(
+            settings.config().conflict_resolution(),
+            ConflictResolution::Rebase,
+        );
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                None,
+                ConflictResolution::Merge,
+                vec![],
+                vec![],
+            ))
+            .unwrap();
+
+        assert_eq!(
+            settings.config().conflict_resolution(),
+            ConflictResolution::Merge
+        );
+    }
+
+    /// There is no default, and there could not be one: nobody but the human
+    /// knows where their own site is, and a Verkstead that guessed would put a
+    /// link to somebody else's page on a pull request.
+    #[test]
+    fn a_share_viewer_nobody_has_hosted_is_nowhere() {
+        for text in [
+            "",
+            "git_author:\n  name: Tobias Cohen\n",
+            "share_viewer_url:\n",
+        ] {
+            assert_eq!(
+                Config::read(text).unwrap().share_viewer_url(),
+                None,
+                "for {text:?}"
+            );
+        }
     }
 
     #[test]
@@ -746,6 +1030,10 @@ mod tests {
                     Some("tobi@tobico.net".to_owned()),
                 ),
                 RustBuildCache::default(),
+                None,
+                ConflictResolution::Merge,
+                vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -753,6 +1041,43 @@ mod tests {
 
         assert_eq!(config.git_author().name(), Some("Tobias Cohen"));
         assert_eq!(config.git_author().email(), Some("tobi@tobico.net"));
+    }
+
+    #[test]
+    fn a_saved_share_viewer_url_is_what_the_next_read_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                Some("https://ada.github.io/shares/".to_owned()),
+                ConflictResolution::Merge,
+                vec![],
+                vec![],
+            ))
+            .unwrap();
+
+        assert_eq!(
+            settings.config().share_viewer_url(),
+            Some("https://ada.github.io/shares/")
+        );
+
+        // And clearing the field is how it is taken away, which is the whole of
+        // what an empty one means.
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                Some(String::new()),
+                ConflictResolution::Merge,
+                vec![],
+                vec![],
+            ))
+            .unwrap();
+
+        assert_eq!(settings.config().share_viewer_url(), None);
     }
 
     /// The reason the files are serialized rather than formatted by hand: a name
@@ -769,6 +1094,10 @@ mod tests {
                     Some("tobi@tobico.net".to_owned()),
                 ),
                 RustBuildCache::default(),
+                None,
+                ConflictResolution::Merge,
+                vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -787,6 +1116,10 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), Some(String::new())),
                 RustBuildCache::default(),
+                None,
+                ConflictResolution::Merge,
+                vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -824,6 +1157,10 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
+                None,
+                ConflictResolution::Merge,
+                vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -846,6 +1183,10 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
+                None,
+                ConflictResolution::Merge,
+                vec![],
+                vec![],
             ))
             .unwrap();
 
@@ -856,5 +1197,126 @@ mod tests {
         left.sort();
 
         assert_eq!(left, vec!["config.yaml", "secrets.yaml"]);
+    }
+
+    #[test]
+    fn the_binds_are_what_the_config_file_says_in_the_order_it_says_them() {
+        let config = Config::read(
+            "sandbox_binds:\n  - /var/cache/verkstead-node\n  \
+             - verkstead=/var/cache/verkstead-cargo\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.sandbox_binds(),
+            [
+                "/var/cache/verkstead-node",
+                "verkstead=/var/cache/verkstead-cargo"
+            ],
+        );
+    }
+
+    #[test]
+    fn a_file_with_no_binds_in_it_configures_none() {
+        assert!(
+            Config::read("git_author:\n  name: Ada\n")
+                .unwrap()
+                .sandbox_binds()
+                .is_empty()
+        );
+        assert!(Config::read("").unwrap().sandbox_binds().is_empty());
+    }
+
+    /// A row emptied rather than deleted is a row the human took out, and one
+    /// with a stray space around it is the path they meant.
+    #[test]
+    fn a_blank_bind_is_no_bind_and_a_padded_one_is_the_path_inside_it() {
+        let config = Config::read("sandbox_binds:\n  - ''\n  - '  /var/cache  '\n  -\n").unwrap();
+
+        assert_eq!(config.sandbox_binds(), ["/var/cache"]);
+    }
+
+    #[test]
+    fn a_saved_bind_is_what_the_next_read_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                None,
+                ConflictResolution::Merge,
+                vec!["/var/cache/verkstead-node".to_owned()],
+                vec![],
+            ))
+            .unwrap();
+
+        assert_eq!(
+            settings.config().sandbox_binds(),
+            ["/var/cache/verkstead-node"]
+        );
+
+        // And a save that was told none takes the ones that were there away,
+        // which is how the last one is deleted.
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                None,
+                ConflictResolution::Merge,
+                vec![],
+                vec![],
+            ))
+            .unwrap();
+
+        assert!(settings.config().sandbox_binds().is_empty());
+    }
+
+    #[test]
+    fn the_watched_paths_are_what_the_config_file_says() {
+        let config = Config::read("watched_paths:\n  - /home/ada/src\n  - /srv/repos\n").unwrap();
+
+        assert_eq!(config.watched_paths(), ["/home/ada/src", "/srv/repos"]);
+    }
+
+    /// A boundary nobody has widened, which is every path outside whatever the
+    /// installation said — see [`crate::WatchedPaths`].
+    #[test]
+    fn a_file_with_no_watched_paths_in_it_says_none() {
+        assert!(
+            Config::read("git_author:\n  name: Ada\n")
+                .unwrap()
+                .watched_paths()
+                .is_empty()
+        );
+        assert!(Config::read("").unwrap().watched_paths().is_empty());
+    }
+
+    #[test]
+    fn a_blank_watched_path_is_no_path_and_a_padded_one_is_the_path_inside_it() {
+        let config =
+            Config::read("watched_paths:\n  - ''\n  - '  /home/ada/src  '\n  -\n").unwrap();
+
+        assert_eq!(config.watched_paths(), ["/home/ada/src"]);
+    }
+
+    #[test]
+    fn a_saved_watched_path_is_what_the_next_read_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                None,
+                ConflictResolution::Merge,
+                vec![],
+                vec!["/home/ada/src".to_owned()],
+            ))
+            .unwrap();
+
+        assert_eq!(settings.config().watched_paths(), ["/home/ada/src"]);
     }
 }

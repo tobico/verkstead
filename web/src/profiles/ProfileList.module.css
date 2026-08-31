@@ -103,11 +103,10 @@
   font-size: 0.9em;
 }
 
-/* The models are the one field that is a list, so they are the one taken in a
-   textarea — drawn as the inputs around it, because it is the same kind of
-   typing with room for more than one line of it. */
-.form input,
-.form textarea {
+/* The typed fields — the name, the two paths, and the model id added by hand.
+   Said by type rather than by element, because the ticks the models are picked
+   with are inputs too and a width of the pane is not what a checkbox wants. */
+.form input[type="text"] {
   display: block;
   width: 100%;
   margin-bottom: 0.85rem;
@@ -120,8 +119,88 @@
   padding: 0.5rem 0.6rem;
 }
 
-.form textarea {
-  resize: vertical;
+/* The models: a tick per model this build knows, and the field under them for an
+   id it does not.
+
+   A fieldset with none of a fieldset's box — the markup is what says these ticks
+   are one question, and the frame it comes with would be the only frame on a
+   form that has none. */
+.form .models {
+  margin: 0 0 0.85rem;
+  padding: 0;
+  border: 0;
+}
+
+/* The legend is this field's label, so it is drawn as the labels above and below
+   it are. */
+.form .models legend {
+  padding: 0;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.picks {
+  list-style: none;
+  margin: 0 0 0.85rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.picks li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+/* A tick and the name beside it, which is a control rather than a field's label
+   — so it takes none of the treatment the labels above the fields do. */
+.form .picks label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* The id the name stands for, quiet beside it: what the session is launched
+   with, for whoever is checking. */
+.picks code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The id typed in where the list has not learned it yet: the field and the press
+   that puts it among the ticks, on one line. */
+.byHand {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.form .byHand input[type="text"] {
+  margin-bottom: 0;
+}
+
+/* Drawn as an outline rather than filled, like the remove below: the filled
+   button on this form is the one that saves it, and a second one beside a field
+   would read as a second way to do that. */
+.byHand button {
+  padding: 0.5rem 0.9rem;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.byHand button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .buttons {
@@ -184,9 +263,8 @@
 }
 
 /* The field being typed in, which is no pointer's doing: the border says which
-   of the four the words are going into. */
-.form input:focus-visible,
-.form textarea:focus-visible {
+   of them the words are going into. */
+.form input[type="text"]:focus-visible {
   border-color: var(--accent);
 }
 
@@ -194,8 +272,11 @@
    accent it is filled with, and the outline takes the colour its own words are
    in — the remove's red. */
 @media (hover: hover) {
-  .form input:hover,
-  .form textarea:hover {
+  .form input[type="text"]:hover {
+    border-color: var(--ink-soft);
+  }
+
+  .byHand button:not(:disabled):hover {
     border-color: var(--ink-soft);
   }
 

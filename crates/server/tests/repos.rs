@@ -6,6 +6,10 @@
 //! than of the boundary type underneath it — which is the point of the Watched
 //! Paths being a security boundary. A browser that skipped the form, or a `curl`
 //! that never saw one, meets the same answers.
+//!
+//! And the one thing there is to say to a Repo that is already registered: how
+//! it resolves a merge conflict, which is an override of the global setting and
+//! so is nothing at all until somebody says something.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -17,7 +21,7 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Registered, RepoEntry, RepoRemoved, RepoView};
+use verkstead_render::{ConflictResolution, Registered, RepoEntry, RepoRemoved, RepoView};
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
 /// A router watching `watched`, plus the directory holding its database alive.
@@ -40,6 +44,34 @@ async fn app_and_pool_watching(watched: &Path) -> (tempfile::TempDir, SqlitePool
     let data_dir = dir.path().to_owned();
 
     (dir, pool.clone(), router_watching(pool, watched, data_dir))
+}
+
+/// A router the installation gave nothing to watch, plus the Data Directory its
+/// `config.yaml` goes in — which is what a standalone install is before anybody
+/// has been to its settings page.
+async fn app_watching_what_the_settings_say() -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let data_dir = dir.path().to_owned();
+
+    (dir, router_watching(pool, WatchedPaths::none(), data_dir))
+}
+
+/// Write `config.yaml` in `data_dir` saying `paths` are the Watched Paths.
+///
+/// The file rather than the type that writes it: what a hand-edit and a save
+/// both leave behind is this text, and a test that went through the type would
+/// not be reading the key.
+fn watch_in_the_settings(data_dir: &Path, paths: &[&Path]) {
+    let mut yaml = String::from("watched_paths:\n");
+    for path in paths {
+        yaml.push_str(&format!("  - {}\n", path.display()));
+    }
+
+    std::fs::write(data_dir.join("config.yaml"), yaml).unwrap();
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -96,6 +128,17 @@ async fn remove(app: &Router, id: i64) -> RepoRemoved {
         app,
         &format!("/api/ui/repos/{id}/remove"),
         &serde_json::Value::Null,
+    )
+    .await
+}
+
+/// Say how one Repo is to resolve a conflict from now on — or, with `None`, that
+/// it is to go back to whatever every other Repo does.
+async fn resolve(app: &Router, id: i64, resolution: Option<ConflictResolution>) -> RepoView {
+    post(
+        app,
+        &format!("/api/ui/repos/{id}/resolution"),
+        &serde_json::json!({ "resolution": resolution }),
     )
     .await
 }
@@ -287,9 +330,9 @@ async fn a_repo_already_registered_is_refused_however_its_path_is_spelled() {
     assert_eq!(listed(&app).await.len(), 1);
 }
 
-/// The closed state the server refuses to start in, asked of the router
-/// directly: with no Watched Path there is nowhere a Repo could be registered
-/// from, and every path is outside.
+/// The closed state a standalone install comes up in: with no Watched Path said
+/// at the installation and none said in the settings, there is nowhere a Repo
+/// could be registered from, and every path is outside.
 #[tokio::test]
 async fn a_server_watching_nothing_registers_nothing() {
     let dir = tempfile::tempdir().unwrap();
@@ -301,6 +344,64 @@ async fn a_server_watching_nothing_registers_nothing() {
     let repo = repository(dir.path().join("verkstead"));
 
     assert_eq!(register(&app, &repo).await, Registered::OutsideWatchedPaths);
+}
+
+/// The settings side of the boundary, and the whole of what makes a standalone
+/// install possible: the server was given nothing to watch, the human writes a
+/// directory into `config.yaml`, and the next request admits from it — no
+/// restart anywhere.
+#[tokio::test]
+async fn a_watched_path_written_into_the_settings_admits_from_the_next_request() {
+    let (dir, app) = app_watching_what_the_settings_say().await;
+    let src = tempfile::tempdir().unwrap();
+    let repo = repository(src.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::OutsideWatchedPaths);
+
+    watch_in_the_settings(dir.path(), &[src.path()]);
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    assert_eq!(listed(&app).await.len(), 1);
+}
+
+/// And nothing in the file is ever fatal: an entry naming a directory that is
+/// not there covers nothing, and the one written beside it goes on covering
+/// what it covers.
+#[tokio::test]
+async fn a_settings_watched_path_that_is_not_there_costs_the_others_nothing() {
+    let (dir, app) = app_watching_what_the_settings_say().await;
+    let src = tempfile::tempdir().unwrap();
+    let repo = repository(src.path().join("verkstead"));
+
+    watch_in_the_settings(dir.path(), &[&src.path().join("never-made"), src.path()]);
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+}
+
+/// Taking one out again is free. Admission is asked at registration and never
+/// again, so a Repo already on the list goes on being one — it only stops being
+/// somewhere a *new* Repo can be registered from.
+#[tokio::test]
+async fn taking_a_watched_path_out_of_the_settings_leaves_what_is_registered() {
+    let (dir, app) = app_watching_what_the_settings_say().await;
+    let src = tempfile::tempdir().unwrap();
+    let repo = repository(src.path().join("verkstead"));
+
+    watch_in_the_settings(dir.path(), &[src.path()]);
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+
+    watch_in_the_settings(dir.path(), &[]);
+
+    let repos = listed(&app).await;
+    assert_eq!(repos.len(), 1);
+    assert_eq!(branches(&app, repos[0].id).await, ["main"]);
+
+    // And the boundary is closed behind it: the next one is outside.
+    let another = repository(src.path().join("askance"));
+    assert_eq!(
+        register(&app, &another).await,
+        Registered::OutsideWatchedPaths
+    );
 }
 
 /// What a Conversation branches from: the remote's idea of the default branch
@@ -456,6 +557,80 @@ async fn a_repo_opened_carries_its_branches_its_work_and_its_roadmaps() {
         "a repository with no roadmaps has none waiting: {:?}",
         opened.roadmaps,
     );
+}
+
+/// A registered Repo says nothing about how it resolves a conflict until
+/// somebody tells it, and then it says that until they take it back.
+///
+/// `null` is *whatever the settings page says for every Repo* rather than
+/// *merge*: the two are the same answer today and stop being the same the moment
+/// the global is changed, so what a Repo nobody has been to holds is nothing at
+/// all.
+#[tokio::test]
+async fn a_repos_resolution_is_said_taken_back_and_read_off_the_pane() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    let opened: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
+    assert_eq!(
+        opened.conflict_resolution, None,
+        "a Repo nobody has told overrides nothing",
+    );
+
+    let saved = resolve(&app, id, Some(ConflictResolution::Rebase)).await;
+    assert_eq!(
+        saved.conflict_resolution,
+        Some(ConflictResolution::Rebase),
+        "the answer is the Repo as it now stands, which is what the pane draws",
+    );
+
+    let read: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
+    assert_eq!(read.conflict_resolution, Some(ConflictResolution::Rebase));
+
+    assert_eq!(
+        resolve(&app, id, Some(ConflictResolution::Merge))
+            .await
+            .conflict_resolution,
+        Some(ConflictResolution::Merge),
+        "and either word can be the override, a Repo pinned to a merge being a \
+         real thing to say where the global is a rebase",
+    );
+
+    assert_eq!(
+        resolve(&app, id, None).await.conflict_resolution,
+        None,
+        "and clearing it puts the Repo back to whatever every other one does",
+    );
+}
+
+/// A Repo nothing is registered under has nothing to be told, and saying so is
+/// the same refusal opening one gives: a pane somebody left open in another tab
+/// while the Repo was taken away.
+#[tokio::test]
+async fn a_repo_that_is_not_there_cannot_be_told_how_to_resolve_a_conflict() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+
+    for asked in ["404", "not-a-number"] {
+        let (status, _) = fetch(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/ui/repos/{asked}/resolution"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "resolution": "Merge" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND, "telling {asked}");
+    }
 }
 
 /// A Repo that is not registered has nothing to open, and saying so is a

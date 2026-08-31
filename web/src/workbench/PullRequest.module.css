@@ -25,6 +25,52 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* And the conflict, where the last look at GitHub found one. In the palette's
+   colour for work that has stopped, which is what a conflict is: nothing on this
+   pull request lands until somebody resolves it. Drawn only where there is one —
+   see `PullRequest.tsx`. */
+.summary .conflict {
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  color: var(--stopped);
+}
+
+/* And the press that gets the conflict resolved, under the words saying there is
+   one. The accent fill every press in the app that starts something is drawn
+   with — this one starts a wrap-up — and never drawn at all where there is
+   nothing to resolve or where the work is not finished with. See
+   `PullRequest.tsx`. */
+.resolve {
+  margin: 0.6rem 0 0;
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.resolve:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .resolve:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
+
+/* And what a press that did nothing says, in the place the press was made: a
+   reading that has moved on rather than anything to correct. */
+.refused {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+}
+
 /* The commit list, the checks and the comments, each a section of the pane. All
    three are a reading of GitHub as it stands rather than anything Verkstead
    wrote down. */

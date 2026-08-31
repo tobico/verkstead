@@ -1,5 +1,6 @@
 {
   "settings": {
+    "conflict_resolution": "Rebase",
     "git_author": {
       "email": "ada@example.com",
       "name": "Ada Lovelace"
@@ -8,16 +9,53 @@
       "at": "2026-08-03T09:07:11.000Z",
       "last_four": "cdef"
     },
+    "paths": {
+      "binds": [
+        {
+          "path": "/var/cache/verkstead-node",
+          "repo": null,
+          "resolution": {
+            "Unresolved": {
+              "why": "the server cannot see it: there is nothing at that path"
+            }
+          },
+          "source": "Settings"
+        },
+        {
+          "path": "/var/cache/verkstead-cargo",
+          "repo": "verkstead",
+          "resolution": {
+            "Unresolved": {
+              "why": "the server cannot see it: there is nothing at that path"
+            }
+          },
+          "source": "Settings"
+        }
+      ],
+      "watched": [
+        {
+          "path": "/home/ada/src",
+          "resolution": {
+            "Unresolved": {
+              "why": "the server cannot see it: No such file or directory (os error 2)"
+            }
+          },
+          "source": "Settings"
+        }
+      ]
+    },
     "rust_build_cache": {
       "compiles_cached": false,
       "enabled": true,
       "size": "50G",
       "size_configured": true
-    }
+    },
+    "share_viewer_url": "https://ada.github.io/verkstead-shares/"
   },
   "verified": {
     "Account": {
-      "login": "ada"
+      "login": "ada",
+      "missing": []
     }
   }
 }

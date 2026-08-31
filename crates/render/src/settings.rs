@@ -1,6 +1,6 @@
-//! What Verkstead has been told — the GitHub token, the git author and the
-//! shared Rust build cache — as the viewer receives it, and what it sends to
-//! change any of them.
+//! What Verkstead has been told — the GitHub token, the git author, the shared
+//! Rust build cache and where the share viewer is hosted — as the viewer
+//! receives it, and what it sends to change any of them.
 //!
 //! The token goes one way only. What comes back about it is that there is one,
 //! its last four characters and when it was saved, and nothing here can be made
@@ -17,10 +17,32 @@
 //! [`SettingsSaved`].
 //!
 //! The build cache is the plain half of all this: a switch and a size, both
-//! values, both readable back. It is here because it is the one thing about a
-//! Sandbox the human sets rather than the installer, and one fact about it
-//! travels one way only — whether the server found an sccache to compile
-//! through, which is its own environment and nobody's setting.
+//! values, both readable back. It is the one thing about a Sandbox here that
+//! nobody has to configure — it is on with nothing said, and the switch is the
+//! one that takes it away, where the paths below are holes somebody typed. One
+//! fact about it travels one way only: whether the server found an sccache to
+//! compile through, which is its own environment and nobody's setting.
+//!
+//! The share viewer's URL is plainer still: one value, written and read back as
+//! itself. It is a public page the human hosts a copy of, and every link to a
+//! Published Share goes through it — so it is configuration in the ordinary
+//! sense, and the page shows it as it stands. An empty one is *no copy of their
+//! own* rather than no viewer: links are then composed through the copy
+//! Verkstead itself hosts, which is `HOSTED` in `crates/server/src/sharing.rs`.
+//!
+//! And how a conflict is resolved is the plainest of the lot: one of two words,
+//! written and read back as itself. What travels with it is the warning the page
+//! draws beside the second of them — a rebase is force-pushed, and a
+//! force-pushed branch rewrites what reviewers have read.
+//!
+//! And the paths — the Watched Paths and the Sandbox Configuration binds — are
+//! the one thing here said in two places at once. The installation says its own
+//! on the command line and the human says theirs in `config.yaml`, and what
+//! Verkstead goes by is the union. So each entry comes back saying which of the
+//! two said it, and whether the server can see what it names right now: the
+//! first is what makes an entry editable here rather than read-only, and the
+//! second is a report rather than a refusal — a save lands whatever it was
+//! told, and an entry the server cannot see is a row that says so.
 
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +62,147 @@ pub struct SettingsView {
 
     /// And how the shared Rust build cache stands.
     pub rust_build_cache: BuildCacheView,
+
+    /// Where the human hosts a share viewer of their own, or empty where they
+    /// host none.
+    ///
+    /// A string rather than an optional, empty for nothing configured, the way
+    /// the author's two halves are: the field on the page holds it either way,
+    /// and clearing the box is how it is taken away.
+    ///
+    /// Empty is not *no viewer*. Links are then composed through the copy
+    /// Verkstead hosts, and this field is the override — which is why nothing
+    /// fills it in on the human's behalf: a field holding an address nobody
+    /// typed is a setting they cannot tell they have not chosen.
+    ///
+    /// Configuration rather than a secret — it is a public page, and its URL
+    /// goes in a comment on a pull request — so unlike the token it reads back
+    /// exactly as it was written.
+    pub share_viewer_url: String,
+
+    /// And how a conflicted pull request is resolved in every Repo that has not
+    /// said otherwise.
+    ///
+    /// Never null, the way the build cache's switch is never null: nothing
+    /// configured is a merge, so what comes back is where the setting sits
+    /// rather than whether anybody has been here. A Repo's own override is on
+    /// the Repo — see [`crate::RepoView::conflict_resolution`].
+    pub conflict_resolution: ConflictResolution,
+
+    /// And the Watched Paths and the Sandbox Configuration binds, from both of
+    /// the places either of them is said.
+    pub paths: PathsView,
+}
+
+/// How a merge conflict between a pull request and its base branch is resolved.
+///
+/// Two words for two ways of putting the base's work on a branch that has
+/// diverged from it, and what tells them apart is what happens to the commits
+/// already pushed: a merge leaves every one of them where it is, and a rebase
+/// writes them again and has to be force-pushed — which rewrites what reviewers
+/// have read and breaks anything stacked on the branch.
+///
+/// Which is why the page says so beside the choice rather than leaving it to be
+/// found later, and why merge is what nobody choosing anything gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConflictResolution {
+    /// Merge the base branch into the work branch and push the merge.
+    Merge,
+
+    /// Rebase the work branch onto the base branch and force-push what comes
+    /// out.
+    Rebase,
+}
+
+/// Every path Verkstead has been told about, from both sources at once: the
+/// directories it may operate inside, and the extra directories a sandbox is
+/// given beyond the surface every one of them has.
+///
+/// Two lists rather than one, because they are two different permissions — a
+/// Watched Path says where the human may point Verkstead, and a bind says what
+/// a session may write in — and the page draws them apart for that reason.
+///
+/// The installation's own entries come first in each list, and the settings'
+/// follow in the order they were written down. That is the order the two were
+/// decided in: a flag is said once when the machine is set up, and the file is
+/// where somebody has been adding to it since.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PathsView {
+    pub watched: Vec<WatchedPathEntry>,
+
+    /// Every configured bind, the ones every sandbox gets and the ones one Repo
+    /// does together — see [`BindEntry::repo`], which is what says which of the
+    /// two an entry is.
+    pub binds: Vec<BindEntry>,
+}
+
+/// One Watched Path, whichever of the two places said it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct WatchedPathEntry {
+    /// The directory: resolved, for the installation's own, which were resolved
+    /// when the server started; and exactly as it was written, for one out of
+    /// the settings — that is what a save sends back, so it has to come back as
+    /// it went in.
+    pub path: String,
+
+    pub source: PathSource,
+
+    pub resolution: PathResolution,
+}
+
+/// And one Sandbox Configuration bind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct BindEntry {
+    /// The directory bound in, read out of the entry — and the whole entry as
+    /// it was written, where nothing could be read out of it at all. A row
+    /// nobody can see is a row nobody can correct.
+    pub path: String,
+
+    /// The Repo this bind is only for, by the name it is registered under, or
+    /// `null` for one every sandbox gets.
+    pub repo: Option<String>,
+
+    pub source: PathSource,
+
+    pub resolution: PathResolution,
+}
+
+/// Which of the two places an entry was said in.
+///
+/// What decides whether the page will let it be edited: the installation's are
+/// the unit's word or the command line's and are read-only wherever they are
+/// drawn, and the settings' own are the human's to add to and take away.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum PathSource {
+    /// A `--watched-path` or a `--sandbox-bind`, from the command line or from
+    /// the environment the server was started in.
+    Installation,
+
+    /// And one out of `config.yaml`, which is the file this page writes.
+    Settings,
+}
+
+/// Whether the server can see what an entry names, at the moment it was asked.
+///
+/// Reported rather than refused: a save lands whatever it was told, so an entry
+/// naming a directory nobody has made yet is something to say on the row rather
+/// than something to turn a save down over. It is also how a nix install learns
+/// that a path added here needs the installer to widen the unit's namespace
+/// before it can do anything — the file says it, and the server cannot see it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum PathResolution {
+    /// The server can see it: a directory, for a Watched Path, and anything at
+    /// all for a bind.
+    Resolves,
+
+    /// It cannot, and this is why, in the words it is logged in.
+    Unresolved { why: String },
 }
 
 /// The shared Rust build cache as the settings page draws it: the switch, the
@@ -117,6 +280,34 @@ pub struct SettingsEdit {
     /// there is nothing secret about either, so a save says where they are to
     /// stand and the server writes that down.
     pub rust_build_cache: BuildCacheEdit,
+
+    /// And where the human hosts a share viewer of their own, as a value for
+    /// the same reason: an empty one is nothing configured, which is what
+    /// clearing the field means and what puts Verkstead's own hosted copy back.
+    pub share_viewer_url: String,
+
+    /// And how a conflicted pull request is resolved where its Repo says
+    /// nothing, as a value for the same reason: there are two answers and a save
+    /// says which of them this is to be.
+    pub conflict_resolution: ConflictResolution,
+
+    /// The Watched Paths the settings own, as values again: what is sent is
+    /// what `config.yaml` holds afterwards, so a row taken off the page is a
+    /// row taken out of the file.
+    ///
+    /// The installation's own are not here and cannot be sent. They are the
+    /// unit's word rather than this page's, and a save leaves them exactly
+    /// where they are — see [`PathSource`].
+    pub watched_paths: Vec<String>,
+
+    /// And the Sandbox Configuration binds the settings own, in the grammar
+    /// `--sandbox-bind` uses: `/abs/path` for a bind every sandbox gets, and
+    /// `name=/abs/path` for one the Repo registered under that name gets.
+    ///
+    /// Strings rather than a shape of their own, because a string is what the
+    /// file holds — and one grammar for both of the places a bind is said is
+    /// one thing to learn rather than two.
+    pub sandbox_binds: Vec<String>,
 }
 
 /// The build cache as the human has just set it.
@@ -182,7 +373,27 @@ pub struct SettingsSaved {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Verified {
     /// GitHub says the token is this account's.
-    Account { login: String },
+    Account {
+        login: String,
+
+        /// The scopes Verkstead needs that GitHub says this token has not been
+        /// given — empty on one that can do everything asked of it.
+        ///
+        /// `gist` is the whole of the list, and it is a list because the answer
+        /// is *what to go and tick*: publishing a share writes a secret gist,
+        /// which is Verkstead's own write to GitHub rather than a session's, and
+        /// a token issued for reading repositories does not carry it. The
+        /// scopes a *session* needs are not checked here — a session
+        /// authenticates as this token too, but what it does with it is the
+        /// repository's review process rather than anything this server asks
+        /// for.
+        ///
+        /// Empty as well where GitHub said nothing about scopes at all, which is
+        /// what a fine-grained token comes back as: it has permissions rather
+        /// than scopes, and reporting the absence of a header as a missing scope
+        /// would be sending the human to re-issue a token that works.
+        missing: Vec<String>,
+    },
 
     /// GitHub would not say, in `gh`'s own words or Verkstead's about `gh`.
     Refused { why: String },

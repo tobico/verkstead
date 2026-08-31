@@ -597,7 +597,7 @@ async fn refused(state: &AppState, conversation_id: i64, lifecycle: Lifecycle, r
 /// between the listing and the resuming. Whatever did that has already said so,
 /// and a stop about it would be a stop nobody could act on.
 ///
-/// The rest are the words the button's own refusals use, said as the reason half
+/// The rest are the words the row's own refusals use, said as the reason half
 /// of a Notice — see the viewer's `RESUME_REFUSAL` for the same list put to
 /// somebody who is looking at the page.
 fn why(refusal: Resumed) -> Option<&'static str> {

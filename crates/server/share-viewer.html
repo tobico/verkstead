@@ -1,0 +1,254 @@
+<!doctype html>
+<!--
+  The share viewer: the one page that turns a published Share into a read.
+
+  A Published Share is a secret gist, and a gist link alone is no use to
+  whoever it was sent to — GitHub renders a gist as source, and its raw URL is
+  served `text/plain` with `nosniff`, so a browser refuses to draw it. What is
+  missing is somewhere for the file to be a page. This is that somewhere, and
+  it is the whole of it: Verkstead hands this file over on the settings page,
+  the human puts it on a public site of their own once — GitHub Pages is what
+  it was written for — and the URL goes back into the settings, where the
+  comment on a pull request is composed from it.
+
+  Three decisions, and each is about who learns what.
+
+  **The gist id rides in the fragment** (`…/share-viewer.html#<gist-id>`).
+  A fragment is never sent to the server, so the host of this page never
+  learns which share was read through it — no request line, no log, no
+  referrer.
+
+  **The share is fetched straight from GitHub**, by the recipient's own
+  browser: the Gists API for where the file is, and then the raw URL for the
+  file. Nothing passes through the host of this page but the page. The raw URL
+  rather than the API's own copy of the contents, because that one is cut off
+  at a megabyte and a Share is several — the API says so itself, with
+  `truncated`, and the raw URL is what it points at instead.
+
+  **And the share is drawn in a sandboxed frame**, with scripts allowed and
+  same-origin withheld. A Share is an application: it has to run to draw
+  anything. What it must not have is this page's origin, because that is the
+  origin of whatever else the human hosts beside it.
+
+  There is nothing else here. No build, no dependency, no request to anywhere
+  but GitHub — a page that fetched a font would be telling somebody's server
+  who is reading what.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Verkstead share</title>
+    <style>
+      /* The system stack, for the reason there is no build: a font to load is
+         a request to somewhere. */
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        color: #1c1917;
+        background: #fafaf9;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          color: #e7e5e4;
+          background: #1c1917;
+        }
+      }
+
+      /* The share fills the window: this page is a frame around it and should
+         take up no room of its own. */
+      iframe {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+
+      p {
+        max-width: 34rem;
+        margin: 4rem auto;
+        padding: 0 1.5rem;
+        line-height: 1.5;
+      }
+
+      code {
+        font-family: ui-monospace, monospace;
+      }
+
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+
+  <body>
+    <p id="standing">Fetching the share from GitHub…</p>
+    <iframe
+      id="share"
+      title="A shared Verkstead conversation"
+      sandbox="allow-scripts"
+      hidden
+    ></iframe>
+
+    <script>
+      (function () {
+        /// Where a gist is asked about. The API rather than a raw URL guessed
+        /// at: a raw URL carries the account and the revision as well as the
+        /// id, and the id is the whole of what a link to a share carries.
+        const GISTS = "https://api.github.com/gists/";
+
+        const standing = document.getElementById("standing");
+        const frame = document.getElementById("share");
+
+        /// Say what happened, in place of the share.
+        function says(what) {
+          standing.textContent = what;
+          standing.hidden = false;
+          frame.hidden = true;
+        }
+
+        /// And draw the share, which is the only thing on this page that is
+        /// not a sentence.
+        ///
+        /// Through the property rather than the attribute: what goes in is a
+        /// whole HTML document, and an attribute would have to be escaped
+        /// character by character to hold one.
+        function shows(page) {
+          frame.srcdoc = page;
+          frame.hidden = false;
+          standing.hidden = true;
+        }
+
+        /// Which gist this link is for.
+        ///
+        /// The last segment of the fragment, so that a link Verkstead composed
+        /// — the id, and nothing else — and a gist's own page URL somebody
+        /// pasted in after the `#` both name the same gist.
+        function asked() {
+          const written = location.hash.replace(/^#/, "");
+
+          // A fragment somebody typed may hold a `%` that decodes to nothing,
+          // and this page is hosted rather than updated: an exception here
+          // would leave it saying it was fetching, for ever. What was written
+          // is the next best reading of it.
+          let fragment;
+          try {
+            fragment = decodeURIComponent(written);
+          } catch {
+            fragment = written;
+          }
+
+          const segments = fragment.split(/[/?]/).filter((part) => part !== "");
+
+          return segments.length === 0 ? "" : segments[segments.length - 1];
+        }
+
+        /// The file the share is in.
+        ///
+        /// A Share is the only file in the gist Verkstead publishes, so the
+        /// first is the answer — the document is preferred where a gist holds
+        /// more than one, because a gist somebody added a note to is still a
+        /// gist holding a share.
+        function shared(gist) {
+          const files = Object.values(gist.files || {});
+
+          return (
+            files.find((file) => file && /\.html$/i.test(file.filename)) ||
+            files[0]
+          );
+        }
+
+        /// What one fetch that went wrong is called, in GitHub's own numbers.
+        function refused(answer) {
+          return `${answer.status} ${answer.statusText}`.trim();
+        }
+
+        async function show() {
+          const id = asked();
+
+          if (id === "") {
+            says(
+              "This page draws a shared Verkstead conversation, and this link " +
+                "does not name one. A link to a share ends in # and the id of " +
+                "the gist it was published in.",
+            );
+            return;
+          }
+
+          says("Fetching the share from GitHub…");
+
+          let gist;
+
+          try {
+            const answer = await fetch(GISTS + encodeURIComponent(id), {
+              headers: { accept: "application/vnd.github+json" },
+            });
+
+            if (!answer.ok) {
+              says(
+                `GitHub would not hand over the gist ${id}: ${refused(answer)}. ` +
+                  "A share is a secret gist rather than a private one, so " +
+                  "whoever has the link can read it — but it can be deleted, " +
+                  "and GitHub limits how often one machine may ask.",
+              );
+              return;
+            }
+
+            gist = await answer.json();
+          } catch (trouble) {
+            says(`GitHub could not be reached: ${trouble}`);
+            return;
+          }
+
+          const file = shared(gist);
+
+          if (!file || !file.raw_url) {
+            says(`The gist ${id} holds no file, so there is no share in it.`);
+            return;
+          }
+
+          try {
+            // The raw URL rather than `file.content`, which GitHub cuts off at
+            // a megabyte and marks `truncated`. A Share is several megabytes,
+            // so the API's copy of it is never the one to draw.
+            const answer = await fetch(file.raw_url);
+
+            if (!answer.ok) {
+              says(
+                `GitHub would not hand over the share itself: ${refused(answer)}.`,
+              );
+              return;
+            }
+
+            shows(await answer.text());
+          } catch (trouble) {
+            says(`The share could not be fetched: ${trouble}`);
+            return;
+          }
+
+          // What the gist is called, which is what Verkstead named the
+          // conversation when it published it. The share inside the frame
+          // titles itself, and a frame cannot title the page around it.
+          if (typeof gist.description === "string" && gist.description !== "") {
+            document.title = gist.description;
+          }
+        }
+
+        // A fragment changes without the page loading again, so the link
+        // somebody pastes into the bar of a tab that is already open is one
+        // this has to hear about.
+        window.addEventListener("hashchange", show);
+
+        show();
+      })();
+    </script>
+  </body>
+</html>

@@ -175,6 +175,15 @@ pub struct Pace {
     /// review for exactly that reason.
     pub reviewing: Duration,
 
+    /// And how often a Done Conversation's pull requests are asked about, which
+    /// is the slow sweep that takes over from the watcher above — see
+    /// [`crate::merges`].
+    ///
+    /// Here beside the rest for [`Pace::stalls`]'s reason: a caller standing a
+    /// server up chooses how often Verkstead looks at things, and a pull request
+    /// waiting to be merged is one of the things it looks at.
+    pub merges: Duration,
+
     /// And how often every Conversation is looked over for one that has
     /// Stalled — see [`crate::stalls`].
     ///
@@ -195,6 +204,7 @@ impl Default for Pace {
             waking: Duration::from_secs(300),
             long_stop: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
+            merges: crate::merges::SWEPT_EVERY,
             reviewing: Duration::ZERO,
         }
     }

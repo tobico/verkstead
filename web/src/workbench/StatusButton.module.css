@@ -1,0 +1,101 @@
+/* The status button at the head of a Conversation's Timeline — see
+   `StatusButton.tsx`.
+
+   The chrome under it is `Menu.module.css`: the anchor, the wash a press away
+   from the menu lands on, the card the rows come down as. The card itself is
+   painted with the rows it holds, in `Actions.module.css`, because it is the
+   same card the sidebar's right-click drops and there is one of it. What is
+   here is the trigger, which is this button and nothing else in the app: the
+   menu's own ⋯ is what every other pane's trigger is, and a mark is not a place
+   to say two lines.
+
+   Reached as `> button`, which is what the menu holds directly — the class this
+   file paints from is hashed, and the trigger inside the anchor is the
+   component's own element. */
+
+/* The pane's width, because the pane is what it is about: it is the head of the
+   record rather than a control standing in a row of them, and everything under
+   it — the pinned cards, the record — is drawn the same width. Held off the
+   pinned block below by the chrome's own air.
+
+   A card rather than the paper, so it reads as the one thing standing above the
+   record rather than as the first line of it. */
+.status > button {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  margin-top: 0.25rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.85rem;
+  color: inherit;
+  text-align: start;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* The two lines, down the left. `min-width: 0` so a long agent name wraps
+   inside them rather than pushing the chevron off the edge. */
+.status .what {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+/* The first line: the status and the state, on one line and wrapping together
+   where the pane is too narrow to hold them. */
+.status .standing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.5rem;
+}
+
+.status .title {
+  font-weight: 600;
+}
+
+/* The state, understated beside it — the same step down a card in the sidebar
+   takes to say which repo it is in. */
+.status .state {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* And the whole of the first line in the accent where something is waiting on
+   the human, the state beside it included: what is being marked is the line
+   rather than the word, and a subtitle left grey under an accented title would
+   read as the quiet half of a status that is not quiet. */
+.status .attention .title,
+.status .attention .state {
+  color: var(--accent);
+}
+
+/* The second line: what is running, in the ordinary text colour and at the
+   ordinary size. It is a fact about the machine rather than about the work, and
+   it is read after the line above rather than instead of it. */
+.status .agent {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+/* Which way the menu will go, at the far end and quiet: a mark rather than a
+   word, and no part of what the button says. */
+.status .mark {
+  flex: none;
+  color: var(--ink-soft);
+}
+
+/* Under the pointer: the edge comes forward, the way every other standing
+   control in the app answers a hand. The fill stays where it is — the button is
+   already the one card above the record, and a second surface under it would be
+   two things happening at once. */
+@media (hover: hover) {
+  .status > button:hover {
+    border-color: var(--ink-soft);
+  }
+}

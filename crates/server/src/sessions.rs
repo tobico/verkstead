@@ -221,6 +221,14 @@ impl Agents {
         }
     }
 
+    /// What the installation configured as Sandbox Configuration, for the
+    /// settings page rather than for a session: the page draws every bind there
+    /// is and says which of the two places said each one, and these are the ones
+    /// it may only show — see [`crate::paths`].
+    pub fn binds(&self) -> &SandboxConfig {
+        &self.config
+    }
+
     /// What a session under `pairing` on `prompt`, named `session`, runs.
     ///
     /// The model is the Pairing's, said on the command line rather than left to
@@ -1181,7 +1189,12 @@ impl Sessions {
             screen: screen.clone(),
         };
 
-        let event_id = store::start_capture(pool, conversation_id, session.as_deref()).await?;
+        // The Event this session prints into, stamped as it opens with the name
+        // Verkstead gave the session and with the Pairing it is being launched
+        // under — see [`store::start_capture`]. Both are in hand exactly here
+        // and nowhere afterwards.
+        let event_id =
+            store::start_capture(pool, conversation_id, session.as_deref(), Some(pairing)).await?;
 
         // The log the agent keeps of itself is followed under the name Verkstead
         // gave the session, inside the directory of the Profile it is running

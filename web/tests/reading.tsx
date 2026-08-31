@@ -1,61 +1,75 @@
-//! Mounting the Set page the way it is really mounted, for the tests that read
-//! what it drew.
+//! Mounting a Set the way it is really reached, for the tests that read what it
+//! drew: the details pane of the Timeline Event it was asked on.
 //!
-//! Shared because three files' worth of assertions are about one page: the
-//! record it draws, the Diff on it, and the table of contents down its margin.
-//! One mount between them means all three are asking about the page the app
-//! really builds.
+//! Shared because three files' worth of assertions are about one drawing: the
+//! record it makes of a Set, the Diff attached to it, and the table of contents
+//! down its margin. One mount between them means all three are asking about the
+//! pane the app really builds.
+//!
+//! The pane rather than the sheet, because the fetch is the pane's: a Set is
+//! read under its own id, merged into what is already drawn, and read again
+//! whenever a Nudge says the world moved. What the tests here drive is that
+//! read.
 
-import { MemoryRouter, Route, createMemoryHistory } from "@solidjs/router";
 import { cleanup, render, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 
-import type { AskView, SetView, UnreadableSet } from "../src/api/types";
-import { SetPage } from "../src/set/SetPage";
+import type {
+  AskView,
+  QuestionSetEvent,
+  SetView,
+  UnreadableSet,
+} from "../src/api/types";
+import { Asked } from "../src/workbench/Asked";
 import { json, reads, serving, whenever } from "./serving";
 
-/// Where a Set leads back to: the Conversation it was asked from. Not this
-/// page's subject, so it is a stand-in — what a test asks is where the way out
-/// points, which is the link's `href`.
-const Elsewhere = () => <p class="elsewhere" />;
+/// The Timeline row the pane is opened from. The pane reads one thing off it —
+/// which Set to fetch — and fetches the rest, so the rest is what a row carries
+/// and nothing any test here is about.
+function row(id: string): QuestionSetEvent {
+  return {
+    id: 1,
+    at: "2025-02-01T09:00:00Z",
+    set_id: Number(id),
+    title: "A question set",
+    rows: [],
+    standing: { Waiting: "waiting" },
+  };
+}
 
-/// The page on its own route, so the id it fetches is the one the URL names, and
-/// inside a router, because the way back out of a Set is a link.
+/// The pane over the Set the id names.
 ///
-/// Settling a Set is not a navigation and never was one to this page: answering
-/// it or closing it unanswered leaves the human where they are, reading the same
-/// sheet back as the record of what became of it.
+/// Settling a Set takes nobody anywhere: answering it or closing it unanswered
+/// leaves the human in this pane, reading the same sheet back as the record of
+/// what became of it. Which is what `back` is here for — the way out of the
+/// pane, and a test's way of saying nothing took it.
 export function mount(id = "1") {
   // No retries: a test that asked for a refusal should see it at once, rather
-  // than after the three attempts a real page is right to make.
+  // than after the three attempts a real pane is right to make.
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
 
-  const history = createMemoryHistory();
-  history.set({ value: `/sets/${id}` });
+  const back = vi.fn();
 
   return {
     ...render(() => (
       <QueryClientProvider client={client}>
-        <MemoryRouter history={history}>
-          <Route path="/sets/:id" component={SetPage} />
-          <Route path="/conversations/:id" component={Elsewhere} />
-        </MemoryRouter>
+        <Asked asked={row(id)} back={back} />
       </QueryClientProvider>
     )),
-    history,
+    back,
     // For the tests about a Nudge: `invalidateQueries()` on this is exactly
-    // what one does to the page — see `lookAgain` in `src/nudge.ts`.
+    // what one does to the pane — see `lookAgain` in `src/nudge.ts`.
     client,
   };
 }
 
-/// The page once the Set it was asked for has arrived.
+/// The pane once the Set it was asked for has arrived.
 ///
 /// Whatever was drawn before it goes first, so that a test reading one Set
-/// after another is reading one page at a time: two pages in the document at
+/// after another is reading one pane at a time: two of them in the document at
 /// once are two `#preface`s, and an id that names two elements names neither.
 export async function reading(set: SetView): Promise<HTMLElement> {
   cleanup();
@@ -65,7 +79,7 @@ export async function reading(set: SetView): Promise<HTMLElement> {
   return container;
 }
 
-/// The same page over a Set this build cannot read, which is the record rather
+/// The same pane over a Set this build cannot read, which is the record rather
 /// than the sheet — nothing to fill in and nothing to press.
 export async function unreadably(set: UnreadableSet): Promise<HTMLElement> {
   cleanup();
@@ -75,18 +89,18 @@ export async function unreadably(set: UnreadableSet): Promise<HTMLElement> {
   return container;
 }
 
-/// The same page, kept hold of for the tests that fill it in: every read of the
+/// The same pane, kept hold of for the tests that fill it in: every read of the
 /// Set is answered with the Set, and the answers given are what the submit or
-/// the lock the page goes on to make comes back with.
+/// the lock the pane goes on to make comes back with.
 ///
 /// The reads are held to their own path rather than left in the order the
-/// answers are handed out, because settling a Set does not take the page
-/// anywhere: it reads the Set again where it stands, and a sequence would hand
-/// that read whatever the submit was answered with.
+/// answers are handed out, because settling a Set does not take the reader
+/// anywhere: the pane reads the Set again where it stands, and a sequence would
+/// hand that read whatever the submit was answered with.
 ///
 /// The fetch mock comes back with it, because what a sheet was filled in with is
-/// read off the request it sent — and so does the history, so a test can say the
-/// page stayed where it was.
+/// read off the request it sent — and so does the way out of the pane, so a test
+/// can say nobody was taken anywhere.
 export async function answering(
   set: SetView,
   ...answers: Array<() => Promise<globalThis.Response>>
@@ -101,13 +115,13 @@ export async function answering(
     whenever(`/api/ui/sets/${set.id}`, () => json(reads(standing))()),
     ...answers,
   );
-  const { container, history } = mount(String(set.id));
+  const { container, back } = mount(String(set.id));
   await waitFor(() => expect(container.querySelector("h1")).toBeTruthy());
 
   return {
     page: container,
     fetching,
-    history,
+    back,
     settles: (into: SetView) => {
       standing = into;
     },
@@ -191,11 +205,11 @@ export function withTable(set: SetView): SetView {
   };
 }
 
-/// Everything the page has *sent* — the submits and the locks, and never the
+/// Everything the pane has *sent* — the submits and the locks, and never the
 /// reads it makes around them.
 ///
 /// The two are counted apart because a settled Set is read back where it stands:
-/// the page does not leave, so a submit is followed by the read that redraws the
+/// the pane does not leave, so a submit is followed by the read that redraws the
 /// sheet as the record. A test counting every call would be counting that too,
 /// and would say "the Response was sent twice" when it was sent once.
 export function posts(
@@ -204,7 +218,7 @@ export function posts(
   return fetching.mock.calls.filter(([, init]) => init?.method === "POST");
 }
 
-/// The body of the last thing the page sent, as JSON — what it actually put on
+/// The body of the last thing the pane sent, as JSON — what it actually put on
 /// the wire, rather than what it was asked to.
 export function sent(fetching: ReturnType<typeof serving>): unknown {
   const last = posts(fetching).at(-1);

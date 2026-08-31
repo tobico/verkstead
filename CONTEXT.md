@@ -12,10 +12,16 @@ still holds word for word, because the asking half is unchanged.
 ## The workbench
 
 **Watched Path**:
-A directory Verkstead is permitted to operate inside, configured in the
-environment at installation. A security boundary rather than a convenience: any
+A directory Verkstead is permitted to operate inside, said either in the
+environment at installation or in the workbench settings, the boundary being
+the union of the two. A security boundary rather than a convenience: any
 filesystem operation on a path outside every Watched Path is refused, and Repos
-are registered only from within one.
+are registered only from within one. The installation's own are resolved once
+at startup and a missing one refuses to start; the settings' own are re-read
+whenever an admission is decided and never refuse anything — one that will not
+resolve covers nothing, with a line in the log — so a bare binary comes up
+watching nothing, admitting nothing, and is pointed at its first directory from
+the settings page's Paths section.
 _Avoid_: project root, workspace, scan path, allowed directory
 
 **Repo**:
@@ -32,6 +38,9 @@ either way. Refused while a Conversation that is neither Done nor Closed is on
 it, the way removing an Agent Profile a Conversation is set to run under is; and
 registering the same path again brings the same Repo back rather than making a
 second one.
+One thing about a registered Repo is configured rather than read off the
+repository: its **resolution strategy**, where its conflicts are to be resolved
+differently from every other Repo's.
 _Avoid_: project, codebase, checkout
 
 **Conversation**:
@@ -39,16 +48,18 @@ The core entity: a Repo, a base commit, a Brief, one branch and one Worktree.
 Everything done about one piece of work hangs off it. Runs through Draft →
 Grilling → Implementing → Wrapping → Done — a roadmap Conversation passes
 straight from Grilling to Wrapping, its building belonging to its Stages — and
-can be closed from any of them, a **Steer** being the one way back into a
-Conversation that is closed or Done. There is one move back down the ladder: a
-wrap-up whose review split its findings out into a backlog returns to
-Implementing to build it, and its finish step wraps up again on the pull request
-it already had, reviewed afresh. **Follow-up** sits beside the ladder rather
-than on it, the way Closed does, and is the one state with no way in but a
-Steer: the human taking something up about work that is already on a pull
-request, and landing back in the wrap-up when they are finished with it.
-*Blocked on you* is a badge on an active state, never a state of its own, and
-*Waiting on checks* is a condition of Wrapping read the same way — where
+can be closed from any of them, a **Steer** being the way back into a
+Conversation that is closed and one of the two ways into one that is Done. There
+is one move back down the ladder: a wrap-up whose review split its findings out
+into a backlog returns to Implementing to build it, and its finish step wraps up
+again on the pull request it already had, reviewed afresh. And one back up it: a
+Done Conversation whose pull request has stopped merging returns to Wrapping at
+one press, reviewed no further — see **Mergeable**. **Follow-up** sits beside
+the ladder rather than on it, the way Closed does, and is the one state with no
+way in but a Steer: the human taking something up about work that is already on
+a pull request, and landing back in the wrap-up when they are finished with it.
+*Blocked on you* is a condition of an active state, never a state of its own,
+and *Waiting on checks* is a condition of Wrapping read the same way — where
 **Closed** is a state of its own, off the ladder rather than on it: every other
 state is somewhere the work has got to, and closing is the work stopping
 wherever it was. Nothing about a Closed Conversation waits on the human:
@@ -103,9 +114,16 @@ out again on the branch that was worked, which is one of the two times a
 Worktree is made without a branch being made with it — a read-only companion's,
 checked out detached, is the other.
 A removal git refuses — a directory it no longer reads as a Worktree — does not
-hold the close up: it is logged with its path and left on disk, closing being
+hold the close up: it is logged with its path and closed around, closing being
 what the human asked for and a directory nobody can be rid of being what they
-were trying to escape.
+were trying to escape. **Nothing under the Data Directory outlives the record
+that named it, though.** Every close ends by sweeping the whole worktrees
+directory, and a server sweeps it again as it comes up: a directory there that
+no live Conversation names is deleted, git's own removal where git still knows
+it and outright where git does not. Which is what reclaims the ones a close was
+refused over, and the ones a crash left behind. A Conversation that is Done
+keeps its checkouts like any other — Done is not Closed, and a Follow-up steer
+works in them.
 Named for the Repo and what the checkout holds — the branch, or the base a
 detached one stands at — and it lives in the Data Directory rather than inside
 a Watched Path: Verkstead made it, so it goes among Verkstead's own things.
@@ -156,9 +174,17 @@ _Avoid_: container, jail, isolation, environment
 The extra writable binds a Sandbox gets beyond that surface — a package
 registry's, a cache Verkstead does not provide — as one global set every Sandbox
 gets plus a per-Repo set composed over it. Configured where the Watched Paths
-are rather than anywhere the workbench can reach: every one of them is a
-directory of somebody else's and a hole in the boundary, and widening a boundary
-is the installer's to do. The **Build Cache** is not one of these and is not
+are, which is now the installation *and* the workbench: `--sandbox-bind DIR` or
+`--sandbox-bind NAME=DIR`, and the same two grammars on the settings page's
+Paths section and on a Repo's own pane. The two sets union, and each keeps its
+own answer to a bind that is not there — the installation's refuses startup, the
+settings' is skipped for that session with a line in the log, because a phone is
+no place to be told a typo cost every session in a Repo its start. Every one of
+them is a directory of somebody else's and a hole in the boundary, so the page
+says what each one costs beside the field that adds it. On a nix install the
+unit's own namespace is still the module's to widen: an entry outside it saves,
+is reported on the page as one the server cannot see, and does nothing until the
+installer widens the unit. The **Build Cache** is not one of these and is not
 configured here.
 _Avoid_: sandbox settings, mounts, extra paths
 
@@ -172,8 +198,9 @@ have a worse experience for not having checked the settings. Where it is is the
 installer's (`--build-cache-dir`, else the XDG cache directory; the packaged
 unit says `/var/cache/verkstead`); whether a Sandbox gets one at all, and how
 big its compiled half may grow, is the human's, in the workbench settings. The
-one control there that reaches inside a Sandbox, and it only ever closes the
-hole. Without an sccache it is still a cache — the crate downloads are shared —
+one control there that only ever *closes* a hole — the **Sandbox
+Configuration** beside it opens them, and does so only for what somebody typed.
+Without an sccache it is still a cache — the crate downloads are shared —
 and the setup card says so on a repository that builds Rust.
 _Avoid_: sccache, cargo cache, artifact cache, shared target dir
 
@@ -320,6 +347,96 @@ commit, a task list, a stage list, a PR, a Notice. Each shows a summary in the
 Timeline and its full self in the details pane. Task lists, stage lists and PRs
 are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
+
+**Share**:
+A read-only copy of one Conversation as a single HTML file, for showing
+somebody what was asked, answered and built without giving them the workbench.
+It is the viewer built to one document with every byte it needs inside it, and
+the record written into it on the way out, so it opens off a disk with no
+network and nothing to install. Taken from the **Share** row in the
+Conversation's actions, and named for the branch and the day.
+**A curated record rather than the whole one**: the Brief, the Question Sets,
+the commits, the Steers and the lifecycle lines board; a session's output, the
+Notices, the Handoff and the pinned cards do not, and nothing marks where they
+would have been.
+**And nothing about the machine it was taken on.** Where the Worktrees sit on
+the disk and which Agent Profile and model each kind of session ran under are
+facts about this Verkstead rather than about the work, so they come off the
+record on the way out and the Brief's own pane draws neither — a Repo goes by
+its name and not by its path. What a share cannot give away is what it does not
+carry.
+**A snapshot as of the moment it was taken**, never a window onto a Conversation
+that goes on moving — sharing again makes another file. And privacy is
+possession: whoever holds the file can read it.
+_Avoid_: export, snapshot (the file is the Share; a snapshot is what it is *of*),
+report
+
+**Published Share**:
+A Share put where a link reaches it, rather than handed over as a file: a
+**secret gist**, made by Verkstead itself through the GitHub token on the
+settings page. Taken from the **Publish** row beside the download, and drawn
+back in the same menu as the link and the day it was taken. What the token needs
+for it is the **`gist` scope**, and a token without it is named on the settings
+page when it is saved rather than found by a press weeks later.
+**The API makes it and git fills it**: the Gists API's cap on what a gist may be
+created with is undocumented and reported at a megabyte, and a Share is several
+— so the gist is created holding a placeholder and the file arrives over a push,
+which has no such cap. A publish that falls over after the gist exists takes it
+back.
+**Publishing again is a fresh snapshot**, in a gist of its own: the record holds
+where to send somebody now, and whatever was already sent goes on standing where
+it was.
+This is Verkstead's own write to GitHub rather than a session's, so it happens as
+the configured token and never as whatever login the host's `gh` has — a
+Verkstead with no token configured refuses instead of falling back.
+_Avoid_: upload, hosting, sharing (the Share is the file; publishing is what is
+done with it), gist link (the gist is where it went, not what it is)
+
+**Share Viewer**:
+The small static page that turns a Published Share into a read. A gist link
+alone shows source — GitHub renders a gist as code, and its raw URL is served as
+plain text a browser refuses to draw — so the page closes the gap: the gist's id
+rides in the **URL fragment**, the Share is fetched from GitHub by the reader's
+own browser, and it is drawn in a **sandboxed frame** with scripts allowed and
+same-origin withheld.
+**Verkstead hosts one and the human may host their own.** Verkstead's copy is
+published to this project's GitHub Pages from the page in the repository, and it
+is what every link is composed through unless the human says otherwise — so a
+Verkstead nobody has configured hands out links that draw. The page is also
+offered as a download on the settings page, and the **share viewer URL** beside
+it is where the human put a copy of their own; that is configuration rather than
+a secret, it reads back as it was written, and an empty one means Verkstead's
+hosted copy rather than no viewer at all.
+**The link is composed as it is drawn**, off the gist URL the record keeps: a
+Published Share taken before a viewer was configured is linked through one now,
+and a viewer that moves retargets every link there is without republishing.
+It learns nothing about what passes through it: a fragment is never sent to a
+server, so the host sees only that somebody opened the page, and the frame keeps
+the Share's own scripts off that host's origin.
+_Avoid_: proxy, server, renderer, gateway (nothing passes through it — the
+reader's browser fetches from GitHub itself)
+
+**Share to Pull Request**:
+The one press that hands the record to whoever is reviewing the work: it takes a
+Share, publishes it, and leaves **one comment on every pull request the
+Conversation holds** — its own Repo's and every Companion Repo's alike. Offered
+only where the record holds a pull request, because a Conversation on none has
+nowhere for it to go.
+The comment carries **the link** — through the Share Viewer, the human's own
+where they host one and Verkstead's hosted copy where they do not — and the
+**itemized summary** of what is in the file: the Brief's first line, the
+Question Sets by title, and the commits by subject with how much each moved.
+Itemized off the Share rather than off the Conversation, so what is listed is
+what a reader will find in it.
+**Comments only, and nothing is ever rewritten**: a pull request's description is
+not touched, and sharing again is a fresh snapshot, a fresh publish and a fresh
+comment on each — what was said before goes on standing where it was said.
+A pull request the comment could not land on — one that has gone, one the token
+may not write on — is **named against the ones that worked** rather than
+swallowed: the Share is published either way, so the human can paste the link
+there themselves.
+_Avoid_: announce, notify, post, broadcast (a comment is left, once, by a press
+the human made)
 
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose
@@ -692,11 +809,13 @@ are.
 *Is it waiting for a press?* Everything but circumstance is: the next server up
 carries a circumstance stop on unasked, and leaves every other one exactly where
 it stands. *Is the human being told?* Verkstead's brake and a stop nobody chose
-carry the full marks — the sidebar's disc and the *blocked on you* badge — and a
-stop the human made themselves carries neither, showing a quiet **Stopped**
-label in the Conversation's header instead, which goes to the same stop Notice.
-They were there when they pressed it, and a mark that appears where nothing
-happened without them is the mark that teaches them to stop reading the marks.
+carry the full marks — the sidebar's disc, and the status button saying
+*Waiting on you* in the accent — and a stop the human made themselves carries
+neither, the button reading a quiet **Stopped** instead. They were there when
+they pressed it, and a mark that appears where nothing happened without them is
+the mark that teaches them to stop reading the marks. Either way the stop
+Notice is on the record and marked where it stands, which is how a long
+Timeline still says where the run got to.
 Push follows the same rule for the same reason: Verkstead's brake reaches a
 phone, a stop nobody chose does not — a restart being free to pick it up — and
 neither does the human's own Stop.
@@ -705,8 +824,8 @@ neither does the human's own Stop.
 Profile has exhausted its window stops the way everything else does, and all
 that tells it apart is what it carries: the Profile that ran out, and — where
 the sentence the session printed carried a time this build could read — when the
-window comes back, as words to show beside the **Resume**. Information rather
-than a timer: nothing counts down to it, and nothing starts when it passes.
+window comes back, as words on the status button's second line, where what
+is running is otherwise said. Information rather than a timer: nothing counts down to it, and nothing starts when it passes.
 Recognition is one phrase read off the Capture and the Transcript, kept in one
 place because the wording is the backend's and will move. The session is ended
 along with the stop, the agent's own wait for the same reset being no reason to
@@ -718,16 +837,19 @@ hold (gone, and nothing replaced it), interruption, error, failure, crash,
 incident, alert, block, rate limit, throttle
 
 **Resume**:
-The one way a stopped Conversation gets going again, standing in the start-work
-menu wherever there is driving to start. It recomputes what *ought* to be
-running now — from the lifecycle the Conversation is in and what its branch has
-written — and starts that, rather than running again whatever it was that
-stopped. A stop may be answered the next morning, and the Conversation moves on
-in the meantime; where the stop carries words about a usage window coming back,
-they stand beside the button as text, and nothing is waiting on them.
+The one way a stopped Conversation gets going again, standing as the first row
+of the conversation actions menu wherever there is driving to start — above the
+stops, being the one *go* among them, and reached from the status button
+that says nothing is driving this as much as from the sidebar's right-click,
+which drops the same rows. It recomputes what *ought* to be running now — from
+the lifecycle the Conversation is in and what its branch has written — and
+starts that, rather than running again whatever it was that stopped. A stop may
+be answered the next morning, and the Conversation moves on in the meantime;
+where the stop carries words about a usage window coming back, they stand on the
+button's second line as text, and nothing is waiting on them.
 
 It carries nothing. Steering the work is what **Steer** is for, so there is no
-note to write and one button rather than one per way of stopping. It is never
+note to write and one row rather than one per way of stopping. It is never
 silent either: either something starts, which the Timeline says by itself, or
 the press is refused by name and the page says which — the backlog that has
 gone, the Pairing that has, the Worktree that is nowhere. A Worktree the record
@@ -910,15 +1032,19 @@ finish flag
 
 **Waiting on checks**:
 What a wrap-up has narrowed to when the review is answered, nothing said on the
-pull request is left unaddressed, the checks alone are outstanding and nothing
-is running in the Worktree. A **Notice** says so on the Timeline, once per
-narrowing; the card carries the words as a label beside the branch, and the
-sidebar row reads them in place of the state word, Wrapping being what has
-narrowed.
+pull request is left unaddressed, every pull request merges, the checks alone
+are outstanding and nothing is running in the Worktree. A **Notice** says so on
+the Timeline, once per narrowing; the status button reads the words where its
+status word goes, and the sidebar row reads them in place of the state word,
+Wrapping being what has narrowed.
+
+A pull request that is not **mergeable** is not this, and says nothing: what
+that one is waiting on is somebody resolving a conflict rather than GitHub
+finishing something.
 
 A condition of Wrapping rather than a state, exactly as *blocked on you* is a
-badge on an active state: the Lifecycle is untouched, and the only thing stored
-is the mark saying the line has been written. What the label is drawn from is
+condition of an active state: the Lifecycle is untouched, and the only thing
+stored is the mark saying the line has been written. What it is drawn from is
 the wrap-up's own settle facts and the sessions register, read together every
 time they are asked.
 
@@ -949,6 +1075,101 @@ beside green and red, exactly as it is for the watcher meeting a `gh` that will
 not answer, and what a card with no rollup draws is no icon.
 _Avoid_: status, CI (the word here is checks), green as a state name, one check
 (the rollup is the whole suite)
+
+**Mergeable**:
+Whether GitHub can merge a pull request into its base as it stands, asked of the
+same `gh` call the **check rollup** comes back in and written down per pull
+request. A branch its base has moved under conflicts without anybody having
+touched it, and nothing lands after that — so being mergeable is one of the
+things a wrap-up waits on before it reaches Done, one settlement per pull
+request beside the checks and the comments.
+
+Three answers and each is its own thing: *mergeable* settles it, *conflicting*
+puts it back to waiting, and *unknown* — which is what GitHub says while it is
+still working the answer out — changes nothing at all and is written down
+nowhere, exactly as a `gh` that will not answer about the checks is. So what
+stands about a pull request is the last thing GitHub actually said about it.
+
+**A conflicting pull request has a session sent at it**, the way a failed check
+does and through the same dispatch: one under the Conversation's implementation
+Pairing, inside the bundled addressing skill, told which pull request will not
+merge and which worktree to work in, and told to put the base branch's work on
+the branch by the configured **resolution strategy**, resolve the conflicts, run
+the repository's tests, commit and push. Two goes per pull request, counted as
+each session is dispatched and kept across a restart; one out of goes waits for
+every other pull request's before the run stops, and the stop's Notice names the
+pull request that would not merge clean. Resume, a steer into Wrapping and the
+press below all forget the count, exactly as they forget the checks'.
+
+**And it goes on being asked after Done.** A wrap-up's watchers stop when the
+Conversation reaches Done, and the pull request goes on sitting there waiting to
+be merged while its base moves under it — so a sweep of its own asks, every
+fifteen minutes, about every Done Conversation's pull requests. What it writes
+down is the same reading and one beside it: where the pull request has got to,
+which is *open*, *merged* or *closed*. A pull request recorded merged or closed
+is never asked about again, that being a question with a final answer; a Closed
+Conversation is never asked about at all, and an **Archived** one with it, a
+human who has closed the work being finished with it. Nothing is dispatched from
+there and nothing moves: after Done a conflict is the human's to decide about,
+and the sweep's part is that the fact is there when they look.
+
+**And the human has one press for it.** A Done pull request's details pane
+offers **Resolve conflicts** while the recorded fact says the branch conflicts,
+and pressing it sends the Conversation back into Wrapping to have another go:
+the conflict is something the wrap-up waits on again, both counts of spent goes
+are forgotten the way Resume forgets them, and the watchers dispatch the
+resolution session by the rules above. The review's settle is deliberately left
+standing — the work was reviewed and carried to Done on the strength of it, and
+a base that has moved underneath it since is not a reason to read the branch
+again — so no review session runs anywhere in it, and the ordinary settling rule
+carries the work back to Done once the resolution pushes and the checks on it go
+green. A press rather than a **Steer**, which would read the branch afresh. The
+Timeline says it in a steer's shape — the human's own line above the machine's
+move, because a long record should say who decided this — and in words of its
+own, because a steer into Wrapping needs no instruction either and the two would
+otherwise be the same line. They are not the same act, and which of them happened
+is the thing a record months old has to be readable back for.
+
+Opening a pull request's details pane asks GitHub the same two things on its way
+to listing the checks, so it freshens both wherever the Conversation has got to —
+the way it already freshens a stale **check rollup**.
+
+**And the conflict is drawn.** The **pull request** card carries a mark beside
+its check rollup wherever the last look said *conflicting*, in whatever state the
+Conversation is in, and the details pane says the same in words. One recorded
+fact drawn one way everywhere, and never guessed at for the rollup's reason: a
+pull request nothing has asked about draws nothing, *mergeable* and *unknown*
+draw nothing, and the mark goes the moment a fresh reading says the conflict is
+gone. What tells an open page to look again is the Nudge the Conversation
+already carries, sent where the word changed rather than on every poll.
+
+*Can be merged* rather than *has been merged*: Verkstead never waits for the
+merge itself, which is the human's act and the one this pipeline is built
+around. The sweep above asks whether it has happened, which is not the same
+thing — it is watching for the moment there is nothing left to watch, rather
+than holding anything up until it comes.
+_Avoid_: merged, landed, mergeability, clean (the words here are mergeable and
+conflicting)
+
+**Resolution strategy**:
+How a resolution session is told to put the base branch's work on a branch that
+conflicts with it: **merge**, which merges the base in and pushes, or **rebase**,
+which rebases the branch onto the base and force-pushes it with a lease. The two
+are different acts on a branch rather than two spellings of one, so the session
+is told which rather than left to pick.
+
+Merge is what a Verkstead nobody has configured does, and that is the whole
+shape of the setting: a rebase rewrites what reviewers have already read and
+breaks anything stacked on the branch, and nobody should meet that for never
+having found a settings page. What it costs is said on the page beside the
+choice.
+
+Said once for every Repo, in `config.yaml` beside the build cache — an absent
+key, an absent file and an unparseable one all mean merge — and any Repo may
+override it, which is a fact about the Repo and lives in the store beside it. A
+Repo that says nothing follows the global setting rather than a copy of what it
+said the day the Repo was registered.
+_Avoid_: merge strategy, conflict policy, force push setting
 
 **Rescue**:
 The canned line Verkstead types into a session that has gone quiet without
@@ -1004,7 +1225,7 @@ out — is registered, rather than by how long nothing has happened. Wrapping
 idles for days under live watchers and is perfectly healthy; so are the gaps
 between an unattended run's Steps. Draft, Done and Closed are never stalled,
 nothing being supposed to drive them.
-_Avoid_: blocked on you (the badge a stall is precisely without), stopped (what
+_Avoid_: blocked on you (the mark a stall is precisely without), stopped (what
 a stall becomes, not what it is), state, stuck, hung, idle
 
 **Archived**:
