@@ -3873,9 +3873,24 @@ describe("a conversation's pairings", () => {
   const pairing = (profile: ProfileEntry, model: string) =>
     `${profile.id}:${model}`;
 
+  /// And what every row of one reads as, in the order the fixture's profiles
+  /// come to.
+  ///
+  /// Spelled out rather than composed from the fixture, because the composing is
+  /// the thing under test: the backend's name, the model's own name, and the
+  /// profile's after an em dash — said here because the fixture holds three
+  /// Claude Code accounts, so which of them a row is cannot be read off the
+  /// model alone.
+  const READINGS = [
+    "Claude Code Fable 5 — fable",
+    "Claude Code Opus 5 — opus",
+    "Claude Code Haiku 4.5 — opus",
+    "Claude Code Sonnet 5 — sonnet",
+  ];
+
   function withConversation(
     view: ConversationView,
-    ...answers: Array<() => Promise<Response>>
+    ...answers: Parameters<typeof serving>
   ) {
     return serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
@@ -3923,9 +3938,13 @@ describe("a conversation's pairings", () => {
     ).toBe(3);
   });
 
-  /// One flat row per profile-and-model combination, labelled with both — a
-  /// profile listing two models is two rows, because a session runs one of
-  /// them and the pick says which.
+  /// One flat row per profile-and-model combination, read as the backend and the
+  /// model — a profile listing two models is two rows, because a session runs
+  /// one of them and the pick says which.
+  ///
+  /// And the profile's own name after each, because the fixture's three accounts
+  /// are all Claude Code ones: with more than one of a backend saved, the name is
+  /// the whole of what tells two rows on one model apart.
   it("offers every profile-and-model combination as one flat list", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
@@ -3935,11 +3954,36 @@ describe("a conversation's pairings", () => {
       (screen.getByLabelText("Implementation") as HTMLSelectElement).options,
     ).map((option) => option.text);
 
-    expect(options).toEqual(
+    expect(options).toEqual(READINGS);
+
+    // What the rows send is untouched by any of that: the profile's id and the
+    // model's own, which is what a session is launched with.
+    expect(
+      Array.from(
+        (screen.getByLabelText("Implementation") as HTMLSelectElement).options,
+      ).map((option) => option.value),
+    ).toEqual(
       PROFILES.flatMap((profile) =>
-        profile.models.map((model) => `${profile.name} — ${model}`),
+        profile.models.map((model) => pairing(profile, model)),
       ),
     );
+  });
+
+  /// A backend with one account saved says no name at all: there is nothing for
+  /// it to tell apart, and the model is the whole of the choice.
+  it("says only the backend and the model where a backend has one account", async () => {
+    withConversation(
+      UNCHOSEN,
+      whenever("/api/ui/profiles", json([PROFILES[0]])),
+    );
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    expect(
+      Array.from(
+        (screen.getByLabelText("Implementation") as HTMLSelectElement).options,
+      ).map((option) => option.text),
+    ).toEqual(["Not chosen", "Claude Code Fable 5"]);
   });
 
   it("sends each choice on its own, to its own role", async () => {
@@ -3993,23 +4037,19 @@ describe("a conversation's pairings", () => {
         (screen.getByLabelText(label) as HTMLSelectElement).options,
       ).map((option) => option.text);
 
-    const combinations = PROFILES.flatMap((profile) =>
-      profile.models.map((model) => `${profile.name} — ${model}`),
-    );
-
     expect(rows("Review")).toEqual([
       // The placeholder, because nothing has been picked yet — and above the
       // accounts, the row that says none of them will read this branch.
       "Not chosen",
       "No review",
-      ...combinations,
+      ...READINGS,
     ]);
     expect(rows("Grilling")).toEqual([
       "Not chosen",
       "No grilling",
-      ...combinations,
+      ...READINGS,
     ]);
-    expect(rows("Implementation")).toEqual(["Not chosen", ...combinations]);
+    expect(rows("Implementation")).toEqual(["Not chosen", ...READINGS]);
   });
 
   /// And picking it sends a choice rather than the absence of one, exactly as
@@ -12905,9 +12945,12 @@ describe("the configuration on the brief's pane", () => {
       // The commit, abbreviated the way every other commit on the page is.
       Base: GRILLING.base_commit!.slice(0, ABBREVIATED),
       Worktree: GRILLING.worktree!.path,
-      Grilling: "fable — claude-fable-5",
-      Implementation: "opus — claude-opus-5",
-      Review: "sonnet — claude-sonnet-5",
+      // The shared reading, which is what every picker of a pairing says too:
+      // the backend, the model, and the account's name after an em dash — said
+      // here because all three of the fixture's accounts are Claude Code ones.
+      Grilling: "Claude Code Fable 5 — fable",
+      Implementation: "Claude Code Opus 5 — opus",
+      Review: "Claude Code Sonnet 5 — sonnet",
     });
   });
 
@@ -12922,7 +12965,7 @@ describe("the configuration on the brief's pane", () => {
     expect(
       configuration().Implementation,
       "and the roles beside it read as they always did",
-    ).toBe("opus — claude-opus-5");
+    ).toBe("Claude Code Opus 5 — opus");
   });
 
   /// And the same one role along: a conversation whose brief went straight to
@@ -12936,7 +12979,42 @@ describe("the configuration on the brief's pane", () => {
     expect(
       configuration().Review,
       "and the roles beside it read as they always did",
-    ).toBe("sonnet — claude-sonnet-5");
+    ).toBe("Claude Code Sonnet 5 — sonnet");
+  });
+
+  /// A profile chosen before models were paired beside them is half a choice,
+  /// and the pane says the half there is: the backend and the account, with no
+  /// model invented for it. The name is said whatever the list holds — with no
+  /// model there is nothing else to tell one account from another.
+  it("says the half there is where a pairing named no model", async () => {
+    theGrillingStanding({
+      implementation_pairing: {
+        ...GRILLING.implementation_pairing!,
+        model: null,
+      },
+    });
+    await openBrief(GRILLING);
+
+    expect(configuration().Implementation).toBe("Claude Code — opus");
+  });
+
+  /// And the account's name is dropped where its backend has one account saved:
+  /// there is nothing for the name to tell apart, and the model is the whole of
+  /// what ran the work.
+  ///
+  /// The grilling's account is not one of them any more — this is the list as it
+  /// stands, and a Pairing carries the Profile it was settled with — so its name
+  /// stays: dropping it would read as the account that happens to be left.
+  it("says only the backend and the model where a backend has one account", async () => {
+    theGrillingStanding({}, whenever("/api/ui/profiles", json([PROFILES[1]])));
+    await openBrief(GRILLING);
+
+    // Awaited, because the name is what the pane says until the list has been
+    // read: saying it can never misattribute a run, and dropping it can.
+    await waitFor(() =>
+      expect(configuration().Implementation).toBe("Claude Code Opus 5"),
+    );
+    expect(configuration().Grilling).toBe("Claude Code Fable 5 — fable");
   });
 
   it("lists each companion with its mode, its branch and its directory", async () => {

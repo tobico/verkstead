@@ -8,16 +8,34 @@
 
 import { describe, expect, it } from "vitest";
 
+import { AGENT_NAME } from "../src/agents";
 import { KNOWN_MODELS, known, prettify } from "../src/models";
 
 describe("the known models", () => {
-  it("gives every one of them a pretty name and an id", () => {
+  /// A backend apiece as well as a name, because the profile form offers one
+  /// backend's models at a time: an entry naming a backend nobody has a name for
+  /// is one nothing would offer.
+  it("gives every one of them a pretty name, an id and a backend", () => {
     expect(KNOWN_MODELS.length).toBeGreaterThan(0);
 
     for (const model of KNOWN_MODELS) {
-      expect(model.id).toMatch(/^claude-/);
+      expect(model.id).not.toBe("");
       expect(model.name).not.toBe("");
       expect(model.name).not.toBe(model.id);
+      expect(AGENT_NAME[model.agent]).toBeTruthy();
+    }
+  });
+
+  /// Every backend that can launch has at least one model written down. Not a
+  /// rule about the world — an account can be given an id by hand — but the
+  /// picks are the ordinary way in, and a backend with none would be a form that
+  /// looked broken until somebody guessed at a spelling.
+  it("knows a model for every backend", () => {
+    for (const agent of Object.keys(AGENT_NAME)) {
+      expect(
+        KNOWN_MODELS.some((model) => model.agent === agent),
+        `nothing is written down for ${agent}`,
+      ).toBe(true);
     }
   });
 

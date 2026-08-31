@@ -42,10 +42,13 @@
 //! The models are one of those fields, and a profile carries the whole list of
 //! them: a profile reaches one account with one configuration, so what it can
 //! launch is its own rather than a list every profile shares. They are picked
-//! off the models this build knows, with a field beside the picks for an id it
-//! does not — the list goes stale the week another model ships, which is why it
-//! is the ordinary way in rather than the only one. The line-a-piece textarea
-//! this replaces was the whole of it, and made every profile a spelling test.
+//! off the models this build knows *of the picked agent type* — a model belongs
+//! to one backend, and a tick for another backend's would be an invitation to
+//! save a profile that cannot launch — with a field beside the picks for an id
+//! the build does not know: the list goes stale the week another model ships,
+//! which is why it is the ordinary way in rather than the only one. The
+//! line-a-piece textarea this replaces was the whole of it, and made every
+//! profile a spelling test.
 //!
 //! The agent type is picked rather than said. It was said while there was one of
 //! it — a select with a single option is theatre — and there is a second backend
@@ -82,6 +85,7 @@ import {
   editProfile,
   listProfiles,
 } from "../api/client";
+import { AGENT_NAME, type AgentType } from "../agents";
 import type {
   Broken,
   ProfileAccount,
@@ -144,10 +148,6 @@ export const BROKEN: Record<Broken, string> = {
   HomeMissing: "The home it kept its account under is gone.",
   OutsideWatchedPaths: "Its account now points outside the watched paths.",
 };
-
-/// Which agent a profile runs, which is the discriminator its account is shaped
-/// by.
-type AgentType = ProfileAccount["agent_type"];
 
 /// One path an account of some agent type is: the key it is held under, what the
 /// label over it says, and an example to type into it.
@@ -239,17 +239,6 @@ const BLANK_ACCOUNT: Record<AgentType, ProfileAccount> = {
   Codex: { agent_type: "Codex", home: "" },
   Grok: { agent_type: "Grok", home: "" },
   OpenCode: { agent_type: "OpenCode", home: "" },
-};
-
-/// And what each type is called over its picker.
-///
-/// The backend's own name rather than the discriminator, which is the word the
-/// record is written in and not one anybody would recognise their account by.
-const AGENT_NAME: Record<AgentType, string> = {
-  Claude: "Claude Code",
-  Codex: "Codex",
-  Grok: "Grok Build",
-  OpenCode: "OpenCode",
 };
 
 /// An empty form: what "add a profile" starts from.
@@ -543,16 +532,32 @@ export function ProfilePane(props: {
     setRefused(null);
   };
 
-  /// Every model the form draws a tick for: the ones this build knows, and any
-  /// this profile carries that it does not — one saved while the field was free
-  /// text, or one added by hand since.
+  /// The models this build knows that the picked agent type can launch: the
+  /// ticks the form offers of its own.
   ///
-  /// The unknown ones after the known ones rather than in the profile's own
-  /// order, because the known list stands in the same order on every profile and
-  /// one that shuffled itself per profile would be a list nobody could scan.
+  /// Filtered by the type the form is on rather than the whole list, because a
+  /// model is one backend's — a Claude Code account cannot be launched on
+  /// `grok-4.6`, and a tick for it would be an invitation to save a profile that
+  /// cannot run. Picking another type therefore changes what is offered, the way
+  /// it changes which account paths are asked for.
+  const launchable = (): string[] =>
+    KNOWN_MODELS.filter(
+      (model) => model.agent === form().account.agent_type,
+    ).map((model) => model.id);
+
+  /// Every model the form draws a tick for: those, and any this profile carries
+  /// that they do not cover — an id this build has never heard of, one saved
+  /// while the field was free text, or one belonging to a backend this profile
+  /// is no longer on.
+  ///
+  /// The profile's own after the offered ones rather than in the profile's own
+  /// order, because the offered list stands in the same order on every profile
+  /// and one that shuffled itself per profile would be a list nobody could scan.
+  /// Drawn at all because a tick is how a model is taken *off* a profile: one
+  /// the form hid would be one nobody could untick.
   const offered = (): string[] => [
-    ...KNOWN_MODELS.map((model) => model.id),
-    ...form().models.filter((model) => !known(model)),
+    ...launchable(),
+    ...form().models.filter((model) => !launchable().includes(model)),
   ];
 
   /// A model ticked or unticked.

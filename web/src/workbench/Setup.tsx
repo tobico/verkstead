@@ -371,9 +371,13 @@ function PairingPicker(props: {
   /// it before the accounts.
   const rows = (): Row[] => [
     ...(props.away ? [{ value: pairing.NONE, label: props.away }] : []),
-    ...pairing
-      .pairings(props.saved)
-      .map((row) => ({ value: pairing.value(row), label: pairing.label(row) })),
+    ...pairing.pairings(props.saved).map((row) => ({
+      value: pairing.value(row),
+      // The whole list beside each row, because how one reads depends on the
+      // rest of it: the profile's name is said after the model only where its
+      // backend has more than one account saved.
+      label: pairing.label(row, props.saved),
+    })),
   ];
 
   const choose = useMutation(() => ({

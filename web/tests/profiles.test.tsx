@@ -846,20 +846,69 @@ describe("the models a profile lists", () => {
     return serving(whenever("/api/ui/profiles", json([MIXED])), ...answers);
   }
 
+  /// Every model this build knows *of the profile's own agent type*, and no
+  /// other: a model belongs to one backend, and a tick for another backend's
+  /// would be an invitation to save a profile that cannot launch.
+  ///
   /// The name is the viewer's word for the model and the id is what the session
   /// is launched with, so both are on the row: one to read, one to check.
-  it("offers every model this build knows, by name and by id", async () => {
+  it("offers every model this build knows for that backend", async () => {
     theProfiles();
     mountPane(FABLE.id);
 
     await waitFor(() => screen.getByLabelText("Fable 5"));
 
-    for (const model of KNOWN_MODELS) {
+    const claude = KNOWN_MODELS.filter((model) => model.agent === "Claude");
+
+    for (const model of claude) {
       expect(screen.getByLabelText(model.name)).toBeTruthy();
     }
     expect(offered()).toEqual(
-      KNOWN_MODELS.map((model) => `${model.name}${model.id}`),
+      claude.map((model) => `${model.name}${model.id}`),
     );
+
+    // And nothing of anybody else's: `grok-4.6` is a model this build knows the
+    // name of and a Claude Code account cannot be launched on.
+    expect(screen.queryByLabelText("Grok 4.6")).toBeNull();
+  });
+
+  /// And a profile of another type is offered that type's own, which is the same
+  /// list read the other way round.
+  it("offers another backend's models on a profile of that backend", async () => {
+    const grok: ProfileEntry = {
+      ...FABLE,
+      account: { agent_type: "Grok", home: "/srv/accounts/grok" },
+      models: ["grok-4.6"],
+    };
+    serving(whenever("/api/ui/profiles", json([grok])));
+    mountPane(grok.id);
+
+    await waitFor(() => screen.getByLabelText("Grok 4.6"));
+
+    expect(offered()).toEqual(
+      KNOWN_MODELS.filter((model) => model.agent === "Grok").map(
+        (model) => `${model.name}${model.id}`,
+      ),
+    );
+    expect(screen.queryByLabelText("Fable 5")).toBeNull();
+  });
+
+  /// Picking another type on the form changes what is offered with it, the way
+  /// it changes which account paths are asked for — and what the profile already
+  /// carries stays on the form under them, because a tick is how a model is
+  /// taken off a profile and one the form hid would be one nobody could untick.
+  it("changes the models offered when the agent type is picked", async () => {
+    theProfiles();
+    mountPane(FABLE.id);
+
+    await waitFor(() => screen.getByLabelText("Fable 5"));
+    fireEvent.change(screen.getByLabelText("Agent"), {
+      target: { value: "Grok" },
+    });
+
+    await waitFor(() => screen.getByLabelText("Grok 4.6"));
+    expect(screen.queryByLabelText("Opus 5")).toBeNull();
+    expect(ticked()).toEqual(FABLE.models);
   });
 
   /// The picks are what the profile says, ticked: a list saved before there were

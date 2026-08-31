@@ -1002,7 +1002,10 @@ export function Steer(props: {
                   id="steer-pairing"
                   options={pairing.pairings(saved())}
                   value={pairing.value}
-                  label={pairing.label}
+                  // The whole list beside each row: the profile's name is said
+                  // after the model only where its backend has more than one
+                  // account saved.
+                  label={(row) => pairing.label(row, saved())}
                   chosen={picked()}
                   pick={pick}
                   gone={() => pick("")}
