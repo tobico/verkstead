@@ -508,6 +508,24 @@ impl Grilling {
         std::fs::write(directory.join("asked"), "").unwrap();
     }
 
+    /// And take it away again, which is what says the Set that was up has been
+    /// answered and no other is.
+    ///
+    /// **The marker is one Conversation's rather than one session's**, the
+    /// handoff directory being the Conversation's — so a Set answered early in
+    /// a run would otherwise go on telling every session after it that somebody
+    /// is asking. What that costs is a session that falls straight through the
+    /// loop it was meant to talk through, goes quiet with nothing of its own
+    /// open, and is ended before the test has asked it anything: the fixture
+    /// racing an ender rather than anything about the work.
+    fn asked_nothing(&self) {
+        let asked = handoff_directory(self).join("asked");
+
+        if asked.exists() {
+            std::fs::remove_file(asked).unwrap();
+        }
+    }
+
     /// Answer it the way the human does, from the browser.
     async fn answer(&self, set_id: i64) -> Submitted {
         post(
@@ -5648,6 +5666,11 @@ async fn worked_to_empty(fixture: &Grilling) {
 
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // And nobody is asking again from here, which the sessions that come after
+    // this one have to be told — see [`Grilling::asked_nothing`]. A wrap-up's
+    // review is one of them, and it talks until the test puts its Set up.
+    fixture.asked_nothing();
 
     fixture
         .until(|view| {
