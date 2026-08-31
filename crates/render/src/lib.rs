@@ -67,8 +67,8 @@ pub use settings::{
     Verified, WatchedPathEntry,
 };
 pub use sharing::{
-    CommentedOn, MissedOut, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    itemized, shared, shared_commit,
+    CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,
+    SharedConversation, itemized, shared, shared_commit,
 };
 pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,

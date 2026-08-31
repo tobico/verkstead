@@ -435,6 +435,13 @@ A pull request the comment could not land on — one that has gone, one the toke
 may not write on — is **named against the ones that worked** rather than
 swallowed: the Share is published either way, so the human can paste the link
 there themselves.
+**And nothing is ever dispatched about it.** The comment ends with an invisible
+marker — an HTML comment, so a reader sees nothing where it sits — and Wrapping
+drops any comment carrying it at the start of a line, wherever it reads comments.
+It is left as the configured token, which is usually the human's own account, so
+nothing about who said it could tell it from what they write themselves. A human
+quote-replying to it is still somebody to answer: GitHub puts a `>` in front of
+every quoted line, so the marker no longer begins one.
 _Avoid_: announce, notify, post, broadcast (a comment is left, once, by a press
 the human made)
 

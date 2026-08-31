@@ -1412,6 +1412,19 @@ const THREE_COMMENTS: &str = r#"{"id":"IC_1","author":{"login":"tobico"},"body":
 {"id":"IC_2","author":{"login":"tobico"},"body":"And the test that pins it.","createdAt":"2026-08-21T09:00:20Z"},
 {"id":"IC_3","author":{"login":"tobico"},"body":"Otherwise this reads well.","createdAt":"2026-08-21T09:00:40Z"}"#;
 
+/// The comment Share to Pull Request leaves, and a human quote-replying to it.
+///
+/// Verkstead's own is written by the configured token — the human's own account,
+/// as it usually is — so who said it tells the two apart in neither direction.
+/// The marker at the start of the share's last line is the whole of it, and the
+/// reply carries that same marker inside a quote, where GitHub has put a `>` in
+/// front of every line of it.
+///
+/// The `\n` are doubled so that `printf` writes them rather than a newline: a
+/// literal newline inside a JSON string is not JSON.
+const A_SHARE_AND_A_REPLY: &str = r#"{"id":"IC_1","author":{"login":"tobico"},"body":"[Read this conversation](https://x/#9f1)\\n\\nA limiter that counts across instances.\\n\\n<!-- verkstead:shared-conversation -->\\n","createdAt":"2026-08-21T09:00:00Z"},
+{"id":"IC_2","author":{"login":"tobico"},"body":"> [Read this conversation](https://x/#9f1)\\n>\\n> <!-- verkstead:shared-conversation -->\\n\\nWhich of these is the one to keep?","createdAt":"2026-08-21T09:05:00Z"}"#;
+
 /// And two left on the lines of the diff, which is where a review of code
 /// mostly happens — the entries of the REST endpoint's answer, spelled its way.
 const TWO_ON_THE_DIFF: &str = r#"{"node_id":"PRRC_1","user":{"login":"tobico"},"body":"This is the wrong way round.","created_at":"2026-08-21T09:03:00Z","path":"src/window.rs","line":12},
@@ -10115,6 +10128,74 @@ async fn what_was_already_said_reaches_the_review_rather_than_a_session_of_its_o
     assert!(
         !dispatched.exists(),
         "and nothing was dispatched to act on any of it: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+}
+
+/// The comment a share leaves on a pull request is Verkstead's own, so nothing is
+/// ever dispatched about it and the review is never given it — while a human
+/// quote-replying to it is somebody to answer like anybody else.
+///
+/// Share to Pull Request writes as the configured token, which is usually the
+/// human's own account, so no rule about who said it could tell the two apart:
+/// the marker at the start of a line is what does. Quote-replying puts a `>` in
+/// front of every line of what is quoted, which is why the rule is written about
+/// the start of a line and not about the text appearing at all.
+///
+/// The checks cannot be asked about, which keeps the Conversation wrapping up
+/// long enough to watch nothing happen.
+#[tokio::test]
+async fn the_comment_a_share_left_is_never_addressed_and_a_reply_to_it_is() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    assert!(
+        A_SHARE_AND_A_REPLY.contains(verkstead_render::SHARE_MARKER),
+        "the fixture is the comment a share actually leaves",
+    );
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(CHECKS_UNANSWERABLE, A_SHARE_AND_A_REPLY, ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let told = until_written(&reviews).await;
+
+    assert!(
+        !told
+            .lines()
+            .any(|line| line.starts_with(verkstead_render::SHARE_MARKER)),
+        "what Verkstead said itself was not folded into the review: {told}",
+    );
+    assert!(
+        told.contains("Which of these is the one to keep?"),
+        "and the human's reply to it was: {told}",
+    );
+
+    // Nothing is left unaddressed: the reply went to the review, and the share's
+    // own comment was never anything to address.
+    let deadline = Instant::now() + *PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the pull request never settled, so the share's own comment was read \
+             as something to answer",
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Long enough for many more polls of a pull request the share comment is
+    // still standing on, and will be standing on for ever.
+    pause(Duration::from_millis(500)).await;
+
+    assert!(
+        !dispatched.exists(),
+        "and no session was dispatched about any of it: {:?}",
         std::fs::read_to_string(&dispatched).ok(),
     );
 }

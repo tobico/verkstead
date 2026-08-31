@@ -91,6 +91,15 @@
 //! it: Verkstead does not know what has been said, and *nobody said anything* is
 //! not a thing to conclude from not knowing.
 //!
+//! **Except what Verkstead itself said.** The comment Share to Pull Request
+//! leaves ends with a marker of its own — see [`verkstead_render::SHARE_MARKER`]
+//! — and a comment carrying it at the start of a line is dropped wherever the
+//! comments are read: the fresh ones a batch session would be dispatched about
+//! and the standing ones folded into the review alike, on a companion's pull
+//! request as much as on the Conversation's own. It is posted by the configured
+//! token, which is usually the human's own account, so nothing about who said it
+//! could tell it from what they write themselves. See [`verkstead_said_it`].
+//!
 //! Nothing here ever asks the human itself. What asks is the session dispatched
 //! about a batch, which puts what it would do to them rather than what they
 //! said: their own words back at them would be the one question with nothing
@@ -334,6 +343,9 @@ async fn once(state: &AppState, conversation_id: i64, repo_id: i64) -> Watching 
 /// `None` is GitHub not having been asked, which is neither *nothing was said*
 /// nor *something was*. An empty list is the answer that there is nothing new,
 /// which is every pull request the moment it opens.
+///
+/// What a share left is not new and never was — see [`verkstead_said_it`], which
+/// is the one comment neither of the two readers is ever given.
 async fn unaddressed(
     state: &AppState,
     conversation_id: i64,
@@ -380,8 +392,32 @@ async fn unaddressed(
     Some(
         said.into_iter()
             .filter(|comment| !already.contains(&comment.which))
+            .filter(|comment| !verkstead_said_it(&comment.markdown))
             .collect(),
     )
+}
+
+/// Whether this is the comment a share left rather than something somebody wants
+/// addressed.
+///
+/// Share to Pull Request writes as the configured token, which is usually the
+/// human's own account — so no rule about who said it could tell Verkstead's own
+/// comment from theirs, and the marker in the body is what does instead. Built
+/// in and never configurable: it is Verkstead answering for what Verkstead
+/// wrote.
+///
+/// **At the start of a line**, which is what leaves a reply to the share
+/// something to answer: quote-replying on GitHub prefixes every line with `>`,
+/// so the marker travels along inside the quote without ever beginning a line,
+/// and what the human wrote under it is dispatched for like anything else.
+///
+/// Dropped by inspection on every poll rather than written down as addressed.
+/// The comment is Verkstead's own for as long as it exists, so there is nothing
+/// to remember: a server that came back up reads it as its own again.
+fn verkstead_said_it(markdown: &str) -> bool {
+    markdown
+        .lines()
+        .any(|line| line.starts_with(verkstead_render::SHARE_MARKER))
 }
 
 /// Whether the wrap-up's review is over, which is what says a comment is a batch
@@ -828,6 +864,52 @@ mod tests {
             !said.contains("push") && !said.contains("do it"),
             "with nothing telling it to act on them: {said}",
         );
+    }
+
+    /// The comment Share to Pull Request leaves is Verkstead's own, so neither
+    /// session is ever given it: it is written as the configured token, which is
+    /// usually the human's own account, and the marker in the body is the whole
+    /// of how it is told from what they write themselves.
+    #[test]
+    fn the_comment_a_share_left_is_verksteads_own() {
+        assert!(verkstead_said_it(&shared()));
+    }
+
+    /// And a human quote-replying to it is somebody talking. GitHub prefixes
+    /// every line of a quote with `>`, so the marker rides along in the middle of
+    /// a line rather than at the start of one — which is why the rule is written
+    /// about the start of a line.
+    #[test]
+    fn a_quote_reply_of_the_share_is_still_somebody_to_answer() {
+        let quoted: String = shared()
+            .lines()
+            .map(|line| format!("> {line}\n"))
+            .collect::<String>()
+            + "\nWhich of these is the one to keep?\n";
+
+        assert!(!verkstead_said_it(&quoted), "{quoted}");
+    }
+
+    /// Nothing else is. A comment that happens to say what the marker is — this
+    /// one — is a human writing about it rather than a share leaving one.
+    #[test]
+    fn a_comment_that_only_mentions_the_marker_is_addressed_like_any_other() {
+        assert!(!verkstead_said_it(&format!(
+            "The share writes {} at the end. Is that deliberate?",
+            verkstead_render::SHARE_MARKER,
+        )));
+        assert!(!verkstead_said_it("Rename the `window` field."));
+    }
+
+    /// The share comment as it is left: the link, the itemization, and the
+    /// marker on a line of its own at the end.
+    fn shared() -> String {
+        format!(
+            "[Read this conversation](https://x/#9f1) — a read-only copy of \
+             `rate-limiting`, taken 2026-08-30.\n\nA limiter that counts across \
+             instances.\n\n{}\n",
+            verkstead_render::SHARE_MARKER,
+        )
     }
 
     /// A batch session is told where to work, for the reason a fix session is:
