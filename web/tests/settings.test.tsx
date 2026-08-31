@@ -872,21 +872,74 @@ describe("the ignore rules", () => {
 
   /// And the refusal there is no box to draw at, which is the rule itself: a
   /// row with neither pattern would ignore every comment there is.
+  ///
+  /// The page never sends one — a blank row comes off before the save goes out
+  /// — so what this covers is the drawing rather than the way there: the
+  /// refusal is the endpoint's, and anything that posts to it can be answered
+  /// with one.
   it("draws a rule refused as a whole at its row", async () => {
     const why =
       "a rule with neither field would ignore every comment there is, so it " +
       "needs an author, a body, or both";
-    theSettings(TOLD, json(turnedDown({ rule: 1, field: null, why })));
+    theSettings(TOLD, json(turnedDown({ rule: 0, field: null, why })));
+    mountPane();
+    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+
+    fireEvent.input(boxes(0)[0], { target: { value: "dependabot" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => screen.getByText(why));
+    // The row it named is still there, refused rather than dropped, with what
+    // was typed in it still in front of the human.
+    expect(screen.getAllByLabelText(/^Author,/)).toHaveLength(1);
+    expect(boxes(0)[0].value).toBe("dependabot");
+  });
+
+  /// A row nobody wrote anything in is not a rule, so it never goes out — which
+  /// is what keeps a mis-tapped *Add a rule* from turning down a save about the
+  /// author or the token, the one thing the whole `Keep`/`Set` arrangement is
+  /// there to prevent.
+  it("does not send a row nobody wrote anything in", async () => {
+    const fetching = theSettings(TOLD, json(SAVED));
     mountPane();
     await waitFor(() => screen.getAllByLabelText(/^Author,/));
 
     fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
     await waitFor(() => expect(boxes(1)[0]).toBeTruthy());
+    fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "Ada Byron" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => screen.getByText(why));
-    // The row it named is still there, empty and refused rather than dropped.
-    expect(screen.getAllByLabelText(/^Author,/)).toHaveLength(2);
+    await waitFor(() =>
+      expect(
+        (sent(fetching) as { ignored_comments: unknown }).ignored_comments,
+      ).toEqual({ Set: { rules: [{ author: RULE.author, body: RULE.body }] } }),
+    );
+
+    // And it comes off the page with the press, so what is drawn and what was
+    // sent are one list.
+    await waitFor(() =>
+      expect(screen.getAllByLabelText(/^Author,/)).toHaveLength(1),
+    );
+  });
+
+  /// Which is also how a rule is deleted without pressing Remove: clearing both
+  /// boxes says as much, and the save that follows says the list is shorter.
+  it("sends the list without a rule whose boxes were cleared", async () => {
+    const fetching = theSettings(TOLD, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+
+    fireEvent.input(boxes(0)[0], { target: { value: "" } });
+    fireEvent.input(boxes(0)[1], { target: { value: "  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(
+        (sent(fetching) as { ignored_comments: unknown }).ignored_comments,
+      ).toEqual({ Set: { rules: [] } }),
+    );
   });
 
   /// A refusal is the whole request refused, so nothing else the form was

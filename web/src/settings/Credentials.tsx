@@ -46,6 +46,13 @@
 //! only once somebody has touched one, and a save about an email address is
 //! one the server cannot turn down.
 //!
+//! **A row nobody wrote anything in is not a rule**, and comes off the page as
+//! the save goes out. That is how a rule is deleted — clearing both boxes says
+//! as much as pressing Remove does — and it is what keeps a row somebody added
+//! and never filled in from turning down the save it rode along with. The
+//! server refuses a rule that constrains nothing, and this is what means the
+//! page never asks it to.
+//!
 //! A refusal is the whole request refused: neither file is written, and what
 //! comes back names the row and the box it is about. So it is drawn at that
 //! row, with everything the human typed left exactly where they left it.
@@ -276,8 +283,32 @@ export function GithubPane(props: {
     refusals().find((was) => was.rule === at && was.field === field)?.why ??
     null;
 
+  /// Whether a row is a rule at all, which is whether anything was written in
+  /// either of its boxes. Emptiness is decided the way the server decides it —
+  /// by what is left after the spaces — so the two halves agree about which
+  /// rows are rules.
+  const written = (rule: IgnoreRule): boolean =>
+    rule.author.trim() !== "" || rule.body.trim() !== "";
+
+  /// The rows nobody has written anything in, taken off the page as the save
+  /// goes out — which is how a rule is deleted, and what stops a row the human
+  /// added and never filled in refusing the save it rode along with.
+  ///
+  /// Taken off the page rather than merely left out of the request, so that
+  /// what is drawn and what was sent are one list: a refusal names a rule by
+  /// where it stood in what was sent, and a request that quietly left rows out
+  /// would have those numbers pointing at the wrong boxes.
+  const tidied = () => {
+    const edited = rules();
+
+    if (edited !== null) {
+      setRules(edited.filter(written));
+    }
+  };
+
   /// What the save says about the rules: nothing at all until somebody has
-  /// touched a row, and the whole list in the order it is drawn once they have.
+  /// touched a row, and the whole list in the order it is drawn once they have
+  /// — the blank rows having been taken off it by [`tidied`] first.
   const ruleEdit = (): IgnoredCommentsEdit => {
     const edited = rules();
 
@@ -356,6 +387,12 @@ export function GithubPane(props: {
     // being made now: the answer to this one says what is wrong with what is
     // being sent this time.
     setRefusals([]);
+
+    // And a row nobody wrote anything in is not a rule, so it goes before the
+    // list is read off the page — see [`tidied`]. Which is what makes clearing
+    // a row a way to delete it, and what keeps a blank row somebody added and
+    // left from turning down a save about their own email address.
+    tidied();
 
     save.mutate({
       git_author: { name: authorName(), email: authorEmail() },
