@@ -13,10 +13,11 @@ Each stage is one feature: one branch, one review unit. Task chunkings inside
 the briefs are provisional — re-grounded against the codebase when the stage
 starts.
 
-Partly reorderable: 02 needs 01, and 03, 04 and 05 each need 02. After that
-03–05 can run in any order, with one string between them: the "sessions need
-Linux" UI state lands in the first non-Linux stage to run — 04 as ordered — and
-whichever of them runs later reuses it.
+Partly reorderable: 02 needs 01, and 03, 04 and 05 each need 02. 03 comes
+first of the three, because it lays the shared release plumbing and the
+packaging assets that 04 and 05 both build on. After that 04 and 05 run in
+either order, with one string between them: the "sessions need Linux" UI state
+lands in whichever runs first — 04 as ordered — and the other reuses it.
 
 ## Stages
 

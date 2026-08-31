@@ -37,9 +37,11 @@ stage 04's UI state — attached to releases by a Windows leg of the workflow.
    startup, dialog on taken port, logs under `%LOCALAPPDATA%`. Accepts: manual
    smoke on a Windows machine or runner screenshotting; unit tests where the
    tray libs allow.
-3. **Release leg** — a `windows-latest` job builds and attaches the exe, with
-   launch assertions. Accepts: tag run attaches `verkstead-desktop-windows-x64.exe`
-   (naming per the existing scheme).
+3. **Release leg** — a `windows-latest` job builds the exe on the plumbing
+   stage 03 laid: a build leg and an artifact name, and nothing about
+   `publish` — with launch assertions of its own. Accepts: tag run attaches
+   `verkstead-desktop-windows-x64.exe` (naming per the existing scheme, and per
+   what stage 03 taught `publish` to carry).
 
 ## Re-verify at start
 

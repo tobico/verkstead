@@ -34,8 +34,10 @@ the unsigned-app approval steps.
 2. **Bundle and dmg** — scripted `.app` layout (Info.plist, icns from the
    hammer icon), `lipo`, dmg packing. Accepts: script runs on a macos runner;
    the app launches from the mounted dmg on a fresh runner.
-3. **Release leg and docs** — the macOS desktop job joins `release.yml`; the
-   README gains the unsigned-open steps. Accepts: tag run attaches the dmg.
+3. **Release leg and docs** — the macOS desktop job joins `release.yml` on the
+   plumbing stage 03 laid: a build leg and an artifact name, and nothing about
+   `publish`. The README gains the unsigned-open steps. Accepts: tag run
+   attaches the dmg.
 
 ## Re-verify at start
 
