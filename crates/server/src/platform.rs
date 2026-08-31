@@ -2,7 +2,7 @@
 //! platform's own place for it, resolved by hand out of the environment values
 //! that platform keeps the answer in.
 //!
-//! Two directories are resolved here. The **Data Directory** is
+//! Three directories are resolved here. The **Data Directory** is
 //! `~/.local/share/verkstead` on Linux, `~/Library/Application
 //! Support/Verkstead` on macOS and `%APPDATA%\Verkstead` on Windows unless
 //! `--data-dir` says otherwise. Everything it holds moves with it, because it
@@ -15,6 +15,12 @@
 //! what such a directory even *is* — state on Linux, logs on macOS, the local
 //! rather than the roaming application data on Windows — so it is one helper
 //! with three arms rather than one notion spelled three ways.
+//!
+//! The **Build Cache** is the third, and the odd one: `$XDG_CACHE_HOME` or
+//! `~/.cache/verkstead`, read the XDG way on every platform rather than three
+//! ways. It is here because the reading is here — [`crate::build_cache`] owns
+//! everything else about that directory, including being the one directory
+//! Verkstead makes outside its own.
 //!
 //! **By hand rather than by crate.** `dirs` would answer Linux and macOS out of
 //! the same environment variables this does, and then answer Windows through a
@@ -29,13 +35,15 @@
 //! That is what leaves the tests reading values they were handed rather than
 //! mutating the ones the process has: `std::env::set_var` is `unsafe` under
 //! this edition and races every other test in its binary, which is why the
-//! Build Cache's own resolution has no unit test at all.
+//! Build Cache's own resolution went untested for as long as it read the
+//! process itself.
 
 use std::path::{Path, PathBuf};
 
 /// The name Verkstead's own directory takes where the platform's convention is
 /// the binary's name in lowercase — Linux, where it stands among the
-/// `~/.local/share` neighbours that are named for their programs.
+/// `~/.local/share` neighbours that are named for their programs, and the XDG
+/// cache directory wherever that is read.
 const LOWERCASE: &str = "verkstead";
 
 /// And where the convention is the product's name as a human writes it — macOS
@@ -96,6 +104,10 @@ pub struct Environment {
     /// than following a roaming profile around — where a log file belongs, and
     /// the only thing the Windows arm reads for the Log Directory.
     pub local_appdata: Option<PathBuf>,
+
+    /// `$XDG_CACHE_HOME`, which the Build Cache is resolved out of on every
+    /// platform rather than on Linux alone — see [`default_cache_dir`].
+    pub xdg_cache_home: Option<PathBuf>,
 }
 
 impl Environment {
@@ -108,6 +120,7 @@ impl Environment {
             appdata: std::env::var_os("APPDATA").map(PathBuf::from),
             xdg_state_home: std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
             local_appdata: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
+            xdg_cache_home: std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from),
         }
     }
 }
@@ -184,6 +197,32 @@ pub fn default_log_dir(platform: Platform, env: &Environment) -> Option<PathBuf>
             .join(CAPITALISED),
         Platform::Windows => set(env.local_appdata.as_deref())?.join(CAPITALISED),
     };
+
+    Some(dir)
+}
+
+/// The Build Cache this machine gives Verkstead when nobody has said, or `None`
+/// where it names nowhere to put one.
+///
+/// The read of the process environment for the third of them, and what
+/// [`crate::build_cache`] resolves against — that module owns everything else
+/// about the cache, including making it and refusing startup where it cannot
+/// be made.
+pub fn cache_dir() -> Option<PathBuf> {
+    default_cache_dir(&Environment::of_the_process())
+}
+
+/// Where the Build Cache goes when nobody has said, out of `env`:
+/// `$XDG_CACHE_HOME/verkstead` where that is set to an absolute path, and
+/// `~/.cache/verkstead` otherwise.
+///
+/// **The one resolution here with no platform to take**, and deliberately: the
+/// cache is read the XDG way wherever the server is compiled for, which is what
+/// it has always done. Where a build cache belongs on a Mac is a question for
+/// the stage that compiles on one, and moving it is not this module's to decide
+/// on the way past.
+pub fn default_cache_dir(env: &Environment) -> Option<PathBuf> {
+    let dir = xdg(env.xdg_cache_home.as_deref(), env.home.as_deref(), ".cache")?.join(LOWERCASE);
 
     Some(dir)
 }
@@ -528,6 +567,82 @@ mod tests {
                  the working directory",
             );
         }
+    }
+
+    /// The Build Cache's own resolution, which read the process directly until
+    /// this module was here to read it for them — and so had none of these.
+    #[test]
+    fn the_cache_falls_back_to_the_xdg_cache_directory() {
+        assert_eq!(
+            default_cache_dir(&with_home("/home/you")),
+            Some(PathBuf::from("/home/you/.cache/verkstead")),
+        );
+    }
+
+    #[test]
+    fn the_cache_honours_an_absolute_xdg_cache_home() {
+        let env = Environment {
+            xdg_cache_home: Some(PathBuf::from("/var/cache")),
+            ..with_home("/home/you")
+        };
+
+        assert_eq!(
+            default_cache_dir(&env),
+            Some(PathBuf::from("/var/cache/verkstead")),
+            "the packaged unit says /var/cache/verkstead with the flag, and a \
+             machine that exports the variable means the same thing",
+        );
+    }
+
+    /// Both halves of the reading, because until it was this module's the cache
+    /// filtered the variable and not the home — so a relative `HOME` put the
+    /// cache wherever the unit had started the server.
+    #[test]
+    fn the_cache_ignores_a_relative_value() {
+        let relative_variable = Environment {
+            xdg_cache_home: Some(PathBuf::from("cache")),
+            ..with_home("/home/you")
+        };
+
+        assert_eq!(
+            default_cache_dir(&relative_variable),
+            Some(PathBuf::from("/home/you/.cache/verkstead")),
+            "a relative variable is no answer, and the home behind it is",
+        );
+
+        assert_eq!(
+            default_cache_dir(&with_home("home/you")),
+            None,
+            "and a relative home is no answer either: a cache resolved against \
+             wherever the unit started the server is one nobody will find to \
+             clear",
+        );
+    }
+
+    #[test]
+    fn the_cache_reads_no_data_or_state_variable() {
+        let env = Environment {
+            xdg_data_home: Some(PathBuf::from("/var/lib/data")),
+            xdg_state_home: Some(PathBuf::from("/var/lib/state")),
+            ..with_home("/home/you")
+        };
+
+        assert_eq!(
+            default_cache_dir(&env),
+            Some(PathBuf::from("/home/you/.cache/verkstead")),
+            "one reading of the environment is not one directory: the cache is \
+             the cache variable's and nothing else's",
+        );
+    }
+
+    #[test]
+    fn nowhere_to_cache_is_nowhere() {
+        assert_eq!(
+            default_cache_dir(&Environment::default()),
+            None,
+            "an empty environment names nowhere to put a cache, which is what \
+             the Build Cache refuses startup on",
+        );
     }
 
     #[test]

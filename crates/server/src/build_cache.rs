@@ -45,10 +45,6 @@ use crate::settings::RustBuildCache;
 /// under inside a sandbox — see [`crate::sandbox::SCCACHE_INSIDE`].
 const SCCACHE: &str = "sccache";
 
-/// The directory name Verkstead's own things go under inside the XDG cache
-/// directory, which is where the build cache is when nobody has said otherwise.
-const OURS: &str = "verkstead";
-
 /// What `CARGO_HOME` is inside the cache directory: the registry index, the
 /// `.crate` files downloaded into it, and the sources unpacked from them.
 ///
@@ -156,7 +152,19 @@ impl Drop for Compiling {
 
 impl BuildCache {
     /// The cache at `configured`, or at the XDG cache directory where nothing
-    /// was configured — see [`default_dir`].
+    /// was configured — `$XDG_CACHE_HOME/verkstead`, or `~/.cache/verkstead`
+    /// where the machine leaves the XDG variable unset, which is the
+    /// specification's own fallback and what most machines have.
+    ///
+    /// That reading is [`crate::platform::cache_dir`]'s rather than this
+    /// module's: one place reads the environment for every directory of
+    /// Verkstead's own, so a relative `XDG_CACHE_HOME` — or a relative `HOME`
+    /// — is ignored here exactly as it is ignored for the Data Directory,
+    /// because either would otherwise resolve against whatever directory the
+    /// unit happened to start the server in. Nowhere to resolve to is a service
+    /// unit that said nothing about either variable, and it refuses startup
+    /// rather than picking somewhere: a cache in a directory nobody chose is
+    /// one nobody will find to clear.
     ///
     /// The directory is **made** where it is not there, which is the one place
     /// Verkstead makes a directory outside its own Data Directory. Sandbox
@@ -176,11 +184,11 @@ impl BuildCache {
     pub fn resolve(configured: Option<&Path>, data_dir: &Path) -> anyhow::Result<BuildCache> {
         let dir = match configured {
             Some(dir) => dir.to_owned(),
-            None => default_dir().ok_or_else(|| {
+            None => crate::platform::cache_dir().ok_or_else(|| {
                 anyhow::anyhow!(
                     "there is nowhere to put the shared Rust build cache: neither \
-                     XDG_CACHE_HOME nor HOME is set, so say where it goes with \
-                     --build-cache-dir"
+                     XDG_CACHE_HOME nor HOME is set to an absolute path, so say where \
+                     it goes with --build-cache-dir"
                 )
             })?,
         };
@@ -525,31 +533,6 @@ fn compile_server(dir: &Path, sccache: &Path, worktrees: &Path, size: &str) -> C
         .stderr(Stdio::inherit());
 
     bwrap
-}
-
-/// Where the build cache goes when nobody has said: `$XDG_CACHE_HOME/verkstead`,
-/// or `~/.cache/verkstead` where the machine leaves the XDG variable unset —
-/// which is the specification's own fallback and what most machines have.
-///
-/// `None` where neither variable is set and there is therefore no home to put a
-/// cache under, which is a service unit that said nothing about either. The
-/// server refuses to start on it rather than picking somewhere: a cache in a
-/// directory nobody chose is one nobody will find to clear.
-///
-/// A relative `XDG_CACHE_HOME` is ignored rather than resolved, as the
-/// specification says: it would otherwise resolve against whatever directory
-/// the unit happened to start the server in.
-fn default_dir() -> Option<PathBuf> {
-    let xdg = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .filter(|dir| dir.is_absolute());
-
-    let cache = match xdg {
-        Some(dir) => dir,
-        None => PathBuf::from(std::env::var_os("HOME")?).join(".cache"),
-    };
-
-    Some(cache.join(OURS))
 }
 
 /// Where `program` is on the server's own `PATH`, or `None` where it is on none
