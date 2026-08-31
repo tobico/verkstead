@@ -17,11 +17,12 @@
 //! What is open is the URL's rather than this page's, because it is what the
 //! third pane is *about*: the pane is that one thing's full self and nothing
 //! else, so with nothing open it is bare paper. Nearly always that is an Event;
-//! the backlog and the roadmap are the exceptions, being read off the worktree
-//! rather than recorded, and they name themselves by a word instead of an id.
-//! Each of the three has a path of its own under the Conversation — see
-//! `openings.ts` — so a details pane survives being navigated away from and
-//! back, and can be linked to.
+//! the backlog, the roadmap and the Share pane are the exceptions — the two
+//! lists are read off the worktree rather than recorded, and sharing belongs to
+//! the Conversation rather than to any moment on it — and each names itself by a
+//! word instead of an id. Every one of them has a path of its own under the
+//! Conversation — see `openings.ts` — so a details pane survives being navigated
+//! away from and back, and can be linked to.
 //!
 //! Opening a Conversation lands on the end of its record: the last Event with a
 //! pane behind it is selected and the URL is rewritten to its path, so the human
@@ -85,6 +86,7 @@ import { Hatch } from "./Hatch";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
+import { Share } from "./Share";
 import { Timeline } from "./Timeline";
 import {
   lastOpening,
@@ -475,10 +477,11 @@ function DetailsPane(props: {
   /// timeline, because that is where it is drawn: it is the one event that
   /// stays in view rather than scrolling past, and it opens all the same.
   ///
-  /// The backlog and the roadmap are none of these and are not looked for here
-  /// at all: neither has an Event, both being read off the worktree every time
-  /// the Conversation is, so the pane draws them from the selection itself —
-  /// see the `Switch` below.
+  /// The backlog, the roadmap and the Share pane are none of these and are not
+  /// looked for here at all: none of the three has an Event — the two lists are
+  /// read off the worktree every time the Conversation is, and sharing belongs
+  /// to the Conversation rather than to any moment on it — so the pane draws
+  /// them from the selection itself, see the `Switch` below.
   const opened = (conversation: ConversationView): Opened | undefined => {
     const id = props.event;
 
@@ -530,14 +533,24 @@ function DetailsPane(props: {
     <Show when={props.conversation.data}>
       {(conversation) => (
         <Switch>
-          {/* The backlog and the roadmap, which are the two things this
-              pane draws that are not Events: each is read off the worktree
-              every time the Conversation is, so there is nothing on the
-              record to name either by and the cards name them by a word
-              instead. Ahead of the Events because they are not among them —
-              [`opened`] looks for an id, and neither selection is one. */}
+          {/* The backlog, the roadmap and the Share pane, which are the three
+              things this pane draws that are not Events: the two lists are read
+              off the worktree every time the Conversation is, and sharing
+              belongs to the Conversation rather than to anything on its record.
+              So there is nothing on the record to name any of them by, and each
+              is named by a word instead. Ahead of the Events because they are
+              not among them — [`opened`] looks for an id, and none of the three
+              selections is one. */}
           <Match when={props.event === "backlog"}>
             <Backlog
+              conversation={conversation()}
+              back={() => props.pane("middle")}
+            />
+          </Match>
+          {/* And sharing it, opened by the icon on the Timeline's header
+              rather than by anything on the record. */}
+          <Match when={props.event === "share"}>
+            <Share
               conversation={conversation()}
               back={() => props.pane("middle")}
             />

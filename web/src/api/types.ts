@@ -2444,17 +2444,17 @@ export type SettingsEdit = { git_author: Author, github_token: TokenEdit,
  */
 rust_build_cache: BuildCacheEdit, 
 /**
- * And where the human hosts a share viewer of their own, as a value for
- * the same reason: an empty one is nothing configured, which is what
- * clearing the field means and what puts Verkstead's own hosted copy back.
- */
-share_viewer_url: string, 
-/**
  * And how a conflicted pull request is resolved where its Repo says
  * nothing, as a value for the same reason: there are two answers and a save
  * says which of them this is to be.
  */
 conflict_resolution: ConflictResolution, 
+/**
+ * And whether Done shares the record to the pull request, as a value for
+ * that reason too — a switch has two answers and a save says which of them
+ * this is to be.
+ */
+share_on_done: boolean, 
 /**
  * The Watched Paths the settings own, as values again: what is sent is
  * what `config.yaml` holds afterwards, so a row taken off the page is a
@@ -2512,24 +2512,6 @@ github_token: TokenSaved | null,
  */
 rust_build_cache: BuildCacheView, 
 /**
- * Where the human hosts a share viewer of their own, or empty where they
- * host none.
- *
- * A string rather than an optional, empty for nothing configured, the way
- * the author's two halves are: the field on the page holds it either way,
- * and clearing the box is how it is taken away.
- *
- * Empty is not *no viewer*. Links are then composed through the copy
- * Verkstead hosts, and this field is the override — which is why nothing
- * fills it in on the human's behalf: a field holding an address nobody
- * typed is a setting they cannot tell they have not chosen.
- *
- * Configuration rather than a secret — it is a public page, and its URL
- * goes in a comment on a pull request — so unlike the token it reads back
- * exactly as it was written.
- */
-share_viewer_url: string, 
-/**
  * And how a conflicted pull request is resolved in every Repo that has not
  * said otherwise.
  *
@@ -2539,6 +2521,15 @@ share_viewer_url: string,
  * the Repo — see [`crate::RepoView::conflict_resolution`].
  */
 conflict_resolution: ConflictResolution, 
+/**
+ * And whether a Conversation's record is published and linked on its pull
+ * request when the work settles to Done.
+ *
+ * Never null either, and false where nobody has said: this is the one
+ * setting on the page whose unconfigured state is the off one, because
+ * what it turns on writes to GitHub under the human's own account.
+ */
+share_on_done: boolean, 
 /**
  * And the Watched Paths and the Sandbox Configuration binds, from both of
  * the places either of them is said.
@@ -2568,8 +2559,8 @@ export type ShareCommented = { "Commented": { share: ShareView, on: Array<Commen
 export type SharePublished = { "Published": { share: ShareView, } } | "NoToken" | "NoGistScope" | { "Refused": { why: string, } };
 
 /**
- * One published share, as the workbench draws it: the link, and the moment the
- * snapshot was taken.
+ * One published share, as the workbench draws it: the link, the gist behind it,
+ * and the moment the snapshot was taken.
  */
 export type ShareView = { 
 /**
@@ -2583,6 +2574,16 @@ export type ShareView = {
  * is drawn. See `link` in `crates/server/src/sharing.rs`.
  */
 url: string, 
+/**
+ * And the gist itself, as GitHub gave it, which is what the record holds and
+ * what [`Self::url`] is composed from.
+ *
+ * Beside the viewer's link rather than instead of it, the two being for
+ * different things: the viewer's is what a reader is sent, and this is where
+ * the file actually is. A share is deleted at GitHub and nowhere else, so a
+ * human who wants one gone has to be able to reach it.
+ */
+gist: string, 
 /**
  * When it was published, RFC 3339 — drawn beside the link, because a link
  * with no date says nothing about how far the work has moved since.

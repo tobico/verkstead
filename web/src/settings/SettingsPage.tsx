@@ -56,7 +56,6 @@ import { BuildCacheCard, BuildCachePane } from "./BuildCache";
 import { ConflictsCard, ConflictsPane } from "./Conflicts";
 import { GithubCard, GithubPane } from "./Credentials";
 import { PathsCard, PathsPane } from "./Paths";
-import { ShareViewerCard, ShareViewerPane } from "./ShareViewer";
 import {
   SETTINGS,
   WORDS,
@@ -224,18 +223,9 @@ function Settings(props: {
           open={props.opening === "build-cache"}
           press={() => props.select("build-cache")}
         />
-        {/* And the last of the three things Verkstead itself was told: where the
-            page that draws a published share is hosted. Under the other two
-            because it is the one a machine works perfectly without — what it
-            costs to leave alone is a worse read for whoever a share is sent
-            to. */}
-        <ShareViewerCard
-          open={props.opening === "share-viewer"}
-          press={() => props.select("share-viewer")}
-        />
         {/* The one thing here under the lists rather than beside them: where
             Verkstead may work at all, and what a session is given beyond its
-            worktree. Under the three above because it is what a Repo is
+            worktree. Under the two above because it is what a Repo is
             registered from — a machine with no watched path has nothing to put
             on that list. */}
         <PathsCard
@@ -313,9 +303,6 @@ function Details(props: {
       </Match>
       <Match when={props.opening === "build-cache"}>
         <BuildCachePane back={props.back} />
-      </Match>
-      <Match when={props.opening === "share-viewer"}>
-        <ShareViewerPane back={props.back} />
       </Match>
       <Match when={props.opening === "paths"}>
         <PathsPane back={props.back} />

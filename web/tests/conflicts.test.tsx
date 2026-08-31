@@ -157,10 +157,10 @@ describe("the pane", () => {
         git_author: UNSET.git_author,
         github_token: "Keep",
         rust_build_cache: { enabled: UNSET.rust_build_cache.enabled, size: "" },
-        share_viewer_url: UNSET.share_viewer_url,
         watched_paths: [],
         sandbox_binds: [],
         conflict_resolution: "Rebase",
+        share_on_done: UNSET.share_on_done,
       }),
     );
   });

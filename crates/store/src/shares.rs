@@ -26,6 +26,25 @@
 //! time. What was already sent is not unsent: a gist published yesterday goes on
 //! standing at its own URL, and a comment left on a pull request goes on
 //! pointing at it. This is only what the next comment is written from.
+//!
+//! ## And whether the link was ever said on the pull requests
+//!
+//! Beside it, one fact and no more: **a share of this Conversation has been
+//! commented on its pull requests**. Written the first time a comment lands —
+//! the Share Pane's own press and the wrap-up's automatic one alike — and never
+//! unwritten, because it is a record of something that was said to other people
+//! and nothing here can unsay it.
+//!
+//! It is what the automatic share is gated on, so the gate is the fact rather
+//! than the arrival: a Conversation the human has already handed over stays
+//! quiet when it settles, a second settle after a successful share stays quiet
+//! too, and a share that failed wrote nothing here — so the settle after it
+//! tries again. See `share_to_pull_requests` in
+//! `crates/server/src/settling.rs`.
+//!
+//! Its own row rather than a column on the share above it, because the two
+//! outlive each other differently: publishing again replaces where the file
+//! went, and it does not un-leave a comment.
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
@@ -47,7 +66,8 @@ pub struct Share {
     pub at: String,
 }
 
-/// The table a published share's row lives in.
+/// The table a published share's row lives in, and the one beside it that says
+/// a share of this Conversation has been commented on its pull requests.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS shares (
@@ -59,6 +79,16 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the shares table")?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS share_comments (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             at              TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the share comments table")?;
 
     Ok(())
 }
@@ -99,4 +129,41 @@ pub async fn share(pool: &SqlitePool, conversation_id: i64) -> Result<Option<Sha
             .with_context(|| format!("reading the share of Conversation {conversation_id}"))?;
 
     Ok(row.map(|(url, at)| Share { url, at }))
+}
+
+/// Write down that a share of this Conversation has been commented on its pull
+/// requests, if that was not already written down.
+///
+/// The first landing is the one recorded and the ones after it change nothing:
+/// what the row says is *that* it happened, and a moment rewritten by the next
+/// share would be a record of the latest comment rather than of the first.
+///
+/// Never taken away again. The comment is on a pull request other people read,
+/// and there is nothing here that could take it off one.
+pub async fn record_share_comment(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO share_comments (conversation_id, at)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (conversation_id) DO NOTHING",
+    )
+    .bind(conversation_id)
+    .execute(pool)
+    .await
+    .with_context(|| format!("recording the share comment of Conversation {conversation_id}"))?;
+
+    Ok(())
+}
+
+/// And whether one ever has been.
+pub async fn share_commented(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT conversation_id FROM share_comments WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| {
+                format!("reading whether Conversation {conversation_id} was ever commented a share")
+            })?;
+
+    Ok(row.is_some())
 }

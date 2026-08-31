@@ -55,37 +55,6 @@ const DIAGRAMS: &str = r#"<script id="diagrams">"#;
 /// And where either ends, which is what the contents are written between.
 const CLOSES: &str = "</script>";
 
-/// The **share viewer**: the small page that turns a Published Share into a
-/// read, handed over on the settings page for the human to host once.
-///
-/// A share downloads and opens off a disk, and that is the whole of what an
-/// emailed one needs. A *published* one is a secret gist, and a gist link alone
-/// draws nothing: GitHub renders a gist as source, and the raw URL is served
-/// `text/plain` with `nosniff`, which every browser refuses to draw. So the gap
-/// between a link and a read is one static page, and this is it — kept at
-/// [`HOSTED`], which is where every link is composed through unless
-/// [`crate::settings::Config::share_viewer_url`] names a copy the human hosts
-/// themselves. Handed over here because that copy has to come from somewhere.
-///
-/// It is Verkstead's file rather than the recipient's server. The gist id rides
-/// in the fragment, which no browser sends anywhere, and the share is fetched
-/// from GitHub by the reader's own browser and drawn in a sandboxed frame — so
-/// the host of the page learns neither which share was read nor anything of what
-/// is in it, and the share's own scripts never get that host's origin. The page
-/// itself says all of this at the top of it.
-///
-/// Compiled in rather than embedded the way the built viewer is: it is written
-/// by hand, has no build behind it and no dependency in it, so every binary
-/// carries it whether or not anybody has run `pnpm build`.
-pub(crate) const VIEWER: &str = include_str!("../share-viewer.html");
-
-/// What it is called when it lands in somebody's downloads.
-///
-/// Named for what it is rather than for the conversation it will draw: a human
-/// downloads this once in the life of a machine, puts it on a site, and comes
-/// back to it only to replace it.
-pub(crate) const VIEWER_FILENAME: &str = "verkstead-share-viewer.html";
-
 /// The share file: the built template with one Conversation's record in it, and
 /// the diagram renderer where the record needs one.
 ///
@@ -236,29 +205,33 @@ pub(crate) fn titled(conversation: &ConversationView) -> &str {
     }
 }
 
-/// Where the viewer is when nobody has said otherwise: the copy this repository
-/// keeps on its own GitHub Pages, published by `.github/workflows/pages.yml`.
+/// The **share viewer**: the small page that turns a Published Share into a
+/// read, and the one address every Published Share is linked through.
 ///
-/// A default rather than nothing, because nothing is what every Verkstead
-/// starts as: a human who has never been to the settings page would otherwise
-/// hand out gist links, which GitHub draws as source. The page has to be
-/// somewhere public for a published share to read at all, and one copy kept up
-/// beside the code it ships with is a place every install already has.
+/// A share downloads and opens off a disk, and that is the whole of what an
+/// emailed one needs. A *published* one is a secret gist, and a gist link alone
+/// draws nothing: GitHub renders a gist as source, and the raw URL is served
+/// `text/plain` with `nosniff`, which every browser refuses to draw. So the gap
+/// between a link and a read is one static page, and this is where that page is
+/// — the copy this repository keeps on its own GitHub Pages, published from
+/// `crates/server/share-viewer.html` by `.github/workflows/pages.yml`.
 ///
-/// It is Verkstead's file on Verkstead's site, which changes nothing about what
-/// the host of it learns: the gist's id rides in the fragment and the share is
-/// fetched by the reader's own browser — see [`VIEWER`] — so this page sees
-/// neither which share was read through it nor anything that is in it. The
-/// setting still wins: a human hosting their own keeps exactly what they had.
+/// Not configurable, and there is nothing to configure: it is Verkstead's file
+/// rather than the recipient's server, and hosting a second copy would buy
+/// nothing. The gist's id rides in the fragment, which no browser sends
+/// anywhere, and the share is fetched from GitHub by the reader's own browser
+/// and drawn in a sandboxed frame — so the host of the page learns neither
+/// which share was read nor anything of what is in it, and the share's own
+/// scripts never get that host's origin. The page itself says all of this at
+/// the top of it.
 ///
 /// Spelled here and in the workflow that publishes it, and
 /// `web/tests/viewing.test.ts` is what holds the two together: the address is
 /// the one thing about the viewer that has to be the same in both places.
 pub(crate) const HOSTED: &str = "https://tobico.github.io/verkstead/share-viewer.html";
 
-/// Where a reader is sent for a Published Share: through the share viewer,
-/// which is the human's own where they have hosted one and [`HOSTED`] where
-/// they have not.
+/// Where a reader is sent for a Published Share: through the share viewer at
+/// [`HOSTED`].
 ///
 /// The viewer takes the gist's id in its **fragment** — `…/viewer.html#9f1` —
 /// which is the whole of why the page learns nothing about what is read through
@@ -269,20 +242,12 @@ pub(crate) const HOSTED: &str = "https://tobico.github.io/verkstead/share-viewer
 /// The one answer that is still the gist itself is a published URL with no
 /// segment to take an id from: a link pointing a reader at a viewer with no gist
 /// named would draw nothing at all, where the gist at least draws its source.
-pub(crate) fn link(published: &str, viewer: Option<&str>) -> String {
-    let viewer = viewer
-        .map(str::trim)
-        .filter(|viewer| !viewer.is_empty())
-        .unwrap_or(HOSTED);
-
+pub(crate) fn link(published: &str) -> String {
     let Some(gist) = identified(published) else {
         return published.to_owned();
     };
 
-    // The `#` and whatever the human left on the end of what they typed: a URL
-    // pasted with its own fragment already on it is one `#` too many, and the
-    // one they meant is the one this is about to write.
-    format!("{}#{gist}", viewer.split('#').next().unwrap_or(viewer))
+    format!("{HOSTED}#{gist}")
 }
 
 /// GitHub's id for a gist, out of the URL it gave for it.
@@ -461,33 +426,16 @@ mod tests {
         );
     }
 
-    /// A comment links through the viewer where the human has hosted one, with
-    /// the gist's id in the fragment — which is what keeps that host from
-    /// learning which share was read through it.
+    /// A comment links through the hosted viewer, with the gist's id in the
+    /// fragment — which is what keeps that host from learning which share was
+    /// read through it. Every Verkstead links the same way; there is nothing to
+    /// have configured.
     #[test]
-    fn a_published_share_is_linked_through_the_viewer() {
+    fn a_published_share_is_linked_through_the_hosted_viewer() {
         assert_eq!(
-            link(
-                "https://gist.github.com/tobico/9f1",
-                Some("https://tobico.github.io/shares/"),
-            ),
-            "https://tobico.github.io/shares/#9f1",
+            link("https://gist.github.com/tobico/9f1"),
+            format!("{HOSTED}#9f1"),
         );
-    }
-
-    /// And through the hosted one where they have not, which is what makes a
-    /// Verkstead nobody has configured hand out links that draw: the setting is
-    /// an override rather than the thing that switches the viewer on.
-    #[test]
-    fn a_verkstead_told_nothing_links_through_the_hosted_viewer() {
-        const GIST: &str = "https://gist.github.com/tobico/9f1";
-
-        assert_eq!(link(GIST, None), format!("{HOSTED}#9f1"));
-
-        // A field somebody emptied is a field nobody filled: the settings page
-        // writes a blank away, and a blank that arrived any other way says the
-        // same thing.
-        assert_eq!(link(GIST, Some("   ")), format!("{HOSTED}#9f1"));
     }
 
     /// The hosted viewer is the page this repository publishes, at the address
@@ -506,21 +454,8 @@ mod tests {
     /// at least draws its source.
     #[test]
     fn a_published_url_with_no_gist_in_it_is_linked_as_itself() {
-        assert_eq!(link("", None), "");
-        assert_eq!(link("///", Some("https://tobico.github.io/shares/")), "///");
-    }
-
-    /// A viewer URL somebody pasted with a fragment already on it is one `#` too
-    /// many: the one that matters is the gist's.
-    #[test]
-    fn the_fragment_written_is_the_only_one() {
-        assert_eq!(
-            link(
-                "https://gist.github.com/tobico/9f1",
-                Some("https://tobico.github.io/shares/#anything"),
-            ),
-            "https://tobico.github.io/shares/#9f1",
-        );
+        assert_eq!(link(""), "");
+        assert_eq!(link("///"), "///");
     }
 
     fn stamp() -> OffsetDateTime {

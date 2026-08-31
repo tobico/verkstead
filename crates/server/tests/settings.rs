@@ -1,9 +1,7 @@
 //! What Verkstead is told, over the viewer's namespace: reading the git author,
 //! the presence of a GitHub token, how the shared Rust build cache is set,
-//! where the human hosts a share viewer of their own and what paths it has been
-//! given, and writing any of them. The viewer page itself is handed over from
-//! here as well, that being the other half of the setting recording where it
-//! went.
+//! whether Done shares the record to the pull request and what paths it has
+//! been given, and writing any of them.
 //!
 //! The paths are the one thing here said in two places at once — the
 //! installation's flags and the file this page writes — so what those tests ask
@@ -95,8 +93,8 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "git_author": { "name": name, "email": email },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
-            "share_viewer_url": "",
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -113,8 +111,8 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "git_author": { "name": "", "email": "" },
             "github_token": { "Set": { "token": token } },
             "rust_build_cache": { "enabled": true, "size": "" },
-            "share_viewer_url": "",
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -129,8 +127,8 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "git_author": { "name": "", "email": "" },
             "github_token": "Clear",
             "rust_build_cache": { "enabled": true, "size": "" },
-            "share_viewer_url": "",
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -244,8 +242,8 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
             "rust_build_cache": { "enabled": true, "size": "" },
-            "share_viewer_url": "",
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -469,8 +467,8 @@ async fn a_save_carrying_the_paths_as_they_stand_leaves_them() {
             "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
-            "share_viewer_url": "",
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": ["/home/ada/src"],
             "sandbox_binds": ["/var/cache/verkstead-node"],
         }),
@@ -541,8 +539,8 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": false, "size": "5G" },
-            "share_viewer_url": "",
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -593,8 +591,8 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
-            "share_viewer_url": "",
             "conflict_resolution": "Rebase",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -627,8 +625,8 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
-            "share_viewer_url": "",
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -639,6 +637,117 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
         settings(&app).await.conflict_resolution,
         ConflictResolution::Merge
     );
+}
+
+/// Whether Done shares the record to the pull request where nobody has said:
+/// off, which is the other way about from the two settings above it.
+///
+/// The point of that shape: what this switch turns on publishes a gist under
+/// the human's own account and comments on a pull request other people read, so
+/// a Verkstead nobody has been to the settings page of does neither.
+#[tokio::test]
+async fn sharing_on_done_nobody_has_configured_is_off() {
+    let (_dir, app) = app().await;
+
+    assert!(!settings(&app).await.share_on_done);
+}
+
+/// And what a save of it says: the switch goes into the file the wrap-up reads,
+/// and comes back off it — including from a router started afresh on the same
+/// directory, which is what a restart is.
+#[tokio::test]
+async fn sharing_on_done_goes_in_and_comes_back() {
+    let (dir, app) = app().await;
+
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "conflict_resolution": "Merge",
+            "share_on_done": true,
+            "watched_paths": [],
+            "sandbox_binds": [],
+        }),
+    )
+    .await;
+
+    assert!(saved.settings.share_on_done);
+
+    // In the file rather than only in the answer, and in the words a human
+    // hand-editing it would write.
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(
+        written.contains("share_on_done: true"),
+        "the switch is in config.yaml: {written}"
+    );
+
+    assert!(settings(&app).await.share_on_done);
+
+    // And to a server that has just come up on the same Data Directory, which
+    // is the whole of what surviving a restart means here.
+    let restarted = restarted(dir.path()).await;
+    assert!(settings(&restarted).await.share_on_done);
+}
+
+/// A save from another section carries the switch as it stands, and that is
+/// what leaves it alone — the same contract the paths above are saved under,
+/// because one request writes the whole of `config.yaml`.
+#[tokio::test]
+async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
+    let (_dir, app) = app().await;
+
+    save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "conflict_resolution": "Merge",
+            "share_on_done": true,
+            "watched_paths": [],
+            "sandbox_binds": [],
+        }),
+    )
+    .await;
+
+    // The build cache section's own save, which is about the size and carries
+    // everything else as the page read it.
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "5G" },
+            "conflict_resolution": "Merge",
+            "share_on_done": true,
+            "watched_paths": [],
+            "sandbox_binds": [],
+        }),
+    )
+    .await;
+
+    assert_eq!(saved.settings.rust_build_cache.size, "5G");
+    assert!(saved.settings.share_on_done, "the switch stands");
+}
+
+/// A second server on the same Data Directory, which is what a restart looks
+/// like from here: the files are the whole of what is kept, so a router built
+/// afresh over them is the next boot reading them.
+async fn restarted(data_dir: &Path) -> Router {
+    let pool = open_database(&data_dir.join("verkstead.db")).await.unwrap();
+
+    router_asking_github(
+        pool,
+        data_dir.to_owned(),
+        Gh::running(vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            SAYS_ITS_TOKEN.to_owned(),
+            "gh".to_owned(),
+        ]),
+    )
 }
 
 /// Clearing the size field is asking for the default back rather than asking
@@ -653,8 +762,8 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "5G" },
-            "share_viewer_url": "",
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -667,8 +776,8 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "  " },
-            "share_viewer_url": "",
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -677,165 +786,6 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
 
     assert_eq!(saved.settings.rust_build_cache.size, "30G");
     assert!(!saved.settings.rust_build_cache.size_configured);
-}
-
-/// Where the human hosts a share viewer of their own, which is the plainest
-/// setting on the page: written as it was typed and read back as itself.
-///
-/// It is not a secret — it is a public page, and its URL goes into a comment on
-/// a pull request the moment a share is published through it — so unlike the
-/// token there is nothing here that must not come back out.
-#[tokio::test]
-async fn where_the_share_viewer_is_hosted_goes_in_and_comes_back() {
-    let (dir, app) = app().await;
-
-    let saved = save_viewer(&app, "https://ada.github.io/verkstead-shares/").await;
-
-    assert_eq!(
-        saved.settings.share_viewer_url,
-        "https://ada.github.io/verkstead-shares/"
-    );
-
-    // In the file rather than only in the answer: what a link is composed
-    // through is the file, read at the moment the link is drawn.
-    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-    assert!(
-        written.contains("https://ada.github.io/verkstead-shares/"),
-        "the URL is in config.yaml: {written}"
-    );
-
-    assert_eq!(
-        settings(&app).await.share_viewer_url,
-        "https://ada.github.io/verkstead-shares/"
-    );
-}
-
-/// A Verkstead nobody has hosted one for says so as an empty field rather than
-/// as a guess: the *setting* has no default, because nobody but the human knows
-/// where their own site is, and a field filled in with an address nobody typed
-/// is a setting they cannot tell they have not chosen.
-///
-/// What an empty one *means* is another matter, and not this page's: links are
-/// composed through the copy Verkstead hosts — `HOSTED` in
-/// `crates/server/src/sharing.rs`, and `tests/sharing.rs` is where that is
-/// asked about.
-#[tokio::test]
-async fn a_share_viewer_nobody_has_hosted_comes_back_empty() {
-    let (_dir, app) = app().await;
-
-    assert_eq!(settings(&app).await.share_viewer_url, "");
-}
-
-/// And clearing the field takes it away, which is what an empty one means on the
-/// way in as well as on the way out.
-#[tokio::test]
-async fn clearing_the_share_viewer_url_takes_it_away() {
-    let (_dir, app) = app().await;
-
-    save_viewer(&app, "https://ada.github.io/verkstead-shares/").await;
-    let cleared = save_viewer(&app, "  ").await;
-
-    assert_eq!(cleared.settings.share_viewer_url, "");
-    assert_eq!(settings(&app).await.share_viewer_url, "");
-}
-
-/// Saving where the viewer is hosted must not disturb the credentials, for the
-/// reason saving the author must not: the page has one button and the server
-/// writes both files.
-#[tokio::test]
-async fn saving_the_share_viewer_url_leaves_the_token_where_it_was() {
-    let (_dir, app) = app().await;
-
-    save_token(&app, "ghp_thetoken").await;
-    let saved = save_viewer(&app, "https://ada.github.io/verkstead-shares/").await;
-
-    assert_eq!(
-        saved
-            .settings
-            .github_token
-            .expect("the token is still configured")
-            .last_four,
-        "oken",
-    );
-}
-
-/// Save where the share viewer is hosted, with everything else as it stands.
-async fn save_viewer(app: &Router, url: &str) -> SettingsSaved {
-    save(
-        app,
-        &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
-            "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
-            "share_viewer_url": url,
-            "conflict_resolution": "Merge",
-            "watched_paths": [],
-            "sandbox_binds": [],
-        }),
-    )
-    .await
-}
-
-/// The viewer itself, which is the other half of that setting: a human filling
-/// the field in is a human hosting this page, so it has to be obtainable from
-/// here.
-///
-/// An attachment, because the point of the press is having the file — a viewer
-/// that opened in the browser would be one served off the tailnet, where nobody
-/// a share is sent to can reach it.
-#[tokio::test]
-async fn the_share_viewer_page_is_handed_over_to_be_hosted() {
-    let (_dir, app) = app().await;
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/api/ui/share-viewer.html")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_DISPOSITION)
-            .and_then(|value| value.to_str().ok()),
-        Some("attachment; filename=\"verkstead-share-viewer.html\""),
-    );
-
-    let page = String::from_utf8(
-        response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes()
-            .to_vec(),
-    )
-    .unwrap();
-
-    // The three things the page is: a document, a fetch of the gist straight
-    // from GitHub, and a frame the share is drawn in without this page's origin.
-    assert!(page.starts_with("<!doctype html>"), "{page}");
-    assert!(page.contains("https://api.github.com/gists/"));
-    assert!(page.contains(r#"sandbox="allow-scripts""#));
-
-    // And what it is not: anything asked of any other host. Every URL in it is
-    // GitHub's, so a recipient reading a share tells the page's host nothing
-    // beyond that they opened it.
-    for line in page.lines() {
-        if let Some(at) = line.find("https://") {
-            let url = &line[at..];
-            assert!(
-                url.starts_with("https://api.github.com/"),
-                "the viewer reaches for something that is not GitHub: {line}"
-            );
-        }
-    }
 }
 
 /// The Paths half of the page: every Watched Path and every Sandbox
@@ -878,8 +828,8 @@ async fn save_paths(app: &Router, watched: &[&str], binds: &[&str]) -> SettingsS
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
-            "share_viewer_url": "",
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": watched,
             "sandbox_binds": binds,
         }),

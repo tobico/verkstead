@@ -583,8 +583,8 @@ pub struct ConversationView {
     pub shared: Option<ShareView>,
 }
 
-/// One published share, as the workbench draws it: the link, and the moment the
-/// snapshot was taken.
+/// One published share, as the workbench draws it: the link, the gist behind it,
+/// and the moment the snapshot was taken.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ShareView {
@@ -597,6 +597,15 @@ pub struct ShareView {
     /// reader goes through is a fact about the settings at the moment the page
     /// is drawn. See `link` in `crates/server/src/sharing.rs`.
     pub url: String,
+
+    /// And the gist itself, as GitHub gave it, which is what the record holds and
+    /// what [`Self::url`] is composed from.
+    ///
+    /// Beside the viewer's link rather than instead of it, the two being for
+    /// different things: the viewer's is what a reader is sent, and this is where
+    /// the file actually is. A share is deleted at GitHub and nowhere else, so a
+    /// human who wants one gone has to be able to reach it.
+    pub gist: String,
 
     /// When it was published, RFC 3339 — drawn beside the link, because a link
     /// with no date says nothing about how far the work has moved since.

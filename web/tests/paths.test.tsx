@@ -74,8 +74,8 @@ const REST = {
     enabled: TOLD.rust_build_cache.enabled,
     size: TOLD.rust_build_cache.size,
   },
-  share_viewer_url: TOLD.share_viewer_url,
   conflict_resolution: TOLD.conflict_resolution,
+  share_on_done: TOLD.share_on_done,
 };
 
 /// The same settings with the installation having said one of each as well,

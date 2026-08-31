@@ -118,6 +118,7 @@ export function mount(at = "/") {
             <Route path="/" />
             <Route path="/events/:event" />
             <Route path="/backlog" />
+            <Route path="/share" />
             <Route path="/roadmaps/:name" />
           </Route>
         </MemoryRouter>

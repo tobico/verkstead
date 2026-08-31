@@ -76,6 +76,17 @@
    button rather than a link, because paging into the details pane is not going
    anywhere: the workbench is one page, and the URL follows the conversation
    rather than the pane. */
+/* The pane's own controls at the end of the header row: the way on into the
+   details, and the share icon that opens a pane of its own. One group rather
+   than two items, so the header stays a title at one end and its controls at
+   the other however many of them are drawn — see `PaneHead.module.css`, which
+   spaces what is in the row apart. */
+.paneControls {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
 .paneForward {
   padding: 0;
   font: inherit;

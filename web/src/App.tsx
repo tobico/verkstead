@@ -53,7 +53,7 @@ export function App(): JSX.Element {
         <Route path="/" component={Workbench} />
         {/* And each of that Conversation's details panes under it, so what is
             open survives a reload and can be linked to. Nested rather than
-            written out as four routes of their own, because the workbench is
+            written out as five routes of their own, because the workbench is
             one page across all of them: a route the router swaps for another
             takes its component down with it, and everything the middle pane was
             holding — a Brief half typed into above all — would go every time a
@@ -67,6 +67,7 @@ export function App(): JSX.Element {
           <Route path="/" />
           <Route path="/events/:event" />
           <Route path="/backlog" />
+          <Route path="/share" />
           <Route path="/roadmaps/:name" />
         </Route>
         {/* Everything the human configures, on one page: the GitHub token and

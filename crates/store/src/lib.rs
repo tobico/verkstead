@@ -101,7 +101,7 @@ pub use repos::{
 };
 pub use session_names::session_id;
 pub use session_pairings::RanUnder;
-pub use shares::{Share, record_share, share};
+pub use shares::{Share, record_share, record_share_comment, share, share_commented};
 pub use stops::{
     Decision, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop,
     stop_as_asked, stopped,
@@ -731,9 +731,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // about the work on it. See [`unseen`].
     unseen::apply_schema(pool).await?;
 
-    // And where the share of each was published, which hangs off the
-    // Conversations alone as well: a link to a file is not something that
-    // happened to the work either. See [`shares`].
+    // And where the share of each was published, and whether one was ever
+    // commented on its pull requests, which hang off the Conversations alone as
+    // well: a link to a file is not something that happened to the work either.
+    // See [`shares`].
     shares::apply_schema(pool).await?;
 
     // And last of all, whatever a database written by an older Verkstead

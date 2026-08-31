@@ -6,10 +6,10 @@
   whoever it was sent to — GitHub renders a gist as source, and its raw URL is
   served `text/plain` with `nosniff`, so a browser refuses to draw it. What is
   missing is somewhere for the file to be a page. This is that somewhere, and
-  it is the whole of it: Verkstead hands this file over on the settings page,
-  the human puts it on a public site of their own once — GitHub Pages is what
-  it was written for — and the URL goes back into the settings, where the
-  comment on a pull request is composed from it.
+  it is the whole of it: the repository publishes this file to its own GitHub
+  Pages — `.github/workflows/pages.yml` — and every link Verkstead hands out is
+  composed through the address it lands at, `HOSTED` in
+  `crates/server/src/sharing.rs`. Nobody configures that, and nobody has to.
 
   Three decisions, and each is about who learns what.
 
