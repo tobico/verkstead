@@ -57,6 +57,12 @@
 //! for the picked type's own, blank, a path typed for one type's account meaning
 //! nothing in another's.
 //!
+//! It is the one row of this form that is not a native control: each type is
+//! offered under its own brand mark, which an `<option>` cannot hold, so the
+//! type is picked with the app's own listbox — see
+//! [`../picking.tsx`](../picking.tsx). Everything else here is a text field or a
+//! tick, and stays one.
+//!
 //! A type is offered only once it can launch the real binary, which is what
 //! keeps the picker from being a lie — and offering is said apart from drawing,
 //! in [`AGENT_TYPES`], because the two are not the same list. What a saved
@@ -97,6 +103,7 @@ import type {
 import { useReading } from "../freshness";
 import { KNOWN_MODELS, known, prettify } from "../models";
 import { Empty, ErrorLine } from "../notices";
+import { Listbox } from "../picking";
 import { PaneHead } from "../workbench/PaneHead";
 import app from "../App.module.css";
 import styles from "./ProfileList.module.css";
@@ -701,19 +708,27 @@ export function ProfilePane(props: {
                 is under this changes with it and nothing typed for the old one
                 is carried across. */}
             <label for="profile-agent_type">Agent</label>
-            <select
+            {/* The app's own listbox rather than a `<select>`, because each row
+                carries that backend's brand mark and an `<option>` holds
+                nothing but text — the one row of this form where there is
+                something to draw beside the words.
+
+                A profile of a type this build draws but does not offer reads as
+                nothing chosen rather than as whichever type happens to be first,
+                which is the listbox's own guarantee and the honest reading of a
+                row that is not on offer. Its account is untouched by that: what
+                the form sends is what was read back, until another type is
+                picked. */}
+            <Listbox
               id="profile-agent_type"
-              value={form().account.agent_type}
-              onChange={(ev) =>
-                pickedType(ev.currentTarget.value as AgentType)
-              }
-            >
-              <For each={AGENT_TYPES}>
-                {(agent_type) => (
-                  <option value={agent_type}>{AGENT_NAME[agent_type]}</option>
-                )}
-              </For>
-            </select>
+              class={styles.agentType}
+              options={AGENT_TYPES}
+              value={(agent_type) => agent_type}
+              label={(agent_type) => AGENT_NAME[agent_type]}
+              mark={(agent_type) => agent_type}
+              chosen={form().account.agent_type}
+              pick={(picked) => pickedType(picked as AgentType)}
+            />
 
             {/* The account, in whatever shape its agent type keeps one: the
                 fields come off the type rather than being written here, so a

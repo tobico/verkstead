@@ -35,6 +35,7 @@ import type {
   ConversationView,
   GrillingStarted,
   Merging,
+  PairingView,
   ProfileEntry,
   PinnedEvent,
   PullRequestDetails,
@@ -76,11 +77,13 @@ import pressableCss from "../src/CardButton.module.css?raw";
 // And the pressable icon, which is the other thing in a pane that opens into a
 // subpane: the gear at the head of the sidebar is one.
 import button from "../src/IconButton.module.css";
-// The brand mark of the harness a session runs under, three ways: the hashed
-// name a drawn mark is queried by, and the four files it is drawn out of — read
-// here as lobehub published them, so that a test naming a mark and the component
+// The brand mark of the harness a session runs under, two ways: the hashed name
+// a drawn mark is queried by, and the four files it is drawn out of — read here
+// as lobehub published them, so that a test naming a mark and the component
 // drawing it are two independent statements about the same art, the way the
 // check marks below are named from Font Awesome rather than off `Checks.tsx`.
+// Reading one back off the page is `marked` in `./marking.ts`, the mark being
+// drawn on more pages than this one.
 import harnessMark from "../src/HarnessMark.module.css";
 import claudeMarkFile from "../src/marks/claude-color.svg?raw";
 import codexMarkFile from "../src/marks/codex.svg?raw";
@@ -96,7 +99,7 @@ import toasts from "../src/Toasts.module.css";
 import contents from "../src/set/Contents.module.css";
 import sheet from "../src/set/Sheet.module.css";
 import illegible from "../src/set/Unreadable.module.css";
-import { NONE, under } from "../src/pairing";
+import { under } from "../src/pairing";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
 // What can be done to a Conversation as a whole, both ways: the hashed names
@@ -209,6 +212,14 @@ import {
   nudged,
   theWorkbench,
 } from "./bench";
+import { art, marked } from "./marking";
+import {
+  offered,
+  pick,
+  picker,
+  rows as offers,
+  showing,
+} from "./pickers";
 import {
   askedFor,
   hangs,
@@ -3867,6 +3878,35 @@ describe("configuring a companion repo", () => {
   });
 });
 
+/// What one row of a pairing picker sends, as the picker writes it.
+const pairing = (profile: ProfileEntry, model: string) =>
+  `${profile.id}:${model}`;
+
+/// And what every row of one reads as, in the order the fixture's profiles come
+/// to.
+///
+/// Spelled out rather than composed from the fixture, because the composing is
+/// the thing under test: the backend's name, the model's own name, and the
+/// profile's after an em dash — said here because the fixture holds three Claude
+/// Code accounts, so which of them a row is cannot be read off the model alone.
+const READINGS = [
+  "Claude Code Fable 5 — fable",
+  "Claude Code Opus 5 — opus",
+  "Claude Code Haiku 4.5 — opus",
+  "Claude Code Sonnet 5 — sonnet",
+];
+
+/// How one Pairing the server has settled reads, off the same two lists: the
+/// rows in the order the profiles come to, and the readings in the order they
+/// are offered. So what a picker is showing is checked against the row it came
+/// off rather than against the composing being done again beside it.
+const readsAs = (view: PairingView): string =>
+  READINGS[
+    PROFILES.flatMap((profile) =>
+      profile.models.map((model) => pairing(profile, model)),
+    ).indexOf(pairing(view.profile, view.model!))
+  ]!;
+
 /// The last thing a conversation settles before anything will run it: which
 /// account and model grills, and which implements.
 describe("a conversation's pairings", () => {
@@ -3879,25 +3919,6 @@ describe("a conversation's pairings", () => {
     review_pairing: "Nothing",
     ready_to_grill: false,
   };
-
-  /// What one row of a picker sends, as the picker writes it.
-  const pairing = (profile: ProfileEntry, model: string) =>
-    `${profile.id}:${model}`;
-
-  /// And what every row of one reads as, in the order the fixture's profiles
-  /// come to.
-  ///
-  /// Spelled out rather than composed from the fixture, because the composing is
-  /// the thing under test: the backend's name, the model's own name, and the
-  /// profile's after an em dash — said here because the fixture holds three
-  /// Claude Code accounts, so which of them a row is cannot be read off the
-  /// model alone.
-  const READINGS = [
-    "Claude Code Fable 5 — fable",
-    "Claude Code Opus 5 — opus",
-    "Claude Code Haiku 4.5 — opus",
-    "Claude Code Sonnet 5 — sonnet",
-  ];
 
   function withConversation(
     view: ConversationView,
@@ -3916,13 +3937,7 @@ describe("a conversation's pairings", () => {
   it("shows the pairings the conversation has chosen", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
-
-    const grilling = screen.getByLabelText("Grilling") as HTMLSelectElement;
-    const implementing = screen.getByLabelText(
-      "Implementation",
-    ) as HTMLSelectElement;
-    const reviewing = screen.getByLabelText("Review") as HTMLSelectElement;
+    await waitFor(() => picker("Grilling"));
 
     // Separate choices, and in the fixture genuinely separate accounts: grill on
     // fable, implement on opus, review on sonnet.
@@ -3930,22 +3945,19 @@ describe("a conversation's pairings", () => {
     // The fixture picks a Pairing for the grilling, which is one of that
     // picker's rows; the other says there is to be no grilling at all.
     const interviewing = under(OPEN.grilling_pairing)!;
-
-    expect(grilling.value).toBe(
-      pairing(interviewing.profile, interviewing.model!),
-    );
-    expect(implementing.value).toBe(
-      pairing(
-        OPEN.implementation_pairing!.profile,
-        OPEN.implementation_pairing!.model!,
-      ),
-    );
-    // And the same for the review.
     const reviewed = under(OPEN.review_pairing)!;
 
-    expect(reviewing.value).toBe(pairing(reviewed.profile, reviewed.model!));
+    expect(showing("Grilling")).toBe(readsAs(interviewing));
+    expect(showing("Implementation")).toBe(
+      readsAs(OPEN.implementation_pairing!),
+    );
+    expect(showing("Review")).toBe(readsAs(reviewed));
     expect(
-      new Set([grilling.value, implementing.value, reviewing.value]).size,
+      new Set([
+        showing("Grilling"),
+        showing("Implementation"),
+        showing("Review"),
+      ]).size,
     ).toBe(3);
   });
 
@@ -3959,25 +3971,105 @@ describe("a conversation's pairings", () => {
   it("offers every profile-and-model combination as one flat list", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    const options = Array.from(
-      (screen.getByLabelText("Implementation") as HTMLSelectElement).options,
-    ).map((option) => option.text);
+    expect(offers("Implementation")).toEqual(READINGS);
+  });
 
-    expect(options).toEqual(READINGS);
+  /// And what a row sends is untouched by how it reads: the profile's id and the
+  /// model's own, which is what a session is launched with.
+  ///
+  /// Every row rather than one, because the guarantee is that what was read off
+  /// a row is what that row sends — one row proving it would leave the other
+  /// three to a coincidence, and the reading is composed now rather than being
+  /// the two ids it used to be.
+  it("sends the profile and model of whichever row was read", async () => {
+    const fetching = withConversation(UNCHOSEN, json("Chosen"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => picker("Implementation"));
 
-    // What the rows send is untouched by any of that: the profile's id and the
-    // model's own, which is what a session is launched with.
-    expect(
-      Array.from(
-        (screen.getByLabelText("Implementation") as HTMLSelectElement).options,
-      ).map((option) => option.value),
-    ).toEqual(
-      PROFILES.flatMap((profile) =>
-        profile.models.map((model) => pairing(profile, model)),
-      ),
+    const wire = PROFILES.flatMap((profile) =>
+      profile.models.map((model) => ({ profile_id: profile.id, model })),
     );
+
+    for (const [index, reading] of READINGS.entries()) {
+      // Pickable again: the control is disabled while a choice is in flight, so
+      // a walk down the list waits for the one before it to land — which is the
+      // same thing a hand at the card has to do.
+      await waitFor(() => expect(picker("Implementation").disabled).toBe(false));
+      pick("Implementation", reading);
+
+      // The `index`th write to that path, this being the only test that makes
+      // more than one of them.
+      await waitFor(() =>
+        expect(
+          sent(
+            fetching,
+            `/api/ui/conversations/${OPEN.id}/implementation-pairing`,
+            index,
+          ),
+        ).toEqual(wire[index]),
+      );
+    }
+  });
+
+  /// A Grok Build account beside the fixture's Claude Code ones, so that a
+  /// picker has two harnesses in it: one account apiece, which is also the case
+  /// where the reading says no profile name.
+  const MIXED: ProfileEntry[] = [
+    PROFILES[0]!,
+    {
+      account: { agent_type: "Grok", home: "/srv/accounts/grok" },
+      broken: null,
+      id: 9,
+      models: ["grok-4.6"],
+      name: "grok",
+    },
+  ];
+
+  /// Each row under the mark of the harness it runs, which is what the pickers
+  /// were drawn by hand for: a reader picks the account they mean out of a column
+  /// by its shape before reading a word of any of them.
+  it("draws every row under the mark of the harness it runs", async () => {
+    withConversation(UNCHOSEN, whenever("/api/ui/profiles", json(MIXED)));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => picker("Implementation"));
+
+    expect(offers("Implementation")).toEqual([
+      "Claude Code Fable 5",
+      "Grok 4.6",
+    ]);
+    expect(offered("Implementation").map(marked)).toEqual([
+      art(claudeMarkFile),
+      art(grokMarkFile),
+    ]);
+  });
+
+  /// And the closed control draws the chosen row exactly as the list drew it: a
+  /// control showing one thing and offering the same thing drawn differently is
+  /// a control the eye has to check.
+  it("draws the chosen pairing's mark on the closed control", async () => {
+    theWorkbench();
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => picker("Grilling"));
+
+    expect(marked(picker("Grilling"))).toBe(art(claudeMarkFile));
+    expect(marked(picker("Implementation"))).toBe(art(claudeMarkFile));
+    expect(marked(picker("Review"))).toBe(art(claudeMarkFile));
+  });
+
+  /// The row that runs nothing is not an account, so there is no harness for a
+  /// mark to be of: it draws its words and no element at all, rather than a gap
+  /// where one would have been. And so does the picker sitting on it.
+  it("draws the no-session row as words alone", async () => {
+    withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => picker("Review"));
+
+    expect(marked(offered("Grilling")[0]!)).toBeNull();
+    expect(offers("Grilling")[0]).toBe("No grilling");
+    expect(marked(picker("Review"))).toBeNull();
+    expect(showing("Review")).toBe("No review");
   });
 
   /// A backend with one account saved says no name at all: there is nothing for
@@ -3988,23 +4080,20 @@ describe("a conversation's pairings", () => {
       whenever("/api/ui/profiles", json([PROFILES[0]])),
     );
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    expect(
-      Array.from(
-        (screen.getByLabelText("Implementation") as HTMLSelectElement).options,
-      ).map((option) => option.text),
-    ).toEqual(["Not chosen", "Claude Code Fable 5"]);
+    expect(offers("Implementation")).toEqual(["Claude Code Fable 5"]);
+    // The placeholder is what the closed control says rather than a row of the
+    // list: there is no unpicking here, so it is not something to go back to.
+    expect(showing("Implementation")).toBe("Not chosen");
   });
 
   it("sends each choice on its own, to its own role", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    fireEvent.change(screen.getByLabelText("Grilling"), {
-      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
-    });
+    pick("Grilling", READINGS[0]!);
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/grilling-pairing`),
@@ -4018,9 +4107,7 @@ describe("a conversation's pairings", () => {
 
     // The second of a profile's models, which is the half of the choice a
     // profile alone could never have said.
-    fireEvent.change(screen.getByLabelText("Implementation"), {
-      target: { value: pairing(PROFILES[1]!, PROFILES[1]!.models[1]!) },
-    });
+    pick("Implementation", READINGS[2]!);
     await waitFor(() =>
       expect(
         sent(
@@ -4041,26 +4128,18 @@ describe("a conversation's pairings", () => {
   it("offers the no-session row on the grilling and review pickers alone", async () => {
     withConversation(UNCHOSEN);
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Review"));
+    await waitFor(() => picker("Review"));
 
-    const rows = (label: string) =>
-      Array.from(
-        (screen.getByLabelText(label) as HTMLSelectElement).options,
-      ).map((option) => option.text);
+    // Above the accounts, the row that says none of them will read this branch.
+    expect(offers("Review")).toEqual(["No review", ...READINGS]);
+    expect(offers("Grilling")).toEqual(["No grilling", ...READINGS]);
+    expect(offers("Implementation")).toEqual(READINGS);
 
-    expect(rows("Review")).toEqual([
-      // The placeholder, because nothing has been picked yet — and above the
-      // accounts, the row that says none of them will read this branch.
-      "Not chosen",
-      "No review",
-      ...READINGS,
-    ]);
-    expect(rows("Grilling")).toEqual([
-      "Not chosen",
-      "No grilling",
-      ...READINGS,
-    ]);
-    expect(rows("Implementation")).toEqual(["Not chosen", ...READINGS]);
+    // And nothing picked yet on any of them, which the closed control says
+    // rather than offering it as a row.
+    expect(showing("Review")).toBe("Not chosen");
+    expect(showing("Grilling")).toBe("Not chosen");
+    expect(showing("Implementation")).toBe("Not chosen");
   });
 
   /// And picking it sends a choice rather than the absence of one, exactly as
@@ -4068,11 +4147,9 @@ describe("a conversation's pairings", () => {
   it("sends no grilling as the choice it is", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    fireEvent.change(screen.getByLabelText("Grilling"), {
-      target: { value: NONE },
-    });
+    pick("Grilling", "No grilling");
 
     await waitFor(() =>
       expect(
@@ -4086,11 +4163,9 @@ describe("a conversation's pairings", () => {
   it("shows no grilling as what is chosen where it is", async () => {
     withConversation({ ...UNCHOSEN, grilling_pairing: "Skipped" });
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    expect((screen.getByLabelText("Grilling") as HTMLSelectElement).value).toBe(
-      NONE,
-    );
+    expect(showing("Grilling")).toBe("No grilling");
   });
 
   /// And picking it sends a choice rather than the absence of one: an untouched
@@ -4099,11 +4174,9 @@ describe("a conversation's pairings", () => {
   it("sends no review as the choice it is", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Review"));
+    await waitFor(() => picker("Review"));
 
-    fireEvent.change(screen.getByLabelText("Review"), {
-      target: { value: NONE },
-    });
+    pick("Review", "No review");
 
     await waitFor(() =>
       expect(
@@ -4117,11 +4190,9 @@ describe("a conversation's pairings", () => {
   it("sends a review pairing under the same key", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Review"));
+    await waitFor(() => picker("Review"));
 
-    fireEvent.change(screen.getByLabelText("Review"), {
-      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
-    });
+    pick("Review", READINGS[0]!);
 
     await waitFor(() =>
       expect(
@@ -4140,11 +4211,9 @@ describe("a conversation's pairings", () => {
   it("shows no review as what is chosen where it is", async () => {
     withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Review"));
+    await waitFor(() => picker("Review"));
 
-    expect((screen.getByLabelText("Review") as HTMLSelectElement).value).toBe(
-      NONE,
-    );
+    expect(showing("Review")).toBe("No review");
   });
 
   /// A profile chosen before models were paired with them is half a choice: the
@@ -4157,10 +4226,8 @@ describe("a conversation's pairings", () => {
     });
     mount(`/conversations/${OPEN.id}`);
 
-    await waitFor(() => screen.getByLabelText("Grilling"));
-    expect((screen.getByLabelText("Grilling") as HTMLSelectElement).value).toBe(
-      "",
-    );
+    await waitFor(() => picker("Grilling"));
+    expect(showing("Grilling")).toBe("Not chosen");
     await waitFor(() => screen.getByText(/was chosen before models were/));
   });
 
@@ -4169,11 +4236,9 @@ describe("a conversation's pairings", () => {
   it("says a choice was refused once the grilling has started", async () => {
     withConversation(OPEN, json("NotDrafting"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    fireEvent.change(screen.getByLabelText("Grilling"), {
-      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
-    });
+    pick("Grilling", READINGS[0]!);
 
     await waitFor(() =>
       screen.getByText(
@@ -4237,11 +4302,9 @@ describe("a conversation's pairings", () => {
   it("says why a choice was refused, in words", async () => {
     withConversation(UNCHOSEN, json("NoSuchProfile"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    fireEvent.change(screen.getByLabelText("Grilling"), {
-      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
-    });
+    pick("Grilling", READINGS[0]!);
 
     await waitFor(() => screen.getByText("That profile has been removed."));
   });
@@ -6044,17 +6107,6 @@ describe("a session's output on the timeline", () => {
 /// here exactly as lobehub published them, so a mark drawn from the wrong file
 /// fails even though both files would carry the same class.
 describe("the mark of the harness a session ran under", () => {
-  /// The path inside one of lobehub's files, which is the whole of the drawing:
-  /// all four are a single path in a 24-square box.
-  const art = (file: string): string => / d="([^"]+)"/.exec(file)![1]!;
-
-  /// And the drawing a scope has actually put on the page — `null` where it drew
-  /// no mark at all.
-  const marked = (scope: Element): string | null =>
-    scope
-      .querySelector(`.${harnessMark.mark} path`)
-      ?.getAttribute("d") ?? null;
-
   /// Every harness, against the file its mark is drawn out of. A fifth backend
   /// arrives in this list because it arrives in the component's own record,
   /// which will not compile without a mark beside it.
@@ -8121,13 +8173,11 @@ describe("steering a conversation", () => {
     // under.
     const modal = await openSteer(container);
 
-    const picker = (await drawn(modal, "#steer-pairing")) as HTMLSelectElement;
+    await drawn(modal, "#steer-pairing");
     const interviewing = under(GRILLING.grilling_pairing)!;
 
     await waitFor(() =>
-      expect(picker.value).toBe(
-        `${interviewing.profile.id}:${interviewing.model!}`,
-      ),
+      expect(showing("Run it under")).toBe(readsAs(interviewing)),
     );
 
     // Nothing runs in done, so there is nothing there to pick.
@@ -8143,14 +8193,10 @@ describe("steering a conversation", () => {
     const building = GRILLING.implementation_pairing!;
 
     await waitFor(() =>
-      expect(
-        (modal.querySelector("#steer-pairing") as HTMLSelectElement).value,
-      ).toBe(`${building.profile.id}:${building.model!}`),
+      expect(showing("Run it under")).toBe(readsAs(building)),
     );
 
-    fireEvent.change(await drawn(modal, "#steer-pairing"), {
-      target: { value: `${PROFILES[0]!.id}:${PROFILES[0]!.models[0]!}` },
-    });
+    pick("Run it under", READINGS[0]!);
     fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
 
     await waitFor(() =>
@@ -8169,6 +8215,26 @@ describe("steering a conversation", () => {
         follow_up: null,
       }),
     );
+  });
+
+  /// The modal's picker is the setup card's control in another place, so it draws
+  /// what that one draws: the harness's mark in front of every reading, and in
+  /// front of the one it is showing.
+  it("marks the harness on every row of its own picker", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: false, pinned: WRAPPING.pinned },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    await drawn(modal, "#steer-pairing");
+
+    expect(offers("Run it under")).toEqual(READINGS);
+    expect(offered("Run it under").map(marked)).toEqual(
+      READINGS.map(() => art(claudeMarkFile)),
+    );
+    expect(marked(picker("Run it under"))).toBe(art(claudeMarkFile));
   });
 
   /// Grilling is the one target that carries a payload: a brief for the round it

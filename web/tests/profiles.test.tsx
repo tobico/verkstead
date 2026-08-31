@@ -30,13 +30,23 @@ import type {
   ProfileEdit,
   ProfileEntry,
 } from "../src/api/types";
+import { AGENT_NAME } from "../src/agents";
 import { KNOWN_MODELS, prettify } from "../src/models";
+// The four files a backend's brand mark is drawn out of, read as lobehub
+// published them — so that naming a mark here and drawing it in `HarnessMark`
+// are two independent statements about the same art.
+import claudeMarkFile from "../src/marks/claude-color.svg?raw";
+import codexMarkFile from "../src/marks/codex.svg?raw";
+import grokMarkFile from "../src/marks/grok.svg?raw";
+import opencodeMarkFile from "../src/marks/opencode.svg?raw";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
 import { ProfileList, ProfilePane } from "../src/profiles/ProfileList";
 import styles from "../src/profiles/ProfileList.module.css";
 import head from "../src/workbench/PaneHead.module.css";
 import { drawn } from "./bench";
+import { art, marked } from "./marking";
+import { offered as offeredRows, pick, rows, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 
@@ -452,9 +462,7 @@ describe("the pane a card opens", () => {
     expect(
       (screen.getByLabelText(/Home directory/) as HTMLInputElement).value,
     ).toBe(home(CODEX.account).home);
-    expect(
-      (screen.getByLabelText("Agent") as HTMLSelectElement).value,
-    ).toBe("Codex");
+    expect(showing("Agent")).toBe("Codex");
   });
 
   /// The paths shown are the resolved ones the server recorded rather than
@@ -473,9 +481,7 @@ describe("the pane a card opens", () => {
         (press) => press.textContent,
       ),
     ).toEqual(["Remove"]);
-    expect(
-      (screen.getByLabelText("Agent") as HTMLSelectElement).value,
-    ).toBe(FABLE.account.agent_type);
+    expect(showing("Agent")).toBe(AGENT_NAME[FABLE.account.agent_type]);
   });
 
   /// Every backend that can launch, by its own name, and no other.
@@ -491,22 +497,44 @@ describe("the pane a card opens", () => {
     theProfiles();
     mountPane(FABLE.id);
 
-    const picker = (await waitFor(() =>
-      screen.getByLabelText("Agent"),
-    )) as HTMLSelectElement;
+    await waitFor(() => screen.getByLabelText("Agent"));
 
-    expect([...picker.options].map((option) => option.value)).toEqual([
-      "Claude",
-      "Codex",
-      "Grok",
-      "OpenCode",
-    ]);
-    expect([...picker.options].map((option) => option.textContent)).toEqual([
+    expect(rows("Agent")).toEqual([
       "Claude Code",
       "Codex",
       "Grok Build",
       "OpenCode",
     ]);
+  });
+
+  /// And each of them under its own brand mark, which is the whole reason this
+  /// one row of the form is not a `<select>`: a reader picks the account they
+  /// mean out of four by its shape before reading a word.
+  it("offers each backend under its own brand mark", async () => {
+    theProfiles();
+    mountPane(FABLE.id);
+
+    await waitFor(() => screen.getByLabelText("Agent"));
+
+    expect(offeredRows("Agent").map(marked)).toEqual([
+      art(claudeMarkFile),
+      art(codexMarkFile),
+      art(grokMarkFile),
+      art(opencodeMarkFile),
+    ]);
+  });
+
+  /// And the closed control draws the chosen row the way the list drew it, mark
+  /// and all: a control showing one thing and offering the same thing drawn
+  /// differently is a control the eye has to check.
+  it("draws the chosen backend's mark on the closed control", async () => {
+    serving(whenever("/api/ui/profiles", json([CODEX])));
+    mountPane(CODEX.id);
+
+    const control = await waitFor(() => screen.getByLabelText("Agent"));
+
+    expect(marked(control)).toBe(art(codexMarkFile));
+    expect(showing("Agent")).toBe("Codex");
   });
 
   /// Picking another type is asking for that type's account, so the fields under
@@ -518,9 +546,7 @@ describe("the pane a card opens", () => {
 
     await waitFor(() => screen.getByLabelText(/Claude directory/));
 
-    fireEvent.change(screen.getByLabelText("Agent"), {
-      target: { value: "Codex" },
-    });
+    pick("Agent", "Codex");
 
     await waitFor(() => screen.getByLabelText(/Home directory/));
     expect(screen.queryByLabelText(/Claude directory/)).toBeNull();
@@ -676,9 +702,7 @@ describe("the pane the plus opens", () => {
       });
       fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
-      fireEvent.change(screen.getByLabelText("Agent"), {
-        target: { value: profile.account.agent_type },
-      });
+      pick("Agent", AGENT_NAME[profile.account.agent_type]);
       fireEvent.input(
         await waitFor(() => screen.getByLabelText(/Home directory/)),
         { target: { value: home(profile.account).home } },
@@ -902,9 +926,7 @@ describe("the models a profile lists", () => {
     mountPane(FABLE.id);
 
     await waitFor(() => screen.getByLabelText("Fable 5"));
-    fireEvent.change(screen.getByLabelText("Agent"), {
-      target: { value: "Grok" },
-    });
+    pick("Agent", "Grok Build");
 
     await waitFor(() => screen.getByLabelText("Grok 4.6"));
     expect(screen.queryByLabelText("Opus 5")).toBeNull();

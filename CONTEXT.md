@@ -588,6 +588,23 @@ session runs one model. Offered as one flat list wherever it is picked — a row
 per Profile-and-model combination — because the counts are small and a
 two-stage pick would cost a tap every time. There is no default model
 anywhere, so an unpaired Profile is half a choice and reads as none.
+
+**How one reads is one reading, everywhere the workbench says who runs a
+session**: the harness's brand mark, the harness's own name, the model's own
+name, and the Profile's name after an em dash — "Claude Code Fable 5 — Work".
+The name is said only where it is what tells two of them apart, which is a
+harness with more than one Profile saved; a harness with one says "Grok 4.6" and
+stops. The harness's name is dropped where the model's own has already said it,
+so an OpenCode account on minimax reads "OpenCode Minimax M2.1" and a Grok Build
+one does not read "Grok Build Grok 4.6". It is **composed** out of the three
+recorded facts rather than written down per Pairing — the harness, the model id,
+the Profile's name — so a Profile saved a year ago reads the way one saved today
+does, and an id this build has not learned the name of reads as the id, which is
+legible where a blank would not be. Every site shares it: the four pairing
+pickers, the Agent run card on the Timeline and the details pane it opens, the
+status button's running line, and the Brief's three pairing facts. The pickers
+are drawn by hand rather than as a `<select>` for one reason — an `<option>`
+holds text and no mark.
 _Avoid_: profile choice, model selection, profile+model, combination
 
 **Grilling Pairing** / **Implementation Pairing** / **Review Pairing**:

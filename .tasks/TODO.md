@@ -20,4 +20,4 @@ every row can carry its mark.
 - [x] 02: The shared reading — [details](02-shared-reading.md)
 - [x] 03: The historical sites — [details](03-historical-sites.md)
 - [x] 04: The harness marks — [details](04-harness-marks.md)
-- [ ] 05: The pairing listbox — [details](05-pairing-listbox.md)
+- [x] 05: The pairing listbox — [details](05-pairing-listbox.md)

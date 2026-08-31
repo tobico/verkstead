@@ -101,14 +101,18 @@
   font-size: 0.9em;
 }
 
-/* The typed fields — the name, the account's paths, and the model id added by
-   hand — and the agent type, which is picked rather than typed and drawn as the
-   rest of them because it is another of the form's rows, not a control of its
-   own kind. The typed ones are said by type rather than by element, because the
-   ticks the models are picked with are inputs too and a width of the pane is not
-   what a checkbox wants. */
-.form input[type="text"],
-.form select {
+/* The typed fields: the name, the account's paths, and the model id added by
+   hand. Said by type rather than by element, because the ticks the models are
+   picked with are inputs too and a width of the pane is not what a checkbox
+   wants.
+
+   The agent type used to be in this rule, drawn as the rest of the form's rows
+   because it was another of them. It is the app's own listbox now — a row per
+   backend under its own brand mark — which carries the field treatment itself,
+   in `picking.module.css`, and takes only the room under it from here. Its words
+   are not in the fields' monospace either: what is being read is "Claude Code"
+   beside a mark rather than a path. */
+.form input[type="text"] {
   display: block;
   width: 100%;
   margin-bottom: 0.85rem;
@@ -119,6 +123,12 @@
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
   padding: 0.5rem 0.6rem;
+}
+
+/* The room under the type picker, which is the whole of what the form has to say
+   about it: the same gap every field above it leaves. */
+.form .agentType {
+  margin-bottom: 0.85rem;
 }
 
 /* The models: a tick per model this build knows, and the field under them for an
@@ -259,9 +269,9 @@
 }
 
 /* The field being worked in, which is no pointer's doing: the border says which
-   of them the words are going into. */
-.form input[type="text"]:focus-visible,
-.form select:focus-visible {
+   of them the words are going into. The type picker says it for itself, in
+   `picking.module.css`. */
+.form input[type="text"]:focus-visible {
   border-color: var(--accent);
 }
 
@@ -269,8 +279,7 @@
    accent it is filled with, and the outline takes the colour its own words are
    in — the remove's red. */
 @media (hover: hover) {
-  .form input[type="text"]:hover,
-  .form select:hover {
+  .form input[type="text"]:hover {
     border-color: var(--ink-soft);
   }
 

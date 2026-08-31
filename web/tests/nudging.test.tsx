@@ -595,7 +595,7 @@ describe("what a Nudge is about", () => {
     render(() => <App />);
     await waitFor(() =>
       expect(
-        document.querySelector("#implementation-pairing option"),
+        document.querySelector("#implementation-pairing"),
       ).not.toBeNull(),
     );
     stream().opens();
