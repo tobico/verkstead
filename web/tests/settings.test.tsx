@@ -10,10 +10,10 @@
 //! credentials — and the pair is mounted together only where a round trip is
 //! what is being asked about: what the form saved, said back on the card.
 //!
-//! So this suite is in three parts: what is readable on the card without
+//! So this suite is in four parts: what is readable on the card without
 //! opening anything — the token's state, the author, and the warnings about
-//! whichever is missing — what the form does in its pane, and what the page
-//! itself draws around the two.
+//! whichever is missing — what the form does in its pane, what the switch beside
+//! it does, and what the page itself draws around the two.
 //!
 //! `tests/fixtures/settings*.json` are golden fixtures like the profiles page's:
 //! `cargo test` calls the real endpoint and writes the files, so what these
@@ -55,7 +55,6 @@ import card from "../src/CardButton.module.css";
 import { GithubCard, GithubPane } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
 import buildCache from "../src/settings/BuildCache.module.css";
-import shareViewer from "../src/settings/ShareViewer.module.css";
 import paths from "../src/settings/Paths.module.css";
 import {
   SettingsPage,
@@ -424,8 +423,8 @@ describe("saving", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
-        share_viewer_url: TOLD.share_viewer_url,
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         ...PATHS,
       }),
     );
@@ -653,8 +652,8 @@ describe("replacing and clearing the token", () => {
         // Untouched by this form, and so untouched in what the save answers
         // with — see the sections below it for what does change these.
         rust_build_cache: TOLD.rust_build_cache,
-        share_viewer_url: TOLD.share_viewer_url,
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         paths: TOLD.paths,
         ignored_comments: TOLD.ignored_comments,
       },
@@ -678,8 +677,8 @@ describe("replacing and clearing the token", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
-        share_viewer_url: TOLD.share_viewer_url,
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         ...PATHS,
       }),
     );
@@ -1010,6 +1009,104 @@ describe("the ignore rules", () => {
   });
 });
 
+/// The switch beside the token: whether Done shares the record to the pull
+/// request.
+///
+/// It is on this page because what it turns on is done with the token above it,
+/// under the account that token belongs to. It saves itself, the way the build
+/// cache's switch does — and unlike the fields it stands among, which wait for
+/// Save.
+describe("sharing on Done", () => {
+  const theSwitch = (): HTMLInputElement =>
+    screen.getByRole("switch") as HTMLInputElement;
+
+  const answering = (standing: SettingsView): SettingsSaved => ({
+    settings: standing,
+    verified: null,
+    // Nothing a flip sends can be refused: it says nothing about the rules.
+    refused: [],
+  });
+
+  const sharing = (standing: SettingsView, on: boolean): SettingsView => ({
+    ...standing,
+    share_on_done: on,
+  });
+
+  /// Where it sits rather than whether anybody has been here: a Verkstead
+  /// nobody has told anything draws it off.
+  it("says where the setting stands", async () => {
+    theSettings(UNSET);
+    mountPane();
+
+    await waitFor(() => expect(theSwitch().checked).toBe(false));
+  });
+
+  it("saves the moment it is flipped, and leaves the credentials alone", async () => {
+    const fetching = theSettings(TOLD, json(answering(sharing(TOLD, false))));
+    mountPane();
+
+    await waitFor(() => expect(theSwitch().checked).toBe(true));
+    fireEvent.click(theSwitch());
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        // The author as the server holds it, and the token untouched: a flip is
+        // not a submit.
+        git_author: TOLD.git_author,
+        github_token: "Keep",
+        share_on_done: false,
+        // The rules ride along as an action rather than a value: a flip says
+        // nothing about them — see [`ruleEdit`].
+        ignored_comments: "Keep",
+        // And everything else in the file as it stands, because one request
+        // writes the whole of it.
+        rust_build_cache: {
+          enabled: TOLD.rust_build_cache.enabled,
+          size: TOLD.rust_build_cache.size,
+        },
+        conflict_resolution: TOLD.conflict_resolution,
+        ...PATHS,
+      }),
+    );
+
+    // And it follows the answer rather than the press.
+    await waitFor(() => expect(theSwitch().checked).toBe(false));
+  });
+
+  /// A flip halfway through typing an address writes the switch and nothing
+  /// else — and leaves what was being typed where it was.
+  it("writes neither what was typed nor over it", async () => {
+    const fetching = theSettings(TOLD, json(answering(sharing(TOLD, false))));
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    fireEvent.input(screen.getByLabelText("Email"), {
+      target: { value: "ada@analytical." },
+    });
+    fireEvent.click(theSwitch());
+
+    await waitFor(() =>
+      expect(
+        (sent(fetching) as { git_author: { email: string } }).git_author.email,
+      ).toBe(TOLD.git_author.email),
+    );
+
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+      "ada@analytical.",
+    );
+  });
+
+  it("says so when the flip could not be saved", async () => {
+    theSettings(TOLD, json({ error: "gone" }, 500));
+    mountPane();
+
+    await waitFor(() => expect(theSwitch().checked).toBe(true));
+    fireEvent.click(theSwitch());
+
+    await waitFor(() => screen.getByText(/could not be saved/));
+  });
+});
+
 /// The page the credentials head, on the routes the app really gives it: the
 /// settings pane in the middle, the conversations beside it, and a details pane
 /// for whatever the path names.
@@ -1047,8 +1144,8 @@ function thePage(at = "/settings") {
               the middle pane up while the leaf under it changes, so a mount that
               flattened them would be testing a page the app does not build —
               and a list spelled out here would be a second opinion about where
-              a card leads, which is the drift that left the share viewer's card
-              opening the catch-all. */}
+              a card leads, which is the drift that has left a card opening the
+              catch-all before. */}
           <Route path="/settings" component={SettingsPage}>
             {settingsPanes()}
           </Route>
@@ -1221,23 +1318,7 @@ describe("the path a details pane stands at", () => {
     await waitFor(() => expect(history.get()).toBe("/"));
   });
 
-  /// And the third pane a word names: where the share viewer is hosted.
-  it("opens the share viewer at /settings/share-viewer, replacing", async () => {
-    const { container, history } = thePage();
-
-    const face = await drawn<HTMLElement>(
-      container,
-      `.${shareViewer.shareViewerCard}`,
-    );
-    fireEvent.click(face);
-
-    await waitFor(() => expect(history.get()).toBe("/settings/share-viewer"));
-
-    history.back();
-    await waitFor(() => expect(history.get()).toBe("/"));
-  });
-
-  /// And the fourth: the paths Verkstead may work inside, and what a sandbox is
+  /// And the third: the paths Verkstead may work inside, and what a sandbox is
   /// given beyond its worktree.
   it("opens the paths at /settings/paths, replacing", async () => {
     const { container, history } = thePage();
@@ -1257,19 +1338,6 @@ describe("the path a details pane stands at", () => {
     await waitFor(() => screen.getByLabelText("Add a watched path"));
 
     const face = await drawn<HTMLElement>(container, `.${paths.pathsCard}`);
-    expect(face.getAttribute("aria-pressed")).toBe("true");
-    expect(face.classList).toContain(card.open);
-  });
-
-  it("draws the viewer's field in the details pane, and reads its card as open", async () => {
-    const { container } = thePage("/settings/share-viewer");
-
-    await waitFor(() => screen.getByLabelText(/Where you hosted it/));
-
-    const face = await drawn<HTMLElement>(
-      container,
-      `.${shareViewer.shareViewerCard}`,
-    );
     expect(face.getAttribute("aria-pressed")).toBe("true");
     expect(face.classList).toContain(card.open);
   });
@@ -1556,7 +1624,6 @@ describe("where a settings details pane stands", () => {
   it("puts an id behind a segment of its own, and a word beside it", () => {
     expect(pathTo("github")).toBe("/settings/github");
     expect(pathTo("build-cache")).toBe("/settings/build-cache");
-    expect(pathTo("share-viewer")).toBe("/settings/share-viewer");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
     expect(pathTo(opensRepo(7))).toBe("/settings/repos/7");
@@ -1567,7 +1634,6 @@ describe("where a settings details pane stands", () => {
     for (const opening of [
       "github",
       "build-cache",
-      "share-viewer",
       opensProfile(7),
       opensProfile("new"),
       opensRepo(7),

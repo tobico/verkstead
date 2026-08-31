@@ -583,8 +583,8 @@ pub struct ConversationView {
     pub shared: Option<ShareView>,
 }
 
-/// One published share, as the workbench draws it: the link, and the moment the
-/// snapshot was taken.
+/// One published share, as the workbench draws it: the link, the gist behind it,
+/// and the moment the snapshot was taken.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ShareView {
@@ -597,6 +597,15 @@ pub struct ShareView {
     /// reader goes through is a fact about the settings at the moment the page
     /// is drawn. See `link` in `crates/server/src/sharing.rs`.
     pub url: String,
+
+    /// And the gist itself, as GitHub gave it, which is what the record holds and
+    /// what [`Self::url`] is composed from.
+    ///
+    /// Beside the viewer's link rather than instead of it, the two being for
+    /// different things: the viewer's is what a reader is sent, and this is where
+    /// the file actually is. A share is deleted at GitHub and nowhere else, so a
+    /// human who wants one gone has to be able to reach it.
+    pub gist: String,
 
     /// When it was published, RFC 3339 — drawn beside the link, because a link
     /// with no date says nothing about how far the work has moved since.
@@ -1616,6 +1625,14 @@ pub struct AgentOutputEvent {
     /// at all; `null` beside a `profile` that is not is a session from before
     /// either was recorded.
     pub model: Option<String>,
+
+    /// And which agent ran it, which is what says whose mark goes beside the
+    /// reading — the same four words a Profile's account is discriminated by.
+    ///
+    /// Off the record beside the other two and for their reason. `null` for a
+    /// session started before this was written down, which the reading draws
+    /// without a mark rather than guessing one.
+    pub agent_type: Option<crate::AgentType>,
 }
 
 /// A Question Set as the Timeline shows it: what it was called, the table of
@@ -1838,6 +1855,7 @@ pub fn agent_output_event(
     idle: bool,
     profile: Option<String>,
     model: Option<String>,
+    agent_type: Option<crate::AgentType>,
 ) -> TimelineEvent {
     TimelineEvent::AgentOutput(AgentOutputEvent {
         id,
@@ -1848,6 +1866,7 @@ pub fn agent_output_event(
         running,
         profile,
         model,
+        agent_type,
         // Idle is a thing a running session is, and the caller reads the two
         // off different places — so the pair is made consistent here rather
         // than at each of them.

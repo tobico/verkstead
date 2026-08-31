@@ -56,6 +56,16 @@
 //! A refusal is the whole request refused: neither file is written, and what
 //! comes back names the row and the box it is about. So it is drawn at that
 //! row, with everything the human typed left exactly where they left it.
+//!
+//! And one switch stands beside them in the pane, saving itself: whether a
+//! Conversation's record is published and linked on its pull request when the
+//! work settles to Done. It is here rather than in a section of its own because
+//! what it turns on is done with the token above it and under the account that
+//! token belongs to — a switch two panes away from the credential it spends
+//! would be a switch nobody could see the cost of. It saves on the flip, the way
+//! the build cache's does, and it carries the author as the *server* holds it
+//! rather than as the fields hold it: a flip is not a submit, and half a typed
+//! email address is nobody's author.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Index, Match, Show, Switch, createSignal, type JSX } from "solid-js";
@@ -63,6 +73,7 @@ import { Index, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
+import { Switch as Toggle } from "../Switch";
 import { loadSettings, saveSettings } from "../api/client";
 import { useReading } from "../freshness";
 import type {
@@ -248,6 +259,30 @@ export function GithubPane(props: {
   const authorName = () => name() ?? author()?.name ?? "";
   const authorEmail = () => email() ?? author()?.email ?? "";
 
+  /// Everything in `config.yaml` this pane is not about, as it stands.
+  ///
+  /// The endpoint writes the whole file in one request, so a save leaving one of
+  /// these out would be a save emptying it. The defaults are what the server
+  /// would write anyway, for the moment before the read has landed.
+  const held = () => ({
+    rust_build_cache: {
+      enabled: told()?.rust_build_cache.enabled ?? true,
+      size: told()?.rust_build_cache.size_configured
+        ? (told()?.rust_build_cache.size ?? "")
+        : "",
+    },
+    // And how a conflicted pull request is resolved, likewise.
+    conflict_resolution: told()?.conflict_resolution ?? "Merge",
+    // And the Watched Paths and the binds the settings hold, again for that
+    // reason — a list this form left out would be a list it emptied, and one
+    // of them is the boundary itself. See [`heldPaths`].
+    ...heldPaths(told()),
+  });
+
+  /// Where the share-on-Done switch sits, which is off until somebody has been
+  /// here.
+  const sharing = () => told()?.share_on_done ?? false;
+
   const typing = () => replacing() || configured() === null;
 
   /// The rows as they are drawn: what has been typed, or what is written down
@@ -377,11 +412,10 @@ export function GithubPane(props: {
 
   /// Save, with whatever is to become of the token.
   ///
-  /// The build cache rides along as it stands, because the endpoint writes the
-  /// whole of `config.yaml` in one request and this form has no business
-  /// changing it — the section below is where it is set. Its own defaults
-  /// where the read has not landed, which is what the server would write
-  /// anyway.
+  /// The switch below rides along as it stands, along with everything else this
+  /// form is not about — see [`held`]: pressing Save is about the fields, and a
+  /// switch that came back off with the author would be a switch the form
+  /// flipped.
   const write = (github_token: TokenEdit) => {
     // Whatever the last save was turned down over went with the press that is
     // being made now: the answer to this one says what is wrong with what is
@@ -397,28 +431,38 @@ export function GithubPane(props: {
     save.mutate({
       git_author: { name: authorName(), email: authorEmail() },
       github_token,
-      rust_build_cache: {
-        enabled: told()?.rust_build_cache.enabled ?? true,
-        size: told()?.rust_build_cache.size_configured
-          ? (told()?.rust_build_cache.size ?? "")
-          : "",
-      },
-      // And where the share viewer is hosted, as it stands, for the same
-      // reason: one request writes the whole of `config.yaml`.
-      share_viewer_url: told()?.share_viewer_url ?? "",
-      // And how a conflicted pull request is resolved, likewise.
-      conflict_resolution: told()?.conflict_resolution ?? "Merge",
-      // And the Watched Paths and the binds the settings hold, again for that
-      // reason — a list this form left out would be a list it emptied, and one
-      // of them is the boundary itself. See [`heldPaths`].
-      ...heldPaths(told()),
+      share_on_done: sharing(),
       // And the ignore rules, which this pane is the one that owns: the whole
       // list where somebody has touched a row, and `Keep` where nobody has —
       // see [`ruleEdit`]. That is what stops a corrected email address being
       // refused over a pattern somebody hand-edited into the file weeks ago.
       ignored_comments: ruleEdit(),
+      ...held(),
     });
   };
+
+  /// And the switch's own save, which is its own press.
+  ///
+  /// Not the form's: the author goes back as the server holds it rather than as
+  /// the fields do, so a flip made halfway through typing an address writes
+  /// nothing but the switch, and nothing spends the fields either — what was
+  /// being typed is still being typed afterwards.
+  const flipping = useMutation(() => ({
+    mutationFn: (share_on_done: boolean) =>
+      saveSettings({
+        git_author: told()?.git_author ?? { name: "", email: "" },
+        // Untouched, for the reason a blank field is a `Keep`.
+        github_token: "Keep",
+        share_on_done,
+        // And the rules left exactly where they are: a flip is not the form's
+        // save, and one that spoke for them could be turned down over a pattern
+        // it never showed anybody — see [`ruleEdit`].
+        ignored_comments: "Keep",
+        ...held(),
+      }),
+    onSuccess: (saved: SettingsSaved) =>
+      queries.setQueryData(["settings"], saved.settings),
+  }));
 
   const submit = (ev: SubmitEvent) => {
     ev.preventDefault();
@@ -543,6 +587,34 @@ export function GithubPane(props: {
                     </button>
                   </div>
                 </Show>
+              </Show>
+            </section>
+
+            <section>
+              <h3>Sharing</h3>
+
+              {/* In a wrapper of its own, so the form's own label rule — which
+                  is about the labels over the fields — leaves the switch's to
+                  `Switch.module.css`. */}
+              <div class={styles.sharing}>
+                <Toggle
+                  label="Share to pull request on Done"
+                  on={sharing()}
+                  disabled={flipping.isPending}
+                  flip={(on) => flipping.mutate(on)}
+                />
+              </div>
+
+              <Note>
+                When a conversation settles to Done, its record is published as
+                a secret gist and linked in a comment on its pull request. It is
+                published with the token above, which needs the gist scope.
+              </Note>
+
+              <Show when={flipping.isError}>
+                <ErrorLine class={styles.failure}>
+                  The settings could not be saved: {flipping.error?.message}
+                </ErrorLine>
               </Show>
             </section>
 

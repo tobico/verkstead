@@ -83,6 +83,15 @@
   overflow-wrap: anywhere;
 }
 
+/* The harness's mark in front of what is running, spaced with a margin rather
+   than a gap — the line is a run of text — so a line saying that nothing is
+   running, or naming a session that recorded no harness, leaves no space where a
+   mark would have been. Its own ink is the line's, which is the soft one: what
+   is running is read after the status above it rather than instead of it. */
+.status .harness {
+  margin-inline-end: 0.4em;
+}
+
 /* Which way the menu will go, at the far end and quiet: a mark rather than a
    word, and no part of what the button says. */
 .status .mark {

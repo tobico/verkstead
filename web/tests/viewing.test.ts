@@ -8,9 +8,8 @@
 //! what it does with `fetch` and the fragment is what these ask about.
 //!
 //! Three promises, and almost every test here is one of them. The last describe
-//! is about the page's *address* rather than the page: three files spell that
-//! out separately, and one of them drifting is a 404 on every share ever
-//! published.
+//! is about the page's *address* rather than the page: two files spell that out
+//! separately, and one of them drifting is a 404 on every share ever published.
 //!
 //! **It draws the share whole.** The Gists API cuts a file off at a megabyte and
 //! says so with `truncated`; a share is several. So the page follows the API's
@@ -35,11 +34,9 @@ import SOURCE from "../../crates/server/share-viewer.html?raw";
 
 /// And the two files that say where it is published, read the same way: the
 /// workflow that puts it there, and the module that composes every link through
-/// it. What the address is compared against is `HOSTED` on the settings page —
-/// see the last describe below.
+/// it — see the last describe below.
 import WORKFLOW from "../../.github/workflows/pages.yml?raw";
 import SHARING from "../../crates/server/src/sharing.rs?raw";
-import { HOSTED } from "../src/settings/ShareViewer";
 
 /// What is inside its `<body>`, which is the markup and the script it runs.
 const BODY = /<body>([\s\S]*)<\/body>/.exec(SOURCE)![1]!;
@@ -317,17 +314,20 @@ describe("a link that draws nothing", () => {
   });
 });
 
-/// Where the page is, which is a fact three files hold separately: the workflow
-/// that publishes it, the server constant every link is composed through, and
-/// the settings page that says which viewer this Verkstead is using.
+/// Where the page is, which is a fact two files hold separately: the workflow
+/// that publishes it, and the server constant every link is composed through.
+/// Nobody configures this — every Verkstead links through the one hosted copy —
+/// so those two are the whole of the agreement.
 ///
-/// Nothing composes the three. A viewer published to one address and linked at
+/// Nothing composes them. A viewer published to one address and linked at
 /// another is a 404 on every share ever published, and the first person to find
 /// out would be whoever opened a link on a pull request — so this is the
 /// comparison, kept beside the page itself.
 describe("where the viewer is published", () => {
-  it("is the one address the workflow, the server and the settings page hold", () => {
-    expect(WORKFLOW).toContain(`EXPECTED: ${HOSTED}`);
-    expect(SHARING).toContain(`pub(crate) const HOSTED: &str = "${HOSTED}";`);
+  it("is the one address the server and the workflow that publishes it hold", () => {
+    const linked = /pub\(crate\) const HOSTED: &str = "([^"]+)";/.exec(SHARING);
+
+    expect(linked, "the server names the viewer it links through").not.toBeNull();
+    expect(WORKFLOW).toContain(`EXPECTED: ${linked![1]!}`);
   });
 });

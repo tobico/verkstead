@@ -1,10 +1,9 @@
 # The share viewer, hosted. A published share is a secret gist, and a browser
 # draws a gist as source rather than as a page; the viewer is the small static
-# page that fetches one and draws it properly. The binary hands that file over
-# for whoever wants to host their own copy — and this workflow keeps the copy
-# nobody has to host, at
-# <https://tobico.github.io/verkstead/share-viewer.html>, which is the address
-# every share link Verkstead composes points at by default.
+# page that fetches one and draws it properly. This workflow keeps the one copy
+# of it, at <https://tobico.github.io/verkstead/share-viewer.html>, which is the
+# address every share link Verkstead composes points at. Nobody hosts their own:
+# there is nothing to configure and nothing the page would learn either way.
 #
 # Pinned throughout, as the other workflows are: the actions to released
 # versions, and the runners to images rather than `-latest`.
@@ -40,12 +39,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # The site, which is the one file under the name it is served as.
-  # `share-viewer.html` rather than the `verkstead-share-viewer.html` the
-  # download hands over: that name is for a file landing in somebody's
-  # Downloads folder beside everything else, and this one is alone in a
-  # directory of its own. The URL it makes is what task 04 bakes in as the
-  # default, so the name is not free to move.
+  # The site, which is the one file under the name it is served as. The URL it
+  # makes is the address every share link is composed through — `HOSTED` in
+  # `crates/server/src/sharing.rs` — so the name is not free to move.
   site:
     name: Site
     runs-on: ubuntu-24.04

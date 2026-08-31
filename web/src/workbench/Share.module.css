@@ -1,0 +1,122 @@
+/* Sharing a Conversation, in a pane of its own — see `Share.tsx`: where the
+   last share went above, and every way to hand the record over under it. */
+
+/* The published share, which is the half of this pane that is a drawing of the
+   record. Drawn as the block of facts it is, and not drawn at all where nobody
+   has published one. */
+.published {
+  margin: 0 0 1.2rem;
+}
+
+.published .heading {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* The viewer's link and the button that copies it, on one line: the link is
+   what the human came for and the button is how they take it, so the two are
+   one thing to read. Wrapping, because a URL is longer than a narrow pane. */
+.published .link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+}
+
+/* A URL has no spaces in it, so a narrow pane has to be told it may break one
+   anywhere rather than letting it run off the edge. */
+.published .link a,
+.published .gist a {
+  overflow-wrap: anywhere;
+}
+
+/* The copy button, quiet beside the link it is about: this is the smallest
+   press in the pane and the one made most often, so it reads as part of the
+   line rather than as a control standing over it. */
+.copy {
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .copy:hover {
+    color: var(--ink);
+    background: var(--card);
+  }
+}
+
+/* When it was taken, and where the file itself is. Both understated: a link
+   with no date says nothing about how far the work has moved since, and the
+   gist is the way to a thing rather than the thing. */
+.published .when,
+.published .gist,
+.published .deleting {
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* Every way there is to hand the record over, in a row that wraps: three
+   presses on a wide pane and a column of them on a phone. */
+.doing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0 0 0.8rem;
+}
+
+/* The download, which is a link drawn as a press: what it is is another way to
+   take the record away, and a row of controls where one of them read as prose
+   would be one control the eye had to look for. Quieter than the two beside it,
+   because it reaches nobody and costs nothing. */
+.download,
+.publish,
+.comment {
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.download {
+  color: var(--ink);
+  text-decoration: none;
+  background: transparent;
+  border: 1px solid var(--edge);
+}
+
+/* And the two that reach GitHub, in the accent fill every press in the app that
+   starts something is drawn with. */
+.publish,
+.comment {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.publish:disabled,
+.comment:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .download:hover {
+    background: var(--card);
+  }
+
+  .publish:not(:disabled):hover,
+  .comment:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

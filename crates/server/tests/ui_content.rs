@@ -2860,16 +2860,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // build cache that has been configured rather than only its
             // defaults — `settings-unset.json` above is the other half.
             "rust_build_cache": { "enabled": true, "size": "50G" },
-            // And a share viewer hosted somewhere, for the same reason: the
-            // fixture of a Verkstead that has been told everything carries the
-            // configured half of this too, and `settings-unset.json` is where
-            // nobody has hosted one.
-            "share_viewer_url": "https://ada.github.io/verkstead-shares/",
             // And a rebase configured, for the reason the size above is typed:
             // the fixture of a Verkstead that has been told everything carries
             // the answer somebody chose, and `settings-unset.json` is the one
             // nobody has chosen anything in.
             "conflict_resolution": "Rebase",
+
+            // And the switch on, for that reason again — this is the
+            // fixture of a Verkstead that has been told everything, and off is
+            // what `settings-unset.json` already carries.
+            "share_on_done": true,
 
             // And the paths this Verkstead was told about, which come back
             // labelled as the settings' own — the router behind this fixture was

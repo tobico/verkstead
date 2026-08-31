@@ -18,12 +18,18 @@
 //! changed, so there is not a control on this pane: what it says of a
 //! Conversation past drafting is what nobody can change any more.
 //!
-//! Everything it draws is carried by the Conversation, so nothing here fetches.
+//! Everything it draws is carried by the Conversation, but for one list: the
+//! saved Agent Profiles, which say whether the account behind a Pairing is the
+//! only one on its backend and so whether its name is said after the model. That
+//! read is inside [`Machine`], which is the half of the summary a share does not
+//! draw — a share makes no request to anything, and this is what keeps it that
+//! way.
 //!
 //! [`Document`]: ./Document.tsx
 
 import { For, Show, type JSX } from "solid-js";
 
+import { listProfiles } from "../api/client";
 import type {
   BriefEvent,
   CompanionMode,
@@ -31,8 +37,11 @@ import type {
   ConversationView,
   PairingView,
   PickedView,
+  ProfileEntry,
   Worktree,
 } from "../api/types";
+import { useReading } from "../freshness";
+import { HarnessMark } from "../HarnessMark";
 import { PaneSticky } from "../Panes";
 import { Empty } from "../notices";
 import * as pairing from "../pairing";
@@ -160,24 +169,7 @@ function Configuration(props: {
             *not checked out* and *no grilling*, which would be a share telling
             the reader something untrue instead of nothing at all. */}
         <Show when={!props.readOnly}>
-          <Fact term="Worktree">
-            <Where worktree={props.conversation.worktree} />
-          </Fact>
-          <Fact term="Grilling">
-            <Picked
-              picked={props.conversation.grilling_pairing}
-              away="No grilling."
-            />
-          </Fact>
-          <Fact term="Implementation">
-            <Paired pairing={props.conversation.implementation_pairing} />
-          </Fact>
-          <Fact term="Review">
-            <Picked
-              picked={props.conversation.review_pairing}
-              away="No review."
-            />
-          </Fact>
+          <Machine conversation={props.conversation} />
         </Show>
       </dl>
 
@@ -212,6 +204,56 @@ function Configuration(props: {
         </ul>
       </Show>
     </section>
+  );
+}
+
+/// The half of the Configuration that is about the machine rather than about the
+/// work: which checkout it was worked in, and which account and model each kind
+/// of session runs under.
+///
+/// Its own component because of the one read this pane makes. A Pairing carries
+/// the Profile whole, so the backend and the model are in hand — but whether the
+/// Profile's *name* is worth saying is a fact about the other Profiles, and that
+/// is the saved list. So the list is read here, inside the half a share does not
+/// draw: a share makes no request to anything, and a query mounted above the
+/// `Show` would be one.
+///
+/// The same query the pickers make, so the cache is what a second caller pays —
+/// and the reading says the Profile's name while it is still in flight, saying
+/// it being the answer that can never misattribute a run.
+function Machine(props: { conversation: ConversationView }): JSX.Element {
+  const profiles = useReading(() => ({
+    queryKey: ["profiles"],
+    queryFn: listProfiles,
+    freshness: { reconcile: "id" },
+  }));
+
+  return (
+    <>
+      <Fact term="Worktree">
+        <Where worktree={props.conversation.worktree} />
+      </Fact>
+      <Fact term="Grilling">
+        <Picked
+          picked={props.conversation.grilling_pairing}
+          saved={profiles.data}
+          away="No grilling."
+        />
+      </Fact>
+      <Fact term="Implementation">
+        <Paired
+          pairing={props.conversation.implementation_pairing}
+          saved={profiles.data}
+        />
+      </Fact>
+      <Fact term="Review">
+        <Picked
+          picked={props.conversation.review_pairing}
+          saved={profiles.data}
+          away="No review."
+        />
+      </Fact>
+    </>
   );
 }
 
@@ -306,13 +348,20 @@ function Where(props: { worktree: Worktree | null }): JSX.Element {
   );
 }
 
-/// One of the Pairings, said the way every picker of one says it: the account,
-/// and the model that account runs on.
+/// One of the Pairings, said the way every picker of one says it: the backend's
+/// mark, the backend, the model that account runs on, and the account's name
+/// where that is what tells two of them apart.
 ///
 /// A Profile chosen before models were paired beside them is half a choice, and
 /// the pane says the half there is rather than inventing the other — there is no
-/// default model anywhere.
-function Paired(props: { pairing: PairingView | null }): JSX.Element {
+/// default model anywhere. That reading is the shared one's too, which is why
+/// nothing is decided here.
+function Paired(props: {
+  pairing: PairingView | null;
+  /// The Profiles as they stand, which is what says whether the account's own
+  /// name is worth saying — `undefined` until the list has been read.
+  saved: ProfileEntry[] | undefined;
+}): JSX.Element {
   return (
     <Show
       when={props.pairing}
@@ -320,9 +369,13 @@ function Paired(props: { pairing: PairingView | null }): JSX.Element {
     >
       {(paired) => (
         <>
-          {paired().model
-            ? pairing.label({ profile: paired().profile, model: paired().model! })
-            : paired().profile.name}
+          {/* The backend's own mark in front of its name, as every other site
+              that says who runs a session draws it. A Profile always carries a
+              backend, so a paired row always has one to draw — the missing
+              half here is the model rather than the harness. The space after it
+              is the row's own `column-gap`, this `dd` being a flex row. */}
+          <HarnessMark of={paired().profile.account.agent_type} />
+          {pairing.label(paired(), props.saved)}
         </>
       )}
     </Show>
@@ -335,13 +388,17 @@ function Paired(props: { pairing: PairingView | null }): JSX.Element {
 /// Said as the choice it was rather than as an absence: *no grilling* and *no
 /// review* are what the human picked, and a pane that read either as "not
 /// chosen" would show a settled conversation as an unsettled one.
-function Picked(props: { picked: PickedView; away: string }): JSX.Element {
+function Picked(props: {
+  picked: PickedView;
+  saved: ProfileEntry[] | undefined;
+  away: string;
+}): JSX.Element {
   return (
     <Show
       when={props.picked !== "Skipped"}
       fallback={<span class={styles.rule}>{props.away}</span>}
     >
-      <Paired pairing={pairing.under(props.picked)} />
+      <Paired pairing={pairing.under(props.picked)} saved={props.saved} />
     </Show>
   );
 }

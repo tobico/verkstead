@@ -16,5 +16,5 @@
     "size": "30G",
     "size_configured": false
   },
-  "share_viewer_url": ""
+  "share_on_done": false
 }

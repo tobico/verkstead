@@ -291,10 +291,10 @@ describe("changing the build cache", () => {
           enabled: false,
           size: TOLD.rust_build_cache.size,
         },
-        share_viewer_url: TOLD.share_viewer_url,
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         ...PATHS,
       }),
     );
@@ -335,10 +335,10 @@ describe("changing the build cache", () => {
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
         rust_build_cache: { enabled: true, size: "80G" },
-        share_viewer_url: TOLD.share_viewer_url,
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         ...PATHS,
       }),
     );

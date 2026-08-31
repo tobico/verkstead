@@ -19,6 +19,7 @@ import type {
   AbandonedRepo,
   Adopted,
   AgentOutputEvent,
+  AgentType,
   BacklogPane,
   BriefEvent,
   Capture,
@@ -34,6 +35,7 @@ import type {
   ConversationView,
   GrillingStarted,
   Merging,
+  PairingView,
   ProfileEntry,
   PinnedEvent,
   PullRequestDetails,
@@ -75,6 +77,18 @@ import pressableCss from "../src/CardButton.module.css?raw";
 // And the pressable icon, which is the other thing in a pane that opens into a
 // subpane: the gear at the head of the sidebar is one.
 import button from "../src/IconButton.module.css";
+// The brand mark of the harness a session runs under, two ways: the hashed name
+// a drawn mark is queried by, and the four files it is drawn out of — read here
+// as lobehub published them, so that a test naming a mark and the component
+// drawing it are two independent statements about the same art, the way the
+// check marks below are named from Font Awesome rather than off `Checks.tsx`.
+// Reading one back off the page is `marked` in `./marking.ts`, the mark being
+// drawn on more pages than this one.
+import harnessMark from "../src/HarnessMark.module.css";
+import claudeMarkFile from "../src/marks/claude-color.svg?raw";
+import codexMarkFile from "../src/marks/codex.svg?raw";
+import grokMarkFile from "../src/marks/grok.svg?raw";
+import opencodeMarkFile from "../src/marks/opencode.svg?raw";
 import dropdown from "../src/Menu.module.css";
 import menuCss from "../src/Menu.module.css?raw";
 import notices from "../src/notices.module.css";
@@ -85,7 +99,7 @@ import toasts from "../src/Toasts.module.css";
 import contents from "../src/set/Contents.module.css";
 import sheet from "../src/set/Sheet.module.css";
 import illegible from "../src/set/Unreadable.module.css";
-import { NONE, under } from "../src/pairing";
+import { under } from "../src/pairing";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
 // What can be done to a Conversation as a whole, both ways: the hashed names
@@ -132,6 +146,9 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The pause card, which is one of the record's and draws itself.
 import { RESOLVE_REFUSAL } from "../src/workbench/PullRequest";
 import prPane from "../src/workbench/PullRequest.module.css";
+// Sharing the Conversation, which is a details pane of its own: the published
+// share it draws, and the presses that came out of the actions menu.
+import sharePane from "../src/workbench/Share.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
 // themselves come straight from Font Awesome, so that a test naming one and the
@@ -198,6 +215,14 @@ import {
   nudged,
   theWorkbench,
 } from "./bench";
+import { art, marked } from "./marking";
+import {
+  offered,
+  pick,
+  picker,
+  rows as offers,
+  showing,
+} from "./pickers";
 import {
   askedFor,
   hangs,
@@ -1704,7 +1729,6 @@ describe("what a right-click on a card offers", () => {
       [...menu.querySelectorAll("button")].map((button) => button.className),
     ).toEqual([
       actions.resume,
-      actions.publish,
       actions.stop,
       actions.forceStop,
       actions.steer,
@@ -3856,6 +3880,35 @@ describe("configuring a companion repo", () => {
   });
 });
 
+/// What one row of a pairing picker sends, as the picker writes it.
+const pairing = (profile: ProfileEntry, model: string) =>
+  `${profile.id}:${model}`;
+
+/// And what every row of one reads as, in the order the fixture's profiles come
+/// to.
+///
+/// Spelled out rather than composed from the fixture, because the composing is
+/// the thing under test: the backend's name, the model's own name, and the
+/// profile's after an em dash — said here because the fixture holds three Claude
+/// Code accounts, so which of them a row is cannot be read off the model alone.
+const READINGS = [
+  "Claude Code Fable 5 — fable",
+  "Claude Code Opus 5 — opus",
+  "Claude Code Haiku 4.5 — opus",
+  "Claude Code Sonnet 5 — sonnet",
+];
+
+/// How one Pairing the server has settled reads, off the same two lists: the
+/// rows in the order the profiles come to, and the readings in the order they
+/// are offered. So what a picker is showing is checked against the row it came
+/// off rather than against the composing being done again beside it.
+const readsAs = (view: PairingView): string =>
+  READINGS[
+    PROFILES.flatMap((profile) =>
+      profile.models.map((model) => pairing(profile, model)),
+    ).indexOf(pairing(view.profile, view.model!))
+  ]!;
+
 /// The last thing a conversation settles before anything will run it: which
 /// account and model grills, and which implements.
 describe("a conversation's pairings", () => {
@@ -3869,13 +3922,9 @@ describe("a conversation's pairings", () => {
     ready_to_grill: false,
   };
 
-  /// What one row of a picker sends, as the picker writes it.
-  const pairing = (profile: ProfileEntry, model: string) =>
-    `${profile.id}:${model}`;
-
   function withConversation(
     view: ConversationView,
-    ...answers: Array<() => Promise<Response>>
+    ...answers: Parameters<typeof serving>
   ) {
     return serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
@@ -3890,13 +3939,7 @@ describe("a conversation's pairings", () => {
   it("shows the pairings the conversation has chosen", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
-
-    const grilling = screen.getByLabelText("Grilling") as HTMLSelectElement;
-    const implementing = screen.getByLabelText(
-      "Implementation",
-    ) as HTMLSelectElement;
-    const reviewing = screen.getByLabelText("Review") as HTMLSelectElement;
+    await waitFor(() => picker("Grilling"));
 
     // Separate choices, and in the fixture genuinely separate accounts: grill on
     // fable, implement on opus, review on sonnet.
@@ -3904,52 +3947,155 @@ describe("a conversation's pairings", () => {
     // The fixture picks a Pairing for the grilling, which is one of that
     // picker's rows; the other says there is to be no grilling at all.
     const interviewing = under(OPEN.grilling_pairing)!;
-
-    expect(grilling.value).toBe(
-      pairing(interviewing.profile, interviewing.model!),
-    );
-    expect(implementing.value).toBe(
-      pairing(
-        OPEN.implementation_pairing!.profile,
-        OPEN.implementation_pairing!.model!,
-      ),
-    );
-    // And the same for the review.
     const reviewed = under(OPEN.review_pairing)!;
 
-    expect(reviewing.value).toBe(pairing(reviewed.profile, reviewed.model!));
+    expect(showing("Grilling")).toBe(readsAs(interviewing));
+    expect(showing("Implementation")).toBe(
+      readsAs(OPEN.implementation_pairing!),
+    );
+    expect(showing("Review")).toBe(readsAs(reviewed));
     expect(
-      new Set([grilling.value, implementing.value, reviewing.value]).size,
+      new Set([
+        showing("Grilling"),
+        showing("Implementation"),
+        showing("Review"),
+      ]).size,
     ).toBe(3);
   });
 
-  /// One flat row per profile-and-model combination, labelled with both — a
-  /// profile listing two models is two rows, because a session runs one of
-  /// them and the pick says which.
+  /// One flat row per profile-and-model combination, read as the backend and the
+  /// model — a profile listing two models is two rows, because a session runs
+  /// one of them and the pick says which.
+  ///
+  /// And the profile's own name after each, because the fixture's three accounts
+  /// are all Claude Code ones: with more than one of a backend saved, the name is
+  /// the whole of what tells two rows on one model apart.
   it("offers every profile-and-model combination as one flat list", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    const options = Array.from(
-      (screen.getByLabelText("Implementation") as HTMLSelectElement).options,
-    ).map((option) => option.text);
+    expect(offers("Implementation")).toEqual(READINGS);
+  });
 
-    expect(options).toEqual(
-      PROFILES.flatMap((profile) =>
-        profile.models.map((model) => `${profile.name} — ${model}`),
-      ),
+  /// And what a row sends is untouched by how it reads: the profile's id and the
+  /// model's own, which is what a session is launched with.
+  ///
+  /// Every row rather than one, because the guarantee is that what was read off
+  /// a row is what that row sends — one row proving it would leave the other
+  /// three to a coincidence, and the reading is composed now rather than being
+  /// the two ids it used to be.
+  it("sends the profile and model of whichever row was read", async () => {
+    const fetching = withConversation(UNCHOSEN, json("Chosen"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => picker("Implementation"));
+
+    const wire = PROFILES.flatMap((profile) =>
+      profile.models.map((model) => ({ profile_id: profile.id, model })),
     );
+
+    for (const [index, reading] of READINGS.entries()) {
+      // Pickable again: the control is disabled while a choice is in flight, so
+      // a walk down the list waits for the one before it to land — which is the
+      // same thing a hand at the card has to do.
+      await waitFor(() => expect(picker("Implementation").disabled).toBe(false));
+      pick("Implementation", reading);
+
+      // The `index`th write to that path, this being the only test that makes
+      // more than one of them.
+      await waitFor(() =>
+        expect(
+          sent(
+            fetching,
+            `/api/ui/conversations/${OPEN.id}/implementation-pairing`,
+            index,
+          ),
+        ).toEqual(wire[index]),
+      );
+    }
+  });
+
+  /// A Grok Build account beside the fixture's Claude Code ones, so that a
+  /// picker has two harnesses in it: one account apiece, which is also the case
+  /// where the reading says no profile name.
+  const MIXED: ProfileEntry[] = [
+    PROFILES[0]!,
+    {
+      account: { agent_type: "Grok", home: "/srv/accounts/grok" },
+      broken: null,
+      id: 9,
+      models: ["grok-4.6"],
+      name: "grok",
+    },
+  ];
+
+  /// Each row under the mark of the harness it runs, which is what the pickers
+  /// were drawn by hand for: a reader picks the account they mean out of a column
+  /// by its shape before reading a word of any of them.
+  it("draws every row under the mark of the harness it runs", async () => {
+    withConversation(UNCHOSEN, whenever("/api/ui/profiles", json(MIXED)));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => picker("Implementation"));
+
+    expect(offers("Implementation")).toEqual([
+      "Claude Code Fable 5",
+      "Grok 4.6",
+    ]);
+    expect(offered("Implementation").map(marked)).toEqual([
+      art(claudeMarkFile),
+      art(grokMarkFile),
+    ]);
+  });
+
+  /// And the closed control draws the chosen row exactly as the list drew it: a
+  /// control showing one thing and offering the same thing drawn differently is
+  /// a control the eye has to check.
+  it("draws the chosen pairing's mark on the closed control", async () => {
+    theWorkbench();
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => picker("Grilling"));
+
+    expect(marked(picker("Grilling"))).toBe(art(claudeMarkFile));
+    expect(marked(picker("Implementation"))).toBe(art(claudeMarkFile));
+    expect(marked(picker("Review"))).toBe(art(claudeMarkFile));
+  });
+
+  /// The row that runs nothing is not an account, so there is no harness for a
+  /// mark to be of: it draws its words and no element at all, rather than a gap
+  /// where one would have been. And so does the picker sitting on it.
+  it("draws the no-session row as words alone", async () => {
+    withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => picker("Review"));
+
+    expect(marked(offered("Grilling")[0]!)).toBeNull();
+    expect(offers("Grilling")[0]).toBe("No grilling");
+    expect(marked(picker("Review"))).toBeNull();
+    expect(showing("Review")).toBe("No review");
+  });
+
+  /// A backend with one account saved says no name at all: there is nothing for
+  /// it to tell apart, and the model is the whole of the choice.
+  it("says only the backend and the model where a backend has one account", async () => {
+    withConversation(
+      UNCHOSEN,
+      whenever("/api/ui/profiles", json([PROFILES[0]])),
+    );
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => picker("Grilling"));
+
+    expect(offers("Implementation")).toEqual(["Claude Code Fable 5"]);
+    // The placeholder is what the closed control says rather than a row of the
+    // list: there is no unpicking here, so it is not something to go back to.
+    expect(showing("Implementation")).toBe("Not chosen");
   });
 
   it("sends each choice on its own, to its own role", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    fireEvent.change(screen.getByLabelText("Grilling"), {
-      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
-    });
+    pick("Grilling", READINGS[0]!);
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/grilling-pairing`),
@@ -3963,9 +4109,7 @@ describe("a conversation's pairings", () => {
 
     // The second of a profile's models, which is the half of the choice a
     // profile alone could never have said.
-    fireEvent.change(screen.getByLabelText("Implementation"), {
-      target: { value: pairing(PROFILES[1]!, PROFILES[1]!.models[1]!) },
-    });
+    pick("Implementation", READINGS[2]!);
     await waitFor(() =>
       expect(
         sent(
@@ -3986,30 +4130,18 @@ describe("a conversation's pairings", () => {
   it("offers the no-session row on the grilling and review pickers alone", async () => {
     withConversation(UNCHOSEN);
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Review"));
+    await waitFor(() => picker("Review"));
 
-    const rows = (label: string) =>
-      Array.from(
-        (screen.getByLabelText(label) as HTMLSelectElement).options,
-      ).map((option) => option.text);
+    // Above the accounts, the row that says none of them will read this branch.
+    expect(offers("Review")).toEqual(["No review", ...READINGS]);
+    expect(offers("Grilling")).toEqual(["No grilling", ...READINGS]);
+    expect(offers("Implementation")).toEqual(READINGS);
 
-    const combinations = PROFILES.flatMap((profile) =>
-      profile.models.map((model) => `${profile.name} — ${model}`),
-    );
-
-    expect(rows("Review")).toEqual([
-      // The placeholder, because nothing has been picked yet — and above the
-      // accounts, the row that says none of them will read this branch.
-      "Not chosen",
-      "No review",
-      ...combinations,
-    ]);
-    expect(rows("Grilling")).toEqual([
-      "Not chosen",
-      "No grilling",
-      ...combinations,
-    ]);
-    expect(rows("Implementation")).toEqual(["Not chosen", ...combinations]);
+    // And nothing picked yet on any of them, which the closed control says
+    // rather than offering it as a row.
+    expect(showing("Review")).toBe("Not chosen");
+    expect(showing("Grilling")).toBe("Not chosen");
+    expect(showing("Implementation")).toBe("Not chosen");
   });
 
   /// And picking it sends a choice rather than the absence of one, exactly as
@@ -4017,11 +4149,9 @@ describe("a conversation's pairings", () => {
   it("sends no grilling as the choice it is", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    fireEvent.change(screen.getByLabelText("Grilling"), {
-      target: { value: NONE },
-    });
+    pick("Grilling", "No grilling");
 
     await waitFor(() =>
       expect(
@@ -4035,11 +4165,9 @@ describe("a conversation's pairings", () => {
   it("shows no grilling as what is chosen where it is", async () => {
     withConversation({ ...UNCHOSEN, grilling_pairing: "Skipped" });
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    expect((screen.getByLabelText("Grilling") as HTMLSelectElement).value).toBe(
-      NONE,
-    );
+    expect(showing("Grilling")).toBe("No grilling");
   });
 
   /// And picking it sends a choice rather than the absence of one: an untouched
@@ -4048,11 +4176,9 @@ describe("a conversation's pairings", () => {
   it("sends no review as the choice it is", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Review"));
+    await waitFor(() => picker("Review"));
 
-    fireEvent.change(screen.getByLabelText("Review"), {
-      target: { value: NONE },
-    });
+    pick("Review", "No review");
 
     await waitFor(() =>
       expect(
@@ -4066,11 +4192,9 @@ describe("a conversation's pairings", () => {
   it("sends a review pairing under the same key", async () => {
     const fetching = withConversation(UNCHOSEN, json("Chosen"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Review"));
+    await waitFor(() => picker("Review"));
 
-    fireEvent.change(screen.getByLabelText("Review"), {
-      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
-    });
+    pick("Review", READINGS[0]!);
 
     await waitFor(() =>
       expect(
@@ -4089,11 +4213,9 @@ describe("a conversation's pairings", () => {
   it("shows no review as what is chosen where it is", async () => {
     withConversation({ ...UNCHOSEN, review_pairing: "Skipped" });
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Review"));
+    await waitFor(() => picker("Review"));
 
-    expect((screen.getByLabelText("Review") as HTMLSelectElement).value).toBe(
-      NONE,
-    );
+    expect(showing("Review")).toBe("No review");
   });
 
   /// A profile chosen before models were paired with them is half a choice: the
@@ -4106,10 +4228,8 @@ describe("a conversation's pairings", () => {
     });
     mount(`/conversations/${OPEN.id}`);
 
-    await waitFor(() => screen.getByLabelText("Grilling"));
-    expect((screen.getByLabelText("Grilling") as HTMLSelectElement).value).toBe(
-      "",
-    );
+    await waitFor(() => picker("Grilling"));
+    expect(showing("Grilling")).toBe("Not chosen");
     await waitFor(() => screen.getByText(/was chosen before models were/));
   });
 
@@ -4118,11 +4238,9 @@ describe("a conversation's pairings", () => {
   it("says a choice was refused once the grilling has started", async () => {
     withConversation(OPEN, json("NotDrafting"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    fireEvent.change(screen.getByLabelText("Grilling"), {
-      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
-    });
+    pick("Grilling", READINGS[0]!);
 
     await waitFor(() =>
       screen.getByText(
@@ -4186,11 +4304,9 @@ describe("a conversation's pairings", () => {
   it("says why a choice was refused, in words", async () => {
     withConversation(UNCHOSEN, json("NoSuchProfile"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
+    await waitFor(() => picker("Grilling"));
 
-    fireEvent.change(screen.getByLabelText("Grilling"), {
-      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
-    });
+    pick("Grilling", READINGS[0]!);
 
     await waitFor(() => screen.getByText("That profile has been removed."));
   });
@@ -5039,6 +5155,85 @@ describe("a session's output on the timeline", () => {
     // Nothing of the Capture itself: it is fetched by the pane that shows
     // it, and only once one is opened.
     expect(output.textContent).not.toContain("Reading the brief");
+  });
+
+  /// And the head names the run rather than the kind of thing it is: the shared
+  /// reading of what the session was launched under, off the three facts it
+  /// wrote down as it started. A record holding a session per resume is a
+  /// column of cards, and *Agent run* was the same three words on every one.
+  ///
+  /// The account's name is said here because the saved list holds three Claude
+  /// Code accounts and none of them is this one — a name the list no longer
+  /// holds keeps its own, dropping it being a run attributed to whoever is left.
+  it("names the run at the head of the card", async () => {
+    theGrillingOutput({
+      agent_type: "Claude",
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    await waitFor(() =>
+      expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+        "Claude Code Fable 5 — Work",
+      ),
+    );
+  });
+
+  /// A session from before Verkstead wrote the backend down says the half it
+  /// kept, with no backend guessed for it — which is every Agent run on every
+  /// record made before this.
+  it("leaves the backend out of a run that never recorded one", async () => {
+    theGrillingOutput({
+      agent_type: null,
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    await waitFor(() =>
+      expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+        "Fable 5 — Work",
+      ),
+    );
+  });
+
+  /// And a session that recorded none of the three keeps the words: there is
+  /// nothing to name it by, and the card is still a card.
+  it("says Agent run where the record kept nothing to name it by", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    expect(OUTPUT.profile).toBeNull();
+    expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+      "Agent run",
+    );
+  });
+
+  /// The details pane is titled the same way, for the reason its summary line
+  /// is: the card and the pane are one session read at two distances, and a
+  /// pane titled otherwise would be two answers to who ran it.
+  it("titles the details pane with the same reading", async () => {
+    theGrillingOutput({
+      agent_type: "Claude",
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head} h1`);
+
+    await waitFor(() =>
+      expect(head.textContent).toBe("Claude Code Fable 5 — Work"),
+    );
   });
 
   /// A session whose backend keeps no log has no Transcript to count, and its
@@ -5900,6 +6095,215 @@ describe("a session's output on the timeline", () => {
   });
 });
 
+/// The brand mark of the harness, in front of the words that name the run.
+///
+/// The reading says who runs a session and the mark is what makes a column of
+/// those readings scannable: a reader picks the Claude run out of five by its
+/// shape before reading a word of any of them. So it is drawn everywhere the
+/// reading is and JSX can put an `svg` — the card, the pane it opens, the status
+/// button's running line and the Brief's three pairing facts — and it is one
+/// component, so those four cannot come to draw four different pictures of the
+/// one harness.
+///
+/// What is asserted is the drawing rather than a class: the four files are read
+/// here exactly as lobehub published them, so a mark drawn from the wrong file
+/// fails even though both files would carry the same class.
+describe("the mark of the harness a session ran under", () => {
+  /// Every harness, against the file its mark is drawn out of. A fifth backend
+  /// arrives in this list because it arrives in the component's own record,
+  /// which will not compile without a mark beside it.
+  const MARKS = [
+    ["Claude", claudeMarkFile],
+    ["Codex", codexMarkFile],
+    ["Grok", grokMarkFile],
+    ["OpenCode", opencodeMarkFile],
+  ] satisfies Array<[AgentType, string]>;
+
+  /// The Agent run card on the record, which is where a reader meets a run
+  /// first.
+  it.each(MARKS)(
+    "draws %s's own mark on the card that names the run",
+    async (harness, file) => {
+      theGrillingOutput({ agent_type: harness, profile: "Work", model: null });
+      const { container } = mount(`/conversations/${GRILLING.id}`);
+
+      const head = await drawn(
+        container,
+        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+      );
+
+      await waitFor(() => expect(marked(head)).toBe(art(file)));
+    },
+  );
+
+  /// And the details pane the card opens carries the same one, for the reason it
+  /// carries the same words: one session read at two distances.
+  it("carries the same mark into the details pane", async () => {
+    theGrillingOutput({
+      agent_type: "OpenCode",
+      profile: "Work",
+      model: "minimax/minimax-m2.1",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    const head = await drawn(
+      container,
+      `.${shell.detailsPane} .${paneHead.head} h1`,
+    );
+
+    await waitFor(() => expect(marked(head)).toBe(art(opencodeMarkFile)));
+    expect(head.textContent).toBe("OpenCode Minimax M2.1 — Work");
+  });
+
+  /// The status button's second line, off the same record: what is running is
+  /// what was launched, and the mark says which harness launched it.
+  it("marks the harness on the status button's running line", async () => {
+    theGrillingOutput({
+      running: true,
+      agent_type: "Grok",
+      profile: "Work",
+      model: "grok-4.6",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const line = await drawn(
+      container,
+      `.${statusButton.status} .${statusButton.agent}`,
+    );
+
+    await waitFor(() => expect(marked(line)).toBe(art(grokMarkFile)));
+  });
+
+  /// A line saying nothing is running has no harness to mark, which is the same
+  /// nothing its words say.
+  it("marks nothing on a line with no session behind it", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const line = await drawn(
+      container,
+      `.${statusButton.status} .${statusButton.agent}`,
+    );
+
+    expect(line.textContent).toBe("No agent running");
+    expect(line.querySelector(`.${harnessMark.mark}`)).toBeNull();
+  });
+
+  /// And the Brief's three pairing facts, which say what each role *will* run
+  /// under. All three of the fixture's accounts are Claude Code ones, so all
+  /// three rows wear the one mark — what is being asked is that the rows carry a
+  /// mark at all, the four harnesses being covered on the card above.
+  it("marks the backend on each of the Brief's pairing facts", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`),
+    );
+
+    const summary = await drawn(
+      container,
+      `.${shell.detailsPane} .${briefPane.configuration}`,
+    );
+
+    await waitFor(() =>
+      expect(
+        ["Grilling", "Implementation", "Review"].map((term) =>
+          marked(
+            [...summary.querySelectorAll(`.${briefPane.fact}`)].find(
+              (fact) => fact.querySelector("dt")!.textContent === term,
+            )!,
+          ),
+        ),
+      ).toEqual([
+        art(claudeMarkFile),
+        art(claudeMarkFile),
+        art(claudeMarkFile),
+      ]),
+    );
+  });
+
+  /// A run recorded before Verkstead wrote the harness down draws no mark, and
+  /// no element either: the space in front of the words is the mark's own
+  /// margin, so a card with nothing to draw has nothing to leave a gap.
+  it("draws no mark, and no gap, where no harness was recorded", async () => {
+    theGrillingOutput({
+      agent_type: null,
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const head = await drawn(
+      container,
+      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+    );
+
+    await waitFor(() => expect(head.textContent).toBe("Fable 5 — Work"));
+    expect(head.querySelector(`.${harnessMark.mark}`)).toBeNull();
+  });
+
+  /// Claude Code's is lobehub's colour variant, which names its own fill and so
+  /// stands in its own orange wherever it is drawn — colour where lobehub has it
+  /// was the pick, and of these four it has it for Claude alone.
+  it("keeps Claude Code's mark in its own colour", async () => {
+    theGrillingOutput({ agent_type: "Claude", profile: "Work", model: null });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const head = await drawn(
+      container,
+      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+    );
+
+    const path = await drawn(head, `.${harnessMark.mark} path`);
+
+    expect(path.getAttribute("fill")).toBe("#D97757");
+    expect(head.querySelector(`.${harnessMark.mark} svg`)!.getAttribute("fill"))
+      .toBeNull();
+  });
+
+  /// And the other three follow the ink of whatever line they were put beside,
+  /// the way an `Icon` does: soft on the status button's second line, the
+  /// heading's own on a card.
+  it.each(MARKS.filter(([harness]) => harness !== "Claude"))(
+    "leaves %s's mark in the ink around it",
+    async (harness, _file) => {
+      theGrillingOutput({ agent_type: harness, profile: "Work", model: null });
+      const { container } = mount(`/conversations/${GRILLING.id}`);
+
+      const head = await drawn(
+        container,
+        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+      );
+
+      const svg = await drawn(head, `.${harnessMark.mark} svg`);
+
+      expect(svg.getAttribute("fill")).toBe("currentColor");
+      expect(svg.querySelector("path")!.getAttribute("fill")).toBeNull();
+    },
+  );
+
+  /// The mark says nothing to a screen reader: the words beside it are the whole
+  /// of what it means, and a mark read out as "Claude" in front of them would be
+  /// the line saying itself twice.
+  it("says nothing of itself to a reader who cannot see it", async () => {
+    theGrillingOutput({ agent_type: "Codex", profile: "Work", model: null });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const mark = await drawn(
+      container,
+      `.${timeline.agentOutput} .${harnessMark.mark}`,
+    );
+
+    expect(mark.getAttribute("aria-hidden")).toBe("true");
+    // Nor as a tooltip, which is what the `<title>` lobehub ships would have
+    // drawn — taken out of every one of the four files as they were copied.
+    expect(mark.querySelector("title")).toBeNull();
+  });
+});
+
 /// And what is no longer held against the foot of the pane: a strip for the
 /// session running now.
 ///
@@ -5932,10 +6336,17 @@ describe("the foot of the timeline pane", () => {
   /// And the status button says what the strip said, which is why it could go:
   /// the running session, named rather than marked.
   it("says what is running at the head of the pane instead", async () => {
-    theGrillingOutput({ running: true, profile: "Work", model: "claude-fable-5" });
+    theGrillingOutput({
+      running: true,
+      agent_type: "Claude",
+      profile: "Work",
+      model: "claude-fable-5",
+    });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    expect(await saidRunning(container)).toBe("Work Fable 5");
+    await waitFor(() =>
+      expect(saidRunning(container)).resolves.toBe("Claude Code Fable 5 — Work"),
+    );
   });
 });
 
@@ -6775,10 +7186,9 @@ function theGrillingStanding(
 }
 
 describe("stopping a conversation", () => {
-  /// The two stops sit in the same menu as the resume, the share, the steer and
-  /// the close, in the order of what each one costs: get going again, take a
-  /// copy away, pause after this task, stop now, move the work somewhere else,
-  /// end the conversation. Each
+  /// The two stops sit in the same menu as the resume, the steer and the close,
+  /// in the order of what each one costs: get going again, pause after this
+  /// task, stop now, move the work somewhere else, end the conversation. Each
   /// says what it does, because *stop* and *force stop* are two words apart and
   /// hours of work apart — and each says it *inside* the row, so what the press
   /// is called and what it means are one thing to read and one thing to aim at.
@@ -6793,7 +7203,6 @@ describe("stopping a conversation", () => {
 
     expect(offered).toEqual([
       actions.resume,
-      actions.publish,
       actions.stop,
       actions.forceStop,
       actions.steer,
@@ -6992,53 +7401,247 @@ describe("stopping a conversation", () => {
   });
 });
 
-/// Where the share is published, which is the one press in this menu that
+/// Where the share is published, which is the one press on this pane that
 /// reaches outside the machine.
 const PUBLISHING = `/api/ui/conversations/${GRILLING.id}/share/publish`;
 
 /// And what comes back from it: the link the server composed, which is the
-/// gist's id in the share viewer's fragment rather than the gist. Whose viewer
-/// it is — Verkstead's hosted one or the human's own — is settled over there;
-/// what this side has to do is hand out whatever arrived.
+/// gist's id in the share viewer's fragment rather than the gist. Which page
+/// composes it is settled over there — every Verkstead goes through the one
+/// hosted copy — and what this side has to do is hand out whatever arrived.
 const PUBLISHED = "https://tobico.github.io/verkstead/share-viewer.html#9f1";
 
+/// And the gist itself, which travels beside it: where the file actually is,
+/// and the only place a share can be deleted.
+const GIST = "https://gist.github.com/tobico/9f1";
+
+/// One published share, as the record carries it.
+const SHARED = { url: PUBLISHED, gist: GIST, at: "2026-08-30T01:02:03Z" };
+
+/// The share icon on the Timeline's header, which is the whole of the way into
+/// the pane: no card opens it, sharing belonging to the Conversation rather
+/// than to any moment on its record.
+function shareIcon(container: ParentNode): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(
+    `.${shell.middlePane} .${button.iconButton}[aria-label="Share"]`,
+  );
+}
+
+/// Press it, and wait for the pane it opens.
+async function openShare(container: ParentNode): Promise<HTMLElement> {
+  fireEvent.click(await drawn(container, `.${shell.middlePane} .${button.iconButton}[aria-label="Share"]`));
+  return drawn(container, `.${shell.detailsPane} .${sharePane.doing}`);
+}
+
+describe("the way into the share pane", () => {
+  /// Drawn the way the settings gear beside the Verkstead wordmark is, and for
+  /// the same reason: it is another thing standing in a pane that is selected
+  /// and opened into the pane beside it.
+  it("stands on the timeline's header as an icon button", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const icon = await drawn(
+      container,
+      `.${shell.middlePane} .${button.iconButton}[aria-label="Share"]`,
+    );
+
+    // The label is the whole of what a screen reader has: the shape says
+    // nothing when it is read aloud.
+    expect(icon.getAttribute("aria-label")).toBe("Share");
+    expect(icon.querySelector("svg")).toBeTruthy();
+  });
+
+  /// And it reads as open while its pane is what the details are showing, which
+  /// is what the open card in the sidebar says about itself, in the same fill.
+  it("reads as open while the pane it opened is showing", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const icon = await drawn(
+      container,
+      `.${shell.middlePane} .${button.iconButton}[aria-label="Share"]`,
+    );
+    expect(icon.getAttribute("aria-pressed")).toBe("false");
+    expect(icon.className).not.toContain(button.open);
+
+    fireEvent.click(icon);
+
+    await waitFor(() =>
+      expect(shareIcon(container)!.getAttribute("aria-pressed")).toBe("true"),
+    );
+    expect(shareIcon(container)!.className).toContain(button.open);
+  });
+
+  /// The press is two acts, exactly as pressing a card on the record is: the
+  /// selection, and the walk into the details. Which is what makes it work on a
+  /// narrow window, where the two panes are two levels.
+  it("walks a narrow window into the details, and back out again", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+    expect(frame(container).dataset.pane).toBe("middle");
+
+    fireEvent.click(shareIcon(container)!);
+    expect(frame(container).dataset.pane).toBe("details");
+
+    await drawn(container, `.${shell.detailsPane} .${sharePane.doing}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "← Timeline" }));
+    expect(frame(container).dataset.pane).toBe("middle");
+  });
+
+  /// And it can be linked to, like every other details pane: what is open is in
+  /// the URL, so a cold load of this path opens on it.
+  it("stands at a path of its own", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}/share`);
+
+    await drawn(container, `.${shell.detailsPane} .${sharePane.doing}`);
+    await waitFor(() =>
+      expect(shareIcon(container)!.getAttribute("aria-pressed")).toBe("true"),
+    );
+  });
+
+  /// And the menus it came out of carry none of it. Four rows left both of them
+  /// together — the pane's own status button and the sidebar's right-click are
+  /// one set of rows — because not one of them did anything to the Conversation,
+  /// which is what those menus are for.
+  it("takes the share rows out of both menus", async () => {
+    theGrillingStanding({ pinned: WRAPPING.pinned, shared: SHARED });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+
+    for (const words of [
+      "Download",
+      "Publish",
+      "Published share",
+      "Share to pull request",
+    ]) {
+      expect(menu.textContent).not.toContain(words);
+    }
+
+    // Nothing that is not a press, either: the published-share row was a link
+    // in a menu of buttons, and it goes with them.
+    expect(menu.querySelector("a")).toBeNull();
+  });
+});
+
+describe("the share pane", () => {
+  /// What most visits to this pane are for: the link to send somebody, and the
+  /// button that takes it. The URL is the server's own composition — the gist's
+  /// id in the share viewer's fragment rather than the gist — so what is drawn
+  /// is whatever the record came back carrying. See `link` in
+  /// `crates/server/src/sharing.rs`.
+  it("draws the viewer's link, the moment and the gist", async () => {
+    theGrillingStanding({ shared: SHARED });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openShare(container);
+
+    const link = await drawn<HTMLAnchorElement>(
+      container,
+      `.${sharePane.link} a`,
+    );
+    expect(link.getAttribute("href")).toBe(PUBLISHED);
+
+    expect(screen.getByText(/^Taken /)).toBeTruthy();
+
+    // And the gist beside it, which is where the file is and the only place a
+    // share can be deleted: nothing in Verkstead deletes one.
+    const gist = await drawn<HTMLAnchorElement>(
+      container,
+      `.${sharePane.gist} a`,
+    );
+    expect(gist.getAttribute("href")).toBe(GIST);
+    expect(
+      screen.getByText(/the only place a share can be deleted/),
+    ).toBeTruthy();
+  });
+
+  /// The copy button beside it, which is silent otherwise: a clipboard write
+  /// changes nothing on the screen, and a press that looks like it did nothing
+  /// gets pressed again.
+  it("copies the viewer's link, and says it did", async () => {
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (said: string) => {
+          written.push(said);
+          return Promise.resolve();
+        },
+      },
+    });
+
+    theGrillingStanding({ shared: SHARED });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.copy}`));
+
+    await waitFor(() => expect(written).toEqual([PUBLISHED]));
+    await waitFor(() =>
+      expect(container.querySelector(`.${sharePane.copy}`)!.textContent).toBe(
+        "Copied",
+      ),
+    );
+  });
+
+  /// And a Conversation nobody has published one of says so plainly, rather
+  /// than drawing a block of facts with nothing in it.
+  it("says so plainly where nothing has been published", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openShare(container);
+
+    expect(container.querySelector(`.${sharePane.published}`)).toBeNull();
+    expect(
+      screen.getByText(/This conversation has not been published\./),
+    ).toBeTruthy();
+  });
+});
+
 describe("publishing a share", () => {
-  /// Two rows and one thing: the file to attach, and the same file put where a
-  /// link reaches it. Both are offered on every conversation there is, because
+  /// Two presses and one thing: the file to attach, and the same file put where
+  /// a link reaches it. Both are offered on every conversation there is, because
   /// a share is the record as it stands and a record stands from the moment
   /// there is one.
+  ///
+  /// The download is a link rather than a press, because that is what a browser
+  /// is for: the server answers as an attachment and names the file.
   it("offers publishing beside the download, with nothing to send", async () => {
     const fetching = theGrillingStanding(
       {},
       whenever(
         PUBLISHING,
-        json({
-          Published: {
-            share: {
-              url: PUBLISHED,
-              at: "2026-08-30T01:02:03Z",
-            },
-          },
-        } satisfies SharePublished),
+        json({ Published: { share: SHARED } } satisfies SharePublished),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    expect(
-      screen.getByText("Publish it as a secret gist and get a link to send."),
-    ).toBeTruthy();
+    await openShare(container);
 
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
+    const download = await drawn<HTMLAnchorElement>(
+      container,
+      `.${sharePane.download}`,
     );
+    expect(download.getAttribute("href")).toBe(
+      `/api/ui/conversations/${GRILLING.id}/share`,
+    );
+    expect(download.hasAttribute("download")).toBe(true);
+
+    fireEvent.click(await drawn(container, `.${sharePane.publish}`));
 
     await waitFor(() => expect(sent(fetching, PUBLISHING)).toEqual({}));
   });
 
-  /// And the moment itself carries the link, because the menu it was pressed
-  /// from is shut by the time the toast is read.
+  /// And the moment itself carries the link, because it is worth reaching for
+  /// while it is still what the human is thinking about.
   ///
   /// The link is the share viewer's rather than the gist's — composed by the
   /// server, so what this asks is that the toast opens what came back rather
@@ -7049,20 +7652,14 @@ describe("publishing a share", () => {
       {},
       whenever(
         PUBLISHING,
-        json({
-          Published: {
-            share: { url: PUBLISHED, at: "2026-08-30T01:02:03Z" },
-          },
-        } satisfies SharePublished),
+        json({ Published: { share: SHARED } } satisfies SharePublished),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.publish}`));
 
     const said = await waitFor(() =>
       screen.getByText("The share is published.", { exact: false }),
@@ -7074,51 +7671,23 @@ describe("publishing a share", () => {
     ).toBe(PUBLISHED);
   });
 
-  /// A published share is a link the human can send again without publishing a
-  /// second snapshot, so it stands in the menu with the day it was taken.
-  ///
-  /// The URL is the server's own composition — the gist's id in the share
-  /// viewer's fragment, rather than the gist — so what this draws is whatever
-  /// the record came back carrying. See `link` in
-  /// `crates/server/src/sharing.rs`, which is where that is decided and proved.
-  it("draws where the last one went, and when", async () => {
-    theGrillingStanding({
-      shared: {
-        url: "https://tobico.github.io/verkstead/share-viewer.html#9f1",
-        at: "2026-08-30T01:02:03Z",
-      },
-    });
+  /// And the press says what a second one would be: publishing again is a fresh
+  /// snapshot rather than a second go at the same one.
+  it("says publishing again where there is already a share", async () => {
+    theGrillingStanding({ shared: SHARED });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    const link = await drawn<HTMLAnchorElement>(
-      container,
-      `.${actions.conversationActions} .${actions.published}`,
-    );
+    await openShare(container);
 
-    expect(link.getAttribute("href")).toBe(
-      "https://tobico.github.io/verkstead/share-viewer.html#9f1",
-    );
     expect(
-      screen.getByText(/Taken .* Opens it in the share viewer\./),
-    ).toBeTruthy();
-
-    // And the press says so: publishing again is a fresh snapshot rather than a
-    // second go at the same one.
-    expect(
-      (await drawn(container, `.${actions.conversationActions} .${actions.publish}`))
-        .textContent,
-    ).toContain("Publish again");
+      (await drawn(container, `.${sharePane.publish}`)).textContent,
+    ).toBe("Publish again");
   });
 
   /// The one press here whose failures are the human's to read. A token that
-  /// cannot write gists is not a page drawn against a conversation that moved:
+  /// cannot write gists is not a pane drawn against a conversation that moved:
   /// nothing moved, and a re-read would correct nothing — so what is wrong is
   /// said, with the way to the page it is fixed on inside the sentence.
-  ///
-  /// In a toast rather than in the row that was pressed, and the menu shuts as
-  /// it arrives: an outcome is a moment, and a row here is a drawing of the
-  /// conversation it is about — see `Toasts.tsx`.
   it("says which token trouble stopped it, and where to fix it", async () => {
     theGrillingStanding(
       {},
@@ -7126,10 +7695,8 @@ describe("publishing a share", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.publish}`));
 
     const said = await waitFor(() =>
       screen.getByText("The saved GitHub token may not write gists.", {
@@ -7141,53 +7708,6 @@ describe("publishing a share", () => {
     expect(
       said.querySelector<HTMLAnchorElement>('a[href="/settings/github"]'),
     ).toBeTruthy();
-
-    // And the menu it was pressed from has gone: what it said is on the toast,
-    // and a row still holding it would go on saying it over whatever
-    // conversation is opened next.
-    await waitFor(() =>
-      expect(
-        container.querySelector(`.${actions.conversationActions} .${actions.publish}`),
-      ).toBeNull(),
-    );
-  });
-
-  /// And nothing of it is left on the next conversation's menu, which is the
-  /// whole reason an outcome is not kept in a row: the sidebar's right-click is
-  /// one menu for the whole list, and the pane's own ⋯ outlives a walk from one
-  /// conversation to the next.
-  it("leaves nothing behind on the menu of another conversation", async () => {
-    theGrillingStanding(
-      {},
-      whenever(PUBLISHING, json("NoToken" satisfies SharePublished), "POST"),
-    );
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
-    );
-
-    const said = await waitFor(() =>
-      screen.getByText("Verkstead has no GitHub token to publish as.", {
-        exact: false,
-      }),
-    );
-
-    // Done with, the way the human is done with it.
-    fireEvent.click(
-      said.closest(`.${toasts.toast}`)!.querySelector("button")!,
-    );
-
-    await openActions(container);
-    expect(
-      (
-        await drawn(
-          container,
-          `.${actions.conversationActions} .${actions.publish}`,
-        )
-      ).textContent,
-    ).toBe("PublishPublish it as a secret gist and get a link to send.");
   });
 
   /// And a Verkstead nobody has given a token is the other half of the same
@@ -7200,10 +7720,8 @@ describe("publishing a share", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.publish}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.publish}`));
 
     await waitFor(() =>
       screen.getByText("Verkstead has no GitHub token to publish as.", {
@@ -7239,9 +7757,9 @@ describe("sharing a conversation to its pull requests", () => {
     theGrillingStanding({});
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const menu = await openActions(container);
+    const pane = await openShare(container);
 
-    expect(menu.querySelector(`.${actions.comment}`)).toBeNull();
+    expect(pane.querySelector(`.${sharePane.comment}`)).toBeNull();
   });
 
   it("publishes and comments the link on every one of them", async () => {
@@ -7251,10 +7769,7 @@ describe("sharing a conversation to its pull requests", () => {
         SHARING_TO_PRS,
         json({
           Commented: {
-            share: {
-              url: "https://gist.github.com/tobico/9f1",
-              at: "2026-08-30T01:02:03Z",
-            },
+            share: SHARED,
             on: [ON_ITS_OWN, { ...MISSED, url: "https://github.com/x#1" }],
             missed: [],
           },
@@ -7264,14 +7779,8 @@ describe("sharing a conversation to its pull requests", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    expect(
-      screen.getByText("Publish it and comment the link on every pull request."),
-    ).toBeTruthy();
-
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.comment}`));
 
     await waitFor(() => expect(sent(fetching, SHARING_TO_PRS)).toEqual({}));
 
@@ -7291,24 +7800,15 @@ describe("sharing a conversation to its pull requests", () => {
       whenever(
         SHARING_TO_PRS,
         json({
-          Commented: {
-            share: {
-              url: "https://gist.github.com/tobico/9f1",
-              at: "2026-08-30T01:02:03Z",
-            },
-            on: [ON_ITS_OWN],
-            missed: [MISSED],
-          },
+          Commented: { share: SHARED, on: [ON_ITS_OWN], missed: [MISSED] },
         } satisfies ShareCommented),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.comment}`));
 
     await waitFor(() =>
       screen.getByText(
@@ -7334,10 +7834,8 @@ describe("sharing a conversation to its pull requests", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await openActions(container);
-    fireEvent.click(
-      await drawn(container, `.${actions.conversationActions} .${actions.comment}`),
-    );
+    await openShare(container);
+    fireEvent.click(await drawn(container, `.${sharePane.comment}`));
 
     const said = await waitFor(() =>
       screen.getByText("The saved GitHub token may not write gists.", {
@@ -7764,13 +8262,11 @@ describe("steering a conversation", () => {
     // under.
     const modal = await openSteer(container);
 
-    const picker = (await drawn(modal, "#steer-pairing")) as HTMLSelectElement;
+    await drawn(modal, "#steer-pairing");
     const interviewing = under(GRILLING.grilling_pairing)!;
 
     await waitFor(() =>
-      expect(picker.value).toBe(
-        `${interviewing.profile.id}:${interviewing.model!}`,
-      ),
+      expect(showing("Run it under")).toBe(readsAs(interviewing)),
     );
 
     // Nothing runs in done, so there is nothing there to pick.
@@ -7786,14 +8282,10 @@ describe("steering a conversation", () => {
     const building = GRILLING.implementation_pairing!;
 
     await waitFor(() =>
-      expect(
-        (modal.querySelector("#steer-pairing") as HTMLSelectElement).value,
-      ).toBe(`${building.profile.id}:${building.model!}`),
+      expect(showing("Run it under")).toBe(readsAs(building)),
     );
 
-    fireEvent.change(await drawn(modal, "#steer-pairing"), {
-      target: { value: `${PROFILES[0]!.id}:${PROFILES[0]!.models[0]!}` },
-    });
+    pick("Run it under", READINGS[0]!);
     fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
 
     await waitFor(() =>
@@ -7812,6 +8304,26 @@ describe("steering a conversation", () => {
         follow_up: null,
       }),
     );
+  });
+
+  /// The modal's picker is the setup card's control in another place, so it draws
+  /// what that one draws: the harness's mark in front of every reading, and in
+  /// front of the one it is showing.
+  it("marks the harness on every row of its own picker", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: false, pinned: WRAPPING.pinned },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    await drawn(modal, "#steer-pairing");
+
+    expect(offers("Run it under")).toEqual(READINGS);
+    expect(offered("Run it under").map(marked)).toEqual(
+      READINGS.map(() => art(claudeMarkFile)),
+    );
+    expect(marked(picker("Run it under"))).toBe(art(claudeMarkFile));
   });
 
   /// Grilling is the one target that carries a payload: a brief for the round it
@@ -11084,15 +11596,34 @@ describe("the status button", () => {
   /// The second line: the Profile and the model the session was launched under,
   /// off the record rather than off the Pairing the Conversation is configured
   /// with — what is running is what was launched.
-  it("names the agent running, as the human would say it", async () => {
+  it("names the agent running, as every other site names one", async () => {
     theGrillingOutput({
       running: true,
+      agent_type: "Claude",
       profile: "Work",
       model: "claude-fable-5",
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    expect(await saidRunning(container)).toBe("Work Fable 5");
+    await waitFor(() =>
+      expect(saidRunning(container)).resolves.toBe("Claude Code Fable 5 — Work"),
+    );
+  });
+
+  /// And a session from before the backend was written down says the half the
+  /// record kept, with no backend guessed for it.
+  it("leaves out a backend the running session never recorded", async () => {
+    theGrillingOutput({
+      running: true,
+      agent_type: null,
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() =>
+      expect(saidRunning(container)).resolves.toBe("Fable 5 — Work"),
+    );
   });
 
   /// And on the one stop that waits for something a press cannot supply, when
@@ -12905,9 +13436,12 @@ describe("the configuration on the brief's pane", () => {
       // The commit, abbreviated the way every other commit on the page is.
       Base: GRILLING.base_commit!.slice(0, ABBREVIATED),
       Worktree: GRILLING.worktree!.path,
-      Grilling: "fable — claude-fable-5",
-      Implementation: "opus — claude-opus-5",
-      Review: "sonnet — claude-sonnet-5",
+      // The shared reading, which is what every picker of a pairing says too:
+      // the backend, the model, and the account's name after an em dash — said
+      // here because all three of the fixture's accounts are Claude Code ones.
+      Grilling: "Claude Code Fable 5 — fable",
+      Implementation: "Claude Code Opus 5 — opus",
+      Review: "Claude Code Sonnet 5 — sonnet",
     });
   });
 
@@ -12922,7 +13456,7 @@ describe("the configuration on the brief's pane", () => {
     expect(
       configuration().Implementation,
       "and the roles beside it read as they always did",
-    ).toBe("opus — claude-opus-5");
+    ).toBe("Claude Code Opus 5 — opus");
   });
 
   /// And the same one role along: a conversation whose brief went straight to
@@ -12936,7 +13470,42 @@ describe("the configuration on the brief's pane", () => {
     expect(
       configuration().Review,
       "and the roles beside it read as they always did",
-    ).toBe("sonnet — claude-sonnet-5");
+    ).toBe("Claude Code Sonnet 5 — sonnet");
+  });
+
+  /// A profile chosen before models were paired beside them is half a choice,
+  /// and the pane says the half there is: the backend and the account, with no
+  /// model invented for it. The name is said whatever the list holds — with no
+  /// model there is nothing else to tell one account from another.
+  it("says the half there is where a pairing named no model", async () => {
+    theGrillingStanding({
+      implementation_pairing: {
+        ...GRILLING.implementation_pairing!,
+        model: null,
+      },
+    });
+    await openBrief(GRILLING);
+
+    expect(configuration().Implementation).toBe("Claude Code — opus");
+  });
+
+  /// And the account's name is dropped where its backend has one account saved:
+  /// there is nothing for the name to tell apart, and the model is the whole of
+  /// what ran the work.
+  ///
+  /// The grilling's account is not one of them any more — this is the list as it
+  /// stands, and a Pairing carries the Profile it was settled with — so its name
+  /// stays: dropping it would read as the account that happens to be left.
+  it("says only the backend and the model where a backend has one account", async () => {
+    theGrillingStanding({}, whenever("/api/ui/profiles", json([PROFILES[1]])));
+    await openBrief(GRILLING);
+
+    // Awaited, because the name is what the pane says until the list has been
+    // read: saying it can never misattribute a run, and dropping it can.
+    await waitFor(() =>
+      expect(configuration().Implementation).toBe("Claude Code Opus 5"),
+    );
+    expect(configuration().Grilling).toBe("Claude Code Fable 5 — fable");
   });
 
   it("lists each companion with its mode, its branch and its directory", async () => {

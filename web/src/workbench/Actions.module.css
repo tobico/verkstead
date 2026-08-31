@@ -35,30 +35,6 @@
 .resume {
 }
 
-/* Taking a copy away, which is the one row here that does nothing to the
-   conversation at all — and the one that is a link rather than a press, the
-   file being the browser's to save. Drawn like every other row, because what it
-   is is another thing there is to do about the conversation as a whole. Named
-   here so the row can be found. */
-.share {
-}
-
-/* Publishing that same copy where a link reaches it, and — once there is one —
-   the link itself. Two rows and one thing, drawn like every other row and
-   named here so each can be found. */
-.publish {
-}
-
-.published {
-}
-
-/* And the same publish with a comment on every pull request the conversation is
-   on, which is the one row here that says something in front of other people.
-   Drawn like every other row — what it costs is in the sentence under its name
-   rather than in its paint — and named here so the row can be found. */
-.comment {
-}
-
 /* Stopping after the current task, and stopping now. Drawn like every other row
    and named here so each can be found. */
 .stop {

@@ -24,8 +24,8 @@
 //! rust_build_cache:
 //!   enabled: true
 //!   size: 30G
-//! share_viewer_url: https://ada.github.io/verkstead-share-viewer/
 //! conflict_resolution: merge
+//! share_on_done: false
 //! sandbox_binds:
 //!   - /var/cache/verkstead-node
 //!   - verkstead=/var/cache/verkstead-cargo
@@ -63,6 +63,13 @@
 //! merged in rather than its branch rebased and force-pushed. One Repo may say
 //! otherwise — that override is a fact about the Repo and lives in the store
 //! beside it, not here.
+//!
+//! And `share_on_done` is written that way and defaults the other way about:
+//! the three ways of saying nothing all mean **off**. The other defaults here
+//! are the answer a human would have chosen anyway; this one publishes a gist
+//! under their own account and comments on a pull request other people read,
+//! and neither is a thing to do to somebody who has never been to the settings
+//! page — see [`Config::share_on_done`].
 
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -367,18 +374,6 @@ pub struct Config {
     #[serde(default)]
     rust_build_cache: RustBuildCache,
 
-    /// Where the human put a **share viewer** of their own — the small page
-    /// Verkstead ships that draws a Published Share in a browser, hosted on a
-    /// public site of theirs.
-    ///
-    /// Configuration rather than a secret, and the plainest thing in either
-    /// file: a URL, or nothing. Nothing is a Verkstead that has never been to
-    /// that section, and it costs nothing — links are composed through the copy
-    /// Verkstead itself hosts, `HOSTED` in [`crate::sharing`]. This is an
-    /// override for a human who would rather serve the page themselves.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    share_viewer_url: Option<String>,
-
     /// And how a pull request that will not merge is resolved: the base merged
     /// in, which is what nobody choosing anything gets, or the branch rebased
     /// onto the base and force-pushed.
@@ -393,6 +388,17 @@ pub struct Config {
     /// lives in the store beside it, and this is what it falls back to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     conflict_resolution: Option<ConflictResolution>,
+
+    /// And whether a Conversation's record is shared to its pull request when
+    /// the work settles to Done.
+    ///
+    /// Written the way the two above it are and defaulting the other way about:
+    /// an absent key, an absent file and one nothing can parse all mean **off**.
+    /// What the switch turns on writes to GitHub under the human's own account,
+    /// which is not something to start doing to somebody who has never been to
+    /// the settings page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    share_on_done: Option<bool>,
 
     /// And the Sandbox Configuration binds said here rather than at the
     /// installation: a flat list in the grammar `--sandbox-bind` takes,
@@ -478,8 +484,8 @@ impl Config {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
             },
-            share_viewer_url: config.share_viewer_url.and_then(blank_is_nothing),
             conflict_resolution: config.conflict_resolution,
+            share_on_done: config.share_on_done,
             sandbox_binds: entries_written(config.sandbox_binds),
             watched_paths: entries_written(config.watched_paths),
             ignored_comments: rules_kept(config.ignored_comments),
@@ -490,8 +496,8 @@ impl Config {
     pub fn of(
         git_author: GitAuthor,
         rust_build_cache: RustBuildCache,
-        share_viewer_url: Option<String>,
         conflict_resolution: ConflictResolution,
+        share_on_done: bool,
         sandbox_binds: Vec<String>,
         watched_paths: Vec<String>,
         ignored_comments: Vec<IgnoreRule>,
@@ -499,12 +505,13 @@ impl Config {
         Config {
             git_author,
             rust_build_cache,
-            share_viewer_url: share_viewer_url.and_then(blank_is_nothing),
             // Written down as it stands rather than left out where it is the
             // default, the way the build cache's switch is: what the page sends
             // is where the setting is to sit, and a key that appeared only for
             // one of the two answers would read as a file half-written.
             conflict_resolution: Some(conflict_resolution),
+            // And the switch beside it, for the reason above it.
+            share_on_done: Some(share_on_done),
             sandbox_binds: entries_written(sandbox_binds),
             watched_paths: entries_written(watched_paths),
             // Whole, and not put through the reading half's own drop above: what
@@ -527,18 +534,6 @@ impl Config {
         &self.rust_build_cache
     }
 
-    /// And where the human hosts a share viewer of their own, or `None` where
-    /// they host none.
-    ///
-    /// `None` rather than the address links are actually composed through, and
-    /// deliberately: this is what the settings page draws back into its field,
-    /// and a field filled in with something nobody typed is a setting the human
-    /// cannot tell they have not chosen. What a blank one *means* is
-    /// [`crate::sharing::link`]'s to say.
-    pub fn share_viewer_url(&self) -> Option<&str> {
-        self.share_viewer_url.as_deref()
-    }
-
     /// And how a conflict is resolved where the Repo it is in says nothing,
     /// which is a merge until somebody says otherwise.
     ///
@@ -548,6 +543,15 @@ impl Config {
     pub fn conflict_resolution(&self) -> ConflictResolution {
         self.conflict_resolution
             .unwrap_or(ConflictResolution::Merge)
+    }
+
+    /// And whether the wrap-up shares the record to the pull request when the
+    /// work settles to Done, which is **off** until somebody says otherwise.
+    ///
+    /// Read the way the two above it are: where the setting sits, rather than
+    /// whether anybody has been here.
+    pub fn share_on_done(&self) -> bool {
+        self.share_on_done.unwrap_or(false)
     }
 
     /// And the binds it holds, in the order they were written down. An empty
@@ -976,16 +980,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn where_the_share_viewer_is_hosted_is_what_the_config_file_says() {
-        let config = Config::read("share_viewer_url: https://ada.github.io/shares/\n").unwrap();
-
-        assert_eq!(
-            config.share_viewer_url(),
-            Some("https://ada.github.io/shares/")
-        );
-    }
-
     /// How a conflict is resolved is the human's word for it, and what they
     /// wrote is what comes back.
     #[test]
@@ -1053,8 +1047,8 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
-                None,
                 ConflictResolution::Rebase,
+                false,
                 vec![],
                 vec![],
                 vec![],
@@ -1070,8 +1064,8 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
-                None,
                 ConflictResolution::Merge,
+                false,
                 vec![],
                 vec![],
                 vec![],
@@ -1084,22 +1078,111 @@ mod tests {
         );
     }
 
-    /// There is no default, and there could not be one: nobody but the human
-    /// knows where their own site is, and a Verkstead that guessed would put a
-    /// link to somebody else's page on a pull request.
+    /// Whether Done shares the record to the pull request is the human's word
+    /// for it too, and what they wrote is what comes back.
     #[test]
-    fn a_share_viewer_nobody_has_hosted_is_nowhere() {
+    fn sharing_on_done_is_what_the_config_file_says() {
+        assert!(
+            Config::read("share_on_done: true\n")
+                .unwrap()
+                .share_on_done()
+        );
+        assert!(
+            !Config::read("share_on_done: false\n")
+                .unwrap()
+                .share_on_done()
+        );
+    }
+
+    /// And the whole point of *its* shape, which is the other way about from
+    /// the two above: nothing configured is off.
+    ///
+    /// An absent key, an absent file and one nothing can parse all say the same
+    /// thing, because the alternative is a human who never found this switch
+    /// having gists published under their account and comments left on pull
+    /// requests other people are reading.
+    #[test]
+    fn sharing_nobody_has_said_anything_about_is_off() {
         for text in [
             "",
             "git_author:\n  name: Tobias Cohen\n",
-            "share_viewer_url:\n",
+            "share_on_done:\n",
         ] {
-            assert_eq!(
-                Config::read(text).unwrap().share_viewer_url(),
-                None,
-                "for {text:?}"
+            assert!(
+                !Config::read(text).unwrap().share_on_done(),
+                "nothing said here is off: {text:?}",
             );
         }
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        assert!(
+            !settings.config().share_on_done(),
+            "and so is a Data Directory with no config file in it at all",
+        );
+
+        std::fs::write(settings.config_path(), "share_on_done: [oh\n").unwrap();
+
+        assert!(
+            !settings.config().share_on_done(),
+            "and so is a file nothing can parse",
+        );
+    }
+
+    /// The switch a save writes is the one the next read finds, which is what a
+    /// setting surviving a restart amounts to: the file is read afresh every
+    /// time, so a second reader of the same directory is what a restart is.
+    #[test]
+    fn sharing_on_done_goes_through_the_file_and_comes_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                ConflictResolution::Merge,
+                true,
+                vec![],
+                vec![],
+                vec![],
+            ))
+            .unwrap();
+
+        assert!(Settings::in_data_dir(dir.path()).config().share_on_done());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                ConflictResolution::Merge,
+                false,
+                vec![],
+                vec![],
+                vec![],
+            ))
+            .unwrap();
+
+        assert!(
+            !Settings::in_data_dir(dir.path()).config().share_on_done(),
+            "a switch that could only be turned on would be one nobody could undo",
+        );
+    }
+
+    /// Where the share viewer is hosted used to be said here, and a file
+    /// written before it stopped being a setting still carries the key. It is
+    /// read past like any other key this build has never heard of — the rest of
+    /// the file is what the human configured, and refusing it would be a
+    /// Verkstead that would not start for a line it no longer cares about.
+    #[test]
+    fn a_config_file_still_carrying_a_share_viewer_url_is_read_past_it() {
+        let config = Config::read(
+            "share_viewer_url: https://ada.github.io/shares/\ngit_author:\n  name: Tobias Cohen\n",
+        )
+        .unwrap();
+
+        assert_eq!(config.git_author().name(), Some("Tobias Cohen"));
     }
 
     #[test]
@@ -1258,8 +1341,8 @@ mod tests {
                     Some("tobi@tobico.net".to_owned()),
                 ),
                 RustBuildCache::default(),
-                None,
                 ConflictResolution::Merge,
+                false,
                 vec![],
                 vec![],
                 vec![],
@@ -1272,43 +1355,38 @@ mod tests {
         assert_eq!(config.git_author().email(), Some("tobi@tobico.net"));
     }
 
+    /// And the key goes when the file is next written: a save serializes the
+    /// config as this build knows it, so the line the human never asked for
+    /// stops being carried about forever.
     #[test]
-    fn a_saved_share_viewer_url_is_what_the_next_read_says() {
+    fn saving_drops_a_share_viewer_url_the_file_was_still_carrying() {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
+        std::fs::write(
+            settings.config_path(),
+            "share_viewer_url: https://ada.github.io/shares/\n",
+        )
+        .unwrap();
+
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
-                Some("https://ada.github.io/shares/".to_owned()),
                 ConflictResolution::Merge,
+                false,
                 vec![],
                 vec![],
                 vec![],
             ))
             .unwrap();
 
-        assert_eq!(
-            settings.config().share_viewer_url(),
-            Some("https://ada.github.io/shares/")
+        let written = std::fs::read_to_string(settings.config_path()).unwrap();
+
+        assert!(
+            !written.contains("share_viewer_url"),
+            "the key should be gone, not {written:?}"
         );
-
-        // And clearing the field is how it is taken away, which is the whole of
-        // what an empty one means.
-        settings
-            .save_config(&Config::of(
-                GitAuthor::default(),
-                RustBuildCache::default(),
-                Some(String::new()),
-                ConflictResolution::Merge,
-                vec![],
-                vec![],
-                vec![],
-            ))
-            .unwrap();
-
-        assert_eq!(settings.config().share_viewer_url(), None);
     }
 
     /// The reason the files are serialized rather than formatted by hand: a name
@@ -1325,8 +1403,8 @@ mod tests {
                     Some("tobi@tobico.net".to_owned()),
                 ),
                 RustBuildCache::default(),
-                None,
                 ConflictResolution::Merge,
+                false,
                 vec![],
                 vec![],
                 vec![],
@@ -1348,8 +1426,8 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), Some(String::new())),
                 RustBuildCache::default(),
-                None,
                 ConflictResolution::Merge,
+                false,
                 vec![],
                 vec![],
                 vec![],
@@ -1390,8 +1468,8 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
-                None,
                 ConflictResolution::Merge,
+                false,
                 vec![],
                 vec![],
                 vec![],
@@ -1417,8 +1495,8 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
-                None,
                 ConflictResolution::Merge,
+                false,
                 vec![],
                 vec![],
                 vec![],
@@ -1480,8 +1558,8 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
-                None,
                 ConflictResolution::Merge,
+                false,
                 vec!["/var/cache/verkstead-node".to_owned()],
                 vec![],
                 vec![],
@@ -1499,8 +1577,8 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
-                None,
                 ConflictResolution::Merge,
+                false,
                 vec![],
                 vec![],
                 vec![],
@@ -1547,8 +1625,8 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
-                None,
                 ConflictResolution::Merge,
+                false,
                 vec![],
                 vec!["/home/ada/src".to_owned()],
                 vec![],
@@ -1624,8 +1702,8 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
-                None,
                 ConflictResolution::Merge,
+                false,
                 vec![],
                 vec![],
                 vec![IgnoreRule::of(
