@@ -1625,6 +1625,14 @@ pub struct AgentOutputEvent {
     /// at all; `null` beside a `profile` that is not is a session from before
     /// either was recorded.
     pub model: Option<String>,
+
+    /// And which agent ran it, which is what says whose mark goes beside the
+    /// reading — the same four words a Profile's account is discriminated by.
+    ///
+    /// Off the record beside the other two and for their reason. `null` for a
+    /// session started before this was written down, which the reading draws
+    /// without a mark rather than guessing one.
+    pub agent_type: Option<crate::AgentType>,
 }
 
 /// A Question Set as the Timeline shows it: what it was called, the table of
@@ -1847,6 +1855,7 @@ pub fn agent_output_event(
     idle: bool,
     profile: Option<String>,
     model: Option<String>,
+    agent_type: Option<crate::AgentType>,
 ) -> TimelineEvent {
     TimelineEvent::AgentOutput(AgentOutputEvent {
         id,
@@ -1857,6 +1866,7 @@ pub fn agent_output_event(
         running,
         profile,
         model,
+        agent_type,
         // Idle is a thing a running session is, and the caller reads the two
         // off different places — so the pair is made consistent here rather
         // than at each of them.

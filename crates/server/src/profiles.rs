@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
+    AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
 };
 
 use crate::store;
@@ -542,5 +542,17 @@ fn account(account: &store::Account) -> ProfileAccount {
         store::Account::OpenCode { home } => ProfileAccount::OpenCode {
             home: home.to_string_lossy().into_owned(),
         },
+    }
+}
+
+/// And the agent type on its own, for the Timeline: what a session ran under is
+/// recorded without an account, the Profile it came from being a thing that can
+/// since have gone.
+pub(crate) fn agent_type(agent_type: store::AgentType) -> AgentType {
+    match agent_type {
+        store::AgentType::Claude => AgentType::Claude,
+        store::AgentType::Codex => AgentType::Codex,
+        store::AgentType::Grok => AgentType::Grok,
+        store::AgentType::OpenCode => AgentType::OpenCode,
     }
 }

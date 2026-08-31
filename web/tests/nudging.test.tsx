@@ -532,10 +532,11 @@ const ABOUT: Record<string, readonly string[]> = {
   conversation: [OPENED, SIDEBAR],
   conversations: [SIDEBAR],
   repos: [REPOS, ROADMAPS],
-  // Nothing on the conversation this sweep opens draws a pairing picker, so
-  // there is no Profiles query mounted for the re-read to land in. What a Nudge
-  // of this kind does where one *is* drawn is the test under the sweep.
-  profiles: [],
+  // Every workbench pane draws the list now, a picker or no picker: the status
+  // button says who is running and the record says who ran, and both are read
+  // against the saved accounts. Once however many of them are mounted — one
+  // key, one query, one re-read.
+  profiles: [PROFILES],
 };
 
 describe("what a Nudge is about", () => {
@@ -594,7 +595,7 @@ describe("what a Nudge is about", () => {
     render(() => <App />);
     await waitFor(() =>
       expect(
-        document.querySelector("#implementation-pairing option"),
+        document.querySelector("#implementation-pairing"),
       ).not.toBeNull(),
     );
     stream().opens();

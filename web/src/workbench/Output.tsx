@@ -61,8 +61,10 @@ import {
 } from "solid-js";
 
 import { PaneSticky } from "../Panes";
-import { loadCapture, loadTranscript } from "../api/client";
+import { ran, reading } from "../agents";
+import { listProfiles, loadCapture, loadTranscript } from "../api/client";
 import { useReading } from "../freshness";
+import { HarnessMark } from "../HarnessMark";
 import { Empty, ErrorLine } from "../notices";
 import { followBottom } from "../scrolling";
 import { Mark } from "./Mark";
@@ -195,6 +197,17 @@ export function Output(props: {
     freshness: over ? "static" : { reconcile: "id" },
   }));
 
+  // Who ran the session, for the header: the same read the record's own card
+  // makes, so opening a card names the run that card named. The list decides
+  // one thing only — whether the account's own name is said after the model —
+  // and while it is in flight the name is said, that being the answer that can
+  // never misattribute a run.
+  const profiles = useReading(() => ({
+    queryKey: ["profiles"],
+    queryFn: listProfiles,
+    freshness: { reconcile: "id" },
+  }));
+
   /// The two labels themselves, so the mark under the pressed one can be put
   /// where that one is.
   let transcriptTab!: HTMLButtonElement;
@@ -222,7 +235,21 @@ export function Output(props: {
   return (
     <>
       <PaneSticky>
-        <PaneHead back={{ to: "Timeline", go: props.back }} title="Agent run">
+        <PaneHead
+          back={{ to: "Timeline", go: props.back }}
+          title={
+            <>
+              {/* The same mark the card that opened this pane draws, in front of
+                  the same reading: one session read at two distances, and the
+                  harness is said the same way at both. */}
+              <HarnessMark
+                of={props.output.agent_type}
+                class={styles.harness!}
+              />
+              {reading(ran(props.output), profiles.data) || "Agent run"}
+            </>
+          }
+        >
           {/* The two ways of reading the one session, beside the title rather than
               across the pane under it: two words is all the width it ever needs,
               and the header is where a pane's own controls belong. Buttons that

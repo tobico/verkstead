@@ -766,6 +766,14 @@
   font-weight: 600;
 }
 
+/* The harness's mark, in front of the words that name the run. A margin rather
+   than a gap, the heading being a run of text rather than a flex row — and so a
+   card whose run recorded no harness leaves no space where a mark would have
+   been, there being no element to carry the margin. */
+.agentOutput .harness {
+  margin-inline-end: 0.4em;
+}
+
 .agentOutput .turns {
   font-size: 0.9rem;
   color: var(--ink-soft);

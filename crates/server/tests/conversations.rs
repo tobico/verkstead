@@ -20,13 +20,13 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CheckRollup, CompanionAdded,
-    CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode, CompanionModeChosen,
-    CompanionRefusal, CompanionRemoved, ConversationArchived, ConversationClosed,
-    ConversationEntry, ConversationSteered, ConversationUnarchived, ConversationView,
-    GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen, ProfileSaved,
-    Registered, Resolved, RoadmapPane, ShowingArchived, Standing, Started, SteerCompanionRefusal,
-    SteerOpened, TimelineEvent,
+    Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CheckRollup,
+    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
+    CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
+    ConversationView, GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen,
+    ProfileSaved, Registered, Resolved, RoadmapPane, ShowingArchived, Standing, Started,
+    SteerCompanionRefusal, SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
@@ -4550,8 +4550,150 @@ async fn a_sessions_event_says_what_it_was_launched_under() {
         Some("claude-opus-5"),
         "and the model id raw, prettifying being the viewer's alone",
     );
+    assert_eq!(
+        output.agent_type,
+        Some(AgentType::Claude),
+        "and which agent ran it, which is what the harness mark is drawn from",
+    );
 
     pool.close().await;
+}
+
+/// And it says which agent ran it whatever that agent is, the whole point of
+/// recording one being to tell two harnesses apart.
+///
+/// Launched under a Profile of a type nothing else in this file uses, because a
+/// record that answered "Claude" for everything would pass every assertion
+/// above without knowing anything.
+#[tokio::test]
+async fn a_sessions_event_says_which_harness_ran_it() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let profile_id = codex_profile(&app, watched.path(), "hopper").await;
+    let pairing = store::Pairing {
+        profile: store::load_profile(&pool, profile_id)
+            .await
+            .unwrap()
+            .expect("the Profile just saved is there"),
+        model: Some("gpt-5.2-codex".to_owned()),
+    };
+
+    store::start_capture(&pool, id, Some("a-session"), Some(&pairing))
+        .await
+        .unwrap();
+
+    let output = printed(&app, id).await;
+    assert_eq!(
+        (output.profile.as_deref(), output.model.as_deref()),
+        (Some("hopper"), Some("gpt-5.2-codex")),
+        "the Profile and the model this one was launched under",
+    );
+    assert_eq!(
+        output.agent_type,
+        Some(AgentType::Codex),
+        "and the agent that ran it, which is the Profile's own type and not a default",
+    );
+
+    pool.close().await;
+}
+
+/// What became of the Profile afterwards changes nothing: the Event is the
+/// account of a session that has already run.
+///
+/// Rewritten whole rather than renamed, which is the strongest version of the
+/// same press — a new name over another harness's account. Deleting it is the
+/// other half of the same rule and is refused while a Conversation has it
+/// chosen, so what a rewrite proves is what there is to prove: none of the three
+/// things recorded is looked up when the Timeline is read.
+#[tokio::test]
+async fn what_the_profile_became_afterwards_changes_nothing() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let picked = opened(&app, id)
+        .await
+        .grilling_pairing
+        .pairing()
+        .expect("the grilling was paired before it started")
+        .clone();
+    let pairing = store::Pairing {
+        profile: store::load_profile(&pool, picked.profile.id)
+            .await
+            .unwrap()
+            .expect("the Profile is still there"),
+        model: picked.model,
+    };
+
+    store::start_capture(&pool, id, Some("a-session"), Some(&pairing))
+        .await
+        .unwrap();
+
+    let home = codex_home(watched.path(), "fable");
+    let saved: ProfileSaved = post(
+        &app,
+        &format!("/api/ui/profiles/{}", picked.profile.id),
+        &serde_json::json!({
+            "name": "renamed",
+            "account": { "agent_type": "Codex", "home": home },
+            "models": ["gpt-5.2-codex"],
+        }),
+    )
+    .await;
+    assert_eq!(saved, ProfileSaved::Saved);
+
+    let output = printed(&app, id).await;
+    assert_eq!(
+        (output.profile.as_deref(), output.model.as_deref()),
+        (Some("fable"), Some("claude-opus-5")),
+        "the name and the model as they read when the session started",
+    );
+    assert_eq!(
+        output.agent_type,
+        Some(AgentType::Claude),
+        "and the agent that ran it, whatever the Profile has since become",
+    );
+
+    pool.close().await;
+}
+
+/// A Codex home inside `watched`, which is the whole of what a Codex account
+/// is — see `tests/profiles.rs`, where the shape of each type's account is the
+/// subject.
+fn codex_home(watched: &Path, account: &str) -> PathBuf {
+    let home = watched.join(account).join(".codex");
+    std::fs::create_dir_all(&home).unwrap();
+    home
+}
+
+/// Save a Codex Profile and hand back its id, [`profile`]'s way: through the
+/// endpoint the human saves one through, so what is recorded is what a save
+/// leaves behind.
+async fn codex_profile(app: &Router, watched: &Path, name: &str) -> i64 {
+    let saved: ProfileSaved = post(
+        app,
+        "/api/ui/profiles",
+        &serde_json::json!({
+            "name": name,
+            "account": { "agent_type": "Codex", "home": codex_home(watched, name) },
+            "models": ["gpt-5.2-codex"],
+        }),
+    )
+    .await;
+    assert_eq!(saved, ProfileSaved::Saved);
+
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(app, "/api/ui/profiles").await;
+    profiles
+        .into_iter()
+        .find(|profile| profile.name == name)
+        .expect("the Profile just saved should be on the list")
+        .id
 }
 
 /// And a session from before any of that was written down says nothing about
@@ -4575,9 +4717,64 @@ async fn a_session_that_was_never_paired_says_nothing_about_it() {
     assert_eq!(output.profile, None, "nothing was paired with this one");
     assert_eq!(output.model, None, "so there is no model to name either");
     assert_eq!(
+        output.agent_type, None,
+        "and no agent to name, which is a reading drawn without a mark",
+    );
+    assert_eq!(
         (output.lines, output.turns, output.latest.as_str()),
         (0, None, ""),
         "and the Event is otherwise the one it always was",
+    );
+
+    pool.close().await;
+}
+
+/// And a session paired before the agent was written down keeps its pairing and
+/// says nothing about the agent, which is every Event recorded between the two.
+///
+/// The row is taken away by hand because nothing writes one of these any more:
+/// the agent arrived in a table beside the pairing rather than as a column in
+/// it, so a Timeline from between the two is a pairing with no agent beside it.
+#[tokio::test]
+async fn a_session_paired_before_the_agent_was_recorded_says_nothing_about_it() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let picked = opened(&app, id)
+        .await
+        .grilling_pairing
+        .pairing()
+        .expect("the grilling was paired before it started")
+        .clone();
+    let pairing = store::Pairing {
+        profile: store::load_profile(&pool, picked.profile.id)
+            .await
+            .unwrap()
+            .expect("the Profile is still there"),
+        model: picked.model,
+    };
+
+    let event = store::start_capture(&pool, id, Some("a-session"), Some(&pairing))
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM session_agents WHERE event_id = ?")
+        .bind(event)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let output = printed(&app, id).await;
+    assert_eq!(
+        (output.profile.as_deref(), output.model.as_deref()),
+        (Some("fable"), Some("claude-opus-5")),
+        "the pairing is there, being what was recorded at the time",
+    );
+    assert_eq!(
+        output.agent_type, None,
+        "and the agent is not, which is nothing rather than an error",
     );
 
     pool.close().await;

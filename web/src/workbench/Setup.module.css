@@ -210,8 +210,9 @@
   padding: 0.5rem 0.6rem;
 }
 
-/* The same control the pairings are picked with, because it is the same kind of
-   choice: one of a short list the repository already holds. */
+/* One of a short list the repository already holds, which is what a native
+   dropdown is for: a branch has nothing to draw beside its name, so this stays
+   a `<select>` where the pairings above have become a listbox of their own. */
 .baseBranch select {
   width: 100%;
   font: inherit;
@@ -275,37 +276,32 @@
   color: var(--ink-soft);
 }
 
-.profileChoice select {
-  width: 100%;
-  font: inherit;
-  color: inherit;
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  padding: 0.5rem 0.6rem;
-}
+/* The pairing itself is picked with a listbox the app draws rather than a
+   `<select>`, so that every row can carry its harness's mark — what it looks
+   like is `picking.module.css`, this card being one of five places the same
+   control stands. Nothing about it is left here: the choice is as wide as the
+   field, which the control already is.
 
-/* A chosen profile whose pair has gone: the select still shows it, because it is
-   what was chosen, and the reason it will not do is said under it. */
+   A chosen profile whose pair has gone: the control still shows it, because it
+   is what was chosen, and the reason it will not do is said under it. */
 .profileChoice .broken {
   margin: 0.35rem 0 0;
   font-size: 0.85rem;
 }
 
 /* A profile chosen before models were paired with them, which is half a choice:
-   the select shows nothing, and this is what it is showing nothing about. */
+   the control shows nothing, and this is what it is showing nothing about. */
 .profileChoice .unpaired {
   margin: 0.35rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
 
-/* The field being typed in or picked from, which is no pointer's doing: the
-   border says which of them the human is in — the branch, a base, a pairing,
-   or a companion's own. */
+/* The field being typed in, which is no pointer's doing: the border says which
+   of them the human is in — the branch, a base, or a companion's own. The
+   pairing control says it for itself, in `picking.module.css`. */
 .fieldLine input:focus-visible,
-.baseBranch select:focus-visible,
-.profileChoice select:focus-visible {
+.baseBranch select:focus-visible {
   border-color: var(--accent);
 }
 
@@ -314,8 +310,7 @@
    app draws itself does everywhere else. */
 @media (hover: hover) {
   .fieldLine input:hover,
-  .baseBranch select:hover,
-  .profileChoice select:hover {
+  .baseBranch select:hover {
     border-color: var(--ink-soft);
   }
 

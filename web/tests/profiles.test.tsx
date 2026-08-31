@@ -30,13 +30,23 @@ import type {
   ProfileEdit,
   ProfileEntry,
 } from "../src/api/types";
+import { AGENT_NAME } from "../src/agents";
 import { KNOWN_MODELS, prettify } from "../src/models";
+// The four files a backend's brand mark is drawn out of, read as lobehub
+// published them — so that naming a mark here and drawing it in `HarnessMark`
+// are two independent statements about the same art.
+import claudeMarkFile from "../src/marks/claude-color.svg?raw";
+import codexMarkFile from "../src/marks/codex.svg?raw";
+import grokMarkFile from "../src/marks/grok.svg?raw";
+import opencodeMarkFile from "../src/marks/opencode.svg?raw";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
 import { ProfileList, ProfilePane } from "../src/profiles/ProfileList";
 import styles from "../src/profiles/ProfileList.module.css";
 import head from "../src/workbench/PaneHead.module.css";
 import { drawn } from "./bench";
+import { art, marked } from "./marking";
+import { offered as offeredRows, pick, rows, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 
@@ -452,9 +462,7 @@ describe("the pane a card opens", () => {
     expect(
       (screen.getByLabelText(/Home directory/) as HTMLInputElement).value,
     ).toBe(home(CODEX.account).home);
-    expect(
-      (screen.getByLabelText("Agent") as HTMLSelectElement).value,
-    ).toBe("Codex");
+    expect(showing("Agent")).toBe("Codex");
   });
 
   /// The paths shown are the resolved ones the server recorded rather than
@@ -473,9 +481,7 @@ describe("the pane a card opens", () => {
         (press) => press.textContent,
       ),
     ).toEqual(["Remove"]);
-    expect(
-      (screen.getByLabelText("Agent") as HTMLSelectElement).value,
-    ).toBe(FABLE.account.agent_type);
+    expect(showing("Agent")).toBe(AGENT_NAME[FABLE.account.agent_type]);
   });
 
   /// Every backend that can launch, by its own name, and no other.
@@ -491,22 +497,44 @@ describe("the pane a card opens", () => {
     theProfiles();
     mountPane(FABLE.id);
 
-    const picker = (await waitFor(() =>
-      screen.getByLabelText("Agent"),
-    )) as HTMLSelectElement;
+    await waitFor(() => screen.getByLabelText("Agent"));
 
-    expect([...picker.options].map((option) => option.value)).toEqual([
-      "Claude",
-      "Codex",
-      "Grok",
-      "OpenCode",
-    ]);
-    expect([...picker.options].map((option) => option.textContent)).toEqual([
+    expect(rows("Agent")).toEqual([
       "Claude Code",
       "Codex",
       "Grok Build",
       "OpenCode",
     ]);
+  });
+
+  /// And each of them under its own brand mark, which is the whole reason this
+  /// one row of the form is not a `<select>`: a reader picks the account they
+  /// mean out of four by its shape before reading a word.
+  it("offers each backend under its own brand mark", async () => {
+    theProfiles();
+    mountPane(FABLE.id);
+
+    await waitFor(() => screen.getByLabelText("Agent"));
+
+    expect(offeredRows("Agent").map(marked)).toEqual([
+      art(claudeMarkFile),
+      art(codexMarkFile),
+      art(grokMarkFile),
+      art(opencodeMarkFile),
+    ]);
+  });
+
+  /// And the closed control draws the chosen row the way the list drew it, mark
+  /// and all: a control showing one thing and offering the same thing drawn
+  /// differently is a control the eye has to check.
+  it("draws the chosen backend's mark on the closed control", async () => {
+    serving(whenever("/api/ui/profiles", json([CODEX])));
+    mountPane(CODEX.id);
+
+    const control = await waitFor(() => screen.getByLabelText("Agent"));
+
+    expect(marked(control)).toBe(art(codexMarkFile));
+    expect(showing("Agent")).toBe("Codex");
   });
 
   /// Picking another type is asking for that type's account, so the fields under
@@ -518,9 +546,7 @@ describe("the pane a card opens", () => {
 
     await waitFor(() => screen.getByLabelText(/Claude directory/));
 
-    fireEvent.change(screen.getByLabelText("Agent"), {
-      target: { value: "Codex" },
-    });
+    pick("Agent", "Codex");
 
     await waitFor(() => screen.getByLabelText(/Home directory/));
     expect(screen.queryByLabelText(/Claude directory/)).toBeNull();
@@ -676,9 +702,7 @@ describe("the pane the plus opens", () => {
       });
       fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
-      fireEvent.change(screen.getByLabelText("Agent"), {
-        target: { value: profile.account.agent_type },
-      });
+      pick("Agent", AGENT_NAME[profile.account.agent_type]);
       fireEvent.input(
         await waitFor(() => screen.getByLabelText(/Home directory/)),
         { target: { value: home(profile.account).home } },
@@ -846,20 +870,113 @@ describe("the models a profile lists", () => {
     return serving(whenever("/api/ui/profiles", json([MIXED])), ...answers);
   }
 
+  /// Every model this build knows *of the profile's own agent type*, and no
+  /// other: a model belongs to one backend, and a tick for another backend's
+  /// would be an invitation to save a profile that cannot launch.
+  ///
   /// The name is the viewer's word for the model and the id is what the session
   /// is launched with, so both are on the row: one to read, one to check.
-  it("offers every model this build knows, by name and by id", async () => {
+  it("offers every model this build knows for that backend", async () => {
     theProfiles();
     mountPane(FABLE.id);
 
     await waitFor(() => screen.getByLabelText("Fable 5"));
 
-    for (const model of KNOWN_MODELS) {
+    const claude = KNOWN_MODELS.filter((model) => model.agent === "Claude");
+
+    for (const model of claude) {
       expect(screen.getByLabelText(model.name)).toBeTruthy();
     }
     expect(offered()).toEqual(
-      KNOWN_MODELS.map((model) => `${model.name}${model.id}`),
+      claude.map((model) => `${model.name}${model.id}`),
     );
+
+    // And nothing of anybody else's: `grok-4.6` is a model this build knows the
+    // name of and a Claude Code account cannot be launched on.
+    expect(screen.queryByLabelText("Grok 4.6")).toBeNull();
+  });
+
+  /// And a profile of another type is offered that type's own, which is the same
+  /// list read the other way round.
+  it("offers another backend's models on a profile of that backend", async () => {
+    const grok: ProfileEntry = {
+      ...FABLE,
+      account: { agent_type: "Grok", home: "/srv/accounts/grok" },
+      models: ["grok-4.6"],
+    };
+    serving(whenever("/api/ui/profiles", json([grok])));
+    mountPane(grok.id);
+
+    await waitFor(() => screen.getByLabelText("Grok 4.6"));
+
+    expect(offered()).toEqual(
+      KNOWN_MODELS.filter((model) => model.agent === "Grok").map(
+        (model) => `${model.name}${model.id}`,
+      ),
+    );
+    expect(screen.queryByLabelText("Fable 5")).toBeNull();
+  });
+
+  /// Picking another type on the form changes what is offered with it, the way
+  /// it changes which account paths are asked for — and what the profile already
+  /// carries stays on the form under them, because a tick is how a model is
+  /// taken off a profile and one the form hid would be one nobody could untick.
+  it("changes the models offered when the agent type is picked", async () => {
+    theProfiles();
+    mountPane(FABLE.id);
+
+    await waitFor(() => screen.getByLabelText("Fable 5"));
+    pick("Agent", "Grok Build");
+
+    await waitFor(() => screen.getByLabelText("Grok 4.6"));
+    expect(screen.queryByLabelText("Opus 5")).toBeNull();
+    expect(ticked()).toEqual(FABLE.models);
+  });
+
+  /// And each of those carried-over ticks says whose model it is, which is the
+  /// one thing about a tick that nothing else on the form would tell: what a
+  /// profile saved with one offers is a pairing reading "Grok Build Fable 5"
+  /// that grok will refuse to launch, and the form is where that is cheap to
+  /// see.
+  ///
+  /// In the tick's own name rather than under the list, so a reader who cannot
+  /// see the row hears it as part of what they are ticking.
+  it("says whose model a tick carried over from another backend is", async () => {
+    theProfiles();
+    mountPane(FABLE.id);
+
+    await waitFor(() => screen.getByLabelText("Fable 5"));
+    pick("Agent", "Grok Build");
+    await waitFor(() => screen.getByLabelText("Grok 4.6"));
+
+    expect(
+      screen.getByLabelText(/Fable 5/).closest("li")!.textContent,
+    ).toContain("Claude Code's model, which this account cannot launch");
+
+    // And nothing of the sort beside the backend's own, which is every
+    // ordinary row on every ordinary form.
+    expect(
+      screen.getByLabelText("Grok 4.6").closest("li")!.textContent,
+    ).not.toContain("cannot launch");
+  });
+
+  /// An id the list has never heard of says nothing either: the free-text way in
+  /// is what one of those is, and a model this build cannot name is not one it
+  /// can say the backend of.
+  it("says nothing about a model the build does not know", async () => {
+    const mixed: ProfileEntry = {
+      ...FABLE,
+      account: { agent_type: "Grok", home: "/srv/accounts/grok" },
+      models: ["grok-4.6", "grok-5-preview"],
+    };
+    serving(whenever("/api/ui/profiles", json([mixed])));
+    mountPane(mixed.id);
+
+    await waitFor(() => screen.getByLabelText("grok-5-preview"));
+
+    expect(
+      screen.getByLabelText("grok-5-preview").closest("li")!.textContent,
+    ).not.toContain("cannot launch");
   });
 
   /// The picks are what the profile says, ticked: a list saved before there were

@@ -202,7 +202,30 @@ profile: string | null,
  * at all; `null` beside a `profile` that is not is a session from before
  * either was recorded.
  */
-model: string | null, };
+model: string | null, 
+/**
+ * And which agent ran it, which is what says whose mark goes beside the
+ * reading — the same four words a Profile's account is discriminated by.
+ *
+ * Off the record beside the other two and for their reason. `null` for a
+ * session started before this was written down, which the reading draws
+ * without a mark rather than guessing one.
+ */
+agent_type: AgentType | null, };
+
+/**
+ * Which agent a session runs, on its own rather than as an account's shape.
+ *
+ * The same four words [`ProfileAccount`]'s discriminator is written in, so a
+ * viewer narrowing on one narrows on the other: what a Profile runs and what a
+ * finished session ran are the same fact about the same set of backends, and
+ * two spellings of it would be two things for the viewer to keep in step.
+ *
+ * Its own type because the account is not always there to carry it — a Timeline
+ * Event says which agent ran a session and holds no account at all, the
+ * Profile it was launched from being a thing that can since have gone.
+ */
+export type AgentType = "Claude" | "Codex" | "Grok" | "OpenCode";
 
 /**
  * One question's slot in a Response: either an Answer — a selected Option

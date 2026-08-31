@@ -6,8 +6,14 @@
 //! its animation over, an open dropdown closes, and the choice inside one can
 //! come apart from what is displayed. ADR-0009 answered that in two places: the
 //! merge every query now has to name in `src/freshness.ts`, which keeps the
-//! elements alive, and the [`Picker`] in `src/picking.tsx`, which keeps a
-//! `<select>` honest even when they are not.
+//! elements alive, and `src/picking.tsx`, which keeps a dropdown honest even
+//! when they are not.
+//!
+//! Both of that module's controls are asked here, because the guarantee is the
+//! module's rather than either control's: the native [`Picker`] and the
+//! [`Listbox`] the pairing pickers are drawn with hold it off one set of
+//! readings, and a listbox that lost it would lose it on the four choices that
+//! say who runs the work.
 //!
 //! So this file asserts about identity rather than about appearance. Everything
 //! here would pass on text: the rebuilt row says the same words, and the
@@ -19,7 +25,7 @@
 //! and the re-read is driven the way a Nudge drives it — see `nudged` in
 //! `bench.tsx`.
 
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 
@@ -38,7 +44,7 @@ import sidebar from "../src/workbench/Conversations.module.css";
 import marks from "../src/workbench/Mark.module.css";
 import steerModal from "../src/workbench/Steer.module.css";
 import { under } from "../src/pairing";
-import { Picker } from "../src/picking";
+import { Listbox, Picker } from "../src/picking";
 import {
   OPEN,
   PROFILES,
@@ -51,6 +57,7 @@ import {
   survived,
   theWorkbench,
 } from "./bench";
+import { opened, pick, picker, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 
@@ -150,6 +157,78 @@ describe("a picker whose options are rebuilt", () => {
   });
 });
 
+/// The same two questions of the control the pairings are picked with, which has
+/// no browser doing the fixing-up for it: what it shows it decides itself, off
+/// the same readings, so what it must never do is decide differently.
+describe("a listbox whose options are rebuilt", () => {
+  /// Two rows and a choice, drawn straight for the reason the native one above
+  /// is — and labelled, because the label reaching the control is one of the
+  /// guarantees rather than a detail of the harness.
+  function picking(chosenAt = "2") {
+    const [rows, setRows] = createSignal([
+      { id: 1, name: "verkstead" },
+      { id: 2, name: "askance" },
+    ]);
+    const [chosen, setChosen] = createSignal(chosenAt);
+
+    render(() => (
+      <>
+        <label for="repo">Repo</label>
+        <Listbox
+          id="repo"
+          options={rows()}
+          value={(repo) => String(repo.id)}
+          label={(repo) => repo.name}
+          chosen={chosen()}
+          pick={setChosen}
+          gone={() => setChosen("")}
+        />
+      </>
+    ));
+
+    return {
+      chosen,
+      /// The list read again, as rows the merge did not keep.
+      rebuilt: setRows,
+    };
+  }
+
+  it("shows the same choice after every row is a new element", () => {
+    const { rebuilt } = picking();
+    expect(showing("Repo")).toBe("askance");
+
+    rebuilt([
+      { id: 1, name: "verkstead" },
+      { id: 2, name: "askance" },
+    ]);
+
+    expect(showing("Repo")).toBe("askance");
+  });
+
+  it("shows nothing chosen when the chosen row is gone, and says so", () => {
+    const { chosen, rebuilt } = picking();
+
+    rebuilt([{ id: 1, name: "verkstead" }]);
+
+    // Not the row that happens to be first now, on this control either.
+    expect(showing("Repo")).toBe("Not chosen");
+    expect(chosen()).toBe("");
+  });
+
+  /// And what it shows is what it would send: the row read off the closed
+  /// control is the row whose value comes back out of `pick`, which is the whole
+  /// of the divergence this module exists to close.
+  it("sends the row it was showing", () => {
+    const { chosen } = picking("");
+    expect(showing("Repo")).toBe("Not chosen");
+
+    pick("Repo", "verkstead");
+
+    expect(chosen()).toBe("1");
+    expect(showing("Repo")).toBe("verkstead");
+  });
+});
+
 describe("what a Nudge leaves standing", () => {
   it("keeps the row a session's spinner is spinning on", async () => {
     theWorkbench(whenever("/api/ui/conversations", json(BUSY)));
@@ -182,17 +261,20 @@ describe("what a Nudge leaves standing", () => {
     survived(offered, nodes(container, `.${menu.drop} > [role="menuitem"]`));
   });
 
-  it("keeps both pairing pickers' options", async () => {
+  /// The pairing pickers are the app's own listbox, whose rows are on the page
+  /// only while they are down — so they are opened first, which is also the case
+  /// the merge is for: a Nudge landing while somebody is reading the list.
+  it("keeps an open pairing picker's rows", async () => {
     theWorkbench();
     const { container, client } = mount(`/conversations/${OPEN.id}`);
-    await drawn(container, "#grilling-pairing option");
-    const grilling = nodes(container, "#grilling-pairing option");
-    const implementing = nodes(container, "#implementation-pairing option");
+    await drawn(container, "#grilling-pairing");
+    const grilling = nodes(opened("Grilling"), '[role="option"]');
+    const implementing = nodes(opened("Implementation"), '[role="option"]');
 
     await nudged(client);
 
-    survived(grilling, nodes(container, "#grilling-pairing option"));
-    survived(implementing, nodes(container, "#implementation-pairing option"));
+    survived(grilling, nodes(opened("Grilling"), '[role="option"]'));
+    survived(implementing, nodes(opened("Implementation"), '[role="option"]'));
   });
 
   /// The third picker, and the one a Nudge is loudest around: it sits in the
@@ -216,16 +298,16 @@ describe("what a Nudge leaves standing", () => {
     fireEvent.click(
       await drawn(container, `.${actions.conversationActions} > .${menu.trigger}`),
     );
-    const opened = await drawn(container, `.${actions.conversationActions} > .${menu.drop}`);
-    fireEvent.click(await drawn(opened, `.${actions.steer}`));
+    const dropped = await drawn(container, `.${actions.conversationActions} > .${menu.drop}`);
+    fireEvent.click(await drawn(dropped, `.${actions.steer}`));
     await drawn(document.body, `.${steerModal.steerConversation}`);
 
-    await drawn(document.body, "#steer-pairing option");
-    const options = nodes(document.body, "#steer-pairing option");
+    await drawn(document.body, "#steer-pairing");
+    const rows = nodes(opened("Run it under"), '[role="option"]');
 
     await nudged(client);
 
-    survived(options, nodes(document.body, "#steer-pairing option"));
+    survived(rows, nodes(opened("Run it under"), '[role="option"]'));
   });
 });
 
@@ -262,17 +344,15 @@ describe("what a picker shows and what it would send", () => {
     const standing = { profiles: PROFILES };
     theWorkbench(whenever("/api/ui/profiles", () => json(standing.profiles)()));
     const { client } = mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
-    const grilling = screen.getByLabelText("Grilling") as HTMLSelectElement;
-    expect(grilling.value).toBe(`${chosen.profile.id}:${chosen.model}`);
+    await waitFor(() => picker("Grilling"));
+    expect(showing("Grilling")).toBe("Claude Code Fable 5 — fable");
 
     standing.profiles = PROFILES.filter(
       (profile) => profile.id !== chosen.profile.id,
     );
     await nudged(client);
 
-    expect(grilling.value).toBe("");
-    expect(grilling.selectedOptions[0]!.textContent).toBe("Not chosen");
+    expect(showing("Grilling")).toBe("Not chosen");
   });
 
   /// And the same when the profile is still there but no longer lists the model
@@ -283,8 +363,7 @@ describe("what a picker shows and what it would send", () => {
     const standing = { profiles: PROFILES };
     theWorkbench(whenever("/api/ui/profiles", () => json(standing.profiles)()));
     const { client } = mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Grilling"));
-    const grilling = screen.getByLabelText("Grilling") as HTMLSelectElement;
+    await waitFor(() => picker("Grilling"));
 
     standing.profiles = PROFILES.map((profile) =>
       profile.id === chosen.profile.id
@@ -296,6 +375,6 @@ describe("what a picker shows and what it would send", () => {
     );
     await nudged(client);
 
-    expect(grilling.value).toBe("");
+    expect(showing("Grilling")).toBe("Not chosen");
   });
 });
