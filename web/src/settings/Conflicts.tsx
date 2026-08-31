@@ -164,6 +164,9 @@ export function ConflictsPane(props: {
             : "",
         },
         conflict_resolution,
+        // And whether Done shares the record to its pull request, which is the
+        // GitHub section's switch and none of this one's business.
+        share_on_done: settings?.share_on_done ?? false,
         // And the paths as the read left them: a list this section left out
         // would be a list it emptied — see [`heldPaths`].
         ...heldPaths(settings),

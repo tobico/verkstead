@@ -1,6 +1,7 @@
 //! What Verkstead has been told — the GitHub token, the git author, the shared
-//! Rust build cache and where the share viewer is hosted — as the viewer
-//! receives it, and what it sends to change any of them.
+//! Rust build cache and whether a Conversation is shared to its pull request
+//! when it settles to Done — as the viewer receives it, and what it sends to
+//! change any of them.
 //!
 //! The token goes one way only. What comes back about it is that there is one,
 //! its last four characters and when it was saved, and nothing here can be made
@@ -23,12 +24,11 @@
 //! fact about it travels one way only: whether the server found an sccache to
 //! compile through, which is its own environment and nobody's setting.
 //!
-//! The share viewer's URL is plainer still: one value, written and read back as
-//! itself. It is a public page the human hosts a copy of, and every link to a
-//! Published Share goes through it — so it is configuration in the ordinary
-//! sense, and the page shows it as it stands. An empty one is *no copy of their
-//! own* rather than no viewer: links are then composed through the copy
-//! Verkstead itself hosts, which is `HOSTED` in `crates/server/src/sharing.rs`.
+//! Sharing to the pull request is plainer still: one switch, written and read
+//! back as itself. It is the one setting here that is **off** with nothing
+//! configured — what it turns on writes to GitHub under the human's own
+//! account — so what comes back is where it sits rather than whether anybody
+//! has been to the page.
 //!
 //! And how a conflict is resolved is the plainest of the lot: one of two words,
 //! written and read back as itself. What travels with it is the warning the page
@@ -71,6 +71,14 @@ pub struct SettingsView {
     /// rather than whether anybody has been here. A Repo's own override is on
     /// the Repo — see [`crate::RepoView::conflict_resolution`].
     pub conflict_resolution: ConflictResolution,
+
+    /// And whether a Conversation's record is published and linked on its pull
+    /// request when the work settles to Done.
+    ///
+    /// Never null either, and false where nobody has said: this is the one
+    /// setting on the page whose unconfigured state is the off one, because
+    /// what it turns on writes to GitHub under the human's own account.
+    pub share_on_done: bool,
 
     /// And the Watched Paths and the Sandbox Configuration binds, from both of
     /// the places either of them is said.
@@ -268,6 +276,11 @@ pub struct SettingsEdit {
     /// nothing, as a value for the same reason: there are two answers and a save
     /// says which of them this is to be.
     pub conflict_resolution: ConflictResolution,
+
+    /// And whether Done shares the record to the pull request, as a value for
+    /// that reason too — a switch has two answers and a save says which of them
+    /// this is to be.
+    pub share_on_done: bool,
 
     /// The Watched Paths the settings own, as values again: what is sent is
     /// what `config.yaml` holds afterwards, so a row taken off the page is a

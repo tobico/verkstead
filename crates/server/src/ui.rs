@@ -3382,6 +3382,9 @@ async fn save_settings(
             // nothing, which is one of two words and never absent: there is no
             // third state for a page to send.
             crate::repos::stored(edit.conflict_resolution),
+            // And whether Done shares the record to the pull request, which is
+            // a switch: two answers, and the save says which of them this is.
+            edit.share_on_done,
             // And the paths as values too: what is sent is what the file holds
             // afterwards, so a row taken off the page is a row taken out of the
             // file. Only the settings' own — the installation's are the unit's
@@ -3500,6 +3503,11 @@ fn as_told(
         // Where the setting sits rather than whether anybody has been here:
         // nothing configured is a merge, and there is no third state to draw.
         conflict_resolution: crate::repos::resolution(config.conflict_resolution()),
+
+        // And where the switch beside it sits, which is off until somebody has
+        // been here — the one setting on the page whose unconfigured state is
+        // the off one.
+        share_on_done: config.share_on_done(),
 
         // Both sources at once, each entry saying which of the two said it and
         // whether the server can see it now — see [`crate::paths`]. Read from

@@ -10,10 +10,10 @@
 //! credentials — and the pair is mounted together only where a round trip is
 //! what is being asked about: what the form saved, said back on the card.
 //!
-//! So this suite is in three parts: what is readable on the card without
+//! So this suite is in four parts: what is readable on the card without
 //! opening anything — the token's state, the author, and the warnings about
-//! whichever is missing — what the form does in its pane, and what the page
-//! itself draws around the two.
+//! whichever is missing — what the form does in its pane, what the switch beside
+//! it does, and what the page itself draws around the two.
 //!
 //! `tests/fixtures/settings*.json` are golden fixtures like the profiles page's:
 //! `cargo test` calls the real endpoint and writes the files, so what these
@@ -421,6 +421,7 @@ describe("saving", () => {
           size: TOLD.rust_build_cache.size,
         },
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         ...PATHS,
       }),
     );
@@ -646,6 +647,7 @@ describe("replacing and clearing the token", () => {
         // with — see the sections below it for what does change these.
         rust_build_cache: TOLD.rust_build_cache,
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         paths: TOLD.paths,
       },
       verified: null,
@@ -665,6 +667,7 @@ describe("replacing and clearing the token", () => {
           size: TOLD.rust_build_cache.size,
         },
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         ...PATHS,
       }),
     );
@@ -676,6 +679,99 @@ describe("replacing and clearing the token", () => {
       container.querySelector(`.${styles.githubCard} .${styles.authorName}`)!
         .textContent,
     ).toBe(TOLD.git_author.name);
+  });
+});
+
+/// The switch beside the token: whether Done shares the record to the pull
+/// request.
+///
+/// It is on this page because what it turns on is done with the token above it,
+/// under the account that token belongs to. It saves itself, the way the build
+/// cache's switch does — and unlike the fields it stands among, which wait for
+/// Save.
+describe("sharing on Done", () => {
+  const theSwitch = (): HTMLInputElement =>
+    screen.getByRole("switch") as HTMLInputElement;
+
+  const answering = (standing: SettingsView): SettingsSaved => ({
+    settings: standing,
+    verified: null,
+  });
+
+  const sharing = (standing: SettingsView, on: boolean): SettingsView => ({
+    ...standing,
+    share_on_done: on,
+  });
+
+  /// Where it sits rather than whether anybody has been here: a Verkstead
+  /// nobody has told anything draws it off.
+  it("says where the setting stands", async () => {
+    theSettings(UNSET);
+    mountPane();
+
+    await waitFor(() => expect(theSwitch().checked).toBe(false));
+  });
+
+  it("saves the moment it is flipped, and leaves the credentials alone", async () => {
+    const fetching = theSettings(TOLD, json(answering(sharing(TOLD, false))));
+    mountPane();
+
+    await waitFor(() => expect(theSwitch().checked).toBe(true));
+    fireEvent.click(theSwitch());
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        // The author as the server holds it, and the token untouched: a flip is
+        // not a submit.
+        git_author: TOLD.git_author,
+        github_token: "Keep",
+        share_on_done: false,
+        // And everything else in the file as it stands, because one request
+        // writes the whole of it.
+        rust_build_cache: {
+          enabled: TOLD.rust_build_cache.enabled,
+          size: TOLD.rust_build_cache.size,
+        },
+        conflict_resolution: TOLD.conflict_resolution,
+        ...PATHS,
+      }),
+    );
+
+    // And it follows the answer rather than the press.
+    await waitFor(() => expect(theSwitch().checked).toBe(false));
+  });
+
+  /// A flip halfway through typing an address writes the switch and nothing
+  /// else — and leaves what was being typed where it was.
+  it("writes neither what was typed nor over it", async () => {
+    const fetching = theSettings(TOLD, json(answering(sharing(TOLD, false))));
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    fireEvent.input(screen.getByLabelText("Email"), {
+      target: { value: "ada@analytical." },
+    });
+    fireEvent.click(theSwitch());
+
+    await waitFor(() =>
+      expect(
+        (sent(fetching) as { git_author: { email: string } }).git_author.email,
+      ).toBe(TOLD.git_author.email),
+    );
+
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+      "ada@analytical.",
+    );
+  });
+
+  it("says so when the flip could not be saved", async () => {
+    theSettings(TOLD, json({ error: "gone" }, 500));
+    mountPane();
+
+    await waitFor(() => expect(theSwitch().checked).toBe(true));
+    fireEvent.click(theSwitch());
+
+    await waitFor(() => screen.getByText(/could not be saved/));
   });
 });
 

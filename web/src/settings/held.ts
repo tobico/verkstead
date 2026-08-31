@@ -2,9 +2,9 @@
 //! them.
 //!
 //! One request writes the whole of `config.yaml`, so every section's save sends
-//! every value in it — the author, the build cache, the share viewer and now the
-//! two lists of paths. A section that left a list out would be a section that
-//! emptied it: what is sent is what the file holds afterwards.
+//! every value in it — the author, the build cache, the share-on-Done switch and
+//! the two lists of paths. A section that left a list out would be a section
+//! that emptied it: what is sent is what the file holds afterwards.
 //!
 //! Only the settings' own go back. The installation's entries come back on every
 //! read labelled as the unit's word, they were never in this file, and sending

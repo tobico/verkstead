@@ -291,6 +291,7 @@ describe("changing the build cache", () => {
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         ...PATHS,
       }),
     );
@@ -331,6 +332,7 @@ describe("changing the build cache", () => {
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         ...PATHS,
       }),
     );

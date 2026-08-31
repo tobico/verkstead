@@ -75,6 +75,7 @@ const REST = {
     size: TOLD.rust_build_cache.size,
   },
   conflict_resolution: TOLD.conflict_resolution,
+  share_on_done: TOLD.share_on_done,
 };
 
 /// The same settings with the installation having said one of each as well,

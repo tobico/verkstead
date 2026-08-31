@@ -2866,6 +2866,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // nobody has chosen anything in.
             "conflict_resolution": "Rebase",
 
+            // And the switch on, for that reason again — this is the
+            // fixture of a Verkstead that has been told everything, and off is
+            // what `settings-unset.json` already carries.
+            "share_on_done": true,
+
             // And the paths this Verkstead was told about, which come back
             // labelled as the settings' own — the router behind this fixture was
             // started with none of its own, the way a standalone install is.

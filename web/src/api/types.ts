@@ -2450,6 +2450,12 @@ rust_build_cache: BuildCacheEdit,
  */
 conflict_resolution: ConflictResolution, 
 /**
+ * And whether Done shares the record to the pull request, as a value for
+ * that reason too — a switch has two answers and a save says which of them
+ * this is to be.
+ */
+share_on_done: boolean, 
+/**
  * The Watched Paths the settings own, as values again: what is sent is
  * what `config.yaml` holds afterwards, so a row taken off the page is a
  * row taken out of the file.
@@ -2515,6 +2521,15 @@ rust_build_cache: BuildCacheView,
  * the Repo — see [`crate::RepoView::conflict_resolution`].
  */
 conflict_resolution: ConflictResolution, 
+/**
+ * And whether a Conversation's record is published and linked on its pull
+ * request when the work settles to Done.
+ *
+ * Never null either, and false where nobody has said: this is the one
+ * setting on the page whose unconfigured state is the off one, because
+ * what it turns on writes to GitHub under the human's own account.
+ */
+share_on_done: boolean, 
 /**
  * And the Watched Paths and the Sandbox Configuration binds, from both of
  * the places either of them is said.

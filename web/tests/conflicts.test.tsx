@@ -160,6 +160,7 @@ describe("the pane", () => {
         watched_paths: [],
         sandbox_binds: [],
         conflict_resolution: "Rebase",
+        share_on_done: UNSET.share_on_done,
       }),
     );
   });

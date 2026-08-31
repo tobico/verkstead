@@ -48,5 +48,6 @@
     "enabled": true,
     "size": "50G",
     "size_configured": true
-  }
+  },
+  "share_on_done": true
 }

@@ -90,6 +90,7 @@ rust_build_cache:
   enabled: true
   size: 30G
 conflict_resolution: merge
+share_on_done: false
 sandbox_binds:
   - /var/cache/verkstead-node
   - verkstead=/var/cache/verkstead-cargo
@@ -123,12 +124,13 @@ $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
    "compiles_cached":true},"conflict_resolution":"Merge",
- "paths":{"watched":[],"binds":[]}}
+ "share_on_done":false,"paths":{"watched":[],"binds":[]}}
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
          "rust_build_cache":{"enabled":true,"size":""},
          "conflict_resolution":"Merge",
+         "share_on_done":false,
          "watched_paths":["/home/tobi/src"],
          "sandbox_binds":["/var/cache/verkstead-node"]}' \
     http://127.0.0.1:8422/api/ui/settings
@@ -137,6 +139,7 @@ $ curl -X POST -H 'Content-Type: application/json' \
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
     "compiles_cached":true},
   "conflict_resolution":"Merge",
+  "share_on_done":false,
   "paths":{"watched":[{"path":"/home/tobi/src","source":"Settings",
     "resolution":"Resolves"}],
    "binds":[{"path":"/var/cache/verkstead-node","repo":null,
@@ -184,6 +187,14 @@ on `main`; its address is `HOSTED` in `crates/server/src/sharing.rs`, and
 Nothing about that is secret: the page is public, the id after the `#` rides in
 the fragment and is never sent to the host that serves it, and the share itself
 is fetched from GitHub by the reader's own browser.
+
+`"share_on_done"` is whether a conversation's record is published and linked on
+its pull request when the work settles to Done, which is otherwise something the
+human presses for. It is the one setting here that is **off** with nothing
+configured — an absent key, an absent file and one nothing can parse all mean
+off — because what it turns on publishes a gist under the human's own account
+and comments on a pull request other people are reading. It is set from the
+GitHub and git author pane, beside the token it is published with.
 
 `"conflict_resolution"` is what a session sent at a pull request that will not
 merge is told to do about it: `"Merge"`, which merges the base branch into the

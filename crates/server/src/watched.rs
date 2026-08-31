@@ -459,6 +459,7 @@ mod tests {
                 crate::settings::GitAuthor::default(),
                 crate::settings::RustBuildCache::default(),
                 crate::store::ConflictResolution::Merge,
+                false,
                 vec![],
                 paths,
             ))

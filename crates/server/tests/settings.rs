@@ -1,9 +1,7 @@
 //! What Verkstead is told, over the viewer's namespace: reading the git author,
 //! the presence of a GitHub token, how the shared Rust build cache is set,
-//! where the human hosts a share viewer of their own and what paths it has been
-//! given, and writing any of them. The viewer page itself is handed over from
-//! here as well, that being the other half of the setting recording where it
-//! went.
+//! whether Done shares the record to the pull request and what paths it has
+//! been given, and writing any of them.
 //!
 //! The paths are the one thing here said in two places at once — the
 //! installation's flags and the file this page writes — so what those tests ask
@@ -96,6 +94,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -113,6 +112,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "github_token": { "Set": { "token": token } },
             "rust_build_cache": { "enabled": true, "size": "" },
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -128,6 +128,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "github_token": "Clear",
             "rust_build_cache": { "enabled": true, "size": "" },
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -242,6 +243,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
             "rust_build_cache": { "enabled": true, "size": "" },
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -466,6 +468,7 @@ async fn a_save_carrying_the_paths_as_they_stand_leaves_them() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": ["/home/ada/src"],
             "sandbox_binds": ["/var/cache/verkstead-node"],
         }),
@@ -537,6 +540,7 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": false, "size": "5G" },
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -588,6 +592,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "conflict_resolution": "Rebase",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -621,6 +626,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -631,6 +637,117 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
         settings(&app).await.conflict_resolution,
         ConflictResolution::Merge
     );
+}
+
+/// Whether Done shares the record to the pull request where nobody has said:
+/// off, which is the other way about from the two settings above it.
+///
+/// The point of that shape: what this switch turns on publishes a gist under
+/// the human's own account and comments on a pull request other people read, so
+/// a Verkstead nobody has been to the settings page of does neither.
+#[tokio::test]
+async fn sharing_on_done_nobody_has_configured_is_off() {
+    let (_dir, app) = app().await;
+
+    assert!(!settings(&app).await.share_on_done);
+}
+
+/// And what a save of it says: the switch goes into the file the wrap-up reads,
+/// and comes back off it — including from a router started afresh on the same
+/// directory, which is what a restart is.
+#[tokio::test]
+async fn sharing_on_done_goes_in_and_comes_back() {
+    let (dir, app) = app().await;
+
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "conflict_resolution": "Merge",
+            "share_on_done": true,
+            "watched_paths": [],
+            "sandbox_binds": [],
+        }),
+    )
+    .await;
+
+    assert!(saved.settings.share_on_done);
+
+    // In the file rather than only in the answer, and in the words a human
+    // hand-editing it would write.
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(
+        written.contains("share_on_done: true"),
+        "the switch is in config.yaml: {written}"
+    );
+
+    assert!(settings(&app).await.share_on_done);
+
+    // And to a server that has just come up on the same Data Directory, which
+    // is the whole of what surviving a restart means here.
+    let restarted = restarted(dir.path()).await;
+    assert!(settings(&restarted).await.share_on_done);
+}
+
+/// A save from another section carries the switch as it stands, and that is
+/// what leaves it alone — the same contract the paths above are saved under,
+/// because one request writes the whole of `config.yaml`.
+#[tokio::test]
+async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
+    let (_dir, app) = app().await;
+
+    save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "conflict_resolution": "Merge",
+            "share_on_done": true,
+            "watched_paths": [],
+            "sandbox_binds": [],
+        }),
+    )
+    .await;
+
+    // The build cache section's own save, which is about the size and carries
+    // everything else as the page read it.
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "5G" },
+            "conflict_resolution": "Merge",
+            "share_on_done": true,
+            "watched_paths": [],
+            "sandbox_binds": [],
+        }),
+    )
+    .await;
+
+    assert_eq!(saved.settings.rust_build_cache.size, "5G");
+    assert!(saved.settings.share_on_done, "the switch stands");
+}
+
+/// A second server on the same Data Directory, which is what a restart looks
+/// like from here: the files are the whole of what is kept, so a router built
+/// afresh over them is the next boot reading them.
+async fn restarted(data_dir: &Path) -> Router {
+    let pool = open_database(&data_dir.join("verkstead.db")).await.unwrap();
+
+    router_asking_github(
+        pool,
+        data_dir.to_owned(),
+        Gh::running(vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            SAYS_ITS_TOKEN.to_owned(),
+            "gh".to_owned(),
+        ]),
+    )
 }
 
 /// Clearing the size field is asking for the default back rather than asking
@@ -646,6 +763,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "5G" },
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -659,6 +777,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "  " },
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": [],
             "sandbox_binds": [],
         }),
@@ -710,6 +829,7 @@ async fn save_paths(app: &Router, watched: &[&str], binds: &[&str]) -> SettingsS
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
             "conflict_resolution": "Merge",
+            "share_on_done": false,
             "watched_paths": watched,
             "sandbox_binds": binds,
         }),

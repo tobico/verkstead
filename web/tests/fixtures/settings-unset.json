@@ -14,5 +14,6 @@
     "enabled": true,
     "size": "30G",
     "size_configured": false
-  }
+  },
+  "share_on_done": false
 }
