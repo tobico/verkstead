@@ -107,7 +107,7 @@
 .pinned {
   display: flex;
   flex-direction: column;
-  padding: 0.75rem 0;
+  padding: 0 0 1rem;
 }
 
 /* The carousel, which is what more than one pinned card is: they are held above

@@ -25,7 +25,8 @@
   align-items: center;
   gap: 0.75rem;
   width: 100%;
-  margin-top: 0.75rem;
+  margin-top: 0.25rem;
+  margin-bottom: 1rem;
   padding: 0.6rem 0.85rem;
   color: inherit;
   text-align: start;
