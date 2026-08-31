@@ -41,6 +41,12 @@
 //! complete record on its own and a session with no Transcript has always been
 //! an ordinary thing here (ADR 0006). So it is the deliberate failure mode:
 //! this stops reading, says so in the log, and the session runs on untouched.
+//!
+//! **But not on the first refusal.** A store opencode has made and not yet
+//! written its schema into refuses in the very words one whose shape has moved
+//! does, and that store is a session's own a moment before it fills up — so
+//! what is read as the shape is a store going on saying the same thing across
+//! several polls, and one poll saying it is the moment. See [`GIVING_UP`].
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -81,6 +87,11 @@ pub(crate) struct Reader {
     /// The highest sequence number already taken, which is the cursor.
     taken: i64,
 
+    /// How many polls running have found the store refusing the questions this
+    /// build asks of it — see [`GIVING_UP`], which is what it takes for that to
+    /// be the store's shape rather than the moment it was asked in.
+    refused: u32,
+
     /// Whether this store turned out to be a shape this build cannot read, in
     /// which case nothing is asked of it again and the Capture is the whole
     /// record.
@@ -94,6 +105,25 @@ pub(crate) struct Reader {
 /// than a session nothing has been read from.
 const NOTHING_TAKEN: i64 = -1;
 
+/// How many polls running have to be refused before the store is given up on.
+///
+/// **Because a store with nothing in it yet refuses exactly as one whose shape
+/// has moved does.** SQLite answers a question about a table that is not there
+/// under the same generic code as one about a table that was renamed — see
+/// [`unknown_shape`] — and a database file exists from the moment opencode
+/// opens it, which is a little before the schema inside it is committed. A
+/// reader that gave up on the first refusal would land in that window on the
+/// first session under a fresh Profile and leave it Capture-only for the whole
+/// of its life, over a condition that was over in milliseconds.
+///
+/// So that window is waited out, and the polls behind it are what say this is
+/// the store rather than the moment: they are half a second apart, so this is a
+/// couple of seconds of a store going on saying the same thing. A shape that
+/// really has moved says it on every poll there will ever be, and is given up
+/// on two seconds later than it would have been — which costs a session nothing
+/// at all, the records those polls would have taken not being there to take.
+const GIVING_UP: u32 = 5;
+
 impl Reader {
     /// Read the session that opened in `worktree` at or after `launched`, out
     /// of the store at `database`.
@@ -105,6 +135,7 @@ impl Reader {
             reading: None,
             session: None,
             taken: NOTHING_TAKEN,
+            refused: 0,
             unreadable: false,
         }
     }
@@ -122,8 +153,33 @@ impl Reader {
         }
 
         match self.arrived().await {
-            Ok(arrived) => arrived,
+            Ok(arrived) => {
+                // Anything but a refusal is the store answering the questions
+                // this build asks of it, so the polls that were refused before
+                // it were the moment rather than the shape — see [`GIVING_UP`].
+                self.refused = 0;
+
+                arrived
+            }
             Err(error) if unknown_shape(&error) => {
+                self.refused += 1;
+
+                if self.refused < GIVING_UP {
+                    // A store opencode has made and not yet put its schema into
+                    // refuses exactly as one whose shape has moved does, and
+                    // that one is over in milliseconds — so what says which
+                    // this is is whether it goes on saying it.
+                    tracing::debug!(
+                        error = ?error,
+                        database = %self.database.display(),
+                        refused = self.refused,
+                        "an OpenCode session's store refused the questions this build asks \
+                         of it, which is not yet its shape",
+                    );
+
+                    return Vec::new();
+                }
+
                 self.unreadable = true;
 
                 tracing::warn!(
@@ -744,9 +800,76 @@ mod tests {
             "a store whose shape this build does not know hands back no records",
         );
         assert!(
+            !reader.unreadable,
+            "and one poll saying so is not the shape yet — see [`GIVING_UP`], and \
+             the test below this one for what that poll is otherwise",
+        );
+
+        for _ in 1..GIVING_UP {
+            assert!(reader.take().await.is_empty());
+        }
+
+        assert!(
             reader.unreadable,
-            "and is not asked again, the Capture being the session's whole record \
-             from here",
+            "but a store going on saying it is, and is not asked again — the \
+             Capture being the session's whole record from here",
+        );
+    }
+
+    /// And the reason it takes more than one: the store opencode has just made
+    /// and not yet put its schema into refuses in the very words the store above
+    /// does.
+    ///
+    /// That is every session's own store for the moment between opencode opening
+    /// the file and committing what goes in it, and a reader that gave up there
+    /// would leave the first session under a fresh Profile Capture-only for the
+    /// whole of its life over a condition that was over in milliseconds.
+    #[tokio::test]
+    async fn a_store_with_nothing_in_it_yet_is_not_a_store_of_a_shape_nobody_knows() {
+        let account = tempfile::tempdir().unwrap();
+        let database = account.path().join("opencode.db");
+
+        // The file as opencode leaves it in the instant after opening it: there,
+        // readable, and holding none of the tables that are about to go in.
+        SqlitePool::connect_with(
+            SqliteConnectOptions::new()
+                .filename(&database)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+
+        let (launched, now) = launched();
+        let worktree = PathBuf::from("/srv/worktrees/rate-limiting");
+
+        let mut reader = Reader::of(database.clone(), worktree.clone(), launched);
+
+        assert!(
+            reader.take().await.is_empty(),
+            "there is nothing in it to read",
+        );
+        assert!(
+            !reader.unreadable,
+            "and a store the schema has not landed in yet is not one this build \
+             cannot read",
+        );
+
+        let writing = store(&database).await;
+        opened(&writing, "ses_own", &worktree, now).await;
+        wrote(
+            &writing,
+            "ses_own",
+            0,
+            "session.created.1",
+            r#"{"of":"own"}"#,
+        )
+        .await;
+
+        assert_eq!(
+            reader.take().await,
+            vec![r#"{"kind":"session.created.1","seq":0,"record":{"of":"own"}}"#.to_owned()],
+            "so the poll after the schema landed reads the session, as it would \
+             have if this one had never looked early",
         );
     }
 
