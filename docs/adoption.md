@@ -73,15 +73,6 @@ each is a boundary rather than a convenience:
   than being skipped. A bare path goes to every session; `name=path` goes only
   to sessions working in the Repo registered under that name.
 
-The **Data Directory** is not one of the three and is not a choice on this
-module: the unit keeps it in its own state directory, `/var/lib/verkstead`, and
-passes it as `--data-dir`. Started without that flag — the same package run by
-hand — Verkstead keeps it in the platform's own place instead:
-`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
-on macOS, `%APPDATA%\Verkstead` on Windows. One directory either way, holding
-the database, the Worktrees, the Skills, the handoff directories and both
-settings files.
-
 The workbench says both lists as well, on the settings page's **Paths** section
 and on each Repo's own pane, and what a session gets is the union of the two.
 Those entries are saved into `config.yaml` in the data directory, read afresh
@@ -105,6 +96,15 @@ Sandboxes get one, and how
 large its compiled half may grow, are in the workbench settings; it is on with
 nothing configured. `systemctl clean --what=cache verkstead` empties it, and
 nothing but build output is in it.
+
+The **Data Directory** is not one of the three either, and not a choice on this
+module: the unit keeps it in its own state directory, `/var/lib/verkstead`, and
+passes it as `--data-dir`. Started without that flag — the same package run by
+hand — Verkstead keeps it in the platform's own place instead:
+`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
+on macOS, `%APPDATA%\Verkstead` on Windows. One directory either way, holding
+the database, the Worktrees, the Skills, the handoff directories and both
+settings files.
 
 The server binds loopback and speaks plain HTTP. Answering from a phone needs
 HTTPS, which is `tailscale serve --bg 8422` in front of it — and push
