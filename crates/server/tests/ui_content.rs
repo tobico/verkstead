@@ -1736,6 +1736,29 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-m", "docs: the roadmaps as they stand"]);
 
+    // And a fourth on a branch of its own that the default branch has not
+    // swallowed, which is the ordinary shape of a roadmap staged in Verkstead
+    // and not merged yet: invisible at the default tip, and the effort most
+    // likely to be the one somebody wants carried on. Its row names the branch,
+    // because that is the base adopting it fixes the Conversation to.
+    git(&repo, &["checkout", "-q", "-b", "tobi/steer"]);
+
+    let steer = repo.join("docs/roadmaps/steer");
+    std::fs::create_dir_all(&steer).unwrap();
+    std::fs::write(
+        steer.join("ROADMAP.md"),
+        "# Steer roadmap\n\n\
+         Taking a run somewhere else, mid-flight.\n\n\
+         ## Stages\n\n\
+         - [ ] 01: One stop and steer — [brief](01-stop-and-steer.md)\n",
+    )
+    .unwrap();
+    std::fs::write(steer.join("01-stop-and-steer.md"), "# a stage brief\n").unwrap();
+
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-m", "docs: stage the steer roadmap"]);
+    git(&repo, &["checkout", "-q", "main"]);
+
     let registered = store::register_repo(&pool, &repo, "verkstead", "main")
         .await
         .unwrap()

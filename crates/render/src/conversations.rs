@@ -193,6 +193,20 @@ pub struct AbandonedRoadmap {
 
     /// And what that stage is called.
     pub stage_title: String,
+
+    /// The branch this reading came off, or empty where it came off the default
+    /// branch.
+    ///
+    /// A roadmap is a document on a branch, and one staged on a branch that has
+    /// not merged yet is only there. So the branch travels with the reading and
+    /// becomes the new Conversation's base: adopting reads the roadmap again at
+    /// whatever base it is fixed to, and a stage found here and looked for
+    /// somewhere else is a stage that is not there.
+    ///
+    /// Empty for the default branch, which is the base a Conversation takes
+    /// when nobody fixes one — nothing to override, and nothing for the row to
+    /// say about where it was found.
+    pub base: String,
 }
 
 /// What a Conversation is adopting, as its own page draws it: the roadmap it
@@ -2369,6 +2383,15 @@ pub struct NewConversation {
 pub struct NewAdoption {
     pub repo_id: i64,
     pub roadmap: String,
+
+    /// The branch the roadmap was found on, where it was found on one — the
+    /// [`AbandonedRoadmap::base`] of the row that was clicked, carried back so
+    /// the Conversation starts fixed to it.
+    ///
+    /// Absent where the row came off the default branch, which is what a
+    /// Conversation with no base fixed already reads.
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 /// The order the human has just dragged the sidebar into: every Conversation

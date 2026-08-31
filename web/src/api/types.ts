@@ -53,7 +53,22 @@ stage: string,
 /**
  * And what that stage is called.
  */
-stage_title: string, };
+stage_title: string, 
+/**
+ * The branch this reading came off, or empty where it came off the default
+ * branch.
+ *
+ * A roadmap is a document on a branch, and one staged on a branch that has
+ * not merged yet is only there. So the branch travels with the reading and
+ * becomes the new Conversation's base: adopting reads the roadmap again at
+ * whatever base it is fixed to, and a stage found here and looked for
+ * somewhere else is a stage that is not there.
+ *
+ * Empty for the default branch, which is the base a Conversation takes
+ * when nobody fixes one — nothing to override, and nothing for the row to
+ * say about where it was found.
+ */
+base: string, };
 
 /**
  * What became of pressing Adopt.
@@ -1488,7 +1503,16 @@ at: string, state: Lifecycle, };
  * roadmap's own answer at whatever commit the Conversation ends up branching
  * from.
  */
-export type NewAdoption = { repo_id: number, roadmap: string, };
+export type NewAdoption = { repo_id: number, roadmap: string, 
+/**
+ * The branch the roadmap was found on, where it was found on one — the
+ * [`AbandonedRoadmap::base`] of the row that was clicked, carried back so
+ * the Conversation starts fixed to it.
+ *
+ * Absent where the row came off the default branch, which is what a
+ * Conversation with no base fixed already reads.
+ */
+base: string | null, };
 
 /**
  * Which registered Repo to work alongside.

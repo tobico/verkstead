@@ -73,20 +73,51 @@ pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
 /// where the page is drawn and asked again when Adopt is pressed: a roadmap
 /// somebody finished between the notice and the click is a thing to say on the
 /// page rather than a start to refuse.
+///
+/// `base` is the branch the notice found the roadmap on, and it is fixed on the
+/// Conversation here rather than left to the human: a roadmap staged on an
+/// unmerged branch exists nowhere else, so a Conversation started against the
+/// default branch would draw *nothing to adopt at this base commit* about the
+/// very roadmap that was just clicked. `None` is the default branch, which is
+/// what a Conversation with no base fixed already reads.
 pub(crate) async fn start_adopting(
     state: &AppState,
     repo_id: i64,
     roadmap: &str,
+    base: Option<&str>,
 ) -> Result<Started> {
     Ok(
         match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap).await? {
             Some(id) => {
+                if let Some(base) = base {
+                    fix(state, id, base).await;
+                }
+
                 prefill(state, id, repo_id).await;
                 Started::Started { id }
             }
             None => Started::NoSuchRepo,
         },
     )
+}
+
+/// Fix a new adopting Conversation's base to the branch its roadmap was found
+/// on.
+///
+/// Nothing refuses the start over this, for [`prefill`]'s reason: the
+/// Conversation exists by the time this runs. What a base that failed to write
+/// costs is a page saying there is nothing to adopt at the base it does have,
+/// with the picker that fixes it sitting on the same page — so it is logged and
+/// the human is left somewhere they can get themselves out of.
+async fn fix(state: &AppState, id: i64, base: &str) {
+    if let Err(error) = store::set_base_commit(&state.pool, id, Some(base)).await {
+        tracing::warn!(
+            error = ?error,
+            conversation_id = id,
+            base,
+            "fixing an adopting Conversation to the branch its roadmap was found on failed",
+        );
+    }
 }
 
 /// Fill a new Conversation's two pickers with what its Repo was last grilled

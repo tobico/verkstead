@@ -746,8 +746,15 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
   }));
 
   const adopt = useMutation(() => ({
-    mutationFn: ({ repoId, roadmap }: { repoId: number; roadmap: string }) =>
-      startAdoption(repoId, roadmap),
+    mutationFn: ({
+      repoId,
+      roadmap,
+      base,
+    }: {
+      repoId: number;
+      roadmap: string;
+      base: string;
+    }) => startAdoption(repoId, roadmap, base),
     onSuccess: (outcome: Started) => {
       if (typeof outcome === "string") {
         // `NoSuchRepo`, against a row read a moment ago: the Repo was there and
@@ -831,6 +838,7 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
                       adopt.mutate({
                         repoId: held.repoId,
                         roadmap: held.roadmap.name,
+                        base: held.roadmap.base,
                       })
                     }
                   >
@@ -842,6 +850,17 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
                       next is stage {held.roadmap.stage}:{" "}
                       {held.roadmap.stage_title}
                     </span>
+                    {/* Where the roadmap was found, said only when it is
+                        somewhere other than the default branch: a roadmap on an
+                        unmerged branch is adopted from that branch, and which
+                        branch it is decides what the stage is built on. */}
+                    <Show when={held.roadmap.base}>
+                      {(base) => (
+                        <span class={styles.base}>
+                          on <code>{base()}</code>
+                        </span>
+                      )}
+                    </Show>
                   </button>
                 )}
               </For>
