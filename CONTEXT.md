@@ -149,7 +149,9 @@ that a Verkstead launched from an icon finds what one launched from a shell
 left. A run out of a checkout asks for the old behaviour by name, with
 `--data-dir .`. Everything in it is named by Verkstead rather than by whoever
 started it. Not a Watched Path and not the same kind of thing: a Watched Path
-bounds what the human may point Verkstead at, and this is Verkstead's own.
+bounds what the human may point Verkstead at, and this is Verkstead's own. The
+**Build Cache** and the **Log Directory** are Verkstead's own too, and neither
+of them is in here.
 _Avoid_: state directory, work dir, scratch space, cache
 
 **Sandbox**:
@@ -221,6 +223,24 @@ and the Build Cache, and nothing else Verkstead keeps: `rustc` runs proc macros
 while it compiles, so the database and the settings files stay outside its
 reach.
 _Avoid_: daemon, sccache daemon, build server, compiler service
+
+**Log Directory**:
+The other directory of Verkstead's own outside the Data Directory: where the
+desktop app writes the server's log file, because the stdout of a tray app
+launched from an icon goes nowhere and a file has to have somewhere to be.
+Where it is is the platform's and nothing says otherwise —
+`~/.local/state/verkstead` on Linux (`$XDG_STATE_HOME` where that is set to an
+absolute path), `~/Library/Logs/Verkstead` on macOS, `%LOCALAPPDATA%\Verkstead`
+on Windows, the local rather than the roaming application data because a log
+file follows nobody between machines. The three platforms disagree about what
+such a directory even *is*, which is why it is named here for what it is **for**
+rather than for what any one of them calls it. **It stands empty and uncreated
+until there is a desktop binary to write in it**: the server itself keeps
+logging to stdout wherever it was started from, and the binary that opens the
+file is the one that makes the directory, as the Build Cache makes its own where
+it uses it. Not the Data Directory and not settable beside it: what `--data-dir`
+says has nothing to do with where this is.
+_Avoid_: state directory, logs dir, log file (that's what goes *in* it), cache
 
 **Companion Repo**:
 Another registered Repo a Conversation is given to work alongside its own,

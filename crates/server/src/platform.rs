@@ -2,12 +2,19 @@
 //! platform's own place for it, resolved by hand out of the environment values
 //! that platform keeps the answer in.
 //!
-//! One directory is resolved here so far — the **Data Directory**, which is
+//! Two directories are resolved here. The **Data Directory** is
 //! `~/.local/share/verkstead` on Linux, `~/Library/Application
 //! Support/Verkstead` on macOS and `%APPDATA%\Verkstead` on Windows unless
 //! `--data-dir` says otherwise. Everything it holds moves with it, because it
 //! is one directory and the only thing that varies is where it is when nobody
 //! has said.
+//!
+//! The **Log Directory** is the other one, and nothing says where it goes:
+//! `~/.local/state/verkstead` on Linux, `~/Library/Logs/Verkstead` on macOS,
+//! `%LOCALAPPDATA%\Verkstead` on Windows. The three platforms disagree about
+//! what such a directory even *is* — state on Linux, logs on macOS, the local
+//! rather than the roaming application data on Windows — so it is one helper
+//! with three arms rather than one notion spelled three ways.
 //!
 //! **By hand rather than by crate.** `dirs` would answer Linux and macOS out of
 //! the same environment variables this does, and then answer Windows through a
@@ -78,8 +85,17 @@ pub struct Environment {
     pub home: Option<PathBuf>,
 
     /// `%APPDATA%`, the roaming application data directory, which only the
-    /// Windows arm looks at.
+    /// Windows arm looks at, and only for the Data Directory.
     pub appdata: Option<PathBuf>,
+
+    /// `$XDG_STATE_HOME`, which only the Linux arm looks at, and only for the
+    /// Log Directory.
+    pub xdg_state_home: Option<PathBuf>,
+
+    /// `%LOCALAPPDATA%`, the application data that stays on the machine rather
+    /// than following a roaming profile around — where a log file belongs, and
+    /// the only thing the Windows arm reads for the Log Directory.
+    pub local_appdata: Option<PathBuf>,
 }
 
 impl Environment {
@@ -90,6 +106,8 @@ impl Environment {
             xdg_data_home: std::env::var_os("XDG_DATA_HOME").map(PathBuf::from),
             home: std::env::var_os("HOME").map(PathBuf::from),
             appdata: std::env::var_os("APPDATA").map(PathBuf::from),
+            xdg_state_home: std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+            local_appdata: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
         }
     }
 }
@@ -126,6 +144,45 @@ pub fn default_data_dir(platform: Platform, env: &Environment) -> Option<PathBuf
             .join("Library/Application Support")
             .join(CAPITALISED),
         Platform::Windows => set(env.appdata.as_deref())?.join(CAPITALISED),
+    };
+
+    Some(dir)
+}
+
+/// The Log Directory this machine gives Verkstead, or `None` where it names
+/// nowhere to put one.
+///
+/// The read of the process environment for the second of the two directories,
+/// and the whole of what a binary outside this crate calls. **Nothing here
+/// writes to it and nothing creates it**: the answer is where a log file would
+/// go, and the binary that opens one is the binary that makes the directory,
+/// exactly as the Build Cache makes its own where it uses it. The server keeps
+/// logging to stdout whatever this says, so nowhere to resolve to answers
+/// nothing rather than refusing anything — what a desktop binary with no home
+/// should do is a decision for the stage that has a dialog to put it in.
+pub fn log_dir() -> Option<PathBuf> {
+    default_log_dir(Platform::HERE, &Environment::of_the_process())
+}
+
+/// Where the Log Directory goes on `platform`, out of `env`, or `None` where
+/// that environment names nowhere to put one.
+///
+/// The three platforms disagree about what this directory *is* — a state
+/// directory on Linux, a logs directory on macOS, the local rather than the
+/// roaming application data on Windows — so what they share is the use a log
+/// file makes of it rather than a notion each of them spells its own way.
+pub fn default_log_dir(platform: Platform, env: &Environment) -> Option<PathBuf> {
+    let dir = match platform {
+        Platform::Linux => xdg(
+            env.xdg_state_home.as_deref(),
+            env.home.as_deref(),
+            ".local/state",
+        )?
+        .join(LOWERCASE),
+        Platform::MacOs => absolute(env.home.as_deref())?
+            .join("Library/Logs")
+            .join(CAPITALISED),
+        Platform::Windows => set(env.local_appdata.as_deref())?.join(CAPITALISED),
     };
 
     Some(dir)
@@ -333,6 +390,157 @@ mod tests {
             PathBuf::from("."),
             "a developer running out of a checkout asks for the working \
              directory, and gets it",
+        );
+    }
+
+    #[test]
+    fn linux_logs_under_the_xdg_state_directory() {
+        assert_eq!(
+            default_log_dir(Platform::Linux, &with_home("/home/you")),
+            Some(PathBuf::from("/home/you/.local/state/verkstead")),
+        );
+    }
+
+    #[test]
+    fn linux_honours_an_absolute_xdg_state_home() {
+        let env = Environment {
+            xdg_state_home: Some(PathBuf::from("/var/lib/state")),
+            ..with_home("/home/you")
+        };
+
+        assert_eq!(
+            default_log_dir(Platform::Linux, &env),
+            Some(PathBuf::from("/var/lib/state/verkstead")),
+            "the state variable gets the reading the data one gets, because it \
+             is the same specification saying it",
+        );
+    }
+
+    #[test]
+    fn linux_ignores_a_relative_xdg_state_home() {
+        let env = Environment {
+            xdg_state_home: Some(PathBuf::from("state")),
+            ..with_home("/home/you")
+        };
+
+        assert_eq!(
+            default_log_dir(Platform::Linux, &env),
+            Some(PathBuf::from("/home/you/.local/state/verkstead")),
+            "a relative value would put the log file wherever the app was \
+             launched from, which is the thing being fixed",
+        );
+    }
+
+    #[test]
+    fn linux_does_not_log_in_the_data_directory() {
+        let env = Environment {
+            xdg_data_home: Some(PathBuf::from("/var/lib/data")),
+            ..with_home("/home/you")
+        };
+
+        assert_eq!(
+            default_log_dir(Platform::Linux, &env),
+            Some(PathBuf::from("/home/you/.local/state/verkstead")),
+            "the data variable says nothing about where the state directory is",
+        );
+    }
+
+    #[test]
+    fn macos_logs_in_the_library_logs_directory() {
+        assert_eq!(
+            default_log_dir(Platform::MacOs, &with_home("/Users/you")),
+            Some(PathBuf::from("/Users/you/Library/Logs/Verkstead")),
+            "a Mac keeps logs of its own somewhere Console.app already looks",
+        );
+    }
+
+    #[test]
+    fn macos_reads_no_xdg_variable_for_it_either() {
+        let env = Environment {
+            xdg_state_home: Some(PathBuf::from("/var/lib/state")),
+            ..with_home("/Users/you")
+        };
+
+        assert_eq!(
+            default_log_dir(Platform::MacOs, &env),
+            Some(PathBuf::from("/Users/you/Library/Logs/Verkstead")),
+        );
+    }
+
+    #[test]
+    fn windows_logs_in_the_local_application_data() {
+        let env = Environment {
+            local_appdata: Some(PathBuf::from(r"C:\Users\you\AppData\Local")),
+            ..Environment::default()
+        };
+
+        assert_eq!(
+            default_log_dir(Platform::Windows, &env),
+            Some(PathBuf::from(r"C:\Users\you\AppData\Local").join("Verkstead")),
+        );
+    }
+
+    #[test]
+    fn windows_does_not_log_in_the_roaming_application_data() {
+        let env = Environment {
+            appdata: Some(PathBuf::from(r"C:\Users\you\AppData\Roaming")),
+            ..Environment::default()
+        };
+
+        assert_eq!(
+            default_log_dir(Platform::Windows, &env),
+            None,
+            "a log file follows nobody between machines, so the roaming \
+             directory is not an answer to this question",
+        );
+    }
+
+    #[test]
+    fn nowhere_to_log_is_nowhere_on_every_platform() {
+        for platform in [Platform::Linux, Platform::MacOs, Platform::Windows] {
+            assert_eq!(
+                default_log_dir(platform, &Environment::default()),
+                None,
+                "{platform:?} with an empty environment has nowhere to log to, \
+                 and answering nothing is the whole of what that costs",
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_or_relative_value_is_no_log_directory_at_all() {
+        for (platform, env) in [
+            (Platform::Linux, with_home("")),
+            (Platform::Linux, with_home("home/you")),
+            (Platform::MacOs, with_home("")),
+            (
+                Platform::Windows,
+                Environment {
+                    local_appdata: Some(PathBuf::new()),
+                    ..Environment::default()
+                },
+            ),
+        ] {
+            assert_eq!(
+                default_log_dir(platform, &env),
+                None,
+                "{platform:?} should ignore {env:?} rather than resolve against \
+                 the working directory",
+            );
+        }
+    }
+
+    #[test]
+    fn resolving_a_log_directory_makes_none() {
+        let home = std::env::temp_dir().join("verkstead-log-dir-resolution");
+        let dir = default_log_dir(Platform::Linux, &with_home(&home.to_string_lossy()))
+            .expect("a home is enough to resolve against");
+
+        assert!(
+            !dir.exists(),
+            "resolving says where the directory would go and nothing else — the \
+             binary that opens a log file is the one that makes {}",
+            dir.display(),
         );
     }
 }
