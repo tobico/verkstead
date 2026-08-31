@@ -140,9 +140,10 @@ pub(crate) fn waited_on() -> String {
 pub struct Stopped {
     pub decision: Decision,
 
-    /// The Notice saying what stopped, why, and what the evidence was. Where
-    /// the *blocked on you* badge points, a badge with nowhere to go being no
-    /// use to anybody.
+    /// The Notice saying what stopped, why, and what the evidence was. What the
+    /// record marks as the one the run stopped at: the status button at the head
+    /// of a Timeline says that a Conversation has stopped, and this is where the
+    /// reason is read.
     pub notice: i64,
 
     /// When it stopped, RFC 3339.
@@ -152,7 +153,8 @@ pub struct Stopped {
     /// anything at all — and `None` on every stop that is not a usage window's,
     /// which is nearly all of them.
     ///
-    /// Words beside the Resume button rather than a moment anything acts on:
+    /// Words on the status button's second line rather than a moment anything
+    /// acts on:
     /// what a stopped run waits for is a press. Kept as text for the reason the
     /// line that said it is kept — the wording is the backend's and will move,
     /// and somebody reading a stop a week later is reading what the session

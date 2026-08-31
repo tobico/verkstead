@@ -27,10 +27,15 @@
 //! that row rather than being refused as registered already: the path is still
 //! unique and the Repo is still the same Repo, so a second registration of it
 //! is the human asking for it back.
+//!
+//! One more fact about a Repo lives beside the registration in the same shape:
+//! how a merge conflict on its pull requests is resolved, where the human has
+//! overridden what `config.yaml` says for every Repo at once. A row is an
+//! override and no row is the global answer — see [`ConflictResolution`].
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use sqlx::SqlitePool;
 
 /// A Repo as the store holds it.
@@ -82,6 +87,24 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the unregistered_repos table")?;
+
+    // And how each of them resolves a merge conflict, where the human has said
+    // something other than what the settings file says for every Repo at once.
+    //
+    // A table of its own beside the registrations for the reason the flag above
+    // is one: `repos` is STRICT and there is no migration machinery here to add
+    // a column with. A row is an override and no row is the global answer, so
+    // there is nothing here to mean *unset* and nothing to write for a Repo
+    // nobody has been to.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS repo_resolutions (
+             repo_id  INTEGER PRIMARY KEY REFERENCES repos(id),
+             strategy TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the repo resolutions table")?;
 
     Ok(())
 }
@@ -310,4 +333,141 @@ pub async fn registered_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>>
 pub(crate) fn text(path: &Path) -> Result<&str> {
     path.to_str()
         .ok_or_else(|| anyhow!("the path {} is not valid UTF-8", path.display()))
+}
+
+/// Where every Repo on record is, taken away or not.
+///
+/// Not [`registered_repos`], which is the read everything *offering* Repos for
+/// new work goes through — and a Repo the human took away is not on offer. This
+/// is the other question, asked by the sweep of orphaned worktrees: where might
+/// git still be holding a registration for a directory that has gone? An
+/// unregistering leaves the repository exactly where it was, so its
+/// registrations go stale like anybody else's, and skipping it would leave one
+/// nothing ever prunes — git refusing to check that branch out anywhere later,
+/// and the same path registering again bringing the same Repo back to be
+/// refused in.
+///
+/// The paths alone, because pruning is all that is done with them and a name is
+/// nothing git is asked.
+pub async fn recorded_repos(pool: &SqlitePool) -> Result<Vec<PathBuf>> {
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT path FROM repos ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .context("listing where every Repo on record is")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(path,)| PathBuf::from(path))
+        .collect())
+}
+
+/// How a merge conflict on a Repo's pull request is to be resolved.
+///
+/// Two ways of putting the base branch's work on a branch that has diverged
+/// from it, and the whole of the difference is what happens to the commits that
+/// are already there: a merge leaves every one of them where it is, and a rebase
+/// writes them again on top of the base and has to be force-pushed.
+///
+/// One enum for the two places the choice is written down — the word in
+/// `config.yaml`, which is the global setting, and the word in the column below,
+/// which is one Repo's override of it. The file and the column would otherwise
+/// be two spellings of one idea, and a spelling that drifted would be a
+/// Verkstead resolving a conflict the way nobody asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictResolution {
+    /// Merge the base branch into the work branch. Nothing is rewritten and
+    /// nothing is force-pushed, so whatever has been read or stacked on the
+    /// branch goes on standing — which is why this is what nobody choosing
+    /// anything gets.
+    Merge,
+
+    /// Rebase the work branch onto the base branch, and force-push what comes
+    /// out. A tidier history, at the cost of rewriting what reviewers have
+    /// already read and breaking anything stacked on the branch.
+    Rebase,
+}
+
+impl ConflictResolution {
+    /// The word the column holds, which is the word `config.yaml` holds too —
+    /// lowercase and spelled out, so a database opened by hand says the same
+    /// thing the settings file does.
+    fn stored(self) -> &'static str {
+        match self {
+            Self::Merge => "merge",
+            Self::Rebase => "rebase",
+        }
+    }
+
+    /// The one a stored word names. An unknown word is a database written by a
+    /// Verkstead this one does not understand, exactly as an unknown lifecycle
+    /// state is.
+    fn read(word: &str) -> Result<Self> {
+        Ok(match word {
+            "merge" => Self::Merge,
+            "rebase" => Self::Rebase,
+            other => bail!("a conflict is to be resolved by the unknown {other:?}"),
+        })
+    }
+}
+
+/// What one Repo overrides the global resolution strategy with, or `None` where
+/// it overrides nothing — which is every Repo until somebody says otherwise.
+///
+/// `None` is *use whatever is configured globally* rather than *merge*: the two
+/// are the same answer today and would stop being the same the moment the global
+/// setting is changed, and a Repo that had quietly frozen the old global would
+/// be a setting the human cannot see they have made.
+///
+/// Found for a Repo somebody has taken off the registry as well, the way
+/// [`load_repo`] finds one: nothing new is worked in it, and a Conversation
+/// already wrapping in it is still a Conversation whose conflicts have to be
+/// resolved somehow.
+pub async fn repo_resolution(
+    pool: &SqlitePool,
+    repo_id: i64,
+) -> Result<Option<ConflictResolution>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT strategy FROM repo_resolutions WHERE repo_id = ?")
+            .bind(repo_id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading how the Repo {repo_id} resolves a conflict"))?;
+
+    row.map(|(word,)| ConflictResolution::read(&word))
+        .transpose()
+}
+
+/// Say how this Repo resolves a conflict, or take back what was said.
+///
+/// `None` removes the row rather than writing a word for the global answer:
+/// what *use the global setting* means is that there is nothing here, and a row
+/// holding today's global would go on holding it after the global moved.
+pub async fn set_repo_resolution(
+    pool: &SqlitePool,
+    repo_id: i64,
+    resolution: Option<ConflictResolution>,
+) -> Result<()> {
+    match resolution {
+        Some(resolution) => sqlx::query(
+            "INSERT INTO repo_resolutions (repo_id, strategy)
+             VALUES (?, ?)
+             ON CONFLICT (repo_id) DO UPDATE SET strategy = excluded.strategy",
+        )
+        .bind(repo_id)
+        .bind(resolution.stored())
+        .execute(pool)
+        .await
+        .with_context(|| format!("saying how the Repo {repo_id} resolves a conflict"))?,
+
+        None => sqlx::query("DELETE FROM repo_resolutions WHERE repo_id = ?")
+            .bind(repo_id)
+            .execute(pool)
+            .await
+            .with_context(|| {
+                format!("taking back how the Repo {repo_id} was told to resolve a conflict")
+            })?,
+    };
+
+    Ok(())
 }

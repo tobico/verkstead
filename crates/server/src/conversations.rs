@@ -849,6 +849,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
         let branch = branch.clone();
+        let checkouts = state.checkouts.clone();
         move || {
             // A Conversation that has a worktree resolves the commit its branch
             // was cut from and stops there: the branch is taken because this
@@ -860,7 +861,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 let named = picked.unwrap_or(default);
 
                 return worktrees::resolve(&repo, &named)
-                    .map(|commit| (commit, Vec::new()))
+                    .map(|commit| (commit, Vec::new(), None))
                     .ok_or(GrillingStarted::NoBaseCommit);
             }
 
@@ -913,14 +914,29 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 planned.push(beside);
             }
 
+            // And only now, held from the first directory this makes to the
+            // record naming it: a sweep of orphaned worktrees reading in
+            // between would find live checkouts no record names. See
+            // [`crate::AppState::checkouts`].
+            //
+            // Here rather than around the whole of this, which is where it
+            // would read as belonging: everything above only asks questions,
+            // and the fetch among them has no deadline to answer within — so a
+            // remote dropping packets would hold this lock indefinitely, and
+            // every close in the workbench behind it, a close being the one
+            // thing that must never be held. Taken inside the blocking half and
+            // handed back out of it, because the record it has to reach is on
+            // the other side.
+            let making = checkouts.blocking_lock_owned();
+
             make(&planned).map_err(Unmade::grilling)?;
 
-            Ok((commit, recorded(&planned)))
+            Ok((commit, recorded(&planned), Some(making)))
         }
     })
     .await?;
 
-    let (commit, checkouts) = match made {
+    let (commit, checkouts, making) = match made {
         Ok(made) => made,
         Err(refusal) => return Ok(refusal),
     };
@@ -935,6 +951,13 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         store::Grilling::NotDrafting => return Ok(GrillingStarted::NotDrafting),
         store::Grilling::Started => {}
     }
+
+    // The record names them now, so the sweep would keep them: released here
+    // rather than at the end, because what follows is a launch and holding a
+    // lock across one would hold every other start behind it. Nothing to
+    // release where the Conversation already had its checkouts — that made no
+    // directory, so there was no window to hold.
+    drop(making);
 
     // From here the Conversation says it is being worked on, and the thing that
     // will say so is a session that does not exist yet. So a registration stands
@@ -1400,12 +1423,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // The same [`plan`], [`make`] and [`recorded`] a grill start uses, at the
     // stage's own branch: a read-write companion mirrors that where its row
     // names nothing, so the branch cut beside the stage is the stage's own.
+
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
         let branch = branch.clone();
         let commit = commit.clone();
         let data_dir = state.data_dir.clone();
         let companions = conversation.companions.clone();
+        let checkouts = state.checkouts.clone();
 
         move || {
             let mut planned = vec![Checkout {
@@ -1423,15 +1448,23 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
                 planned.push(beside);
             }
 
+            // And only now, held from the first directory this makes to the
+            // record naming it, as a grill start holds it and for its reason: a
+            // directory made and not yet recorded is one a sweep would read as
+            // nobody's. Here rather than around the whole of this, because
+            // [`plan`] fetches once per companion and a fetch has no deadline
+            // to answer within. See [`crate::AppState::checkouts`].
+            let making = checkouts.blocking_lock_owned();
+
             make(&planned).map_err(Unmade::adopting)?;
 
-            Ok(recorded(&planned))
+            Ok((recorded(&planned), making))
         }
     })
     .await?;
 
-    let checkouts = match made {
-        Ok(checkouts) => checkouts,
+    let (checkouts, making) = match made {
+        Ok(made) => made,
         Err(refusal) => return Ok(refusal),
     };
 
@@ -1452,6 +1485,10 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         store::Staged::NoSuchConversation => return Ok(Adopted::NoSuchConversation),
         store::Staged::NotDrafting => return Ok(Adopted::NotDrafting),
     }
+
+    // Recorded, so the sweep would keep them. What follows is a Timeline and a
+    // launch, and neither makes a directory.
+    drop(making);
 
     // What was adopted, from where, and where its branch came off — on the
     // Conversation's own Timeline, because that is the only Timeline there is:
@@ -1534,9 +1571,14 @@ fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
 /// state a human is trying to get out of when they press Close. Refusing them
 /// would leave a Conversation nothing can ever end, which is worse than the
 /// directory it was protecting. So the removal is attempted, a failure is logged
-/// with the path in it, and the close is recorded regardless: what is left behind
-/// is one directory under the Data Directory, named in the log, for a human to
-/// delete.
+/// with the path in it, and the close is recorded regardless.
+///
+/// **And then the sweep this ends with takes the directory anyway.** What git's
+/// polite removal could not have is exactly what [`worktrees::sweep`] is for:
+/// nothing under the Data Directory outlives the record that named it, so a
+/// directory the log has just been written about is one the close reclaims
+/// before it returns, along with whatever earlier closes and crashes left
+/// behind.
 ///
 /// And what it was still drawing the human with goes last of all — the questions
 /// it left open, in [`asked`], and the news mark it was carrying, in [`read`].
@@ -1609,6 +1651,18 @@ pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClose
         asked(state, id).await;
         read(state, id).await;
     }
+
+    // And then the backstop under all of it: every directory under the worktrees
+    // directory that no Conversation names any more. The targeted removals above
+    // are still what ordinarily gives this Conversation its checkouts back —
+    // this is what reclaims the ones git refused, which are exactly the ones the
+    // warnings above have just been written about, along with whatever earlier
+    // closes and crashes left behind. See [`worktrees::sweep`].
+    //
+    // After the record rather than before it: the rows this close deletes are
+    // what makes its own directories orphans, and a sweep that ran first would
+    // read them as live and leave them.
+    worktrees::sweep(state).await;
 
     Ok(match closing {
         store::Closing::Closed => ConversationClosed::Closed,

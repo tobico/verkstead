@@ -19,6 +19,7 @@
 
 import { Show, type JSX } from "solid-js";
 
+import { PaneSticky } from "../Panes";
 import { Empty } from "../notices";
 import styles from "./Document.module.css";
 import { PaneHead } from "./PaneHead";
@@ -35,7 +36,9 @@ export function Document(props: {
 }): JSX.Element {
   return (
     <>
-      <PaneHead back={{ to: "Timeline", go: props.back }} title={props.heading} />
+      <PaneSticky>
+        <PaneHead back={{ to: "Timeline", go: props.back }} title={props.heading} />
+      </PaneSticky>
 
       <Show when={props.html !== ""} fallback={<Empty>{props.empty}</Empty>}>
         <div class={`${styles.document} markdown`} innerHTML={props.html} />

@@ -1957,7 +1957,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // It reads as a session that has stopped: the fixture is a payload rather
     // than a moment, and a running one would be a page drawing a spinner over
     // something that has not moved since 2026.
-    let capture = store::start_capture(&pool, grilling, None).await.unwrap();
+    let capture = store::start_capture(&pool, grilling, None, None)
+        .await
+        .unwrap();
     store::append_capture(
         &pool,
         capture,
@@ -2336,6 +2338,31 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         )),
     );
 
+    // And the same Conversation as a share carries it, which is what the shared
+    // file boots from. This one because it is the richest record here: a brief,
+    // the moves, an answered Set, three commits with a companion's among them —
+    // and, on the way out, the handoff and the session output a share leaves
+    // behind. What the payload holds is `crates/server/tests/sharing.rs`'s
+    // subject; this is the file the viewer's own share is drawn from.
+    //
+    // Its commits carry their Summaries and no diffs, and that is the fixture
+    // being honest rather than a gap: the Repos here are paths nothing is at,
+    // so git has nothing to say about any of those hashes, and what a share
+    // does with a commit it cannot read is exactly what this record shows —
+    // the pane, with the flag beside it saying where the diff went. What a
+    // read diff draws is the viewer's own tests' to say, from a pane of their
+    // own.
+    write(
+        "share.json",
+        &pin_share(
+            &get(
+                &app,
+                &format!("/api/ui/conversations/{directing}/share.json"),
+            )
+            .await,
+        ),
+    );
+
     write(
         "conversation-tasks.json",
         &pin_worktree(
@@ -2577,6 +2604,15 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap();
 
+    // And whether it merges, which the same poll writes down beside it. Cleanly,
+    // which is what a wrap-up waiting on its suite looks like: the branch is
+    // fine and GitHub is still thinking about the tests. A conflict is the
+    // reading the viewer's own tests compose over this one — what is being
+    // carried here is the field.
+    store::record_merging(&pool, wrapping, repos[0].id, store::Merging::Cleanly)
+        .await
+        .unwrap();
+
     write(
         "conversation-wrapping.json",
         &pin_health(&pin_timeline(
@@ -2593,6 +2629,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let waiting_on = verkstead_store::WAITED_ON.into_iter().chain([
         verkstead_store::WaitingOn::Checks(repos[0].id),
         verkstead_store::WaitingOn::Comments(repos[0].id),
+        verkstead_store::WaitingOn::Mergeable(repos[0].id),
     ]);
 
     for waiting_on in waiting_on {
@@ -2823,6 +2860,29 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // build cache that has been configured rather than only its
             // defaults — `settings-unset.json` above is the other half.
             "rust_build_cache": { "enabled": true, "size": "50G" },
+            // And a share viewer hosted somewhere, for the same reason: the
+            // fixture of a Verkstead that has been told everything carries the
+            // configured half of this too, and `settings-unset.json` is where
+            // nobody has hosted one.
+            "share_viewer_url": "https://ada.github.io/verkstead-shares/",
+            // And a rebase configured, for the reason the size above is typed:
+            // the fixture of a Verkstead that has been told everything carries
+            // the answer somebody chose, and `settings-unset.json` is the one
+            // nobody has chosen anything in.
+            "conflict_resolution": "Rebase",
+
+            // And the paths this Verkstead was told about, which come back
+            // labelled as the settings' own — the router behind this fixture was
+            // started with none of its own, the way a standalone install is.
+            //
+            // None of them is on the machine writing the fixture, so each comes
+            // back unresolved, which is the row the page has the most to draw:
+            // an entry that is saved, is in the file, and does nothing until the
+            // directory is there. Fixed paths rather than a temporary
+            // directory's, because a fixture that changed with the machine that
+            // wrote it would be a diff on every run.
+            "watched_paths": ["/home/ada/src"],
+            "sandbox_binds": ["/var/cache/verkstead-node", "verkstead=/var/cache/verkstead-cargo"],
         }),
     )
     .await;
@@ -3071,6 +3131,20 @@ fn pin_timeline(json: &str) -> String {
             body["at"] = "2026-08-03T09:07:11.000Z".into();
         }
     }
+
+    serde_json::to_string(&payload).unwrap()
+}
+
+/// The same, for a share — whose Conversation is one level down, and which
+/// carries a stamp of its own: the moment the share was taken.
+fn pin_share(json: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    payload["exported_at"] = "2026-08-03T09:07:11.000Z".into();
+
+    let conversation = serde_json::to_string(&payload["conversation"]).unwrap();
+    payload["conversation"] =
+        serde_json::from_str(&pin_health(&pin_timeline(&conversation))).unwrap();
 
     serde_json::to_string(&payload).unwrap()
 }

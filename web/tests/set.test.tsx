@@ -11,7 +11,7 @@
 //! of contents are drawn here too, and asked about in `diff.test.tsx` and
 //! `contents.test.tsx` — this file is the record itself.
 
-import { screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Response as Decided } from "../src/api/types";
@@ -22,10 +22,10 @@ import app from "../src/App.module.css";
 import card from "../src/Card.module.css";
 import contents from "../src/set/Contents.module.css";
 import closing from "../src/set/Postscript.module.css";
-import setPage from "../src/set/SetPage.module.css";
 import sheet from "../src/set/Sheet.module.css";
 import standing from "../src/set/Standing.module.css";
 import illegible from "../src/set/Unreadable.module.css";
+import paneHead from "../src/workbench/PaneHead.module.css";
 import {
   mount,
   reading,
@@ -279,14 +279,17 @@ describe("reading a Set", () => {
     );
   });
 
-  it("says so plainly when there is no such Set", async () => {
+  /// However it was refused, and in the server's own words: the pane draws
+  /// what it was told rather than a sentence of its own. A Set that is not
+  /// there reads like any other read that did not land — the "No such Set."
+  /// of its own went with the page it was the whole of.
+  it("shows the server's own wording when the Set cannot be read", async () => {
     serving(json({ error: "there is no Question Set 404" }, 404));
     mount("404");
 
-    await waitFor(() => screen.getByText("No such Set."));
-  });
+    await waitFor(() => screen.getByText(/there is no Question Set 404/));
 
-  it("shows the server's own wording when the Set cannot be read", async () => {
+    cleanup();
     serving(json({ error: "the Question Set could not be read" }, 500));
     mount();
 
@@ -446,11 +449,12 @@ describe("the record of a settled Set", () => {
     // A Set is answered once, so there is nothing here to act on it with.
     expect(page.querySelector("input")).toBeNull();
     expect(page.querySelector("textarea")).toBeNull();
-    // The nav's bar is a button, and the only one an answered Set has: it is a way
-    // around the record rather than anything that acts on it. Counted rather than
-    // excused, so a button that does act on the Set still fails this.
-    expect(page.querySelectorAll("button")).toHaveLength(1);
-    expect(page.querySelector("button")!.className).toBe(contents.bar);
+    // Two buttons, and neither of them acts on the Set: the way back out of the
+    // pane, and the nav's bar, which is a way around the record. Counted rather
+    // than excused, so a button that does act on the Set still fails this.
+    expect(texts(page, "button")).toHaveLength(2);
+    expect(page.querySelector(`.${paneHead.back}`)).toBeTruthy();
+    expect(page.querySelector(`.${contents.bar}`)).toBeTruthy();
     expect(page.querySelector(`.${sheet.questions}`)!.className).toContain(sheet.decided!);
   });
 
@@ -534,14 +538,16 @@ describe("the record of a settled Set", () => {
     expect(page.querySelectorAll(`.${sheet.option} .${sheet.star}`)).toHaveLength(1);
   });
 
-  it("leads back to the Conversation the Set was asked from", async () => {
+  it("leads back to the Timeline the Set was asked on", async () => {
     // The same way out however the Set stands: settled or waiting, it is an
     // Event on one Timeline and there is nowhere else for reading it to lead.
+    // The pane's own way out, drawn by the header the sheet hands in: where
+    // the Set had a page of its own there was a link, and a pane has this.
     for (const set of [WAITING, ANSWERED, LOCKED]) {
       const page = await reading(set);
-      const out = page.querySelector(`a.${setPage.back}`)!;
-      expect(out.getAttribute("href")).toBe(`/conversations/${set.conversation}`);
-      expect(out.textContent).toBe("← Conversation");
+      expect(page.querySelector(`.${paneHead.back}`)!.textContent).toBe(
+        "← Timeline",
+      );
     }
   });
 
@@ -749,8 +755,8 @@ describe("a Set this build cannot read", () => {
     expect(page.querySelector(`.${illegible.storedJson}`)!.textContent).toBe(
       UNREADABLE.body,
     );
-    expect(page.querySelector(`.${setPage.back}`)!.getAttribute("href")).toBe(
-      `/conversations/${UNREADABLE.conversation}`,
+    expect(page.querySelector(`.${paneHead.back}`)!.textContent).toBe(
+      "← Timeline",
     );
   });
 
@@ -761,6 +767,8 @@ describe("a Set this build cannot read", () => {
     // read; and no standing menu, so there is no locking behind it either.
     expect(page.querySelector(`.${sheet.questions}`)).toBeNull();
     expect(page.querySelector(`.${standing.standing}`)).toBeNull();
-    expect(page.querySelectorAll("button")).toHaveLength(0);
+    // The one button is the way back out of the pane, which is the pane's
+    // rather than the record's: there is nothing here to press about the Set.
+    expect(texts(page, "button")).toEqual(["← Timeline"]);
   });
 });

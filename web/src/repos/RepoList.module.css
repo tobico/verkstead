@@ -288,3 +288,51 @@
     border-color: var(--removed);
   }
 }
+
+/* How this Repo resolves a merge conflict — the one thing on the pane that is a
+   setting rather than a reading, so it is a section of its own between what the
+   Repo is and the press that takes it off the registry. */
+.resolving {
+  margin-top: 1.5rem;
+}
+
+.resolving h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.resolving label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.resolving select {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+/* What the answer in force does to a pull request, under the picker: the same
+   line the settings page draws under its own, because it is the same choice. */
+.resolves {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.resolving select:focus-visible {
+  border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .resolving select:hover {
+    border-color: var(--ink-soft);
+  }
+}

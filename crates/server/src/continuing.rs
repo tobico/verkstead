@@ -293,6 +293,7 @@ async fn start(
     // whole list is planned first for the reason a grill start plans one — that
     // is what lets a stage that cannot be given one companion start with nothing
     // left behind anywhere.
+
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
         let branch = branch.clone();
@@ -300,6 +301,7 @@ async fn start(
         let data = state.data_dir.clone();
         let companions = conversation.companions.clone();
         let predecessor = stacked_on.clone();
+        let checkouts = state.checkouts.clone();
 
         move || {
             let Some(commit) = worktrees::resolve(&repo, &from) else {
@@ -334,14 +336,23 @@ async fn start(
                 )?);
             }
 
+            // And only now, held from the first directory this makes to the
+            // record naming it, as a grill start holds it and for its reason: a
+            // directory made and not yet recorded is one the sweep of orphaned
+            // worktrees would read as nobody's. Here rather than around the
+            // whole of this, because [`beside`] fetches once per companion and
+            // a fetch has no deadline to answer within. See
+            // [`crate::AppState::checkouts`].
+            let making = checkouts.blocking_lock_owned();
+
             make(&planned)?;
 
-            Ok((commit, recorded(&planned)))
+            Ok((commit, recorded(&planned), making))
         }
     })
     .await;
 
-    let (commit, checkouts) = match made {
+    let (commit, checkouts, making) = match made {
         Ok(Ok(made)) => made,
         Ok(Err(halted)) => {
             say(state, settled, &halted.said(&stage, &branch, &from)).await;
@@ -379,6 +390,10 @@ async fn start(
             return;
         }
     }
+
+    // Recorded, so the sweep would keep them. What follows says so on two
+    // Timelines and launches a session, and none of it makes a directory.
+    drop(making);
 
     // What Verkstead decided, on both Timelines: on the stage's, because the
     // branch it is on was nobody's choice but this; and on the settled one,

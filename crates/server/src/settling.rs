@@ -1,29 +1,32 @@
 //! The rule that ends a wrap-up, and the condition it passes through on the way.
 //!
-//! A Conversation leaves Wrapping for **Done** when three kinds of thing are
+//! A Conversation leaves Wrapping for **Done** when four kinds of thing are
 //! true together: every pull request's checks are green, the self-review's
-//! Question Set has been answered, and nothing said on any of the pull requests
-//! is left unaddressed. Any one of them missing keeps it where it is.
+//! Question Set has been answered, nothing said on any of the pull requests is
+//! left unaddressed, and GitHub can merge every one of them. Any one of them
+//! missing keeps it where it is.
 //!
-//! Three kinds rather than three things, because a Conversation ends on a pull
-//! request per repository it was worked in and each of them has a suite and a
-//! conversation of its own: the review is one review across the whole of it, and
-//! the checks and the comments are one settlement each per pull request. Which
-//! pull requests those are is read off the record every time the rule is asked —
-//! a companion's found a poll after the Conversation's own is two more things to
-//! wait on, and a wrap-up that had already counted its three would have finished
-//! in between. See [`store::finish_wrap_up`].
+//! Four kinds rather than four things, because a Conversation ends on a pull
+//! request per repository it was worked in and each of them has a suite, a
+//! conversation and a base of its own: the review is one review across the whole
+//! of it, and the checks, the comments and the merge are one settlement each per
+//! pull request. Which pull requests those are is read off the record every time
+//! the rule is asked — a companion's found a poll after the Conversation's own is
+//! three more things to wait on, and a wrap-up that had already counted its four
+//! would have finished in between. See [`store::finish_wrap_up`].
 //!
 //! Verkstead decides that itself. There is nobody at the workbench to press
 //! anything, which is the whole of what running unattended means — and each of
-//! the three is already a fact Verkstead knows rather than an opinion somebody
+//! the four is already a fact Verkstead knows rather than an opinion somebody
 //! would have to form.
 //!
-//! What it does **not** wait for is the merge. Stages stack on unmerged
+//! What it does **not** wait for is the merge itself. Stages stack on unmerged
 //! predecessors, so a Conversation that stayed in Wrapping until its pull request
 //! landed would hold up every stage behind it — and merging is the human act this
 //! pipeline is built around rather than a step in it. Done means Verkstead has
-//! finished with the work, not that it is on `main`.
+//! finished with the work, not that it is on `main`. Which is why *can be merged*
+//! is what the fourth settlement is about: a pull request nobody can land is work
+//! Verkstead has not finished with, and one nobody has landed yet is not.
 //!
 //! **And never over a stop.** Every other stop a wrap-up can take leaves
 //! something unsettled behind it — red checks, a review nobody finished, a batch
@@ -41,10 +44,12 @@
 //! notices. Asking costs a few reads of a table.
 //!
 //! Which is also why the condition on the way is noticed here — see
-//! [`narrowing`]. A wrap-up whose review and comments have settled and whose
-//! checks have not, with nothing running in its Worktree, is **Waiting on
+//! [`narrowing`]. A wrap-up whose review, comments and merge have settled and
+//! whose checks have not, with nothing running in its Worktree, is **Waiting on
 //! checks**: a label on the card and a line on the Timeline, drawn off the same
-//! facts this loop already reads on a cadence, and nothing on the Lifecycle.
+//! facts this loop already reads on a cadence, and nothing on the Lifecycle. A
+//! conflicted pull request is not that, and says nothing: what it is waiting on
+//! is a resolution rather than a suite.
 
 use verkstead_schema::Nudge;
 
@@ -85,9 +90,9 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
             Ok(store::Finished::Done) => {
                 tracing::info!(
                     conversation_id,
-                    "every pull request's checks are green and nothing said on any of \
-                     them is left unaddressed, and the review is answered, so the work \
-                     is done",
+                    "every pull request's checks are green, every one of them merges and \
+                     nothing said on any of them is left unaddressed, and the review is \
+                     answered, so the work is done",
                 );
 
                 // The sidebar keeps the news until the human has looked at it,
@@ -160,8 +165,10 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
 /// Notice a wrap-up that has narrowed to its checks, and say so once.
 ///
 /// **Waiting on checks** is a condition of Wrapping rather than a state: the
-/// review answered, the comments dealt with, the checks alone outstanding and
-/// nothing running in the Worktree. Nothing is stored about it beyond the mark
+/// review answered, the comments dealt with, every pull request merging, the
+/// checks alone outstanding and nothing running in the Worktree. A conflicted
+/// pull request is not it — what that waits on is a resolution rather than a
+/// suite — and it says nothing. Nothing is stored about it beyond the mark
 /// that says the Notice has been written — see [`store::narrowing`] — and the
 /// Lifecycle is untouched. It is read off the settle facts and the sessions
 /// register the same way *blocked on you* is read off a stop.

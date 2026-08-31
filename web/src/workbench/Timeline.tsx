@@ -16,9 +16,8 @@
 //! Each of them is a moment as well — the pull request the finish step opened,
 //! and the backlog and the roadmap at the moment they landed on the branch — so
 //! each is drawn in both places: the same card in the pinned block and on the
-//! record where it happened. A second appearance rather than a move, for the
-//! reason the running session's strip below is one: what the record says
-//! happened should stay on it.
+//! record where it happened. A second appearance rather than a move: what the
+//! record says happened should stay on it.
 //!
 //! The two lists differ from the pull request in where the card's content comes
 //! from. A PR is three facts the record holds; a backlog and a roadmap are read
@@ -48,24 +47,27 @@
 //! to open, and it carries a Conversation's setup under it for as long as there
 //! is a draft to set up.
 //!
-//! Held against the foot of the pane, for as long as a session is running, is
-//! that session again: a strip carrying its title and its liveness mark, which
-//! opens the same details pane its card does. A second appearance rather than a
-//! move — the card keeps its place on the record — because a record grows past
-//! a screenful within the hour and the one thing on it that is moving should
-//! never have to be scrolled back to.
+//! Nothing is held against the foot of the pane. A strip for the session running
+//! now used to be — the title and the liveness mark, a way back to a card that a
+//! long record had scrolled away from — and the status button at the head of the
+//! pane says what is running, in more words than the strip ever did and where
+//! the eye lands rather than at the far end of the pane.
 //!
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
 //! happened so far, which is exactly where the next thing to happen belongs.
 //! One lives there — `Start work` under the Brief it will freeze. What to
 //! do about a conversation Verkstead has finished with is not there: a Steer is
-//! the way back into one, and it hangs off the header with everything else done
-//! to the conversation as a whole.
+//! the way back into one, and it is in the menu the status button drops with
+//! everything else done to the conversation as a whole.
+//! Getting a stopped conversation going again is in that menu too rather than at
+//! the foot of the record: Resume is a row of it like the rest, so it is reached
+//! from the thing that says nothing is driving this — and from the sidebar's
+//! right-click, which drops the same rows.
 //! Stopping the work is in neither place and not in the list: none of the three
 //! ways of doing it — stop after this task, stop now, close the conversation —
-//! is a step in the work, so all three hang off the header behind a menu, where
-//! what cannot be undone is not one stray click away.
+//! is a step in the work, so all three are in that same menu, where what cannot
+//! be undone is not one stray click away.
 //!
 //! Nothing here ends the grilling, and nothing here chooses a direction. That is
 //! the agent's own closing move — a Question Set carrying a proposal, with the
@@ -85,7 +87,7 @@ import {
   type JSX,
 } from "solid-js";
 
-import { resume, saveBrief, startGrilling } from "../api/client";
+import { saveBrief, startGrilling } from "../api/client";
 import type {
   AgentOutputEvent,
   BriefEvent,
@@ -102,7 +104,6 @@ import type {
   PinnedEvent,
   PullRequestEvent,
   QuestionSetEvent,
-  Resumed,
   StageListEvent,
   StageListReached,
   SteerEvent,
@@ -113,13 +114,13 @@ import type {
 } from "../api/types";
 import app from "../App.module.css";
 import { CardButton } from "../CardButton";
+import { PaneSticky } from "../Panes";
 import { Empty, ErrorLine, Note } from "../notices";
 import { followBottom } from "../scrolling";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
 // from the page that draws the whole record rather than kept a second time
 // here: the row and the page are one record read at two distances.
 import unreadable from "../set/Unreadable.module.css";
-import { Actions } from "./Actions";
 import { Adoption } from "./Adoption";
 import { Checks } from "./Checks";
 import { Mark } from "./Mark";
@@ -127,13 +128,13 @@ import { Mark } from "./Mark";
 // it: a Set waiting on the human wears the disc the sidebar's card wears, and
 // that vocabulary is the module's rather than any one component's.
 import marks from "./Mark.module.css";
+import { Conflict } from "./Merging";
 import { PaneHead } from "./PaneHead";
 import { Setup } from "./Setup";
+import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
-import shell from "../Panes.module.css";
-import { WAITING_ON_CHECKS } from "./conditions";
 import { titled } from "./naming";
-import { ENDED, STATE } from "./states";
+import { STATE } from "./states";
 import { opensRoadmap, type Opening } from "./openings";
 import { keeping } from "./settling";
 import { windowed } from "./windowing";
@@ -213,35 +214,6 @@ export function grillRefusal(outcome: GrillingStarted): string {
 
   return GRILL_REFUSAL[outcome];
 }
-
-/// And each way of being refused a resume.
-///
-/// Every one of them is the button doing the one thing it is for: saying what
-/// there is to do about a conversation nothing is driving. A press that quietly
-/// found nothing to start would leave the human exactly as stuck as they were,
-/// which is why the server names these rather than logging them.
-export const RESUME_REFUSAL: Record<Resumed, string> = {
-  Resumed: "",
-  NoSuchConversation: "This conversation is gone.",
-  NotDriven:
-    "Nothing is supposed to be driving this conversation, so there is nothing to start again.",
-  AlreadyDriven:
-    "Something is already driving this conversation. Have a look at what it is doing.",
-  NowhereToWork:
-    "This conversation has no worktree to work in, so there is nowhere to start.",
-  WorktreeRefused:
-    "This conversation's worktree is broken and git would not make it again from the branch. The server log says why.",
-  NoDirection:
-    "Nothing on the record says how this work is being built, so there is no run to pick up.",
-  NothingToWork:
-    "There is no backlog left to work and nothing was ever written on this branch, so there is nothing built here to carry anywhere. Set the next thing going by hand.",
-  NoGrillingPairing:
-    "Choose a grilling profile and model first, on the brief.",
-  NoImplementationPairing:
-    "Choose an implementation profile and model first, on the brief.",
-  NoFollowUpBrief:
-    "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
-};
 
 /// The state a move came *from*: the state the move before it went to, and
 /// `Draft` where there is no move before it, since a Conversation starts
@@ -350,29 +322,63 @@ function Openable(props: {
   );
 }
 
+/// What this pane is called: the branch it is titled by, and the Repo that
+/// branch is in understated beside it.
+///
+/// The two facts the sidebar's card says in the same order and the same voice,
+/// so the card and the header of the pane it opens read as the one name said
+/// twice — and the status button under them goes on in that voice with its own
+/// two lines.
+///
+/// Drawn in every state, a Draft's included. A Conversation nobody has named is
+/// called *Draft* on both, which is what it is; the Repo beside it is then the
+/// only thing on the header that tells one draft from the next.
+///
+/// The space between the two is written out, and is the whole of what a screen
+/// reader has to tell them apart: the heading is named by everything under it
+/// run together, and two spans with nothing between them are read as one word.
+/// It is not drawn — a run of white space makes no flex item — so the gap
+/// between them on screen is still the stylesheet's.
+function PaneName(props: { conversation: ConversationView }): JSX.Element {
+  return (
+    <>
+      <span class={styles.paneTitle}>{titled(props.conversation)}</span>{" "}
+      <span class={styles.paneRepo}>{props.conversation.repo.name}</span>
+    </>
+  );
+}
+
 export function Timeline(props: {
   conversation: ConversationView;
-  back: () => void;
+
+  /// The way back out to the conversations, where there is a list to go back
+  /// to. A share has none — it is one Conversation and nothing around it — so
+  /// there is nothing to draw and nowhere to go.
+  back?: () => void;
+
   details: () => void;
 
   /// Which Event the details pane is showing, and how to change it.
   selected: Opening | null;
   select: (opening: Opening) => void;
-}): JSX.Element {
-  /// The session running now, where there is one: the last output on the record
-  /// that is still being written to. The last, because a Conversation runs one
-  /// session at a time — a record is a column of finished sessions with at most
-  /// one live one at the end of it.
-  const live = createMemo(() =>
-    props.conversation.timeline
-      .flatMap((event) =>
-        "AgentOutput" in event && event.AgentOutput.running
-          ? [event.AgentOutput]
-          : [],
-      )
-      .at(-1),
-  );
 
+  /// Whether this is a record to read rather than a Conversation to work in,
+  /// which is what a share is.
+  ///
+  /// What it takes off is everything that is not a moment on the record: the
+  /// status button, which is where the work stands and what is running in it
+  /// and the whole of the actions menu behind one press, and the block that
+  /// says what happens next. The cards themselves are untouched — a share is
+  /// read by opening them, exactly as the workbench is.
+  ///
+  /// Nothing about a *card* is decided here, and that is deliberate: a shared
+  /// Conversation arrives with every field a control is drawn from already
+  /// saying nothing — see `shared` in `crates/render/src/sharing.rs` — so the
+  /// record cannot express an action whatever draws it. This is the header and
+  /// what stands after the record, which belong to the Conversation rather than
+  /// to anything on it.
+  readOnly?: boolean;
+}): JSX.Element {
   /// The record itself, which is what says which box this pane scrolls in: a
   /// column of the page below the first breakpoint, and the pane above it.
   let record!: HTMLOListElement;
@@ -404,93 +410,30 @@ export function Timeline(props: {
           of them travel with it, so there is no strip of scrolling record
           between the title and the pinned items and nothing to keep a pinned
           block's own offset in step with. */}
-      <div class={shell.paneChrome}>
+      <PaneSticky>
         {/* The way back out of this level, which is the whole of what a narrow
-            window offers instead of the pane beside it. Drawn always and hidden
-            by the pane head where all three panes are on screen at once.
+            window offers instead of the pane beside it. Drawn wherever there is
+            a list to go back to, and hidden by the pane head where all three
+            panes are on screen at once.
 
             Titled for its branch, or a Draft where nobody has named one — the
             same rule the sidebar row it was opened from draws, so the card and
-            the header are the one name. */}
+            the header are the one name.
+
+            And the Repo understated beside it, as the card says the same two
+            facts: the header and the card are then the one name said twice.
+            Drawn in every state, a Draft's included — two drafts against two
+            repositories are both called Draft, and the Repo is the only thing
+            on either header that tells them apart. */}
         <PaneHead
-          back={{ to: "Conversations", go: props.back }}
-          title={titled(props.conversation)}
+          back={
+            props.back === undefined
+              ? undefined
+              : { to: "Conversations", go: props.back }
+          }
+          heading={styles.paneName}
+          title={<PaneName conversation={props.conversation} />}
         >
-          {/* Where the work got to, for the two states it stops at: a Done
-              conversation says *Done* and a closed one says *Closed*, beside
-              the branch they are named for.
-
-              Only those two. A state on the way up the ladder is what a
-              conversation is doing right now, and the record under the header
-              is that answer at length — a word repeating it would be chrome
-              earning nothing. An ended one has no record still being written,
-              so the last move is the bottom of a long scroll and the one glance
-              that answers *is this finished?* has nowhere else to land.
-
-              A plain word and nothing to press: unlike the marks below it there
-              is no one event this stands for, and nowhere it could send
-              anybody. */}
-          <Show when={ENDED.has(props.conversation.state)}>
-            <span class={styles.ended}>
-              {STATE[props.conversation.state]}
-            </span>
-          </Show>
-          {/* What the work has stopped on, said where the conversation is named
-              rather than only down in the list: a timeline is long by the time a
-              run gets far enough to stop, and a mark the human had to go
-              hunting behind would not be one. It points at the event that
-              stopped it, which is what makes it worth pressing.
-
-              Which is one kind of event now: whatever stopped a run — a session
-              that fell over, a press, an account out of window — the mark goes
-              to the notice saying so, where it stands in the record. There is
-              nothing behind a pane for it, so a narrow window stays on the
-              record rather than being sent away from the very thing there is to
-              read.
-
-              Two marks over the one event, and which it is comes off the wire
-              rather than being weighed here. A stop that happened without the
-              human is loud: `Blocked on you`, in the accent, because it is the
-              one they have to go and look at. A stop they pressed themselves is
-              quiet: `Stopped`, drawn as the condition beside it is, because
-              they were there — the word is worth reading and there is nothing
-              to shout about. Both go to the same place. */}
-          <Show when={props.conversation.blocked_on}>
-            {(event) => (
-              <button
-                type="button"
-                class={
-                  props.conversation.stopped_by_hand
-                    ? styles.stopped
-                    : styles.blocked
-                }
-                // Whatever stopped it, the badge goes to the whole of it: a
-                // held session opens its screen, and the notice that says what
-                // stopped a run opens the notice. There was a case here for
-                // the one event that had no pane behind it, and a notice has
-                // one now.
-                onClick={() => {
-                  props.select(event());
-                  props.details();
-                }}
-              >
-                {props.conversation.stopped_by_hand
-                  ? "Stopped"
-                  : "Blocked on you"}
-              </button>
-            )}
-          </Show>
-          {/* And what a wrap-up has narrowed to, in the same place and drawn
-              far more quietly: the review is answered, nothing said on the pull
-              request is left unaddressed, and the checks going green is all
-              that is left. A label rather than a control — there is nothing to
-              press and nowhere to go, the checks being GitHub's to finish — and
-              a condition of Wrapping rather than a state, which is why it is
-              drawn beside the branch and never in place of it. */}
-          <Show when={props.conversation.waiting_on_checks}>
-            <span class={styles.waitingOnChecks}>{WAITING_ON_CHECKS}</span>
-          </Show>
-          <Actions conversation={props.conversation} />
           {/* And the way on to the next level, drawn only where there is a next
               level to reach: the details pane holds the selected Event and
               nothing else, so with nothing selected it is bare paper and a
@@ -507,13 +450,28 @@ export function Timeline(props: {
           </Show>
         </PaneHead>
 
+        {/* And under the title, where the eye lands: where the work stands,
+            what is running in it, and behind its press everything there is to
+            do about it. Above the pinned cards because it is about the
+            Conversation rather than about anything the work is against, and
+            inside the same block so that it stays in view with them.
+
+            Not in a share, where all three of those are answers about a
+            workbench the reader is not sitting at: nothing is running in a
+            file, everything the menu offers is done to a Conversation they do
+            not hold, and where the work stands is what the record under it
+            says. */}
+        <Show when={!props.readOnly}>
+          <StatusButton conversation={props.conversation} />
+        </Show>
+
         <Pinned
           conversation={props.conversation}
           selected={props.selected}
           select={props.select}
           details={props.details}
         />
-      </div>
+      </PaneSticky>
 
       <ol class={styles.timeline} ref={record}>
         <For each={props.conversation.timeline}>
@@ -553,6 +511,11 @@ export function Timeline(props: {
                       }}
                     />
                   )}
+                </Match>
+                <Match
+                  when={"ResolveConflicts" in event && event.ResolveConflicts}
+                >
+                  <ConflictsResolved />
                 </Match>
                 <Match when={"Handoff" in event && event.Handoff}>
                   {(handoff) => (
@@ -688,149 +651,27 @@ export function Timeline(props: {
           event that moved every time one landed. Only one is ever drawn — each
           is for a different state — so they read as the one thing there is to do
           from here. What to do about a conversation that is finished is not
-          here: a steer is the way back into one, and it is in the menu on the
-          header, drawn whatever state the conversation is in. */}
-      <Show
-        when={props.conversation.adopting}
-        fallback={<StartGrilling conversation={props.conversation} />}
-      >
-        {(adopting) => (
-          <Adoption conversation={props.conversation} adopting={adopting()} />
-        )}
-      </Show>
-      {/* And under that, the way to get a conversation moving again. It is
-          offered *whenever nothing is running*, which is a quiet moment between
-          steps as much as it is a run that has stopped, so it sits below
-          whichever of the two above is drawn rather than instead of it.
+          here, and neither is getting a stopped one going again: a steer and a
+          resume are both rows of the menu the status button drops, drawn
+          whatever state the conversation is in.
 
-          What Verkstead was never going to do is not here: a steer is what says
-          that, and it is in the menu on the header. */}
-      <Resume conversation={props.conversation} />
-
-      {/* And the session running now, held against the foot of the pane so that
-          it can be reached from however far down the record the human has read.
-          A second appearance rather than a move: the session keeps its card in
-          its own place on the record, and this is the way back to it. */}
-      <Show when={live()}>
-        {(output) => (
-          <Session
-            output={output()}
-            open={() => {
-              props.select(output().id);
-              props.details();
-            }}
-          />
-        )}
+          And none of it is drawn in a share: what happens next is nothing a
+          reader holding a file has any part in, and a record that ended on a
+          press would be asking them for one. */}
+      <Show when={!props.readOnly}>
+        <Show
+          when={props.conversation.adopting}
+          fallback={<StartGrilling conversation={props.conversation} />}
+        >
+          {(adopting) => (
+            <Adoption
+              conversation={props.conversation}
+              adopting={adopting()}
+            />
+          )}
+        </Show>
       </Show>
     </>
-  );
-}
-
-/// The session running now, held against the foot of the pane.
-///
-/// One line of what the record's own card says — the title and the mark — and
-/// the same press: it opens the session's output in the details pane. It shows
-/// only while something is running, because what it is for is finding the thing
-/// that is moving; a session that has ended is a card on the record like any
-/// other.
-function Session(props: {
-  output: AgentOutputEvent;
-  open: () => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      class={`${styles.session} ${shell.paneFoot}`}
-      onClick={props.open}
-    >
-      <span class={styles.what}>Agent run</span>
-      <Mark
-        running={props.output.running}
-        idle={props.output.idle}
-        class={styles.rowMark}
-      />
-    </button>
-  );
-}
-
-/// The one standing way to get Verkstead driving again: a button, and what it
-/// refuses with when there is nothing to drive.
-///
-/// Drawn exactly where the server says it is worth drawing — see
-/// `ready_to_resume`, which is the state being one something ought to be driving
-/// and nothing driving it. The page cannot work that out for itself: what drives
-/// a conversation is a register of running tasks, and a register lives in the
-/// server.
-///
-/// It carries nothing. What to start is recomputed from the conversation's state
-/// and its branch at the moment of the press, which is the whole point of one
-/// button rather than one per way of stopping — saying something else should
-/// happen is what a steer is for.
-///
-/// Beside it, where the run stopped because an account ran out of window, the
-/// words the session printed about when that account comes back. Words to read
-/// and not a countdown: no stop resumes itself, so this one waits for the same
-/// press as every other, and what the reset time is for is deciding when to
-/// make it. The one thing that tells the two apart.
-function Resume(props: { conversation: ConversationView }): JSX.Element {
-  const queries = useQueryClient();
-
-  const [refused, setRefused] = createSignal<Resumed | null>(null);
-
-  const press = useMutation(() => ({
-    mutationFn: () => resume(props.conversation.id),
-    onSuccess: (outcome: Resumed) => {
-      setRefused(outcome === "Resumed" ? null : outcome);
-
-      // Either way the page it was pressed on is out of date: driving has
-      // started, or the world had moved under the button. Reading it again is
-      // both the correction and the explanation.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
-    },
-  }));
-
-  return (
-    <Show when={props.conversation.ready_to_resume}>
-      <div class={styles.resume}>
-        <h2>Nothing is driving this</h2>
-
-        <button
-          type="button"
-          class={styles.resumeConversation}
-          disabled={press.isPending}
-          onClick={() => press.mutate()}
-        >
-          {press.isPending ? "Resuming…" : "Resume"}
-        </button>
-
-        <Show when={props.conversation.resets}>
-          {(resets) => (
-            <p class={styles.resets}>
-              The account it was spending is out of window until {resets()}.
-            </p>
-          )}
-        </Show>
-
-        <Note>
-          Verkstead works out what should be running from where the work now
-          stands, and starts it.
-        </Note>
-
-        <Show when={refused()}>
-          {(outcome) => (
-            <ErrorLine class={styles.failure}>
-              {RESUME_REFUSAL[outcome()]}
-            </ErrorLine>
-          )}
-        </Show>
-        <Show when={press.isError}>
-          <ErrorLine class={styles.failure}>
-            The conversation could not be resumed: {press.error?.message}
-          </ErrorLine>
-        </Show>
-      </div>
-    </Show>
   );
 }
 
@@ -1200,8 +1041,13 @@ function Card(props: {
   );
 }
 
-/// The pull request the finish step opened: what it is called, its number, and
-/// how its checks are getting on.
+/// The pull request the finish step opened: what it is called, its number, how
+/// its checks are getting on, and whether it merges into its base at all.
+///
+/// The last two are the marks on the end of the head line, and neither is ever
+/// guessed at: each is drawn only where something has asked GitHub, and the
+/// conflict mark goes the moment a fresh reading says the conflict is gone. See
+/// `Checks.tsx` and `Merging.tsx`.
 ///
 /// The whole card is the press, as the two lists beside it are: what is *on* it
 /// — the commits and the comments — is in the details pane, fetched from GitHub
@@ -1237,9 +1083,14 @@ function PullRequest(props: {
           {(repo) => <span class={styles.repo}>{repo()}</span>}
         </Show>
         {/* On the other end of the line, where every card's second thing sits:
-            the checks are what is true of the pull request now, beside what it
-            was called when it opened. */}
-        <Checks checks={props.opened.checks} class={styles.checkRollup!} />
+            what is true of the pull request now, beside what it was called when
+            it opened. Two marks rather than one — how the checks are, and
+            whether it merges at all — and each is drawn only where something
+            has asked GitHub about it. */}
+        <span class={styles.marks}>
+          <Conflict merging={props.opened.merging} />
+          <Checks checks={props.opened.checks} />
+        </span>
       </div>
 
       <p class={styles.pullRequestTitle}>{props.opened.title}</p>
@@ -1556,11 +1407,11 @@ function Handoff(props: {
 /// prose around it. Which is also why it is an `Openable`: a link inside a
 /// button is not something a browser will have.
 ///
-/// Marked while it is what the conversation is blocked on, which is the whole of
-/// what the badge above does: a timeline is long by the time a run stops, and
-/// the badge is how the notice that stopped it is found. Read off `blocked_on`
-/// rather than off being the open one, because the two say different things
-/// now — a notice being read is not a notice the work stopped at.
+/// Marked while it is what the conversation is blocked on, which is now the
+/// whole of how a stop is found on the record: the status button says the work
+/// has stopped and the mark says where. Read off `blocked_on` rather than off
+/// being the open one, because the two say different things — a notice being
+/// read is not a notice the work stopped at.
 function Notice(props: {
   notice: NoticeEvent;
   blocked: boolean;
@@ -1675,6 +1526,27 @@ function Steered(props: {
       )}
     </Show>
   );
+}
+
+/// The press that asks for a finished conversation's conflict to be resolved.
+///
+/// A line and not a card, drawn like the steer beside it and the move directly
+/// under it, and read as the same pair: this says who decided, and the move says
+/// what came of it.
+///
+/// **Its own line rather than a steer's**, because the two are not the same act.
+/// A steer into wrapping opens the branch to be read again — the review goes
+/// with it and the whole of the work is read afresh — and this deliberately
+/// leaves the review that carried the work to done standing, asking only that
+/// the conflict be resolved. Both are the human sending a finished conversation
+/// back into its wrap-up, and a record that drew them the same line could never
+/// be read back for which of them happened.
+///
+/// It says nothing about which pull request, for the reason the steer says
+/// nothing about which branch: the cards above it are what a conflict is drawn
+/// on, and this is the moment somebody acted on one.
+function ConflictsResolved(): JSX.Element {
+  return <p class={styles.pressed}>You asked for the conflict to be resolved</p>;
 }
 
 /// What a session has printed: how much of it there is, and the last thing it

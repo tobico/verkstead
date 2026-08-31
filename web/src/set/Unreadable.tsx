@@ -12,14 +12,16 @@
 //! Set somebody is reading, and this is a record to be fixed by a build that can
 //! read it.
 //!
-//! Its own module rather than the page's, for [`Sheet`](./Sheet.tsx)'s reason: a
-//! Set is reached two ways — as a page of its own and as the details pane of the
-//! Timeline Event it landed on — and one drawing between them is one reading.
+//! Its own module rather than the sheet's, for [`Sheet`](./Sheet.tsx)'s reason:
+//! what a Set is drawn as is one question, and the two answers to it — the sheet
+//! and the record — are two files rather than two halves of one.
 
 import type { JSX } from "solid-js";
 
 import app from "../App.module.css";
+import { PaneSticky } from "../Panes";
 import type { UnreadableSet } from "../api/types";
+import { PaneHead } from "../workbench/PaneHead";
 // The provenance line is the sheet's: a Set this build cannot read still says
 // where it came from, in the same place a readable one does.
 import page from "./Sheet.module.css";
@@ -28,17 +30,21 @@ import styles from "./Unreadable.module.css";
 /// One unreadable Set, top to bottom: what it is, why this build cannot read it,
 /// and the body as it was stored.
 ///
-/// `lead` is whatever the record is reached through — the way back to the
-/// Conversation it was asked from, or the pane header of the Timeline Event it
-/// belongs to — exactly as it is on a readable Set's sheet.
+/// The header is the pane's own, exactly as it is on a readable Set's sheet: the
+/// record is titled by the id it is the record of, and `back` is what the way
+/// out of the pane does — absent where the pane it stands in has nowhere to go.
 export function Unreadable(props: {
   set: UnreadableSet;
-  lead?: JSX.Element;
+  back?: () => void;
 }): JSX.Element {
   return (
     <>
-      {props.lead}
-      <h1>Question set {props.set.id}</h1>
+      <PaneSticky>
+        <PaneHead
+          back={props.back && { to: "Timeline", go: props.back }}
+          title={`Question set ${props.set.id}`}
+        />
+      </PaneSticky>
       <div class={page.meta}>
         <span class={styles.unreadableBadge}>cannot be read</span>
       </div>

@@ -1,6 +1,6 @@
 //! What wrap-up is still waiting on, how many goes the machine has had at a red
 //! check, which comments it has already dispatched about — and the move to Done
-//! that having settled all three is.
+//! that having settled all of it is.
 //!
 //! The first three are bookkeeping rather than Timeline Events, and every one of
 //! them has to survive a restart — which is the whole reason they are in the
@@ -79,22 +79,25 @@ async fn own(pool: &SqlitePool, id: i64) -> i64 {
         .id
 }
 
-/// Everything one Conversation's wrap-up waits on: the review, and the checks
-/// and the comments of every pull request it is on.
+/// Everything one Conversation's wrap-up waits on: the review, and the checks,
+/// the comments and the merge of every pull request it is on.
 ///
 /// Read off the record rather than written out, exactly as the rule that ends a
 /// wrap-up reads them — a Conversation ends on one pull request per repository it
-/// was worked in, and each of them has a suite and a conversation of its own.
+/// was worked in, and each of them has a suite, a conversation and a base of its
+/// own.
 async fn waiting_on(pool: &SqlitePool, id: i64) -> Vec<WaitingOn> {
     let opened = pull_requests(pool, id).await.unwrap();
 
     WAITED_ON
         .into_iter()
-        .chain(
-            opened
-                .into_iter()
-                .flat_map(|(repo, _)| [WaitingOn::Checks(repo.id), WaitingOn::Comments(repo.id)]),
-        )
+        .chain(opened.into_iter().flat_map(|(repo, _)| {
+            [
+                WaitingOn::Checks(repo.id),
+                WaitingOn::Comments(repo.id),
+                WaitingOn::Mergeable(repo.id),
+            ]
+        }))
         .collect()
 }
 
@@ -436,14 +439,14 @@ async fn which_comments_have_been_dispatched_for_is_asked_of_one_pull_request() 
     );
 }
 
-/// The rule that ends a wrap-up: the checks green, the review answered and
-/// nothing said left unaddressed, all three together.
+/// The rule that ends a wrap-up: the checks green, the review answered, nothing
+/// said left unaddressed and the pull request merging, all four together.
 ///
 /// Verkstead decides it itself and records the move like every other — there is
 /// nobody at the workbench to press anything, which is the whole of what running
 /// unattended means.
 #[tokio::test]
-async fn a_wrap_up_with_all_three_settled_is_done_and_the_move_is_on_the_timeline() {
+async fn a_wrap_up_with_everything_settled_is_done_and_the_move_is_on_the_timeline() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
@@ -480,9 +483,9 @@ async fn a_wrap_up_with_all_three_settled_is_done_and_the_move_is_on_the_timelin
     );
 }
 
-/// A second round wraps up from nothing. The round before it settled all three
-/// and addressed whatever was said on the pull request; a round that inherited
-/// the first would be over the moment it reached Wrapping.
+/// A second round wraps up from nothing. The round before it settled everything
+/// it waited on and addressed whatever was said on the pull request; a round
+/// that inherited the first would be over the moment it reached Wrapping.
 ///
 /// The comments are what it keeps, and deliberately: a comment somebody wrote and
 /// a session answered stays answered, where every check and every review belongs
@@ -530,7 +533,7 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
     assert_eq!(
         wrap_up_settled(&pool, id).await.unwrap(),
         Vec::new(),
-        "the new round waits on all three again"
+        "the new round waits on all of it again"
     );
     assert_eq!(
         fix_attempts(&pool, id, own(&pool, id).await, "build")
@@ -547,13 +550,14 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
         "but a comment already answered stays answered"
     );
 }
-/// Any one of the three missing keeps it in Wrapping — each of them in turn,
-/// because a rule that held for two of the three would be a wrap-up that
+/// Any one of the four missing keeps it in Wrapping — each of them in turn,
+/// because a rule that held for three of the four would be a wrap-up that
 /// finished with work outstanding.
 #[tokio::test]
-async fn missing_any_one_of_the_three_keeps_the_conversation_wrapping() {
+async fn missing_any_one_of_the_four_keeps_the_conversation_wrapping() {
     // Every one of them in turn, which on a Conversation with a companion is
-    // five: the review, and a suite and a conversation per pull request.
+    // seven: the review, and a suite, a conversation and a merge per pull
+    // request.
     let (_dir, counting) = fresh_pool().await;
     let counted = wrapping(&counting).await;
     beside(&counting, counted).await;
@@ -591,11 +595,12 @@ async fn missing_any_one_of_the_three_keeps_the_conversation_wrapping() {
 }
 
 /// A companion's pull request found after the Conversation's own went green is
-/// one more suite and one more conversation to wait on, and the wrap-up waits.
+/// one more suite, one more conversation and one more merge to wait on, and the
+/// wrap-up waits.
 ///
 /// The order this actually happens in: the finish opens both, Verkstead records
 /// its own and moves the Conversation, and the companion's is discovered a poll
-/// later. A rule written out as *three things* would have finished the wrap-up in
+/// later. A rule written out as *four things* would have finished the wrap-up in
 /// between and left the second pull request red on a Conversation that was
 /// already Done.
 #[tokio::test]
@@ -626,6 +631,55 @@ async fn a_companions_pull_request_is_one_more_thing_to_wait_on() {
     );
 
     settle_wrap_up(&pool, id, WaitingOn::Comments(beside))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        finish_wrap_up(&pool, id).await.unwrap(),
+        Finished::StillWaiting,
+        "and nothing has said GitHub can merge it",
+    );
+
+    settle_wrap_up(&pool, id, WaitingOn::Mergeable(beside))
+        .await
+        .unwrap();
+
+    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+}
+
+/// A pull request GitHub cannot merge keeps the wrap-up where it is, however
+/// green everything else about it is — and the wrap-up finishes the moment the
+/// conflict is resolved.
+///
+/// The whole point of the fourth settlement: a Conversation carried to Done over
+/// a conflicted pull request would be work Verkstead had called finished and
+/// nobody could land. Which is also what closes the race the settle fact exists
+/// for — a base moving under the branch just as the last suite goes green.
+#[tokio::test]
+async fn a_pull_request_that_conflicts_keeps_the_wrap_up_going() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+    let repo = own(&pool, id).await;
+
+    for waiting_on in waiting_on(&pool, id).await {
+        settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+
+    unsettle_wrap_up(&pool, id, WaitingOn::Mergeable(repo))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        finish_wrap_up(&pool, id).await.unwrap(),
+        Finished::StillWaiting,
+        "nothing can land a conflicted pull request, so the work is not finished with",
+    );
+    assert_eq!(
+        load_conversation(&pool, id).await.unwrap().unwrap().state,
+        Lifecycle::Wrapping,
+    );
+
+    settle_wrap_up(&pool, id, WaitingOn::Mergeable(repo))
         .await
         .unwrap();
 

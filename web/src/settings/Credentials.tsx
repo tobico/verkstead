@@ -42,6 +42,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { PaneSticky } from "../Panes";
 import { loadSettings, saveSettings } from "../api/client";
 import { useReading } from "../freshness";
 import type {
@@ -55,6 +56,7 @@ import type {
 import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
 import { PaneHead } from "../workbench/PaneHead";
+import { heldPaths } from "./held";
 import styles from "./Credentials.module.css";
 
 /// The two files as they stand, read once for the two panes that draw them.
@@ -225,6 +227,14 @@ export function GithubPane(props: {
     return what && "Refused" in what ? what.Refused.why : null;
   };
 
+  /// And the scopes GitHub says it has not been given, of the ones Verkstead
+  /// needs. Empty on a token that can do everything asked of it — and on one
+  /// GitHub named no scopes for at all, which says nothing either way.
+  const missing = () => {
+    const what = verified();
+    return what && "Account" in what ? what.Account.missing : [];
+  };
+
   /// Spend the form. The pane stays — what was saved is what the fields are
   /// showing — but the write-only field goes back to empty, and the author
   /// fields go back to following the server, which has just been told what they
@@ -268,6 +278,15 @@ export function GithubPane(props: {
           ? (told()?.rust_build_cache.size ?? "")
           : "",
       },
+      // And where the share viewer is hosted, as it stands, for the same
+      // reason: one request writes the whole of `config.yaml`.
+      share_viewer_url: told()?.share_viewer_url ?? "",
+      // And how a conflicted pull request is resolved, likewise.
+      conflict_resolution: told()?.conflict_resolution ?? "Merge",
+      // And the Watched Paths and the binds the settings hold, again for that
+      // reason — a list this form left out would be a list it emptied, and one
+      // of them is the boundary itself. See [`heldPaths`].
+      ...heldPaths(told()),
     });
 
   const submit = (ev: SubmitEvent) => {
@@ -284,10 +303,12 @@ export function GithubPane(props: {
 
   return (
     <>
-      <PaneHead
-        back={{ to: "Settings", go: props.back }}
-        title="GitHub and git author"
-      />
+      <PaneSticky>
+        <PaneHead
+          back={{ to: "Settings", go: props.back }}
+          title="GitHub and git author"
+        />
+      </PaneSticky>
 
       <Switch>
         <Match when={settings.isPending}>
@@ -316,7 +337,22 @@ export function GithubPane(props: {
                   </p>
                 )}
               </Show>
+
+              {/* And what it may not do, on a token that authenticates
+                  perfectly and cannot publish a share. A line of its own rather
+                  than part of the one above, because it is a different thing to
+                  do about it: the account is right and the token needs re-
+                  issuing with another box ticked. */}
+              <Show when={missing().length > 0}>
+                <p class={styles.unscoped}>
+                  It cannot publish a share: GitHub has not given it the{" "}
+                  <code class={styles.scope}>{missing().join(", ")}</code>{" "}
+                  scope. Re-issue the token on GitHub with that ticked and save
+                  it here again.
+                </p>
+              </Show>
               <Show when={refused()}>
+
                 {(why) => (
                   <ErrorLine class={styles.unverified}>
                     It is saved, but GitHub would not say whose it is: {why()}

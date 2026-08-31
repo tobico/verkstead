@@ -438,34 +438,48 @@ pub struct ConversationView {
     /// Which Event the Conversation is blocked on, or `null` where nothing is
     /// stopping it.
     ///
-    /// What the *blocked on you* badge is drawn from. The Event id and not a
-    /// flag, so that a header saying the work has stopped can point at the thing
-    /// that stopped it — a Timeline is long by the time a run gets far enough to
-    /// stop, and *blocked on you* with nowhere to go would be a badge the human
-    /// had to go hunting behind.
+    /// The Event id and not a flag, so that the Notice a run stopped at can be
+    /// marked where it stands on the record — a Timeline is long by the time a
+    /// run gets far enough to stop, and the status button at the head of it
+    /// saying the work has stopped is half an answer without somewhere to read
+    /// why.
     ///
-    /// *Blocked on you* is a badge on an active state and never a state of its
+    /// Being stopped is a condition of an active state and never a state of its
     /// own, which is why this sits beside `state` rather than in it.
     ///
-    /// Set for every stop, however it stopped. Which of the two marks the
-    /// header draws is `stopped_by_hand` below — both of them point here, a
-    /// stop the human has to find being the same Notice as a stop they made
-    /// themselves.
+    /// Set for every stop, however it stopped. Which word the status button
+    /// says over it is `stopped_by_hand` below; the Notice is the same Notice
+    /// either way, a stop the human has to find being no different on the
+    /// record from a stop they made themselves.
     pub blocked_on: Option<i64>,
 
     /// Whether that stop is the human's own press, or a row from before the
     /// two were told apart and read as one.
     ///
-    /// Which of the two marks the header draws, decided here rather than in the
-    /// browser: `false` is the accent *Blocked on you* badge — Verkstead pulled
-    /// the brake, or a crash took the driver away — and `true` is the quiet
-    /// **Stopped** label, which goes to the same Notice and says nothing about
-    /// anybody waiting. The sidebar's disc follows the same rule from its own
-    /// end of the wire, where the row's `waiting` has already folded it in.
+    /// Which word the status button says over the stop, decided here rather
+    /// than in the browser: `false` is the accented one — Verkstead pulled the
+    /// brake, or a crash took the driver away, so the Conversation is *Waiting
+    /// on you*, or *Blocked* where somehow it is not — and `true` is the quiet
+    /// *Stopped*, which says nothing about anybody waiting. The sidebar's disc
+    /// follows the same rule from its own end of the wire, where the row's
+    /// `waiting` has already folded it in.
     ///
     /// `false` where nothing has stopped, which is the ordinary Conversation:
-    /// there is no mark to choose between.
+    /// there is no word to choose between.
     pub stopped_by_hand: bool,
+
+    /// Whether something about this Conversation is waiting on the human: an ask
+    /// left open, or driving that has stopped without them.
+    ///
+    /// The same fact the sidebar row carries — see [`ConversationEntry::waiting`]
+    /// — folded by the same rule in the same place, so the row and the page it
+    /// opens can never come to disagree about the one Conversation. What the
+    /// page does with it is its own: the row draws a disc, and the head of the
+    /// Timeline draws the status word in the accent colour.
+    ///
+    /// A Draft is never one of them, and neither is a Closed Conversation: the
+    /// first is drawn as a draft and the second has nothing left to want.
+    pub waiting: bool,
 
     /// Whether the wrap-up has narrowed to its checks: the review answered, the
     /// comments dealt with, the checks alone outstanding, and nothing running in
@@ -489,10 +503,11 @@ pub struct ConversationView {
     /// `null` on every stop that is not a usage window's — which is nearly all
     /// of them, and every Conversation that has not stopped.
     ///
-    /// Words to draw beside Resume rather than a moment anything acts on: no
-    /// stop resumes itself, so what a stopped run waits for is a press whatever
-    /// stopped it. The one thing that tells a run stopped by an exhausted window
-    /// from a run stopped by anything else — same card, same badge, same button.
+    /// Words for the status button's second line, where what is running is
+    /// otherwise said, rather than a moment anything acts on: no stop resumes
+    /// itself, so what a stopped run waits for is a press whatever stopped it.
+    /// The one thing that tells a run stopped by an exhausted window from a run
+    /// stopped by anything else — same card, same status, same row to press.
     ///
     /// As the session printed it, because the wording is the backend's: `3pm`
     /// stays `3pm`, which is what somebody looks at their own clock for.
@@ -554,6 +569,38 @@ pub struct ConversationView {
     /// state of something the work is against. Empty is the ordinary case — a
     /// Conversation with no backlog has nothing to pin.
     pub pinned: Vec<PinnedEvent>,
+
+    /// Where the latest share of this Conversation was published, and when.
+    ///
+    /// `null` on every Conversation nobody has published one of, which is most
+    /// of them: downloading a share leaves no trace, and this is only about the
+    /// one that was put somewhere a link can reach.
+    ///
+    /// Replaced rather than added to. Publishing again is a fresh snapshot of a
+    /// Conversation that has moved on, so what the workbench draws is where to
+    /// send somebody *now* — see the store's `shares`, which says what becomes
+    /// of the link it replaced.
+    pub shared: Option<ShareView>,
+}
+
+/// One published share, as the workbench draws it: the link, and the moment the
+/// snapshot was taken.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ShareView {
+    /// The page to send somebody to: the gist's id in the share viewer's
+    /// fragment, which is what draws the share as the conversation rather than
+    /// as source.
+    ///
+    /// Composed by the server on the way out rather than read off the record —
+    /// what the record holds is the gist as GitHub gave it, and which viewer a
+    /// reader goes through is a fact about the settings at the moment the page
+    /// is drawn. See `link` in `crates/server/src/sharing.rs`.
+    pub url: String,
+
+    /// When it was published, RFC 3339 — drawn beside the link, because a link
+    /// with no date says nothing about how far the work has moved since.
+    pub at: String,
 }
 
 /// One companion repo of a Conversation: which Repo, how far into it a session
@@ -724,6 +771,17 @@ pub enum TimelineEvent {
     /// difference between the pipeline arriving somewhere and a human deciding
     /// it should be there.
     Steer(SteerEvent),
+
+    /// The human pressing **Resolve conflicts** on a finished Conversation's
+    /// pull request.
+    ///
+    /// Drawn beside the Moved line the same press wrote, exactly as a Steer is
+    /// and for a Steer's reason — and its own kind rather than a Steer into
+    /// Wrapping because the two are different acts. A steer opens the branch to
+    /// be read again; this leaves the review that carried the work to Done
+    /// standing, and asks only that the conflict be resolved. A record that drew
+    /// them the same line could never be read back for which of them happened.
+    ResolveConflicts(ResolveConflictsEvent),
 
     /// The pull request the finish step opened, at the moment it reached the
     /// Timeline.
@@ -1098,6 +1156,21 @@ pub struct PullRequestEvent {
     /// will be: what keeps it fresh is the checks watcher, and that stops when
     /// the wrap-up is over.
     pub checks: Option<CheckRollup>,
+
+    /// And whether it merges into its base, as the last look at GitHub found it
+    /// — or nothing where nothing has looked.
+    ///
+    /// Beside the rollup because it is the same kind of fact: a reading of
+    /// GitHub written down when something asked, drawn as a mark on the card,
+    /// and stale on a Conversation nothing is watching. What keeps this one
+    /// fresh outlives the wrap-up, though — a sweep asks about a Done
+    /// Conversation's pull requests every quarter of an hour until each is
+    /// merged or closed.
+    ///
+    /// Unlike the rollup, a companion's card carries its own: whether a branch
+    /// conflicts with its base is a fact about that branch, and it is written
+    /// down per pull request rather than per Conversation.
+    pub merging: Option<Merging>,
 }
 
 /// How a pull request's checks are getting on, taken all together.
@@ -1111,6 +1184,24 @@ pub enum CheckRollup {
     Passed,
     Running,
     Failed,
+}
+
+/// And whether it merges into its base.
+///
+/// The store's own word again, and two rather than GitHub's three for the reason
+/// it keeps two: a GitHub that has not worked the answer out yet is *not known*,
+/// and not knowing is the absence of this rather than a word in it — the same
+/// card with no mark on it that a pull request nothing has asked about draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Merging {
+    /// GitHub says it merges, which is a card with nothing to draw about it:
+    /// merging cleanly is what a pull request is expected to do.
+    Cleanly,
+
+    /// GitHub says it does not, and nothing lands until somebody resolves it.
+    /// The one of the two the card has a mark for.
+    Conflicting,
 }
 
 /// What is on a pull request now: the commits it carries, what GitHub is running
@@ -1390,6 +1481,25 @@ pub struct SteerEvent {
     pub html: Option<String>,
 }
 
+/// The **Resolve conflicts** press as the page receives it: when, and nothing
+/// else.
+///
+/// Nothing else because there is nothing else. Where it sends the work is always
+/// Wrapping, which the move under it says; what it was about is the pull
+/// requests the record says conflict, which the cards above it draw. The row is
+/// the deciding, and the deciding is the whole of what it holds.
+///
+/// So the words are the viewer's, as a move's are — see [`SteerEvent`], whose
+/// sentence this one stands beside and must not be mistaken for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ResolveConflictsEvent {
+    pub id: i64,
+
+    /// When it was pressed, RFC 3339.
+    pub at: String,
+}
+
 /// A move as the page receives it: when, and to what.
 ///
 /// No rendered body, unlike the Brief — there is no markdown in a move. What the
@@ -1488,6 +1598,24 @@ pub struct AgentOutputEvent {
     /// gone quiet — so a page opened onto a session that has been idle for an
     /// hour says so at once rather than waiting to be told.
     pub idle: bool,
+
+    /// The name of the Agent Profile this session was launched from.
+    ///
+    /// Off the record rather than off what is running: it is written down as
+    /// the session starts and stays true afterwards, so a Profile renamed or
+    /// deleted since — and a Verkstead restarted since — leaves this saying
+    /// what actually ran. `null` for a session started before Verkstead wrote
+    /// it down.
+    pub profile: Option<String>,
+
+    /// And the model it was launched on, as the raw id: `claude-opus-5` rather
+    /// than "Opus 5". Prettifying is the viewer's, so a model nothing here has
+    /// heard of still reaches the human as its id.
+    ///
+    /// `null` beside a `profile` that is there is a Pairing that named no model
+    /// at all; `null` beside a `profile` that is not is a session from before
+    /// either was recorded.
+    pub model: Option<String>,
 }
 
 /// A Question Set as the Timeline shows it: what it was called, the table of
@@ -1500,9 +1628,9 @@ pub struct AgentOutputEvent {
 /// was asked from, and the Timeline is re-read every time an open page hears the
 /// world moved.
 ///
-/// `set_id` is what the details pane fetches the document by — the same
-/// `/api/ui/sets/{id}` the standalone page reads, because it is the same Set
-/// reached another way.
+/// `set_id` is what the details pane fetches the document by, through
+/// `/api/ui/sets/{id}` — the Set's own id rather than this Event's, because a
+/// Set answered anywhere is the same Set here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct QuestionSetEvent {
@@ -1520,7 +1648,7 @@ pub struct QuestionSetEvent {
     pub rows: Vec<SetRow>,
 
     /// Whether it is still waiting on the human, and what became of it if not.
-    /// The same verdict the Set's own page carries, from the same registry of
+    /// The same verdict the Set's own sheet carries, from the same registry of
     /// held waits — this is a Timeline the human answers from.
     pub standing: Standing,
 }
@@ -1695,6 +1823,11 @@ pub fn proposal_view(proposal: &verkstead_schema::Proposal) -> ProposalView {
 
 /// A session's output as an Event. Nothing to render either — the summary was
 /// worked out as the output arrived — and here for the same reason as the move.
+///
+/// The arguments are the Event's own columns rather than a list somebody chose,
+/// which is what makes them many — gathering them into a struct would be a
+/// second shape to keep true beside the one it was read out of.
+#[allow(clippy::too_many_arguments)]
 pub fn agent_output_event(
     id: i64,
     at: String,
@@ -1703,6 +1836,8 @@ pub fn agent_output_event(
     latest: String,
     running: bool,
     idle: bool,
+    profile: Option<String>,
+    model: Option<String>,
 ) -> TimelineEvent {
     TimelineEvent::AgentOutput(AgentOutputEvent {
         id,
@@ -1711,6 +1846,8 @@ pub fn agent_output_event(
         turns,
         latest,
         running,
+        profile,
+        model,
         // Idle is a thing a running session is, and the caller reads the two
         // off different places — so the pair is made consistent here rather
         // than at each of them.
@@ -2087,6 +2224,7 @@ fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestE
         repo: opened.repo,
 
         checks: opened.checks,
+        merging: opened.merging,
     }
 }
 
@@ -2107,6 +2245,9 @@ pub struct PullRequestSummary {
 
     /// How its checks were, as the store last wrote it down.
     pub checks: Option<CheckRollup>,
+
+    /// And whether it merged, the same way — see [`PullRequestEvent::merging`].
+    pub merging: Option<Merging>,
 }
 
 /// What a pull request holds, as the details pane receives it: the commit list
@@ -2193,6 +2334,16 @@ pub fn steer_event(
         target,
         html: instruction.map(crate::markdown::to_html),
     })
+}
+
+/// The **Resolve conflicts** press as an Event: when it was pressed, and nothing
+/// else.
+///
+/// Nothing rendered, unlike the steer above it — there is no markdown here, and
+/// no state either. Where it sends the work is always Wrapping, and the words
+/// are the viewer's, exactly as a move's are.
+pub fn resolve_conflicts_event(id: i64, at: String) -> TimelineEvent {
+    TimelineEvent::ResolveConflicts(ResolveConflictsEvent { id, at })
 }
 
 /// Starting a Conversation: the Repo it is against, and nothing else.
@@ -2601,6 +2752,66 @@ pub enum Resumed {
     /// about: another record that cannot be true, a steer being the only way
     /// into Follow-up and one without a brief being refused.
     NoFollowUpBrief,
+}
+
+/// What became of pressing **Resolve conflicts** on a finished Conversation's
+/// pull request.
+///
+/// Named the way [`Resumed`]'s refusals are, and for the same reason: the press
+/// either sets a resolution going or it does not, and a button that quietly did
+/// nothing would leave the human waiting on a session that was never dispatched.
+///
+/// The refusals are of two kinds. Two of them are readings that have moved on
+/// rather than anything for the human to correct — the button is drawn off the
+/// record, and the record is what this is answered from — so each says what has
+/// changed since the pane was drawn. The other two are about the checkout the
+/// resolution session would work in, which a Conversation left Done for weeks is
+/// the likeliest of any to have lost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Resolved {
+    /// The Conversation is wrapping up again: the press is on its Timeline, the
+    /// conflict is something the wrap-up waits on once more, the goes the
+    /// machine had already spent are forgotten, and the watchers are on it.
+    ///
+    /// What they find is a review already settled, which runs nothing, and a
+    /// pull request that will not merge, which dispatches a resolution session.
+    Resolving,
+
+    NoSuchConversation,
+
+    /// It is not Done any more: something else has moved it since the pane was
+    /// drawn. A Conversation that is wrapping up has the watchers on it already
+    /// and needs no press; one that has been closed is the human finished with
+    /// the work.
+    NotDone,
+
+    /// Nothing on it conflicts any more. The pull request merges again —
+    /// somebody resolved it, or the freshening the pane does as it opens found
+    /// the conflict gone — and a press that put the Conversation back to
+    /// Wrapping for it would be a round trip to Done with nothing done on the
+    /// way.
+    NothingConflicts,
+
+    /// There is no Worktree on the record for the resolution session to work in.
+    /// A Conversation past drafting is supposed to have one, so this is a record
+    /// that cannot be true.
+    ///
+    /// [`Resumed::NowhereToWork`] under another press, and the same thing: a
+    /// conflict is resolved by a session doing git in a checkout, and there is
+    /// no checkout here to name.
+    NowhereToWork,
+
+    /// There is one on the record, the directory it names is not a worktree any
+    /// more, and it could not be made again from the branch.
+    ///
+    /// The one refusal here with nothing for the human to correct, exactly as
+    /// [`Resumed::WorktreeRefused`] is: the reason is in the server's log. A
+    /// Conversation stays Done for as long as nobody merges its pull request,
+    /// which is time enough for a directory to go — so this is the press
+    /// refusing over the checkout rather than moving the work back into a
+    /// wrap-up that had nowhere to do it.
+    WorktreeRefused,
 }
 
 /// What clicking Steer found, which is what the modal it opens is drawn from.

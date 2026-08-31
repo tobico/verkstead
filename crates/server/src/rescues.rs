@@ -63,7 +63,7 @@
 //! own Capture holds the line and whatever the agent made of it.
 
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::AppState;
 use crate::runner::{Landing, Pace};
@@ -96,6 +96,20 @@ pub(crate) const AT_MOST: usize = 2;
 pub(crate) const LINE: &str = "If you have your next step, carry on with it now. If you are blocked or waiting on me, \
      summarize your status and ask me what to do next via `verkstead ask`.";
 
+/// How long the wait for that echo goes on for before the stir is taken anyway.
+///
+/// The ceiling on [`after_the_echo`], and there are two terminals it is for: the
+/// one that takes the keystrokes and draws nothing back for them, where there is
+/// no echo to wait out at all; and the one whose session took the line and got
+/// straight on with its work, which is a session printing for reasons of its own
+/// and no longer anything this loop is waiting to see.
+///
+/// Long against a turnaround, because what it bounds is the machine rather than
+/// the terminal: an echo is written the moment the keystroke is, and seconds
+/// later is not an echo running late but a terminal that was never going to send
+/// one.
+const FOR_THE_ECHO: Duration = Duration::from_secs(2);
+
 /// Type [`LINE`] into the session, and say whether it reached one.
 ///
 /// By the Event as well as by the Conversation, which is what
@@ -125,6 +139,47 @@ pub(crate) async fn rescue(state: &AppState, conversation_id: i64, event_id: i64
     );
 
     true
+}
+
+/// Wait for what was just typed to finish arriving back, and give the moment it
+/// had as the stir.
+///
+/// **Watched rather than waited out.** What the stir was taken after used to be
+/// a fixed pause, long enough for an echo on a machine with nothing else on it —
+/// and a pause is a guess at something that can be looked at instead. An echo a
+/// moment slower than the guess landed *after* the stir, where it reads as the
+/// session stirring: the second rescue then armed on the bare grace the first
+/// one did, which is the one thing the stir is there to prevent.
+///
+/// So it waits for the terminal to stir and then to settle. A stir later than
+/// the keystrokes is the echo arriving, [`crate::typing::AFTER_THE_ECHO`] with
+/// nothing after it is the echo all in, and the stir is taken from there — which
+/// is after every word the keyboard put in the session's mouth, however long the
+/// machine took to carry them.
+///
+/// Read off [`Idle::since`] rather than off the bare byte clock, because that is
+/// what the caller compares the stir against: on a backend judged by its screen
+/// the echo is what takes the prompt off it, and the moment that reading moves
+/// is the moment the keystrokes landed.
+///
+/// [`FOR_THE_ECHO`] bounds the whole of it, for the terminals that never settle.
+async fn after_the_echo(idle: &Idle) -> Instant {
+    let typed = Instant::now();
+
+    while typed.elapsed() < FOR_THE_ECHO {
+        let seen = idle.since();
+
+        tokio::time::sleep(crate::typing::AFTER_THE_ECHO).await;
+
+        // Something since the keystrokes, and nothing after it in the window
+        // just waited out: what was typed has come back and the terminal has
+        // gone quiet behind it.
+        if seen > typed && idle.since() == seen {
+            break;
+        }
+    }
+
+    Instant::now()
 }
 
 /// What would say this session's work is done, which is the one thing about the
@@ -327,12 +382,11 @@ pub(crate) async fn until_it_will_not_ask(
             spent += 1;
 
             // Once what was typed has finished arriving back, rather than as it
-            // was typed — see [`crate::typing::AFTER_THE_ECHO`]. A terminal
-            // echoes, so a stir taken at the last keystroke is one the
-            // keystrokes answer themselves.
-            tokio::time::sleep(crate::typing::AFTER_THE_ECHO).await;
-
-            stirred = Instant::now();
+            // Once what was typed has finished arriving back, rather than as it
+            // was typed — see [`after_the_echo`]. A terminal echoes, so a stir
+            // taken at the last keystroke is one the keystrokes answer
+            // themselves.
+            stirred = after_the_echo(idle).await;
         }
 
         tokio::time::sleep(pace.poll).await;
