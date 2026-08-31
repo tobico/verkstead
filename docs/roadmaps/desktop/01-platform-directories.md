@@ -40,7 +40,15 @@ behaviour spelled explicitly (`--data-dir .`).
    unchanged.
 2. **State/log dir helper** — resolution beside the data-dir's, exported for
    stage 02. Accepts: per-OS unit tests; nothing writes there yet.
-3. **Docs** — `docs/development.md` gains `--data-dir .` in the dev commands;
+3. **The vocabulary this stage amends.** CONTEXT.md's **Data Directory** entry
+   says the default in its own words — "the working directory when nothing says
+   otherwise" — and that sentence is what this stage makes untrue. The
+   state/log dir wants saying somewhere too: a second directory of
+   Verkstead's own outside the Data Directory, which is what the **Build
+   Cache** entry already is and the pattern for how one is written down.
+   Accepts: no entry describes the default as the working directory; a reader
+   looking for where the desktop app's logs go finds it.
+4. **Docs** — `docs/development.md` gains `--data-dir .` in the dev commands;
    `docs/adoption.md` names the new default.
 
 ## Re-verify at start
