@@ -933,6 +933,52 @@ describe("the models a profile lists", () => {
     expect(ticked()).toEqual(FABLE.models);
   });
 
+  /// And each of those carried-over ticks says whose model it is, which is the
+  /// one thing about a tick that nothing else on the form would tell: what a
+  /// profile saved with one offers is a pairing reading "Grok Build Fable 5"
+  /// that grok will refuse to launch, and the form is where that is cheap to
+  /// see.
+  ///
+  /// In the tick's own name rather than under the list, so a reader who cannot
+  /// see the row hears it as part of what they are ticking.
+  it("says whose model a tick carried over from another backend is", async () => {
+    theProfiles();
+    mountPane(FABLE.id);
+
+    await waitFor(() => screen.getByLabelText("Fable 5"));
+    pick("Agent", "Grok Build");
+    await waitFor(() => screen.getByLabelText("Grok 4.6"));
+
+    expect(
+      screen.getByLabelText(/Fable 5/).closest("li")!.textContent,
+    ).toContain("Claude Code's model, which this account cannot launch");
+
+    // And nothing of the sort beside the backend's own, which is every
+    // ordinary row on every ordinary form.
+    expect(
+      screen.getByLabelText("Grok 4.6").closest("li")!.textContent,
+    ).not.toContain("cannot launch");
+  });
+
+  /// An id the list has never heard of says nothing either: the free-text way in
+  /// is what one of those is, and a model this build cannot name is not one it
+  /// can say the backend of.
+  it("says nothing about a model the build does not know", async () => {
+    const mixed: ProfileEntry = {
+      ...FABLE,
+      account: { agent_type: "Grok", home: "/srv/accounts/grok" },
+      models: ["grok-4.6", "grok-5-preview"],
+    };
+    serving(whenever("/api/ui/profiles", json([mixed])));
+    mountPane(mixed.id);
+
+    await waitFor(() => screen.getByLabelText("grok-5-preview"));
+
+    expect(
+      screen.getByLabelText("grok-5-preview").closest("li")!.textContent,
+    ).not.toContain("cannot launch");
+  });
+
   /// The picks are what the profile says, ticked: a list saved before there were
   /// picks reads back as picks.
   it("ticks what the profile lists and nothing else", async () => {

@@ -161,8 +161,12 @@
   gap: 0.35rem;
 }
 
+/* Wrapping, because a row can say more than a narrow pane holds on one line: a
+   tick, a name, the note under `elsewhere` below and the id are four things, and
+   the words are the part worth reading whole. */
 .picks li {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 0.5rem;
 }
@@ -171,11 +175,22 @@
    — so it takes none of the treatment the labels above the fields do. */
 .form .picks label {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 0.4rem;
   margin: 0;
   font-size: inherit;
   color: inherit;
+}
+
+/* A ticked model that is another backend's, which is what a profile carries
+   across when its type is picked again. Said in the tick's own words rather
+   than under the list, so the row that is wrong is the row that says so — and
+   in `--stopped`, which is the colour on this page that means *this wants you*:
+   a profile saved with one of these offers a pairing the harness will refuse. */
+.picks .elsewhere {
+  font-size: 0.85rem;
+  color: var(--stopped);
 }
 
 /* The id the name stands for, quiet beside it: what the session is launched

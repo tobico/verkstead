@@ -567,6 +567,26 @@ export function ProfilePane(props: {
     ...form().models.filter((model) => !launchable().includes(model)),
   ];
 
+  /// Whose model one of them is, where it is a model this build knows and the
+  /// backend that launches it is not the one the form is on.
+  ///
+  /// Which is the one thing a row of [`offered`] can be that nothing here put
+  /// there. A profile carries the models it was saved with, so picking another
+  /// backend leaves the models of the backend before it on the form — ticked,
+  /// because unticking one is how it is taken off, and drawn for that reason
+  /// rather than hidden. Nothing else on the form says a tick is not this
+  /// account's, and what a tick like that saves is a pairing offered as
+  /// runnable that the harness will refuse: `grok` started on `claude-fable-5`.
+  ///
+  /// `undefined` for every ordinary row and for an id the list has never heard
+  /// of — the free-text way in is what that is, and a model this build cannot
+  /// name is not a model it can say the backend of.
+  const elsewhere = (model: string): AgentType | undefined =>
+    KNOWN_MODELS.find(
+      (known) =>
+        known.id === model && known.agent !== form().account.agent_type,
+    )?.agent;
+
   /// A model ticked or unticked.
   ///
   /// A tick appends and nothing else moves, so a profile opened and saved with
@@ -653,6 +673,19 @@ export function ProfilePane(props: {
                           }
                         />
                         {prettify(model)}
+                        {/* And whose it is, where it is not this account's:
+                            inside the label rather than beside it, unlike the
+                            id below, because it is about the tick rather than
+                            about the model — a reader who cannot see the row
+                            hears it as part of what they are ticking. */}
+                        <Show when={elsewhere(model)}>
+                          {(agent) => (
+                            <span class={styles.elsewhere}>
+                              {AGENT_NAME[agent()]}'s model, which this account
+                              cannot launch
+                            </span>
+                          )}
+                        </Show>
                       </label>
                       {/* The id beside the name, for whoever is checking: the
                           name is this viewer's word and the id is what the
