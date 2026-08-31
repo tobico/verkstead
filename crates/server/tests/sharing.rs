@@ -1309,6 +1309,11 @@ async fn a_share_does_not_carry_the_link_to_a_share() {
 /// Conversation that has since moved — and a share published for nobody would
 /// be a gist left in somebody's account for nothing. The pull requests are read
 /// before the file is built, which is what makes that true.
+///
+/// And nothing is written down about it, which is what the wrap-up's own
+/// automatic share is gated on: the fact says a comment *landed*, and a press
+/// that left none anywhere leaves the next settle free to try — see
+/// `share_to_pull_requests` in `crates/server/src/settling.rs`.
 #[tokio::test]
 async fn a_conversation_on_no_pull_request_is_not_published_at_all() {
     let (dir, pool, app) = app_asking_github().await;
@@ -1323,6 +1328,11 @@ async fn a_conversation_on_no_pull_request_is_not_published_at_all() {
         !dir.path().join("asked").exists(),
         "GitHub was asked something: {:?}",
         std::fs::read_to_string(dir.path().join("asked")).ok(),
+    );
+
+    assert!(
+        !store::share_commented(&pool, id).await.unwrap(),
+        "a press that commented nowhere said a comment had been left",
     );
 }
 

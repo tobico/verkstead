@@ -449,8 +449,20 @@ A pull request the comment could not land on — one that has gone, one the toke
 may not write on — is **named against the ones that worked** rather than
 swallowed: the Share is published either way, so the human can paste the link
 there themselves.
+**And the wrap-up does it by itself where the human has asked for that**, which
+is the `share_on_done` switch on the settings page — off until somebody turns it
+on. A Conversation the pipeline settles to **Done** is shared this same way, in
+the same breath as the push and the unseen mark; it is that settle rather than
+the state, so a **Steer** into Done shares nothing.
+It happens once, gated on one recorded fact: **a share-to-PR comment has been
+left on this Conversation**. The fact is written wherever a comment lands, the
+press's own and the wrap-up's alike, and never unwritten — so work the human has
+already handed over stays quiet, a second settle after a share that worked stays
+quiet, and a share that *failed* left no fact and gets another go at the next
+settle. Failure is a **Notice** naming what could not be done; success says
+nothing at all, the fresh Published Share reading on the Share Pane.
 _Avoid_: announce, notify, post, broadcast (a comment is left, once, by a press
-the human made)
+or by the settle the human turned on)
 
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose

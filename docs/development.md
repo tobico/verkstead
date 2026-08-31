@@ -196,6 +196,14 @@ off — because what it turns on publishes a gist under the human's own account
 and comments on a pull request other people are reading. It is set from the
 GitHub and git author pane, beside the token it is published with.
 
+What it turns on is the wrap-up's own settle rather than the state: a steer into
+Done shares nothing. It fires once per conversation, gated on the row in
+`share_comments` that says a share-to-PR comment has been left on it — written
+wherever a comment lands, the Share pane's press and the settle alike, and never
+deleted. So a conversation shared by hand stays quiet, and a share that failed
+wrote no row and is tried again at the next settle. A failure is a Notice on the
+timeline naming it; a share that worked writes nothing there.
+
 `"conflict_resolution"` is what a session sent at a pull request that will not
 merge is told to do about it: `"Merge"`, which merges the base branch into the
 work branch and pushes, or `"Rebase"`, which rebases the branch onto its base and
