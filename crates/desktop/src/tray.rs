@@ -8,8 +8,7 @@
 //!
 //! **The menu is short on purpose.** An item that does nothing is a worse first
 //! impression than a menu that is honestly short, so what is on it is what
-//! works — View Logs and Launch on Startup arrive with the things that make
-//! them work.
+//! works — Launch on Startup arrives with the thing that makes it work.
 //!
 //! **Linux draws it as an appindicator**, which is a menu and nothing else: the
 //! panel opens the menu when the icon is clicked and reports no click of its
@@ -49,6 +48,9 @@ const ARTWORK: &[u8] = include_bytes!("../../../assets/icons/icon-192.png");
 pub enum Chosen {
     /// Put the viewer back in front of the human.
     Open,
+    /// Put this run's log in front of them instead — see [`crate::logs`] for
+    /// why a tray app has one at all.
+    ViewLogs,
     /// Stop Verkstead.
     Exit,
 }
@@ -58,12 +60,13 @@ impl Chosen {
     ///
     /// Open first because it is the default action, and the first item is what
     /// a menu means by default.
-    pub const MENU: [Chosen; 2] = [Chosen::Open, Chosen::Exit];
+    pub const MENU: [Chosen; 3] = [Chosen::Open, Chosen::ViewLogs, Chosen::Exit];
 
     /// What the item says.
     pub fn label(self) -> &'static str {
         match self {
             Chosen::Open => "Open",
+            Chosen::ViewLogs => "View Logs",
             Chosen::Exit => "Exit",
         }
     }
@@ -77,6 +80,7 @@ impl Chosen {
     fn id(self) -> &'static str {
         match self {
             Chosen::Open => "open",
+            Chosen::ViewLogs => "view-logs",
             Chosen::Exit => "exit",
         }
     }
@@ -196,8 +200,11 @@ mod tests {
     /// The menu as it is drawn, which on a machine with no screen is the only
     /// part of the drawing there is to check.
     #[test]
-    fn the_menu_is_open_and_then_exit() {
-        assert_eq!(Chosen::MENU.map(Chosen::label), ["Open", "Exit"]);
+    fn the_menu_is_open_then_the_log_and_then_exit() {
+        assert_eq!(
+            Chosen::MENU.map(Chosen::label),
+            ["Open", "View Logs", "Exit"]
+        );
     }
 
     /// What an event carries is an id, so this is the wiring: the id an item was

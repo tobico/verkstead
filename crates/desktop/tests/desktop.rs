@@ -2,10 +2,11 @@
 //! stand-in for the browser on its `PATH` and a Data Directory of the test's
 //! own.
 //!
-//! What is judged here is the three things the app does before anything else
-//! exists — it serves the viewer, it puts the viewer in front of the human
-//! unless told not to, and it refuses an address somebody else is already
-//! listening on without having made anything on the way.
+//! What is judged here is what the app does before anything else exists — it
+//! serves the viewer, it puts the viewer in front of the human unless told not
+//! to, it writes its log where a human can find it, and it refuses an address
+//! somebody else is already listening on without having made anything on the
+//! way.
 
 use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;
@@ -130,6 +131,23 @@ impl App {
         }
     }
 
+    /// Stop the app and hand back everything it said on stderr.
+    ///
+    /// Read once it has gone rather than while it runs: the pipe is where it
+    /// writes, and reading to the end of one is what says there is no more.
+    fn stop_saying(&mut self) -> String {
+        let Some(mut child) = self.child.take() else {
+            return String::new();
+        };
+
+        let _ = child.kill();
+        let said = child
+            .wait_with_output()
+            .expect("the app should be waited on once it has been stopped");
+
+        String::from_utf8_lossy(&said.stderr).into_owned()
+    }
+
     fn stop(&mut self) {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
@@ -155,6 +173,10 @@ fn command(opener: &Opener, home: &Path, env: &[(&str, &str)]) -> Command {
         .env_remove("DISPLAY")
         .env_remove("WAYLAND_DISPLAY")
         .env_remove("XDG_DATA_HOME")
+        // Where the log file goes is the platform's answer alone — there is no
+        // flag for it — so a machine that has one set is a machine whose own
+        // state directory these tests would otherwise write into.
+        .env_remove("XDG_STATE_HOME")
         .env_remove("VERKSTEAD_LISTEN")
         .env_remove("VERKSTEAD_DATA_DIR")
         .env_remove("VERKSTEAD_WATCHED_PATHS");
@@ -361,6 +383,111 @@ fn a_screen_that_is_named_and_is_not_there_serves_without_a_tray() {
     opener.await_asked_for(&format!("http://127.0.0.1:{port}/"));
 
     app.stop();
+}
+
+/// Where the log file goes on a machine that says nothing but where its home
+/// is, which is the Linux default and the case every desktop actually has.
+fn log_file(home: &Path) -> PathBuf {
+    home.join(".local/state/verkstead/verkstead.log")
+}
+
+/// A tray app has no stdout anybody will ever read, so the server's log goes to
+/// the Log Directory instead — made by this binary, because the resolving that
+/// stage 01 landed deliberately makes nothing.
+#[test]
+fn the_log_file_holds_the_servers_own_startup_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(tmp.path());
+    let home = tmp.path().join("home");
+    let data_dir = tmp.path().join("data");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    let mut args = as_args(&flags);
+    args.push("--no-open");
+    let mut app = App::start(port, &opener, &home, &args, &[]);
+
+    let logged = std::fs::read_to_string(log_file(&home)).unwrap_or_else(|why| {
+        panic!(
+            "the app should have written to {} ({why})",
+            log_file(&home).display()
+        )
+    });
+
+    assert!(
+        logged.contains("verkstead is listening"),
+        "the log should carry the server's own startup line, got:\n{logged}"
+    );
+
+    app.stop();
+}
+
+/// And what is written there is filtered the way `verkstead serve`'s stdout is:
+/// where the events go is the starting binary's call, and which of them are
+/// worth writing is `RUST_LOG`'s.
+#[test]
+fn rust_log_filters_the_file_as_it_filters_the_clis_stdout() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(tmp.path());
+    let home = tmp.path().join("home");
+    let data_dir = tmp.path().join("data");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    let mut args = as_args(&flags);
+    args.push("--no-open");
+    let mut app = App::start(port, &opener, &home, &args, &[("RUST_LOG", "error")]);
+
+    let logged = std::fs::read_to_string(log_file(&home))
+        .expect("the file is opened whatever is filtered out of it");
+
+    assert!(
+        !logged.contains("verkstead is listening"),
+        "`RUST_LOG=error` should have silenced the startup line, got:\n{logged}"
+    );
+
+    app.stop();
+}
+
+/// A machine with nowhere to keep a log file has only lost the log, which is
+/// nothing like a machine with nowhere to keep a Data Directory: the app says
+/// where the logging went instead and goes on serving. A relative home is how a
+/// Unix machine gets there — see `verkstead_server::platform`, where a directory
+/// resolved against wherever the app was launched from is the thing the platform
+/// default replaces.
+#[test]
+fn nowhere_to_keep_a_log_file_serves_and_says_where_the_log_went() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(tmp.path());
+    let data_dir = tmp.path().join("data");
+    let cache = tmp.path().join("cache");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    let mut args = as_args(&flags);
+    args.push("--no-open");
+    // The Build Cache is resolved out of the home as well, and that one *does*
+    // refuse startup — so it is told where it goes, leaving the log file as the
+    // one thing this machine has nowhere for.
+    let mut app = App::start(
+        port,
+        &opener,
+        Path::new("a-relative-home"),
+        &args,
+        &[("XDG_CACHE_HOME", cache.to_str().unwrap())],
+    );
+
+    // Serving, which is the whole point: `App::start` has already waited for it.
+    let said = app.stop_saying();
+
+    assert!(
+        said.contains("nowhere to keep a log file"),
+        "the app should have said why there is no log file, got:\n{said}"
+    );
+    assert!(
+        said.contains("verkstead is listening"),
+        "and the logging should have gone to stderr instead, got:\n{said}"
+    );
 }
 
 fn stderr(output: &Output) -> String {

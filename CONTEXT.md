@@ -234,12 +234,20 @@ absolute path), `~/Library/Logs/Verkstead` on macOS, `%LOCALAPPDATA%\Verkstead`
 on Windows, the local rather than the roaming application data because a log
 file follows nobody between machines. The three platforms disagree about what
 such a directory even *is*, which is why it is named here for what it is **for**
-rather than for what any one of them calls it. **It stands empty and uncreated
-until there is a desktop binary to write in it**: the server itself keeps
-logging to stdout wherever it was started from, and the binary that opens the
-file is the one that makes the directory, as the Build Cache makes its own where
-it uses it. Not the Data Directory and not settable beside it: what `--data-dir`
-says has nothing to do with where this is.
+rather than for what any one of them calls it. **The desktop app makes it**,
+as the Build Cache makes its own where it uses it, and what it holds is the log
+and the log before it: `verkstead.log`, rolled over to `verkstead.log.1` at a
+few megabytes and kept no further back than that, so a machine that has been
+running Verkstead for months is not handed a log nobody can open. **View Logs**
+on the tray menu is what opens it. The server itself keeps logging to stdout
+wherever it was started from — where the events go is the starting binary's
+call — and `RUST_LOG` filters the file exactly as it filters that stdout.
+**A machine that names nowhere to put one is not refused**: it gets no file, the
+app says so and logs to standard error instead, and the menu item says the same
+rather than opening nothing — a Verkstead with nowhere for a log file has only
+lost the log, where one with nowhere for a Data Directory has nothing to serve.
+Not the Data Directory and not settable beside it: what `--data-dir` says has
+nothing to do with where this is.
 _Avoid_: state directory, logs dir, log file (that's what goes *in* it), cache
 
 **Companion Repo**:

@@ -181,8 +181,9 @@ pub fn default_data_dir(platform: Platform, env: &Environment) -> Option<PathBuf
 /// go, and the binary that opens one is the binary that makes the directory,
 /// exactly as the Build Cache makes its own where it uses it. The server keeps
 /// logging to stdout whatever this says, so nowhere to resolve to answers
-/// nothing rather than refusing anything — what a desktop binary with no home
-/// should do is a decision for the stage that has a dialog to put it in.
+/// nothing rather than refusing anything — and the desktop binary that asks
+/// takes that for a log it has lost rather than a startup it should refuse,
+/// which is the opposite of what [`data_dir`] does with the same misfortune.
 pub fn log_dir() -> Option<PathBuf> {
     default_log_dir(Platform::HERE, &Environment::of_the_process())
 }

@@ -25,5 +25,5 @@ Roadmap stage: [02: The desktop crate and the Linux tray](docs/roadmaps/desktop/
 
 - [x] 01: The crate, the server in-process, and the browser — [details](01-crate-server-and-browser.md)
 - [x] 02: The tray icon, Open and Exit — [details](02-tray-open-and-exit.md)
-- [ ] 03: The rotating log file, and View Logs — [details](03-log-file-and-view-logs.md)
+- [x] 03: The rotating log file, and View Logs — [details](03-log-file-and-view-logs.md)
 - [ ] 04: Launch on Startup — [details](04-launch-on-startup.md)

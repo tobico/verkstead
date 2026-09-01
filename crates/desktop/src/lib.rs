@@ -24,11 +24,18 @@
 //! with no tray to put an icon in — over SSH, in a container, under a test — is
 //! not a failure and not a reason to stop serving, so there the main thread
 //! waits on the server as `verkstead serve` does.
+//!
+//! **And the logging goes to a file**, which is the other thing about being
+//! started from an icon: there is no terminal for a stdout to be read in, so
+//! the server's `tracing` is written to the Log Directory and the tray gets the
+//! item that opens it — see [`logs`].
 
-/// Handing a URL to whatever this desktop opens links with.
-pub mod browser;
-/// The one thing this binary draws that carries words.
+/// The two things this binary draws that carry words.
 pub mod dialog;
+/// Where the server's `tracing` goes, and what View Logs opens.
+pub mod logs;
+/// Handing a URL or a file to whatever this desktop opens it with.
+pub mod opener;
 /// Whether this process has a screen to draw on.
 pub mod screen;
 /// The icon in the system tray, and what is on its menu.
@@ -41,14 +48,6 @@ use std::sync::mpsc::sync_channel;
 use anyhow::{Context, Result};
 use tray_icon::TrayIcon;
 use verkstead_server::Config;
-
-/// What is logged when `RUST_LOG` says nothing: what `crates/cli` logs — the
-/// server's own startup line and whatever else it has to report — and this
-/// binary's own account of the tray and the browser beside it, with nothing
-/// from the crates beneath either. The app's half is here because it is the
-/// half that says why there is no icon in the tray, and a reason nobody is
-/// shown is no reason at all.
-const DEFAULT_FILTER: &str = "verkstead_server=info,verkstead_desktop=info";
 
 /// How the desktop app is started.
 ///
@@ -108,12 +107,10 @@ impl Desktop {
     /// socket closes with the process, and every session and the shared compile
     /// server are `bwrap --die-with-parent` children that go when this goes.
     pub fn run(self, listener: TcpListener) -> Result<()> {
-        tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| DEFAULT_FILTER.into()),
-            )
-            .init();
+        // Before anything has anything to report, and by this binary rather
+        // than by the server: where the events go is the starting binary's
+        // call, and this one was started from an icon — see [`logs`].
+        let logging = logs::start();
 
         let viewer = viewer_url(self.server.listen);
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -132,12 +129,12 @@ impl Desktop {
             // the address is in the server's own startup line, a browser
             // pointed at it by hand reaches the same viewer, and so does every
             // other device on the tailnet.
-            if let Err(error) = browser::open(&viewer) {
+            if let Err(error) = opener::url(&viewer) {
                 tracing::warn!(%viewer, "{error:#}");
             }
         }
 
-        let Some(tray) = raise(&viewer) else {
+        let Some(tray) = raise(&viewer, &logging) else {
             // No tray to be in, so this is `verkstead serve` with a browser
             // opened: the main thread waits on the server, and the process is
             // stopped the way that one is.
@@ -192,8 +189,9 @@ impl Desktop {
 /// nobody shows is one this cannot tell from an icon somebody does.
 ///
 /// `viewer` is where Open sends the browser: the same URL that was opened at
-/// startup, now on demand.
-fn raise(viewer: &str) -> Option<TrayIcon> {
+/// startup, now on demand. `logging` is what View Logs opens, or what it says
+/// where this machine had nowhere to keep a log file.
+fn raise(viewer: &str, logging: &logs::Kept) -> Option<TrayIcon> {
     if !screen::there_is_one() {
         tracing::info!("there is no screen here, so Verkstead is running as the server alone");
         return None;
@@ -205,16 +203,30 @@ fn raise(viewer: &str) -> Option<TrayIcon> {
     }
 
     let viewer = viewer.to_owned();
+    let logging = logging.clone();
 
     let raised = tray::show(move |chosen| match chosen {
         tray::Chosen::Open => {
             // Said and carried on, for the reason the open at startup is: the
             // viewer is reachable from every browser on the tailnet, and a
             // desktop that would not open one is no reason to stop serving them.
-            if let Err(error) = browser::open(&viewer) {
+            if let Err(error) = opener::url(&viewer) {
                 tracing::warn!(%viewer, "{error:#}");
             }
         }
+        tray::Chosen::ViewLogs => match &logging {
+            // The same handing-over the viewer gets, at whatever this desktop
+            // reads a text file with.
+            logs::Kept::In(file) => {
+                if let Err(error) = opener::file(file) {
+                    tracing::warn!("{error:#}");
+                }
+            }
+            // And where there is no file, the reason there is none — said on
+            // the screen, because the log it would otherwise be written to is
+            // the thing this machine has not got.
+            logs::Kept::Nowhere(why) => dialog::note(why),
+        },
         // Which ends the loop `run` is blocked on, and with it the process.
         tray::Chosen::Exit => gtk::main_quit(),
     });
