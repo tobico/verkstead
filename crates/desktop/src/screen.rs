@@ -1,11 +1,11 @@
 //! Whether this process has a screen to draw on.
 //!
 //! **Asked rather than risked**, and asked before anything is drawn — the tray
-//! as much as the one dialog. GTK will not start without a screen, and what
-//! sits on top of it does not always fail politely: rfd's dialog waits on a
-//! toolkit thread that never began rather than coming back, so a Verkstead run
-//! over SSH, or under a test, would hang on the very failure it was trying to
-//! report.
+//! as much as the dialogs. GTK will not start without a screen, and a Verkstead
+//! run over SSH, in a container or under a test has none: what starting the
+//! toolkit anyway would buy is GTK's own complaint on the standard error nobody
+//! launched from an icon is reading, printed underneath the very message that
+//! was being reported.
 //!
 //! What says there is a screen on Linux is `$DISPLAY` or `$WAYLAND_DISPLAY`, so
 //! that is what is read. A screen that is *named* and is not there is a

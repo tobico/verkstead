@@ -137,7 +137,7 @@
 
           # The desktop app's toolkit, and the tray protocol drawn over it
           # (ADR-0012). Build inputs rather than packages so that pkg-config is
-          # pointed at their development files: `rfd`'s dialog and the tray both
+          # pointed at their development files: the tray and the app's dialogs
           # compile against GTK3 headers, and a shell without them cannot build
           # `crates/desktop` at all. The same two are what the AppImage carries.
           buildInputs = with pkgs; [
