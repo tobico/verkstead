@@ -335,6 +335,34 @@ fn the_help_names_the_flag_and_the_server_options_it_sits_beside() {
     }
 }
 
+/// A session that names a screen the toolkit cannot open — a stale `DISPLAY`
+/// left in a shell profile, an X server that has gone away — is a machine with
+/// no tray and every other reason to go on serving. The screen every other test
+/// here has is *no* screen, which is the case the app never even asks the
+/// toolkit about; this is the other one, where it asks and is refused.
+#[test]
+fn a_screen_that_is_named_and_is_not_there_serves_without_a_tray() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(tmp.path());
+    let data_dir = tmp.path().join("data");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    // A display number nothing on this machine is answering on: an X server
+    // would be listening on a socket named after it, and none is.
+    let mut app = App::start(
+        port,
+        &opener,
+        tmp.path(),
+        &as_args(&flags),
+        &[("DISPLAY", ":917")],
+    );
+
+    opener.await_asked_for(&format!("http://127.0.0.1:{port}/"));
+
+    app.stop();
+}
+
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }

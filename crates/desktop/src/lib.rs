@@ -1,5 +1,6 @@
 //! `verkstead-desktop` — Verkstead started from an icon: the server in-process,
-//! and the viewer in the default browser.
+//! the viewer in the default browser, and an icon in the tray over the two of
+//! them.
 //!
 //! There is no window here and no second UI (ADR-0012). The viewer is embedded
 //! in the server and installs as a PWA, so what a desktop app adds is lifecycle
@@ -14,22 +15,40 @@
 //! is found before the server has made anything, while there is still nothing
 //! to undo. That is [`Desktop::settle`], and it is why the server has a
 //! [`verkstead_server::run_on`] to be handed the socket.
+//!
+//! **The main thread is the tray's**, and the server runs beside it. GTK holds
+//! the thread it was started on for as long as its loop is running, so the
+//! server is spawned onto a runtime of its own threads and the two meet at the
+//! menu: what is picked off it is handled on the loop's thread, and the server
+//! ending is brought back to that thread to end the loop with it. A session
+//! with no tray to put an icon in — over SSH, in a container, under a test — is
+//! not a failure and not a reason to stop serving, so there the main thread
+//! waits on the server as `verkstead serve` does.
 
 /// Handing a URL to whatever this desktop opens links with.
 pub mod browser;
-/// The one thing this binary draws for itself.
+/// The one thing this binary draws that carries words.
 pub mod dialog;
+/// Whether this process has a screen to draw on.
+pub mod screen;
+/// The icon in the system tray, and what is on its menu.
+pub mod tray;
 
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
+use std::sync::mpsc::sync_channel;
 
 use anyhow::{Context, Result};
+use tray_icon::TrayIcon;
 use verkstead_server::Config;
 
-/// What the server logs when `RUST_LOG` says nothing, which is what
-/// `crates/cli` logs: its own startup line and whatever else it has to report,
-/// and nothing from the crates beneath it.
-const DEFAULT_FILTER: &str = "verkstead_server=info";
+/// What is logged when `RUST_LOG` says nothing: what `crates/cli` logs — the
+/// server's own startup line and whatever else it has to report — and this
+/// binary's own account of the tray and the browser beside it, with nothing
+/// from the crates beneath either. The app's half is here because it is the
+/// half that says why there is no icon in the tray, and a reason nobody is
+/// shown is no reason at all.
+const DEFAULT_FILTER: &str = "verkstead_server=info,verkstead_desktop=info";
 
 /// How the desktop app is started.
 ///
@@ -72,15 +91,22 @@ impl Desktop {
         })
     }
 
-    /// Serve on `listener` until the server stops, with the viewer opened in
-    /// front of the human unless [`Desktop::no_open`] said not to.
+    /// Serve on `listener` until Exit is chosen or the server stops, with the
+    /// viewer opened in front of the human unless [`Desktop::no_open`] said not
+    /// to.
     ///
     /// **The runtime runs on threads of its own.** `crates/cli` builds one and
-    /// blocks the main thread on it; this binary cannot, because the toolkit a
-    /// tray icon is drawn with wants the main thread and will not share it. So
-    /// the server is spawned onto a runtime and the main thread stays free —
-    /// waiting here on the server, for as long as there is nothing else asking
-    /// for it.
+    /// blocks the main thread on it; this binary cannot, because the toolkit
+    /// the tray icon is drawn with wants the main thread and will not share it.
+    /// So the server is spawned onto a runtime and the main thread goes to the
+    /// tray's loop — or waits on the server, where there is no tray to have.
+    ///
+    /// **Exit is a stop where it stands.** The server has never had a shutdown
+    /// path — nothing in it handles a signal, and under systemd it is stopped
+    /// by SIGTERM and dies where it is — so the tray does not get machinery no
+    /// other caller of the server has. What that leaves behind is nothing: the
+    /// socket closes with the process, and every session and the shared compile
+    /// server are `bwrap --die-with-parent` children that go when this goes.
     pub fn run(self, listener: TcpListener) -> Result<()> {
         tracing_subscriber::fmt()
             .with_env_filter(
@@ -111,9 +137,94 @@ impl Desktop {
             }
         }
 
-        runtime
-            .block_on(serving)
-            .context("the thread the server was running on ended")?
+        let Some(tray) = raise(&viewer) else {
+            // No tray to be in, so this is `verkstead serve` with a browser
+            // opened: the main thread waits on the server, and the process is
+            // stopped the way that one is.
+            return runtime
+                .block_on(serving)
+                .context("the thread the server was running on ended")?;
+        };
+
+        // The server's own ending, brought to the thread the loop is about to
+        // hold: a server that has stopped is an app with nothing left to be the
+        // tray of, and nobody watching a terminal for it to say so in.
+        let (ended, has_ended) = sync_channel(1);
+        runtime.spawn(async move {
+            let _ = ended.send(serving.await);
+            gtk::glib::idle_add_once(gtk::main_quit);
+        });
+
+        gtk::main();
+
+        // Read before the runtime is let go of below: letting go of it cancels
+        // the task that does the sending, and a cancellation arriving here
+        // would read as a server that stopped when what stopped was the app.
+        let ended = has_ended.try_recv();
+
+        // Out of the tray before the process goes, and then the runtime let go
+        // of rather than waited on — see this method's own docs for what Exit
+        // leaves behind, which is nothing.
+        drop(tray);
+        runtime.shutdown_background();
+
+        match ended {
+            // The server stopped, which is the only way the loop ends with
+            // something to report.
+            Ok(outcome) => outcome.context("the thread the server was running on ended")?,
+            // Exit, which is the loop ending on its own account.
+            Err(_) => Ok(()),
+        }
+    }
+}
+
+/// The icon in the tray, or `None` where there is nowhere to put one.
+///
+/// **None of the ways there is nowhere is a reason to stop serving.** No screen
+/// at all — over SSH, in a container, under a test — is a Verkstead serving
+/// browsers elsewhere and nothing wrong with it; a screen that is named and
+/// cannot be opened, or a tray that will not take the icon, is a machine to say
+/// something about in the log. What is left in each case is the server and the
+/// viewer, which is the useful half of the app.
+///
+/// A desktop with no tray host running is *not* one of them: an appindicator
+/// registers on the bus whether or not anything is drawing it, so an icon
+/// nobody shows is one this cannot tell from an icon somebody does.
+///
+/// `viewer` is where Open sends the browser: the same URL that was opened at
+/// startup, now on demand.
+fn raise(viewer: &str) -> Option<TrayIcon> {
+    if !screen::there_is_one() {
+        tracing::info!("there is no screen here, so Verkstead is running as the server alone");
+        return None;
+    }
+
+    if let Err(error) = gtk::init() {
+        tracing::warn!(%error, "the desktop toolkit would not start, so there is no tray icon");
+        return None;
+    }
+
+    let viewer = viewer.to_owned();
+
+    let raised = tray::show(move |chosen| match chosen {
+        tray::Chosen::Open => {
+            // Said and carried on, for the reason the open at startup is: the
+            // viewer is reachable from every browser on the tailnet, and a
+            // desktop that would not open one is no reason to stop serving them.
+            if let Err(error) = browser::open(&viewer) {
+                tracing::warn!(%viewer, "{error:#}");
+            }
+        }
+        // Which ends the loop `run` is blocked on, and with it the process.
+        tray::Chosen::Exit => gtk::main_quit(),
+    });
+
+    match raised {
+        Ok(icon) => Some(icon),
+        Err(error) => {
+            tracing::warn!("{error:#}");
+            None
+        }
     }
 }
 

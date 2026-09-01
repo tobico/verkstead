@@ -69,6 +69,13 @@ nowhere else. An address something is already listening on — the command above
 say — is a dialog and a nonzero exit rather than a second Verkstead beside the
 first.
 
+What it puts on the screen is an icon in the system tray, and the menu on it is
+**Open** — the viewer again, in your browser — and **Exit**, which stops
+Verkstead where it stands the way stopping the systemd unit does. Run it where
+there is no screen to put an icon on, over SSH or under a test, and it is the
+server and the open and no more: a warning in the log, and everything else
+exactly as it was.
+
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
 `--build-cache-dir` says otherwise. Every sandboxed session gets it writable,

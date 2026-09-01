@@ -19,8 +19,16 @@ clap.workspace = true
 # artifact of the first one (ADR-0012). The headless `verkstead` links the same
 # library and carries none of what is below.
 verkstead-server = { path = "../server" }
+# The loop the tray lives on, which on Linux is GTK's own and wants the main
+# thread — see `Desktop::run`. The same 0.18 `muda` draws its menu with, so the
+# build carries one GTK crate rather than two.
+gtk = "0.18"
 # What the viewer is handed to: whatever this desktop opens a URL with.
 open = "5"
+# The tray takes its icon as pixels, so the PNG in `assets/icons/` is decoded on
+# the way in — see `tray::rgba`. Already in the build under `tray-icon`, which
+# writes those pixels back out as a PNG for the panel to load.
+png = "0.18"
 # The one thing this binary draws for itself — see `dialog`. GTK3 rather than
 # the portal rfd would reach for by default: it is the toolkit the tray is drawn
 # with, so the binary carries one toolkit rather than one per thing on screen,
@@ -33,6 +41,13 @@ tokio.workspace = true
 # Where the server's `tracing` goes is the starting binary's call as well.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The icon in the tray and the menu on it (ADR-0012), and `muda` under it. The
+# `gtk` feature is the Linux backend — an appindicator, drawn with the toolkit
+# `rfd` is already drawing the dialog with. Default features off drops the other
+# one, `libxdo`, which `muda` wants only for the accelerators on its predefined
+# items: this menu has neither, and carrying it would put a system library into
+# CI, the dev shell and the AppImage for nothing.
+tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
 
 [dev-dependencies]
 # The tests run the real binary, so what they check is what an icon starts.
