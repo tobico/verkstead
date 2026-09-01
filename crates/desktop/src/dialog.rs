@@ -1,13 +1,19 @@
 //! The two things this binary draws that carry words.
 //!
 //! Everything a human ever sees of Verkstead is the viewer in their browser and
-//! the icon in their tray, with two exceptions. A Verkstead that could not take
-//! its address has no viewer to say so in and no tray to say it from — and it
-//! was started from an icon rather than from a shell, so the message has
-//! nowhere else to go (ADR-0012). And a menu item that has nothing to do says
-//! so, rather than being picked and appearing to do nothing.
+//! the icon in their tray, and what is left over is here. A Verkstead that could
+//! not take its address has no viewer to say so in and no tray to say it from —
+//! and it was started from an icon rather than from a shell, so the message has
+//! nowhere else to go (ADR-0012). A menu item that has nothing to do says so,
+//! rather than being picked and appearing to do nothing. And a menu item that
+//! could not do what it was picked for says that, rather than leaving the human
+//! to find out at the next login.
 
 /// Put `message` on the screen as an error, and wait for it to be dismissed.
+///
+/// The address that could not be taken, and the Launch on Startup box that
+/// could not be written: a failure the human asked for and has to be told
+/// about, wherever it happened.
 ///
 /// GTK draws it, which is the toolkit the tray icon is drawn with too: one
 /// toolkit for the whole binary rather than one per thing on the screen, and

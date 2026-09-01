@@ -29,6 +29,12 @@
 //! started from an icon: there is no terminal for a stdout to be read in, so
 //! the server's `tracing` is written to the Log Directory and the tray gets the
 //! item that opens it — see [`logs`].
+//!
+//! **Whether it comes up again next login is the desktop's answer rather than
+//! Verkstead's.** The last item on the menu before Exit is a checkbox over the
+//! platform's own startup registration — read from it, written to it, and
+//! rewritten at every launch while it is there, with nothing of Verkstead's own
+//! keeping a second copy of the answer. See [`startup`].
 
 /// The two things this binary draws that carry words.
 pub mod dialog;
@@ -38,6 +44,8 @@ pub mod logs;
 pub mod opener;
 /// Whether this process has a screen to draw on.
 pub mod screen;
+/// Whether Verkstead comes up when the desktop session does.
+pub mod startup;
 /// The icon in the system tray, and what is on its menu.
 pub mod tray;
 
@@ -48,6 +56,13 @@ use std::sync::mpsc::sync_channel;
 use anyhow::{Context, Result};
 use tray_icon::TrayIcon;
 use verkstead_server::Config;
+
+/// What Verkstead is called wherever a platform asks for an identifier rather
+/// than a name (ADR-0012).
+///
+/// The tray's own id, and the name the startup registration is written under —
+/// one string, because a platform that was told two would have two Verksteads.
+pub const APP_ID: &str = "net.tobico.Verkstead";
 
 /// How the desktop app is started.
 ///
@@ -112,6 +127,14 @@ impl Desktop {
         // call, and this one was started from an icon — see [`logs`].
         let logging = logs::start();
 
+        // And before anything else this launch does, because it is about *this*
+        // launch: while the box is checked, the startup registration is
+        // rewritten with the path of the executable that is running, so a
+        // binary somebody moved heals its own registration the next time they
+        // start it by hand — see [`startup`].
+        let startup = startup::Startup::here();
+        startup.refresh();
+
         let viewer = viewer_url(self.server.listen);
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -134,7 +157,7 @@ impl Desktop {
             }
         }
 
-        let Some(tray) = raise(&viewer, &logging) else {
+        let Some(tray) = raise(&viewer, &logging, &startup) else {
             // No tray to be in, so this is `verkstead serve` with a browser
             // opened: the main thread waits on the server, and the process is
             // stopped the way that one is.
@@ -190,8 +213,9 @@ impl Desktop {
 ///
 /// `viewer` is where Open sends the browser: the same URL that was opened at
 /// startup, now on demand. `logging` is what View Logs opens, or what it says
-/// where this machine had nowhere to keep a log file.
-fn raise(viewer: &str, logging: &logs::Kept) -> Option<TrayIcon> {
+/// where this machine had nowhere to keep a log file. `startup` is the
+/// registration the Launch on Startup box is drawn from and written to.
+fn raise(viewer: &str, logging: &logs::Kept, startup: &startup::Startup) -> Option<TrayIcon> {
     if !screen::there_is_one() {
         tracing::info!("there is no screen here, so Verkstead is running as the server alone");
         return None;
@@ -204,8 +228,14 @@ fn raise(viewer: &str, logging: &logs::Kept) -> Option<TrayIcon> {
 
     let viewer = viewer.to_owned();
     let logging = logging.clone();
+    let startup = startup.clone();
 
-    let raised = tray::show(move |chosen| match chosen {
+    // What the box is ticked to as the menu is made, which is what the
+    // registration says right now — or nothing to tick, on a machine with
+    // nowhere to keep one.
+    let ticked = startup.possible().then(|| startup.on());
+
+    let raised = tray::show(ticked, move |chosen| match chosen {
         tray::Chosen::Open => {
             // Said and carried on, for the reason the open at startup is: the
             // viewer is reachable from every browser on the tailnet, and a
@@ -227,6 +257,21 @@ fn raise(viewer: &str, logging: &logs::Kept) -> Option<TrayIcon> {
             // the thing this machine has not got.
             logs::Kept::Nowhere(why) => dialog::note(why),
         },
+        tray::Chosen::LaunchOnStartup => {
+            // The registration is the state, so what the human has just asked
+            // for is the opposite of what it says — the item having ticked
+            // itself already, and the registration being what has to agree.
+            let wanted = !startup.on();
+
+            if let Err(error) = startup.set(wanted) {
+                tracing::warn!("{error:#}");
+                dialog::refusal(&format!("{error:#}"));
+            }
+
+            // Whatever actually holds, read back off the registration: a write
+            // that did not happen is a tick that goes back where it was.
+            tray::shows_launch_on_startup(startup.on());
+        }
         // Which ends the loop `run` is blocked on, and with it the process.
         tray::Chosen::Exit => gtk::main_quit(),
     });

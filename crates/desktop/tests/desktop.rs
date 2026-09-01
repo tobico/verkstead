@@ -4,7 +4,8 @@
 //!
 //! What is judged here is what the app does before anything else exists — it
 //! serves the viewer, it puts the viewer in front of the human unless told not
-//! to, it writes its log where a human can find it, and it refuses an address
+//! to, it writes its log where a human can find it, it puts right a startup
+//! registration naming a binary that has moved, and it refuses an address
 //! somebody else is already listening on without having made anything on the
 //! way.
 
@@ -177,6 +178,14 @@ fn command(opener: &Opener, home: &Path, env: &[(&str, &str)]) -> Command {
         // flag for it — so a machine that has one set is a machine whose own
         // state directory these tests would otherwise write into.
         .env_remove("XDG_STATE_HOME")
+        // And where the startup registration goes is the platform's answer
+        // alone as well, which matters more: a test that left this would be one
+        // that wrote into the autostart directory of whoever ran it.
+        .env_remove("XDG_CONFIG_HOME")
+        // An AppImage says where the file the human has is, and a machine
+        // running these tests out of one would otherwise have the registration
+        // named for it rather than for the binary the test built.
+        .env_remove("APPIMAGE")
         .env_remove("VERKSTEAD_LISTEN")
         .env_remove("VERKSTEAD_DATA_DIR")
         .env_remove("VERKSTEAD_WATCHED_PATHS");
@@ -492,4 +501,79 @@ fn nowhere_to_keep_a_log_file_serves_and_says_where_the_log_went() {
 
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// Where the startup registration goes on a machine that says nothing but where
+/// its home is, which is the XDG default and the case every desktop actually
+/// has.
+fn autostart_entry(home: &Path) -> PathBuf {
+    home.join(".config/autostart/net.tobico.Verkstead.desktop")
+}
+
+/// A binary that has moved leaves a registration naming where it used to be,
+/// and the next launch by hand is where that is put right — the whole of why
+/// this is "rewritten every launch" rather than "written once". The launch is an
+/// ordinary one in every other way: it serves, and it opens the viewer.
+#[test]
+fn a_launch_rewrites_a_startup_registration_that_names_somewhere_else() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(tmp.path());
+    let home = tmp.path().join("home");
+    let data_dir = tmp.path().join("data");
+    let port = free_port();
+
+    let entry = autostart_entry(&home);
+    std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
+    std::fs::write(
+        &entry,
+        "[Desktop Entry]\nType=Application\nName=Verkstead\n\
+         Exec=\"/somewhere/it/used/to/be/verkstead-desktop\" --no-open\n",
+    )
+    .unwrap();
+
+    let flags = flags(port, &data_dir);
+    let mut app = App::start(port, &opener, &home, &as_args(&flags), &[]);
+
+    opener.await_asked_for(&format!("http://127.0.0.1:{port}/"));
+
+    let registered = std::fs::read_to_string(&entry).unwrap();
+    assert!(
+        registered.contains(env!("CARGO_BIN_EXE_verkstead-desktop")),
+        "the registration should name the executable that is running, got:\n{registered}"
+    );
+    assert!(
+        !registered.contains("/somewhere/it/used/to/be/"),
+        "and not the one it was written for, got:\n{registered}"
+    );
+    assert!(
+        registered.contains("--no-open"),
+        "a login should not be handed a browser window, got:\n{registered}"
+    );
+
+    app.stop();
+}
+
+/// And a machine nobody asked to be started on is left alone: a launch rewrites
+/// what somebody asked for rather than deciding it for them, and the box is the
+/// only thing that ever registers Verkstead.
+#[test]
+fn a_launch_registers_nothing_nobody_asked_for() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(tmp.path());
+    let home = tmp.path().join("home");
+    let data_dir = tmp.path().join("data");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    let mut args = as_args(&flags);
+    args.push("--no-open");
+    let mut app = App::start(port, &opener, &home, &args, &[]);
+
+    assert!(
+        !autostart_entry(&home).exists(),
+        "{} should not be there",
+        autostart_entry(&home).display()
+    );
+
+    app.stop();
 }

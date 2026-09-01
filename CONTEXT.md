@@ -250,6 +250,24 @@ Not the Data Directory and not settable beside it: what `--data-dir` says has
 nothing to do with where this is.
 _Avoid_: state directory, logs dir, log file (that's what goes *in* it), cache
 
+**Startup Registration**:
+What says Verkstead comes up when the machine's desktop session does, and what
+**Launch on Startup** on the tray menu ticks and unticks. The platform's own,
+and the platform's alone: an XDG autostart entry named for the app id on Linux
+(`~/.config/autostart/net.tobico.Verkstead.desktop`), the Run key on Windows, a
+launch agent on macOS. **It is the state rather than a copy of it** — the box
+is drawn from reading it, checking writes it and unchecking removes it, and
+neither settings file has an entry for this or ever will: a human who turns it
+off with their desktop's own settings has unchecked the box, and Verkstead
+agrees with them rather than argues. **Every launch rewrites it while it is
+there**, with the path of the executable that is running, so a binary that was
+moved — downloaded again elsewhere, an AppImage put somewhere else — heals its
+own registration the next time it is started by hand; a machine that never
+asked for one is left alone. What it starts is an ordinary launch of the app
+with the browser left alone, because a login is not a moment to be handed a
+browser window.
+_Avoid_: autostart setting, startup preference, run at login option
+
 **Companion Repo**:
 Another registered Repo a Conversation is given to work alongside its own,
 **read-only** or **read-write**, checked out beside the Conversation's own

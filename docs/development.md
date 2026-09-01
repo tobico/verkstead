@@ -70,11 +70,22 @@ say — is a dialog and a nonzero exit rather than a second Verkstead beside the
 first.
 
 What it puts on the screen is an icon in the system tray, and the menu on it is
-**Open** — the viewer again, in your browser — and **Exit**, which stops
-Verkstead where it stands the way stopping the systemd unit does. Run it where
-there is no screen to put an icon on, over SSH or under a test, and it is the
-server and the open and no more: a warning in the log, and everything else
-exactly as it was.
+**Open** — the viewer again, in your browser — **View Logs**, which opens the
+file the server's log goes to instead of a stdout nobody launched from an icon
+will read, **Launch on Startup**, and **Exit**, which stops Verkstead where it
+stands the way stopping the systemd unit does. Run it where there is no screen
+to put an icon on, over SSH or under a test, and it is the server and the open
+and no more: a warning in the log, and everything else exactly as it was.
+
+**Launch on Startup** is a checkbox over your desktop's own autostart entry —
+`~/.config/autostart/net.tobico.Verkstead.desktop` here — and that file is the
+whole of the state: checking the box writes it, unchecking removes it, turning
+it off in your desktop's own settings unchecks it, and no setting of
+Verkstead's own keeps a second copy of the answer. Every launch rewrites it
+while it is there, with the path of the executable that is running, so a binary
+you moved heals its own entry the next time you start it by hand. What it
+writes starts the app with `--no-open`: a login is not a moment to be handed a
+browser window.
 
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless

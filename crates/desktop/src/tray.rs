@@ -6,9 +6,16 @@
 //! itself: put the viewer back in front of the human, and stop the process that
 //! is serving it.
 //!
-//! **The menu is short on purpose.** An item that does nothing is a worse first
-//! impression than a menu that is honestly short, so what is on it is what
-//! works — Launch on Startup arrives with the thing that makes it work.
+//! **The menu is short on purpose**, and it is now all of it: Open, View Logs,
+//! Launch on Startup and Exit, each arrived with the thing that makes it work.
+//! An item that does nothing is a worse first impression than a menu that is
+//! honestly short.
+//!
+//! **One of them is a checkbox rather than a button**, and it is drawn from
+//! [`crate::startup`] rather than from anything this module keeps: the platform
+//! registration is the state, so what the tick says is read at the moment the
+//! menu is made, and put right again after it is picked — see
+//! [`shows_launch_on_startup`].
 //!
 //! **Linux draws it as an appindicator**, which is a menu and nothing else: the
 //! panel opens the menu when the icon is clicked and reports no click of its
@@ -18,16 +25,15 @@
 //! has it run that same action, so the icon and its menu never mean two
 //! different things.
 
+use std::cell::RefCell;
 use std::io::Cursor;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem};
+use tray_icon::menu::{CheckMenuItem, IsMenuItem, Menu, MenuEvent, MenuId, MenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
-/// What the tray calls itself, which is what Verkstead is called everywhere a
-/// platform asks for an identifier rather than a name (ADR-0012).
-const APP_ID: &str = "net.tobico.Verkstead";
+use crate::APP_ID;
 
 /// The artwork, in the binary rather than beside it.
 ///
@@ -51,6 +57,10 @@ pub enum Chosen {
     /// Put this run's log in front of them instead — see [`crate::logs`] for
     /// why a tray app has one at all.
     ViewLogs,
+    /// Turn starting Verkstead with the desktop session on, or off — the one
+    /// item that is a checkbox, and see [`crate::startup`] for what the tick
+    /// stands for.
+    LaunchOnStartup,
     /// Stop Verkstead.
     Exit,
 }
@@ -59,14 +69,21 @@ impl Chosen {
     /// The menu, in the order it is drawn.
     ///
     /// Open first because it is the default action, and the first item is what
-    /// a menu means by default.
-    pub const MENU: [Chosen; 3] = [Chosen::Open, Chosen::ViewLogs, Chosen::Exit];
+    /// a menu means by default. Exit last for the same reason in reverse, with
+    /// the two that are neither between them.
+    pub const MENU: [Chosen; 4] = [
+        Chosen::Open,
+        Chosen::ViewLogs,
+        Chosen::LaunchOnStartup,
+        Chosen::Exit,
+    ];
 
     /// What the item says.
     pub fn label(self) -> &'static str {
         match self {
             Chosen::Open => "Open",
             Chosen::ViewLogs => "View Logs",
+            Chosen::LaunchOnStartup => "Launch on Startup",
             Chosen::Exit => "Exit",
         }
     }
@@ -81,6 +98,7 @@ impl Chosen {
         match self {
             Chosen::Open => "open",
             Chosen::ViewLogs => "view-logs",
+            Chosen::LaunchOnStartup => "launch-on-startup",
             Chosen::Exit => "exit",
         }
     }
@@ -97,16 +115,53 @@ impl Chosen {
     }
 }
 
+thread_local! {
+    /// The Launch on Startup item, kept where the handler that has to correct
+    /// it can reach it.
+    ///
+    /// **On the thread rather than in the handler**, because the two ends will
+    /// not meet any other way: muda's menu items are not `Send` and the handler
+    /// it takes must be. They are the same thread anyway — the loop's, which is
+    /// where the events are raised and where everything drawn is spoken to —
+    /// which is the whole of why keeping it here works.
+    static LAUNCH_ON_STARTUP: RefCell<Option<CheckMenuItem>> = const { RefCell::new(None) };
+}
+
+/// Draw the Launch on Startup item as `on`.
+///
+/// For whoever handled [`Chosen::LaunchOnStartup`] to call once it knows what
+/// actually holds: the item has already ticked itself by the time the pick is
+/// reported, and a registration that was not written is a tick that has to go
+/// back where it was. Called from the loop's thread, which is where the
+/// handling happens; anywhere else it draws nothing and says nothing, the item
+/// not being that thread's to have.
+pub fn shows_launch_on_startup(on: bool) {
+    LAUNCH_ON_STARTUP.with(|item| {
+        if let Some(item) = item.borrow().as_ref() {
+            item.set_checked(on);
+        }
+    });
+}
+
 /// Put the icon in the tray, and call `chosen` with whatever is picked off it.
 ///
 /// **`chosen` runs on the thread the loop is on**, which is where it has to
 /// run: ending the loop is one of the two things it does, and GTK is only ever
 /// spoken to from the thread that started it.
 ///
+/// `startup` is what the Launch on Startup box is ticked to as the menu is
+/// made, or `None` where this machine has nowhere to keep the registration the
+/// tick would stand for — where the item is drawn greyed rather than left off,
+/// so that the menu says what Verkstead can do and what it cannot rather than
+/// only one of the two.
+///
 /// The [`TrayIcon`] that comes back *is* the icon — dropping it takes it out of
 /// the tray — so the caller holds it for as long as there is an app to have
 /// one.
-pub fn show(chosen: impl Fn(Chosen) + Send + Sync + 'static) -> Result<TrayIcon> {
+pub fn show(
+    startup: Option<bool>,
+    chosen: impl Fn(Chosen) + Send + Sync + 'static,
+) -> Result<TrayIcon> {
     // First, because it is the one step here that can fail on its own account
     // and the rest of this sets handlers that are the process's rather than
     // this call's — a refusal is worth having before any of that.
@@ -115,8 +170,22 @@ pub fn show(chosen: impl Fn(Chosen) + Send + Sync + 'static) -> Result<TrayIcon>
     let menu = Menu::new();
 
     for offered in Chosen::MENU {
-        let item = MenuItem::with_id(offered.id(), offered.label(), true, None);
-        menu.append(&item)
+        let item: Box<dyn IsMenuItem> = match offered {
+            Chosen::LaunchOnStartup => {
+                let item = CheckMenuItem::with_id(
+                    offered.id(),
+                    offered.label(),
+                    startup.is_some(),
+                    startup.unwrap_or(false),
+                    None,
+                );
+                LAUNCH_ON_STARTUP.with(|kept| *kept.borrow_mut() = Some(item.clone()));
+                Box::new(item)
+            }
+            _ => Box::new(MenuItem::with_id(offered.id(), offered.label(), true, None)),
+        };
+
+        menu.append(item.as_ref())
             .with_context(|| format!("putting {} on the tray's menu", offered.label()))?;
     }
 
@@ -200,10 +269,10 @@ mod tests {
     /// The menu as it is drawn, which on a machine with no screen is the only
     /// part of the drawing there is to check.
     #[test]
-    fn the_menu_is_open_then_the_log_and_then_exit() {
+    fn the_menu_is_open_the_log_the_startup_box_and_then_exit() {
         assert_eq!(
             Chosen::MENU.map(Chosen::label),
-            ["Open", "View Logs", "Exit"]
+            ["Open", "View Logs", "Launch on Startup", "Exit"]
         );
     }
 
