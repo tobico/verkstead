@@ -15,8 +15,8 @@
 #
 # This directory is entirely this script's output: it is rewritten from nothing
 # on every run, so a size that stops being generated stops being committed.
-# Stages 04 and 05 add the macOS .icns and the Windows .ico here, from the same
-# artwork and the same run.
+# The macOS .icns is written here too, from the same artwork and the same run;
+# stage 05 adds the Windows .ico beside it.
 #
 # ImageMagick and desktop-file-utils come from the dev shell, so run this under
 # `nix develop` — or as `nix develop --command tools/generate-packaging.sh`.
@@ -83,3 +83,72 @@ for size in 16 24 32 48 64 128 256 512; do
   magick "$ARTWORK" -filter Lanczos -background none \
     -resize "${size}x${size}" -strip "$apps/$APP_ID.png"
 done
+
+# The macOS icon, which is those same downscales again inside the one container
+# macOS reads an app's icon out of — `Verkstead.app/Contents/Resources`, put
+# there by tools/build-macos-dmg.sh.
+#
+# Written here rather than handed to `iconutil` because that tool is a Mac's and
+# this script runs wherever the dev shell does, while the format is a header and
+# one chunk per size: `icns`, the file's own length, and then a four-character
+# type, a length and a PNG for each. Nothing about it is Apple-only but the
+# reader.
+#
+# macOS asks for a slot by name rather than for the nearest size, so the @2x
+# slots are named as well as the plain ones, each filled by the downscale of the
+# pixel size it asks for. That the two are the same file is what an .iconset
+# built from this artwork would give it too: there is one drawing and everything
+# is a downscale of it. Nothing fills 512@2x — `ic10` is 1024 square and the
+# artwork is 545.
+ICNS_CHUNKS="
+icp4 16   16pt
+ic11 32   16pt@2x
+icp5 32   32pt
+ic12 64   32pt@2x
+ic07 128  128pt
+ic13 256  128pt@2x
+ic08 256  256pt
+ic14 512  256pt@2x
+ic09 512  512pt
+"
+
+ICNS="$OUT/$APP_ID.icns"
+
+# The PNG a chunk carries, which is the one already written above: the icns is a
+# repackaging of the committed tree rather than a second pass over the artwork,
+# so the icon a Mac draws and the icon a Linux panel draws are the same pixels.
+icns_png() { printf '%s' "$OUT/icons/hicolor/${1}x${1}/apps/$APP_ID.png"; }
+
+# Four bytes, most significant first — the only number this format has. Printed
+# as escapes for a second printf to write, because that is how a shell puts a
+# byte it cannot name into a file.
+be32() {
+  printf '\\x%02x\\x%02x\\x%02x\\x%02x' \
+    $(($1 >> 24 & 255)) $(($1 >> 16 & 255)) $(($1 >> 8 & 255)) $(($1 & 255))
+}
+
+# The header's length counts the whole file, so it is known only once every
+# chunk's is: eight bytes of header, and eight plus a PNG for each chunk.
+total=8
+while read -r type size _; do
+  [ -n "$type" ] || continue
+  total=$((total + 8 + $(wc -c < "$(icns_png "$size")")))
+done <<< "$ICNS_CHUNKS"
+
+printf 'icns' > "$ICNS"
+printf "$(be32 "$total")" >> "$ICNS"
+while read -r type size _; do
+  [ -n "$type" ] || continue
+  png="$(icns_png "$size")"
+  printf '%s' "$type" >> "$ICNS"
+  printf "$(be32 $((8 + $(wc -c < "$png"))))" >> "$ICNS"
+  cat "$png" >> "$ICNS"
+done <<< "$ICNS_CHUNKS"
+
+# Read back, as the desktop entry is: a reader takes the header's length as the
+# file's own and stops there when it disagrees, so an icon that is a byte out is
+# an icon that never draws and nothing else here would notice.
+if [ "$(wc -c < "$ICNS")" -ne "$total" ]; then
+  printf '%s\n' "$ICNS is $(wc -c < "$ICNS") bytes and claims $total." >&2
+  exit 1
+fi

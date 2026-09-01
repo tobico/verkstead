@@ -425,16 +425,29 @@ $ nix fmt                 # the Nix files
 $ nix flake check         # the viewer's suite, and the NixOS module in a VM
 
 $ tools/generate-icons.sh     # the favicon and PWA icons, after replacing the artwork
-$ tools/generate-packaging.sh # the desktop entry and the launcher icons, from the same
+$ tools/generate-packaging.sh # the desktop entry, the launcher icons and the icns
 $ tools/build-appimage.sh     # Verkstead-x86_64.AppImage, once the viewer is built
+$ tools/build-macos-dmg.sh    # Verkstead-universal.dmg, on a Mac
 ```
 
-The last one is the Linux desktop artifact a release ships, and it is the same
-command CI runs — the desktop binary, the packaging assets and every library the
-tray is drawn over, in one file under `target/appimage/`. It builds what
-`cargo build --release -p verkstead-desktop` builds, so it wants the dev shell
-for the same reason that does, and it wants `web/dist` already built because the
-viewer is compiled in.
+The last two are the desktop artifacts a release ships, one per platform. Both
+take everything from the working tree and leave one file under `target/`, and
+both want `web/dist` already built, because the viewer is compiled into the
+binary they wrap.
+
+The AppImage is the desktop binary, the packaging assets and every library the
+tray is drawn over, in one file, and it is the same command CI runs. It builds
+what `cargo build --release -p verkstead-desktop` builds, so it wants the dev
+shell for the same reason that does.
+
+The dmg is `Verkstead.app` — the same binary built for both Apple targets and
+`lipo`-ed into one, the icns from `packaging/`, and an `Info.plist` that says
+`net.tobico.Verkstead` and `LSUIElement`, which is what makes it a menu-bar app
+with no Dock tile. It runs on a Mac only: `lipo`, `codesign` and `hdiutil` are
+the operating system's own tools, and there is no cross build of it from here.
+The bundle is ad-hoc signed rather than signed with a Developer ID, because
+Apple silicon will not execute a binary with no signature at all — that is not
+the signing that gets an app past Gatekeeper, and there is none of that.
 
 ### The sessions suite, and the machine under it
 
@@ -572,13 +585,19 @@ at the web root and, because the viewer is embedded, carried inside every binary
 including the headless CLI — and a desktop entry and a launcher's icons are
 neither the viewer's to serve nor the CLI's to hold. So the desktop packaging
 gets a directory of its own: `net.tobico.Verkstead.desktop` and the hicolor icon
-tree that `tools/build-appimage.sh` installs into the AppImage, and the macOS
-and Windows launcher artwork beside them when those stages land. It is written
-by [`tools/generate-packaging.sh`](../tools/generate-packaging.sh) from the same
-hammer, and committed for the same reason the viewer's icons are. That script
-rewrites the whole directory from nothing on every run — so a size that stops
-being generated stops being committed, and nothing under it is ever edited by
-hand.
+tree that `tools/build-appimage.sh` installs into the AppImage,
+`net.tobico.Verkstead.icns` that `tools/build-macos-dmg.sh` puts in the app
+bundle, and the Windows launcher artwork beside them when that stage lands. It
+is written by [`tools/generate-packaging.sh`](../tools/generate-packaging.sh)
+from the same hammer, and committed for the same reason the viewer's icons are.
+That script rewrites the whole directory from nothing on every run — so a size
+that stops being generated stops being committed, and nothing under it is ever
+edited by hand.
+
+The icns is written by the script itself rather than by `iconutil`, which is a
+Mac's: the format is a header and a PNG per icon slot, so it is generated in the
+dev shell alongside everything else here rather than on the one platform that
+reads it.
 
 The tests run the real server in-process, so the round trip they check is the
 one an agent gets — including the quickstart above, whose example files
