@@ -264,18 +264,28 @@ jobs:
           path: web/dist
 
       # None of these are on the runner image by declaration, so they are
-      # installed rather than hoped for. The first two are what `crates/desktop`
-      # links and what `ci.yml` installs to build the workspace at all — the
-      # toolkit, and the tray protocol over it. The other two are the bundling's
-      # own: `mksquashfs` makes the filesystem an AppImage is, and `fusermount3`
-      # is what the AppImage runtime mounts it back with, which is what lets the
-      # assertions below run the artifact itself rather than something unpacked
-      # out of it.
+      # installed rather than hoped for, in three groups.
+      #
+      # The first two are what `crates/desktop` links and what `ci.yml` installs
+      # to build the workspace at all — the toolkit, and the tray protocol over
+      # it. The next two are the bundling's own: `mksquashfs` makes the
+      # filesystem an AppImage is, and `fusermount3` is what the AppImage
+      # runtime mounts it back with, which is what lets the assertions below run
+      # the artifact itself rather than something unpacked out of it.
+      #
+      # The last two are what the tray is asserted on, and nothing builds or
+      # bundles with them: a runner has no screen and no session bus, and
+      # without both the app takes its no-screen path and the bundled toolkit is
+      # never loaded at all — see the assertion for what that would leave
+      # unchecked. `dbus-x11` is asked for rather than `dbus-run-session`'s own
+      # package, because it depends on it under a name that has moved between
+      # releases and this one has not.
       - name: Install the desktop app's toolkit
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libgtk-3-dev \
-            libayatana-appindicator3-dev squashfs-tools fuse3
+            libayatana-appindicator3-dev squashfs-tools fuse3 \
+            xvfb dbus-x11
 
       # The same pin as everywhere else, and no `targets`: this leg builds for
       # the runner it is on. The toolkit is linked rather than compiled in, so
@@ -305,25 +315,77 @@ jobs:
       - name: The AppImage runs
         run: ./"$APPIMAGE" --help
 
-      # And answers as the file a human downloads: with the viewer, rather than
-      # the 503 an empty embed serves. The same claim the CLI legs make of their
-      # own binaries, made the same way, and `--retry-connrefused` rather than a
-      # sleep for the same reason — the app is up when it answers.
+      # The two halves of what a human downloads this file for, asserted on one
+      # run of it: a tray icon, and the viewer behind it.
       #
-      # There is no screen on a runner and none is needed: with `$DISPLAY` unset
-      # there is nowhere to put a tray icon, which the app reads as a session
-      # without a tray rather than as a failure and serves anyway — see
-      # `crates/desktop/src/screen.rs`. `--no-open` is the other half of it,
-      # there being no browser here to hand a URL to.
-      - name: The viewer is inside the AppImage
+      # **A screen, deliberately.** A runner has none, and a Verkstead started
+      # without one reads that as a session with nowhere to put an icon, serves
+      # anyway, and never calls `gtk::init` — see `crates/desktop/src/screen.rs`.
+      # Which would leave every library the bundle carries for the tray's sake
+      # unopened by this leg, the appindicator included: that one is loaded by
+      # name at runtime, so it is absent from `ldd` and is copied in by hand by
+      # `tools/build-appimage.sh`, and nothing but a run with a screen would ever
+      # find out whether the copy was the right file. So Xvfb is started and
+      # `$DISPLAY` points at it, and the app is run under a session bus of its
+      # own, which is where an appindicator registers itself.
+      #
+      # `--no-open` stays: a screen is not a browser, and there is still nothing
+      # here to hand a URL to.
+      #
+      # **The log is where the answer is.** Nothing about the tray is visible
+      # from outside the process, so the app says so itself — one line on the way
+      # up, and a warning on each of the ways it can end without an icon — and
+      # `$XDG_STATE_HOME` is set so the file it says it in is somewhere this step
+      # knows. See `crates/desktop/src/lib.rs`.
+      #
+      # `--retry-connrefused` rather than a sleep, as in the CLI legs: the app is
+      # up when it answers.
+      #
+      # **Bounded**, which the headless run had no need to be: the failures this
+      # app draws it has a screen for are drawn as dialogs, and a dialog waits
+      # for somebody to dismiss it. Nobody is here, so a run that got that far
+      # would hold the job until the runner's own six hours were up rather than
+      # failing in front of whoever tagged.
+      - name: The tray comes up, and the viewer is inside the AppImage
+        timeout-minutes: 5
+        env:
+          XDG_STATE_HOME: ${{ runner.temp }}/state
         run: |
-          ./"$APPIMAGE" --no-open --listen 127.0.0.1:8422 \
+          Xvfb :99 -screen 0 1024x768x24 &
+          screen=$!
+          export DISPLAY=:99
+          # The socket is what says the display is up, and a toolkit started
+          # before it is there is a toolkit that will not start. Spelled as an
+          # `if` rather than a `&&`, which under `set -e` would end the step on
+          # the first turn round the loop that found nothing.
+          for _ in $(seq 50); do
+            if [ -e /tmp/.X11-unix/X99 ]; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          log="$XDG_STATE_HOME/verkstead/verkstead.log"
+          dbus-run-session -- ./"$APPIMAGE" --no-open --listen 127.0.0.1:8422 \
             --data-dir "$RUNNER_TEMP/desktop" &
           app=$!
           document=$(curl --fail --silent --show-error \
             --retry 10 --retry-delay 1 --retry-connrefused \
             http://127.0.0.1:8422/)
-          kill "$app"
+
+          # The icon is raised on the main thread while the server comes up on
+          # another, so the viewer answering is no promise that the tray has
+          # finished either way yet. Waited for here rather than read after the
+          # kill, where whichever won the race would be the answer.
+          for _ in $(seq 50); do
+            if grep -q "Verkstead is in the tray" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          kill "$app" "$screen"
+
           # As in the CLI legs: an absent viewer is a 503 that `--fail` has
           # already caught, and this is the rest of it — the document vite wrote
           # names the hashed bundle beside it, and the fallback names nothing.
@@ -335,6 +397,17 @@ jobs:
               exit 1
               ;;
           esac
+
+          # And the tray, out of the app's own log. Read for the line rather than
+          # against the warnings, so that a log which was never written — no log
+          # directory, and the events on a standard error nobody kept — fails
+          # here rather than passing for want of anything to find in it.
+          if ! grep -q "Verkstead is in the tray" "$log" 2> /dev/null; then
+            echo "::error::The AppImage did not raise a tray icon."
+            cat "$log" 2> /dev/null || echo "There is no log at $log."
+            exit 1
+          fi
+          cat "$log"
 
       # Under an artifact name that says which desktop this is rather than what
       # the file is called. `publish` fetches the CLI binaries by a

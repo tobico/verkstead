@@ -280,7 +280,18 @@ fn raise(viewer: &str, logging: &logs::Kept, startup: &startup::Startup) -> Opti
     });
 
     match raised {
-        Ok(icon) => Some(icon),
+        Ok(icon) => {
+            // Said on the way through, where each of the two refusals above is
+            // said: the log is the only mark any of this leaves, and a reader
+            // who has been told what *would* have gone wrong is owed the line
+            // saying nothing did. It is also what the release workflow's
+            // desktop leg reads to know that the bundle it has just built can
+            // raise a tray at all — a headless run reaches neither the toolkit
+            // nor the appindicator, so this line is the whole of what tells the
+            // two apart. See `.github/workflows/release.yml`.
+            tracing::info!("Verkstead is in the tray");
+            Some(icon)
+        }
         Err(error) => {
             tracing::warn!("{error:#}");
             None
