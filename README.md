@@ -13,13 +13,22 @@ separate, maintained product; Verkstead diverges freely from it.
 
 ## Status
 
-**Early, private, and unreleased.** There is no binary to download — the flake
-builds it and the NixOS module runs it. The workbench, the sandboxed sessions,
-the task-list and roadmap pipelines and the per-PR wrap-up are built; what has
-not happened yet is a real repository driven through them end to end, which is
-where [adoption](docs/adoption.md) stands.
+**Early, private, and unreleased.** There is nothing to download yet. The
+workbench, the sandboxed sessions, the task-list and roadmap pipelines and the
+per-PR wrap-up are built; what has not happened yet is a real repository driven
+through them end to end, which is where [adoption](docs/adoption.md) stands.
 
-NixOS only for now: Linux and bwrap are a hard requirement.
+What a tag will produce is two ways in rather than one, and neither is a
+replacement for the other. On a host that is always on, the flake builds the
+headless daemon and the NixOS module runs it. On a Linux desktop,
+`Verkstead-x86_64.AppImage` is that same server started from an icon: the viewer
+in your browser and a tray icon over it — or no icon at all where the desktop
+has no tray host, vanilla GNOME being the case people meet, and it serves just
+the same. Which of the two you want is
+[adoption](docs/adoption.md#getting-it-running).
+
+Linux for now: bwrap is a hard requirement, and the daemon install is the
+NixOS module's.
 
 ## Where things are written down
 
@@ -40,7 +49,7 @@ request.
 and the loop for working on Verkstead itself.
 
 **[Releasing](docs/releasing.md)** — how a tag would become the published
-binaries. Nothing has been released under this name yet.
+binaries and the AppImage. Nothing has been released under this name yet.
 
 ## License
 

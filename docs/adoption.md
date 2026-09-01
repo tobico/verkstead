@@ -42,8 +42,21 @@ wrappers that launched it — see [The old tools](#the-old-tools).
 
 ## Getting it running
 
-Nothing has been released under this name yet, so the flake is the whole of the
-install. On a NixOS host, import it and enable the service:
+Nothing has been released under this name yet, so what follows is what a `v*`
+tag produces rather than something to fetch today — [releasing.md](releasing.md)
+says what a tag builds and where it puts it.
+
+There are two ways in, and they are two different things rather than two
+spellings of one. **The flake and the NixOS module run the headless daemon**, on
+a machine that is always on and answering from wherever you are. **The AppImage
+is the same server started from an icon**, on the Linux desktop in front of you,
+with the viewer in your browser and a tray icon over it. Which one you want is
+which of those two machines you were describing; both at once is two Verksteads,
+and the second to reach port 8422 says so in a dialog and exits.
+
+### The daemon, on NixOS
+
+On a NixOS host, import the flake and enable the service:
 
 ```nix
 services.verkstead = {
@@ -109,6 +122,36 @@ settings files.
 The server binds loopback and speaks plain HTTP. Answering from a phone needs
 HTTPS, which is `tailscale serve --bg 8422` in front of it — and push
 notifications need that HTTPS to work at all.
+
+### The desktop app, on a Linux machine
+
+`Verkstead-x86_64.AppImage` is one file holding the server, the viewer and every
+library the tray is drawn over, so a machine that has none of them installed
+needs nothing but the file. x86_64 only: an arm64 Linux desktop has the bare CLI
+and `verkstead serve`. Downloaded, made executable — a Release asset carries no
+mode — and run, it serves on `127.0.0.1:8422`, opens the viewer in the default
+browser, and puts an icon in the tray with the four things a browser tab cannot
+do for itself: **Open** brings the viewer back, **View Logs** opens the file the
+server's logging goes to when there is no terminal to print it in, **Launch on
+Startup** is a checkbox over the desktop's own startup registration, and
+**Exit** stops the server. `--no-open` starts it without the browser, and
+`--data-dir` moves the Data Directory off `~/.local/share/verkstead`.
+
+**A desktop with no tray host shows no icon, and nothing is wrong.** Vanilla
+GNOME is the case people meet — it draws no tray, and an AppIndicator extension
+is what gives it one. Verkstead cannot tell that from a tray that is drawing the
+icon, because the appindicator registers on the bus either way, so there is no
+message it could honestly give you. What it does instead is what it does
+everywhere: serve, and open the viewer. The viewer is the whole interface — the
+tray holds those four items and nothing else — so what is lost is the icon
+rather than the app: the viewer is a URL you already have, the log file is in
+the platform's log directory, and stopping it is stopping the process. The
+extension is what gets the four back, and there is nothing to reinstall or
+reconfigure here once it is on.
+
+Sessions need bubblewrap either way in, and it is the machine's rather than the
+bundle's: the NixOS module puts it on the service's path, and a desktop
+elsewhere wants the distribution's `bubblewrap` package installed.
 
 Out of a checkout instead — the same server, told `--data-dir .` so that
 `verkstead.db` and the rest land in the checkout rather than in the platform
