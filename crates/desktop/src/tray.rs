@@ -15,7 +15,9 @@
 //! [`crate::startup`] rather than from anything this module keeps: the platform
 //! registration is the state, so what the tick says is read at the moment the
 //! menu is made, and put right again after it is picked — see
-//! [`shows_launch_on_startup`].
+//! [`shows_launch_on_startup`]. What is *asked for* by picking it is the item's
+//! own tick rather than that reading over again, because the two can have come
+//! apart in between — see [`launch_on_startup_shows`].
 //!
 //! **Linux draws it as an appindicator**, which is a menu and nothing else: the
 //! panel opens the menu when the icon is clicked and reports no click of its
@@ -125,6 +127,21 @@ thread_local! {
     /// where the events are raised and where everything drawn is spoken to —
     /// which is the whole of why keeping it here works.
     static LAUNCH_ON_STARTUP: RefCell<Option<CheckMenuItem>> = const { RefCell::new(None) };
+}
+
+/// What the Launch on Startup item is ticked to, or `None` where this thread
+/// has no item to read — the item not being that thread's to have, and nobody
+/// having made one at all where the tray could not be raised.
+///
+/// **After a pick, this is what the human just asked for**: the item ticks
+/// itself before the pick is reported, so what it shows is the state they were
+/// reaching for rather than the one the menu was drawn from. The two are not
+/// always the same — a desktop's own settings can turn the registration off
+/// while Verkstead is running, and the menu is drawn once — and reading the
+/// registration instead would have such a pick doing the opposite of what the
+/// box in front of them said.
+pub fn launch_on_startup_shows() -> Option<bool> {
+    LAUNCH_ON_STARTUP.with(|item| item.borrow().as_ref().map(CheckMenuItem::is_checked))
 }
 
 /// Draw the Launch on Startup item as `on`.

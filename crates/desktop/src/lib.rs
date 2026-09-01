@@ -258,10 +258,13 @@ fn raise(viewer: &str, logging: &logs::Kept, startup: &startup::Startup) -> Opti
             logs::Kept::Nowhere(why) => dialog::note(why),
         },
         tray::Chosen::LaunchOnStartup => {
-            // The registration is the state, so what the human has just asked
-            // for is the opposite of what it says — the item having ticked
-            // itself already, and the registration being what has to agree.
-            let wanted = !startup.on();
+            // What the box in front of them now says, which is what they were
+            // reaching for: the item ticks itself before the pick is reported.
+            // Read from the item rather than inverted from the registration,
+            // because the menu is drawn once and a desktop's own settings can
+            // turn the registration off underneath it — and then an inverted
+            // read would register Verkstead for somebody who was unticking it.
+            let wanted = tray::launch_on_startup_shows().unwrap_or(!startup.on());
 
             if let Err(error) = startup.set(wanted) {
                 tracing::warn!("{error:#}");
