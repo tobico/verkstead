@@ -23,6 +23,6 @@ lands in whichever runs first — 04 as ordered — and the other reuses it.
 
 - [x] 01: Platform directories — [brief](01-platform-directories.md)
 - [x] 02: The desktop crate and the Linux tray — [brief](02-desktop-crate.md)
-- [ ] 03: AppImage and the release legs — [brief](03-appimage.md) *(in progress: `desktop/03-appimage`)*
+- [x] 03: AppImage and the release legs — [brief](03-appimage.md)
 - [ ] 04: macOS bundle and dmg — [brief](04-macos-dmg.md)
 - [ ] 05: Windows port and portable exe — [brief](05-windows-exe.md)
