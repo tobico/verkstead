@@ -550,7 +550,7 @@ and every platform:
 | Artwork | Cut into | Why it is its own file |
 | --- | --- | --- |
 | `icons/verkstead.png` | `icon-192`, `icon-512` | The full mark on a transparent field: the manifest's icons, and the sidebar's at `3rem` |
-| `icons/verkstead-hammer.png` | `icon-32` | The hammer alone — at 32px the full mark is a grey smudge with confetti on it, and no filter rescues artwork with too much in it for the size |
+| `icons/verkstead-hammer.png` | `icon-32`, and every icon under `packaging/` | The hammer alone — at 32px the full mark is a grey smudge with confetti on it, and no filter rescues artwork with too much in it for the size |
 | `icons/verkstead-bg.jpg` | `apple-touch-icon.png` | The only one drawn with a field of its own, because iOS composites a transparent icon onto black |
 
 The iOS icon used to be the full mark flattened onto the manifest's
@@ -561,6 +561,20 @@ The manifest asks for `any` rather than `any maskable`: the artwork runs to the
 edges of its square, and a launcher masking it to a circle would cut the hammer
 and the anvil's horn off. Art with a margin inside it could claim `maskable`
 back.
+
+`packaging/` is the second tree of generated assets, and it sits outside
+`assets/` deliberately. Everything under that directory is `publicDir` — served
+at the web root and, because the viewer is embedded, carried inside every binary
+including the headless CLI — and a desktop entry and a launcher's icons are
+neither the viewer's to serve nor the CLI's to hold. So the desktop packaging
+gets a directory of its own: `net.tobico.Verkstead.desktop` and the hicolor icon
+tree that `tools/build-appimage.sh` installs into the AppImage, and the macOS
+and Windows launcher artwork beside them when those stages land. It is written
+by [`tools/generate-packaging.sh`](../tools/generate-packaging.sh) from the same
+hammer, and committed for the same reason the viewer's icons are. That script
+rewrites the whole directory from nothing on every run — so a size that stops
+being generated stops being committed, and nothing under it is ever edited by
+hand.
 
 The tests run the real server in-process, so the round trip they check is the
 one an agent gets — including the quickstart above, whose example files
