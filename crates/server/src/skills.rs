@@ -1016,8 +1016,14 @@ mod tests {
             grilling(&skills, "# Rate limiting\n").contains(&skills.named(GRILLING)),
             "a prompt names the skill by the path this installation put it at",
         );
+        // And there is a file at the far end of it. Held against what was
+        // written rather than against what the prompt says, because the two are
+        // the same file seen from two sides: on a Mac the prompt names the host
+        // path and this reads that, and on Linux it names the mount, which the
+        // bind makes for the sandbox and which the host running this has no
+        // reason to have.
         assert!(
-            std::fs::read_to_string(skills.named(GRILLING)).is_ok(),
+            skills.path().join(GRILLING).is_file(),
             "and that path is a file a session can open",
         );
     }
