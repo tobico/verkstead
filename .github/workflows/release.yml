@@ -19,9 +19,12 @@ name: Release
 #
 # The rehearsal is here because the only other way to find out whether a leg
 # works would be to publish. It builds every artifact and runs every assertion,
-# while the two jobs that write — the Release and the manifest commit — are
-# gated on the ref actually being a tag, so a dispatched run stops after the
-# building. See the `if` on each of them.
+# while the two jobs that write — the Release and the manifest commit — run for
+# a pushed tag and nothing else, so a run started by hand stops after the
+# building. Asked of the event rather than of the ref, because
+# `workflow_dispatch` takes a tag as readily as a branch: gated on the ref, a
+# rehearsal somebody started against `v0.1.0` would publish it. See the `if` on
+# each of them.
 on:
   push:
     tags: ["v*"]
@@ -436,11 +439,17 @@ jobs:
   publish:
     name: Publish
     needs: [build, desktop-linux]
-    # A tag, or nothing at all. A run started by hand has built every artifact
-    # and run every assertion by the time it reaches here, and stops: there is
-    # no version to publish under, and a Release named after a branch is not a
-    # rehearsal of anything.
-    if: startsWith(github.ref, 'refs/tags/')
+    # A pushed tag, or nothing at all. A run started by hand has built every
+    # artifact and run every assertion by the time it reaches here, and stops:
+    # there is nothing left to rehearse, and publishing is the one thing a
+    # rehearsal must not do.
+    #
+    # The event rather than the ref, because the two are not the same question:
+    # this workflow is pushed to by tags alone, so a `push` *is* a tag, while a
+    # `workflow_dispatch` can be started against a tag as easily as a branch —
+    # GitHub offers both in the same list — and a ref test would let that one
+    # through as a release.
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     # The only job that writes. Creating a Release is a write to the
     # repository's contents, and it is granted here rather than at the top of
@@ -573,11 +582,12 @@ jobs:
   manifest:
     name: Manifest
     needs: publish
-    # A tag, said here as well as on `publish` rather than left to be inferred.
-    # `needs` already skips this job in a run that published nothing; this is
-    # the job that commits to `main`, and what stops it doing that is worth
-    # reading here rather than a job away.
-    if: startsWith(github.ref, 'refs/tags/')
+    # A pushed tag, said here as well as on `publish` rather than left to be
+    # inferred. `needs` already skips this job in a run that published nothing;
+    # this is the job that commits to `main`, and what stops it doing that is
+    # worth reading here rather than a job away. See `publish` for why the
+    # question is about the event.
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     # The second and last job that writes: the manifest is a commit on `main`.
     permissions:
@@ -684,7 +694,8 @@ jobs:
       #
       # Nothing re-triggers: a push made with the workflow's own `GITHUB_TOKEN`
       # does not start a workflow run, so this neither re-enters CI nor loops
-      # back into this workflow. `release.yml` is tag-only besides.
+      # back into this workflow. Nothing here pushes a tag besides, which is the
+      # only push `release.yml` listens for.
       #
       # A rejected push means `main` moved between the checkout and here, which
       # fails the run loudly; re-running the job checks out the new `main` and
