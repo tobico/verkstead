@@ -386,7 +386,7 @@ jobs:
       #
       # **A screen, deliberately.** A runner has none, and a Verkstead started
       # without one reads that as a session with nowhere to put an icon, serves
-      # anyway, and never calls `gtk::init` — see `crates/desktop/src/screen.rs`.
+      # anyway, and never starts the toolkit — see `crates/desktop/src/screen.rs`.
       # Which would leave every library the bundle carries for the tray's sake
       # unopened by this leg, the appindicator included: that one is loaded by
       # name at runtime, so it is absent from `ldd` and is copied in by hand by

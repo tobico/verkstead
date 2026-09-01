@@ -23,16 +23,25 @@
 //! whatever the human is doing at every login is the thing that gets the box
 //! unchecked.
 //!
-//! **The platform half is a module of its own.** One arm today, because this
-//! binary builds for Linux alone today; the stages that build it for macOS and
+//! **The platform half is a module of its own**, and everything else in this
+//! file is the same wherever it is built. Linux registers with an XDG autostart
+//! entry, which is the `xdg` module. The stages that build this for macOS and
 //! for Windows register with a launch agent and with the Run key, which is
-//! another arm of this same shape rather than another way of doing this.
-//! Nothing above this module changes when they arrive.
+//! another arm of this same shape rather than another way of doing this — and
+//! until an arm is written the platform has nowhere to keep a registration,
+//! which is the `nowhere` module and a state this file already draws: the item
+//! greyed rather than a box that ticks and does nothing.
 
+#[cfg(not(target_os = "linux"))]
+mod nowhere;
+#[cfg(target_os = "linux")]
 mod xdg;
 
 use anyhow::{Context, Result, bail};
 
+#[cfg(not(target_os = "linux"))]
+use nowhere::Entry;
+#[cfg(target_os = "linux")]
 use xdg::Entry;
 
 /// Verkstead's startup registration on this machine, or the machine having
@@ -115,7 +124,10 @@ impl Startup {
     }
 }
 
-#[cfg(test)]
+/// Linux's, because what these write and read back is the platform arm's own
+/// registration: a machine with nowhere to keep one has nothing to put in a
+/// temporary directory and nothing to find there.
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use std::path::Path;
 

@@ -16,14 +16,14 @@
 //! to undo. That is [`Desktop::settle`], and it is why the server has a
 //! [`verkstead_server::run_on`] to be handed the socket.
 //!
-//! **The main thread is the tray's**, and the server runs beside it. GTK holds
-//! the thread it was started on for as long as its loop is running, so the
-//! server is spawned onto a runtime of its own threads and the two meet at the
-//! menu: what is picked off it is handled on the loop's thread, and the server
-//! ending is brought back to that thread to end the loop with it. A session
-//! with no tray to put an icon in — over SSH, in a container, under a test — is
-//! not a failure and not a reason to stop serving, so there the main thread
-//! waits on the server as `verkstead serve` does.
+//! **The main thread is the tray's**, and the server runs beside it. The
+//! platform's own toolkit holds the thread its loop is running on — see
+//! [`toolkit`] — so the server is spawned onto a runtime of its own threads and
+//! the two meet at the menu: what is picked off it is handled on the loop's
+//! thread, and the server ending is brought back to that thread to end the loop
+//! with it. A session with no tray to put an icon in — over SSH, in a
+//! container, under a test — is not a failure and not a reason to stop serving,
+//! so there the main thread waits on the server as `verkstead serve` does.
 //!
 //! **And the logging goes to a file**, which is the other thing about being
 //! started from an icon: there is no terminal for a stdout to be read in, so
@@ -46,6 +46,8 @@ pub mod opener;
 pub mod screen;
 /// Whether Verkstead comes up when the desktop session does.
 pub mod startup;
+/// The loop the tray lives on, and the two ways it ends.
+pub mod toolkit;
 /// The icon in the system tray, and what is on its menu.
 pub mod tray;
 
@@ -172,10 +174,10 @@ impl Desktop {
         let (ended, has_ended) = sync_channel(1);
         runtime.spawn(async move {
             let _ = ended.send(serving.await);
-            gtk::glib::idle_add_once(gtk::main_quit);
+            toolkit::stop_from_elsewhere();
         });
 
-        gtk::main();
+        toolkit::run();
 
         // Read before the runtime is let go of below: letting go of it cancels
         // the task that does the sending, and a cancellation arriving here
@@ -209,7 +211,8 @@ impl Desktop {
 ///
 /// A desktop with no tray host running is *not* one of them: an appindicator
 /// registers on the bus whether or not anything is drawing it, so an icon
-/// nobody shows is one this cannot tell from an icon somebody does.
+/// nobody shows is one this cannot tell from an icon somebody does. macOS has
+/// no such question — the menu bar is the session's own and always there.
 ///
 /// `viewer` is where Open sends the browser: the same URL that was opened at
 /// startup, now on demand. `logging` is what View Logs opens, or what it says
@@ -221,8 +224,8 @@ fn raise(viewer: &str, logging: &logs::Kept, startup: &startup::Startup) -> Opti
         return None;
     }
 
-    if let Err(error) = gtk::init() {
-        tracing::warn!(%error, "the desktop toolkit would not start, so there is no tray icon");
+    if let Err(error) = toolkit::start() {
+        tracing::warn!("the desktop toolkit would not start, so there is no tray icon: {error:#}");
         return None;
     }
 
@@ -276,7 +279,7 @@ fn raise(viewer: &str, logging: &logs::Kept, startup: &startup::Startup) -> Opti
             tray::shows_launch_on_startup(startup.on());
         }
         // Which ends the loop `run` is blocked on, and with it the process.
-        tray::Chosen::Exit => gtk::main_quit(),
+        tray::Chosen::Exit => toolkit::stop(),
     });
 
     match raised {

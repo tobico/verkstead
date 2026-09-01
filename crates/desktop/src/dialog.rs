@@ -9,22 +9,21 @@
 //! nothing to do, or could not do what it was picked for, says so rather than
 //! being picked and appearing to do nothing.
 //!
-//! **Drawn with GTK, on the thread the toolkit was started on**, which is the
-//! main thread and — while there is a tray — the thread its loop runs on. That
-//! is the whole of what these two functions are careful about. A dialog handed
-//! to a toolkit thread of its own cannot be drawn from inside the loop's own
-//! dispatch: the loop's thread holds the main context for as long as a menu
-//! item's handler runs, so nothing else can take it to draw with, and a menu
-//! item that raised one that way would never come back. Drawn here, the nested
-//! loop [`gtk::prelude::DialogExt::run`] starts belongs to the thread that
-//! already owns the context, which is what a menu handler and a dying `main`
-//! both are.
+//! **Drawn on the loop's own thread**, which is the main thread and — while
+//! there is a tray — the thread [`crate::toolkit::run`] is holding. That is the
+//! whole of what these two functions are careful about, and it is the same
+//! obligation on both platforms. A dialog handed to a toolkit thread of its own
+//! cannot be drawn from inside the loop's own dispatch: GTK's loop holds the
+//! main context for as long as a menu item's handler runs, so nothing else can
+//! take it to draw with, and a menu item that raised one that way would never
+//! come back; AppKit will not be spoken to from anywhere but the main thread at
+//! all. Drawn here, the nested loop each platform starts for a modal belongs to
+//! the thread that is already entitled to it — which is what a menu handler and
+//! a dying `main` both are.
 //!
 //! One toolkit for the whole binary, therefore — the same GTK the tray icon is
-//! drawn with, and one answer for the packages a machine has to carry to build
-//! it.
-
-use gtk::prelude::*;
+//! drawn with on Linux, and the same AppKit it is drawn with on macOS. See
+//! [`crate::toolkit`], which is where either of them is started.
 
 /// Put `message` on the screen as an error, and wait for it to be dismissed.
 ///
@@ -37,7 +36,7 @@ use gtk::prelude::*;
 /// and a failure to tell somebody something is not itself something to tell
 /// them.
 pub fn refusal(message: &str) {
-    draw(gtk::MessageType::Error, message);
+    draw(Level::Refusal, message);
 }
 
 /// Put `message` on the screen as a remark, and wait for it to be dismissed.
@@ -50,7 +49,19 @@ pub fn refusal(message: &str) {
 /// Nothing here is reported and nothing here fails either, for [`refusal`]'s
 /// reasons.
 pub fn note(message: &str) {
-    draw(gtk::MessageType::Info, message);
+    draw(Level::Info, message);
+}
+
+/// Which of the two a message is, said without a toolkit in it.
+///
+/// The two platforms have their own names for the same distinction, so what
+/// crosses [`draw`] is this rather than either of theirs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Level {
+    /// Something went wrong.
+    Refusal,
+    /// Something is worth saying, and nothing went wrong.
+    Info,
 }
 
 /// The dialog itself, at whichever level it is drawn as.
@@ -58,10 +69,11 @@ pub fn note(message: &str) {
 /// Called from the main thread and nowhere else, which is where both of this
 /// binary's callers are: `main`, before there is a tray, and a menu item's
 /// handler, which runs on the loop's own thread.
-fn draw(level: gtk::MessageType, message: &str) {
+fn draw(level: Level, message: &str) {
     // Asked before the toolkit is, because a session with no screen is one that
-    // has already had these words somewhere it can read them, and starting GTK
-    // to find that out would only put its own complaint on the same stderr.
+    // has already had these words somewhere it can read them, and starting a
+    // toolkit to find that out would only put its own complaint on the same
+    // stderr.
     if !crate::screen::there_is_one() {
         return;
     }
@@ -70,9 +82,22 @@ fn draw(level: gtk::MessageType, message: &str) {
     // usually started the toolkit long before this, and the one caller that has
     // not — the address that could not be taken — is the caller this module
     // exists for.
-    if gtk::init().is_err() {
+    if crate::toolkit::start().is_err() {
         return;
     }
+
+    put(level, message);
+}
+
+/// GTK's message dialog, run on the thread that started GTK.
+#[cfg(target_os = "linux")]
+fn put(level: Level, message: &str) {
+    use gtk::prelude::*;
+
+    let level = match level {
+        Level::Refusal => gtk::MessageType::Error,
+        Level::Info => gtk::MessageType::Info,
+    };
 
     let dialog = gtk::MessageDialog::new(
         None::<&gtk::Window>,
@@ -89,4 +114,39 @@ fn draw(level: gtk::MessageType, message: &str) {
     // A dialog that was run is still a window until it is told otherwise, and
     // the tray's own loop would go on drawing it.
     unsafe { dialog.destroy() };
+}
+
+/// AppKit's alert, run on the main thread.
+///
+/// **Brought to the front first**, which GTK's dialog does not have to be: a
+/// menu-bar app is an accessory rather than an application somebody switched to
+/// — see [`crate::toolkit`] — and an accessory's alert opens behind whatever
+/// they were doing unless the app asks for the front. The deprecated spelling of
+/// the asking is the one used, because the replacement arrived in macOS 14 and
+/// this app runs on the macOS people have.
+#[cfg(target_os = "macos")]
+fn put(level: Level, message: &str) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSAlert, NSAlertStyle, NSApplication};
+    use objc2_foundation::NSString;
+
+    let Some(main) = MainThreadMarker::new() else {
+        // `toolkit::start` has already refused off the main thread, so this is
+        // unreachable by the two callers there are — and drawing anyway is the
+        // one thing that must not happen here.
+        return;
+    };
+
+    let alert = NSAlert::new(main);
+    alert.setAlertStyle(match level {
+        Level::Refusal => NSAlertStyle::Critical,
+        Level::Info => NSAlertStyle::Informational,
+    });
+    alert.setMessageText(&NSString::from_str("Verkstead"));
+    alert.setInformativeText(&NSString::from_str(message));
+
+    #[allow(deprecated)]
+    NSApplication::sharedApplication(main).activateIgnoringOtherApps(true);
+
+    alert.runModal();
 }
