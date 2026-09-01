@@ -80,6 +80,111 @@ const CAT: &str = "/bin/cat";
 /// process table, which is where a lifetime is read off.
 const PS: &str = "/bin/ps";
 
+/// The command that applies a policy, which this suite names for itself in one
+/// place — see [`will_start_a_process`].
+const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+
+/// **What a policy has to say before it says anything of Verkstead's.**
+///
+/// Every probe in this file starts a process under a policy, so a policy that
+/// will not start one at all fails all of them at once and says nothing about
+/// which — the process dies on `SIGABRT` in `dyld` before there is a stderr to
+/// write the reason to. This walks up to the real floor a rule at a time, so
+/// what a run of this suite reports is the smallest policy this platform
+/// refuses rather than twenty-five identical panics.
+///
+/// It is here rather than beside the renderer because only a Mac can answer it:
+/// what is being asked is not what the policy says but whether the kernel will
+/// run anything under it.
+#[test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "only a Mac says whether it will start a process under a policy"
+)]
+fn the_floor_a_policy_stands_on_is_one_this_platform_will_start_a_process_under() {
+    // Each one is the one before it plus a line, so the first that fails is the
+    // line that did it.
+    let everything = "(allow file-read* file-map-executable process-exec* (subpath \"/\"))\n";
+
+    let ladder = [
+        ("nothing denied at all", String::from("(version 1)\n")),
+        (
+            "deny default, and every family allowed by wildcard",
+            String::from(
+                "(version 1)\n(deny default)\n\
+                 (allow file* process* mach* sysctl* signal* network* ipc* system*)\n",
+            ),
+        ),
+        (
+            "deny default, and the whole filesystem readable",
+            format!("(version 1)\n(deny default)\n{everything}(allow process-fork)\n"),
+        ),
+        (
+            "and the lookups and reads a process makes of the machine",
+            format!(
+                "(version 1)\n(deny default)\n{everything}(allow process-fork)\n\
+                 (allow mach-lookup)\n(allow sysctl-read)\n",
+            ),
+        ),
+        (
+            "the floor as it is written, over the whole filesystem",
+            format!("{}{everything}", floor()),
+        ),
+    ];
+
+    let report: Vec<String> = ladder
+        .iter()
+        .map(|(what, policy)| format!("  {what}: {}", will_start_a_process(policy)))
+        .collect();
+
+    assert!(
+        ladder
+            .iter()
+            .all(|(_, policy)| will_start_a_process(policy) == "ran"),
+        "a policy this suite builds on will not start a process:\n{}",
+        report.join("\n"),
+    );
+}
+
+/// The floor every policy the server writes starts with, as it is written
+/// there.
+///
+/// Copied rather than reached for, because it is private to the renderer and
+/// what this asks of it is not what it says: the two being held together is
+/// [`the_floor_a_policy_stands_on_is_one_this_platform_will_start_a_process_under`]'s
+/// own job, and it does it by failing when they drift.
+fn floor() -> String {
+    String::from(
+        "(version 1)\n\n(deny default)\n\n(allow file-read-metadata)\n\n\
+         (allow process-fork)\n(allow process-info* (target self))\n\
+         (allow sysctl-read)\n(allow ipc-posix*)\n\
+         (allow signal (target same-sandbox))\n\n\
+         (allow system-socket)\n(allow network*)\n(allow mach-lookup)\n",
+    )
+}
+
+/// Whether `policy` is one this Mac will run `/bin/sh` under, and how it ended
+/// where it is not.
+fn will_start_a_process(policy: &str) -> String {
+    let output = Command::new(SANDBOX_EXEC)
+        .arg("-p")
+        .arg(policy)
+        .args([SH, "-c", "exit 0"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("sandbox-exec is part of macOS");
+
+    if output.status.success() {
+        return String::from("ran");
+    }
+
+    format!(
+        "{} — {:?}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr),
+    )
+}
+
 /// What the stub sccache says when it is asked to be a session's client, which
 /// is the half a session runs — see [`Grilling::sccache`] for the other one.
 const SAYS_WHICH_SCCACHE: &str = "printf 'sccache 0.0.0-the-one-resolved\\n'\n";
