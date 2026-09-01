@@ -803,10 +803,11 @@ pub(crate) async fn rename_companion_branch(
 /// human never saw it, and by the time the branch is cut the repository may
 /// well have one by that name already — an earlier Conversation's, since a
 /// branch outlives the worktree it was worked in. So a taken prefill is
-/// replaced with another free name rather than refused, in every repository it
-/// is about to be cut in at once, and the record follows what was cut. What
-/// *is* refused is a name the human typed on a branch that is already there:
-/// that one they chose and meant, and it is theirs to think again about.
+/// replaced with another free name rather than refused — free in every
+/// repository it is about to be cut in at once, and free of what their remotes
+/// hold as well as their own branches — and the record follows what was cut.
+/// What *is* refused is a name the human typed on a branch that is already
+/// there: that one they chose and meant, and it is theirs to think again about.
 ///
 /// **Every companion repo is checked out here too**, and every one of them is
 /// asked the same four questions in the same order and refused by the same
@@ -937,19 +938,25 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 return Err(GrillingStarted::NoBaseCommit);
             };
 
-            // Whether a name is free to be cut, asked of every repository it is
-            // about to be cut in: this one, and every companion mirroring the
-            // Conversation's branch. A companion with a name of its own is not
-            // one of them — that name is the human's and does not move with
-            // this one, so a repository holding it is a refusal below rather
-            // than a reason to pick again here.
-            let free = |name: &str| {
-                !worktrees::branch_exists(&repo, name)
-                    && companions
-                        .iter()
-                        .filter(|companion| companion.mirrors())
-                        .all(|companion| !worktrees::branch_exists(&companion.repo.path, name))
-            };
+            // Every name that is already spoken for in the repositories this
+            // one is about to be cut in: this one, and every companion
+            // mirroring the Conversation's branch. A companion with a name of
+            // its own is not one of them — that name is the human's and does
+            // not move with this one, so a repository holding it is a refusal
+            // below rather than a reason to pick again here.
+            //
+            // Read whole and once, after the fetch, so that the remotes it
+            // carries are as fresh as the remotes are — and so that a walk over
+            // the candidates is a walk in memory. See
+            // [`worktrees::cut_names`] for why a name only a remote holds
+            // counts as spoken for.
+            let mut taken = worktrees::cut_names(&repo);
+
+            for companion in companions.iter().filter(|companion| companion.mirrors()) {
+                taken.extend(worktrees::cut_names(&companion.repo.path));
+            }
+
+            let free = |name: &str| !taken.contains(name);
 
             // And the name the work is cut on. A name Verkstead invented is
             // nobody's — a prefill drawn nowhere, which the human never saw and

@@ -1871,6 +1871,37 @@ async fn a_start_invents_around_a_companion_that_holds_the_name() {
     );
 }
 
+/// And a name only the remote holds is picked around as well, though nothing
+/// local is in the way of cutting it: the branch that would be pushed to it is
+/// somebody's, and there is no shortage of other names.
+#[tokio::test]
+async fn a_start_invents_around_a_name_only_the_remote_holds() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let carried = opened(&app, id).await.branch;
+    let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    git(
+        &repo,
+        &[
+            "update-ref",
+            &format!("refs/remotes/origin/{carried}"),
+            &tip,
+        ],
+    );
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_ne!(view.branch, carried);
+    assert!(has_branch(&repo, &view.branch));
+    assert!(
+        !has_branch(&repo, &carried),
+        "and nothing was cut under the name it was carrying",
+    );
+}
+
 /// The companion of that name, as the Conversation reports it.
 fn companion<'a>(view: &'a ConversationView, name: &str) -> &'a verkstead_render::CompanionView {
     view.companions
