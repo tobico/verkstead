@@ -152,11 +152,15 @@ impl Grilling {
         let dir = self.cache_dir();
         std::fs::create_dir_all(&dir).unwrap();
 
-        BuildCache::at(dir, compiling.then(|| self.sccache()), self.worktrees_dir())
+        BuildCache::at(
+            dir,
+            compiling.then(|| self.sccache()),
+            self.state.path().to_owned(),
+        )
     }
 
-    /// The Worktrees directory the compile server is given, which is where this
-    /// fixture's own worktree already is.
+    /// The Worktrees directory the compile server is shown of that Data
+    /// Directory, which is where this fixture's own worktree already is.
     fn worktrees_dir(&self) -> PathBuf {
         self.state.path().join("worktrees")
     }

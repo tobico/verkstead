@@ -76,7 +76,11 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use surface::{Access, Reach, Surface};
+// And the description itself, which is not this module's alone: the compile
+// server outside every session is composed of the same vocabulary and rendered
+// by the same renderer — see [`crate::build_cache`], and [`on_the_machine`]
+// for the part of it the two share.
+pub(crate) use surface::{Access, Reach, Surface};
 
 use crate::build_cache::{self, BuildCache};
 use crate::handoffs::{self, Handoffs};
@@ -312,14 +316,18 @@ const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
 /// `verkstead` run outside a sandbox altogether gets.
 pub const AGENT_TYPE: &str = "VERKSTEAD_AGENT";
 
-/// And where the sccache the shared build cache compiles through is mounted,
-/// beside it.
+/// Where the executables of Verkstead's own are inside a sandbox: `bin` under
+/// [`own_directory`].
 ///
-/// The same trick, for the same reason: the binary is the server's own to
-/// choose, the directory is made by the bind and holds nothing the host put
-/// there, and an absolute `RUSTC_WRAPPER` is one that works whatever a project's
-/// dev shell does to `PATH`. See [`crate::build_cache`].
-pub(crate) const SCCACHE_INSIDE: &str = "/verkstead/bin/sccache";
+/// Two things are in it and neither is the host's — the binary a session asks
+/// with, and the sccache the shared build cache compiles through — so it is
+/// what leads a `PATH` inside, in a session's sandbox and in the compile
+/// server's alike. Made by the bind on Linux and really there on a Mac, which
+/// is why it is a function of where the Data Directory is rather than a name.
+/// See [`path`], [`Executable`] and [`crate::build_cache`].
+pub(crate) fn own_bin(platform: Platform, data_dir: &Path) -> PathBuf {
+    own_directory(platform, data_dir).join(BIN)
+}
 
 /// What a session's `PATH` is inside: `ours` first, and then the machine's own.
 ///
@@ -339,6 +347,44 @@ pub(crate) const SCCACHE_INSIDE: &str = "/verkstead/bin/sccache";
 /// what a sandbox holds rather than about either process.
 pub(crate) fn path(ours: &Path) -> String {
     format!("{}:{MACHINE_PATH}", ours.display())
+}
+
+/// The floor every sandbox Verkstead makes stands on, whatever it is for: the
+/// system read-only, a process table of its own, the device nodes a program
+/// opens by name, and somewhere to write a temporary file.
+///
+/// Said here rather than twice, because there are two sandboxes and they
+/// share this much of what they hold — a session's own, and the compile
+/// server every session's `rustc` goes through (see
+/// [`crate::build_cache::BuildCache::compiling`]). What each adds on top of
+/// it is its own, and so is where it starts: `chdir` is a Conversation's
+/// Worktree for one of them and the compile server's own HOME for the other.
+///
+/// What is not on the machine is skipped rather than said: a rule about a
+/// path that does not exist is a rule about nothing, and on Linux a bind of
+/// one is a sandbox that will not start.
+pub(crate) fn on_the_machine(chdir: PathBuf) -> Surface {
+    let mut surface = Surface::starting_in(chdir);
+
+    for path in SYSTEM.iter().map(Path::new).filter(|path| path.exists()) {
+        surface.own(path, Reach::ReadOnly);
+    }
+
+    surface
+        .made(Access::ProcessTable)
+        .made(Access::Devices)
+        .made(Access::Temporary(PathBuf::from(TMP)));
+
+    surface
+}
+
+/// And `surface` as the command that runs it, by whichever mechanism this
+/// machine has one.
+///
+/// The one place either rendering is reached from, so that a sandbox is a
+/// description going in and a command coming out wherever one is made.
+pub(crate) fn rendered(surface: &Surface) -> Command {
+    render(surface)
 }
 
 /// The machine's own half of that, which is one list or the other and never
@@ -546,9 +592,7 @@ impl Executable {
 
         path.is_file().then_some(Executable {
             path,
-            inside: own_directory(Platform::HERE, data_dir)
-                .join(BIN)
-                .join(VERKSTEAD),
+            inside: own_bin(Platform::HERE, data_dir).join(VERKSTEAD),
         })
     }
 
@@ -1094,6 +1138,16 @@ impl Sandbox {
         })
     }
 
+    /// Where a session finds the sccache it compiles through, which is beside
+    /// the binary it asks with — see [`own_bin`].
+    ///
+    /// Read off the executable rather than said again, so that the one answer
+    /// about where a directory of Verkstead's own is on this machine serves
+    /// both of the things in it.
+    fn sccache_inside(&self) -> PathBuf {
+        self.verkstead.bin().join(build_cache::SCCACHE)
+    }
+
     /// `argv` as it will be run inside the sandbox, by whichever mechanism this
     /// machine has one.
     ///
@@ -1113,19 +1167,10 @@ impl Sandbox {
     /// after the account, and why the handoff directory is after the temporary
     /// filesystem that would otherwise be over it.
     fn surface<S: AsRef<OsStr>>(&self, argv: &[S]) -> Surface {
-        let mut surface = Surface::starting_in(self.worktree.clone());
-
-        // What is not there is skipped rather than said: a rule about a path
-        // that does not exist is a rule about nothing, and on Linux a bind of
-        // one is a sandbox that will not start.
-        for path in SYSTEM.iter().map(Path::new).filter(|path| path.exists()) {
-            surface.own(path, Reach::ReadOnly);
-        }
-
-        surface
-            .made(Access::ProcessTable)
-            .made(Access::Devices)
-            .made(Access::Temporary(PathBuf::from(TMP)));
+        // The floor every sandbox of Verkstead's stands on — see
+        // [`on_the_machine`], which is where the compile server outside every
+        // session gets the same one.
+        let mut surface = on_the_machine(self.worktree.clone());
 
         // HOME before anything that goes inside it: the directory has to be
         // there for the account to land in, and everything else about it stays
@@ -1256,7 +1301,7 @@ impl Sandbox {
             surface.own(cache.dir(), Reach::ReadWrite);
 
             if let Some(sccache) = cache.sccache() {
-                surface.elsewhere(sccache, SCCACHE_INSIDE, Reach::ReadOnly);
+                surface.elsewhere(sccache, self.sccache_inside(), Reach::ReadOnly);
             }
         }
 
@@ -1339,7 +1384,7 @@ impl Sandbox {
             // one cache like every other.
             if cache.sccache().is_some() {
                 surface
-                    .set("RUSTC_WRAPPER", SCCACHE_INSIDE)
+                    .set("RUSTC_WRAPPER", self.sccache_inside())
                     .set("SCCACHE_DIR", cache.sccache_dir())
                     .set("SCCACHE_CACHE_SIZE", cache.size());
             }

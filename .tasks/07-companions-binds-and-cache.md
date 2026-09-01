@@ -27,9 +27,9 @@ task before it was and the way the Linux suite is.
 
 ## Acceptance criteria
 
-- [ ] Probes show each Companion Repo at the mode it was set to, and the
+- [x] Probes show each Companion Repo at the mode it was set to, and the
       configured binds composing as they do on Linux
-- [ ] A probe shows the Build Cache writable with cargo's home inside it, and a
+- [x] A probe shows the Build Cache writable with cargo's home inside it, and a
       Rust build inside a session compiling through the machine's one sccache
-- [ ] A probe shows the Compile Server's own sandbox holding the Worktrees and
+- [x] A probe shows the Compile Server's own sandbox holding the Worktrees and
       none of the Data Directory
