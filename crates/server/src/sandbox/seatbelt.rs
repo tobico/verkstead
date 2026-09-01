@@ -72,11 +72,23 @@ const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
 ///   there is a probe to say what a session actually needs.
 /// - **The devices**, which are named rather than a directory: `/dev` on a Mac
 ///   is the machine's own and holds every disk on it.
+/// - **The root directory itself**, which is the one rule here that reads as
+///   nothing and is the whole of whether a policy runs at all. A description is
+///   rendered as `subpath` rules, and a `subpath` of `/usr` — or of every
+///   top-level directory on the machine at once — never matches `/`. A process
+///   started under a policy that does not match it dies in `dyld` on `SIGABRT`
+///   before `main`, with nothing on either stream: there is no stderr to
+///   complain to yet. Which is exactly what it cost to find, so it is written
+///   down here rather than left to be found again. `literal` rather than
+///   `subpath`, because what is wanted is the directory node and not the
+///   machine behind it — and it is no widening, `file-read-metadata` above
+///   having already made every name on the box `stat`-able.
 const FLOOR: &str = r#"(version 1)
 
 (deny default)
 
 (allow file-read-metadata)
+(allow file-read* (literal "/"))
 
 (allow process-fork)
 (allow process-info* (target self))
