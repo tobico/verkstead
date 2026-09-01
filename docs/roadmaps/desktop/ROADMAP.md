@@ -21,8 +21,8 @@ lands in whichever runs first — 04 as ordered — and the other reuses it.
 
 ## Stages
 
-- [ ] 01: Platform directories — [brief](01-platform-directories.md) *(in progress: `desktop/01-platform-directories`)*
-- [ ] 02: The desktop crate and the Linux tray — [brief](02-desktop-crate.md)
+- [x] 01: Platform directories — [brief](01-platform-directories.md)
+- [ ] 02: The desktop crate and the Linux tray — [brief](02-desktop-crate.md) *(in progress: `desktop/02-desktop-crate`)*
 - [ ] 03: AppImage and the release legs — [brief](03-appimage.md)
 - [ ] 04: macOS bundle and dmg — [brief](04-macos-dmg.md)
 - [ ] 05: Windows port and portable exe — [brief](05-windows-exe.md)
