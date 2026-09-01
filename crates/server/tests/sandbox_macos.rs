@@ -146,6 +146,61 @@ fn the_floor_a_policy_stands_on_is_one_this_platform_will_start_a_process_under(
     );
 }
 
+/// And which directory the system list is missing, asked the same way.
+///
+/// The ladder above settles that the floor is not what refuses — it starts a
+/// process quite happily with the whole filesystem readable behind it — so what
+/// is left is a path a process reads on its way up that the system list does
+/// not name. This takes the policy a real session would be given and tries it
+/// with one more directory readable, one candidate at a time, and reports which
+/// of them is the one.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "only a Mac says whether it will start a process under a policy"
+)]
+async fn the_system_list_names_every_directory_a_process_reads_on_its_way_up() {
+    let fixture = grilling().await;
+    let mut command = fixture.sandbox().command(&[SH, "-c", "exit 0"]);
+    let real_policy = policy_of(&command);
+
+    // Drained so that building the command above has not left a child behind,
+    // and so that what is tried below is the policy rather than this.
+    let _ = command.stdin(Stdio::null()).output();
+
+    let candidates = [
+        "/dev",
+        "/private/var/db",
+        "/private/var/folders",
+        "/private/var",
+        "/System/Volumes",
+        "/System",
+        "/",
+    ];
+
+    let mut report = vec![format!(
+        "  the policy as it stands: {}",
+        will_start_a_process(&real_policy),
+    )];
+
+    report.extend(candidates.iter().map(|candidate| {
+        let policy = format!(
+            "{real_policy}\n(allow file-read* file-map-executable process-exec* \
+             (subpath \"{candidate}\"))\n",
+        );
+
+        format!(
+            "  and {candidate} readable: {}",
+            will_start_a_process(&policy)
+        )
+    }));
+
+    panic!(
+        "which directory a process on this Mac reads on its way up:\n{}",
+        report.join("\n"),
+    );
+}
+
 /// The floor every policy the server writes starts with, as it is written
 /// there.
 ///
