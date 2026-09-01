@@ -886,9 +886,9 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 
     // Where the work goes on. A Conversation that already has one works where it
     // has always worked and there is nothing here to make; one that has none is
-    // given the name a first grilling chooses — which is inside, because the
-    // directory is named for the branch and the branch is not settled until the
-    // repository has been asked about it.
+    // given a directory named for its branch, chosen below rather than here
+    // because the branch itself is not settled until the repository has been
+    // asked about the name.
     let worked_in = conversation.worktree.clone();
 
     // The filesystem and git halves together, off the runtime: a worktree of a
