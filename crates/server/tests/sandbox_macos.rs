@@ -175,6 +175,13 @@ async fn the_system_list_names_every_directory_a_process_reads_on_its_way_up() {
         "/private/var",
         "/System/Volumes",
         "/System",
+        "/Applications",
+        "/Users",
+        "/Volumes",
+        "/opt",
+        "/cores",
+        "/.vol",
+        "/private",
         "/",
     ];
 
@@ -183,17 +190,21 @@ async fn the_system_list_names_every_directory_a_process_reads_on_its_way_up() {
         will_start_a_process(&real_policy),
     )];
 
-    report.extend(candidates.iter().map(|candidate| {
-        let policy = format!(
-            "{real_policy}\n(allow file-read* file-map-executable process-exec* \
-             (subpath \"{candidate}\"))\n",
-        );
+    // Cumulative rather than one at a time: a single one of these fixing
+    // nothing is what the last run said, so what is wanted now is the shortest
+    // prefix that does.
+    let mut policy = real_policy.clone();
 
-        format!(
-            "  and {candidate} readable: {}",
+    for candidate in candidates {
+        policy.push_str(&format!(
+            "\n(allow file-read* file-map-executable process-exec* (subpath \"{candidate}\"))\n",
+        ));
+
+        report.push(format!(
+            "  and {candidate} readable too: {}",
             will_start_a_process(&policy)
-        )
-    }));
+        ));
+    }
 
     panic!(
         "which directory a process on this Mac reads on its way up:\n{}",
