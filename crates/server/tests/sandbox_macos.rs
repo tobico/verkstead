@@ -1054,13 +1054,16 @@ async fn a_session_starts_in_its_worktree_with_nothing_of_the_servers_environmen
 }
 
 /// The Profile's account is where its backend looks for it, inside a HOME that
-/// is the session's own and holds nothing else.
+/// is the session's own and holds nothing but what Verkstead put there.
 ///
-/// The Linux suite's claim word for word, and a different mechanism under it:
-/// there, HOME is an empty filesystem with the account mounted into it; here it
-/// is a real directory of Verkstead's own with the account linked into it, and
-/// what keeps the machine's own home out of it is the policy rather than the
-/// directory never having been there.
+/// The Linux suite's claim with one thing added: there, HOME is an empty
+/// filesystem with the account mounted into it; here it is a real directory of
+/// Verkstead's own with the account linked into it, and what keeps the
+/// machine's own home out of it is the policy rather than the directory never
+/// having been there. And the Conversation's handoff directory is in it too,
+/// which on Linux is under `/tmp` — a Mac has one real `/tmp` that every
+/// Conversation would be sharing a link in, so the one directory that is
+/// already this Conversation's own is where it goes instead.
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
@@ -1096,8 +1099,9 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
          directory to be refused in"
     );
     assert_eq!(
-        reported["home"], ".claude .claude.json ",
-        "and nothing else is in it"
+        reported["home"], ".claude .claude.json verkstead ",
+        "and nothing else is in it: the pair, and the handoff directory that \
+         is under HOME on this platform"
     );
 }
 
@@ -1116,9 +1120,12 @@ async fn a_home_account_is_where_its_backend_looks_for_it() {
     let fixture = grilling().await;
 
     for (profile, held) in [
-        (fixture.codex_profile().await, ".codex "),
-        (fixture.grok_profile().await, ".grok "),
-        (fixture.opencode_profile().await, ".config .local "),
+        (fixture.codex_profile().await, ".codex verkstead "),
+        (fixture.grok_profile().await, ".grok verkstead "),
+        (
+            fixture.opencode_profile().await,
+            ".config .local verkstead ",
+        ),
     ] {
         let sandbox = fixture.sandbox_under(&profile);
 
@@ -1137,7 +1144,8 @@ async fn a_home_account_is_where_its_backend_looks_for_it() {
 
         assert_eq!(
             reported["home"], held,
-            "the account this session runs under is the whole of what HOME holds"
+            "the account this session runs under is the whole of what HOME \
+             holds, beside the handoff directory every session gets there"
         );
         assert_eq!(
             reported["claude-dir"], "absent",
@@ -1145,14 +1153,14 @@ async fn a_home_account_is_where_its_backend_looks_for_it() {
         );
 
         match held {
-            ".codex " => {
+            ".codex verkstead " => {
                 assert_eq!(reported["codex-home"], "write");
                 assert_eq!(
                     reported["codex-config"], "write",
                     "with what the account already kept there"
                 );
             }
-            ".grok " => assert_eq!(reported["grok-home"], "write"),
+            ".grok verkstead " => assert_eq!(reported["grok-home"], "write"),
             _ => {
                 assert_eq!(reported["opencode-config"], "write");
                 assert_eq!(

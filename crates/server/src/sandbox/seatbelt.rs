@@ -32,10 +32,16 @@
 //! directions. A mount hides the account's own skills by standing an empty
 //! directory on them; there is nothing to stand anywhere here, and a link
 //! written at that path would be written *into* the account itself — so it is
-//! a rule refusing the path instead, after the rule that made the account
-//! reachable. Which is the whole of why the order of a description is the
-//! description: a policy takes the last rule that matched, exactly as a mount
-//! table takes the last bind that landed.
+//! the path being kept out of the rule that grants the account, in that rule's
+//! own words. See [`reaching`] and [`refusing`].
+//!
+//! **Not a `deny` written after it, which is what this used to be.** A mount
+//! table takes the last bind that landed and a policy does not read the same
+//! way: a probe inside a real sandbox found the account's own skills writable
+//! while the policy that made them so said, in order, that they were refused.
+//! So the exclusion is `require-not` inside the one rule, where no reading of
+//! the order can come out differently, and the outright `deny` stays beside it
+//! as the statement of intent rather than as the mechanism.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -154,16 +160,29 @@ pub(crate) fn command(surface: &Surface) -> Command {
 fn policy(surface: &Surface) -> String {
     let mut policy = String::from(FLOOR);
 
+    // What the description says a session must not reach, resolved once and
+    // read by every rule below — see [`refusing`]. A rule that would grant
+    // something one of these sits under has to say so in the same breath rather
+    // than leave a later `deny` to take it back.
+    let refused: Vec<PathBuf> = surface
+        .reaches()
+        .iter()
+        .filter_map(|access| match access {
+            Access::Nothing { inside, .. } => Some(real(inside)),
+            _ => None,
+        })
+        .collect();
+
     for access in surface.reaches() {
         match access {
-            Access::Own { path, reach } => policy.push_str(&reaching(path, *reach)),
+            Access::Own { path, reach } => policy.push_str(&reaching(path, *reach, &refused)),
 
             // Somewhere to write a temporary file. The host's own on this
             // platform rather than a filesystem of the session's, which is
             // where a tmpfs and a policy part company: what a session writes
             // there is visible to whoever else is on the machine, and what they
             // left there is visible to it.
-            Access::Temporary(path) => policy.push_str(&reaching(path, Reach::ReadWrite)),
+            Access::Temporary(path) => policy.push_str(&reaching(path, Reach::ReadWrite, &refused)),
 
             Access::Devices => policy.push_str(DEVICES),
 
@@ -171,7 +190,7 @@ fn policy(surface: &Surface) -> String {
             // this is written — see [`realise`] — so what is left to say about
             // it is that a session may read and write it, which is what a HOME
             // is for.
-            Access::Empty(path) => policy.push_str(&reaching(path, Reach::ReadWrite)),
+            Access::Empty(path) => policy.push_str(&reaching(path, Reach::ReadWrite, &refused)),
 
             // And a path a session finds somewhere else, which by now is a link
             // to the path it really is. A policy is matched against what a name
@@ -192,13 +211,23 @@ fn policy(surface: &Surface) -> String {
                     ));
                 }
 
-                policy.push_str(&reaching(host, *reach));
+                policy.push_str(&reaching(host, *reach, &refused));
             }
 
-            // And what a mount would have covered, refused instead. After the
-            // rule that made the directory it is in reachable, because the last
-            // rule that matches is the one a policy takes — see this module's
-            // own documentation for why this is not a link like the others.
+            // And what a mount would have covered, refused instead — said
+            // twice, and neither saying is the other's spelling.
+            //
+            // **The rule that grants the account excludes this path in the same
+            // breath**, which is [`reaching`]'s doing and is what actually
+            // holds: a `deny` written after an `allow` the path sits under does
+            // not take it back, and a probe inside a real sandbox is what said
+            // so — the account's own skills came back writable while a policy
+            // that read in order said they could not be.
+            //
+            // **And it is denied outright as well**, which costs nothing and is
+            // what says the intention rather than the arithmetic: a path
+            // reached by some route nobody thought of is still one a session
+            // must not have.
             Access::Nothing { inside, .. } => policy.push_str(&format!(
                 "\n(deny file* (subpath {}))\n",
                 quoted(&real(inside))
@@ -287,23 +316,53 @@ fn linked(host: &Path, inside: &Path) -> std::io::Result<()> {
 }
 
 /// The rules that make one path reachable: readable and runnable, and writable
-/// where the description said so.
+/// where the description said so — less whatever of `refused` sits under it.
 ///
 /// Runnable with readable, rather than as a decision of its own. Every path in
 /// a description is either the system a session runs programs out of or a
 /// directory of the project's, and a checkout a session may read is one it may
 /// build and run — which is what a coding session is for.
-fn reaching(path: &Path, reach: Reach) -> String {
-    let path = quoted(&real(path));
+///
+/// **What is refused is excluded here rather than denied afterwards.** The
+/// account's own skills sit inside the account, so the rule that grants the
+/// account is the rule that would otherwise grant them — and a `deny` written
+/// after it does not take them back, which a probe inside a real sandbox is
+/// what settled: the skills came back writable while a policy that read in
+/// order said they could not be. `require-not` says it in the one rule instead,
+/// where no reading of the order can come out differently. See [`refusing`].
+fn reaching(path: &Path, reach: Reach, refused: &[PathBuf]) -> String {
+    let matched = refusing(&real(path), refused);
 
-    let mut rules =
-        format!("\n(allow file-read* file-map-executable process-exec* (subpath {path}))\n");
+    let mut rules = format!("\n(allow file-read* file-map-executable process-exec* {matched})\n");
 
     if reach == Reach::ReadWrite {
-        rules.push_str(&format!("(allow file-write* (subpath {path}))\n"));
+        rules.push_str(&format!("(allow file-write* {matched})\n"));
     }
 
     rules
+}
+
+/// `path` as the filter a rule about it matches on: the subpath itself, and
+/// where anything in `refused` sits under it, that subpath with each of them
+/// taken out of it.
+///
+/// A path in `refused` that is `path` itself is left alone — a rule granting
+/// exactly what another one refuses is the description contradicting itself
+/// rather than something to render, and the outright `deny` is what answers it.
+fn refusing(path: &Path, refused: &[PathBuf]) -> String {
+    let subpath = format!("(subpath {})", quoted(path));
+
+    let under: String = refused
+        .iter()
+        .filter(|no| no.as_path() != path && no.starts_with(path))
+        .map(|no| format!(" (require-not (subpath {}))", quoted(no)))
+        .collect();
+
+    if under.is_empty() {
+        return subpath;
+    }
+
+    format!("(require-all {subpath}{under})")
 }
 
 /// What `path` really is: resolved whole where it is there, and resolved as far
@@ -519,24 +578,40 @@ mod tests {
         realise(&surface);
 
         let policy = policy(&surface);
-        let refused = format!(
-            "(deny file* (subpath {}))",
-            quoted(&real(&account.join("skills")))
-        );
+        let skills = quoted(&real(&account.join("skills")));
 
         assert!(
-            policy.contains(&refused),
+            policy.contains(&format!("(deny file* (subpath {skills}))")),
             "what a session is grilled by is the product's, not whatever the \
              account keeps:\n{policy}",
         );
-        assert!(
-            policy.find(&refused)
-                > policy.find(&format!(
-                    "(allow file-write* (subpath {}))",
-                    quoted(&real(&account))
+
+        // The one that actually holds it: the rule granting the account says in
+        // its own words that this path is not part of what it grants, so
+        // nothing about the order of the two decides it — see the module's own
+        // documentation for the probe that settled that it has to.
+        for granted in ["file-read*", "file-write*"] {
+            assert!(
+                policy.contains(&format!(
+                    "(allow {granted}{} (require-all (subpath {}) (require-not (subpath {skills})))",
+                    if granted == "file-read*" {
+                        " file-map-executable process-exec*"
+                    } else {
+                        ""
+                    },
+                    quoted(&real(&account)),
                 )),
-            "and it is said after the account it stands inside, because the \
-             last rule that matches is the one a policy takes:\n{policy}",
+                "the account is granted with its own skills taken out of what \
+                 is granted, rather than added back and denied again:\n{policy}",
+            );
+        }
+
+        assert!(
+            !policy.contains(&format!(
+                "(allow file-write* (subpath {}))",
+                quoted(&real(&account))
+            )),
+            "and there is no rule anywhere granting the account whole:\n{policy}",
         );
         assert!(
             account.join("skills/the-accounts-own").is_dir(),
