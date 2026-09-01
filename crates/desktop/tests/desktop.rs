@@ -557,10 +557,35 @@ fn stderr(output: &Output) -> String {
 }
 
 /// Where the startup registration goes on a machine that says nothing but where
-/// its home is, which is the XDG default and the case every desktop actually
-/// has.
-fn autostart_entry(home: &Path) -> PathBuf {
+/// its home is, which is the platform's own default and the case every desktop
+/// actually has: the XDG autostart entry here, and the launch agent on macOS.
+#[cfg(target_os = "linux")]
+fn registration(home: &Path) -> PathBuf {
     home.join(".config/autostart/net.tobico.Verkstead.desktop")
+}
+
+#[cfg(target_os = "macos")]
+fn registration(home: &Path) -> PathBuf {
+    home.join("Library/LaunchAgents/net.tobico.Verkstead.plist")
+}
+
+/// A registration naming a Verkstead that is not there, written the way this
+/// platform keeps one — what a binary somebody has since moved left behind.
+#[cfg(target_os = "linux")]
+fn naming_somewhere_else() -> &'static str {
+    "[Desktop Entry]\nType=Application\nName=Verkstead\n\
+     Exec=\"/somewhere/it/used/to/be/verkstead-desktop\" --no-open\n"
+}
+
+#[cfg(target_os = "macos")]
+fn naming_somewhere_else() -> &'static str {
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+     <plist version=\"1.0\">\n<dict>\n\
+     \t<key>Label</key>\n\t<string>net.tobico.Verkstead</string>\n\
+     \t<key>ProgramArguments</key>\n\t<array>\n\
+     \t\t<string>/somewhere/it/used/to/be/verkstead-desktop</string>\n\
+     \t\t<string>--no-open</string>\n\t</array>\n\
+     \t<key>RunAtLoad</key>\n\t<true/>\n</dict>\n</plist>\n"
 }
 
 /// A binary that has moved leaves a registration naming where it used to be,
@@ -575,14 +600,9 @@ fn a_launch_rewrites_a_startup_registration_that_names_somewhere_else() {
     let data_dir = tmp.path().join("data");
     let port = free_port();
 
-    let entry = autostart_entry(&home);
+    let entry = registration(&home);
     std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
-    std::fs::write(
-        &entry,
-        "[Desktop Entry]\nType=Application\nName=Verkstead\n\
-         Exec=\"/somewhere/it/used/to/be/verkstead-desktop\" --no-open\n",
-    )
-    .unwrap();
+    std::fs::write(&entry, naming_somewhere_else()).unwrap();
 
     let flags = flags(port, &data_dir);
     let mut app = App::start(port, &opener, &home, &as_args(&flags), &[]);
@@ -623,9 +643,9 @@ fn a_launch_registers_nothing_nobody_asked_for() {
     let mut app = App::start(port, &opener, &home, &args, &[]);
 
     assert!(
-        !autostart_entry(&home).exists(),
+        !registration(&home).exists(),
         "{} should not be there",
-        autostart_entry(&home).display()
+        registration(&home).display()
     );
 
     app.stop();

@@ -20,7 +20,7 @@ Roadmap stage: [04: macOS bundle and dmg](docs/roadmaps/desktop/04-macos-dmg.md)
 ## Tasks
 
 - [x] 01: The desktop crate boots on macOS — [details](01-desktop-crate-on-macos.md)
-- [ ] 02: Launch on Startup on macOS — [details](02-launch-on-startup.md)
+- [x] 02: Launch on Startup on macOS — [details](02-launch-on-startup.md)
 - [ ] 03: The app bundle and the dmg — [details](03-bundle-and-dmg.md)
 - [ ] 04: The release leg — [details](04-release-leg.md)
 - [ ] 05: A session runs inside an Apple sandbox — [details](05-session-in-an-apple-sandbox.md)

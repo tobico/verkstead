@@ -3,11 +3,12 @@
 //!
 //! **The platform's own registration is the source of truth**, and nothing
 //! duplicates it. On Linux that is an XDG autostart entry — see [`xdg`] — and
-//! the checkbox on the tray menu is drawn from whether that entry is there and
-//! says yes, read afresh every time it is asked. There is no entry in either
-//! settings file for this and none is added: a human who takes the registration
-//! away with their desktop's own tools has unchecked the box, and Verkstead
-//! agrees with them rather than argues.
+//! on macOS a launch agent in the user's own agents directory — see
+//! [`launchd`]. The checkbox on the tray menu is drawn from whether that
+//! registration is there and says yes, read afresh every time it is asked.
+//! There is no entry in either settings file for this and none is added: a
+//! human who takes the registration away with the platform's own tools has
+//! unchecked the box, and Verkstead agrees with them rather than argues.
 //!
 //! **Every launch rewrites the registration while it is there.** A binary that
 //! was moved — downloaded again into another directory, an AppImage put
@@ -25,21 +26,29 @@
 //!
 //! **The platform half is a module of its own**, and everything else in this
 //! file is the same wherever it is built. Linux registers with an XDG autostart
-//! entry, which is the `xdg` module. The stages that build this for macOS and
-//! for Windows register with a launch agent and with the Run key, which is
+//! entry, which is the `xdg` module, and macOS with a launch agent plist, which
+//! is the `launchd` one — one file that is there or is not, either way. The
+//! stage that builds this for Windows registers with the Run key, which is
 //! another arm of this same shape rather than another way of doing this — and
 //! until an arm is written the platform has nowhere to keep a registration,
 //! which is the `nowhere` module and a state this file already draws: the item
 //! greyed rather than a box that ticks and does nothing.
 
-#[cfg(not(target_os = "linux"))]
+// Built wherever the tests are rather than on macOS alone: everything in it is
+// path and text, so the arm this Linux runner will never run is still an arm
+// its tests call — see the module's own docs.
+#[cfg(any(target_os = "macos", test))]
+mod launchd;
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 mod nowhere;
 #[cfg(target_os = "linux")]
 mod xdg;
 
 use anyhow::{Context, Result, bail};
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+use launchd::Entry;
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 use nowhere::Entry;
 #[cfg(target_os = "linux")]
 use xdg::Entry;
