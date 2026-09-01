@@ -10,6 +10,16 @@ published as a GitHub Release under the tag, and finally the workflow commits
 was just published. None of that is hand-driven, and nothing in it is
 hand-edited afterwards.
 
+The CLI legs each run on a runner of their own architecture; the desktop leg
+runs in an `ubuntu:22.04` container on top of one. That is the whole of what
+decides the AppImage's floor — a bundle carries the libraries it links but not
+the C runtime, so a downloader's loader has to satisfy the glibc the file was
+compiled against, and 22.04's 2.35 reaches Ubuntu 22.04, Debian 12 and
+everything above them. The leg reads the symbols back afterwards and fails on
+anything higher, so the floor and the promise
+[adoption.md](adoption.md#the-desktop-app-on-a-linux-machine) makes about it
+cannot drift apart. Move the image and both move.
+
 The manifest is the CLI binaries alone, and that is the one place a count is
 still the right question: what the flake and the NixOS module run is the
 headless daemon, so nothing fetches a desktop bundle through nix and four stays

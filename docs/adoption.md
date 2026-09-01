@@ -126,10 +126,10 @@ notifications need that HTTPS to work at all.
 ### The desktop app, on a Linux machine
 
 `Verkstead-x86_64.AppImage` is one file holding the server, the viewer and every
-library the tray is drawn over, so a machine that has none of them installed
-needs nothing but the file. x86_64 only: an arm64 Linux desktop has the bare CLI
-and `verkstead serve`. Downloaded, made executable — a Release asset carries no
-mode — and run, it serves on `127.0.0.1:8422`, opens the viewer in the default
+library the tray is drawn over, so a machine with none of them installed needs
+nothing else to draw a tray icon. x86_64 only: an arm64 Linux desktop has the
+bare CLI and `verkstead serve`. Downloaded, made executable — a Release asset
+carries no mode — and run, it serves on `127.0.0.1:8422`, opens the viewer in the default
 browser, and puts an icon in the tray with the four things a browser tab cannot
 do for itself: **Open** brings the viewer back, **View Logs** opens the file the
 server's logging goes to when there is no terminal to print it in, **Launch on
@@ -149,9 +149,26 @@ the platform's log directory, and stopping it is stopping the process. The
 extension is what gets the four back, and there is nothing to reinstall or
 reconfigure here once it is on.
 
-Sessions need bubblewrap either way in, and it is the machine's rather than the
-bundle's: the NixOS module puts it on the service's path, and a desktop
-elsewhere wants the distribution's `bubblewrap` package installed.
+**Three things stay the machine's**, and a bundle is the wrong place for any of
+them.
+
+**Sessions need bubblewrap**, and it cannot ride inside: an AppImage is mounted
+`nosuid` and its files sit at a path made for one run, so a copy carried in the
+bundle would be denied the privilege bwrap needs however it was granted. The
+NixOS module puts it on the service's path; a desktop elsewhere wants the
+distribution's `bubblewrap` package installed.
+
+**The C library is the host's**, because a process holding two of them has two
+of everything a C library keeps. The bundle is built against glibc 2.35, which
+is the floor it runs on: Ubuntu 22.04, Debian 12 and anything newer will load
+it, and a distribution older than those — RHEL 9 and its family among them —
+will not, saying `GLIBC_2.35 not found` and nothing friendlier.
+
+**And FUSE, because an AppImage mounts itself.** It wants a `fusermount` on the
+`PATH` and a `/dev/fuse` to open; every desktop install has both, and a minimal
+or hardened one may not. Without them the file says so — "Cannot mount AppImage,
+please check your FUSE setup" — and `--appimage-extract-and-run` is the way past
+it for a machine you cannot change.
 
 Out of a checkout instead — the same server, told `--data-dir .` so that
 `verkstead.db` and the rest land in the checkout rather than in the platform

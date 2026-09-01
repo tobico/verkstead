@@ -250,11 +250,64 @@ jobs:
     name: Verkstead-x86_64.AppImage
     needs: viewer
     runs-on: ubuntu-24.04
+    # **The floor this artifact runs on is decided here, and nowhere else.** A
+    # bundle carries every library it links but not the C runtime — a process
+    # holding two of those has two of everything the C library keeps — so what
+    # the loader on a downloader's machine has to satisfy is the glibc of the
+    # machine that compiled it. Built on the runner itself that would be 2.39,
+    # which is above Ubuntu 22.04 and Debian 12 and so above much of what is
+    # still in support; built here it is 22.04's own 2.35, and the step that
+    # reads the symbols back is what holds it there.
+    #
+    # The assertions below then run on the floor rather than above it, which is
+    # the better half of the bargain: an AppImage that comes up on the oldest
+    # machine this leg claims comes up on the newer ones.
+    #
+    # The options are what lets it: an AppImage mounts itself through FUSE, and
+    # a container is not allowed to mount anything unless it is handed the
+    # device, the capability and a way past the host's own profile for
+    # containers. Without them every assertion here would be about a file
+    # nothing had run.
+    container:
+      image: ubuntu:22.04
+      options: >-
+        --device /dev/fuse
+        --cap-add SYS_ADMIN
+        --security-opt apparmor:unconfined
     env:
       # Where `tools/build-appimage.sh` leaves it, said once: every step below
       # either runs this file or asks something of it.
       APPIMAGE: target/appimage/Verkstead-x86_64.AppImage
     steps:
+      # First, because a distribution image carries nothing and the steps below
+      # are what a runner image would have made unnecessary: `curl` is how the
+      # Rust action fetches rustup when a machine has none, `git` is how the
+      # checkout checks out, and a C compiler is what cc-rs builds the C in the
+      # dependency tree with — SQLite's own sources and `ring`'s, as on the CLI
+      # legs. No `sudo` anywhere in this job: a container step is already root,
+      # and the image has no such command.
+      #
+      # Then three groups of the leg's own. `libgtk-3-dev` and the appindicator
+      # are what `crates/desktop` links and what `ci.yml` installs to build the
+      # workspace at all — the toolkit, and the tray protocol over it.
+      # `squashfs-tools` and `fuse3` are the bundling's: `mksquashfs` makes the
+      # filesystem an AppImage is, and `fusermount3` is what the runtime mounts
+      # it back with, which is what lets the assertions run the artifact itself
+      # rather than something unpacked out of it.
+      #
+      # And `xvfb` and `dbus-x11`, which nothing builds or bundles with: a
+      # runner has no screen and no session bus, and without both the app takes
+      # its no-screen path and the bundled toolkit is never loaded at all — see
+      # the assertion for what that would leave unchecked. `dbus-x11` is asked
+      # for rather than `dbus-run-session`'s own package, because it depends on
+      # it under a name that has moved between releases and this one has not.
+      - name: Install what a distribution image has not got
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates curl git build-essential \
+            pkg-config libgtk-3-dev libayatana-appindicator3-dev \
+            squashfs-tools fuse3 xvfb dbus-x11
+
       - uses: actions/checkout@v7.0.1
 
       # As the CLI legs do and for the same reason: the viewer is embedded at
@@ -265,30 +318,6 @@ jobs:
         with:
           name: viewer
           path: web/dist
-
-      # None of these are on the runner image by declaration, so they are
-      # installed rather than hoped for, in three groups.
-      #
-      # The first two are what `crates/desktop` links and what `ci.yml` installs
-      # to build the workspace at all — the toolkit, and the tray protocol over
-      # it. The next two are the bundling's own: `mksquashfs` makes the
-      # filesystem an AppImage is, and `fusermount3` is what the AppImage
-      # runtime mounts it back with, which is what lets the assertions below run
-      # the artifact itself rather than something unpacked out of it.
-      #
-      # The last two are what the tray is asserted on, and nothing builds or
-      # bundles with them: a runner has no screen and no session bus, and
-      # without both the app takes its no-screen path and the bundled toolkit is
-      # never loaded at all — see the assertion for what that would leave
-      # unchecked. `dbus-x11` is asked for rather than `dbus-run-session`'s own
-      # package, because it depends on it under a name that has moved between
-      # releases and this one has not.
-      - name: Install the desktop app's toolkit
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libgtk-3-dev \
-            libayatana-appindicator3-dev squashfs-tools fuse3 \
-            xvfb dbus-x11
 
       # The same pin as everywhere else, and no `targets`: this leg builds for
       # the runner it is on. The toolkit is linked rather than compiled in, so
@@ -311,9 +340,43 @@ jobs:
       # makes on itself — that every library the app or its bundle names is one
       # of the files it copied in — which is what keeps this leg from shipping
       # something that only runs on a machine with the development packages the
-      # step above just installed.
+      # first step of this job installed.
       - name: Build the AppImage
         run: tools/build-appimage.sh
+
+      # The claim the container above makes, checked rather than trusted. Every
+      # versioned reference to glibc in the app and in each library the bundle
+      # carries, and the highest of them is what a downloader's loader has to
+      # satisfy; anything over the floor is a file that builds, runs here, and
+      # refuses to start on the machines this leg was moved onto an older image
+      # to reach — with `GLIBC_2.xx not found` and nothing friendlier, long
+      # after a release.
+      #
+      # Said as a number here rather than read off the image, because it is the
+      # promise the documentation makes to a downloader and not a fact about a
+      # runner — see `docs/adoption.md`. Moving the image means moving both.
+      - name: The AppImage asks for no glibc newer than 2.35
+        env:
+          FLOOR: "2.35"
+        run: |
+          asked=$(objdump -T target/appimage/AppDir/usr/bin/verkstead-desktop \
+            target/appimage/AppDir/usr/lib/* 2> /dev/null |
+            grep -o 'GLIBC_[0-9][0-9.]*' | sort -u -V | tail -1)
+          asked=${asked#GLIBC_}
+          echo "The highest glibc asked for is ${asked:-none}."
+          # Nothing found is a check that did not run rather than a bundle that
+          # asks for nothing: everything here is dynamically linked against the
+          # C library, so some version is always named.
+          if [ -z "$asked" ]; then
+            echo "::error::Nothing in the bundle names a glibc version at all."
+            exit 1
+          fi
+          # `sort -V` and read the last: over the floor is the only failure, and
+          # a version scheme is not a number to compare with `-gt`.
+          if [ "$(printf '%s\n%s\n' "$FLOOR" "$asked" | sort -V | tail -1)" != "$FLOOR" ]; then
+            echo "::error::The AppImage asks for glibc $asked, above the $FLOOR this leg builds to."
+            exit 1
+          fi
 
       - name: The AppImage runs
         run: ./"$APPIMAGE" --help

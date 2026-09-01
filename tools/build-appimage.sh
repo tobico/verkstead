@@ -34,7 +34,9 @@ APPIMAGE="$WORK/Verkstead-x86_64.AppImage"
 # one thing that cannot be replaced from inside a bundle — a process that had
 # loaded two of them would have two of everything the C library keeps. They also
 # settle the floor this artifact runs on, which is the glibc of the machine it
-# was built on, which is the runner image the release workflow pins.
+# was built on — which is why the release workflow does not build it on the
+# runner, but in an older container image on top of one, and reads the symbols
+# back afterwards to hold it there. Run here, the floor is the dev shell's.
 #
 # One list, read twice: by what is left out below, and by the check at the end
 # that nothing else was.
