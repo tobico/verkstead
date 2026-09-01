@@ -2924,6 +2924,37 @@ pub async fn follow_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<(
     Ok(())
 }
 
+/// Put another invented name in place of the one a Conversation was started on,
+/// because the repository turned out to have a branch by it already.
+///
+/// The third way a branch name moves, and the only one nobody asked for.
+/// [`rename_branch`] is the human typing one; [`follow_branch`] is a session
+/// having renamed the branch it was working on; this is the moment before the
+/// branch exists at all, where the prefill the record has been carrying is found
+/// to name somebody else's work — and a prefill is nobody's, so it is replaced
+/// rather than defended.
+///
+/// Whose the name is does not change, exactly as it does not when a session
+/// renames one: what goes in is another name Verkstead invented, so the
+/// Conversation is still on one Verkstead is responsible for and its first
+/// session is still the one to pick a better one.
+///
+/// Refused where the human has settled a name, in the write itself rather than
+/// in a look taken first: `named_branch` is the fallback the prefill provides,
+/// and the name a human typed is not one to go picking again behind them.
+/// Nothing says which happened, because nothing has to — the caller passes a
+/// name it chose against the repository and only ever for an invented one.
+pub async fn reinvent_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<()> {
+    sqlx::query("UPDATE conversations SET branch = ? WHERE id = ? AND named_branch IS NULL")
+        .bind(branch)
+        .bind(id)
+        .execute(pool)
+        .await
+        .with_context(|| format!("inventing another branch name for Conversation {id}"))?;
+
+    Ok(())
+}
+
 /// Record the commit a drafting Conversation branches from, or `None` to put it
 /// back on the default-branch rule.
 ///

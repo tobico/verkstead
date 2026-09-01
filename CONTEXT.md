@@ -82,6 +82,19 @@ than another being invented. Two drafts against one Repo both reading *Draft*
 beside the same Repo name is what two drafts are: they are few, and they are
 short-lived.
 
+**An invented name is a prefill until the work starts, and only then a branch.**
+Which is where it is made to be free: at the moment the branch is cut it is
+checked against every repository it is about to be cut in — the Conversation's
+own and each companion mirroring it — and where one of them already has a branch
+by that name, another name is invented out of the same words and that is what
+the work goes on. A branch outlives the worktree it was worked in, so a Repo
+worked in for a while holds plenty of them, and two Conversations landing on one
+of a thousand names is a matter of when rather than whether. Nothing is reported,
+because nothing had been drawn: whose the name is does not change with it, and
+the first session still has one to replace. **A name the human typed is refused
+instead** — that one they chose and meant, so a branch of somebody else's work
+under it is something to tell them about rather than something to pick around.
+
 **And where nobody has named it, the work's first session is asked to.** The
 press that starts the work leaves the naming to the session it starts — the
 grilling one, the ungrilled build one, or the one a steered Draft starts — and

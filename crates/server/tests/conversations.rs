@@ -1782,17 +1782,93 @@ async fn starting_is_refused_when_the_base_branch_no_longer_resolves() {
 }
 
 /// Verkstead did not make the branch, so it will not take it over: what is on it
-/// is somebody's work.
+/// is somebody's work, and the name is one the human typed and meant.
 #[tokio::test]
-async fn starting_is_refused_when_the_branch_is_already_there() {
+async fn starting_is_refused_when_the_named_branch_is_already_there() {
     let (watched, _dir, app, repo, repo_id) = workbench().await;
     let id = ready(&app, watched.path(), repo_id).await;
 
-    let branch = opened(&app, id).await.branch;
-    git(&repo, &["branch", &branch]);
+    assert_eq!(
+        rename(&app, id, "rate-limiting").await,
+        BranchRenamed::Renamed
+    );
+    git(&repo, &["branch", "rate-limiting"]);
 
     assert_eq!(grill(&app, id).await, GrillingStarted::BranchExists);
-    assert_eq!(opened(&app, id).await.state, Lifecycle::Draft);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.branch, "rate-limiting", "and the name is still theirs");
+}
+
+/// But a name Verkstead invented is nobody's, so a repository that already has a
+/// branch by it is a reason to invent another rather than a reason to refuse:
+/// the human never saw that name and cannot have meant it.
+#[tokio::test]
+async fn a_start_invents_another_name_where_the_one_it_has_is_taken() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let carried = opened(&app, id).await.branch;
+    git(&repo, &["branch", &carried]);
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+
+    assert_ne!(view.branch, carried, "the work is on a name of its own");
+    assert!(
+        has_branch(&repo, &view.branch),
+        "and that name is the branch that was cut",
+    );
+
+    // Still Verkstead's name and still the first session's to replace: what
+    // happened here is a prefill being swapped for another prefill.
+    assert!(!view.branch_named);
+    assert!(view.naming);
+
+    // And the work is where the record says it is, under the name it settled on.
+    let worktree = PathBuf::from(view.worktree.expect("a start makes one").path);
+    assert!(
+        worktree.ends_with(format!("verkstead-{}", view.branch)),
+        "the directory is named for the branch, not for the one it started with",
+    );
+    assert_eq!(
+        git(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        view.branch,
+    );
+}
+
+/// The same question asked of every repository the invented name is about to be
+/// cut in. A companion mirroring the Conversation's branch takes that name too,
+/// so one already holding it is answered by picking again rather than by the
+/// refusal a companion's own typed name would get.
+#[tokio::test]
+async fn a_start_invents_around_a_companion_that_holds_the_name() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let companion = second_repo(&app, watched.path(), "askance").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    add_companion(&app, id, companion).await;
+    companion_mode(&app, id, companion, CompanionMode::ReadWrite).await;
+
+    let askance = watched.path().join("askance");
+    let carried = opened(&app, id).await.branch;
+
+    // Free in the Conversation's own repository and taken in the companion's,
+    // which is a name this start cannot use either.
+    git(&askance, &["branch", &carried]);
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+
+    assert_ne!(view.branch, carried);
+    assert!(has_branch(&repo, &view.branch));
+    assert!(
+        has_branch(&askance, &view.branch),
+        "the companion mirrors it, so it is cut there under the same name",
+    );
 }
 
 /// The companion of that name, as the Conversation reports it.
