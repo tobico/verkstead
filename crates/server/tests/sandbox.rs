@@ -13,6 +13,14 @@
 //! the three is attempted rather than asked of the metadata: a read-only bind
 //! and a directory somebody has no write permission on look identical to
 //! `test -w`, and only one of them is the surface being described.
+//!
+//! **This is the Linux half.** What the same description comes to on a Mac is
+//! `tests/sandbox_macos.rs`, which asks the same questions of Apple's own
+//! mechanism and reads a different answer back from the paths a session may not
+//! reach. Neither suite runs on the other's machine: what is asserted here is a
+//! mount namespace, and there is none of one to probe anywhere else.
+
+#![cfg(target_os = "linux")]
 
 use std::collections::BTreeMap;
 use std::io::Write;

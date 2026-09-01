@@ -1,5 +1,12 @@
-//! The sandbox a session runs in: a bwrap surface built around one
-//! Conversation's worktree, and nothing else.
+//! The sandbox a session runs in: a surface built around one Conversation's
+//! worktree, and nothing else.
+//!
+//! **What is inside is one description, and the mechanism under it is the
+//! platform's.** [`Sandbox::surface`] says what a session may reach, once; a
+//! renderer turns that into bubblewrap's flags on Linux — see [`bwrap`] — or
+//! into a deny-by-default policy on a Mac — see [`seatbelt`]. Neither rendering
+//! is the description, the two are not the same boundary, and nothing above
+//! this module learns which one it got (ADR-0012).
 //!
 //! Evolved from `tobico-scripts/bin/sandbox`, which is the working reference —
 //! but narrowed where it matters. That script binds the whole of `~/src`
@@ -45,10 +52,30 @@
 //! worktree it is in. A proxy allowlist can come later, in front of this, and
 //! the seam for it is that nothing here reads the network's absence.
 
+// Built wherever the tests are rather than on its own platform alone: a
+// rendering is a description going in and a command coming out, so the arm this
+// machine will never run is still an arm its tests call — the same reason
+// `crates/desktop`'s startup registrations are all built here.
+#[cfg(any(not(target_os = "macos"), test))]
+mod bwrap;
+#[cfg(any(target_os = "macos", test))]
+mod seatbelt;
+mod surface;
+
+// And which of them a session actually gets, which is the one thing about the
+// seam that is a `cfg` rather than a description: bubblewrap wherever there is
+// a kernel with namespaces to unshare, and Apple's own on a Mac.
+#[cfg(not(target_os = "macos"))]
+use bwrap::command as render;
+#[cfg(target_os = "macos")]
+use seatbelt::command as render;
+
 use std::ffi::OsStr;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+use surface::{Access, Reach, Surface};
 
 use crate::build_cache::{self, BuildCache};
 use crate::handoffs::{self, Handoffs};
@@ -57,8 +84,20 @@ use crate::skills::{self, Skills};
 use crate::store;
 use crate::terminal;
 
-/// The system directories a sandbox gets read-only, in the order bwrap is told
-/// about them.
+/// The system directories a sandbox gets read-only on this machine, in the
+/// order they are said.
+///
+/// A `cfg!` rather than a `cfg`, for the reason [`crate::platform::Platform`]
+/// is a value rather than one: what the system *is* differs by platform and the
+/// list that says so is a fact either way, so both are here and both are
+/// readable by a test on whichever machine is running it.
+pub(crate) const SYSTEM: &[&str] = if cfg!(target_os = "macos") {
+    APPLE_SYSTEM
+} else {
+    LINUX_SYSTEM
+};
+
+/// What that is on Linux.
 ///
 /// `/nix` is the whole of what makes the box usable — every binary a session
 /// runs is under it — and the rest is what a dynamic linker, a certificate store
@@ -82,7 +121,7 @@ use crate::terminal;
 /// The compile server gets the same list, because what makes a machine usable
 /// is the same whichever of the two is reading it — see
 /// [`crate::build_cache::BuildCache::compiling`].
-pub(crate) const SYSTEM: [&str; 7] = [
+const LINUX_SYSTEM: &[&str] = &[
     "/nix",
     "/usr",
     "/bin",
@@ -90,6 +129,36 @@ pub(crate) const SYSTEM: [&str; 7] = [
     "/lib64",
     "/etc",
     "/run/current-system",
+];
+
+/// And what it is on a Mac, which shares not one entry with it.
+///
+/// `/System/Library` rather than `/System`, and deliberately: the data volume
+/// is firmlinked in under `/System/Volumes/Data`, so a session given the whole
+/// of `/System` would reach every home directory on the machine by its other
+/// name. What is here is the frameworks, the shared cache the dynamic linker
+/// maps out of the cryptex, the machine-wide `/Library`, and the tools —
+/// Apple's own under `/usr` and `/bin`, Homebrew's where somebody installed it,
+/// and nix's where a Mac is running nix-darwin.
+///
+/// `/var/select` is the one that reads as nothing: `/bin/sh` on a Mac reads
+/// `/private/var/select/sh` to decide which shell it is being run as, and a
+/// session without it has a shell that will not start.
+///
+/// One that is not there is skipped, as on Linux and for the same reason: a
+/// Mac without Homebrew is a Mac without Homebrew, which is a thing to notice
+/// elsewhere than in a policy.
+const APPLE_SYSTEM: &[&str] = &[
+    "/System/Library",
+    "/System/Volumes/Preboot/Cryptexes",
+    "/Library",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/etc",
+    "/var/select",
+    "/opt/homebrew",
+    "/nix",
 ];
 
 /// Where the server's own executable is mounted, which is what a session runs
@@ -227,9 +296,18 @@ pub(crate) const SCCACHE_INSIDE: &str = "/verkstead/bin/sccache";
 pub(crate) const PATH: &str =
     "/verkstead/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
 
-/// And what a session's `SHELL` is: the one path the system bind is certain to
-/// have a shell at, on NixOS and everywhere else.
+/// And what a session's `SHELL` is: the one path the system is certain to have
+/// a shell at, on NixOS and everywhere else.
 const SHELL: &str = "/bin/sh";
+
+/// Where a session writes a temporary file.
+///
+/// The one thing in the description whose two renderings differ in what they
+/// leave behind rather than in how they are spelled: on Linux this is a
+/// filesystem of the session's own, holding nothing of the host's and gone when
+/// the session is, and on a Mac it is the machine's own directory of that name
+/// with a rule about it — see [`seatbelt`].
+const TMP: &str = "/tmp";
 
 /// GitHub over HTTPS, which is the one host a sandbox is given credentials for
 /// and the one every SSH remote is rewritten to — see [`Sandbox::git_config`].
@@ -425,21 +503,6 @@ impl Bind {
             reach: Reach::ReadOnly,
         }
     }
-
-    /// The bwrap flag that makes it what it is.
-    fn flag(&self) -> &'static str {
-        match self.reach {
-            Reach::ReadOnly => "--ro-bind",
-            Reach::ReadWrite => "--bind",
-        }
-    }
-}
-
-/// How far into a bind a session may reach.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Reach {
-    ReadOnly,
-    ReadWrite,
 }
 
 /// Sandbox Configuration: the extra read-write binds a sandbox gets beyond the
@@ -859,54 +922,50 @@ impl Sandbox {
         })
     }
 
-    /// `argv` as it will be run inside the sandbox.
+    /// `argv` as it will be run inside the sandbox, by whichever mechanism this
+    /// machine has one.
     ///
     /// The command is not put through a shell: what runs inside is an argument
-    /// vector the orchestrator built, and a shell between it and bwrap would be
-    /// one more thing to quote for.
+    /// vector the orchestrator built, and a shell between it and the sandbox
+    /// would be one more thing to quote for.
     pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> Command {
-        let mut bwrap = Command::new("bwrap");
+        render(&self.surface(argv))
+    }
 
-        // Nothing of the server's environment comes through. What the sandbox
-        // holds is decided here, and a variable the unit happened to be started
-        // with — where the database is, what the server listens on — is not part
-        // of that decision.
-        bwrap.env_clear();
+    /// And what that mechanism is given: everything a session may reach, said
+    /// once.
+    ///
+    /// **The order is the description**, because a path said twice is the
+    /// second one — see [`surface`]. Which is why the account lands after the
+    /// directory it goes inside, why what covers the account's own skills is
+    /// after the account, and why the handoff directory is after the temporary
+    /// filesystem that would otherwise be over it.
+    fn surface<S: AsRef<OsStr>>(&self, argv: &[S]) -> Surface {
+        let mut surface = Surface::starting_in(self.worktree.clone());
 
-        bwrap.args([
-            // A session outlives nothing: if the orchestrator goes, so does
-            // whatever it left running.
-            "--die-with-parent",
-            // Every namespace, and then the network back — see the module's own
-            // documentation for why that one.
-            "--unshare-all",
-            "--share-net",
-            "--hostname",
-            "verkstead",
-        ]);
-
+        // What is not there is skipped rather than said: a rule about a path
+        // that does not exist is a rule about nothing, and on Linux a bind of
+        // one is a sandbox that will not start.
         for path in SYSTEM.iter().map(Path::new).filter(|path| path.exists()) {
-            bwrap.arg("--ro-bind").arg(path).arg(path);
+            surface.own(path, Reach::ReadOnly);
         }
 
-        // `/proc` and `/dev` are made rather than bound: they are the sandbox's
-        // own, which is what makes the unshared pid namespace mean anything.
-        bwrap.args(["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp"]);
+        surface
+            .made(Access::ProcessTable)
+            .made(Access::Devices)
+            .made(Access::Temporary(PathBuf::from(TMP)));
 
-        // HOME before anything mounted into it: the directory has to be there
-        // for the pair to land in, and everything else about it stays absent.
-        bwrap.arg("--dir").arg(&self.home.path);
+        // HOME before anything that goes inside it: the directory has to be
+        // there for the account to land in, and everything else about it stays
+        // absent.
+        surface.made(Access::Empty(self.home.path.clone()));
 
-        bwrap
-            .arg("--bind")
-            .arg(&self.worktree)
-            .arg(&self.worktree)
-            .arg("--bind")
-            .arg(&self.git_dir)
-            .arg(&self.git_dir);
+        surface
+            .own(&self.worktree, Reach::ReadWrite)
+            .own(&self.git_dir, Reach::ReadWrite);
 
-        // And the account, in the shape its agent type keeps one: what is bound
-        // over where is that type's own business, and a backend arriving with an
+        // And the account, in the shape its agent type keeps one: what goes
+        // where is that type's own business, and a backend arriving with an
         // account of its own lands here rather than in whatever the pair
         // happened to mean.
         match &self.account {
@@ -914,75 +973,62 @@ impl Sandbox {
                 claude_dir,
                 config_file,
             } => {
-                bwrap
-                    .arg("--bind")
-                    .arg(claude_dir)
-                    .arg(self.home.path.join(CLAUDE_DIR_INSIDE_HOME))
-                    .arg("--bind")
-                    .arg(config_file)
-                    .arg(self.home.path.join(CLAUDE_CONFIG_INSIDE_HOME));
+                surface
+                    .elsewhere(
+                        claude_dir,
+                        self.home.path.join(CLAUDE_DIR_INSIDE_HOME),
+                        Reach::ReadWrite,
+                    )
+                    .elsewhere(
+                        config_file,
+                        self.home.path.join(CLAUDE_CONFIG_INSIDE_HOME),
+                        Reach::ReadWrite,
+                    );
             }
             store::Account::Codex { home } => {
-                bwrap
-                    .arg("--bind")
-                    .arg(home)
-                    .arg(self.home.path.join(CODEX_INSIDE_HOME));
+                surface.elsewhere(
+                    home,
+                    self.home.path.join(CODEX_INSIDE_HOME),
+                    Reach::ReadWrite,
+                );
             }
             store::Account::Grok { home } => {
-                bwrap
-                    .arg("--bind")
-                    .arg(home)
-                    .arg(self.home.path.join(GROK_INSIDE_HOME));
+                surface.elsewhere(
+                    home,
+                    self.home.path.join(GROK_INSIDE_HOME),
+                    Reach::ReadWrite,
+                );
             }
-            // Two binds rather than one, and the same relative path on both
-            // sides of each: an OpenCode Profile's home is an opencode home,
-            // and the XDG defaults resolve inside the fresh HOME — see
-            // [`OPENCODE_CONFIG_INSIDE_HOME`]. And the two things this backend
-            // is told about itself said while the account is being said: the
-            // store, because where opencode writes it is inside the second of
-            // the two directories, and the shell tool's default timeout,
-            // because what it is there for is the ask this backend holds open.
+            // Two rather than one, and the same relative path on both sides of
+            // each: an OpenCode Profile's home is an opencode home, and the XDG
+            // defaults resolve inside the fresh HOME — see
+            // [`OPENCODE_CONFIG_INSIDE_HOME`].
             store::Account::OpenCode { home } => {
                 for inside in [OPENCODE_CONFIG_INSIDE_HOME, OPENCODE_DATA_INSIDE_HOME] {
-                    bwrap
-                        .arg("--bind")
-                        .arg(home.join(inside))
-                        .arg(self.home.path.join(inside));
+                    surface.elsewhere(
+                        home.join(inside),
+                        self.home.path.join(inside),
+                        Reach::ReadWrite,
+                    );
                 }
-
-                bwrap
-                    .arg("--setenv")
-                    .arg(OPENCODE_DB)
-                    .arg(OPENCODE_DB_FILE)
-                    // And how long its shell tool holds a command the model
-                    // gave no timeout of its own, which is what a blocking ask
-                    // under this backend stands on — see
-                    // [`OPENCODE_BASH_DEFAULT_TIMEOUT`].
-                    .arg("--setenv")
-                    .arg(OPENCODE_BASH_DEFAULT_TIMEOUT)
-                    .arg(OPENCODE_BASH_DEFAULT_TIMEOUT_MS);
             }
         }
 
-        // After `/tmp` is made, and inside it: the tmpfs above would otherwise
+        // After the temporary filesystem and inside it: that would otherwise
         // land over this and leave the session writing its handoff into memory
         // nothing outside will ever read.
-        bwrap
-            .arg("--bind")
-            .arg(&self.handoff_dir)
-            .arg(handoffs::INSIDE);
+        surface.elsewhere(&self.handoff_dir, handoffs::INSIDE, Reach::ReadWrite);
 
-        // The skills, at a path of Verkstead's own outside HOME entirely — the
-        // bind makes the directory, so what a session reads there is what this
-        // binary ships. Read-only, because what a session is grilled by is the
-        // product's and not a file the session can rewrite mid-run.
-        bwrap.arg("--ro-bind").arg(&self.skills).arg(skills::INSIDE);
+        // The skills, at a path of Verkstead's own outside HOME entirely — what
+        // a session reads there is what this binary ships. Read-only, because
+        // what a session is grilled by is the product's and not a file the
+        // session can rewrite mid-run.
+        surface.elsewhere(&self.skills, skills::INSIDE, Reach::ReadOnly);
 
         // And nothing at all where the account's own skills would otherwise be
-        // found: after the Profile's directory and inside it, because a bind is
-        // applied in the order it is given and the one that lands second is the
-        // one that wins. Read-only as the mount that used to stand here was, so
-        // a session cannot fill the directory in and then read from it.
+        // found: after the Profile's directory and inside it, because what is
+        // said second is what a session gets. Read-only as the directory it
+        // stands over is, so a session cannot fill it in and then read from it.
         //
         // Claude's, and so far Claude's alone. Each backend after it has a
         // discovery path of its own, covered the same way by the stage that
@@ -996,90 +1042,86 @@ impl Sandbox {
         // OpenCode adds none either, and for a reason of its own. Its two
         // global paths — `~/.claude/skills` and `~/.agents/skills` — are
         // Claude-shaped and sit under HOME rather than under its account, and
-        // an OpenCode Profile binds neither of them into the sandbox: HOME
-        // inside is fresh, so there is nothing at either to hide and an empty
-        // directory over one would cover nothing. Its own is inside the config
-        // directory the Profile names, which is the exception above. So every
-        // backend that has landed adds nothing here, and a stage that adds no
-        // bind is following the rule rather than forgetting one.
+        // an OpenCode Profile puts neither of them inside: HOME inside is
+        // fresh, so there is nothing at either to hide and an empty directory
+        // over one would cover nothing. Its own is inside the config directory
+        // the Profile names, which is the exception above. So every backend
+        // that has landed adds nothing here, and a stage that adds nothing is
+        // following the rule rather than forgetting one.
         //
         // And the account's type at all, rather than every home there is,
-        // because a bind into a home no session is running under would cover
+        // because covering a home no session is running under would cover
         // nothing and make a directory the account never had.
         if matches!(self.account, store::Account::Claude { .. }) {
-            bwrap
-                .arg("--ro-bind")
-                .arg(&self.nothing)
-                .arg(self.home.path.join(skills::CLAUDE_INSIDE_HOME));
+            surface.elsewhere(
+                &self.nothing,
+                self.home.path.join(skills::CLAUDE_INSIDE_HOME),
+                Reach::ReadOnly,
+            );
         }
 
         // And the binary the session asks with, in a directory of its own that
-        // goes first on `PATH` — see [`Executable`]. The bind makes the
-        // directory, so what is on that `PATH` entry is this one file and
-        // nothing the host put beside it.
-        bwrap
-            .arg("--ro-bind")
-            .arg(&self.verkstead)
-            .arg(VERKSTEAD_INSIDE);
+        // goes first on `PATH` — see [`Executable`]. What is on that `PATH`
+        // entry is this one file and nothing the host put beside it.
+        surface.elsewhere(&self.verkstead, VERKSTEAD_INSIDE, Reach::ReadOnly);
 
-        // And the shared build cache: the directory writable at the same path
-        // inside, and the sccache that compiles into it read-only in the
-        // directory the binary above just made. After the `--dir` on HOME, so
-        // that a cache under the server's own home — which is where it is when
-        // nobody has configured one — lands inside the fresh HOME rather than
-        // being wiped by it. See [`crate::build_cache`].
+        // And the shared build cache: the directory writable at its own place,
+        // and the sccache that compiles into it read-only in the directory the
+        // binary above just made. After the empty HOME, so that a cache under
+        // the server's own home — which is where it is when nobody has
+        // configured one — is inside it rather than wiped by it. See
+        // [`crate::build_cache`].
         if let Some(cache) = &self.build_cache {
-            bwrap.arg("--bind").arg(cache.dir()).arg(cache.dir());
+            surface.own(cache.dir(), Reach::ReadWrite);
 
             if let Some(sccache) = cache.sccache() {
-                bwrap.arg("--ro-bind").arg(sccache).arg(SCCACHE_INSIDE);
+                surface.elsewhere(sccache, SCCACHE_INSIDE, Reach::ReadOnly);
             }
         }
 
         for bind in &self.binds {
-            bwrap.arg(bind.flag()).arg(&bind.path).arg(&bind.path);
+            surface.own(&bind.path, bind.reach);
         }
 
-        bwrap
-            .arg("--chdir")
-            .arg(&self.worktree)
-            .arg("--setenv")
-            .arg("HOME")
-            .arg(&self.home.path)
-            .arg("--setenv")
-            .arg("PATH")
-            .arg(PATH)
+        surface
+            .set("HOME", &self.home.path)
+            .set("PATH", PATH)
             // Which shell is inside, for the same reason `PATH` is said here:
             // the environment is cleared, so a tool that shells out reaches for
             // whatever this holds — and with nothing in it, it would fall back
             // to whatever login shell the passwd file gives the user the server
             // happens to run as.
-            .arg("--setenv")
-            .arg("SHELL")
-            .arg(SHELL)
+            .set("SHELL", SHELL)
             // And what kind of terminal a session is on, which is a fact about
             // the pseudo-terminal Verkstead opened for it rather than about the
             // sandbox — see [`crate::terminal`]. Said because nothing else
             // would: the environment is cleared, and an interface told nothing
             // draws for the dumbest terminal it knows about.
-            .arg("--setenv")
-            .arg("TERM")
-            .arg(terminal::TERM)
+            .set("TERM", terminal::TERM)
             // What makes a session's Question Sets its own Conversation's. The
             // variable the bundled CLI reads, scoped to one Conversation, so
             // nothing is inferred from the project or the branch — two
             // Conversations against one Repo would be indistinguishable by
             // either.
-            .arg("--setenv")
-            .arg("VERKSTEAD_SERVER")
-            .arg(&self.server)
+            .set("VERKSTEAD_SERVER", &self.server)
             // And which backend this session is, which is what tailors the
             // Guide it reads — see [`AGENT_TYPE`]. Off the account's own shape,
             // so nothing has to be plumbed through to say which agent is being
             // launched.
-            .arg("--setenv")
-            .arg(AGENT_TYPE)
-            .arg(self.account.agent_type().word());
+            .set(AGENT_TYPE, self.account.agent_type().word());
+
+        // The two an OpenCode session is told about itself: where its store
+        // goes, because opencode names the file after the release channel the
+        // install came from and the reader that follows a Transcript opens the
+        // path this chose; and how long its shell tool holds a command the
+        // model gave no timeout of its own, which is what a blocking ask under
+        // this backend stands on — see [`OPENCODE_BASH_DEFAULT_TIMEOUT`].
+        if matches!(self.account, store::Account::OpenCode { .. }) {
+            surface.set(OPENCODE_DB, OPENCODE_DB_FILE).set(
+                OPENCODE_BASH_DEFAULT_TIMEOUT,
+                OPENCODE_BASH_DEFAULT_TIMEOUT_MS,
+            );
+        }
 
         // Where a Rust build inside puts what it downloads and what it
         // compiles. Nothing but a Rust build ever reads any of them, which is
@@ -1099,16 +1141,12 @@ impl Sandbox {
         // `nix develop` layers its environment over this one — which is a
         // project saying what its own build needs, and is working as intended.
         if let Some(cache) = &self.build_cache {
-            bwrap
-                .arg("--setenv")
-                .arg("CARGO_HOME")
-                .arg(cache.cargo_home());
+            surface.set("CARGO_HOME", cache.cargo_home());
 
             // Only where there is an sccache to point at. Without one this is a
             // cache of downloads and nothing else — see [`crate::build_cache`]
-            // — and a `RUSTC_WRAPPER` naming a path that is not mounted would
-            // be every Rust build inside failing rather than one running
-            // uncached.
+            // — and a `RUSTC_WRAPPER` naming a path that is not inside would be
+            // every Rust build inside failing rather than one running uncached.
             //
             // What this reaches is the compile server Verkstead is running
             // outside, over the host's network — see
@@ -1119,16 +1157,10 @@ impl Sandbox {
             // somehow missing, and that server should write into the machine's
             // one cache like every other.
             if cache.sccache().is_some() {
-                bwrap
-                    .arg("--setenv")
-                    .arg("RUSTC_WRAPPER")
-                    .arg(SCCACHE_INSIDE)
-                    .arg("--setenv")
-                    .arg("SCCACHE_DIR")
-                    .arg(cache.sccache_dir())
-                    .arg("--setenv")
-                    .arg("SCCACHE_CACHE_SIZE")
-                    .arg(cache.size());
+                surface
+                    .set("RUSTC_WRAPPER", SCCACHE_INSIDE)
+                    .set("SCCACHE_DIR", cache.sccache_dir())
+                    .set("SCCACHE_CACHE_SIZE", cache.size());
             }
         }
 
@@ -1137,7 +1169,7 @@ impl Sandbox {
         // to set: `GH_TOKEN` present and empty is a login `gh` fails on obscurely
         // where its absence is a login it says plainly it does not have.
         if let Some(token) = &self.github_token {
-            bwrap.arg("--setenv").arg("GH_TOKEN").arg(token);
+            surface.set("GH_TOKEN", token);
         }
 
         // And the whole of git's configuration, in the environment for the same
@@ -1145,30 +1177,22 @@ impl Sandbox {
         let git_config = self.git_config();
 
         for (n, (key, value)) in git_config.iter().enumerate() {
-            bwrap
-                .arg("--setenv")
-                .arg(format!("GIT_CONFIG_KEY_{n}"))
-                .arg(key)
-                .arg("--setenv")
-                .arg(format!("GIT_CONFIG_VALUE_{n}"))
-                .arg(value);
+            surface
+                .set(&format!("GIT_CONFIG_KEY_{n}"), key)
+                .set(&format!("GIT_CONFIG_VALUE_{n}"), value);
         }
 
-        bwrap
-            .arg("--setenv")
-            .arg("GIT_CONFIG_COUNT")
-            .arg(git_config.len().to_string())
+        surface
+            .set("GIT_CONFIG_COUNT", git_config.len().to_string())
             // And nothing git cannot answer for itself is asked of anybody.
             // Nobody is at this terminal: a push with no usable credentials has
             // to come back saying so, where a prompt for a username would be a
             // session sitting on a pty until something noticed.
-            .arg("--setenv")
-            .arg("GIT_TERMINAL_PROMPT")
-            .arg("0");
+            .set("GIT_TERMINAL_PROMPT", "0");
 
-        bwrap.args(argv);
+        surface.running(argv);
 
-        bwrap
+        surface
     }
 
     /// Every `key = value` git is configured with inside, in the order the

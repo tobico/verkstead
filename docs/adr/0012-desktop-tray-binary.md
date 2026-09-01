@@ -27,6 +27,30 @@ The desktop app is deliberately plain about its limits:
   the UI says plainly that sessions need Linux. Porting is later work, platform
   by platform — shipping a clear notice was chosen over waiting for the ports or
   shipping remote-client apps, so the product is one thing everywhere it runs.
+
+  Amended: **macOS is the first of those ports, and it lands on
+  `sandbox-exec`.** What a session may reach is now one description said once
+  and rendered twice — bubblewrap's flags on Linux, a deny-by-default policy on
+  a Mac — so a Mac runs the product whole rather than the product minus
+  sessions. The two renderings are not the same boundary, and the difference is
+  accepted rather than papered over: **Apple's denies where bubblewrap hides.**
+  A session on Linux is in a mount namespace where the rest of the machine is
+  simply not there; a session on a Mac can see the machine and is refused it,
+  and every path that exists only inside a bind on Linux — a fresh HOME, the
+  account mounted into it, the skills, the binary a session asks with — has to
+  be a real path there. What is inside is the same either way, which is the
+  whole of what the description is for.
+
+  And `sandbox-exec` is **deprecated by Apple, with no replacement an unsigned
+  app can use**: the supported way to sandbox is an entitlement on a signed
+  bundle, applied to the app itself rather than to a child it spawns, and this
+  app is unsigned by the decision below. The command has been deprecated since
+  macOS 10.10, is what Apple's own tooling still runs behind, and there is no
+  sign of it going. A risk taken with open eyes: the day it goes, Mac sessions
+  go with it until something replaces them.
+
+  Windows is untouched by any of this. Its session machinery stays cfg-gated
+  out, and the UI state that says sessions need Linux is still built for it.
 - **A taken port is an error.** If `127.0.0.1:8422` is already bound — a second
   copy, or the NixOS-module daemon — the app shows an error dialog and exits
   rather than fronting the running server or picking another port.
