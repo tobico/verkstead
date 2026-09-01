@@ -499,6 +499,59 @@ fn nowhere_to_keep_a_log_file_serves_and_says_where_the_log_went() {
     );
 }
 
+/// Everything that goes wrong after the address is taken goes wrong where there
+/// is a log file to say so in, and this is what says it lands there: an icon
+/// that appeared and vanished is otherwise the whole of what the human was
+/// told. A Watched Path that is not there is the shortest of those failures —
+/// the server resolves them before it makes anything — and it stands here for
+/// the Data Directory that cannot be written and the machine with no `HOME`.
+///
+/// The dialog beside it is the one part of this no test here can see, wanting a
+/// screen that these deliberately do not have.
+#[test]
+fn a_startup_that_fails_after_the_address_says_so_in_the_log() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(tmp.path());
+    let home = tmp.path().join("home");
+    let data_dir = tmp.path().join("data");
+    let missing = tmp.path().join("not-a-directory");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    let mut args = as_args(&flags);
+    args.push("--no-open");
+    args.push("--watched-path");
+    args.push(missing.to_str().unwrap());
+
+    let refused = command(&opener, &home, &[])
+        .args(&args)
+        .output()
+        .expect("the desktop binary should be built for its own tests");
+
+    assert!(
+        !refused.status.success(),
+        "the app should have given up rather than served, got {:?}",
+        refused.status
+    );
+
+    let logged = std::fs::read_to_string(log_file(&home)).unwrap_or_else(|why| {
+        panic!(
+            "the app should have written to {} ({why})",
+            log_file(&home).display()
+        )
+    });
+
+    assert!(
+        logged.contains(missing.to_str().unwrap()),
+        "the log should carry the failure that stopped the app, got:\n{logged}"
+    );
+    assert!(
+        stderr(&refused).contains(missing.to_str().unwrap()),
+        "and so should the standard error, got:\n{}",
+        stderr(&refused)
+    );
+}
+
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
