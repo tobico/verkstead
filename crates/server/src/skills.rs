@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rust_embed::Embed;
 
+use crate::handoffs;
 use crate::platform::Platform;
 use crate::store;
 
@@ -178,6 +179,11 @@ impl Skills {
         // the mount the sentence has to name the other place instead.
         let inside = crate::sandbox::own_directory(Platform::HERE, data_dir).join(DIRECTORY);
 
+        // And how the same files name the handoff directory, which is the other
+        // path they send a session to — see [`said_at`] for why that one is
+        // said through a variable rather than spelled out.
+        let handoffs = handoffs::said(Platform::HERE);
+
         match std::fs::remove_dir_all(&path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -201,7 +207,7 @@ impl Skills {
                     .with_context(|| format!("making {}", parent.display()))?;
             }
 
-            std::fs::write(&written, said_at(&file.data, &inside))
+            std::fs::write(&written, said_at(&file.data, &inside, handoffs))
                 .with_context(|| format!("installing the skill {}", written.display()))?;
 
             installed += 1;
@@ -264,41 +270,54 @@ impl Skills {
     }
 }
 
-/// A skill's own text, saying where it is.
+/// A skill's own text, saying where the two directories it names really are.
 ///
-/// A skill that sends a session into another one names it by an absolute path,
-/// because the sentence a session reads has to be one it can open — so the
-/// text is as much a statement of where the skills are as the prompts here
-/// are, and it has to say the same thing they do. Where a bind makes [`INSIDE`]
-/// the file already says exactly that, and this changes nothing at all; where
-/// none can, it says the directory the file is being written into.
+/// A skill that sends a session into another one, or tells it where to write
+/// the handoff, names an absolute path — the sentence a session reads has to be
+/// one it can open. So the text is as much a statement about those directories
+/// as the prompts here are, and it has to say the same thing they do. Where a
+/// mount makes both, the file already says exactly that and this changes
+/// nothing at all; where none does, each is rewritten to what a session on this
+/// installation really finds.
 ///
-/// The mount alone is rewritten. The handoff directory a skill also names is
-/// left as it stands: that path is one both platforms really have.
+/// **The two are rewritten differently, because only one of them is one path.**
+/// The skills are written out once for the whole installation, so where they
+/// went is an absolute name this can spell — [`Skills::inside`]. A
+/// Conversation's handoff directory is a different directory per Conversation
+/// and no id exists when this runs, so what goes in is the variable that
+/// already differs per Conversation — see [`handoffs::said`], and [`handoffs`]
+/// itself for why that directory is under HOME on the platform with no mounts.
 ///
 /// Bytes rather than text, because an embedded file is bytes: a skill that
 /// turned out not to be UTF-8 is installed as it is rather than mangled into
 /// something a session would read.
-fn said_at<'a>(text: &'a [u8], inside: &Path) -> Cow<'a, [u8]> {
-    let mount = INSIDE.as_bytes();
-    let real = inside.as_os_str().as_encoded_bytes();
+fn said_at<'a>(text: &'a [u8], inside: &Path, handoffs: &str) -> Cow<'a, [u8]> {
+    let (mount, skills) = (INSIDE.as_bytes(), inside.as_os_str().as_encoded_bytes());
+    let (tmp, said) = (handoffs::INSIDE.as_bytes(), handoffs.as_bytes());
 
-    if real == mount {
+    // Which is every platform whose sandbox mounts both of them: the file says
+    // what a session will find already, and is installed as it shipped.
+    if skills == mount && said == tmp {
         return Cow::Borrowed(text);
     }
 
+    Cow::Owned(instead_of(&instead_of(text, mount, skills), tmp, said))
+}
+
+/// `text` with every `word` in it replaced by `instead`.
+fn instead_of(text: &[u8], word: &[u8], instead: &[u8]) -> Vec<u8> {
     let mut said = Vec::with_capacity(text.len());
     let mut rest = text;
 
-    while let Some(at) = rest.windows(mount.len()).position(|word| word == mount) {
+    while let Some(at) = rest.windows(word.len()).position(|found| found == word) {
         said.extend_from_slice(&rest[..at]);
-        said.extend_from_slice(real);
-        rest = &rest[at + mount.len()..];
+        said.extend_from_slice(instead);
+        rest = &rest[at + word.len()..];
     }
 
     said.extend_from_slice(rest);
 
-    Cow::Owned(said)
+    said
 }
 
 /// What a grilling session is started on: the Brief, under the line that sends
@@ -968,25 +987,29 @@ mod tests {
         FOLLOWING_UP,
     ];
 
-    /// A skill installed where a bind will put it says what it always said.
+    /// A skill installed where a mount will put both paths says what it always
+    /// said.
     #[test]
     fn a_skill_at_the_mount_is_installed_word_for_word() {
-        let said = b"Read /verkstead/skills/staging/SKILL.md and stage it.\n";
+        let said = b"Read /verkstead/skills/staging/SKILL.md, then write \
+                     /tmp/verkstead/handoff.md.\n";
 
         assert_eq!(
-            said_at(said, Path::new(INSIDE)).as_ref(),
+            said_at(said, Path::new(INSIDE), handoffs::INSIDE).as_ref(),
             said,
-            "the platform whose bind makes that path needs nothing said differently",
+            "the platform whose mounts make those paths needs nothing said differently",
         );
     }
 
-    /// And one installed where none can says where it really is.
+    /// And one installed where none does says where each of them really is.
     ///
-    /// Every mention of the directory, because a skill names as many of its
-    /// neighbours as it sends a session to — and nothing else about the text,
-    /// the handoff directory included: that path is one both platforms have.
+    /// Every mention of either, because a skill names as many of its neighbours
+    /// as it sends a session to — the skills by the directory they were
+    /// installed in, which is one path for the installation, and the handoff
+    /// through HOME, which is the one thing about it that differs per
+    /// Conversation. And nothing else about the text at all.
     #[test]
-    fn a_skill_installed_off_the_mount_names_the_directory_it_is_in() {
+    fn a_skill_installed_off_the_mount_names_the_paths_a_session_would_find() {
         let inside = Path::new("/Users/you/Library/Application Support/Verkstead/skills");
 
         let said = said_at(
@@ -994,14 +1017,15 @@ mod tests {
               /verkstead/skills/breaking-down/SKILL.md, and write \
               /tmp/verkstead/handoff.md.\n",
             inside,
+            handoffs::SAID_INSIDE_HOME,
         );
 
         assert_eq!(
             String::from_utf8(said.into_owned()).unwrap(),
             "Read /Users/you/Library/Application Support/Verkstead/skills/staging/SKILL.md, \
              then /Users/you/Library/Application Support/Verkstead/skills/breaking-down/SKILL.md, \
-             and write /tmp/verkstead/handoff.md.\n",
-            "a session told to read a path has to be told one it can open",
+             and write $HOME/verkstead/handoff.md.\n",
+            "a session told to read or write a path has to be told one it can open",
         );
     }
 

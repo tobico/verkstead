@@ -12,9 +12,21 @@
 //! file every `git add -A` after it swept into the human's repository, and no
 //! amount of instructing an agent not to commit something is as good as the file
 //! not being there. So each Conversation gets a directory of Verkstead's own,
-//! under the Data Directory beside the worktrees, bound into every one of its
-//! sandboxes at [`INSIDE`] — which is under `/tmp` because that is where a
+//! under the Data Directory beside the worktrees, reached inside every one of
+//! its sandboxes at [`INSIDE`] — which is under `/tmp` because that is where a
 //! session already expects to find what is neither the checkout nor its home.
+//!
+//! **Except where every Conversation would be reaching the same `/tmp`.** That
+//! path is one directory per session on Linux, a tmpfs of the session's own
+//! standing in a namespace nothing else is in; on a platform whose sandbox has
+//! no mounts to make it with, `/tmp` is the machine's one real `/tmp` and a link
+//! written there is a link every Conversation on the box shares. The second
+//! session to start would repoint it and the first would write its handoff into
+//! somebody else's directory — which its own policy refuses, so the document
+//! would simply never be written. So there the directory is reached under the
+//! session's own HOME instead: see [`inside`], and [`crate::sandbox::Homes`] for
+//! why a HOME is a different directory per Conversation there and the same one
+//! here.
 //!
 //! Taking it is a move rather than a read: the copy in the directory goes as the
 //! Timeline gets one, so the Event is the handoff from then on and there is
@@ -22,8 +34,49 @@
 
 use std::path::{Path, PathBuf};
 
-/// Where a Conversation's directory is mounted inside its sandbox.
+use crate::platform::Platform;
+
+/// Where a Conversation's directory is reached inside its sandbox, on the
+/// platform whose sandbox can mount one there.
 pub(crate) const INSIDE: &str = "/tmp/verkstead";
+
+/// And what it is called under HOME where none can — see [`inside`], and this
+/// module's own documentation for why the two are not one path.
+const INSIDE_HOME: &str = "verkstead";
+
+/// How a skill names the second of those, which is the one thing about this
+/// path that cannot be an absolute name.
+///
+/// A skill that sends a session to a path has to name one it can open, and this
+/// one is a different directory per Conversation — so it is named through the
+/// variable that already differs per Conversation rather than spelled out. The
+/// skills are written out once for the whole installation and a Conversation's
+/// id is not known then, so there is nothing else a fixed string could say. See
+/// [`crate::skills::said_at`], which is what puts this in the text.
+pub(crate) const SAID_INSIDE_HOME: &str = "$HOME/verkstead";
+
+/// Where a session whose HOME is `home` reaches its handoff directory.
+///
+/// A `Platform` rather than a `cfg`, for the reason [`Platform`] is a value at
+/// all: the arm this machine will never run is still an arm a test on it can
+/// ask for, and this one decides a path a session is told about in prose.
+pub(crate) fn inside(platform: Platform, home: &Path) -> PathBuf {
+    match platform {
+        Platform::MacOs => home.join(INSIDE_HOME),
+        Platform::Linux | Platform::Windows => PathBuf::from(INSIDE),
+    }
+}
+
+/// And how a skill names it on the installation this platform is running: the
+/// path itself where a mount makes one directory per session of it, and the
+/// variable it has to be said through where none does — see
+/// [`SAID_INSIDE_HOME`].
+pub(crate) fn said(platform: Platform) -> &'static str {
+    match platform {
+        Platform::MacOs => SAID_INSIDE_HOME,
+        Platform::Linux | Platform::Windows => INSIDE,
+    }
+}
 
 /// What the handoff document is called inside it.
 const HANDOFF: &str = "handoff.md";
@@ -33,9 +86,9 @@ const HANDOFF: &str = "handoff.md";
 ///
 /// Nothing in the server says it: the skill is markdown and says it in prose,
 /// and this module reads the file from the outside where it is somewhere else
-/// entirely. It is here so that the tests can hold the skill's sentence and the
-/// mount to each other — the one place the two could drift apart is a session
-/// writing a document nothing ever reads.
+/// entirely. It is here so that the tests can hold the skill's sentence and what
+/// a sandbox makes to each other — the one place the two could drift apart is a
+/// session writing a document nothing ever reads.
 #[cfg(test)]
 pub(crate) const HANDOFF_INSIDE: &str = "/tmp/verkstead/handoff.md";
 
@@ -187,6 +240,45 @@ mod tests {
     #[test]
     fn the_path_the_skill_names_is_the_directory_that_is_mounted() {
         assert_eq!(Path::new(INSIDE).join(HANDOFF), Path::new(HANDOFF_INSIDE));
+    }
+
+    /// And where no mount can make that path, it is under the session's own
+    /// HOME — which is what keeps two Conversations running at once out of each
+    /// other's document, their HOMEs being different directories.
+    #[test]
+    fn a_platform_with_no_mounts_reaches_it_under_the_home_it_was_given() {
+        let sevens = Path::new("/data/homes/7");
+        let eights = Path::new("/data/homes/8");
+
+        assert_eq!(
+            inside(Platform::MacOs, sevens),
+            Path::new("/data/homes/7/verkstead"),
+            "one Conversation's directory is under its own HOME",
+        );
+        assert_ne!(
+            inside(Platform::MacOs, sevens),
+            inside(Platform::MacOs, eights),
+            "and so it is not the one the Conversation beside it is writing into",
+        );
+
+        assert_eq!(
+            inside(Platform::Linux, sevens),
+            Path::new(INSIDE),
+            "where a tmpfs of the session's own makes that path one directory \
+             per session already",
+        );
+    }
+
+    /// The variable a skill names it through is that same path, said the one way
+    /// a string written before any Conversation exists can say it.
+    #[test]
+    fn what_a_skill_says_is_what_a_sessions_home_makes() {
+        assert_eq!(
+            SAID_INSIDE_HOME.replace("$HOME", "/data/homes/7"),
+            inside(Platform::MacOs, Path::new("/data/homes/7"))
+                .display()
+                .to_string(),
+        );
     }
 
     #[test]

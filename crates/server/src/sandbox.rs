@@ -523,30 +523,51 @@ impl Homes {
         &self.servers
     }
 
-    /// And one Conversation's own.
+    /// And one Conversation's own, with the handoff directory it reaches
+    /// beside it.
+    ///
+    /// The two together because one platform decides both: where a HOME is,
+    /// and — where nothing can be mounted anywhere — that the Conversation's
+    /// handoff directory is under it rather than at a `/tmp` every Conversation
+    /// on the machine would be sharing. See [`handoffs::inside`].
     fn for_conversation(&self, conversation_id: i64) -> Home {
         let path = match self.platform {
             Platform::MacOs => self.root.join(conversation_id.to_string()),
             Platform::Linux | Platform::Windows => self.servers.clone(),
         };
 
-        Home { path }
+        Home {
+            handoffs: handoffs::inside(self.platform, &path),
+            path,
+        }
     }
 }
 
-/// The directory `~` means inside one sandbox.
+/// The directory `~` means inside one sandbox, and the handoff directory that
+/// goes with it.
 ///
 /// Made rather than constructed: it is [`Homes`] that decides where a session's
 /// own is, and a HOME the caller chose is a directory a renderer would empty.
 #[derive(Debug, Clone)]
 pub struct Home {
     path: PathBuf,
+
+    /// Where the Conversation's handoff directory is reached from inside, which
+    /// is `/tmp/verkstead` wherever a mount makes that one directory per
+    /// session and a directory under `path` where none does — see
+    /// [`handoffs::inside`], which is where the whole of that difference is.
+    handoffs: PathBuf,
 }
 
 impl Home {
     /// The directory itself, which is what `~` resolves to inside.
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// And where this Conversation's handoff directory is inside.
+    pub(crate) fn handoffs(&self) -> &Path {
+        &self.handoffs
     }
 }
 
@@ -1236,10 +1257,14 @@ impl Sandbox {
             }
         }
 
-        // After the temporary filesystem and inside it: that would otherwise
-        // land over this and leave the session writing its handoff into memory
-        // nothing outside will ever read.
-        surface.elsewhere(&self.handoff_dir, handoffs::INSIDE, Reach::ReadWrite);
+        // After the temporary filesystem and the empty HOME alike, because on
+        // one platform or the other it is inside each of them: a tmpfs would
+        // otherwise land over it and leave the session writing its handoff into
+        // memory nothing outside will ever read, and an emptied HOME would take
+        // the link away again. Which of the two it is under is
+        // [`handoffs::inside`]'s, and this is the one place a session reaches
+        // it.
+        surface.elsewhere(&self.handoff_dir, self.home.handoffs(), Reach::ReadWrite);
 
         // The skills, at a path of Verkstead's own outside HOME entirely — what
         // a session reads there is what this binary ships. Read-only, because
@@ -1714,6 +1739,37 @@ mod tests {
             mac.for_conversation(8).path(),
             mac.for_conversation(7).path(),
             "and one Conversation's HOME is not another's"
+        );
+    }
+
+    /// And its handoff directory comes with it, which is what keeps two
+    /// Conversations running at once out of each other's document.
+    ///
+    /// `/tmp` is a filesystem of the session's own where a mount makes one and
+    /// the machine's one real directory where none does — so the handoff is
+    /// reached under HOME on the second, and a HOME is already one directory
+    /// per Conversation there. See [`handoffs`].
+    #[test]
+    fn the_handoff_directory_is_reached_wherever_that_home_makes_it_the_conversations_own() {
+        let data = Path::new("/data");
+        let servers = PathBuf::from("/home/verkstead");
+
+        let linux = Homes::on(Platform::Linux, servers.clone(), data);
+        assert_eq!(
+            linux.for_conversation(7).handoffs(),
+            Path::new(handoffs::INSIDE),
+            "a tmpfs makes that one path a directory per session already"
+        );
+
+        let mac = Homes::on(Platform::MacOs, servers, data);
+        assert_eq!(
+            mac.for_conversation(7).handoffs(),
+            Path::new("/data/homes/7/verkstead"),
+        );
+        assert_ne!(
+            mac.for_conversation(8).handoffs(),
+            mac.for_conversation(7).handoffs(),
+            "and the Conversation beside it is writing somewhere else entirely"
         );
     }
 

@@ -1359,6 +1359,15 @@ async fn a_session_runs_the_tools_this_mac_has_and_is_not_stopped_by_the_ones_it
 /// one thing inside a sandbox that outlives the session: a grilling writes the
 /// handoff there and the Conversation reads it afterwards, so a link to the
 /// wrong place would be a handoff nothing ever finds.
+///
+/// **Under HOME rather than at `/tmp/verkstead`**, which is the whole of what
+/// this platform changes about it. There is one real `/tmp` on a Mac and every
+/// Conversation would be sharing a link written in it — the second session to
+/// start repointing it, and the first then writing its handoff into a directory
+/// its own policy refuses. A HOME is already one directory per Conversation, so
+/// the handoff goes under it and the skills are installed saying so. Written
+/// here the way a session reads it: `$HOME`, expanded by the shell inside out of
+/// the environment the sandbox handed it.
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
@@ -1371,8 +1380,8 @@ async fn what_a_session_writes_in_its_handoff_directory_is_there_when_it_has_gon
     let reported = probe(
         &sandbox,
         r#"
-        printf '# What we settled\n' > /tmp/verkstead/handoff.md
-        dir /tmp/verkstead handoff
+        printf '# What we settled\n' > "$HOME/verkstead/handoff.md"
+        dir "$HOME/verkstead" handoff
         "#,
     );
 
@@ -1388,6 +1397,34 @@ async fn what_a_session_writes_in_its_handoff_directory_is_there_when_it_has_gon
         std::fs::read_to_string(written).expect("the handoff is outside the sandbox"),
         "# What we settled\n",
         "which is the whole point of the directory being Verkstead's own",
+    );
+}
+
+/// And the skills say that path rather than the mount, so a session told where
+/// to write its handoff is told somewhere it can write.
+///
+/// The prompt and the skill text are two halves of one instruction — see the
+/// server's `skills::said_at` — and this is the half that is a file on disk. Run
+/// on whatever machine the suite is on: what it reads is what this build
+/// installed, and where that is, is decided by the platform rather than probed.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the skills this reads are installed as a Mac's"
+)]
+async fn the_grilling_skill_names_the_handoff_where_a_session_would_find_it() {
+    let fixture = grilling().await;
+
+    let grilling_skill =
+        std::fs::read_to_string(fixture.skills.path().join("grilling/SKILL.md")).unwrap();
+
+    assert!(
+        grilling_skill.contains("$HOME/verkstead/handoff.md"),
+        "the skill has to name a path a session on this platform can open",
+    );
+    assert!(
+        !grilling_skill.contains("/tmp/verkstead"),
+        "and not the one every Conversation would be sharing",
     );
 }
 
