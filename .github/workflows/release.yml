@@ -1,5 +1,6 @@
 # What a `v*` tag ships: one bare binary per platform the project ships, and
-# beside them the Linux desktop app as an AppImage — each with the viewer inside
+# beside them the desktop app as the file each desktop is installed from — the
+# Linux one as an AppImage, the macOS one as a dmg — each with the viewer inside
 # it, published as a GitHub Release under the tag that triggered the run. Every
 # leg builds its artifact and then runs it, so a target that will not build, or
 # that builds something that will not run, fails the run rather than reaching a
@@ -243,7 +244,8 @@ jobs:
   # matrix above, because nothing about it is that matrix's shape — it is
   # dynamic where those are static, it wants the toolkit's development packages
   # where those want musl, and what it uploads is a bundle rather than a bare
-  # binary. Stages 04 and 05 of the desktop roadmap add a leg each beside it.
+  # binary. `desktop-macos` is the next leg along, and stage 05 of the desktop
+  # roadmap adds one more beside the two.
   #
   # x86_64 only, per ADR-0012: an arm64 Linux user has the bare CLI.
   desktop-linux:
@@ -494,6 +496,192 @@ jobs:
           path: ${{ env.APPIMAGE }}
           if-no-files-found: error
 
+  # The macOS desktop artifact: the same app the AppImage carries, drawn over
+  # AppKit instead of GTK and inside the disk image a Mac download arrives as.
+  # A leg of its own rather than two rows in the matrix above, for the reason
+  # `desktop-linux` gives about itself — what it uploads is a bundle rather
+  # than a bare binary, and nothing about it is that matrix's shape.
+  #
+  # **One runner builds both Macs.** The app is universal, which is two builds
+  # with `lipo` over them, and an Apple host cross-compiles to the other Apple
+  # architecture — one SDK carries both, and clang is told which by `-arch`. So
+  # this leg builds both halves itself rather than joining the two macOS legs
+  # of the matrix in a third job: those build the bare CLI, this builds the
+  # desktop app, and a job that fetched them would be fetching the wrong
+  # binary. `macos-15` is the Apple silicon image, which is the half more
+  # people download.
+  desktop-macos:
+    name: Verkstead-universal.dmg
+    needs: viewer
+    runs-on: macos-15
+    env:
+      # Where `tools/build-macos-dmg.sh` leaves it, said once; and where the
+      # steps below mount it to reach what is inside. Both under `target/`,
+      # which is where that script puts everything it makes.
+      DMG: target/macos/Verkstead-universal.dmg
+      MOUNT: target/macos/mounted
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # As every other leg does, and for the same reason: the viewer is
+      # embedded at compile time out of `web/dist`, which the checkout leaves
+      # empty. The desktop app is the server in-process, so it carries the
+      # viewer too.
+      - name: Fetch the viewer
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: viewer
+          path: web/dist
+
+      # The same pin as everywhere else, and both Apple targets rather than the
+      # runner's own: this leg compiles the app twice and joins the halves, so
+      # the standard library for the architecture this runner is not has to be
+      # here as well as its own. `tools/build-macos-dmg.sh` looks for both
+      # before it compiles either, so a target that was never installed is said
+      # in a moment rather than after the long half of the build.
+      - name: Install Rust 1.91.1
+        uses: dtolnay/rust-toolchain@1.91.1
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      # A cache key of its own, as every leg has: this is a sixth dependency
+      # tree — the two Apple targets with the GUI crates in them — and a key it
+      # shared with the matrix's macOS legs would have them evicting each other.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: dmg
+
+      # The script the dev shell runs, unchanged and unexplained here: the two
+      # builds, the `lipo` over them, the bundle around that and the image
+      # around that are all `tools/build-macos-dmg.sh`'s to say. Including the
+      # checks it makes on itself — that the executable holds both
+      # architectures, that the `Info.plist` it wrote is one, and that the
+      # bundle verifies against the signature it sealed it with.
+      - name: Build the dmg
+        run: tools/build-macos-dmg.sh
+
+      # Opened the way a download is opened, rather than reaching for the
+      # `Verkstead.app` the script left beside the image: what the assertions
+      # below run is the file this leg uploads, and the app inside it is a copy
+      # that was made before the image was packed and could differ from it.
+      #
+      # At a path this job names rather than the `/Volumes/Verkstead` the
+      # volume name would otherwise take, so that the steps below have one path
+      # to say whatever else this runner has mounted; and `-nobrowse` because
+      # there is no Finder here for it to appear in.
+      - name: Mount the dmg
+        run: |
+          mkdir -p "$MOUNT"
+          hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$PWD/$MOUNT"
+          ls -l "$MOUNT"
+
+      - name: The app runs
+        run: |
+          "$MOUNT/Verkstead.app/Contents/MacOS/verkstead-desktop" --help
+
+      # The two halves of what a human downloads this file for, asserted on one
+      # run of it: an icon in the menu bar, and the viewer behind it.
+      #
+      # **No screen to arrange**, which is the one place this is shorter than
+      # the AppImage's assertion: a macOS runner is a logged-in session with a
+      # window server of its own, and macOS says so nowhere in the environment
+      # — so `screen::there_is_one` answers yes there without asking, and the
+      # app takes its tray path with nothing started in front of it.
+      #
+      # **The log is where the answer is**, as it is there: nothing about the
+      # menu bar is visible from outside the process, so the app says so itself
+      # — one line on the way up, and a warning on each of the ways it can end
+      # without an icon. The Log Directory on macOS is `~/Library/Logs/Verkstead`
+      # — see `crates/server/src/platform.rs` — which a runner has a home for
+      # and needs nothing said about; the file is taken away first all the same,
+      # so that a line found in it is this run's.
+      #
+      # `--no-open` stays: there is a browser on this machine and nobody at it.
+      #
+      # `--retry-connrefused` rather than a sleep, as in every other leg: the
+      # app is up when it answers.
+      #
+      # **Bounded**, for the reason the AppImage's is: the failures this app
+      # draws it has a screen for are drawn as dialogs, and a dialog nobody
+      # dismisses would hold the job until the runner's own six hours were up
+      # rather than failing in front of whoever tagged.
+      - name: The tray comes up, and the viewer is inside the dmg
+        timeout-minutes: 5
+        run: |
+          log="$HOME/Library/Logs/Verkstead/verkstead.log"
+          rm -f "$log"
+
+          "$MOUNT/Verkstead.app/Contents/MacOS/verkstead-desktop" --no-open \
+            --listen 127.0.0.1:8422 --data-dir "$RUNNER_TEMP/desktop" &
+          app=$!
+          document=$(curl --fail --silent --show-error \
+            --retry 10 --retry-delay 1 --retry-connrefused \
+            http://127.0.0.1:8422/)
+
+          # The icon is raised on the main thread while the server comes up on
+          # another, so the viewer answering is no promise that the tray has
+          # finished either way yet. Waited for here rather than read after the
+          # kill, where whichever won the race would be the answer.
+          for _ in $(seq 50); do
+            if grep -q "Verkstead is in the tray" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          kill "$app"
+
+          # As in every other leg: an absent viewer is a 503 that `--fail` has
+          # already caught, and this is the rest of it — the document vite wrote
+          # names the hashed bundle beside it, and the fallback names nothing.
+          case "$document" in
+            */assets/*) ;;
+            *)
+              echo "::error::The app served a document with no bundle in it."
+              printf '%s\n' "$document"
+              exit 1
+              ;;
+          esac
+
+          # And the menu bar, out of the app's own log. Read for the line rather
+          # than against the warnings, so that a log which was never written
+          # fails here rather than passing for want of anything to find in it.
+          if ! grep -q "Verkstead is in the tray" "$log" 2> /dev/null; then
+            echo "::error::The app did not raise a tray icon."
+            cat "$log" 2> /dev/null || echo "There is no log at $log."
+            exit 1
+          fi
+          cat "$log"
+
+      # Before the upload and whatever the assertions said, because the mount
+      # is inside the directory the artifact is read out of and nothing else on
+      # this runner would take it down. Asked of `hdiutil` first: a run that
+      # failed before the image was built has nothing attached, and a detach of
+      # nothing is an error about the wrong thing.
+      - name: Unmount the dmg
+        if: always()
+        run: |
+          if hdiutil info | grep -qF "$PWD/$MOUNT"; then
+            hdiutil detach "$PWD/$MOUNT"
+          fi
+
+      # Under the `desktop-` artifact prefix, for the reason the AppImage's
+      # upload gives: that prefix is what keeps a desktop asset out of the
+      # count `publish` makes of the bare binaries, whatever the file inside is
+      # called. `publish` is where the file's own name is written down.
+      #
+      # A zip carries no symlink and no mode, and neither does a Release asset
+      # — but a dmg is a filesystem in a file, so what comes back out of this
+      # artifact is the image itself with the app, the `/Applications` symlink
+      # and every mode either of them has still inside it. Which is the other
+      # half of why a Mac download is an image rather than a folder.
+      - name: Upload the dmg
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-macos
+          path: ${{ env.DMG }}
+          if-no-files-found: error
+
   # The Release, once every leg has succeeded — the desktop ones as much as the
   # matrix. `needs` is the whole of that rule: a matrix job has failed if any of
   # its legs did, and a job whose `needs` failed does not run — so a tag that
@@ -501,7 +689,7 @@ jobs:
   # that looks complete until somebody reaches for what is not in it.
   publish:
     name: Publish
-    needs: [build, desktop-linux]
+    needs: [build, desktop-linux, desktop-macos]
     # A pushed tag, or nothing at all. A run started by hand has built every
     # artifact and run every assertion by the time it reaches here, and stops:
     # there is nothing left to rehearse, and publishing is the one thing a
@@ -570,7 +758,7 @@ jobs:
       # what an install line and the documentation spell out — and any count
       # would be satisfied by a leg that uploaded `verkstead-desktop.AppImage`.
       # So this is the one place the desktop asset names are written down, and
-      # stages 04 and 05 add a line each to it and nothing else in this job.
+      # stage 05 adds the last line to it and nothing else in this job.
       #
       # Read both ways round: every name here arrived, and nothing arrived that
       # is not named here. Without the second, a leg this job has never been
@@ -579,6 +767,7 @@ jobs:
         env:
           DESKTOP_ASSETS: |
             Verkstead-x86_64.AppImage
+            Verkstead-universal.dmg
         run: |
           expected=$(printf '%s\n' "$DESKTOP_ASSETS" | sed '/^[[:space:]]*$/d' | sort)
           found=$(ls -1 desktop 2> /dev/null | sort)
