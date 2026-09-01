@@ -15,8 +15,9 @@
 //! than either of their own. A path is reachable at its own place or somewhere
 //! else, and a session may read it or write it; a few things are made rather
 //! than reached, being nobody's on the host. Everything a mechanism does about
-//! *how* — a mount namespace, a policy expression — is the renderer's own
-//! business and none of this file's.
+//! *how* — a mount namespace, a policy expression, a directory really made and
+//! a link really written — is the renderer's own business and none of this
+//! file's.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -48,6 +49,18 @@ pub(crate) enum Access {
         inside: PathBuf,
         reach: Reach,
     },
+
+    /// A path a session must not reach, whatever is under it: the account's own
+    /// skills, which are hidden rather than merged with.
+    ///
+    /// Said as an intention of its own rather than as one more
+    /// [`Access::Elsewhere`], because it is the one place the two mechanisms
+    /// answer a description in opposite directions. A mount makes something not
+    /// be there by putting an empty directory of Verkstead's own over it —
+    /// which is what `empty` is for — and a policy makes it not be there by
+    /// refusing it, having nothing to put anywhere. Rendered as a bind, the
+    /// second of them would write into the account it is standing on.
+    Nothing { inside: PathBuf, empty: PathBuf },
 
     /// The process table, which is the sandbox's own where the platform keeps
     /// one in the filesystem.
@@ -107,16 +120,43 @@ impl Surface {
     }
 
     /// And one a session finds somewhere else.
+    ///
+    /// A path already where it is wanted is [`Access::Own`] rather than a bind
+    /// of itself onto itself. Which is not a tidying: it is what becomes of
+    /// these on the platform with no mounts to offer, where what a session
+    /// finds is where the thing already is — and saying it here is what keeps
+    /// both renderers from having to notice.
     pub(crate) fn elsewhere(
         &mut self,
         host: impl Into<PathBuf>,
         inside: impl Into<PathBuf>,
         reach: Reach,
     ) -> &mut Surface {
+        let (host, inside) = (host.into(), inside.into());
+
+        if host == inside {
+            return self.own(host, reach);
+        }
+
         self.reaches.push(Access::Elsewhere {
-            host: host.into(),
-            inside: inside.into(),
+            host,
+            inside,
             reach,
+        });
+
+        self
+    }
+
+    /// And a path a session must not reach, with the empty directory a mount
+    /// puts over it — see [`Access::Nothing`].
+    pub(crate) fn nothing(
+        &mut self,
+        inside: impl Into<PathBuf>,
+        empty: impl Into<PathBuf>,
+    ) -> &mut Surface {
+        self.reaches.push(Access::Nothing {
+            inside: inside.into(),
+            empty: empty.into(),
         });
 
         self

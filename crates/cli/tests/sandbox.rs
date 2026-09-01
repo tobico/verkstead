@@ -25,7 +25,8 @@ use support::repo_with_a_commit;
 use verkstead_schema::{Direction, QuestionSet, Response};
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
-use verkstead_server::sandbox::{Executable, Home, Reachable, Sandbox};
+use verkstead_server::platform::Platform;
+use verkstead_server::sandbox::{Executable, Homes, Reachable, Sandbox};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
@@ -97,17 +98,22 @@ impl Grilling {
         Sandbox::for_conversation(
             &self.conversation,
             profile,
-            Home {
-                path: self.home.path().to_owned(),
-            },
+            &Homes::on(
+                Platform::HERE,
+                self.home.path().to_owned(),
+                self.state.path(),
+            ),
             &Reachable::at(self.listening),
             &Skills::installed(self.state.path()).expect("this binary carries skills"),
             // What a real server hands over is its own image. A test harness's
             // own image is the test harness — so this names the binary cargo
             // built from this crate, which is the same thing a `verkstead serve`
             // would be running.
-            &Executable::at(PathBuf::from(env!("CARGO_BIN_EXE_verkstead")))
-                .expect("cargo builds this crate's binary for its own tests"),
+            &Executable::at(
+                PathBuf::from(env!("CARGO_BIN_EXE_verkstead")),
+                self.state.path(),
+            )
+            .expect("cargo builds this crate's binary for its own tests"),
             &Handoffs::under(self.state.path()),
             &settings.secrets(),
             &settings.config(),

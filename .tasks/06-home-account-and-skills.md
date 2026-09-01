@@ -27,10 +27,10 @@ nix-darwin is installed, so a Mac that has it is not made to do without.
 
 ## Acceptance criteria
 
-- [ ] A probe shows the Profile's account where its backend looks for it, for
+- [x] A probe shows the Profile's account where its backend looks for it, for
       each account shape, and shows one account's sessions cannot reach another's
-- [ ] A probe shows the skills inside are the bundled ones and only those, and
+- [x] A probe shows the skills inside are the bundled ones and only those, and
       that `verkstead` on the session's `PATH` is the server's own image
-- [ ] A session on a Mac with nix-darwin reaches nix's tools; one without reaches
+- [x] A session on a Mac with nix-darwin reaches nix's tools; one without reaches
       Homebrew's and the system's, and neither refuses to start for want of the
       other

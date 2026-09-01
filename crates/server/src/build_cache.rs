@@ -464,6 +464,13 @@ pub fn builds_rust(repo: &Path) -> bool {
 fn compile_server(dir: &Path, sccache: &Path, worktrees: &Path, size: &str) -> Command {
     let mut bwrap = Command::new("bwrap");
 
+    // The directory of Verkstead's own inside, which is where the sccache below
+    // is bound and where a session's own `verkstead` goes — and so what leads
+    // the `PATH` in both.
+    let ours = Path::new(sandbox::SCCACHE_INSIDE)
+        .parent()
+        .expect("the sccache is bound under a directory of Verkstead's own");
+
     // Nothing of the server's environment, for the reason a session gets none:
     // what is inside is what is said here.
     bwrap.env_clear();
@@ -506,7 +513,11 @@ fn compile_server(dir: &Path, sccache: &Path, worktrees: &Path, size: &str) -> C
         .arg(COMPILING_HOME)
         .arg("--setenv")
         .arg("PATH")
-        .arg(sandbox::PATH)
+        // The same `PATH` a session gets, off the same directory: the sccache
+        // this runs is bound in beside where a session's `verkstead` goes, and
+        // what is in front of the machine's own paths is that directory either
+        // way — see [`crate::sandbox::path`].
+        .arg(sandbox::path(ours))
         .arg("--setenv")
         .arg("SCCACHE_DIR")
         .arg(dir.join(SCCACHE_DIR))

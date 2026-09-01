@@ -56,6 +56,12 @@ pub(crate) fn command(surface: &Surface) -> Command {
             } => {
                 bwrap.arg(flag(*reach)).arg(host).arg(inside);
             }
+            // Which is a bind too on this platform: an empty directory of
+            // Verkstead's own, read-only over whatever a session would
+            // otherwise have found there.
+            Access::Nothing { inside, empty } => {
+                bwrap.arg("--ro-bind").arg(empty).arg(inside);
+            }
             // `/proc` and `/dev` are made rather than bound: they are the
             // sandbox's own, which is what makes the unshared pid namespace
             // mean anything.

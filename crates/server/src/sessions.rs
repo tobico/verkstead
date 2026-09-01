@@ -40,7 +40,7 @@ use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
 use crate::runner::Pace;
-use crate::sandbox::{Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
+use crate::sandbox::{Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::screen::Live;
 use crate::settings::Settings;
 use crate::skills::{self, Skills};
@@ -92,7 +92,7 @@ const IDLE_AFTER: Duration = Duration::from_secs(3);
 /// settings page reaches the next session without the server being restarted.
 #[derive(Debug, Clone)]
 pub struct Agents {
-    home: Home,
+    homes: Homes,
     reachable: Reachable,
     config: SandboxConfig,
 
@@ -166,7 +166,7 @@ impl Agents {
     /// whichever account it names.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        home: Home,
+        homes: Homes,
         reachable: Reachable,
         config: SandboxConfig,
         cache: BuildCache,
@@ -176,7 +176,7 @@ impl Agents {
         settings: Settings,
     ) -> Agents {
         Agents {
-            home,
+            homes,
             reachable,
             config,
             cache,
@@ -195,7 +195,7 @@ impl Agents {
     #[allow(clippy::too_many_arguments)]
     pub fn running(
         agent: Vec<String>,
-        home: Home,
+        homes: Homes,
         reachable: Reachable,
         config: SandboxConfig,
         cache: BuildCache,
@@ -207,7 +207,7 @@ impl Agents {
         Agents {
             agent: Some(agent),
             ..Agents::new(
-                home, reachable, config, cache, skills, verkstead, handoffs, settings,
+                homes, reachable, config, cache, skills, verkstead, handoffs, settings,
             )
         }
     }
@@ -1213,6 +1213,18 @@ impl Sessions {
         }
     }
 
+    /// The skills every session this server runs is given, or `None` where it
+    /// runs none.
+    ///
+    /// Here because a prompt names them: what sends a session into a skill is
+    /// the path it is told to read, and where that path is depends on where
+    /// they were installed — see [`Skills::inside`]. A server with no agents
+    /// has no skills to name and nothing to start, so the two are `None`
+    /// together.
+    pub(crate) fn skills(&self) -> Option<&Skills> {
+        self.agents.as_deref().map(|agents| &agents.skills)
+    }
+
     /// One that cannot: nothing is launched, and everything else about starting
     /// a grilling holds.
     pub(crate) fn none() -> Sessions {
@@ -1566,7 +1578,7 @@ impl Sessions {
         let built = tokio::task::spawn_blocking({
             let conversation = conversation.clone();
             let profile = pairing.profile.clone();
-            let home = agents.home.clone();
+            let homes = agents.homes.clone();
             let reachable = agents.reachable.clone();
             let skills = agents.skills.clone();
             let handoffs = agents.handoffs.clone();
@@ -1596,7 +1608,7 @@ impl Sessions {
                 let sandbox = Sandbox::for_conversation(
                     &conversation,
                     &profile,
-                    home,
+                    &homes,
                     &reachable,
                     &skills,
                     &verkstead,
@@ -2453,9 +2465,11 @@ mod tests {
     /// standing where it goes.
     fn real(state: &std::path::Path) -> Agents {
         Agents::new(
-            Home {
-                path: PathBuf::from("/home/verkstead"),
-            },
+            Homes::on(
+                crate::platform::Platform::HERE,
+                PathBuf::from("/home/verkstead"),
+                state,
+            ),
             Reachable::at("127.0.0.1:8422".parse().unwrap()),
             SandboxConfig::default(),
             // What the argv is built from is not the sandbox, so this asks for
@@ -2465,7 +2479,7 @@ mod tests {
             // A test harness is its own executable, and what a sandbox does with
             // one is bind it: any file that is really there will do where nothing
             // here runs it.
-            Executable::of_the_server(),
+            Executable::of_the_server(state),
             Handoffs::under(state),
             Settings::in_data_dir(state),
         )

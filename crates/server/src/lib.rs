@@ -755,11 +755,6 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // all.
     let binds = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
 
-    let home = sandbox::Home::of_the_server().context(
-        "no HOME is set: a session's `~` is the home directory of whoever runs Verkstead, \
-         and the machine's git identity is read out of it, so the unit has to say what it is",
-    )?;
-
     // Resolved and then made at startup, for the reason the Watched Paths are
     // resolved at startup: a machine with nowhere to keep a Data Directory, and
     // a directory Verkstead cannot write to, are misconfigurations to report now
@@ -770,6 +765,16 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     let data_dir = platform::data_dir(config.data_dir.as_deref())?;
     std::fs::create_dir_all(&data_dir)
         .with_context(|| format!("creating data directory {}", data_dir.display()))?;
+
+    // And where a session's HOME comes from, which wants the Data Directory
+    // above on the platform that makes a real one under it — see
+    // [`sandbox::Homes`]. Refused for the reason the Watched Paths are: a HOME
+    // the unit never said is a misconfiguration to report now rather than a
+    // session that fails to start weeks later with nobody watching.
+    let homes = sandbox::Homes::of_the_server(&data_dir).context(
+        "no HOME is set: a session's `~` is the home directory of whoever runs Verkstead, \
+         and the machine's git identity is read out of it, so the unit has to say what it is",
+    )?;
 
     // And the skills written out into it, before anything can ask for a session:
     // they are what a grilling session is pointed at, and this binary's are what
@@ -796,7 +801,7 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // cannot say what it is running has nothing to equip a session with, and
     // which session that costs is the thing worth reporting — so it is said as
     // one is started rather than here, where there is nothing to name.
-    let verkstead = sandbox::Executable::of_the_server();
+    let verkstead = sandbox::Executable::of_the_server(&data_dir);
 
     // And where a Conversation's handoff document is written, which is a root
     // under the same directory: each Conversation's own is made as its first
@@ -831,7 +836,7 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
         update_check = config.releases().is_some(),
         watched = ?watched.paths(),
         settings_watched = ?settings.config().watched_paths(),
-        home = %home.path.display(),
+        home = %homes.servers().display(),
         sandbox_binds = binds.count(),
         build_cache = ?cache.dir(),
         caches_compiles = cache.caches_compiles(),
@@ -848,7 +853,7 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
             watched,
             data_dir,
             Agents::new(
-                home,
+                homes,
                 sandbox::Reachable::at(config.listen),
                 binds,
                 cache,

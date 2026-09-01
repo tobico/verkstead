@@ -17,6 +17,15 @@
 //! `absent` on a Mac has found something odd, and one that finds `refused` has
 //! found the boundary working.
 //!
+//! With two exceptions, and both are the boundary working rather than odd. A
+//! session's HOME is a directory of Verkstead's own here, so what is *not* in
+//! it — the machine's keys, somebody's shell history — is absent rather than
+//! refused: those are in another directory entirely, and that one is refused.
+//! And the account's own skills are refused so far that they are not there to
+//! be looked at either: what covers them is a rule denying everything about
+//! the path, metadata included, which is the strongest thing a policy can say
+//! and the closest it comes to a mount standing on it.
+//!
 //! **Built everywhere and run on one machine.** Every test here is compiled on
 //! the Linux runner and *ignored* there rather than left out of the build: what
 //! they run is `sandbox-exec` and what they assert is a policy only a Mac
@@ -32,7 +41,8 @@ use std::process::{Command, Stdio};
 
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
-use verkstead_server::sandbox::{Executable, Home, Reachable, Sandbox};
+use verkstead_server::platform::Platform;
+use verkstead_server::sandbox::{Executable, Homes, Reachable, Sandbox};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
@@ -53,9 +63,9 @@ const SH: &str = "/bin/sh";
 
 /// And the one tool the probe reaches for that a shell has no builtin of.
 ///
-/// Absolute, as everything the probe runs is: the `PATH` inside is still the
-/// Linux one until the task that makes it a Mac's, and what saves the probe
-/// meanwhile is the `/usr/bin` on the end of it rather than anything decided.
+/// Absolute, as everything the probe runs is: what a session's `PATH` holds is
+/// one of the things being probed, so a probe that found its own tools through
+/// it would be leaning on the answer.
 const CURL: &str = "/usr/bin/curl";
 
 /// A Conversation part-way through its first grilling: a Repo inside a Watched
@@ -80,6 +90,10 @@ struct Grilling {
     conversation: store::Conversation,
     profile: store::Profile,
 
+    /// The store the Conversation and its Profiles were written into, for the
+    /// tests that want a second account to run under.
+    pool: sqlx::SqlitePool,
+
     skills: Skills,
     verkstead: Executable,
     handoffs: Handoffs,
@@ -89,16 +103,19 @@ struct Grilling {
 impl Grilling {
     /// The sandbox this Conversation's session would run in.
     ///
-    /// With no shared build cache and no configured binds: this stage builds
-    /// the floor a session stands on, and what is composed over it is the two
-    /// tasks after it.
+    /// With no shared build cache and no configured binds: what is composed
+    /// over the floor a session stands on is the task after this one.
     fn sandbox(&self) -> Sandbox {
+        self.sandbox_under(&self.profile)
+    }
+
+    /// And one around a Profile that is not the fixture's own, which is how
+    /// each of the other account shapes gets a sandbox to be probed inside.
+    fn sandbox_under(&self, profile: &store::Profile) -> Sandbox {
         Sandbox::for_conversation(
             &self.conversation,
-            &self.profile,
-            Home {
-                path: self.home.path().to_owned(),
-            },
+            profile,
+            &self.homes(),
             &Reachable::at(LISTENING),
             &self.skills,
             &self.verkstead,
@@ -123,6 +140,80 @@ impl Grilling {
         self.repo.join(".git")
     }
 
+    /// A Profile of the second agent type, whose whole account is one home,
+    /// with something of the account's inside it — so that "the account is
+    /// there" is a claim about a directory with contents.
+    async fn codex_profile(&self) -> store::Profile {
+        let home = self.watched.path().join("codex-account/.codex");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("config.toml"), "# the account's own\n").unwrap();
+
+        self.profile_of("codex", store::Account::Codex { home }, "gpt-5-codex")
+            .await
+    }
+
+    /// And one of the third, whose account is one home as the second's is.
+    async fn grok_profile(&self) -> store::Profile {
+        let home = self.watched.path().join("grok-account/.grok");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("user-settings.json"), "{}\n").unwrap();
+
+        self.profile_of("grok", store::Account::Grok { home }, "grok-4.6")
+            .await
+    }
+
+    /// And one of the fourth, whose account is one home holding the two
+    /// directories opencode keeps an account in — made the way a human makes
+    /// one, a `HOME=<it> opencode` run leaving exactly these.
+    async fn opencode_profile(&self) -> store::Profile {
+        let home = self.watched.path().join("opencode-account/opencode");
+        let config = home.join(".config/opencode");
+        let data = home.join(".local/share/opencode");
+
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(config.join("opencode.json"), "{}\n").unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("auth.json"), "{}\n").unwrap();
+
+        self.profile_of(
+            "opencode",
+            store::Account::OpenCode { home },
+            "opencode/big-pickle",
+        )
+        .await
+    }
+
+    /// One of those, saved into the same store the fixture's own was.
+    async fn profile_of(&self, name: &str, account: store::Account, model: &str) -> store::Profile {
+        store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: name.to_owned(),
+                account,
+                models: vec![model.to_owned()],
+            },
+        )
+        .await
+        .unwrap()
+        .expect("nothing is called that yet")
+    }
+
+    /// The homes this server hands out: the fixture's own directory where the
+    /// machine's is, and its state directory to make a session's own under.
+    ///
+    /// The two are not the same thing here, and that is what half of these
+    /// tests turn on: the first is the host's home, which is refused, and a
+    /// session's own HOME is a directory of Verkstead's made fresh under the
+    /// second.
+    fn homes(&self) -> Homes {
+        Homes::on(
+            Platform::HERE,
+            self.home.path().to_owned(),
+            self.state.path(),
+        )
+    }
+
+    /// Where the machine's own home is, which is nobody inside's.
     fn home_path(&self) -> &Path {
         self.home.path()
     }
@@ -162,6 +253,17 @@ async fn grilling() -> Grilling {
     std::fs::create_dir_all(&claude_dir).unwrap();
     std::fs::write(claude_dir.join("settings.json"), "{}\n").unwrap();
     std::fs::write(&config_file, "{}\n").unwrap();
+
+    // And skills of the account's own, which are what a session must not be
+    // grilled by: a Profile is an account to run as rather than a second
+    // opinion about how to work. Really there, so that a probe finding nothing
+    // has found the rule covering them rather than an empty directory.
+    std::fs::create_dir_all(claude_dir.join("skills/the-accounts-own")).unwrap();
+    std::fs::write(
+        claude_dir.join("skills/the-accounts-own/SKILL.md"),
+        "# what the account would have been grilled by\n",
+    )
+    .unwrap();
 
     let profile = store::create_profile(
         &pool,
@@ -216,11 +318,15 @@ async fn grilling() -> Grilling {
     let handoffs = Handoffs::under(state.path());
     let settings = Settings::in_data_dir(state.path());
 
-    let image = state.path().join("bin/verkstead");
+    // Not under `bin/`, which is where this platform links what a session finds
+    // — the image is the server's own file wherever it happens to be, and a
+    // fixture that stood it where the link goes would be proving nothing about
+    // the link.
+    let image = state.path().join("image/verkstead");
     std::fs::create_dir_all(image.parent().unwrap()).unwrap();
     std::fs::write(&image, SAYS_WHICH_BUILD).unwrap();
     std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let verkstead = Executable::at(image).expect("the executable was just written");
+    let verkstead = Executable::at(image, state.path()).expect("the executable was just written");
 
     Grilling {
         watched,
@@ -230,6 +336,7 @@ async fn grilling() -> Grilling {
         sibling,
         conversation,
         profile,
+        pool,
         skills,
         verkstead,
         handoffs,
@@ -642,5 +749,380 @@ async fn a_session_starts_in_its_worktree_with_nothing_of_the_servers_environmen
         reported["cargo"], "unset",
         "and carries nothing of whatever started the server: the environment \
          inside is the description's, whole"
+    );
+}
+
+/// The Profile's account is where its backend looks for it, inside a HOME that
+/// is the session's own and holds nothing else.
+///
+/// The Linux suite's claim word for word, and a different mechanism under it:
+/// there, HOME is an empty filesystem with the account mounted into it; here it
+/// is a real directory of Verkstead's own with the account linked into it, and
+/// what keeps the machine's own home out of it is the policy rather than the
+/// directory never having been there.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox();
+
+    let reported = probe(
+        &sandbox,
+        r#"
+        dir "$HOME/.claude" claude-dir
+        file "$HOME/.claude/settings.json" settings
+        file "$HOME/.claude.json" claude-config
+        file "$HOME/.ssh/id_ed25519" private-key
+        say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+        "#,
+    );
+
+    assert_eq!(
+        reported["claude-dir"], "write",
+        "a session writes its own session logs and settings"
+    );
+    assert_eq!(
+        reported["settings"], "write",
+        "and what the account already kept there is there to be read"
+    );
+    assert_eq!(reported["claude-config"], "write");
+    assert_eq!(
+        reported["private-key"], "absent",
+        "a session's HOME is its own, so the machine's is not even the same \
+         directory to be refused in"
+    );
+    assert_eq!(
+        reported["home"], ".claude .claude.json ",
+        "and nothing else is in it"
+    );
+}
+
+/// And for each of the three backends whose whole account is one home or two,
+/// that account is where *its* backend looks and nothing of Claude's is beside
+/// it.
+///
+/// Two accounts of different shapes cannot both be right about `~`, so what is
+/// linked in is the account's own type's and only that.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_home_account_is_where_its_backend_looks_for_it() {
+    let fixture = grilling().await;
+
+    for (profile, held) in [
+        (fixture.codex_profile().await, ".codex "),
+        (fixture.grok_profile().await, ".grok "),
+        (fixture.opencode_profile().await, ".config .local "),
+    ] {
+        let sandbox = fixture.sandbox_under(&profile);
+
+        let reported = probe(
+            &sandbox,
+            r#"
+            dir "$HOME/.codex" codex-home
+            file "$HOME/.codex/config.toml" codex-config
+            dir "$HOME/.grok" grok-home
+            dir "$HOME/.config/opencode" opencode-config
+            file "$HOME/.local/share/opencode/auth.json" opencode-auth
+            dir "$HOME/.claude" claude-dir
+            say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+            "#,
+        );
+
+        assert_eq!(
+            reported["home"], held,
+            "the account this session runs under is the whole of what HOME holds"
+        );
+        assert_eq!(
+            reported["claude-dir"], "absent",
+            "and no account of another shape is in it"
+        );
+
+        match held {
+            ".codex " => {
+                assert_eq!(reported["codex-home"], "write");
+                assert_eq!(
+                    reported["codex-config"], "write",
+                    "with what the account already kept there"
+                );
+            }
+            ".grok " => assert_eq!(reported["grok-home"], "write"),
+            _ => {
+                assert_eq!(reported["opencode-config"], "write");
+                assert_eq!(
+                    reported["opencode-auth"], "write",
+                    "which is the half of an opencode account that is the login"
+                );
+            }
+        }
+    }
+}
+
+/// And one account's sessions cannot reach another's.
+///
+/// The thing the mount does for nothing on Linux, where an account nothing
+/// bound in was never in the namespace at all. Here both accounts are real
+/// directories on the machine and the session is running under one of them:
+/// what makes the other one nobody's business is the policy, and this is the
+/// probe that says so.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn one_accounts_sessions_cannot_reach_anothers() {
+    let fixture = grilling().await;
+    let other = fixture.codex_profile().await;
+    let sandbox = fixture.sandbox();
+
+    let store::Account::Codex { home: theirs } = &other.account else {
+        panic!("a Codex Profile's account is one home");
+    };
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            dir {theirs} the-other-account
+            file {config} the-other-config
+            "#,
+            theirs = quoted(theirs),
+            config = quoted(&theirs.join("config.toml")),
+        ),
+    );
+
+    assert_eq!(
+        reported["the-other-account"], "refused",
+        "a session runs as one account, and the rest are somebody else's"
+    );
+    assert_eq!(reported["the-other-config"], "refused");
+}
+
+/// The skills a session reads are the ones this binary ships, and only those.
+///
+/// At a path of Verkstead's own on both platforms, and the same path only on
+/// one of them: nothing can be created at `/` on a Mac, so what a session is
+/// told to read is the directory they were really written into — which is the
+/// one part of the Data Directory a session may reach, and read-only at that.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox();
+
+    let inside = fixture.skills.inside().to_owned();
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            file {grilling} grilling
+            say installed "$(ls {inside} | sort | tr '\n' ' ')"
+            dir {data} data-dir
+            file "$HOME/.claude/CLAUDE.md" claude-md
+            dir "$HOME/.claude/skills" the-accounts-own
+            "#,
+            grilling = quoted(&inside.join("grilling/SKILL.md")),
+            inside = quoted(&inside),
+            data = quoted(fixture.state.path()),
+        ),
+    );
+
+    assert_eq!(
+        reported["grilling"], "read",
+        "the bundled grilling skill is installed, and is not a session's to rewrite"
+    );
+    assert_eq!(
+        reported["installed"],
+        installed_on_the_host(&fixture.skills),
+        "and the whole of what this binary ships is there"
+    );
+    assert_eq!(
+        reported["data-dir"], "refused",
+        "while the directory holding them is otherwise no session's business"
+    );
+    assert_eq!(
+        reported["claude-md"], "absent",
+        "there is no global CLAUDE.md in here to say how to reach the human"
+    );
+    assert_eq!(
+        reported["the-accounts-own"], "absent",
+        "and what the account keeps under its own skills is refused so far \
+         that there is nothing there to look at — which the fixture put a skill \
+         in to be able to say"
+    );
+
+    assert!(
+        fixture
+            .watched
+            .path()
+            .join("account/.claude/skills/the-accounts-own/SKILL.md")
+            .is_file(),
+        "while nothing of the account's own was written over to do it",
+    );
+}
+
+/// The skill names as they sit on the host, in the shape the probe reports them
+/// from inside — so the assertion above is "the installed set, whatever it is
+/// this release" rather than a list to be edited every time a skill lands.
+fn installed_on_the_host(skills: &Skills) -> String {
+    let mut names: Vec<String> = std::fs::read_dir(skills.path())
+        .expect("the skills are installed")
+        .map(|entry| entry.expect("a readable entry").file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .collect();
+
+    names.sort();
+
+    names.iter().map(|name| format!("{name} ")).collect()
+}
+
+/// `verkstead` inside is the executable serving the session, and it is what a
+/// bare `verkstead` finds.
+///
+/// The two halves of an ask are the CLI a session runs and the server it puts a
+/// Set to, and they have to be one build. So the server hands over its own
+/// image — linked into a directory holding nothing else, ahead of every path
+/// the machine could have installed a `verkstead` on.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn the_verkstead_a_session_asks_with_is_the_one_serving_it() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox();
+
+    let reported = probe(
+        &sandbox,
+        r#"
+        found=$(command -v verkstead)
+        say found "$found"
+        say version "$(verkstead)"
+        say beside "$(ls "$(dirname "$found")")"
+        say first "${PATH%%:*}"
+        file "$found" binary
+        "#,
+    );
+
+    assert_eq!(
+        reported["version"], "verkstead 0.0.0-the-servers-own",
+        "running it runs the server's own build, not whatever the machine has"
+    );
+    assert_eq!(
+        reported["beside"], "verkstead",
+        "the directory holds the one executable the server put there and nothing else"
+    );
+    assert_eq!(
+        Path::new(&reported["first"]),
+        fixture.state.path().join("bin"),
+        "which is looked in before every path an install could have landed on"
+    );
+    assert_eq!(
+        reported["found"],
+        format!("{}/verkstead", reported["first"]),
+        "and a bare `verkstead` is what is in it"
+    );
+    assert_eq!(
+        reported["binary"], "read",
+        "and it is no more a session's to rewrite mid-run than the skills are"
+    );
+}
+
+/// A session runs the machine's own tools, whichever of them this Mac has.
+///
+/// Homebrew's and the system's are what a Mac nobody has been to any trouble
+/// over holds; nix's are what one running nix-darwin has and nothing else does.
+/// Both are on the `PATH` and both are reachable, and the entries for whichever
+/// of them is not installed resolve to nothing without costing a session
+/// anything — which is what "neither is made to do without the other" comes to
+/// from inside. What holds the two lists to each other is a unit test beside
+/// the lists themselves.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_session_runs_the_tools_this_mac_has_and_is_not_stopped_by_the_ones_it_has_not() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox();
+
+    let reported = probe(
+        &sandbox,
+        r#"
+        say path "$PATH"
+        say shell "$SHELL"
+        say git "$(command -v git || echo none)"
+        say sed "$(command -v sed || echo none)"
+        "#,
+    );
+
+    for looked_in in [
+        "/opt/homebrew/bin",
+        "/usr/bin",
+        "/run/current-system/sw/bin",
+    ] {
+        assert!(
+            reported["path"].split(':').any(|entry| entry == looked_in),
+            "{looked_in} is where one kind of Mac keeps its tools, and this \
+             session would never look there: {}",
+            reported["path"],
+        );
+    }
+
+    assert_eq!(
+        reported["shell"], "/bin/sh",
+        "and the shell a tool shells out to is one this platform really has"
+    );
+    assert_ne!(
+        reported["git"], "none",
+        "a session that cannot find git cannot commit, whatever else is on the PATH"
+    );
+    assert_ne!(reported["sed"], "none");
+}
+
+/// What a session writes in its handoff directory is there when it has gone.
+///
+/// The directory is a link on this platform rather than a mount, and it is the
+/// one thing inside a sandbox that outlives the session: a grilling writes the
+/// handoff there and the Conversation reads it afterwards, so a link to the
+/// wrong place would be a handoff nothing ever finds.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn what_a_session_writes_in_its_handoff_directory_is_there_when_it_has_gone() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox();
+
+    let reported = probe(
+        &sandbox,
+        r#"
+        printf '# What we settled\n' > /tmp/verkstead/handoff.md
+        dir /tmp/verkstead handoff
+        "#,
+    );
+
+    assert_eq!(reported["handoff"], "write");
+
+    let written = fixture
+        .handoffs
+        .directory(fixture.conversation.id)
+        .expect("the directory is made as the sandbox is built")
+        .join("handoff.md");
+
+    assert_eq!(
+        std::fs::read_to_string(written).expect("the handoff is outside the sandbox"),
+        "# What we settled\n",
+        "which is the whole point of the directory being Verkstead's own",
     );
 }

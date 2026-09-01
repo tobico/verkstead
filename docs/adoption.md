@@ -32,7 +32,7 @@ The vocabulary in bold is the project's, defined once in
 | `roadrunner` — a terminal per run, driving `.tasks/` and `docs/roadmaps/` | The orchestrator, driving the same two files off the Repo, with the run visible on a **Timeline** instead of scrolling past |
 | roadrunner's interruptions | A **Halt** and its stop **Notice** — pushed to your phone, read where the work is, and answered by one **Resume** |
 | askance — one queue of Question Sets for the machine | **Question Sets** on the Timeline of the Conversation they were asked from |
-| The skills installed under `~/.claude/skills` | **Skills** shipped inside the binary and mounted read-only at `/verkstead/skills`, with the account's own hidden behind an empty directory, so a session's behaviour is the product's |
+| The skills installed under `~/.claude/skills` | **Skills** shipped inside the binary and read-only inside at a path no backend owns, with the account's own not reachable at all, so a session's behaviour is the product's |
 | A gate at every commit | No commit gates. Review consolidates in the wrap-up, per pull request |
 
 What stays: **askance is a separate, maintained product**, and the

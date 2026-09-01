@@ -19,9 +19,10 @@
 //!
 //! - **read-write** — the Conversation's worktree, the Repo's common `.git`
 //!   directory, and the Profile's pair at `~/.claude` and `~/.claude.json`
-//! - **read-only** — `/nix` and the system paths, the bundled skills at
-//!   `/verkstead/skills`, an empty directory over the `~/.claude/skills` they
-//!   used to hide, and the executable serving all this, as `verkstead`
+//! - **read-only** — `/nix` and the system paths, the bundled skills in a
+//!   directory of Verkstead's own — see [`own_directory`] — nothing at all
+//!   where the account's own skills would be found, and the executable serving
+//!   all this, as `verkstead`
 //! - **tmpfs** — `/tmp`, and everything else in HOME simply absent
 //! - **by mode** — each companion repo the Conversation was configured with,
 //!   its worktree and its git directory together, read-only or read-write as
@@ -79,6 +80,7 @@ use surface::{Access, Reach, Surface};
 
 use crate::build_cache::{self, BuildCache};
 use crate::handoffs::{self, Handoffs};
+use crate::platform::Platform;
 use crate::settings::{Config, GitAuthor, Secrets};
 use crate::skills::{self, Skills};
 use crate::store;
@@ -148,6 +150,11 @@ const LINUX_SYSTEM: &[&str] = &[
 /// One that is not there is skipped, as on Linux and for the same reason: a
 /// Mac without Homebrew is a Mac without Homebrew, which is a thing to notice
 /// elsewhere than in a policy.
+///
+/// `/run/current-system` is nix-darwin's, and it is the one entry here that is
+/// about a Mac somebody has been to some trouble over: that machine's tools are
+/// under it, [`APPLE_PATH`] looks there, and a Mac without nix-darwin skips it
+/// the way a machine without Homebrew skips `/opt/homebrew`.
 const APPLE_SYSTEM: &[&str] = &[
     "/System/Library",
     "/System/Volumes/Preboot/Cryptexes",
@@ -159,16 +166,49 @@ const APPLE_SYSTEM: &[&str] = &[
     "/var/select",
     "/opt/homebrew",
     "/nix",
+    "/run/current-system",
 ];
 
-/// Where the server's own executable is mounted, which is what a session runs
-/// as `verkstead`.
+/// Where a session finds the product itself: the skills it is grilled by, and
+/// under `bin` the executable it asks with.
 ///
-/// In a directory of Verkstead's own rather than under a name inside one of the
-/// system binds: those are the host's and read-only, so there is nowhere in them
-/// to put a file. The directory is made by the bind itself, holds this one
-/// executable and nothing else, and goes first on [`PATH`].
-const VERKSTEAD_INSIDE: &str = "/verkstead/bin/verkstead";
+/// `/verkstead` on Linux, and it is nowhere on the host — the binds make it,
+/// which is what says everything in it is the server's own rather than whatever
+/// the machine happened to have under that name.
+///
+/// A Mac has neither half of that. There are no binds to make a directory with,
+/// and nothing can be made at `/` to be found in one: the root volume is
+/// read-only and sealed, and the one supported way past that is
+/// `/etc/synthetic.conf`, which is root's and wants a reboot — neither of which
+/// an app a human dragged out of a dmg has. So there it is the Data Directory.
+/// The skills are already written out inside it, the binary is linked in beside
+/// them, and no other part of it is reachable from a session at all — so what
+/// is in it is still the server's own, said by the policy rather than by the
+/// directory being nobody's. What a session is then told to read is the path
+/// the file is really at.
+///
+/// Windows keeps the Linux spelling, having no sandbox at all yet: the stage
+/// that gives it one is the stage that decides what a directory of Verkstead's
+/// own is there.
+pub fn own_directory(platform: Platform, data_dir: &Path) -> PathBuf {
+    match platform {
+        Platform::MacOs => data_dir.to_owned(),
+        Platform::Linux | Platform::Windows => PathBuf::from(OWN_DIRECTORY),
+    }
+}
+
+/// What that directory is where a bind makes it.
+const OWN_DIRECTORY: &str = "/verkstead";
+
+/// And the two things inside it: the directory the executables are in, which
+/// goes first on a session's `PATH`, and what the server's own image is called
+/// there.
+///
+/// A directory rather than a name inside one of the system binds: those are the
+/// host's and read-only, so there is nowhere in them to put a file. It holds
+/// the one executable the server put there and nothing else.
+const BIN: &str = "bin";
+const VERKSTEAD: &str = "verkstead";
 
 /// Where each agent type's account lands in HOME.
 ///
@@ -281,23 +321,63 @@ pub const AGENT_TYPE: &str = "VERKSTEAD_AGENT";
 /// dev shell does to `PATH`. See [`crate::build_cache`].
 pub(crate) const SCCACHE_INSIDE: &str = "/verkstead/bin/sccache";
 
-/// What a session's `PATH` is inside.
+/// What a session's `PATH` is inside: `ours` first, and then the machine's own.
 ///
-/// Verkstead's own directory first — see [`Executable`] for why a session asks
-/// with the server's own build rather than with whatever the machine has
-/// installed — then the system profile, then the Nix default profile, then the
-/// paths a non-NixOS `/usr` would put things in. Not inherited from the server's
-/// own environment: what a session can run should be a fact about the sandbox
-/// rather than about however the unit that started the orchestrator happened to
-/// be launched.
+/// `ours` is the directory of Verkstead's own that the binary a session asks
+/// with is in — see [`Executable`] for why a session asks with the server's own
+/// build rather than with whatever the machine has installed. It goes first on
+/// both platforms, and it is passed in rather than said here because where it
+/// is, is a fact about the machine too: `/verkstead/bin` where a bind makes it,
+/// and a directory under the Data Directory where nothing can — see
+/// [`own_directory`].
+///
+/// Nothing here is inherited from the server's own environment: what a session
+/// can run should be a fact about the sandbox rather than about however the
+/// unit that started the orchestrator happened to be launched.
 ///
 /// And what the compile server has, for the same reason: it is a fact about
 /// what a sandbox holds rather than about either process.
-pub(crate) const PATH: &str =
-    "/verkstead/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
+pub(crate) fn path(ours: &Path) -> String {
+    format!("{}:{MACHINE_PATH}", ours.display())
+}
 
-/// And what a session's `SHELL` is: the one path the system is certain to have
-/// a shell at, on NixOS and everywhere else.
+/// The machine's own half of that, which is one list or the other and never
+/// both: a NixOS box has nothing under `/opt/homebrew` and a Mac has nothing
+/// under `/run/current-system/sw` unless somebody put it there.
+const MACHINE_PATH: &str = if cfg!(target_os = "macos") {
+    APPLE_PATH
+} else {
+    LINUX_PATH
+};
+
+/// What that is on Linux: the system profile, then the Nix default profile,
+/// then the paths a non-NixOS `/usr` would put things in.
+const LINUX_PATH: &str =
+    "/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
+
+/// And on a Mac, which has none of NixOS in it until somebody installs one.
+///
+/// Homebrew first — both the Apple-silicon prefix and the Intel one, which is
+/// under `/usr/local` — because a Mac used for development has its actual
+/// toolchain there and Apple's own `/usr/bin` holds older copies of half of it.
+/// Then the system, which is what is there on a Mac nobody has touched.
+///
+/// Then nix's, last and present at all: a Mac running nix-darwin has tools
+/// under `/run/current-system/sw/bin` that exist nowhere else on it, and a Mac
+/// without one has an entry on its `PATH` that resolves to nothing, which costs
+/// a session nothing. So neither kind of machine is made to do without the
+/// other's — see [`APPLE_SYSTEM`], which lets the same directory be reached.
+const APPLE_PATH: &str = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:\
+                          /usr/sbin:/sbin:/run/current-system/sw/bin:\
+                          /nix/var/nix/profiles/default/bin";
+
+/// And what a session's `SHELL` is: the one path every platform this runs on is
+/// certain to have a shell at.
+///
+/// The one thing about the environment with no arm of its own. `/bin/sh` is
+/// NixOS's and a Mac's alike — Apple's is what reads `/private/var/select/sh`
+/// on its way up, which is why that path is in [`APPLE_SYSTEM`] — so the answer
+/// that was right for one machine is right for the other.
 const SHELL: &str = "/bin/sh";
 
 /// Where a session writes a temporary file.
@@ -316,35 +396,106 @@ const TMP: &str = "/tmp";
 /// rewrite says its own.
 const GITHUB: &str = "https://github.com";
 
-/// The host directory `~` means inside a sandbox.
+/// Where a session's HOME comes from, on whichever platform is asking.
 ///
-/// A session's HOME is the server's own, at the same path inside — and that is
-/// the whole of what this is for. Nothing is read out of it any more: it used to
-/// give up two things, what `gh` was authenticated as and who git committed as,
-/// and both are now said rather than found — a token and an author in the
-/// settings files, handed to the session in its environment. What is left is a
-/// path, not a place credentials are collected from.
+/// **On Linux it is the server's own directory, at the same path inside.**
+/// Nothing of what is in it comes through: an empty directory is made over it,
+/// and the Profile's account mounted into that — which is what makes one
+/// account's sessions invisible to another's. Nothing is read out of it either.
+/// It used to give up two things, what `gh` was authenticated as and who git
+/// committed as, and both are now said rather than found — a token and an
+/// author in the settings files, handed to the session in its environment. What
+/// is left is a path, not a place credentials are collected from.
 ///
-/// Nothing of the directory comes through either. HOME inside is an empty
-/// directory with the Profile's pair mounted into it, which is what makes one
-/// account's sessions invisible to another's.
+/// **On a Mac there is nothing to make a directory *over*.** A policy can
+/// refuse a path and cannot empty one, so the directory a session gets has to
+/// really be one: Verkstead's own, under the Data Directory beside the
+/// handoffs, one per Conversation and made fresh as each session starts. The
+/// server's own home is then no session's HOME at all, and is refused along
+/// with the rest of the machine. What keeps one account out of another's is the
+/// policy rather than the absence — everything outside this session's own is
+/// denied — and what keeps one Conversation out of another's is that they are
+/// different directories.
+///
+/// One is emptied as each of that Conversation's sessions starts rather than
+/// removed when the Conversation ends. What a session left in it is nothing
+/// anything reads — the account is linked in rather than copied, so what is
+/// there is the session's own leavings — and a Conversation's id is never
+/// handed out twice, so the only thing a directory left behind can ever be
+/// given to is the Conversation it already belonged to.
+#[derive(Debug, Clone)]
+pub struct Homes {
+    /// The home of whoever is running the server, which is what `~` means
+    /// inside on the platform that can make an empty one over it.
+    servers: PathBuf,
+
+    /// And the root a Conversation's own real one is made under, on the
+    /// platform that cannot.
+    root: PathBuf,
+
+    /// Which of those a session gets. A value rather than a `cfg`, for the
+    /// reason [`Platform`] is one: the arm this machine will never run is still
+    /// an arm a test on it can ask for.
+    platform: Platform,
+}
+
+impl Homes {
+    /// The homes this server hands out.
+    ///
+    /// The server's own is read from the environment rather than from the
+    /// passwd database: a service unit says what HOME is, and that is the answer
+    /// that should count — under the packaged unit it is what the module sets,
+    /// and in a development shell it is the human's own. `None` where nothing
+    /// says, which on Linux is a server that can run no session; a Mac needs it
+    /// for nothing here, and is refused with the rest for the sake of one
+    /// answer rather than two.
+    pub fn of_the_server(data_dir: &Path) -> Option<Homes> {
+        Some(Homes::on(
+            Platform::HERE,
+            PathBuf::from(std::env::var_os("HOME")?),
+            data_dir,
+        ))
+    }
+
+    /// The same on `platform`, out of the two directories it decides between.
+    pub fn on(platform: Platform, servers: PathBuf, data_dir: &Path) -> Homes {
+        Homes {
+            servers,
+            root: data_dir.join("homes"),
+            platform,
+        }
+    }
+
+    /// The home of whoever is running the server, for the startup line that
+    /// says which machine this is running on.
+    pub fn servers(&self) -> &Path {
+        &self.servers
+    }
+
+    /// And one Conversation's own.
+    fn for_conversation(&self, conversation_id: i64) -> Home {
+        let path = match self.platform {
+            Platform::MacOs => self.root.join(conversation_id.to_string()),
+            Platform::Linux | Platform::Windows => self.servers.clone(),
+        };
+
+        Home { path }
+    }
+}
+
+/// The directory `~` means inside one sandbox.
+///
+/// Made rather than constructed: it is [`Homes`] that decides where a session's
+/// own is, and a HOME the caller chose is a directory a renderer would empty.
 #[derive(Debug, Clone)]
 pub struct Home {
-    /// The directory itself, which is what `~` resolves to inside.
-    pub path: PathBuf,
+    path: PathBuf,
 }
 
 impl Home {
-    /// The home of whoever is running the server.
-    ///
-    /// Read from the environment rather than from the passwd database: a service
-    /// unit says what HOME is, and that is the answer that should count — under
-    /// the packaged unit it is what the module sets, and in a development shell
-    /// it is the human's own.
-    pub fn of_the_server() -> Option<Home> {
-        Some(Home {
-            path: PathBuf::from(std::env::var_os("HOME")?),
-        })
+    /// The directory itself, which is what `~` resolves to inside.
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
     }
 }
 
@@ -365,17 +516,24 @@ impl Home {
 #[derive(Debug, Clone)]
 pub struct Executable {
     path: PathBuf,
+
+    /// And where a session finds it, which is `bin/verkstead` under the
+    /// directory of Verkstead's own — see [`own_directory`]. Made by the bind
+    /// on Linux and really there on a Mac, and first on a session's `PATH`
+    /// either way.
+    inside: PathBuf,
 }
 
 impl Executable {
-    /// The running server's own image.
+    /// The running server's own image, as a session started against `data_dir`
+    /// finds it.
     ///
     /// `None` where the process cannot say what it is running, and `None` too
     /// where what it names is no longer a file: a binary replaced under a
     /// running server is exactly that, and `/proc` answers for it with a path
     /// marked `(deleted)` that no bind can be made from.
-    pub fn of_the_server() -> Option<Executable> {
-        Executable::at(std::env::current_exe().ok()?)
+    pub fn of_the_server(data_dir: &Path) -> Option<Executable> {
+        Executable::at(std::env::current_exe().ok()?, data_dir)
     }
 
     /// A named one, which is how a test puts the real CLI where the server's own
@@ -383,15 +541,33 @@ impl Executable {
     ///
     /// `None` for a path with nothing behind it, for the reason above: what this
     /// is for is a bind, and a bind of nothing is a session that will not start.
-    pub fn at(path: PathBuf) -> Option<Executable> {
+    pub fn at(path: PathBuf, data_dir: &Path) -> Option<Executable> {
         let path = unwrapped(&path);
 
-        path.is_file().then_some(Executable { path })
+        path.is_file().then_some(Executable {
+            path,
+            inside: own_directory(Platform::HERE, data_dir)
+                .join(BIN)
+                .join(VERKSTEAD),
+        })
     }
 
     /// Where it is on the host, which is what a sandbox binds.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Where a session finds it, which is what a sandbox puts it at.
+    fn inside(&self) -> &Path {
+        &self.inside
+    }
+
+    /// And the directory it is in inside, which is what goes first on a
+    /// session's `PATH` — see [`path`].
+    fn bin(&self) -> &Path {
+        self.inside
+            .parent()
+            .expect("a path built by joining two names onto a directory has one")
     }
 }
 
@@ -768,23 +944,20 @@ pub struct Sandbox {
     /// running, which is what [`AGENT_TYPE`] carries inside.
     account: store::Account,
 
-    /// The bundled skills, mounted read-only at [`skills::INSIDE`] — see
-    /// [`crate::skills`] for why they are Verkstead's rather than the account's,
-    /// why they are read-only, and why the path is nobody's.
-    skills: PathBuf,
+    /// The bundled skills, read-only where a session is told to read them —
+    /// see [`crate::skills`] for why they are Verkstead's rather than the
+    /// account's, why they are read-only, and why the path is nobody's. And the
+    /// empty directory that goes over `~/.claude/skills`, which comes with them
+    /// — see [`skills::Skills::nothing`].
+    skills: Skills,
 
-    /// And the empty directory that goes over `~/.claude/skills` in their place,
-    /// read-only, so what the account keeps there stays hidden now that the
-    /// mount doing the hiding has moved away — see [`skills::Skills::nothing`].
-    nothing: PathBuf,
-
-    /// The executable a session runs as `verkstead`, mounted read-only at
-    /// [`VERKSTEAD_INSIDE`] and first on `PATH`.
+    /// The executable a session runs as `verkstead`, read-only where a session
+    /// finds it and first on `PATH`.
     ///
     /// The server's own — see [`Executable`] — and read-only for the reason the
     /// skills are: what a session asks with is the product's, and not a file the
     /// session can rewrite mid-run.
-    verkstead: PathBuf,
+    verkstead: Executable,
 
     /// The Conversation's own directory outside the worktree, read-write, at
     /// [`handoffs::INSIDE`].
@@ -877,7 +1050,7 @@ impl Sandbox {
     pub fn for_conversation(
         conversation: &store::Conversation,
         profile: &store::Profile,
-        home: Home,
+        homes: &Homes,
         reachable: &Reachable,
         skills: &Skills,
         verkstead: &Executable,
@@ -909,11 +1082,10 @@ impl Sandbox {
             worktree,
             git_dir,
             account: profile.account.clone(),
-            skills: skills.path().to_owned(),
-            nothing: skills.nothing().to_owned(),
-            verkstead: verkstead.path().to_owned(),
+            skills: skills.clone(),
+            verkstead: verkstead.clone(),
             handoff_dir,
-            home,
+            home: homes.for_conversation(conversation.id),
             github_token: secrets.github_token().map(str::to_owned),
             git_author: config.git_author().clone(),
             server: reachable.asking_from(conversation.id),
@@ -958,7 +1130,7 @@ impl Sandbox {
         // HOME before anything that goes inside it: the directory has to be
         // there for the account to land in, and everything else about it stays
         // absent.
-        surface.made(Access::Empty(self.home.path.clone()));
+        surface.made(Access::Empty(self.home.path().to_owned()));
 
         surface
             .own(&self.worktree, Reach::ReadWrite)
@@ -976,26 +1148,26 @@ impl Sandbox {
                 surface
                     .elsewhere(
                         claude_dir,
-                        self.home.path.join(CLAUDE_DIR_INSIDE_HOME),
+                        self.home.path().join(CLAUDE_DIR_INSIDE_HOME),
                         Reach::ReadWrite,
                     )
                     .elsewhere(
                         config_file,
-                        self.home.path.join(CLAUDE_CONFIG_INSIDE_HOME),
+                        self.home.path().join(CLAUDE_CONFIG_INSIDE_HOME),
                         Reach::ReadWrite,
                     );
             }
             store::Account::Codex { home } => {
                 surface.elsewhere(
                     home,
-                    self.home.path.join(CODEX_INSIDE_HOME),
+                    self.home.path().join(CODEX_INSIDE_HOME),
                     Reach::ReadWrite,
                 );
             }
             store::Account::Grok { home } => {
                 surface.elsewhere(
                     home,
-                    self.home.path.join(GROK_INSIDE_HOME),
+                    self.home.path().join(GROK_INSIDE_HOME),
                     Reach::ReadWrite,
                 );
             }
@@ -1007,7 +1179,7 @@ impl Sandbox {
                 for inside in [OPENCODE_CONFIG_INSIDE_HOME, OPENCODE_DATA_INSIDE_HOME] {
                     surface.elsewhere(
                         home.join(inside),
-                        self.home.path.join(inside),
+                        self.home.path().join(inside),
                         Reach::ReadWrite,
                     );
                 }
@@ -1023,12 +1195,18 @@ impl Sandbox {
         // a session reads there is what this binary ships. Read-only, because
         // what a session is grilled by is the product's and not a file the
         // session can rewrite mid-run.
-        surface.elsewhere(&self.skills, skills::INSIDE, Reach::ReadOnly);
+        //
+        // Where a bind can make that path, this is one; where none can, the
+        // path a session is told to read is the one they are really written at
+        // and the two sides of this are the same directory — see
+        // [`skills::Skills::inside`].
+        surface.elsewhere(self.skills.path(), self.skills.inside(), Reach::ReadOnly);
 
         // And nothing at all where the account's own skills would otherwise be
         // found: after the Profile's directory and inside it, because what is
-        // said second is what a session gets. Read-only as the directory it
-        // stands over is, so a session cannot fill it in and then read from it.
+        // said second is what a session gets — an empty directory of
+        // Verkstead's own standing over them where a mount can do that, and a
+        // refusal of the path where none can.
         //
         // Claude's, and so far Claude's alone. Each backend after it has a
         // discovery path of its own, covered the same way by the stage that
@@ -1053,17 +1231,20 @@ impl Sandbox {
         // because covering a home no session is running under would cover
         // nothing and make a directory the account never had.
         if matches!(self.account, store::Account::Claude { .. }) {
-            surface.elsewhere(
-                &self.nothing,
-                self.home.path.join(skills::CLAUDE_INSIDE_HOME),
-                Reach::ReadOnly,
+            surface.nothing(
+                self.home.path().join(skills::CLAUDE_INSIDE_HOME),
+                self.skills.nothing(),
             );
         }
 
         // And the binary the session asks with, in a directory of its own that
         // goes first on `PATH` — see [`Executable`]. What is on that `PATH`
         // entry is this one file and nothing the host put beside it.
-        surface.elsewhere(&self.verkstead, VERKSTEAD_INSIDE, Reach::ReadOnly);
+        surface.elsewhere(
+            self.verkstead.path(),
+            self.verkstead.inside(),
+            Reach::ReadOnly,
+        );
 
         // And the shared build cache: the directory writable at its own place,
         // and the sccache that compiles into it read-only in the directory the
@@ -1084,8 +1265,8 @@ impl Sandbox {
         }
 
         surface
-            .set("HOME", &self.home.path)
-            .set("PATH", PATH)
+            .set("HOME", self.home.path())
+            .set("PATH", path(self.verkstead.bin()))
             // Which shell is inside, for the same reason `PATH` is said here:
             // the environment is cleared, so a tool that shells out reaches for
             // whatever this holds — and with nothing in it, it would fall back
@@ -1383,23 +1564,106 @@ fn nix(dir: &Path, args: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// An executable that is really there, wherever a test's temporary
+    /// directory is.
+    fn executable(bin: &Path, name: &str, data_dir: &Path) -> Option<Executable> {
+        std::fs::write(bin.join(name), "an ELF\n").unwrap();
+
+        Executable::at(bin.join(name), data_dir)
+    }
+
     /// The bind puts the executable in one directory and `PATH` sends a session
     /// looking in another, and the two have to be the same place — a `verkstead`
     /// mounted somewhere nothing searches is a session back on the machine's
     /// install without anything saying so.
     #[test]
-    fn the_directory_the_binary_is_mounted_in_is_the_first_on_the_path() {
-        let mounted = Path::new(VERKSTEAD_INSIDE);
+    fn the_directory_the_binary_is_found_in_is_the_first_on_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let equipped = executable(dir.path(), "verkstead", dir.path()).expect("it is there");
 
         assert_eq!(
-            mounted.file_name().and_then(OsStr::to_str),
+            equipped.inside.file_name().and_then(OsStr::to_str),
             Some("verkstead"),
             "the name on `PATH` is the name the skills and the Guide tell a session to run"
         );
         assert_eq!(
-            PATH.split(':').next().map(Path::new),
-            mounted.parent(),
+            path(equipped.bin()).split(':').next().map(Path::new),
+            Some(equipped.bin()),
             "the server's own build has to be found before the machine's install"
+        );
+    }
+
+    /// And what a session finds it under is a directory a mount can make, or
+    /// the Data Directory where none can — see [`own_directory`].
+    #[test]
+    fn a_platform_with_no_mounts_finds_the_product_in_the_data_directory() {
+        let data = Path::new("/Users/you/Library/Application Support/Verkstead");
+
+        assert_eq!(
+            own_directory(Platform::MacOs, data),
+            data,
+            "a Mac can make nothing at `/`, so what a session reads is where the \
+             file really is"
+        );
+        assert_eq!(
+            own_directory(Platform::Linux, data),
+            Path::new(OWN_DIRECTORY),
+            "and a bind makes a directory that is nobody's on the host"
+        );
+    }
+
+    /// Every path on a session's `PATH` is one the policy also lets it reach,
+    /// which is what says a Mac with nix-darwin gets nix's tools and one
+    /// without gets Homebrew's and the system's.
+    ///
+    /// Whole directories rather than the paths themselves: `/usr/bin` is on the
+    /// `PATH` and `/usr` is what the system list holds.
+    #[test]
+    fn nothing_on_a_macs_path_is_a_directory_its_policy_refuses() {
+        for entry in APPLE_PATH.split(':') {
+            assert!(
+                APPLE_SYSTEM
+                    .iter()
+                    .any(|system| Path::new(entry).starts_with(system)),
+                "{entry} is on a session's PATH and nothing in the system list \
+                 makes it reachable"
+            );
+        }
+
+        assert!(
+            APPLE_PATH
+                .split(':')
+                .any(|entry| entry == "/opt/homebrew/bin"),
+            "a Mac with Homebrew has its actual toolchain there"
+        );
+        assert!(
+            APPLE_PATH
+                .split(':')
+                .any(|entry| entry == "/run/current-system/sw/bin"),
+            "and a Mac running nix-darwin is not made to do without nix's"
+        );
+    }
+
+    /// A Conversation's HOME is the server's own where a mount can be made
+    /// empty over it, and a real directory of Verkstead's own where none can.
+    #[test]
+    fn a_platform_with_no_mounts_gives_each_conversation_a_home_of_its_own() {
+        let data = Path::new("/data");
+        let servers = PathBuf::from("/home/verkstead");
+
+        let linux = Homes::on(Platform::Linux, servers.clone(), data);
+        assert_eq!(
+            linux.for_conversation(7).path(),
+            servers,
+            "a tmpfs over the server's own home is what makes it empty"
+        );
+
+        let mac = Homes::on(Platform::MacOs, servers, data);
+        assert_eq!(mac.for_conversation(7).path(), Path::new("/data/homes/7"));
+        assert_ne!(
+            mac.for_conversation(8).path(),
+            mac.for_conversation(7).path(),
+            "and one Conversation's HOME is not another's"
         );
     }
 
@@ -1412,7 +1676,7 @@ mod tests {
         std::fs::write(bin.path().join("verkstead"), "#!/bin/sh\n").unwrap();
         std::fs::write(bin.path().join(".verkstead-wrapped"), "an ELF\n").unwrap();
 
-        let executable = Executable::at(bin.path().join(".verkstead-wrapped"))
+        let executable = Executable::at(bin.path().join(".verkstead-wrapped"), bin.path())
             .expect("the file is there to be equipped with");
 
         assert_eq!(
@@ -1430,7 +1694,7 @@ mod tests {
         let path = bin.path().join("verkstead");
         std::fs::write(&path, "an ELF\n").unwrap();
 
-        let executable = Executable::at(path.clone()).expect("the file is there");
+        let executable = Executable::at(path.clone(), bin.path()).expect("the file is there");
 
         assert_eq!(executable.path(), path);
     }
@@ -1442,6 +1706,6 @@ mod tests {
     fn an_executable_that_is_not_there_equips_nobody() {
         let bin = tempfile::tempdir().unwrap();
 
-        assert!(Executable::at(bin.path().join("verkstead")).is_none());
+        assert!(Executable::at(bin.path().join("verkstead"), bin.path()).is_none());
     }
 }

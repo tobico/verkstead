@@ -31,8 +31,9 @@ use std::process::{Command, Stdio};
 
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
+use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{
-    Bind, Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell,
+    Bind, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
 };
 use verkstead_server::settings::{RustBuildCache, Settings};
 use verkstead_server::skills::Skills;
@@ -252,7 +253,7 @@ fi
         Sandbox::for_conversation(
             &self.conversation,
             profile,
-            self.home(),
+            &self.homes(),
             &Reachable::at(listening),
             &self.skills,
             &self.verkstead,
@@ -371,10 +372,12 @@ fi
 
     /// The host home a sandbox is built around — the fixture's rather than
     /// whoever is running the tests, so what `~` holds is decided here.
-    fn home(&self) -> Home {
-        Home {
-            path: self.home.path().to_owned(),
-        }
+    fn homes(&self) -> Homes {
+        Homes::on(
+            Platform::HERE,
+            self.home.path().to_owned(),
+            self.state.path(),
+        )
     }
 
     /// Where `~` is, as the probe will see it.
@@ -601,11 +604,15 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
 
     // The executable a session is equipped with, somewhere no session can reach
     // it except through the bind — see [`SAYS_WHICH_BUILD`].
-    let image = state.path().join("bin/verkstead");
+    // Not under `bin/`, which is where a platform with no binds to make one
+    // with puts what a session finds: the two are different places, and a
+    // fixture that stood the image in the second of them would be proving
+    // nothing about how it got there.
+    let image = state.path().join("image/verkstead");
     std::fs::create_dir_all(image.parent().unwrap()).unwrap();
     std::fs::write(&image, SAYS_WHICH_BUILD).unwrap();
     std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let verkstead = Executable::at(image).expect("the executable was just written");
+    let verkstead = Executable::at(image, state.path()).expect("the executable was just written");
 
     Grilling {
         watched,

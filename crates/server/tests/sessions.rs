@@ -65,7 +65,8 @@ use verkstead_render::{
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
-use verkstead_server::sandbox::{Executable, Home, Reachable, SandboxConfig};
+use verkstead_server::platform::Platform;
+use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, Gh, Pace, WatchedPaths, open_database, router_running_sessions};
@@ -157,8 +158,8 @@ static PATIENCE: LazyLock<Duration> = LazyLock::new(|| paced(Duration::from_secs
 /// bind it read-only — so any file that is really there will do where nothing in
 /// this file runs it. That a session asks with the *server's* build is the
 /// sandbox's own claim, and `tests/sandbox.rs` is where it is put to a session.
-fn equipped() -> Option<Executable> {
-    Executable::of_the_server()
+fn equipped(data_dir: &Path) -> Option<Executable> {
+    Executable::of_the_server(data_dir)
 }
 
 /// A Conversation with a session running under a stub agent, and everything
@@ -383,16 +384,18 @@ impl Grilling {
             self.state.path().to_owned(),
             Agents::running(
                 vec!["/bin/sh".to_owned(), "-c".to_owned(), stub.to_owned()],
-                Home {
-                    path: self.home.path().to_owned(),
-                },
+                Homes::on(
+                    Platform::HERE,
+                    self.home.path().to_owned(),
+                    self.state.path(),
+                ),
                 Reachable::at(LISTENING),
                 SandboxConfig::resolve(&[self.spill.path().display().to_string()]).unwrap(),
                 // No shared build cache: what these tests are about runs a stub
                 // where claude goes and builds nothing at all.
                 BuildCache::none(),
                 Skills::installed(self.state.path()).expect("this binary carries skills"),
-                equipped(),
+                equipped(self.state.path()),
                 Handoffs::under(self.state.path()),
                 Settings::in_data_dir(self.state.path()),
             )
@@ -2469,14 +2472,12 @@ async fn bench_at_pace(
 
     let agents = Agents::running(
         vec!["/bin/sh".to_owned(), "-c".to_owned(), stub.to_owned()],
-        Home {
-            path: home.path().to_owned(),
-        },
+        Homes::on(Platform::HERE, home.path().to_owned(), state.path()),
         Reachable::at(LISTENING),
         SandboxConfig::resolve(&[spill.path().display().to_string()]).unwrap(),
         BuildCache::none(),
         Skills::installed(state.path()).expect("this binary carries skills"),
-        equipped(),
+        equipped(state.path()),
         Handoffs::under(state.path()),
         Settings::in_data_dir(state.path()),
     )
@@ -4542,14 +4543,16 @@ async fn a_capture_survives_the_server_restarting() {
         fixture.state.path().to_owned(),
         Agents::running(
             vec!["/bin/sh".to_owned(), "-c".to_owned(), "true".to_owned()],
-            Home {
-                path: PathBuf::from("/nonexistent"),
-            },
+            Homes::on(
+                Platform::HERE,
+                PathBuf::from("/nonexistent"),
+                fixture.state.path(),
+            ),
             Reachable::at(LISTENING),
             SandboxConfig::default(),
             BuildCache::none(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
-            equipped(),
+            equipped(fixture.state.path()),
             Handoffs::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         ),
@@ -6687,14 +6690,16 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
         fixture.state.path().to_owned(),
         Agents::running(
             vec!["/bin/sh".to_owned(), "-c".to_owned(), "true".to_owned()],
-            Home {
-                path: PathBuf::from("/nonexistent"),
-            },
+            Homes::on(
+                Platform::HERE,
+                PathBuf::from("/nonexistent"),
+                fixture.state.path(),
+            ),
             Reachable::at(LISTENING),
             SandboxConfig::default(),
             BuildCache::none(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
-            equipped(),
+            equipped(fixture.state.path()),
             Handoffs::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         )

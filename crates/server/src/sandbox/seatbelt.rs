@@ -19,14 +19,23 @@
 //! the machine looks like from inside a policy and pretending otherwise would
 //! take a rule per path for nothing gained.
 //!
-//! **What this does not render yet.** [`Access::Elsewhere`] and
-//! [`Access::Empty`] are a path being somewhere it is not, and Apple's sandbox
-//! has no such thing: HOME, the Profile's account, the skills and the binary a
-//! session asks with have to be made real on this platform, which is the next
-//! task of this stage rather than this one. Until it lands, what those describe
-//! is left out of the policy — which is a session that cannot reach its own
-//! account, rather than one that can reach anything more. Everything skipped
-//! here narrows the sandbox; nothing skipped widens it.
+//! **What a mount would have made, this makes.** [`Access::Empty`] and
+//! [`Access::Elsewhere`] are a directory out of nothing and a path being
+//! somewhere it is not, and Apple's sandbox has neither to offer — so before a
+//! policy is written at all, the directory is really made and the path is
+//! really linked, under [`realise`]. A session's HOME is then a real directory
+//! of Verkstead's own with the Profile's account symlinked into it, and what
+//! keeps one account out of another's is the policy: the account this session
+//! runs under is reachable and every other path on the machine is not.
+//!
+//! And [`Access::Nothing`] is the one the two mechanisms answer in opposite
+//! directions. A mount hides the account's own skills by standing an empty
+//! directory on them; there is nothing to stand anywhere here, and a link
+//! written at that path would be written *into* the account itself — so it is
+//! a rule refusing the path instead, after the rule that made the account
+//! reachable. Which is the whole of why the order of a description is the
+//! description: a policy takes the last rule that matched, exactly as a mount
+//! table takes the last bind that landed.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -102,6 +111,8 @@ const DEVICES: &str = r#"
 /// `surface` as the `sandbox-exec` invocation that runs it under its own
 /// policy.
 pub(crate) fn command(surface: &Surface) -> Command {
+    realise(surface);
+
     let mut sandbox = Command::new(SANDBOX_EXEC);
 
     // Nothing of the server's environment, for the reason the Linux rendering
@@ -144,18 +155,123 @@ fn policy(surface: &Surface) -> String {
 
             Access::Devices => policy.push_str(DEVICES),
 
+            // A directory that is really there and really empty by the time
+            // this is written — see [`realise`] — so what is left to say about
+            // it is that a session may read and write it, which is what a HOME
+            // is for.
+            Access::Empty(path) => policy.push_str(&reaching(path, Reach::ReadWrite)),
+
+            // And a path a session finds somewhere else, which by now is a link
+            // to the path it really is. A policy is matched against what a name
+            // resolves to, so what is said about it is said about the host's
+            // path — and the directory the link is *in* is said too, and by
+            // itself: a session looks in the directory its own binary is in,
+            // and nothing under that directory is reachable for its being
+            // listed.
+            Access::Elsewhere {
+                host,
+                inside,
+                reach,
+            } => {
+                if let Some(holding) = inside.parent() {
+                    policy.push_str(&format!(
+                        "\n(allow file-read* (literal {}))\n",
+                        quoted(&real(holding))
+                    ));
+                }
+
+                policy.push_str(&reaching(host, *reach));
+            }
+
+            // And what a mount would have covered, refused instead. After the
+            // rule that made the directory it is in reachable, because the last
+            // rule that matches is the one a policy takes — see this module's
+            // own documentation for why this is not a link like the others.
+            Access::Nothing { inside, .. } => policy.push_str(&format!(
+                "\n(deny file* (subpath {}))\n",
+                quoted(&real(inside))
+            )),
+
             // There is no `/proc` on a Mac, so the process table is not a path
             // and nothing here is about one — what a session can learn about
             // the processes around it is the floor's `process-info*`.
             Access::ProcessTable => {}
-
-            // And the two that want a real path on this platform, which is the
-            // next task's — see this module's own documentation.
-            Access::Elsewhere { .. } | Access::Empty(_) => {}
         }
     }
 
     policy
+}
+
+/// Make what a mount would otherwise have made: the empty directories, and the
+/// links to the paths a session finds somewhere else.
+///
+/// In the order the description says them, because the order *is* the
+/// description — a session's HOME is emptied before the account is linked into
+/// it, and a link written before the directory holding it exists is a link
+/// nothing can be written at.
+///
+/// **Failures are logged rather than raised.** What one costs is a session that
+/// cannot reach the thing that could not be made — its account, its handoff
+/// directory — which fails at the far end saying so; and a [`Command`] is not a
+/// thing that can refuse. What is written here is the server's own to write:
+/// the directories are Verkstead's, under the Data Directory, and the links are
+/// inside them.
+fn realise(surface: &Surface) {
+    for access in surface.reaches() {
+        let made = match access {
+            Access::Empty(path) => emptied(path),
+            Access::Elsewhere { host, inside, .. } => linked(host, inside),
+            _ => Ok(()),
+        };
+
+        if let Err(error) = made {
+            tracing::error!(
+                error = ?error,
+                access = ?access,
+                "what a session was to find could not be made, so it will not find it"
+            );
+        }
+    }
+}
+
+/// A directory that is really there and really empty.
+///
+/// Emptied rather than left where something is already in it: a HOME is one
+/// Conversation's and every session of it is given the same one, so what a
+/// session finds there should be what *it* was given rather than what the last
+/// one left — which is what the other platform's tmpfs does for nothing. The
+/// path is Verkstead's own and nothing else is ever passed here: see
+/// [`super::Homes`], which is the only thing that says where one goes.
+fn emptied(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    std::fs::create_dir_all(path)
+}
+
+/// And a path a session finds somewhere else: a link at `inside` to `host`.
+///
+/// Whatever is at `inside` already goes first. It is the link a session before
+/// this one was given — a Conversation's handoff directory is reached at one
+/// path by every Conversation there is — and a link left pointing at somebody
+/// else's directory is worse than no link at all.
+fn linked(host: &Path, inside: &Path) -> std::io::Result<()> {
+    if let Some(holding) = inside.parent() {
+        std::fs::create_dir_all(holding)?;
+    }
+
+    // By what it is rather than by following it: a link to a directory is a
+    // link, and removing what it points at is not what this is for.
+    match std::fs::symlink_metadata(inside) {
+        Ok(there) if there.is_dir() => std::fs::remove_dir_all(inside)?,
+        Ok(_) => std::fs::remove_file(inside)?,
+        Err(_) => {}
+    }
+
+    std::os::unix::fs::symlink(host, inside)
 }
 
 /// The rules that make one path reachable: readable and runnable, and writable
@@ -178,9 +294,23 @@ fn reaching(path: &Path, reach: Reach) -> String {
     rules
 }
 
-/// What `path` really is, or `path` itself where it resolves to nothing.
+/// What `path` really is: resolved whole where it is there, and resolved as far
+/// as it goes with the rest of the name on the end where it is not.
+///
+/// The second is what a rule about a path that is not there wants, and there is
+/// one: `~/.claude` inside is a link to the Profile's account, and what refuses
+/// the account's own skills has to name them *under the account* whether that
+/// account happens to keep any or not. A name resolved no further than itself
+/// would be a rule about a path nothing will ever be checked against.
 fn real(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
+    if let Ok(resolved) = std::fs::canonicalize(path) {
+        return resolved;
+    }
+
+    match (path.parent(), path.file_name()) {
+        (Some(holding), Some(name)) => real(holding).join(name),
+        _ => path.to_owned(),
+    }
 }
 
 /// `path` as a policy's own string literal.
@@ -281,15 +411,18 @@ mod tests {
         );
     }
 
-    /// The two the next task makes real — see this module's own documentation.
-    /// Nothing about them is in the policy, and what that costs is a session
-    /// that cannot reach its account rather than one that can reach more.
+    /// What only a mount could otherwise have made, made: a real HOME with the
+    /// account really linked into it, and a policy about where those are.
     #[test]
-    fn what_only_a_mount_could_do_is_left_out_rather_than_guessed_at() {
+    fn a_home_is_really_made_and_the_account_is_really_linked_into_it() {
         let dir = tempfile::tempdir().unwrap();
-        let account = dir.path().join("account");
+        let account = dir.path().join("account/.claude");
         let home = dir.path().join("home");
         std::fs::create_dir_all(&account).unwrap();
+
+        // Something the session before this one left behind, which is what a
+        // fresh HOME means on a platform where the directory is really there.
+        std::fs::create_dir_all(home.join("the-last-session")).unwrap();
 
         let mut surface = Surface::starting_in(dir.path().to_owned());
         surface.made(Access::Empty(home.clone())).elsewhere(
@@ -298,13 +431,104 @@ mod tests {
             Reach::ReadWrite,
         );
 
+        realise(&surface);
+
+        assert!(
+            !home.join("the-last-session").exists(),
+            "a HOME is the session's own, and what the last one left is not in it",
+        );
+        assert_eq!(
+            std::fs::read_link(home.join(".claude")).unwrap(),
+            account,
+            "and the Profile's account is where its backend looks for it",
+        );
+
         let policy = policy(&surface);
 
         assert!(
-            !policy.contains(&account.to_string_lossy().to_string())
-                && !policy.contains(&home.to_string_lossy().to_string()),
-            "neither the account nor the HOME it would be mounted into is a \
-             path this platform can reach yet:\n{policy}",
+            policy.contains(&format!(
+                "(allow file-write* (subpath {}))",
+                quoted(&real(&home))
+            )),
+            "HOME is the session's to write:\n{policy}",
+        );
+        assert!(
+            policy.contains(&format!(
+                "(allow file-write* (subpath {}))",
+                quoted(&real(&account))
+            )),
+            "and so is the account it is logged in as, at the path it really \
+             is — which is what a policy matches against:\n{policy}",
+        );
+    }
+
+    /// A link left by whichever session was here before is this session's to
+    /// replace: one Conversation's handoff directory is reached at the path
+    /// every other Conversation's is.
+    #[test]
+    fn a_link_left_by_the_session_before_is_the_one_this_session_needs() {
+        let dir = tempfile::tempdir().unwrap();
+        let theirs = dir.path().join("somebody-elses");
+        let ours = dir.path().join("ours");
+        let inside = dir.path().join("inside/verkstead");
+        std::fs::create_dir_all(&theirs).unwrap();
+        std::fs::create_dir_all(&ours).unwrap();
+        std::fs::create_dir_all(inside.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&theirs, &inside).unwrap();
+
+        let mut surface = Surface::starting_in(dir.path().to_owned());
+        surface.elsewhere(&ours, &inside, Reach::ReadWrite);
+
+        realise(&surface);
+
+        assert_eq!(std::fs::read_link(&inside).unwrap(), ours);
+        assert!(
+            theirs.is_dir(),
+            "and what it pointed at is somebody else's directory, not this one's to remove",
+        );
+    }
+
+    /// And what a mount would have covered is refused instead — under the
+    /// account, which is where a session would really find it, and after the
+    /// rule that made the account reachable.
+    #[test]
+    fn the_accounts_own_skills_are_refused_where_they_really_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let account = dir.path().join("account/.claude");
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(account.join("skills/the-accounts-own")).unwrap();
+
+        let mut surface = Surface::starting_in(dir.path().to_owned());
+        surface
+            .made(Access::Empty(home.clone()))
+            .elsewhere(&account, home.join(".claude"), Reach::ReadWrite)
+            .nothing(home.join(".claude/skills"), dir.path().join("nothing"));
+
+        realise(&surface);
+
+        let policy = policy(&surface);
+        let refused = format!(
+            "(deny file* (subpath {}))",
+            quoted(&real(&account.join("skills")))
+        );
+
+        assert!(
+            policy.contains(&refused),
+            "what a session is grilled by is the product's, not whatever the \
+             account keeps:\n{policy}",
+        );
+        assert!(
+            policy.find(&refused)
+                > policy.find(&format!(
+                    "(allow file-write* (subpath {}))",
+                    quoted(&real(&account))
+                )),
+            "and it is said after the account it stands inside, because the \
+             last rule that matches is the one a policy takes:\n{policy}",
+        );
+        assert!(
+            account.join("skills/the-accounts-own").is_dir(),
+            "nothing of the account's own is written over to do it",
         );
     }
 
