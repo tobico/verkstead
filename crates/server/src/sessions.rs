@@ -39,7 +39,9 @@ use crate::build_cache::{self, BuildCache};
 use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
+use crate::platform::Platform;
 use crate::runner::Pace;
+use crate::sandbox::outliving;
 use crate::sandbox::{Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::screen::Live;
 use crate::settings::Settings;
@@ -1677,6 +1679,16 @@ impl Sessions {
                 return Ok(None);
             }
         };
+
+        // And a keeper beside it where the platform's sandbox has nothing to
+        // say about how long what it started lives — see
+        // [`crate::sandbox::outliving`]. The terminal it was spawned on made it
+        // a session of its own, so its pid is the process group everything it
+        // goes on to start will be in. Nothing on Linux, where the flag it was
+        // started with is what says this.
+        if let Some(running) = child.id() {
+            outliving::keep(Platform::HERE, running, std::process::id());
+        }
 
         // Shared from here on: the relay reads it, and — once somebody is
         // watching — a resize from the browser reaches it.

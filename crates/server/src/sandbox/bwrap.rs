@@ -32,7 +32,9 @@ pub(crate) fn command(surface: &Surface) -> Command {
 
     bwrap.args([
         // A session outlives nothing: if the orchestrator goes, so does
-        // whatever it left running.
+        // whatever it left running. The one flag here with no equivalent on the
+        // other platform, where the same promise is kept by a keeper of
+        // Verkstead's own — see [`super::outliving`].
         "--die-with-parent",
         // Every namespace, and then the network back — see the sandbox module's
         // own documentation for why that one.

@@ -39,6 +39,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use crate::platform::Platform;
+use crate::sandbox::outliving;
 use crate::sandbox::{self, Access, Reach};
 use crate::settings::RustBuildCache;
 
@@ -156,9 +157,11 @@ struct Compiling {
 impl Drop for Compiling {
     /// Stopping it is letting go of it.
     ///
-    /// `--die-with-parent` is what makes the server Verkstead's rather than
-    /// something left running on the machine, and it covers the case that
-    /// matters — the server exiting. This covers the other one: a size the
+    /// What makes the server Verkstead's rather than something left running on
+    /// the machine is the platform's own answer to the case that matters — the
+    /// server exiting: `--die-with-parent` on Linux, and a keeper of
+    /// Verkstead's own on a Mac, which has no such flag to be started with (see
+    /// [`crate::sandbox::outliving`]). This covers the other case: a size the
     /// human changed, where the old server is replaced while Verkstead carries
     /// on, and where nothing else would ever tell it to go.
     fn drop(&mut self) {
@@ -347,6 +350,14 @@ impl BuildCache {
 
         match compile_server(dir, sccache, data_dir, settings.size()).spawn() {
             Ok(server) => {
+                // A keeper beside it, where the sandbox it was started in has
+                // nothing to say about outliving anybody — see
+                // [`crate::sandbox::outliving`], and [`compile_server`] for the
+                // process group of its own this is the other half of. Nothing
+                // at all on Linux, where `--die-with-parent` is the whole of
+                // it.
+                outliving::keep(Platform::HERE, server.id(), std::process::id());
+
                 tracing::info!(
                     cache = %dir.display(),
                     size = settings.size(),
@@ -462,8 +473,8 @@ pub fn builds_rust(repo: &Path) -> bool {
 ///
 /// **In the foreground on purpose.** `sccache --start-server` daemonises and
 /// returns, which would leave Verkstead with nothing to hold — no way to know
-/// whether it is still up, and nothing for the renderer's own die-with-parent
-/// to hang off. `SCCACHE_START_SERVER` with `SCCACHE_NO_DAEMON` is the server
+/// whether it is still up, and no pid for either platform's answer to outliving
+/// the server to be about. `SCCACHE_START_SERVER` with `SCCACHE_NO_DAEMON` is the server
 /// *as* the process, so it is a child like any other: it dies when Verkstead
 /// does, and [`BuildCache::compiling`] can ask whether it is alive.
 ///
@@ -527,6 +538,12 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
         .running(&[&inside]);
 
     let mut compiling = sandbox::rendered(&surface);
+
+    // In a process group of its own where the platform needs one, which is what
+    // a keeper ends when the server has gone — see
+    // [`crate::sandbox::outliving`]. A session's sandbox has one already,
+    // because it runs on a terminal; this runs on none, so it says so here.
+    outliving::in_its_own_group(Platform::HERE, &mut compiling);
 
     // Nothing to read and nothing to say: what it prints in the ordinary case
     // is nothing at all. Its errors are left to the server's own, which is

@@ -122,7 +122,10 @@ impl Desktop {
     /// by SIGTERM and dies where it is — so the tray does not get machinery no
     /// other caller of the server has. What that leaves behind is nothing: the
     /// socket closes with the process, and every session and the shared compile
-    /// server are `bwrap --die-with-parent` children that go when this goes.
+    /// server go when this goes, by whichever means the platform has for
+    /// saying so — `bwrap --die-with-parent` on Linux, and a keeper watching
+    /// from outside the process on a Mac, which has no such flag. Neither
+    /// needs a word from here, which is why Exit can be a stop at all.
     pub fn run(self, listener: TcpListener) -> Result<()> {
         // Before anything has anything to report, and by this binary rather
         // than by the server: where the events go is the starting binary's

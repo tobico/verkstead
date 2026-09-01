@@ -63,6 +63,11 @@ mod bwrap;
 mod seatbelt;
 mod surface;
 
+// And what a rendering cannot say on the platform it is for: how long what it
+// started lives. Not a `cfg` at all — the platform is a value here, and both
+// arms are built and called wherever the tests are.
+pub(crate) mod outliving;
+
 // And which of them a session actually gets, which is the one thing about the
 // seam that is a `cfg` rather than a description: bubblewrap wherever there is
 // a kernel with namespaces to unshare, and Apple's own on a Mac.

@@ -76,6 +76,10 @@ const CURL: &str = "/usr/bin/curl";
 /// it is looked for rather than written out — see [`on_the_host`].
 const CAT: &str = "/bin/cat";
 
+/// And the one thing here asked of the machine rather than of a sandbox: the
+/// process table, which is where a lifetime is read off.
+const PS: &str = "/bin/ps";
+
 /// What the stub sccache says when it is asked to be a session's client, which
 /// is the half a session runs — see [`Grilling::sccache`] for the other one.
 const SAYS_WHICH_SCCACHE: &str = "printf 'sccache 0.0.0-the-one-resolved\\n'\n";
@@ -226,6 +230,10 @@ impl Grilling {
 {PROBE}
 if [ "${{SCCACHE_START_SERVER-}}" = "1" ]; then
     {{
+        # Which is the pid the server holds, `sandbox-exec` having exec'd this
+        # rather than started it beside itself — and so the process group
+        # everything about this sandbox's lifetime is said about.
+        say pid $$
         say home "$HOME"
         say no-daemon "${{SCCACHE_NO_DAEMON-unset}}"
         say idle "${{SCCACHE_IDLE_TIMEOUT-unset}}"
@@ -1904,6 +1912,82 @@ async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory()
         "with a HOME of Verkstead's own for the config file sccache looks for \
          there — a real directory here, where a bind made one on Linux"
     );
+}
+
+/// And how long it lives, which on this platform is nothing the sandbox itself
+/// can say.
+///
+/// `--die-with-parent` is bubblewrap's and Apple's has no equivalent, so a
+/// compile server on a Mac would otherwise be an ordinary child left running
+/// with the machine's build cache open when Verkstead has gone. What answers
+/// that is a process group of its own and a keeper watching it — see the
+/// server's `sandbox::outliving`, whose own tests are what prove that a keeper
+/// ends the group. What is asked here is the half only this platform can
+/// answer: that a compile server started by the real code path gets both.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn the_compile_server_is_kept_from_outliving_verkstead() {
+    let fixture = grilling().await;
+
+    let cache = fixture.cache(true);
+    cache.compiling(&RustBuildCache::default());
+
+    let compiling = compile_server_report(&fixture)["pid"].clone();
+
+    assert_eq!(
+        group_of(&compiling),
+        compiling,
+        "a group of its own, so that ending it ends what it started rather \
+         than whatever else Verkstead is in a group with",
+    );
+    assert!(
+        keeper_watching(&compiling),
+        "and a keeper of Verkstead's own watching that group, which is what \
+         the platform has instead of a flag",
+    );
+}
+
+/// What process group `pid` is in, off the machine's own process table.
+fn group_of(pid: &str) -> String {
+    let output = Command::new(PS)
+        .args(["-o", "pgid=", "-p", pid])
+        .output()
+        .expect("ps is part of macOS");
+
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// Whether a keeper of Verkstead's is watching the group `pid` leads, waited
+/// for the way the report above is waited for.
+///
+/// Read off the process table rather than out of anything Verkstead holds,
+/// because a keeper is deliberately nobody's by the time it matters: it is in a
+/// session of its own with no parent, and the process table is the only place
+/// left that knows it is there. Which is also why it says what it is in its own
+/// first line — see the server's `sandbox::outliving`.
+fn keeper_watching(pid: &str) -> bool {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+
+    while std::time::Instant::now() < until {
+        let output = Command::new(PS)
+            .args(["-axww", "-o", "command="])
+            .output()
+            .expect("ps is part of macOS");
+
+        if String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line.contains("verkstead") && line.contains(pid))
+        {
+            return true;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    false
 }
 
 /// What the compile server wrote down about its own sandbox, waited for.
