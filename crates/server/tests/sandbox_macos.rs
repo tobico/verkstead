@@ -653,19 +653,36 @@ file() {
 "#;
 
 /// Run `script` inside `sandbox` and read back what it reported.
+///
+/// **A probe that did not run says everything it can about why.** There is no
+/// Mac to reproduce one on for whoever reads this — the only machine that
+/// enforces this boundary is the CI runner — so the whole of what a failure
+/// here can ever be diagnosed from is what this prints. How the process ended
+/// matters as much as what it said: `sandbox-exec` reports a policy it will not
+/// compile and a command it cannot exec on stderr and exits, and a start-up
+/// killed by the policy itself says nothing at all and dies on a signal. The
+/// two look identical from an exit code alone, and the policy is what either of
+/// them is about.
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
     let whole = format!("{PROBE}\n{script}\n");
+    let mut command = sandbox.command(&[SH, "-c", &whole]);
 
-    let output = sandbox
-        .command(&[SH, "-c", &whole])
+    let output = command
         .stdin(Stdio::null())
         .output()
         .expect("sandbox-exec is part of macOS");
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "the probe failed inside the sandbox: {stderr}"
+        "the probe did not run inside the sandbox.\n\
+         how it ended: {}\n\
+         stdout: {:?}\n\
+         stderr: {:?}\n\
+         the policy it was given:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+        policy_of(&command),
     );
 
     String::from_utf8_lossy(&output.stdout)
@@ -673,6 +690,26 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
         .filter_map(|line| line.split_once('='))
         .map(|(key, value)| (key.to_owned(), value.to_owned()))
         .collect()
+}
+
+/// The policy `command` applies, read back off the argument it carries it in.
+///
+/// Off the command rather than asked of the server, because that is what was
+/// actually handed to `sandbox-exec`: a reader of a failure wants the string
+/// that failed rather than one built again beside it.
+fn policy_of(command: &Command) -> String {
+    let mut args = command.get_args();
+
+    while let Some(arg) = args.next() {
+        if arg == "-p" {
+            return args
+                .next()
+                .map(|policy| policy.to_string_lossy().into_owned())
+                .unwrap_or_default();
+        }
+    }
+
+    String::from("(there is no -p on this command at all)")
 }
 
 /// Where a program a session could run is on this host, absolute.
