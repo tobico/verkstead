@@ -27,7 +27,7 @@ contradicts.
 
 ## Acceptance criteria
 
-- [ ] A Mac reader can find the dmg, get past Gatekeeper with what is written,
+- [x] A Mac reader can find the dmg, get past Gatekeeper with what is written,
       and knows what a session on their machine can and cannot reach
-- [ ] Nothing left in the docs says the product or the desktop app is Linux-only
-- [ ] `docs/releasing.md` matches what the workflow now builds and attaches
+- [x] Nothing left in the docs says the product or the desktop app is Linux-only
+- [x] `docs/releasing.md` matches what the workflow now builds and attaches

@@ -44,7 +44,12 @@ flowchart LR
   `github.com/tobico/verkstead`.
 - **NixOS-only for the MVP.** Linux/bwrap is a hard requirement; other systems
   can come later. Shipped like askance: one binary, NixOS module, systemd
-  hardening.
+  hardening. (*revised 2026-09-01, desktop stage 04*: later came. The desktop
+  roadmap ships the app on Linux and on macOS, and a Mac runs sessions as well
+  — over Apple's own sandbox rather than bwrap, to one description of what a
+  session may reach, said in [ADR-0012](../adr/0012-desktop-tray-binary.md).
+  The headless daemon, the one binary and the NixOS module are unchanged, and
+  Windows is still without sessions.)
 - **Single user, no app-level auth; the tailnet is the perimeter.** Unchanged
   from askance.
 - **Fresh database.** No import of askance history.

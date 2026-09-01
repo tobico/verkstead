@@ -46,13 +46,14 @@ Nothing has been released under this name yet, so what follows is what a `v*`
 tag produces rather than something to fetch today — [releasing.md](releasing.md)
 says what a tag builds and where it puts it.
 
-There are two ways in, and they are two different things rather than two
+There are three ways in, and they are three different things rather than three
 spellings of one. **The flake and the NixOS module run the headless daemon**, on
 a machine that is always on and answering from wherever you are. **The AppImage
 is the same server started from an icon**, on the Linux desktop in front of you,
-with the viewer in your browser and a tray icon over it. Which one you want is
-which of those two machines you were describing; both at once is two Verksteads,
-and the second to reach port 8422 says so in a dialog and exits.
+with the viewer in your browser and a tray icon over it. **The dmg is that same
+app for a Mac**, with the icon in the menu bar instead. Which one you want is
+which of those machines you were describing; two at once is two Verksteads, and
+the second to reach port 8422 says so in a dialog and exits.
 
 ### The daemon, on NixOS
 
@@ -169,6 +170,98 @@ will not, saying `GLIBC_2.35 not found` and nothing friendlier.
 or hardened one may not. Without them the file says so — "Cannot mount AppImage,
 please check your FUSE setup" — and `--appimage-extract-and-run` is the way past
 it for a machine you cannot change.
+
+### The desktop app, on a Mac
+
+`Verkstead-universal.dmg` holds `Verkstead.app`: the same server and the same
+viewer the AppImage carries, drawn over AppKit instead of GTK, and universal —
+the Apple silicon build and the Intel one are in the one executable, so there is
+one download and no architecture to choose between. macOS 11 is the oldest it
+will start on. Open the image and drag Verkstead into the Applications folder
+beside it in the window, which is the whole of the install.
+
+**The first launch is then refused, and that is expected.** The app is unsigned
+— there is no Developer ID behind it, which is
+[ADR-0012](adr/0012-desktop-tray-binary.md)'s decision rather than an oversight
+— and Gatekeeper will not open an app that arrived over the internet unsigned
+just because somebody double-clicked it. What it says is that macOS "could not
+verify" Verkstead "is free of malware", in a dialog with no way past on it.
+There is a way past, and it is three steps — the first of them being the launch
+that fails, because the refusal is what puts Verkstead in the list the second
+step reads:
+
+1. Double-click **Verkstead** in Applications, and click **Done** on the
+   refusal.
+2. Open **System Settings → Privacy & Security** and scroll down to
+   **Security**. `"Verkstead" was blocked to protect your Mac` is there with an
+   **Open Anyway** button beside it: click it, and authenticate.
+3. macOS asks once more, in a dialog that this time has an **Open Anyway** on
+   it. Click that, and the app starts.
+
+Once, rather than at every launch: what was approved is that copy of the app,
+and starting it afterwards — by hand, or from Launch on Startup — is ordinary.
+Replacing it with a newer download is a different copy and wants the same three
+steps again.
+
+What is on the screen after that is an icon in the menu bar, and the menu on it
+is the Linux tray's four: **Open** brings the viewer back, and heads the menu a
+click on the icon opens; **View Logs** opens the file under
+`~/Library/Logs/Verkstead` that the server's logging goes to when there is no
+terminal to print it in; **Launch on Startup** is a checkbox over a launch
+agent at `~/Library/LaunchAgents/net.tobico.Verkstead.plist`; and **Exit**
+stops the server. `--no-open` starts it without the browser and `--data-dir`
+moves the Data Directory off `~/Library/Application Support/Verkstead`, both of
+them for a run from a terminal — an app launched from Finder is launched with no
+arguments at all.
+
+macOS keeps a **Login Items** list of its own beside that plist, in a database
+the file is not in, and the checkbox cannot see it: switching Verkstead off
+there leaves the box ticked and the plist where it was.
+
+**Sessions run on a Mac**, and what one may reach is the same description as on
+Linux rendered over Apple's sandbox instead of bubblewrap: the Conversation's
+Worktree, the Repo's git directory and the handoff directory writable, each
+Companion Repo at the mode it was set to, the Sandbox Configuration's entries,
+the Build Cache with the machine's one `sccache` behind it, a HOME of the
+session's own with the Agent Profile's account inside it, the Skills and the
+`verkstead` a session asks with read-only, the system read-only, the network
+whole and unfiltered, and nothing else of the machine.
+
+**What differs is that the boundary refuses rather than hides**, and it is worth
+knowing which of the two you have. A session on Linux is in a namespace your
+home directory was never in; a session on a Mac is looking at a machine that has
+one, and is refused every byte of it. What it can still read is the metadata: a
+path it may not open answers `stat` and then refuses to open, because that is
+what a Mac looks like from inside a policy and a rule per path to pretend
+otherwise would buy nothing. And what a mount makes out of nothing is made for
+real instead: the session's HOME, the account linked into it, and the directory
+holding the Skills and the `verkstead` binary are all really there under the
+Data Directory, and what keeps one Conversation out of another's is the policy
+rather than the absence.
+
+**Nothing outlives the app.** Exit off the menu is a stop where it stands, as it
+is on Linux, and so is the process being killed outright: every session and the
+compile server go with it either way. Linux has that from bubblewrap's
+`--die-with-parent`; a Mac has no such flag, so Verkstead starts a keeper beside
+each sandbox whose whole job is to end it once the server is gone.
+
+**Two things stay the machine's**, where three do on Linux.
+
+**The tools a session runs**, because the bundle is the server and the viewer
+and not a toolchain. `git`, `node`, `cargo` and whatever else an agent reaches
+for are the Mac's own: Apple's under `/usr/bin`, where `git` arrives with the
+Xcode Command Line Tools; Homebrew's under `/opt/homebrew`; and nix's under
+`/run/current-system` where the Mac is running nix-darwin. All three are on a
+session's `PATH` inside and readable through the boundary, and a Mac with none
+of them installed has sessions that can run a shell and not much else.
+
+**And the sandbox itself**, which is `/usr/bin/sandbox-exec`: on every Mac,
+nothing to install, and deprecated by Apple with no replacement an unsigned app
+can use — the supported way to sandbox is an entitlement on a signed bundle,
+applied to the app itself rather than to a child it spawns. ADR-0012 takes that
+with open eyes, and it is the one thing here that could stop working without
+anybody touching Verkstead: the day the command goes, Mac sessions go with it
+until something replaces them.
 
 Out of a checkout instead — the same server, told `--data-dir .` so that
 `verkstead.db` and the rest land in the checkout rather than in the platform

@@ -18,17 +18,26 @@ workbench, the sandboxed sessions, the task-list and roadmap pipelines and the
 per-PR wrap-up are built; what has not happened yet is a real repository driven
 through them end to end, which is where [adoption](docs/adoption.md) stands.
 
-What a tag will produce is two ways in rather than one, and neither is a
-replacement for the other. On a host that is always on, the flake builds the
-headless daemon and the NixOS module runs it. On a Linux desktop,
+What a tag will produce is three ways in rather than one, and no two of them
+are the same thing. On a host that is always on, the flake builds the headless
+daemon and the NixOS module runs it. On a Linux desktop,
 `Verkstead-x86_64.AppImage` is that same server started from an icon: the viewer
 in your browser and a tray icon over it — or no icon at all where the desktop
 has no tray host, vanilla GNOME being the case people meet, and it serves just
-the same. Which of the two you want is
-[adoption](docs/adoption.md#getting-it-running).
+the same. On a Mac, `Verkstead-universal.dmg` carries `Verkstead.app` — one
+download for both Macs, the same server again, with its icon in the menu bar.
+That app is unsigned, so the first launch is refused and System Settings is
+where it is allowed through; the steps are written out beside the download in
+[adoption](docs/adoption.md#the-desktop-app-on-a-mac). Which of the three you
+want is [adoption](docs/adoption.md#getting-it-running).
 
-Linux for now: bwrap is a hard requirement, and the daemon install is the
-NixOS module's.
+**Sessions run on Linux and on a Mac**, over the mechanism each platform has
+and to one description of what a session may reach: bubblewrap, where the rest
+of the machine is not in the session's namespace at all, and Apple's sandbox,
+where the machine is in plain sight and refused. What is inside is the same
+either way, and [adoption](docs/adoption.md#the-desktop-app-on-a-mac) says what
+a Mac session can and cannot get to. Windows is a stage away and arrives
+without sessions. The daemon install is the NixOS module's.
 
 ## Where things are written down
 
@@ -49,7 +58,8 @@ request.
 and the loop for working on Verkstead itself.
 
 **[Releasing](docs/releasing.md)** — how a tag would become the published
-binaries and the AppImage. Nothing has been released under this name yet.
+binaries, the AppImage and the dmg. Nothing has been released under this name
+yet.
 
 ## License
 
