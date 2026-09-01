@@ -53,7 +53,10 @@ stage 04's UI state — attached to releases by a Windows leg of the workflow.
   it stands, not the list above.
 - sqlx/SQLite, the push notifier and the embedded viewer on Windows: expected
   fine, unverified anywhere.
-- Stage 04 landed the sessions-need-Linux state; if 05 runs first, that state
-  moves here.
+- The sessions-need-Linux state is this stage's, not stage 04's. Stage 04 was
+  planned to build it and did not: it ported the Sandbox to macOS with
+  `sandbox-exec` instead, so sessions run there and only Windows is without
+  them. Nothing of that state exists yet, and the wording it takes says Windows
+  rather than not-Linux.
 
 [ADR-0012]: ../../adr/0012-desktop-tray-binary.md
