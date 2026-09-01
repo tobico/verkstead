@@ -41,6 +41,17 @@ The desktop app is deliberately plain about its limits:
   be a real path there. What is inside is the same either way, which is the
   whole of what the description is for.
 
+  With one exception, and it is the one place a Mac session reaches **more**
+  than a Linux one: **`/tmp` is the machine's own there.** On Linux it is a
+  filesystem of the session's own, holding nothing of the host's and gone when
+  the session is; a policy has no such thing to offer, so on a Mac it is the
+  real `/private/tmp` — what anything else on the machine left there is
+  readable, and what a session writes stays behind. Accepted rather than
+  narrowed: a session's temporary directory of its own would mean every tool
+  reaching for the literal `/tmp` refused, which is most of them. The
+  Conversation's handoff directory is the one thing that was under `/tmp` and
+  is not: every Conversation on the machine would have been sharing it.
+
   And `sandbox-exec` is **deprecated by Apple, with no replacement an unsigned
   app can use**: the supported way to sandbox is an entitlement on a signed
   bundle, applied to the app itself rather than to a child it spawns, and this

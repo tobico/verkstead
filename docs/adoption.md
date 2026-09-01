@@ -224,8 +224,20 @@ Worktree, the Repo's git directory and the handoff directory writable, each
 Companion Repo at the mode it was set to, the Sandbox Configuration's entries,
 the Build Cache with the machine's one `sccache` behind it, a HOME of the
 session's own with the Agent Profile's account inside it, the Skills and the
-`verkstead` a session asks with read-only, the system read-only, the network
-whole and unfiltered, and nothing else of the machine.
+`verkstead` a session asks with read-only, the system read-only, `/tmp`, the
+network whole and unfiltered, and nothing else of the machine.
+
+**`/tmp` is the one place a Mac session reaches more than a Linux one**, and
+the one thing on that list that is not the same on both. On Linux it is a
+filesystem of the session's own: it holds nothing of the machine's, and it goes
+when the session does. A policy has nothing like that to offer, so on a Mac it
+is your real `/tmp` — a session can read whatever else on the machine left
+something there, and what it writes stays behind for whoever looks. That is
+deliberate rather than an oversight: giving a session a temporary directory of
+its own would mean refusing every tool that reaches for the literal `/tmp`,
+which is most of them. Nothing of Verkstead's is kept there — the handoff
+document a grilling writes goes under the session's own HOME on a Mac, so two
+Conversations running at once are not writing to one path.
 
 **What differs is that the boundary refuses rather than hides**, and it is worth
 knowing which of the two you have. A session on Linux is in a namespace your
