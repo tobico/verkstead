@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Verkstead
+Comment=The workbench, in the system tray
+Exec=verkstead-desktop
+Icon=net.tobico.Verkstead
+Terminal=false
+Categories=Development;
+Keywords=agent;coding;sessions;workbench;

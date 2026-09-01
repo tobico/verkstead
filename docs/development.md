@@ -420,8 +420,17 @@ $ cargo fmt
 $ nix fmt                 # the Nix files
 $ nix flake check         # the viewer's suite, and the NixOS module in a VM
 
-$ tools/generate-icons.sh # the favicon and PWA icons, after replacing the artwork
+$ tools/generate-icons.sh     # the favicon and PWA icons, after replacing the artwork
+$ tools/generate-packaging.sh # the desktop entry and the launcher icons, from the same
+$ tools/build-appimage.sh     # Verkstead-x86_64.AppImage, once the viewer is built
 ```
+
+The last one is the Linux desktop artifact a release ships, and it is the same
+command CI runs — the desktop binary, the packaging assets and every library the
+tray is drawn over, in one file under `target/appimage/`. It builds what
+`cargo build --release -p verkstead-desktop` builds, so it wants the dev shell
+for the same reason that does, and it wants `web/dist` already built because the
+viewer is compiled in.
 
 ### The sessions suite, and the machine under it
 

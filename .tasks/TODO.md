@@ -17,6 +17,6 @@ Roadmap stage: [03: AppImage and the release legs](docs/roadmaps/desktop/03-appi
 
 ## Tasks
 
-- [ ] 01: Packaging assets and the AppImage — [details](01-appimage-bundle.md)
+- [x] 01: Packaging assets and the AppImage — [details](01-appimage-bundle.md)
 - [ ] 02: A tag ships the AppImage — [details](02-release-leg.md)
 - [ ] 03: The install story and what a tag now produces — [details](03-install-story.md)
