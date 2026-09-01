@@ -62,7 +62,6 @@
 //! beside it, not here.
 
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -232,12 +231,12 @@ fn write_atomically(path: &Path, text: &str, mode: u32) -> std::io::Result<()> {
 
     let temp = path.with_file_name(format!(".{name}.{}.new", std::process::id()));
 
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(mode)
-        .open(&temp)?;
+    let mut options = std::fs::OpenOptions::new();
+
+    options.write(true).create(true).truncate(true);
+    no_more_readable_than(&mut options, mode);
+
+    let mut file = options.open(&temp)?;
 
     file.write_all(text.as_bytes())?;
 
@@ -253,6 +252,39 @@ fn write_atomically(path: &Path, text: &str, mode: u32) -> std::io::Result<()> {
     // replacement.
     std::fs::rename(&temp, path)
 }
+
+/// Create the file at `mode` — see [`SECRET_MODE`], which is the one that
+/// matters.
+#[cfg(unix)]
+fn no_more_readable_than(options: &mut std::fs::OpenOptions, mode: u32) {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    options.mode(mode);
+}
+
+/// And on Windows, where a file has no mode to be created at.
+///
+/// **What guards the token there is the directory, and it is worth saying what
+/// that is and is not.** The Data Directory is `%APPDATA%\Verkstead` — inside
+/// the account's own profile, which the operating system gives that account and
+/// no other standard user, and which a file created inside inherits. So a
+/// second person logged into the same machine cannot read the token, which is
+/// what [`SECRET_MODE`] buys on Unix.
+///
+/// **What it does not buy is a narrower file than the directory it is in.** On
+/// Unix the token's file is 0600 in a directory that is 0755, so a mode nobody
+/// meant to widen is the only way it becomes readable; here it is exactly as
+/// readable as the profile around it, and an administrator can read it as root
+/// can on Unix. Narrowing it further would mean writing an access control list
+/// by hand through the Win32 security API — a dependency and a body of code for
+/// the difference between "this account" and "this account, and an
+/// administrator who was already able to take ownership of it".
+///
+/// The `mode` is taken and dropped rather than not passed: it is what the
+/// caller means, on the one platform that can say it, and a signature that
+/// changed by platform would be a second thing to keep in step.
+#[cfg(not(unix))]
+fn no_more_readable_than(_options: &mut std::fs::OpenOptions, _mode: u32) {}
 
 /// What is in the settings file at `path`, or `None` where there is nothing to
 /// read — which is a file nobody has written yet, and is what an installation
@@ -652,8 +684,6 @@ fn blank_is_nothing(value: String) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
-
     use super::{Config, ConflictResolution, GitAuthor, RustBuildCache, Secrets, Settings};
 
     #[test]
@@ -932,8 +962,14 @@ mod tests {
         assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
     }
 
+    /// On the platforms where a file has a mode to be written at — see
+    /// [`super::no_more_readable_than`], which is where what Windows has
+    /// instead is written down.
+    #[cfg(unix)]
     #[test]
     fn the_secrets_file_is_readable_by_nobody_else_on_the_machine() {
+        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
@@ -949,8 +985,12 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600, "the mode of the file holding a token");
     }
 
+    /// The same platforms, for the same reason — see the test above.
+    #[cfg(unix)]
     #[test]
     fn a_file_somebody_left_world_readable_is_brought_to_0600_by_a_save() {
+        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 

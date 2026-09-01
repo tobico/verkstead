@@ -62,7 +62,10 @@ pub(crate) fn on_each(
         .collect()
 }
 
-#[cfg(test)]
+/// The same shell-script `gh` [`crate::github`]'s own tests run, and asked on
+/// the same platforms — a stand-in that is a script wants a machine with a
+/// shell at `/bin/sh`.
+#[cfg(all(test, unix))]
 mod tests {
     use std::path::PathBuf;
 

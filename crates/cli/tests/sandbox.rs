@@ -12,6 +12,10 @@
 //! different build with a different idea of the block. So that is the Set this
 //! sends, written exactly as the bundled grilling skill tells a session to write
 //! one, with nothing built by hand.
+//!
+//! On the platforms a session runs on: what this puts the CLI inside is a real
+//! sandbox, and a Windows Verkstead has none — see the server's `sandbox`.
+#![cfg(unix)]
 
 mod support;
 

@@ -201,8 +201,12 @@ Conversation. The server's own feature rather than Sandbox Configuration: it
 makes the directory, it resolves the `sccache` it compiles through off its own
 environment, and it is **on with nothing configured** — a human should never
 have a worse experience for not having checked the settings. Where it is is the
-installer's (`--build-cache-dir`, else the XDG cache directory; the packaged
-unit says `/var/cache/verkstead`); whether a Sandbox gets one at all, and how
+installer's (`--build-cache-dir`, else the platform's own place for one: the
+XDG cache directory on both Unixes — `~/.cache/verkstead` where nothing says
+otherwise — and `%LOCALAPPDATA%\Verkstead\Cache` on Windows, the local rather
+than the roaming application data because a compiled crate follows nobody
+between machines. The packaged unit says `/var/cache/verkstead`); whether a
+Sandbox gets one at all, and how
 big its compiled half may grow, is the human's, in the workbench settings. The
 one control there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.

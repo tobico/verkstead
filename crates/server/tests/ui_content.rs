@@ -13,6 +13,15 @@
 //! those files rather than a hand-written mock, so a change to the wire shape
 //! that nobody carried across shows up as a failing fixture rather than as a
 //! viewer that draws the wrong thing.
+//!
+//! That fixture half is the one thing here that is not built everywhere: the
+//! settings fixture wants a `gh` to answer, and the stand-in for one is a shell
+//! script — see [`told_app`]. Everything the rest of this file asks is about
+//! what the server made of an agent's markup, which is the same answer on any
+//! machine. So the fixture test is left out on Windows and the long tail of
+//! helpers only it uses goes unused there, which is what this says rather than
+//! `cfg`-gating twenty of them one at a time.
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
 
 use std::path::Path;
 
@@ -1594,6 +1603,12 @@ const FIXTURES: &str = "../../web/tests/fixtures";
 /// Everything a clock would otherwise decide is pinned, so that a run today and
 /// a run next week write the same bytes: every settling stamp is overwritten
 /// with a stated minute after the fact, and it is the viewer that words one.
+///
+/// Written where the `gh` it needs can be a shell script — see [`told_app`] —
+/// which is both Unixes. The files are committed and the viewer's own job reads
+/// them, so what a Windows run would add is a second machine writing the same
+/// bytes.
+#[cfg(unix)]
 #[tokio::test]
 async fn the_viewers_own_tests_are_fed_from_here() {
     // A Set to answer: every feature of the question grammar, the agent's markup
@@ -2902,6 +2917,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 /// The stub is what lets a fixture carry a verified token without a network or
 /// somebody's credentials — what a token really verifies as is
 /// `tests/settings.rs`'s subject, and this is only the shape of the answer.
+///
+/// A `/bin/sh` script, which is what keeps it and its one caller off Windows.
+#[cfg(unix)]
 async fn told_app() -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))

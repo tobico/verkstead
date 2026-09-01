@@ -34,7 +34,11 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{SharedConversation, TimelineEvent};
 use verkstead_schema::QuestionSet;
-use verkstead_server::{Gh, open_database, router, router_asking_github, store};
+use verkstead_server::{open_database, router, store};
+// The `gh` half, which the six tests that reach GitHub want — see
+// [`app_asking_github`] for what keeps them, and these, off Windows.
+#[cfg(unix)]
+use verkstead_server::{Gh, router_asking_github};
 
 /// A router over a database with nothing in it, plus the pool and the directory
 /// keeping it alive.
@@ -54,6 +58,13 @@ async fn app() -> (tempfile::TempDir, SqlitePool, Router) {
 /// was reached at all, and a script that records what it was asked is what can
 /// say so. The directory it writes in is the one the router keeps its settings
 /// in, which holds no token — so nothing here could publish even if it tried.
+///
+/// The script is a `/bin/sh` one, which is what leaves this and the six tests
+/// that ask for it off Windows: a stand-in that is a shell script is a stand-in
+/// for a machine with a shell at that path. What they are about — which presses
+/// reach GitHub — is nothing a platform changes, and the rest of this file is
+/// asked wherever the suite runs.
+#[cfg(unix)]
 async fn app_asking_github() -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
@@ -84,6 +95,7 @@ async fn app_asking_github() -> (tempfile::TempDir, SqlitePool, Router) {
 ///
 /// That module's own tests are what pin the address; this is what says the rows
 /// and the toast are composed through it.
+#[cfg(unix)]
 const HOSTED: &str = "https://tobico.github.io/verkstead/share-viewer.html";
 
 /// Say where the human has hosted a share viewer of their own, by writing the
@@ -92,6 +104,7 @@ const HOSTED: &str = "https://tobico.github.io/verkstead/share-viewer.html";
 /// Written rather than saved through the endpoint because that is all this
 /// needs: `config.yaml` is read at the moment it is wanted, so a file written
 /// here is in force for the next request — see `crates/server/src/settings.rs`.
+#[cfg(unix)]
 fn hosting(dir: &tempfile::TempDir, url: &str) {
     std::fs::write(
         dir.path().join("config.yaml"),
@@ -102,6 +115,7 @@ fn hosting(dir: &tempfile::TempDir, url: &str) {
 
 /// A Conversation with a Brief and nothing else: no pull request, which is what
 /// the press that comments on them has to have nothing to do about.
+#[cfg(unix)]
 async fn drafting(pool: &SqlitePool) -> i64 {
     let repo = repo(pool).await;
 
@@ -118,6 +132,7 @@ async fn drafting(pool: &SqlitePool) -> i64 {
 }
 
 /// Press something, and read what came back.
+#[cfg(unix)]
 async fn post<T: DeserializeOwned>(app: &Router, path: &str) -> T {
     let response = app
         .clone()
@@ -1243,6 +1258,8 @@ async fn a_commit_the_repository_has_lost_says_so_rather_than_stopping_the_expor
 /// that gist's id in the viewer's fragment. A Verkstead nobody has configured
 /// gets Verkstead's own hosted copy, which is what makes this true of a fresh
 /// install rather than of a settings page somebody has been to.
+// The `gh` behind this one is a shell script — see `app_asking_github`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
     let (_dir, pool, app) = app_asking_github().await;
@@ -1276,6 +1293,8 @@ async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
 /// published, which is what a share published before any of this was here gets
 /// for nothing: the record holds the gist, and the row links through whatever
 /// viewer is configured *now*.
+// The `gh` behind this one is a shell script — see `app_asking_github`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_share_published_before_there_was_a_viewer_still_links_through_one() {
     let (dir, pool, app) = app_asking_github().await;
@@ -1302,6 +1321,8 @@ async fn a_share_published_before_there_was_a_viewer_still_links_through_one() {
 /// And a viewer the human hosts themselves wins over the one Verkstead hosts:
 /// the default is what a Verkstead nobody has told anything does, rather than a
 /// place every link has to go through.
+// The `gh` behind this one is a shell script — see `app_asking_github`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_configured_viewer_wins_over_the_hosted_one() {
     let (dir, pool, app) = app_asking_github().await;
@@ -1326,6 +1347,8 @@ async fn a_configured_viewer_wins_over_the_hosted_one() {
 /// somebody *now* — one link at a time rather than a history of them. What was
 /// already sent goes on standing at its own URL; this is only what the next
 /// comment is written from.
+// The `gh` behind this one is a shell script — see `app_asking_github`.
+#[cfg(unix)]
 #[tokio::test]
 async fn publishing_again_replaces_the_link_the_workbench_draws() {
     let (_dir, pool, app) = app_asking_github().await;
@@ -1369,6 +1392,8 @@ async fn a_share_does_not_carry_the_link_to_a_share() {
 /// Conversation that has since moved — and a share published for nobody would
 /// be a gist left in somebody's account for nothing. The pull requests are read
 /// before the file is built, which is what makes that true.
+// The `gh` behind this one is a shell script — see `app_asking_github`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_conversation_on_no_pull_request_is_not_published_at_all() {
     let (dir, pool, app) = app_asking_github().await;
@@ -1388,6 +1413,8 @@ async fn a_conversation_on_no_pull_request_is_not_published_at_all() {
 
 /// And an id that names no Conversation is the same 404 every other reading of
 /// one is: there is nothing to compose a share of, let alone comment.
+// The `gh` behind this one is a shell script — see `app_asking_github`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_conversation_that_is_not_there_is_a_miss() {
     let (_dir, _pool, app) = app_asking_github().await;

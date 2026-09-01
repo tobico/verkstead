@@ -477,6 +477,12 @@ async fn a_pair_outside_the_watched_paths_is_refused_by_the_server() {
 /// A path that merely *reads* as inside a Watched Path is not inside one: the
 /// symlink is followed before the boundary is consulted, exactly as it is for a
 /// Repo.
+///
+/// Made where a link can be made without asking anybody's permission,
+/// which is both Unixes and not Windows: what the boundary does with one is
+/// the same reasoning everywhere, so what is lost there is the making of the
+/// link rather than any of it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_symlink_out_of_the_watched_paths_does_not_get_a_pair_in() {
     let (watched, _dir, app) = workbench().await;
@@ -754,6 +760,12 @@ async fn an_opencode_home_without_the_directories_opencode_reads_is_refused() {
 /// And its home is judged the way a pair's halves are: named by what it is when
 /// it has gone, and against the boundary rather than only against the
 /// filesystem.
+///
+/// Made where a link can be made without asking anybody's permission,
+/// which is both Unixes and not Windows: what the boundary does with one is
+/// the same reasoning everywhere, so what is lost there is the making of the
+/// link rather than any of it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_home_that_has_gone_or_left_the_watched_paths_reads_as_broken() {
     let (watched, _dir, app) = workbench().await;
@@ -827,6 +839,12 @@ async fn a_home_is_refused_by_its_own_name() {
 /// Broken is asked of the boundary and not only of the filesystem: a directory
 /// replaced by a symlink out of the Watched Paths still exists, and mounting it
 /// would be reaching around a boundary with a path that was admitted once.
+///
+/// Made where a link can be made without asking anybody's permission,
+/// which is both Unixes and not Windows: what the boundary does with one is
+/// the same reasoning everywhere, so what is lost there is the making of the
+/// link rather than any of it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_pair_that_now_points_out_of_the_watched_paths_reads_as_broken() {
     let (watched, _dir, app) = workbench().await;

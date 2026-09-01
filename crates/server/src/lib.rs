@@ -771,10 +771,14 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // [`sandbox::Homes`]. Refused for the reason the Watched Paths are: a HOME
     // the unit never said is a misconfiguration to report now rather than a
     // session that fails to start weeks later with nobody watching.
-    let homes = sandbox::Homes::of_the_server(&data_dir).context(
-        "no HOME is set: a session's `~` is the home directory of whoever runs Verkstead, \
-         and the machine's git identity is read out of it, so the unit has to say what it is",
-    )?;
+    let homes = sandbox::Homes::of_the_server(&data_dir).with_context(|| {
+        format!(
+            "no {} is set: a session's `~` is the home directory of whoever runs Verkstead, \
+             and the machine's git identity is read out of it, so whatever starts the \
+             server has to say what it is",
+            platform::home_variable(platform::Platform::HERE),
+        )
+    })?;
 
     // And the skills written out into it, before anything can ask for a session:
     // they are what a grilling session is pointed at, and this binary's are what

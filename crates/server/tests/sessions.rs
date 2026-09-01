@@ -34,6 +34,11 @@
 //! what it costs Verkstead — a run that ends nothing and advances nothing until
 //! the keyboard goes back — so they drive whole backlogs, with the stub waiting
 //! at a gate the test opens when it wants the step to land.
+//!
+//! **On the platforms a session runs on.** The sandbox is bwrap and the
+//! terminal is a real pseudo-terminal, and a Windows Verkstead has neither: it
+//! runs no session at all, and says so above the spawn rather than under it.
+#![cfg(unix)]
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};

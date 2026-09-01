@@ -59,7 +59,12 @@
 // `crates/desktop`'s startup registrations are all built here.
 #[cfg(any(not(target_os = "macos"), test))]
 mod bwrap;
-#[cfg(any(target_os = "macos", test))]
+// The Apple rendering is built for its tests on a Unix and nowhere else: what
+// it renders is a policy about a filesystem where every path is a Unix path,
+// and the tests that read one back make symlinks with a call Windows has not
+// got. There is no Mac to be tested for on a Windows machine, so the arm is
+// left out rather than made portable for a platform it says nothing about.
+#[cfg(any(target_os = "macos", all(test, unix)))]
 mod seatbelt;
 mod surface;
 
@@ -509,14 +514,19 @@ impl Homes {
     /// The server's own is read from the environment rather than from the
     /// passwd database: a service unit says what HOME is, and that is the answer
     /// that should count — under the packaged unit it is what the module sets,
-    /// and in a development shell it is the human's own. `None` where nothing
-    /// says, which on Linux is a server that can run no session; a Mac needs it
-    /// for nothing here, and is refused with the rest for the sake of one
-    /// answer rather than two.
+    /// and in a development shell it is the human's own. Which variable holds
+    /// it is the platform's — see [`crate::platform::home_dir`], which is where
+    /// Windows' `%USERPROFILE%` is read. `None` where nothing says, which on
+    /// Linux is a server that can run no session; a Mac needs it for nothing
+    /// here, and is refused with the rest for the sake of one answer rather
+    /// than two.
     pub fn of_the_server(data_dir: &Path) -> Option<Homes> {
         Some(Homes::on(
             Platform::HERE,
-            PathBuf::from(std::env::var_os("HOME")?),
+            crate::platform::home_dir(
+                Platform::HERE,
+                &crate::platform::Environment::of_the_process(),
+            )?,
             data_dir,
         ))
     }

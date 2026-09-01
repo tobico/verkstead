@@ -31,13 +31,6 @@ http = "1"
 # Signing the VAPID header, which the store's keypair half of the dependency
 # does not need: `ecdsa` is what turns the stored private key into a signature.
 p256 = { workspace = true, features = ["ecdsa"] }
-# The pseudo-terminal a session runs on: opening the pair, sizing it, and giving
-# the sandbox a controlling terminal — see `src/terminal.rs`. Everything it needs
-# is already in the tree under the crates that touch a file descriptor, so the
-# features are the whole of what this adds: `fs` is the one open of the end the
-# session gets, and `process` the `setsid` and `TIOCSCTTY` that make it that
-# session's own terminal.
-rustix = { version = "1", features = ["fs", "process", "pty", "termios"] }
 # Sending the push, and asking GitHub whether a newer Verkstead has been
 # released — between them the whole of what Verkstead says to the public
 # internet. Default
@@ -95,6 +88,24 @@ tracing = "0.1"
 # than 0.5 for the same reason: 0.5's hashing is a generation ahead of the one
 # p256 uses, and would put two of every crypto crate in the tree.
 web-push-native = { version = "0.4", default-features = false }
+
+# The Unix half of the server: everything the session machinery does that is a
+# syscall rather than a record.
+#
+# A table of its own rather than a plain dependency because rustix is the whole
+# of what will not build on Windows — the pseudo-terminal a session runs on, the
+# process group a fetch past its deadline is killed by, and the two exec-time
+# calls the macOS keeper makes. Each of those has a Windows arm of its own or is
+# gated where it is called; this is the crate under all four, and a Windows
+# build carries none of it.
+[target.'cfg(unix)'.dependencies]
+# The pseudo-terminal a session runs on: opening the pair, sizing it, and giving
+# the sandbox a controlling terminal — see `src/terminal/pty.rs`. Everything it
+# needs is already in the tree under the crates that touch a file descriptor, so
+# the features are the whole of what this adds: `fs` is the one open of the end
+# the session gets, and `process` the `setsid` and `TIOCSCTTY` that make it that
+# session's own terminal — and the group a stalled fetch is killed by.
+rustix = { version = "1", features = ["fs", "process", "pty", "termios"] }
 
 [dev-dependencies]
 # Reading and writing the socket below, which is a `Stream` and a `Sink` and
