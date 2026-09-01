@@ -938,34 +938,15 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 return Err(GrillingStarted::NoBaseCommit);
             };
 
-            // Every name that is already spoken for in the repositories this
-            // one is about to be cut in: this one, and every companion
-            // mirroring the Conversation's branch. A companion with a name of
-            // its own is not one of them — that name is the human's and does
-            // not move with this one, so a repository holding it is a refusal
-            // below rather than a reason to pick again here.
-            //
-            // Read whole and once, after the fetch, so that the remotes it
-            // carries are as fresh as the remotes are — and so that a walk over
-            // the candidates is a walk in memory. See
-            // [`worktrees::cut_names`] for why a name only a remote holds
-            // counts as spoken for.
-            let mut taken = worktrees::cut_names(&repo);
-
-            for companion in companions.iter().filter(|companion| companion.mirrors()) {
-                taken.extend(worktrees::cut_names(&companion.repo.path));
-            }
-
-            let free = |name: &str| !taken.contains(name);
-
             // And the name the work is cut on. A name Verkstead invented is
             // nobody's — a prefill drawn nowhere, which the human never saw and
             // could not have meant — so a repository that already has a branch
             // by it is a reason to invent another rather than a reason to stop
-            // the work. There is no shortage of names to try.
-            let branch = match settled || free(&branch) {
+            // the work. Asked after the fetch, so that what the remotes hold is
+            // as fresh as the remotes are.
+            let branch = match settled {
                 true => branch,
-                false => free_branch_name(id, free),
+                false => name_to_cut(id, branch, &cut_in(&repo, &companions)),
             };
 
             // Which leaves the refusal to the case it was written for: a name
@@ -2145,6 +2126,45 @@ fn branch_name() -> String {
     pair(getrandom::u64().unwrap_or(0))
 }
 
+/// Every repository a Conversation's own branch name is about to be cut in: its
+/// Repo, and each companion mirroring that name.
+///
+/// A companion with a name of its own is not one of them — that name is the
+/// human's and does not move with this one, so a repository holding it is a
+/// refusal about that companion rather than a reason to pick another name here.
+pub(crate) fn cut_in(repo: &Path, companions: &[store::Companion]) -> Vec<PathBuf> {
+    std::iter::once(repo.to_path_buf())
+        .chain(
+            companions
+                .iter()
+                .filter(|companion| companion.mirrors())
+                .map(|companion| companion.repo.path.clone()),
+        )
+        .collect()
+}
+
+/// The name to cut a Conversation's branch under, where the name it is carrying
+/// is one Verkstead invented.
+///
+/// `branch` itself wherever nothing in `repos` answers to it, which is almost
+/// always, and another invented name where something does — see
+/// [`free_branch_name`]. What each repository answers to is read once and whole:
+/// its own branches and its remotes' both — see [`worktrees::cut_names`].
+///
+/// Both starts that cut a branch on an invented name come through here, and only
+/// those: a name the human typed is refused on a repository that already has it
+/// rather than picked around, that name being theirs and chosen.
+pub(crate) fn name_to_cut(id: i64, branch: String, repos: &[PathBuf]) -> String {
+    let taken: std::collections::HashSet<String> = repos
+        .iter()
+        .flat_map(|repo| worktrees::cut_names(repo))
+        .collect();
+
+    match taken.contains(&branch) {
+        false => branch,
+        true => free_branch_name(id, |name| !taken.contains(name)),
+    }
+}
 /// A name for the branch a start is about to cut, where the one the Conversation
 /// has been carrying is taken.
 ///
