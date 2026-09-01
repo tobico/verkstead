@@ -16,8 +16,10 @@ starts.
 Partly reorderable: 02 needs 01, and 03, 04 and 05 each need 02. 03 comes
 first of the three, because it lays the shared release plumbing and the
 packaging assets that 04 and 05 both build on. After that 04 and 05 run in
-either order, with one string between them: the "sessions need Linux" UI state
-lands in whichever runs first — 04 as ordered — and the other reuses it.
+either order and there is no string between them: the "sessions need Linux" UI
+state was to have landed in whichever ran first and been reused by the other,
+and 04 ran and ported the Sandbox instead — so nothing of that state exists,
+Windows is the only platform without sessions, and building it is 05's alone.
 
 ## Stages
 
