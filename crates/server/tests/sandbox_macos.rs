@@ -17,18 +17,26 @@
 //! `absent` on a Mac has found something odd, and one that finds `refused` has
 //! found the boundary working.
 //!
-//! With three exceptions, and every one of them is the boundary working rather
-//! than odd. A session's HOME is a directory of Verkstead's own here, so what
-//! is *not* in it — the machine's keys, somebody's shell history — is absent
+//! With two exceptions, and both of them are the boundary working rather than
+//! odd. A session's HOME is a directory of Verkstead's own here, so what is
+//! *not* in it — the machine's keys, somebody's shell history — is absent
 //! rather than refused: those are in another directory entirely, and that one
-//! is refused. The account's own skills are refused so far that they are not
-//! there to be looked at either: what covers them is a rule denying everything
-//! about the path, metadata included, which is the strongest thing a policy can
-//! say and the closest it comes to a mount standing on it. And a path nobody
-//! ever made is absent inside because it is absent outside — which is what a
-//! configured bind naming a directory that is not there comes to: the entry is
-//! skipped, and what a session finds at that name is nothing rather than a
-//! refusal.
+//! is refused. And a path nobody ever made is absent inside because it is
+//! absent outside — which is what a configured bind naming a directory that is
+//! not there comes to: the entry is skipped, and what a session finds at that
+//! name is nothing rather than a refusal.
+//!
+//! **The account's own skills are refused like anything else**, which is not
+//! the exception it was written as. A mount stands an empty directory on them
+//! and a policy cannot, so what was expected here was a denial total enough to
+//! hide the name as well — and this platform does not offer one: the floor
+//! makes every name on the machine `stat`-able, which is what "refuses rather
+//! than hides" *means*, and one path cannot opt out of the sentence the whole
+//! boundary is written in. A session can see that its account has a `skills`
+//! directory and cannot read a byte of it, exactly as it can see the home
+//! directory of whoever owns the Mac. What the design asks for is that a
+//! Conversation is grilled by the product's skills rather than the account's,
+//! and that holds either way.
 //!
 //! **Built everywhere and run on one machine.** Every test here is compiled on
 //! the Linux runner and *ignored* there rather than left out of the build: what
@@ -1263,10 +1271,12 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
         "there is no global CLAUDE.md in here to say how to reach the human"
     );
     assert_eq!(
-        reported["the-accounts-own"], "absent",
-        "and what the account keeps under its own skills is refused so far \
-         that there is nothing there to look at — which the fixture put a skill \
-         in to be able to say"
+        reported["the-accounts-own"], "refused",
+        "and what the account keeps under its own skills is not a session's to \
+         read — which the fixture put a skill in to be able to say. Refused \
+         rather than absent, as the machine itself is: a policy hides no name, \
+         and what the design asks is that a Conversation is grilled by the \
+         product's skills rather than the account's"
     );
 
     assert!(
