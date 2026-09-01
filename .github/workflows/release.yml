@@ -1,22 +1,31 @@
-# What a `v*` tag ships: one binary per platform the project ships, each with
-# the viewer inside it, published as a GitHub Release under the tag that
-# triggered the run. Every leg builds its binary and then runs it, so a target
-# that will not build, or that builds something that will not run, fails the
-# run rather than reaching a Release.
+# What a `v*` tag ships: one bare binary per platform the project ships, and
+# beside them the Linux desktop app as an AppImage — each with the viewer inside
+# it, published as a GitHub Release under the tag that triggered the run. Every
+# leg builds its artifact and then runs it, so a target that will not build, or
+# that builds something that will not run, fails the run rather than reaching a
+# Release.
 #
-# A last job then records what was published in `nix/release.json` and commits
-# it to `main`, which is the whole interface to stage 04's binary flake.
+# A last job then records the bare binaries in `nix/release.json` and commits
+# it to `main`, which is the whole interface to the binary flake.
 #
 # Pinned throughout, as `ci.yml` is: actions to released versions, runners to
 # images rather than `-latest`, and Rust to the patch version the flake's
 # nixpkgs carries.
 name: Release
 
-# Tags and nothing else. What runs here is the build that ships, and a branch
-# has nothing to ship; every other commit is `ci.yml`'s.
+# A `v*` tag, which is a release; or a run started by hand, which is a rehearsal
+# of one. Nothing else: every other commit is `ci.yml`'s, and a branch has
+# nothing to ship.
+#
+# The rehearsal is here because the only other way to find out whether a leg
+# works would be to publish. It builds every artifact and runs every assertion,
+# while the two jobs that write — the Release and the manifest commit — are
+# gated on the ref actually being a tag, so a dispatched run stops after the
+# building. See the `if` on each of them.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 # Read at the top, so that the jobs which compile the dependency tree and run
 # other people's actions hold a token that can do nothing to the repository.
@@ -226,14 +235,139 @@ jobs:
           path: upload/${{ matrix.asset }}
           if-no-files-found: error
 
-  # The Release, once every leg has succeeded. `needs` is the whole of that
-  # rule: a matrix job has failed if any of its legs did, and a job whose
-  # `needs` failed does not run — so a tag that could not be built for one
-  # architecture publishes nothing, rather than a set of three that looks
-  # complete until somebody reaches for the fourth.
+  # The Linux desktop artifact: the tray app of ADR-0012 and everything it is
+  # drawn over, in one file. A leg of its own rather than a fifth row in the
+  # matrix above, because nothing about it is that matrix's shape — it is
+  # dynamic where those are static, it wants the toolkit's development packages
+  # where those want musl, and what it uploads is a bundle rather than a bare
+  # binary. Stages 04 and 05 of the desktop roadmap add a leg each beside it.
+  #
+  # x86_64 only, per ADR-0012: an arm64 Linux user has the bare CLI.
+  desktop-linux:
+    name: Verkstead-x86_64.AppImage
+    needs: viewer
+    runs-on: ubuntu-24.04
+    env:
+      # Where `tools/build-appimage.sh` leaves it, said once: every step below
+      # either runs this file or asks something of it.
+      APPIMAGE: target/appimage/Verkstead-x86_64.AppImage
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # As the CLI legs do and for the same reason: the viewer is embedded at
+      # compile time out of `web/dist`, which the checkout leaves empty. The
+      # desktop app is the server in-process, so it carries the viewer too.
+      - name: Fetch the viewer
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: viewer
+          path: web/dist
+
+      # None of these are on the runner image by declaration, so they are
+      # installed rather than hoped for. The first two are what `crates/desktop`
+      # links and what `ci.yml` installs to build the workspace at all — the
+      # toolkit, and the tray protocol over it. The other two are the bundling's
+      # own: `mksquashfs` makes the filesystem an AppImage is, and `fusermount3`
+      # is what the AppImage runtime mounts it back with, which is what lets the
+      # assertions below run the artifact itself rather than something unpacked
+      # out of it.
+      - name: Install the desktop app's toolkit
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libgtk-3-dev \
+            libayatana-appindicator3-dev squashfs-tools fuse3
+
+      # The same pin as everywhere else, and no `targets`: this leg builds for
+      # the runner it is on. The toolkit is linked rather than compiled in, so
+      # there is nothing here to cross-compile towards — which is why this is a
+      # Linux runner and the artifact is the Linux one.
+      - name: Install Rust 1.91.1
+        uses: dtolnay/rust-toolchain@1.91.1
+
+      # A cache key of its own, for the reason the matrix legs have theirs: this
+      # is a fifth dependency tree — the host target, with the GUI crates in it
+      # — and a key it shared with a musl leg would have the two evicting each
+      # other.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: appimage
+
+      # The script the dev shell runs, unchanged and unexplained here: how the
+      # bundle is made, what is left to the machine it lands on and what rides
+      # inside is all `tools/build-appimage.sh`'s to say. Including the check it
+      # makes on itself — that every library the app or its bundle names is one
+      # of the files it copied in — which is what keeps this leg from shipping
+      # something that only runs on a machine with the development packages the
+      # step above just installed.
+      - name: Build the AppImage
+        run: tools/build-appimage.sh
+
+      - name: The AppImage runs
+        run: ./"$APPIMAGE" --help
+
+      # And answers as the file a human downloads: with the viewer, rather than
+      # the 503 an empty embed serves. The same claim the CLI legs make of their
+      # own binaries, made the same way, and `--retry-connrefused` rather than a
+      # sleep for the same reason — the app is up when it answers.
+      #
+      # There is no screen on a runner and none is needed: with `$DISPLAY` unset
+      # there is nowhere to put a tray icon, which the app reads as a session
+      # without a tray rather than as a failure and serves anyway — see
+      # `crates/desktop/src/screen.rs`. `--no-open` is the other half of it,
+      # there being no browser here to hand a URL to.
+      - name: The viewer is inside the AppImage
+        run: |
+          ./"$APPIMAGE" --no-open --listen 127.0.0.1:8422 \
+            --data-dir "$RUNNER_TEMP/desktop" &
+          app=$!
+          document=$(curl --fail --silent --show-error \
+            --retry 10 --retry-delay 1 --retry-connrefused \
+            http://127.0.0.1:8422/)
+          kill "$app"
+          # As in the CLI legs: an absent viewer is a 503 that `--fail` has
+          # already caught, and this is the rest of it — the document vite wrote
+          # names the hashed bundle beside it, and the fallback names nothing.
+          case "$document" in
+            */assets/*) ;;
+            *)
+              echo "::error::The AppImage served a document with no bundle in it."
+              printf '%s\n' "$document"
+              exit 1
+              ;;
+          esac
+
+      # Under an artifact name that says which desktop this is rather than what
+      # the file is called. `publish` fetches the CLI binaries by a
+      # `verkstead-*` pattern and counts what arrives, so a desktop asset named
+      # in that scheme — a Windows `.exe` would be — would be counted as a fifth
+      # binary; keeping every desktop leg's artifact under `desktop-*` is what
+      # holds the two sets apart whatever the files inside them are called.
+      # `publish` is where the file's own name is written down.
+      #
+      # An artifact is a zip, so the executable bit does not survive the trip,
+      # and a Release asset has no mode to carry it either. The file was run
+      # above, where it still had one, and whoever downloads it chmods it — as
+      # they do a bare binary.
+      - name: Upload the AppImage
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-linux
+          path: ${{ env.APPIMAGE }}
+          if-no-files-found: error
+
+  # The Release, once every leg has succeeded — the desktop ones as much as the
+  # matrix. `needs` is the whole of that rule: a matrix job has failed if any of
+  # its legs did, and a job whose `needs` failed does not run — so a tag that
+  # could not be built for one architecture publishes nothing, rather than a set
+  # that looks complete until somebody reaches for what is not in it.
   publish:
     name: Publish
-    needs: build
+    needs: [build, desktop-linux]
+    # A tag, or nothing at all. A run started by hand has built every artifact
+    # and run every assertion by the time it reaches here, and stops: there is
+    # no version to publish under, and a Release named after a branch is not a
+    # rehearsal of anything.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     # The only job that writes. Creating a Release is a write to the
     # repository's contents, and it is granted here rather than at the top of
@@ -241,12 +375,15 @@ jobs:
     permissions:
       contents: write
     steps:
-      # The four binaries, and not the viewer artifact this run is also
-      # holding: `pattern` is what leaves it behind. `merge-multiple` unwraps
-      # the per-artifact directories, so what lands in `binaries/` is four
-      # files under the names the legs gave them — which are the names the
-      # assets carry, and the names the README's install command will spell.
-      - name: Fetch the binaries
+      # The four bare binaries, and neither the viewer artifact this run is
+      # also holding nor the desktop ones: `pattern` is what leaves both
+      # behind, and every desktop leg names its artifact `desktop-…` precisely
+      # so that it cannot land here and be counted as a fifth binary.
+      # `merge-multiple` unwraps the per-artifact directories, so what lands in
+      # `binaries/` is four files under the names the legs gave them — which
+      # are the names the assets carry, and the names the README's install
+      # command will spell.
+      - name: Fetch the CLI binaries
         uses: actions/download-artifact@v8.0.1
         with:
           pattern: verkstead-*
@@ -257,7 +394,11 @@ jobs:
       # counted through the same glob the upload below hands to `gh`. `needs`
       # says all four legs passed; this says all four arrived, which a
       # mistyped pattern would not.
-      - name: All four binaries are here
+      #
+      # Four is this set's own number and stays four however many desktop
+      # artifacts a release carries: those are the step below's, checked by
+      # name, because a count is the wrong question to ask of them.
+      - name: All four CLI binaries are here
         run: |
           ls -l binaries
           # So that a glob matching nothing counts as none, rather than as the
@@ -269,11 +410,48 @@ jobs:
             exit 1
           fi
 
+      # Everything every desktop leg built, under the artifact-name prefix that
+      # keeps it out of the count above. `merge-multiple` again, so `desktop/`
+      # holds the files themselves under the names they will carry as assets.
+      - name: Fetch the desktop artifacts
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: desktop
+
+      # Named rather than counted, which is the other half of the split above.
+      # What can go wrong with a desktop artifact is its name — the name is
+      # what an install line and the documentation spell out — and any count
+      # would be satisfied by a leg that uploaded `verkstead-desktop.AppImage`.
+      # So this is the one place the desktop asset names are written down, and
+      # stages 04 and 05 add a line each to it and nothing else in this job.
+      #
+      # Read both ways round: every name here arrived, and nothing arrived that
+      # is not named here. Without the second, a leg this job has never been
+      # told about would be built, uploaded, and quietly left off the Release.
+      - name: The desktop artifacts are the ones named here
+        env:
+          DESKTOP_ASSETS: |
+            Verkstead-x86_64.AppImage
+        run: |
+          expected=$(printf '%s\n' "$DESKTOP_ASSETS" | sed '/^[[:space:]]*$/d' | sort)
+          found=$(ls -1 desktop 2> /dev/null | sort)
+          if [ "$expected" != "$found" ]; then
+            echo "::error::The desktop assets are not what this job expects."
+            echo "Expected:"
+            printf '%s\n' "$expected"
+            echo "Found:"
+            printf '%s\n' "$found"
+            exit 1
+          fi
+          printf '%s\n' "$found"
+
       # `gh` rather than a release action: it is on the runner already and it
       # takes the workflow's own token, so there is no third-party version to
       # pin for what is one API call. It is given the repository by name
       # because this job has no checkout to infer one from — it wants the
-      # binaries, and none of the sources.
+      # artifacts, and none of the sources.
       #
       # A pre-release is semver's own rule, a hyphen after the version, as in
       # `v0.1.0-rc.1`. A throwaway tag rehearsing this workflow is one of
@@ -294,7 +472,7 @@ jobs:
             *) prerelease=() ;;
           esac
           gh release create "$TAG" --generate-notes "${prerelease[@]}" \
-            binaries/verkstead-*
+            binaries/verkstead-* desktop/*
 
       # What GitHub says it now has, in the log of the run that put it there —
       # the asset names an adopter's url has to match, and whether the tag was
@@ -307,10 +485,14 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: gh release view "$TAG" --json isPrerelease,assets
 
-  # What the Release now holds, written down where stage 04's flake can read it.
-  # The flake fetches by url and verifies by hash, and nothing about it is
-  # hand-edited, so this job is the only thing standing between a release and a
-  # flake that still points at the version before it.
+  # What the Release now holds of the bare binaries, written down where the
+  # binary flake can read it. The flake fetches by url and verifies by hash, and
+  # nothing about it is hand-edited, so this job is the only thing standing
+  # between a release and a flake that still points at the version before it.
+  #
+  # The desktop artifacts are no part of it, and four stays the right number
+  # here as more of them arrive: what the flake and the NixOS module run is the
+  # headless daemon, and nothing fetches a desktop bundle through nix.
   #
   # It runs after `publish` rather than beside it because the assets it hashes
   # are the published ones — see the hashing step for why that distinction is
@@ -318,6 +500,11 @@ jobs:
   manifest:
     name: Manifest
     needs: publish
+    # A tag, said here as well as on `publish` rather than left to be inferred.
+    # `needs` already skips this job in a run that published nothing; this is
+    # the job that commits to `main`, and what stops it doing that is worth
+    # reading here rather than a job away.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     # The second and last job that writes: the manifest is a commit on `main`.
     permissions:
