@@ -712,7 +712,31 @@ pub fn router_with_viewer<V: Embed + 'static>(pool: SqlitePool) -> Router {
     router(pool).fallback(viewer::serve::<V>)
 }
 
-/// Open the database and serve until the process is stopped.
+/// Take the address, open the database, and serve until the process is stopped.
+///
+/// **The socket is taken before anything is made.** Everything below makes
+/// something — the Data Directory, the Skills written into it, the Build Cache,
+/// the database — and an address somebody else is already listening on is no
+/// reason to have made any of it. So the bind is the first thing that can fail,
+/// and a second Verkstead is refused by the socket rather than after it has
+/// written over the first one's directory.
+///
+/// [`run_on`] is the same thing on a socket the caller bound, which is where the
+/// desktop binary starts: a taken address is the one failure it draws a dialog
+/// for, and a dialog wants the failure before the side effects rather than after
+/// them.
+pub async fn run(config: Config) -> Result<()> {
+    let listener = std::net::TcpListener::bind(config.listen)
+        .with_context(|| format!("binding {}", config.listen))?;
+
+    run_on(listener, config).await
+}
+
+/// The same, on a socket that is already bound.
+///
+/// The listener is the standard library's rather than tokio's, because a caller
+/// that has one bound it before there was a runtime to bind it on — see [`run`]
+/// for why the address is settled first.
 ///
 /// The installation's Watched Paths are resolved before anything else: a
 /// directory that is not there is a misconfiguration to report at startup,
@@ -720,7 +744,7 @@ pub fn router_with_viewer<V: Embed + 'static>(pool: SqlitePool) -> Router {
 /// Being given none of them is not a misconfiguration — the settings file says
 /// Watched Paths too, and a standalone install starts with nothing configured
 /// anywhere and admits nothing until it is.
-pub async fn run(config: Config) -> Result<()> {
+pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<()> {
     let watched = WatchedPaths::resolve(&config.watched_paths)?;
 
     // Both resolved at startup for the reason the Watched Paths are: a bind that
@@ -788,9 +812,11 @@ pub async fn run(config: Config) -> Result<()> {
 
     let pool = open_database(&database(&data_dir)).await?;
 
-    let listener = tokio::net::TcpListener::bind(config.listen)
-        .await
-        .with_context(|| format!("binding {}", config.listen))?;
+    listener
+        .set_nonblocking(true)
+        .context("putting the listening socket into the mode the runtime reads it in")?;
+    let listener = tokio::net::TcpListener::from_std(listener)
+        .context("handing the listening socket to the runtime")?;
 
     // The syntax definitions built on a blocking thread while the server comes
     // up, rather than under the first Diff somebody opens. Nothing waits on it:

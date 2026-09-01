@@ -129,7 +129,21 @@
               # The PWA icons are one PNG downscaled to the sizes the favicon,
               # the manifest and iOS need — see tools/generate-icons.sh.
               imagemagick
+              # What the desktop crate's C dependencies below are found with.
+              # Nothing else here needs one: `crates/desktop` is the first thing
+              # in this repository to link a system library at all.
+              pkg-config
             ]);
+
+          # The desktop app's toolkit, and the tray protocol drawn over it
+          # (ADR-0012). Build inputs rather than packages so that pkg-config is
+          # pointed at their development files: `rfd`'s dialog and the tray both
+          # compile against GTK3 headers, and a shell without them cannot build
+          # `crates/desktop` at all. The same two are what the AppImage carries.
+          buildInputs = with pkgs; [
+            gtk3
+            libayatana-appindicator
+          ];
 
           env.RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
         };

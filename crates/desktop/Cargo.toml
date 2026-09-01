@@ -1,0 +1,40 @@
+[package]
+name = "verkstead-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "verkstead_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "verkstead-desktop"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+# The server, run in-process out of a second binary rather than a second
+# artifact of the first one (ADR-0012). The headless `verkstead` links the same
+# library and carries none of what is below.
+verkstead-server = { path = "../server" }
+# What the viewer is handed to: whatever this desktop opens a URL with.
+open = "5"
+# The one thing this binary draws for itself — see `dialog`. GTK3 rather than
+# the portal rfd would reach for by default: it is the toolkit the tray is drawn
+# with, so the binary carries one toolkit rather than one per thing on screen,
+# and a machine with no desktop portal running still gets the message.
+rfd = { version = "0.17", default-features = false, features = ["gtk3"] }
+# The runtime the server is given, built here for the reason `crates/cli` builds
+# its own: where it runs is the starting binary's call, and this one keeps it off
+# the main thread — see `Desktop::run`.
+tokio.workspace = true
+# Where the server's `tracing` goes is the starting binary's call as well.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# The tests run the real binary, so what they check is what an icon starts.
+tempfile = "3"
+ureq = "3"

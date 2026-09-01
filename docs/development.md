@@ -57,6 +57,18 @@ out of a checkout does: `--data-dir .` is why every command here says it, and
 it keeps the database, the worktrees and the settings beside the checkout where
 they can be deleted with it.
 
+The desktop app is the other binary, and the same server: `cargo run -p
+verkstead-desktop -- --data-dir .` serves what the command above serves and
+opens the viewer in your browser as it comes up. `--no-open` leaves the browser
+alone, and every other flag is the server's own, because the app *is* the
+server ([ADR 0012](adr/0012-desktop-tray-binary.md)) — started with nothing
+said it is the platform's Data Directory again, which is what a machine that
+installed it wants and not what a checkout does. It is the one crate here that
+links system libraries, GTK among them, so it builds in the dev shell and
+nowhere else. An address something is already listening on — the command above,
+say — is a dialog and a nonzero exit rather than a second Verkstead beside the
+first.
+
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
 `--build-cache-dir` says otherwise. Every sandboxed session gets it writable,
