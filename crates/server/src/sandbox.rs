@@ -152,6 +152,18 @@ const LINUX_SYSTEM: &[&str] = &[
 /// Apple's own under `/usr` and `/bin`, Homebrew's where somebody installed it,
 /// and nix's where a Mac is running nix-darwin.
 ///
+/// **The cryptex is under two names and the dynamic linker uses the second**,
+/// which is why both are here. Apple ships the shared cache — and Safari, and
+/// the rest of what arrives out of band — on a cryptex mounted at
+/// `/System/Volumes/Preboot/Cryptexes`, and firmlinked back in at
+/// `/System/Cryptexes`, which is what dyld actually opens. A firmlink is not a
+/// symlink and resolves to itself, so a policy naming only the mount point is a
+/// policy that says nothing about the path being used: every process started
+/// under one dies on `SIGABRT` before it runs a line, because a dyld that
+/// cannot map the cache has nowhere left to load libSystem from. It says
+/// nothing while it does it, either — which is the whole of what made this cost
+/// a CI run to find rather than a read.
+///
 /// `/var/select` is the one that reads as nothing: `/bin/sh` on a Mac reads
 /// `/private/var/select/sh` to decide which shell it is being run as, and a
 /// session without it has a shell that will not start.
@@ -166,6 +178,7 @@ const LINUX_SYSTEM: &[&str] = &[
 /// the way a machine without Homebrew skips `/opt/homebrew`.
 const APPLE_SYSTEM: &[&str] = &[
     "/System/Library",
+    "/System/Cryptexes",
     "/System/Volumes/Preboot/Cryptexes",
     "/Library",
     "/usr",
