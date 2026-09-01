@@ -67,11 +67,7 @@ pub struct Terminal {
 impl Terminal {
     /// Open a terminal, [`COLUMNS`] by [`ROWS`], for a session about to start.
     pub fn open() -> io::Result<Terminal> {
-        // `NOCTTY` on both ends because neither is the server's: the process
-        // that will take this as its controlling terminal is the sandbox, and
-        // it says so for itself in [`Terminal::spawn`].
-        let held =
-            rustix::pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC)?;
+        let held = openpt()?;
 
         // Read without waiting, which is what the runtime below requires of
         // anything it is asked to watch.
@@ -218,4 +214,35 @@ fn take(held: BorrowedFd<'_>, buffer: &mut [u8]) -> io::Result<usize> {
         Err(rustix::io::Errno::IO) => Ok(0),
         Err(error) => Err(error.into()),
     }
+}
+
+/// Open the end Verkstead holds, close-on-exec, for [`Terminal::open`].
+///
+/// `NOCTTY` on both ends because neither is the server's: the process that
+/// will take this as its controlling terminal is the sandbox, and it says so
+/// for itself in [`Terminal::spawn`].
+///
+/// Close-on-exec is the half that is not the same on both platforms.
+/// `posix_openpt` is POSIX and POSIX has no such flag; Linux takes one anyway
+/// — where rustix opens `/dev/ptmx` itself so that the descriptor is never
+/// briefly inheritable — and a Mac's does not, so there it is set on the
+/// descriptor the moment it is open. Either way nothing the server spawns
+/// afterwards inherits this end, which is what stops a copy of it in some
+/// unrelated child holding the terminal open long after the session that owned
+/// it exited.
+#[cfg(not(target_os = "macos"))]
+fn openpt() -> io::Result<OwnedFd> {
+    Ok(rustix::pty::openpt(
+        OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC,
+    )?)
+}
+
+/// And where the flag cannot be asked for — see the arm above.
+#[cfg(target_os = "macos")]
+fn openpt() -> io::Result<OwnedFd> {
+    let held = rustix::pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
+
+    rustix::io::fcntl_setfd(&held, rustix::io::FdFlags::CLOEXEC)?;
+
+    Ok(held)
 }
