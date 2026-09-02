@@ -124,6 +124,16 @@
   background: none;
 }
 
+/* And except inside the modal, where there is no page behind the rows to wash.
+   A `dialog` opened with `showModal` is in the top layer with a backdrop of its
+   own already over the page, and this one — fixed, and painted above everything
+   in the card that is not positioned over it — would land on the card being
+   filled in rather than behind it. So the dimming there is the dialog's, said
+   once, and these rows come down over a card that stays lit. */
+dialog .backdrop {
+  background: none;
+}
+
 /* The rows, hung under the control and as wide as it — they are its own list
    rather than a card of their own, so they line up with the field they came out
    of. Over the page rather than in the flow of it, so dropping them does not

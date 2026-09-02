@@ -417,7 +417,13 @@ export function Listbox<T>(
             small thing on this card. With the wash a menu comes down over,
             because what these rows are is a popover: the page behind them is
             not what the human is answering, and a dropdown that came down over
-            it unchanged read as less than it is. */}
+            it unchanged read as less than it is.
+
+            Where there is a page behind them, which is where the two exceptions
+            come from — see `.backdrop` in `picking.module.css`. Inside the
+            modal there is none, only the card being filled in; and under the
+            browse field the typing goes on while the rows are down. Both keep a
+            clear one. */}
         <div
           class={styles.backdrop}
           aria-hidden="true"

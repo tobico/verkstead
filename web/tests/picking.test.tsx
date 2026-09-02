@@ -346,6 +346,13 @@ describe("what a row of the listbox draws", () => {
     // And the one set of rows that is not a popover keeps a clear one — the
     // browse field's, where the typing goes on while they are down.
     expect(css).toMatch(/\.backdrop\.clear \{[^}]*background: none;/);
+
+    // As does every set of rows inside the modal, where there is no page behind
+    // them to wash: the dialog is in the top layer with its own backdrop over
+    // the page already, and this one — fixed, and painted above everything in
+    // the card — would dim the card being filled in rather than anything
+    // behind it.
+    expect(css).toMatch(/dialog \.backdrop \{[^}]*background: none;/);
   });
 
   /// The caret is the app's own shape rather than whatever the reader's font
