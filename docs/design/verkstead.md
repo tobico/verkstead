@@ -575,7 +575,13 @@ Timeline events:
   on is the stop beside it, and Resume in the status button's menu is what
   answers that.
 - **Pinning is the fixed set** (task list, stage list, PR) with a floating
-  summary box at the top of the timeline; no manual pin/unpin. More than one
+  summary box at the top of the timeline; no manual pin/unpin. They come in one
+  order and are drawn in it — **PR, then task list, then roadmap** (*settled
+  2026-09-02, building pinned-carousel-order*): the PR leads as the one of the
+  three with anything on it to answer, where the two lists are read off the
+  worktree with nothing on them to do, and the lists follow in the order the work
+  goes through them. The order is the server's, decided where the pinned list is
+  built. More than one
   pinned card is a carousel rather than a stack (*settled 2026-08-24, building
   workbench-refit*): everything pinned is held above the record, so a stack of
   them is what the record gets pushed down by. Dots beneath say how many there
