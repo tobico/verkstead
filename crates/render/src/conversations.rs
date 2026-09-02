@@ -1434,9 +1434,11 @@ pub struct CommitPane {
     /// there to hold a Diagram.
     pub diagrams: bool,
 
-    /// `null` where the commit changed nothing a diff can show, which is a merge
-    /// or an empty commit. A commit the repository no longer has is not this: it
-    /// is a 404, because there is nothing there to draw a pane about.
+    /// `null` where the commit changed nothing a diff can show, which is an
+    /// empty commit or a merge that resolved nothing — one whose parents agreed,
+    /// its combined diff being the hunks it settled and there being none. A
+    /// commit the repository no longer has is not this: it is a 404, because
+    /// there is nothing there to draw a pane about.
     pub diff: Option<DiffView>,
 }
 
