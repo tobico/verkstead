@@ -12,18 +12,21 @@
 //! **Drawn on the loop's own thread**, which is the main thread and — while
 //! there is a tray — the thread [`crate::toolkit::run`] is holding. That is the
 //! whole of what these two functions are careful about, and it is the same
-//! obligation on both platforms. A dialog handed to a toolkit thread of its own
-//! cannot be drawn from inside the loop's own dispatch: GTK's loop holds the
-//! main context for as long as a menu item's handler runs, so nothing else can
-//! take it to draw with, and a menu item that raised one that way would never
-//! come back; AppKit will not be spoken to from anywhere but the main thread at
-//! all. Drawn here, the nested loop each platform starts for a modal belongs to
-//! the thread that is already entitled to it — which is what a menu handler and
-//! a dying `main` both are.
+//! obligation on all three platforms. A dialog handed to a toolkit thread of
+//! its own cannot be drawn from inside the loop's own dispatch: GTK's loop
+//! holds the main context for as long as a menu item's handler runs, so nothing
+//! else can take it to draw with, and a menu item that raised one that way
+//! would never come back; AppKit will not be spoken to from anywhere but the
+//! main thread at all; and a message box on Windows runs a loop of its own over
+//! a thread's message queue, which has to be the queue the tray's own messages
+//! arrive in. Drawn here, the nested loop each platform starts for a modal
+//! belongs to the thread that is already entitled to it — which is what a menu
+//! handler and a dying `main` both are.
 //!
 //! One toolkit for the whole binary, therefore — the same GTK the tray icon is
-//! drawn with on Linux, and the same AppKit it is drawn with on macOS. See
-//! [`crate::toolkit`], which is where either of them is started.
+//! drawn with on Linux, the same AppKit it is drawn with on macOS, and the same
+//! Win32 it is drawn with on Windows. See [`crate::toolkit`], which is where any
+//! of them is started.
 
 /// Put `message` on the screen as an error, and wait for it to be dismissed.
 ///
@@ -149,4 +152,51 @@ fn put(level: Level, message: &str) {
     NSApplication::sharedApplication(main).activateIgnoringOtherApps(true);
 
     alert.runModal();
+}
+
+/// Win32's message box, run on the thread the loop is on.
+///
+/// **Brought to the front and kept there**, which is the same courtesy the
+/// macOS alert asks AppKit for: this process has no window a human ever
+/// switched to, so a box left to Windows' own ordering opens behind whatever
+/// they were doing and waits there. `MB_SETFOREGROUND` is what asks for the
+/// front and `MB_TOPMOST` is what keeps it there, and neither is a claim about
+/// the rest of the app — there is no rest of the app to raise.
+///
+/// **Owned by nothing**, which is the other half of having no window: the box
+/// is given a null owner, so it is a window of its own and there is nothing for
+/// it to be modal over. What it stops is this thread, which is what the two
+/// callers want — a menu item that has said something, and a `main` that is
+/// about to give up.
+#[cfg(windows)]
+fn put(level: Level, message: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MB_TOPMOST, MessageBoxW,
+    };
+
+    let level = match level {
+        Level::Refusal => MB_ICONERROR,
+        Level::Info => MB_ICONINFORMATION,
+    };
+
+    let message = wide(message);
+    let title = wide("Verkstead");
+
+    // SAFETY: two null-terminated wide strings that outlive the call, a null
+    // owner window, and a call made on the thread that draws.
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            message.as_ptr(),
+            title.as_ptr(),
+            MB_OK | level | MB_SETFOREGROUND | MB_TOPMOST,
+        );
+    }
+}
+
+/// `said` as Windows takes a string: UTF-16, with the zero on the end that says
+/// where it stops.
+#[cfg(windows)]
+fn wide(said: &str) -> Vec<u16> {
+    said.encode_utf16().chain(std::iter::once(0)).collect()
 }

@@ -23,9 +23,13 @@
 //! panel opens the menu when the icon is clicked and reports no click of its
 //! own. So the icon's default action *is* [`Chosen::Open`], by being the first
 //! item on the menu the click opens. Where a platform reports a double-click of
-//! its own — Windows and macOS, in the stages that package for them — [`show`]
-//! has it run that same action, so the icon and its menu never mean two
-//! different things.
+//! its own — macOS and Windows — [`show`] has it run that same action, so the
+//! icon and its menu never mean two different things.
+//!
+//! **Windows is the one that has to be told which button is which**, because it
+//! is the one that reports every click: the menu is the right button's, and the
+//! left button's two clicks are the default action. See [`show`], which is
+//! where that is said and why.
 
 use std::cell::RefCell;
 use std::io::Cursor;
@@ -229,13 +233,26 @@ pub fn show(
         }
     }));
 
-    TrayIconBuilder::new()
+    let raising = TrayIconBuilder::new()
         .with_id(APP_ID)
         .with_menu(Box::new(menu))
         .with_icon(icon)
-        .with_tooltip("Verkstead")
-        .build()
-        .context("putting the icon in the tray")
+        .with_tooltip("Verkstead");
+
+    // **The left button is left to the double-click on Windows**, which is the
+    // one place a platform's own habits change what is built here. Windows
+    // reports both buttons and both counts, and `tray-icon` would otherwise
+    // open the menu on the first left button *up* — which is a menu over the
+    // pointer before the second click of a double-click has happened, and a
+    // double-click that never arrives because a menu is what took it. So the
+    // menu is the right button's, which is where a Windows human reaches for
+    // one, and the left button's two clicks are the default action this file
+    // already binds. Nothing changes on the other two: an appindicator has only
+    // a menu, and a Mac's status item is the same click either way.
+    #[cfg(windows)]
+    let raising = raising.with_menu_on_left_click(false);
+
+    raising.build().context("putting the icon in the tray")
 }
 
 /// The artwork as the tray takes it: pixels, rather than the file they were

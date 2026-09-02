@@ -1,5 +1,22 @@
 //! `verkstead-desktop` — the Verkstead a human starts from an icon. See the
 //! crate docs for the shape of it; this is the order the two failures come in.
+//!
+//! **No console on Windows**, which is what the subsystem below says: an exe of
+//! the console kind opens a black window when it is double-clicked in Explorer,
+//! and that window stays in front of the human for as long as the app runs. So
+//! this is a windows-subsystem binary, which draws a tray icon and dialogs and
+//! attaches to no console at all.
+//!
+//! What that costs is the standard streams when a *shell* starts it: `--help`
+//! typed into a terminal prints where nobody is looking. It is the right trade
+//! for this binary and not for the other one — `verkstead` is what a shell is
+//! given, this is what an icon is — and it costs a redirected stream nothing,
+//! which is what a test and a release leg hand it. The account of a run goes to
+//! the log file either way; see [`logs`], which is there because a tray app has
+//! no stdout worth reading on any platform.
+//!
+//! [`logs`]: verkstead_desktop::logs
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 use std::process::ExitCode;
 

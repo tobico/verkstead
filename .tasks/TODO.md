@@ -20,5 +20,5 @@ Roadmap stage: [05: Windows port and portable exe](docs/roadmaps/desktop/05-wind
 
 - [x] 01: The server compiles for Windows, and starts there — [details](01-server-on-windows.md)
 - [x] 02: Sessions are honestly absent on Windows — [details](02-sessions-absent-on-windows.md)
-- [ ] 03: The desktop app on Windows — [details](03-the-app-on-windows.md)
+- [x] 03: The desktop app on Windows — [details](03-the-app-on-windows.md)
 - [ ] 04: The release legs, and the way in for a Windows reader — [details](04-release-legs-and-the-way-in.md)

@@ -64,10 +64,11 @@ alone, and every other flag is the server's own, because the app *is* the
 server ([ADR 0012](adr/0012-desktop-tray-binary.md)) — started with nothing
 said it is the platform's Data Directory again, which is what a machine that
 installed it wants and not what a checkout does. It is the one crate here that
-links system libraries, GTK among them, so it builds in the dev shell and
-nowhere else. An address something is already listening on — the command above,
-say — is a dialog and a nonzero exit rather than a second Verkstead beside the
-first.
+links a system toolkit — GTK on Linux, which is why it builds in the dev shell
+and nowhere else here; AppKit on a Mac and Win32 on Windows, which are those
+platforms' own and want nothing installed. An address something is already
+listening on — the command above, say — is a dialog and a nonzero exit rather
+than a second Verkstead beside the first.
 
 What it puts on the screen is an icon in the system tray, and the menu on it is
 **Open** — the viewer again, in your browser — **View Logs**, which opens the
@@ -80,16 +81,19 @@ and no more: a warning in the log, and everything else exactly as it was.
 **Launch on Startup** is a checkbox over the platform's own registration — your
 desktop's autostart entry at `~/.config/autostart/net.tobico.Verkstead.desktop`
 here, a launch agent at `~/Library/LaunchAgents/net.tobico.Verkstead.plist` on
-macOS — and that file is the whole of the state: checking the box writes it,
-unchecking removes it, turning it off in your desktop's own settings unchecks
-it, and no setting of Verkstead's own keeps a second copy of the answer. Every
+macOS, a `net.tobico.Verkstead` value under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` on Windows — and that
+registration is the whole of the state: checking the box writes it, unchecking
+removes it, turning it off in your desktop's own settings unchecks it, and no
+setting of Verkstead's own keeps a second copy of the answer. Every
 launch rewrites it while it is there, with the path of the executable that is
 running, so a binary you moved heals its own entry the next time you start it
 by hand. What it writes starts the app with `--no-open`: a login is not a
-moment to be handed a browser window. The one thing the box cannot see is
-macOS's Login Items list, which `launchd` keeps in a database of its own rather
-than in the file: switch Verkstead off there and the box goes on showing what
-the plist says.
+moment to be handed a browser window. The one thing the box cannot see is the
+platform's own second opinion about it — macOS's Login Items list, which
+`launchd` keeps in a database rather than in the file, and Windows' Startup tab
+in Task Manager, which Explorer records under `StartupApproved`: switch
+Verkstead off in either and the box goes on showing what the registration says.
 
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
@@ -427,7 +431,7 @@ $ nix fmt                 # the Nix files
 $ nix flake check         # the viewer's suite, and the NixOS module in a VM
 
 $ tools/generate-icons.sh     # the favicon and PWA icons, after replacing the artwork
-$ tools/generate-packaging.sh # the desktop entry, the launcher icons and the icns
+$ tools/generate-packaging.sh # the desktop entry, the launcher icons, the icns and the ico
 $ tools/build-appimage.sh     # Verkstead-x86_64.AppImage, once the viewer is built
 $ tools/build-macos-dmg.sh    # Verkstead-universal.dmg, on a Mac
 ```
@@ -589,17 +593,21 @@ neither the viewer's to serve nor the CLI's to hold. So the desktop packaging
 gets a directory of its own: `net.tobico.Verkstead.desktop` and the hicolor icon
 tree that `tools/build-appimage.sh` installs into the AppImage,
 `net.tobico.Verkstead.icns` that `tools/build-macos-dmg.sh` puts in the app
-bundle, and the Windows launcher artwork beside them when that stage lands. It
-is written by [`tools/generate-packaging.sh`](../tools/generate-packaging.sh)
-from the same hammer, and committed for the same reason the viewer's icons are.
-That script rewrites the whole directory from nothing on every run — so a size
+bundle, and `net.tobico.Verkstead.ico`, which `crates/desktop/build.rs` compiles
+into `verkstead-desktop.exe` as a resource — Windows has no packaging around the
+exe to install an icon beside it, so the file carries its own. It is written by
+[`tools/generate-packaging.sh`](../tools/generate-packaging.sh) from the same
+hammer, and committed for the same reason the viewer's icons are. That script
+rewrites the whole directory from nothing on every run — so a size
 that stops being generated stops being committed, and nothing under it is ever
 edited by hand.
 
 The icns is written by the script itself rather than by `iconutil`, which is a
 Mac's: the format is a header and a PNG per icon slot, so it is generated in the
 dev shell alongside everything else here rather than on the one platform that
-reads it.
+reads it. The ico is `magick`'s own output, that tool being in the dev shell
+and having no such restriction — and the sizes it is handed are those same
+committed downscales, so every platform draws the same pixels.
 
 The tests run the real server in-process, so the round trip they check is the
 one an agent gets — including the quickstart above, whose example files

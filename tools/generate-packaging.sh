@@ -15,8 +15,8 @@
 #
 # This directory is entirely this script's output: it is rewritten from nothing
 # on every run, so a size that stops being generated stops being committed.
-# The macOS .icns is written here too, from the same artwork and the same run;
-# stage 05 adds the Windows .ico beside it.
+# The macOS .icns and the Windows .ico are written here too, from the same
+# artwork and the same run.
 #
 # ImageMagick and desktop-file-utils come from the dev shell, so run this under
 # `nix develop` — or as `nix develop --command tools/generate-packaging.sh`.
@@ -150,5 +150,47 @@ done <<< "$ICNS_CHUNKS"
 # an icon that never draws and nothing else here would notice.
 if [ "$(wc -c < "$ICNS")" -ne "$total" ]; then
   printf '%s\n' "$ICNS is $(wc -c < "$ICNS") bytes and claims $total." >&2
+  exit 1
+fi
+
+# And the Windows icon, which is those same downscales again inside the one
+# container Windows reads an executable's icon out of. It is not copied into a
+# bundle the way the .icns is: `crates/desktop/build.rs` compiles it into
+# verkstead-desktop.exe as a resource, so Explorer, the taskbar and the
+# window that a dialog opens all draw Verkstead out of the file itself — which
+# is what a portable exe with nothing beside it needs.
+#
+# Written with `magick` rather than by hand, which is where this differs from
+# the .icns above: the tool that writes an .icns is a Mac's and the format had
+# to be assembled here, while ImageMagick writes an .ico wherever the dev shell
+# runs. It is handed the committed downscales rather than the artwork, so the
+# icon Windows draws is the same pixels as the icon a Linux panel and a Mac
+# draw.
+#
+# `-type TrueColorAlpha` is the one thing it has to be told: left to itself it
+# stores a size whose palette fits in 256 colours as 8-bit, and an 8-bit entry
+# in this format carries a one-bit mask rather than an alpha channel — which
+# is a hard edge around the artwork at exactly the size the taskbar draws.
+#
+# The set stops at 256 because the format stops there: an entry says its width
+# in one byte, with zero meaning 256, and there is nothing it could say about
+# the 512 above it.
+ICO="$OUT/$APP_ID.ico"
+ICO_SIZES="16 24 32 48 64 128 256"
+
+ico_pngs=()
+for size in $ICO_SIZES; do
+  ico_pngs+=("$OUT/icons/hicolor/${size}x${size}/apps/$APP_ID.png")
+done
+
+magick "${ico_pngs[@]}" -type TrueColorAlpha "$ICO"
+
+# Read back, as everything else here is: what says an .ico is right is the
+# number of images in it and the size of each, and a reader that finds one
+# entry where seven were meant draws whatever the one is.
+written=$(magick identify -format '%w ' "$ICO")
+wanted=$(printf '%s ' $ICO_SIZES)
+if [ "$written" != "$wanted" ]; then
+  printf '%s\n' "$ICO holds the sizes ${written}where it should hold ${wanted}" >&2
   exit 1
 fi

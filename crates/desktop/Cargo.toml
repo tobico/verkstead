@@ -87,6 +87,43 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
   "objc2-core-foundation",
 ] }
 
+# And the Windows half: Win32 itself, spoken to through the same `windows-sys`
+# `tray-icon` already builds on here — so the app and the tray under it speak to
+# one binding of it rather than two.
+[target.'cfg(windows)'.dependencies]
+# The message loop the tray lives on and the two ways it ends
+# (`Win32_UI_WindowsAndMessaging` and the thread id in `Win32_System_Threading`
+# — see `toolkit`), `MessageBoxW`, which is what the two dialogs are here — see
+# `dialog` — and the window station this process is on, which is how a Verkstead
+# started where there is no desktop finds that out before it draws — see
+# `screen`. One feature per header, which is how the macOS table above is cut up.
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_StationsAndDesktops",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }
+# The Run key, which is what Launch on Startup is here — see `startup::run_key`.
+# Microsoft's own wrapper over the registry calls rather than the calls: what
+# this crate does with it is open a key, read a value, write one and take one
+# away, and each of those is a call with a length to ask for, a buffer to size
+# and an error code to read that the wrapper has already handled.
+windows-registry = "0.6"
+
+[build-dependencies]
+# The icon and the version information the exe carries — see `build.rs`: it
+# writes the resource script and runs the resource compiler, which on Windows is
+# the SDK's own `rc.exe`. Not under the `cfg(windows)` table above, because a
+# build script is the *host's* program and that table is read for the host: a
+# Linux machine checking this crate for Windows would find the dependency it
+# needs missing. The build script asks what it is building for instead, and does
+# nothing where the answer is not Windows.
+#
+# Default features off: the one of them reads `[package.metadata.winresource]`
+# out of a Cargo.toml, and everything here is said in `build.rs` — carrying a
+# TOML parser to read what nothing writes would be a parser for nothing.
+winresource = { version = "0.1", default-features = false }
+
 [dev-dependencies]
 # The tests run the real binary, so what they check is what an icon starts.
 tempfile = "3"

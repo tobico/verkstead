@@ -170,9 +170,11 @@ jobs:
   # does. This job is the Windows machine this project has, and it is what will
   # say the port goes on holding.
   #
-  # The desktop crate is left out, and only until stage 05's task 03: its
-  # `toolkit` holds a `compile_error!` saying so by name. Everything else in the
-  # workspace is in, tests and all.
+  # The desktop crate is in it, which is where the exe comes from: its tray, its
+  # dialogs and its Run key are Win32, and this is the machine that compiles
+  # them. Its own suite says at each test what a Windows machine can be asked —
+  # see `crates/desktop/tests/desktop.rs`, and the registry tests in
+  # `crates/desktop/src/startup/run_key.rs`, which run nowhere else.
   windows:
     name: Windows
     runs-on: windows-2025
@@ -203,15 +205,19 @@ jobs:
 
       # No `web/dist` here either — the embed is `allow_missing`, so the crates
       # compile without the viewer.
+      #
+      # The desktop crate's build script compiles the icon and the version
+      # information into the exe with the SDK's `rc.exe`, which is the runner
+      # image's own — see `crates/desktop/build.rs`.
       - name: Build
-        run: cargo build --workspace --exclude verkstead-desktop --all-targets
+        run: cargo build --workspace --all-targets
 
       # What is left out of the run is left out of the build above: a suite that
       # stands on a mount namespace, on Apple's sandbox or on a pseudo-terminal
       # is `cfg`-gated at its own file, so this is the whole of what a Windows
       # Verkstead has to say for itself.
       - name: Test
-        run: cargo test --workspace --exclude verkstead-desktop
+        run: cargo test --workspace
 
   # The viewer's own checks, on the viewer's own sources. Nothing here waits on
   # the Rust job and nothing there waits on this one: neither produces anything
