@@ -1,23 +1,18 @@
 //! The conversations sidebar: what there is to work on, and the ways to add
 //! to it.
 //!
-//! The first of them is the compose page — a link at the head of the pane, and
-//! the composer with nothing behind it yet: the brief is written, the setup is
+//! There is one of them: the compose page — a link at the head of the pane, and
+//! the composer with nothing behind it yet. The brief is written, the setup is
 //! settled, and the Conversation is created by the press at the end of it. See
 //! `Compose.tsx`.
 //!
-//! The second is older and is on its way out. A Conversation can also be started
-//! against a registered Repo and nothing else — the branch name is the server's
-//! to prefill and the brief written afterwards — so the whole of starting one is
-//! saying which repository the work is in, and one press of a menu says it: the
-//! button drops the registered Repos, and the Repo pressed *is* the Conversation
-//! started. It stays beside the link while the roadmaps it also holds are still
-//! only reachable through it. See [`NewConversation`].
-//!
-//! The roadmaps nothing is driving are in that menu too, under a heading of
-//! their own — see [`NewConversation`] again, because they are the same thing:
-//! another way work gets into the pipeline, rather than something waiting on
-//! the human.
+//! The roadmaps nothing is driving are reached the same way, from a dropdown
+//! under that page's box rather than from anything here: adopting one is another
+//! way work gets into the pipeline rather than something waiting on the human,
+//! and it asks for the same setup in the same box. The menu that used to hold
+//! both — a press, a repo, and a Conversation created before the human had
+//! written a word — is gone, the page having taken over the last of what it
+//! offered.
 //!
 //! The row's name is the branch. A Conversation has no title of its own, and of
 //! what it does have the branch is the short line the human chose — and the one
@@ -54,7 +49,7 @@
 //! setting that is about these conversations rather than about anything else:
 //! whether the ones put away are drawn among them.
 
-import { faChevronDown, faGear } from "@fortawesome/free-solid-svg-icons";
+import { faGear } from "@fortawesome/free-solid-svg-icons";
 import { A, useLocation, useNavigate } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -69,26 +64,16 @@ import {
 } from "solid-js";
 
 import { CardButton } from "../CardButton";
-import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
-import { Menu } from "../Menu";
 import { PaneSticky } from "../Panes";
 import { Switch as Toggle } from "../Switch";
 import {
-  listAbandonedRoadmaps,
   listConversations,
-  listRepos,
   placeConversations,
   showArchived,
   showingArchived,
-  startAdoption,
-  startConversation,
 } from "../api/client";
-import type {
-  AbandonedRoadmap,
-  ConversationEntry,
-  Started,
-} from "../api/types";
+import type { ConversationEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { CardActions } from "./Actions";
@@ -473,20 +458,15 @@ export function Conversations(props: {
         </PaneHead>
       </PaneSticky>
 
-      {/* The way on to the compose page, which is where a Conversation is
-          written before it exists. A link rather than a button because it is a
-          page: it opens in a new tab if somebody asks it to, and Back leaves it.
-
-          The menu beside it is the older way in — one press, one repo, and the
-          Conversation created before the human has written a word — and it
-          stays until the compose page has taken over the roadmaps it also
-          holds. Both say *New conversation*, because both are, and the pair is
-          the one moment on this branch when they are. */}
+      {/* The one way work gets into the pipeline from here, and the whole of
+          what this pane offers beyond the list: the compose page, where a
+          Conversation is written before it exists — the brief, the setup and the
+          roadmaps there are to adopt all being questions asked in the one box.
+          A link rather than a button because it is a page: it opens in a new tab
+          if somebody asks it to, and Back leaves it. */}
       <A class={styles.compose} href="/compose">
         New conversation
       </A>
-
-      <NewConversation open={props.open} />
 
       <Switch>
         <Match when={conversations.isPending}>
@@ -645,264 +625,6 @@ function ShowArchived(): JSX.Element {
         </ErrorLine>
       </Show>
     </div>
-  );
-}
-
-/// Every way work gets into the pipeline, behind one button: the registered
-/// Repos a Conversation can be started in, and under them the roadmaps nothing
-/// is driving.
-///
-/// A menu rather than the box this used to be. Starting a Conversation is one
-/// decision — which repository — and a form that held a dropdown, a label and a
-/// Start button spent three controls and a permanent corner of the sidebar on
-/// it. Here the Repo pressed *is* the choice made: there is nothing held
-/// between picking and sending, so what the human read off the row and what
-/// went on the wire cannot come apart, which is the whole of what the
-/// [`Picker`](../picking.tsx) was guarding in this one place.
-///
-/// The roadmaps are in the same menu because they are the same kind of thing —
-/// another way to start work, on something somebody staged before Verkstead was
-/// driving anything. They were notices stacked under the box, and being always
-/// in view was what was wrong with them: nothing is waiting on the human there.
-/// Flat rather than nested under their Repo, so the group is a list of roadmaps
-/// to adopt rather than a tree to walk.
-///
-/// There is still no way to dismiss one. The repository is the source of truth
-/// for its own roadmaps everywhere else, so a roadmap that is true and unwanted
-/// is silenced in the repository — tick the box, or annotate the stage — and
-/// what stands in for never dismissing it is that the group is here every time
-/// the menu opens.
-///
-/// Pressing a roadmap starts a Conversation to adopt it with — a draft, on a
-/// page shaped for adopting rather than for grilling. Nothing is adopted by
-/// pressing it: every pairing has to be fixed first, and there is a press on
-/// that page for the adopting itself.
-function NewConversation(props: { open: (id: number) => void }): JSX.Element {
-  const queries = useQueryClient();
-
-  // The Repos are the sidebar's business only because starting a Conversation
-  // needs one. Read here rather than passed down, so the menu is whole wherever
-  // it is drawn.
-  const repos = useReading(() => ({
-    queryKey: ["repos"],
-    queryFn: listRepos,
-
-    // Merged, and for this menu rather than for any list: a rebuilt row is a
-    // new element, and a Nudge landing while the menu is open would take the
-    // human's focus off the row they had tabbed to.
-    freshness: { reconcile: "id" },
-  }));
-
-  const abandoned = useReading(() => ({
-    queryKey: ["abandoned-roadmaps"],
-    queryFn: listAbandonedRoadmaps,
-
-    // Keyed by `repo_id` and not `id`: this list is Repos rather than records
-    // of its own, so what identifies a row is which Repo it is about. The
-    // roadmaps nested under each one carry no key at all and are matched by
-    // position, which is what the server sorts them into.
-    freshness: { reconcile: "repo_id" },
-  }));
-
-  // `false` until the open menu has taken the focus, which it does once and on
-  // the first repo there is.
-  let taken = false;
-
-  // The menu's own way to shut, held here because what closes this one is a
-  // request coming back rather than the press that sent it.
-  let shut = (): void => {};
-
-  /// Take the focus to the first row of the menu, once per opening.
-  ///
-  /// Opened from the keyboard the first row is where the human is going, and a
-  /// menu whose first Tab lands past it is one they have to walk backwards out
-  /// of. Hung off the row itself rather than off the menu, because the menu
-  /// opens whether or not the repos have arrived — a menu that looked for a row
-  /// the moment it was drawn would as often as not find none. In a microtask
-  /// because focusing an element the document does not hold yet does nothing at
-  /// all.
-  const take = (row: HTMLElement): void => {
-    queueMicrotask(() => {
-      if (taken || !row.isConnected) return;
-      taken = true;
-      row.focus();
-    });
-  };
-
-  /// Every roadmap there is to adopt, flat, each still knowing which Repo it is
-  /// in — which is what a press needs and what a line with two `mvp`s in it
-  /// would otherwise be missing.
-  const roadmaps = (): Array<{
-    repoId: number;
-    repo: string;
-    roadmap: AbandonedRoadmap;
-  }> =>
-    (abandoned.data ?? []).flatMap((held) =>
-      held.roadmaps.map((roadmap) => ({
-        repoId: held.repo_id,
-        repo: held.repo,
-        roadmap,
-      })),
-    );
-
-  const start = useMutation(() => ({
-    mutationFn: (repoId: number) => startConversation(repoId),
-    onSuccess: (outcome: Started) => {
-      if (typeof outcome === "string") {
-        // `NoSuchRepo`, from a list this menu read a moment ago: the Repo was
-        // there and is not now. Reading the list again is both the correction
-        // and the explanation, and the menu stays open to be read.
-        void queries.invalidateQueries({ queryKey: ["repos"] });
-        return;
-      }
-
-      // Straight into it: what the human does next is write the brief, and the
-      // Conversation appearing in the sidebar is the confirmation on the way.
-      shut();
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
-      props.open(outcome.Started.id);
-    },
-  }));
-
-  const adopt = useMutation(() => ({
-    mutationFn: ({
-      repoId,
-      roadmap,
-      base,
-    }: {
-      repoId: number;
-      roadmap: string;
-      base: string;
-    }) => startAdoption(repoId, roadmap, base),
-    onSuccess: (outcome: Started) => {
-      if (typeof outcome === "string") {
-        // `NoSuchRepo`, against a row read a moment ago: the Repo was there and
-        // is not now. Reading both lists again is the correction and the
-        // explanation together.
-        void queries.invalidateQueries({ queryKey: ["repos"] });
-        void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
-        return;
-      }
-
-      // Straight onto its page, which is where the pairings and the base
-      // commit are fixed and where adopting is pressed.
-      shut();
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
-      props.open(outcome.Started.id);
-    },
-  }));
-
-  return (
-    <Menu
-      class={styles.newConversation!}
-      name="New conversation"
-      closer={(close) => (shut = close)}
-      opening={() => (taken = false)}
-      trigger={
-        <>
-          New conversation
-          {/* Which way the menu will go, and no part of what the button
-              says. */}
-          <Icon of={faChevronDown} />
-        </>
-      }
-    >
-      {() => (
-        <>
-          <Switch>
-            <Match when={repos.data?.length === 0}>
-              {/* Nothing to attach a Conversation to, so the only thing to
-                  offer is the page that fixes that. */}
-              <Empty class={styles.nothing}>
-                No repos are registered yet —{" "}
-                <A href="/settings">register one</A> to start a conversation.
-              </Empty>
-            </Match>
-            <Match when={repos.data}>
-              {(registered) => (
-                <For each={registered()}>
-                  {(repo, at) => (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      ref={(row) => at() === 0 && take(row)}
-                      disabled={start.isPending}
-                      onClick={() => start.mutate(repo.id)}
-                    >
-                      {repo.name}
-                    </button>
-                  )}
-                </For>
-              )}
-            </Match>
-          </Switch>
-
-          <Show when={roadmaps().length}>
-            <div
-              class={styles.menuGroup}
-              role="group"
-              aria-labelledby="adopt-a-roadmap"
-            >
-              <p class={styles.menuHeading} id="adopt-a-roadmap">
-                Adopt a roadmap
-              </p>
-              <For each={roadmaps()}>
-                {(held) => (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    class={styles.adoptRoadmap}
-                    disabled={adopt.isPending}
-                    onClick={() =>
-                      adopt.mutate({
-                        repoId: held.repoId,
-                        roadmap: held.roadmap.name,
-                        base: held.roadmap.base,
-                      })
-                    }
-                  >
-                    <span class={styles.what}>
-                      <code>{held.roadmap.name}</code>
-                      <span class={styles.in}>in {held.repo}</span>
-                    </span>
-                    <span class={styles.stage}>
-                      next is stage {held.roadmap.stage}:{" "}
-                      {held.roadmap.stage_title}
-                    </span>
-                    {/* Where the roadmap was found, said only when it is
-                        somewhere other than the default branch: a roadmap on an
-                        unmerged branch is adopted from that branch, and which
-                        branch it is decides what the stage is built on. */}
-                    <Show when={held.roadmap.base}>
-                      {(base) => (
-                        <span class={styles.base}>
-                          on <code>{base()}</code>
-                        </span>
-                      )}
-                    </Show>
-                  </button>
-                )}
-              </For>
-            </div>
-          </Show>
-
-          {/* A server that could not answer at all, which is the one thing here
-              that is an error rather than an outcome. Said inside the menu, and
-              the menu is still open to say it in: a press that failed left
-              nothing else on the screen to carry the news. */}
-          <Show when={start.isError}>
-            <ErrorLine class={styles.failure}>
-              The conversation could not be started: {start.error?.message}
-            </ErrorLine>
-          </Show>
-          <Show when={adopt.isError}>
-            <ErrorLine class={styles.failure}>
-              The conversation could not be started: {adopt.error?.message}
-            </ErrorLine>
-          </Show>
-        </>
-      )}
-    </Menu>
   );
 }
 

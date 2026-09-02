@@ -10,10 +10,17 @@
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { ProfileEntry, RepoPairingsView } from "../src/api/types";
+import type {
+  AbandonedRepo,
+  Adopted,
+  ProfileEntry,
+  RepoPairingsView,
+} from "../src/api/types";
+import menu from "../src/Menu.module.css";
 import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import setup from "../src/workbench/Setup.module.css";
+import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { BRANCH_REFUSAL } from "../src/workbench/Setup";
 import {
   COMPOSING,
@@ -26,6 +33,11 @@ import {
 import { OPEN, PROFILES, REPOS, drawn, mount, theWorkbench } from "./bench";
 import { pick, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
+import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
+
+/// The roadmaps nothing is driving, as the server answers for them: three of
+/// them in one repo, the last found on a branch that has not merged.
+const ABANDONED = abandoned as AbandonedRepo[];
 
 /// What the page put on the wire when it wrote to `path`, and how often it did.
 ///
@@ -117,7 +129,7 @@ describe("the compose page", () => {
     leaveRefusals(0, []);
   });
 
-  it("is reached from the sidebar, with the older menu still beside it", async () => {
+  it("is the one way into a new conversation from the sidebar", async () => {
     theWorkbench();
     const { container } = mount();
 
@@ -129,11 +141,13 @@ describe("the compose page", () => {
     expect(link.getAttribute("href")).toBe("/compose");
     expect(link.textContent).toBe("New conversation");
 
-    // Nothing is unreachable while the two of them stand together: the menu
-    // still holds the roadmaps, and it retires when they move.
+    // And the button stands alone: the menu beside it — one press, one repo,
+    // and a conversation created before a word was written — went when this
+    // page took over the last of what it offered, so the pane drops nothing at
+    // all any more.
     expect(
-      container.querySelector(`.${sidebar.newConversation} > button`),
-    ).toBeTruthy();
+      screen.getByLabelText("Conversations").querySelector('[aria-haspopup="menu"]'),
+    ).toBeNull();
   });
 
   it("draws the composer with no timeline beside it", async () => {
@@ -508,6 +522,317 @@ describe("the compose page", () => {
   });
 });
 
+/// The other way work gets into the pipeline, which is this page as well: a
+/// roadmap somebody staged before Verkstead was driving anything, loaded into
+/// the composer and started from it.
+///
+/// This is where the sidebar's New-conversation menu ended up. What was a group
+/// of rows under the repos is a dropdown under the box, and what a press does is
+/// the difference worth asking about: the menu created a conversation on the
+/// spot, and this creates nothing until one of the two presses under the box.
+describe("adopting a roadmap from the compose page", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// The workbench with roadmaps to adopt, and the two endpoints a press walks
+  /// through — the adoption started, and the stage adopted.
+  function adopting(...answers: Parameters<typeof serving>) {
+    return theWorkbench(
+      whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
+      whenever("/api/ui/adoptions", json({ Started: { id: OPEN.id } }), "POST"),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/adopt`,
+        json("Adopted" satisfies Adopted),
+        "POST",
+      ),
+      ...answers,
+      json(null),
+    );
+  }
+
+  /// The dropdown under the box, dropped — and the rows it holds.
+  async function roadmapRows(
+    container: ParentNode,
+  ): Promise<HTMLButtonElement[]> {
+    fireEvent.click(
+      await drawn(container, `.${composer.adopt} > .${menu.trigger}`),
+    );
+    await drawn(container, `.${composer.roadmapRow}`);
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${composer.roadmapRow}`,
+      ),
+    ];
+  }
+
+  /// Load the one at `at`, which is what pressing its row does.
+  async function loadRoadmap(container: ParentNode, at: number): Promise<void> {
+    fireEvent.click((await roadmapRows(container))[at]!);
+    await drawn(container, `.${composer.loaded}`);
+  }
+
+  /// Every roadmap there is to adopt, flat, in the order the rows come down.
+  const flat = ABANDONED.flatMap((held) =>
+    held.roadmaps.map((roadmap) => ({ repo: held.repo, roadmap })),
+  );
+
+  it("names each roadmap, its repo, the next stage and where it was found", async () => {
+    adopting();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const rows = await roadmapRows(container);
+    expect(rows.length).toBe(flat.length);
+
+    for (const [n, held] of flat.entries()) {
+      const said = rows[n]!.textContent!;
+      expect(said).toContain(held.roadmap.name);
+      expect(said).toContain(held.repo);
+      expect(said).toContain(held.roadmap.stage);
+      expect(said).toContain(held.roadmap.stage_title);
+    }
+
+    // Where the roadmap was found, said only when it is somewhere other than
+    // the default branch: that branch is what the stage gets built on.
+    expect(rows[2]!.textContent).toContain("tobi/steer");
+    expect(rows[0]!.textContent).not.toContain("on ");
+  });
+
+  /// Nothing to adopt is nothing to offer, and a brief already being written is
+  /// nothing to replace: the dropdown loads what would stand in the box, and
+  /// one offering to replace a half-written brief would be offering to lose it.
+  it("is drawn only with roadmaps to adopt and an empty box", async () => {
+    theWorkbench();
+    const { container } = mount("/compose");
+
+    // The bench serves no roadmaps at all, which is what a workbench whose
+    // repositories are all being driven looks like.
+    await composing(container);
+    expect(container.querySelector(`.${composer.adopt}`)).toBeNull();
+  });
+
+  it("goes when a brief is being written, and comes back when it is cleared", async () => {
+    adopting();
+    const { container } = mount("/compose");
+    const box = await composing(container);
+
+    await drawn(container, `.${composer.adopt}`);
+
+    fireEvent.input(box, { target: { value: "Make the widget" } });
+    await waitFor(() =>
+      expect(container.querySelector(`.${composer.adopt}`)).toBeNull(),
+    );
+
+    fireEvent.input(box, { target: { value: "" } });
+    await drawn(container, `.${composer.adopt}`);
+  });
+
+  /// Loading one creates nothing: the row is written into what this device is
+  /// holding, and the box locks to the stage that would be started.
+  it("locks the box to the roadmap, and creates nothing", async () => {
+    const fetching = adopting();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await loadRoadmap(container, 0);
+
+    const card = await drawn(container, `.${composer.loaded}`);
+    expect(card.textContent).toContain(ABANDONED[0]!.roadmaps[0]!.name);
+    expect(card.textContent).toContain(ABANDONED[0]!.roadmaps[0]!.stage_title);
+
+    // No field left to write in, and nothing on the wire.
+    expect(container.querySelector(`.${composer.box} textarea`)).toBeNull();
+    expect(writes(fetching, "/api/ui/adoptions")).toBe(0);
+  });
+
+  /// The repo is the roadmap's own and settled, the branch and the base are the
+  /// stage's, and what is left is what adopting actually asks for: the pairings
+  /// and the repos alongside.
+  it("fixes the repo and the base, and leaves the pairings and companions live", async () => {
+    adopting();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await loadRoadmap(container, 0);
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${setup.repoOption} .${setup.optionValue}`)
+          ?.textContent,
+      ).toBe(ABANDONED[0]!.repo),
+    );
+
+    await openRepo(container);
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).disabled).toBe(
+      true,
+    );
+    expect(container.querySelector("#branch")).toBeNull();
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+
+    // The two that are still the human's to settle.
+    expect(screen.getByLabelText("Works alongside")).toBeTruthy();
+    expect(screen.getByLabelText("Grilling")).toBeTruthy();
+  });
+
+  /// And put down again, which gives the box back what was in it: a roadmap is
+  /// loaded *over* the brief rather than in place of it, so nothing that was
+  /// written is lost by taking one up.
+  it("clears back to the brief this device was holding", async () => {
+    // A device holding both, which is what the state is shaped to hold: the
+    // brief that was written, and the roadmap standing over it.
+    keep({
+      ...blank(),
+      brief: "Make the widget",
+      adopting: {
+        repo_id: ABANDONED[0]!.repo_id,
+        repo: ABANDONED[0]!.repo,
+        roadmap: ABANDONED[0]!.roadmaps[0]!.name,
+        title: ABANDONED[0]!.roadmaps[0]!.title,
+        stage: ABANDONED[0]!.roadmaps[0]!.stage,
+        stage_title: ABANDONED[0]!.roadmaps[0]!.stage_title,
+        base: ABANDONED[0]!.roadmaps[0]!.base,
+      },
+    });
+    adopting();
+    const { container } = mount("/compose");
+
+    // The roadmap is what the box is showing, and the brief is nowhere on the
+    // page until it is put down.
+    await drawn(container, `.${composer.loaded}`);
+    expect(container.querySelector(`.${composer.box} textarea`)).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Clear ${ABANDONED[0]!.roadmaps[0]!.name}`,
+      }),
+    );
+
+    const box = await composing(container);
+    await waitFor(() => expect(box.value).toBe("Make the widget"));
+  });
+
+  /// Held on the device like everything else on this page: a reload lands on
+  /// the roadmap that was loaded rather than on a blank box.
+  it("keeps the loaded roadmap on this device", async () => {
+    adopting();
+    const first = mount("/compose");
+
+    await composing(first.container);
+    await loadRoadmap(first.container, 1);
+    first.unmount();
+
+    const again = mount("/compose");
+    const card = await drawn(again.container, `.${composer.loaded}`);
+    expect(card.textContent).toContain(ABANDONED[0]!.roadmaps[1]!.name);
+  });
+
+  /// The press: the adoption started against the repo and the roadmap, every
+  /// touched field put on what it made, and the stage adopted.
+  it("starts the adoption, applies what was touched and adopts", async () => {
+    const fetching = adopting(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/review-pairing`,
+        json("Chosen"),
+        "POST",
+      ),
+    );
+    const { container, history } = mount("/compose");
+
+    await composing(container);
+    await loadRoadmap(container, 2);
+
+    await waitFor(() => expect(screen.getByLabelText("Review")).toBeTruthy());
+    pick("Review", "No review");
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/adoptions")).toEqual({
+        repo_id: ABANDONED[0]!.repo_id,
+        roadmap: ABANDONED[0]!.roadmaps[2]!.name,
+        // The branch the roadmap was found on, so the conversation starts fixed
+        // to it: a roadmap on an unmerged branch is only on that branch.
+        base: ABANDONED[0]!.roadmaps[2]!.base,
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+      ).toEqual({ pairing: null }),
+    );
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/adopt`)).toBe(1),
+    );
+
+    // The three the roadmap answers for itself are never asked: the stage's
+    // brief arrives with the adoption, the stage is worked on its own slug, and
+    // the base went out with the start.
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/brief`)).toBe(0);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/branch`)).toBe(0);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/base`)).toBe(0);
+
+    await waitFor(() =>
+      expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true),
+    );
+    await waitFor(() => expect(localStorage.getItem(COMPOSING)).toBeNull());
+  });
+
+  /// And the quieter press, which does everything but the last of it: the
+  /// conversation is there to be looked at, and adopting is a press on its own
+  /// page — which is what the menu's row did, minus the start.
+  it("saves as a draft without adopting", async () => {
+    const fetching = adopting();
+    const { container, history } = mount("/compose");
+
+    await composing(container);
+    await loadRoadmap(container, 0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/adoptions")).toEqual({
+        repo_id: ABANDONED[0]!.repo_id,
+        roadmap: ABANDONED[0]!.roadmaps[0]!.name,
+        // Off the default branch, so there is no base to fix.
+        base: null,
+      }),
+    );
+    await waitFor(() =>
+      expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true),
+    );
+
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/adopt`)).toBe(0);
+  });
+
+  /// A refusal is carried to the conversation it is about, exactly as every
+  /// other one this page's replay meets is.
+  it("says on the conversation it made what refused the adoption", async () => {
+    adopting(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/adopt`,
+        json("NoGrillingProfile" satisfies Adopted),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await loadRoadmap(container, 0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          `The stage could not be adopted: ${ADOPT_REFUSAL.NoGrillingProfile}`,
+        ),
+      ).toBeTruthy(),
+    );
+  });
+});
+
 /// And the state away from the page it is composed on: what survives a round
 /// trip through this device, and what is discarded rather than half-applied.
 describe("what a device holds between visits", () => {
@@ -525,6 +850,7 @@ describe("what a device holds between visits", () => {
       grilling: "1:opus",
       implementation: "2:fable",
       review: null,
+      adopting: null,
     };
 
     keep(held);

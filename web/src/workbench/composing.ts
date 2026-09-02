@@ -19,11 +19,20 @@
 //! from the first request, so a field the server would not take leaves a draft
 //! with the rest of the work in it — and the refusals travel to that draft
 //! rather than dying with the page that made it, see [`refusedOnCreate`].
+//!
+//! **A roadmap loaded into the page is held the same way and creates the other
+//! kind of Conversation.** Picking one out of the Adopt dropdown writes it into
+//! what this device is holding and nothing else — see [`Adopting`] — so it
+//! survives a reload as everything else here does, and the press is still the
+//! first thing that reaches the server. What that press starts is an adoption
+//! rather than a draft against a Repo, and what kicks it off at the end is the
+//! adopt endpoint rather than the grill one.
 
 import { createSignal } from "solid-js";
 
 import {
   addCompanion,
+  adoptRoadmap,
   chooseGrillingPairing,
   chooseImplementationPairing,
   chooseReviewPairing,
@@ -33,12 +42,14 @@ import {
   setBaseBranch,
   setCompanionBase,
   setCompanionMode,
+  startAdoption,
   startConversation,
   startGrilling,
 } from "../api/client";
 import type { CompanionMode } from "../api/types";
 import { forget, read, write } from "../device";
 import * as pairing from "../pairing";
+import { adoptRefusal } from "./Adoption";
 import {
   BASE_REFUSAL,
   BRANCH_REFUSAL,
@@ -69,6 +80,34 @@ export type Alongside = {
   branch: string;
 };
 
+/// The roadmap a compose page is loaded with, as the row that loaded it worded
+/// it: which repository it is in, which roadmap, and the stage that would be
+/// adopted.
+///
+/// Everything here was read off the abandoned-roadmaps list, and nothing is read
+/// again to draw it — the card in the box is this record rather than a request.
+/// The stage's own brief text is never on this device at all: it is the
+/// repository's, and it becomes the Conversation's Brief at the moment the stage
+/// is adopted.
+export type Adopting = {
+  repo_id: number;
+  /// What the Repo is called, for the card: the list of Repos is read beside
+  /// this and may not have landed, and a card naming no repository would be a
+  /// card missing the thing that tells two `mvp`s apart.
+  repo: string;
+  /// Its directory name under `docs/roadmaps/` — `mvp`.
+  roadmap: string;
+  /// What the roadmap calls itself in its heading, or empty where it has none.
+  title: string;
+  /// The next stage as the roadmap writes it, and what it is called.
+  stage: string;
+  stage_title: string;
+  /// The branch the roadmap was read off, empty being the repo's default branch
+  /// — which is the base the adopting Conversation is started fixed to, a
+  /// roadmap on an unmerged branch being only on that branch.
+  base: string;
+};
+
 /// The whole of a compose page, as it sits on the device between visits.
 ///
 /// Three of the fields are `null` where they are **untouched** rather than
@@ -90,6 +129,14 @@ export type Composed = {
   grilling: string | null;
   implementation: string | null;
   review: string | null;
+  /// The roadmap this page is loaded with, or `null` where it is composing a
+  /// piece of work of its own.
+  ///
+  /// Loaded rather than merged into the fields around it: the repo, the base and
+  /// the branch are the roadmap's own while it is held, and the brief, the repo
+  /// and the base under it are left exactly where they were — which is what
+  /// clearing it restores.
+  adopting: Adopting | null;
 };
 
 /// A compose page nobody has touched.
@@ -103,7 +150,18 @@ export function blank(): Composed {
     grilling: null,
     implementation: null,
     review: null,
+    adopting: null,
   };
+}
+
+/// Which Repo the work would be in: the roadmap's own where one is loaded, and
+/// whatever was picked where none is.
+///
+/// The one reading everything about the repository is drawn off — the trigger's
+/// name, the companions an add is refused for, the pairings the Repo is
+/// remembered to have been grilled with.
+export function on(state: Composed): number | null {
+  return state.adopting?.repo_id ?? state.repo;
 }
 
 /// Whether there is nothing in it worth coming back to. An untouched page is
@@ -118,7 +176,8 @@ export function empty(state: Composed): boolean {
     state.companions.length === 0 &&
     state.grilling === null &&
     state.implementation === null &&
-    state.review === null
+    state.review === null &&
+    state.adopting === null
   );
 }
 
@@ -185,15 +244,26 @@ export type Created =
 /// not take whole is not the setup the human asked to start work under, and a
 /// draft is what they can look at and fix; every other refusal on the way is
 /// still worth carrying, so the list is what decides rather than the first one.
+///
+/// **A page loaded with a roadmap creates the other kind of Conversation**, and
+/// most of the replay is not asked of it: the Brief is the stage's, the branch
+/// is the stage's slug and the base was fixed by the row that loaded it, so what
+/// is left to put on is the companions and the pairings. What the press does at
+/// the end of it is adopt rather than grill, which is the same act — the work
+/// beginning — under the other name.
 export async function create(
   state: Composed,
   work: boolean,
 ): Promise<Created> {
-  if (state.repo === null) {
+  const held = state.adopting;
+  if (held === null && state.repo === null) {
     return "NoSuchRepo";
   }
 
-  const started = await startConversation(state.repo);
+  const started =
+    held === null
+      ? await startConversation(state.repo!)
+      : await startAdoption(held.repo_id, held.roadmap, held.base);
   if (started === "NoSuchRepo") {
     return started;
   }
@@ -208,28 +278,33 @@ export async function create(
     return ok;
   };
 
-  if (state.brief.trim() !== "") {
-    const outcome = await saveBrief(id, state.brief);
-    said(
-      outcome === "Saved",
-      `The brief could not be saved: ${BRIEF_REFUSAL[outcome]}`,
-    );
-  }
+  // The three the roadmap answers for itself, and so are asked only of a page
+  // composing work of its own: the stage's brief arrives with the adoption, the
+  // stage is worked on its own slug, and the base went out with the start.
+  if (held === null) {
+    if (state.brief.trim() !== "") {
+      const outcome = await saveBrief(id, state.brief);
+      said(
+        outcome === "Saved",
+        `The brief could not be saved: ${BRIEF_REFUSAL[outcome]}`,
+      );
+    }
 
-  if (state.branch !== "") {
-    const outcome = await renameBranch(id, state.branch);
-    said(
-      outcome === "Renamed",
-      `The branch could not be named: ${BRANCH_REFUSAL[outcome]}`,
-    );
-  }
+    if (state.branch !== "") {
+      const outcome = await renameBranch(id, state.branch);
+      said(
+        outcome === "Renamed",
+        `The branch could not be named: ${BRANCH_REFUSAL[outcome]}`,
+      );
+    }
 
-  if (state.base !== null) {
-    const outcome = await setBaseBranch(id, state.base);
-    said(
-      outcome === "Recorded",
-      `The base branch could not be recorded: ${BASE_REFUSAL[outcome]}`,
-    );
+    if (state.base !== null) {
+      const outcome = await setBaseBranch(id, state.base);
+      said(
+        outcome === "Recorded",
+        `The base branch could not be recorded: ${BASE_REFUSAL[outcome]}`,
+      );
+    }
   }
 
   for (const alongside of state.companions) {
@@ -267,11 +342,19 @@ export async function create(
   }
 
   if (work && refused.length === 0) {
-    const outcome = await startGrilling(id);
-    said(
-      outcome === "Started",
-      `The work could not be started: ${grillRefusal(outcome)}`,
-    );
+    if (held === null) {
+      const outcome = await startGrilling(id);
+      said(
+        outcome === "Started",
+        `The work could not be started: ${grillRefusal(outcome)}`,
+      );
+    } else {
+      const outcome = await adoptRoadmap(id);
+      said(
+        outcome === "Adopted",
+        `The stage could not be adopted: ${adoptRefusal(outcome)}`,
+      );
+    }
   }
 
   return { conversation: id, refused };
@@ -389,7 +472,8 @@ function parsed(body: string): Composed | null {
     !Array.isArray(held.companions) ||
     !picked(held.grilling) ||
     !picked(held.implementation) ||
-    !picked(held.review)
+    !picked(held.review) ||
+    !loaded(held.adopting)
   ) {
     return null;
   }
@@ -422,7 +506,35 @@ function parsed(body: string): Composed | null {
     grilling: held.grilling,
     implementation: held.implementation,
     review: held.review,
+    adopting: held.adopting ?? null,
   };
+}
+
+/// Whether this is a roadmap loaded into the page, or none at all.
+///
+/// Every field of one, because the card is drawn straight off it and nothing
+/// reads it again: a body missing the stage would be a card with a gap in it,
+/// and a body from an older build has no `adopting` at all — which is the one
+/// absence that is not a fault, and reads as no roadmap loaded.
+function loaded(value: unknown): value is Adopting | null | undefined {
+  if (value === null || value === undefined) {
+    return true;
+  }
+
+  if (typeof value !== "object") {
+    return false;
+  }
+
+  const roadmap = value as Partial<Adopting>;
+  return (
+    typeof roadmap.repo_id === "number" &&
+    typeof roadmap.repo === "string" &&
+    typeof roadmap.roadmap === "string" &&
+    typeof roadmap.title === "string" &&
+    typeof roadmap.stage === "string" &&
+    typeof roadmap.stage_title === "string" &&
+    typeof roadmap.base === "string"
+  );
 }
 
 /// Whether this is a repo id or the absence of one.

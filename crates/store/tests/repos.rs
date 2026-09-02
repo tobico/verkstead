@@ -121,8 +121,8 @@ async fn nothing_registered_means_nothing_listed() {
 }
 
 /// Taking a Repo away takes it off every list that offers Repos for new work —
-/// which is this read, the one the settings list, the New conversation menu and
-/// the abandoned-roadmaps notice are all drawn from.
+/// which is this read, the one the settings list, the compose page's Repo
+/// dropdown and the roadmaps there are to adopt are all drawn from.
 #[tokio::test]
 async fn an_unregistered_repo_is_off_the_list() {
     let (_dir, pool) = fresh_pool().await;
@@ -245,9 +245,10 @@ async fn registering_an_unregistered_path_again_revives_it() {
 }
 
 /// Off the registry is not merely off the list: no new work goes into a Repo
-/// that has been taken away, however the id got as far as the press. A sidebar
+/// that has been taken away, however the id got as far as the press. A page
 /// that has not heard about the removal is the ordinary way that happens — one
-/// device removes a Repo and another still has it in its New conversation menu.
+/// device removes a Repo and another still has it in its compose page's Repo
+/// dropdown.
 #[tokio::test]
 async fn nothing_new_is_started_in_an_unregistered_repo() {
     let (_dir, pool) = fresh_pool().await;

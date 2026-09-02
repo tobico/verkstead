@@ -82,15 +82,16 @@ const DRAFTING = drafting as ConversationView;
 /// counts.
 const OPENED = `/api/ui/conversations/${CONVERSATION.id}`;
 
-/// The four lists the workbench draws its panes over: the sidebar, the Repos the
-/// picker on it needs, the roadmaps nothing is driving beside them, and the
-/// Agent Profiles.
+/// The four lists the workbench draws its panes over: the sidebar, the Repos its
+/// pickers need, the roadmaps nothing is driving, and the Agent Profiles.
 ///
-/// The Profiles are the one of the four a conversation page does not read by
-/// being drawn: what reads them is a pairing picker, and the pickers are on a
-/// draft's setup and in the steer modal. So the sweeps below count them at zero
-/// on the conversation they open, and [`a Nudge of kind profiles`] is asked
-/// about where one is drawn.
+/// Three of the four a conversation page does not read by being drawn. What
+/// reads the Profiles is a pairing picker, and the pickers are on a draft's
+/// setup and in the steer modal; what reads the Repos and the roadmaps is the
+/// compose page, whose Repo option is over the one and whose Adopt dropdown is
+/// over the other. So the sweeps below count all three at zero on the
+/// conversation they open, and each is asked about where it is drawn — see the
+/// two tests after the sweep.
 ///
 /// Named because they are counted. Which of them a Nudge moves is the whole
 /// question of what a kind stands for, and the reason the tests below can tell
@@ -393,11 +394,10 @@ describe("the Nudge stream", () => {
     const fetching = serving(...BESIDE, json(CONVERSATION), json(MOVED_ON));
     render(() => <App />);
     await waitFor(() => screen.getByText(ALREADY_THERE));
-    // The Profiles are not among them: nothing on a conversation page reads
-    // that list, so there is no query mounted for a re-read to land in.
-    const lists = [SIDEBAR, REPOS, ROADMAPS].map((path) =>
-      askedFor(fetching, path),
-    );
+    // The sidebar's list is the only one among them: nothing on a conversation
+    // page reads the Repos, the roadmaps or the Profiles, so there is no query
+    // of any of the three for a re-read to land in.
+    const lists = [SIDEBAR].map((path) => askedFor(fetching, path));
     stream().opens();
 
     stream().nudges(wire);
@@ -407,7 +407,7 @@ describe("the Nudge stream", () => {
     // moved, which is what it used to do about everything.
     await waitFor(() => screen.getByText(ARRIVAL.title));
     expect(askedFor(fetching, OPENED)).toBe(2);
-    [SIDEBAR, REPOS, ROADMAPS].forEach((path, at) => {
+    [SIDEBAR].forEach((path, at) => {
       expect(askedFor(fetching, path), `${path} was not read again`).toBe(
         lists[at]! + 1,
       );
@@ -531,7 +531,11 @@ const ABOUT: Record<string, readonly string[]> = {
   liveness: [OPENED],
   conversation: [OPENED, SIDEBAR],
   conversations: [SIDEBAR],
-  repos: [REPOS, ROADMAPS],
+  // Both lists this kind moves are the compose page's, and the sweep opens a
+  // conversation: the registered Repos are read by the Repo option, and the
+  // roadmaps nothing is driving by the Adopt dropdown beside it. Asked about
+  // where they are drawn, in the test after this sweep.
+  repos: [],
   // Every workbench pane draws the list now, a picker or no picker: the status
   // button says who is running and the record says who ran, and both are read
   // against the saved accounts. Once however many of them are mounted — one
@@ -576,6 +580,36 @@ describe("what a Nudge is about", () => {
       });
     },
   );
+
+  /// The Repos and the roadmaps nothing is driving, asked about where they are
+  /// drawn: the compose page, which is over both — the registered Repos in its
+  /// Repo option, and the roadmaps in the Adopt dropdown under its box.
+  ///
+  /// Its own test rather than a row of the sweep, for the Profiles' reason
+  /// below: the sweep opens a conversation being grilled, and nothing there is
+  /// drawn over either list.
+  it("reads the repos and the roadmaps back where the compose page draws them", async () => {
+    window.history.pushState({}, "", "/compose");
+    const fetching = serving(...BESIDE);
+    render(() => <App />);
+    // Let the reads the page makes on its way up land: the box is drawn over
+    // what this device is holding, and the two lists are read beside it.
+    await vi.advanceTimersByTimeAsync(0);
+    await waitFor(() =>
+      expect(document.querySelector("textarea")).not.toBeNull(),
+    );
+    stream().opens();
+    const before = [REPOS, ROADMAPS].map((path) => askedFor(fetching, path));
+
+    stream().nudges({ kind: "repos" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await waitFor(() =>
+      [REPOS, ROADMAPS].forEach((path, at) => {
+        expect(askedFor(fetching, path), path).toBe(before[at]! + 1);
+      }),
+    );
+  });
 
   /// The Agent Profiles, asked about where one is drawn: a draft's setup, whose
   /// two pairing pickers are the list on the page.

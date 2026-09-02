@@ -131,6 +131,106 @@
   }
 }
 
+/* The roadmap the compose page has been loaded with, standing where the field
+   would be: the box locks to it, an adopted stage's brief being the
+   repository's own. At the padding the rendering beside it is read at, so the
+   box reads the same whichever of the three it is holding. See `Compose.tsx`. */
+.loaded {
+  padding: 0.5rem 0.6rem;
+}
+
+/* The roadmap's name, whatever it calls itself, and the way back out at the far
+   end — one line, wrapping on a phone rather than pushing the × off the card. */
+.roadmapLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+  align-items: baseline;
+  margin: 0 0 0.25rem;
+}
+
+.roadmapTitle {
+  color: var(--ink-soft);
+}
+
+/* The mark that puts the roadmap down, pushed to the far end of that line: it is
+   drawn as the companion rows' own × is, for the reason it is the same act —
+   taking a thing back off what is being composed. */
+.clear {
+  margin-left: auto;
+  padding: 0 0.3rem;
+  font: inherit;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* The stage that would be started, which is what the press under the box would
+   actually do. */
+.stage {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+
+/* The dropdown that loads one, at the near edge of the row the presses are at
+   the far edge of — pushed there by the presses' own `flex-end`, so a row with
+   no roadmaps to offer is the pair of presses exactly as it was.
+
+   An action with a chevron rather than a label over a value: the row inside the
+   box says what the work is, and this says what to put in the box. */
+.adopt {
+  margin-right: auto;
+}
+
+.adopt > button {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+}
+
+/* Hung from the trigger's near edge rather than its far one, the trigger being
+   the first thing in the row — and never wider than the window it comes down
+   over. Capped and scrolling inside the cap: a workbench watching a handful of
+   repositories has more roadmaps than a phone has room for. */
+.adopt > [role="menu"] {
+  right: auto;
+  left: 0;
+  width: min(22rem, calc(100vw - 2.5rem));
+  max-height: min(28rem, 70vh);
+  overflow-y: auto;
+}
+
+/* The roadmap's name over the stage that would be started, because on a phone
+   the two of them do not share a line — and the Repo beside the name, since the
+   list is flat and two repositories may each hold an `mvp`. */
+.roadmapRow .what {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.4rem;
+}
+
+.roadmapRow .in,
+.roadmapRow .next,
+.roadmapRow .found {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* Where the roadmap was found, on its own line under the stage and only there
+   when it is somewhere other than the default branch. */
+.roadmapRow .found {
+  display: block;
+}
+
 /* And the compose page's presses, which are the same one with another beside
    it: a Conversation can be created without being started, and that is the
    quieter of the two. A row, so the pair sits against the far edge the start
@@ -171,5 +271,15 @@
   .presses .draft:not(:disabled):hover {
     color: var(--accent-deep);
     border-color: var(--accent-deep);
+  }
+
+  /* The two quiet controls under the box deepen their accent the way the
+     filled one deepens its fill. */
+  .adopt > button:not(:disabled):hover {
+    color: var(--accent-deep);
+  }
+
+  .clear:hover {
+    color: var(--ink);
   }
 }

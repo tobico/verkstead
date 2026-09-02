@@ -23,22 +23,43 @@
 //! it is created; this page has no draft yet, so it asks for the same answer and
 //! shows it — see `showing`, which is careful to show it rather than hold it.
 //!
+//! **And it is where a roadmap is adopted from**, that being the other way work
+//! gets into the pipeline rather than another page for it: the *Adopt a roadmap*
+//! dropdown under the box lists the roadmaps nothing is driving, and picking one
+//! loads it into what this device is holding. The box locks to a card naming the
+//! roadmap and the stage that would be started, the repo and the base are the
+//! roadmap's own, and the pairings and the repos alongside stay the human's to
+//! settle — which is the whole of what adopting asks for. Clearing it gives the
+//! box back whatever was typed in it.
+//!
+//! What the two presses do with a roadmap loaded is what they always do, under
+//! the other name: *Start work* creates the adopting Conversation and adopts the
+//! stage, and *Save as draft* creates it and leaves the stage to be adopted on
+//! its own page.
+//!
 //! What it does *not* do is decide anything the composer decides. Every control
 //! here is the composer's own component drawn over the compose state instead of
 //! over a Conversation — see `Setup.tsx`, where they live — so the two pages
 //! cannot come to ask different questions or word them differently.
 
-import { useNavigate } from "@solidjs/router";
+import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
+import { A, useNavigate } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 
 import app from "../App.module.css";
+import { Icon } from "../Icon";
+import { Menu } from "../Menu";
 import { PaneSticky, Panes } from "../Panes";
 import { Switch as Toggle } from "../Switch";
-import { listRepos, loadRepoPairings } from "../api/client";
+import {
+  listAbandonedRoadmaps,
+  listRepos,
+  loadRepoPairings,
+} from "../api/client";
 import type { RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
-import { ErrorLine, Note } from "../notices";
+import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Conversations } from "./Conversations";
 import styles from "./Composer.module.css";
@@ -62,7 +83,9 @@ import {
   create,
   keep,
   leaveRefusals,
+  on,
   stored,
+  type Adopting,
   type Alongside,
   type Composed,
 } from "./composing";
@@ -126,10 +149,45 @@ function Compose(props: {
     freshness: { reconcile: "id" },
   }));
 
-  /// Which Repo the work would be in, where the list has it — nothing until one
-  /// is picked, and nothing while the list is still on its way.
+  // And the roadmaps nothing is driving, which is the other way work gets into
+  // the pipeline: the rows behind the Adopt dropdown under the box. Read under
+  // the key the rest of the app reads them under, and read again whenever the
+  // page looks again — a roadmap somebody has picked up since simply stops
+  // being on the list.
+  const abandoned = useReading(() => ({
+    queryKey: ["abandoned-roadmaps"],
+    queryFn: listAbandonedRoadmaps,
+
+    // Keyed by `repo_id`: this list is Repos rather than records of its own, and
+    // a Nudge landing while the dropdown is open must not rebuild the row the
+    // human had tabbed to.
+    freshness: { reconcile: "repo_id" },
+  }));
+
+  /// The roadmap this page is loaded with, where it is loaded with one.
+  const adopting = (): Adopting | null => state().adopting;
+
+  /// Every roadmap there is to adopt, flat and in the shape the page holds one
+  /// in — each still knowing which Repo it is in, which is what a line with two
+  /// `mvp`s in it would otherwise be missing.
+  const roadmaps = (): Adopting[] =>
+    (abandoned.data ?? []).flatMap((held) =>
+      held.roadmaps.map((roadmap) => ({
+        repo_id: held.repo_id,
+        repo: held.repo,
+        roadmap: roadmap.name,
+        title: roadmap.title,
+        stage: roadmap.stage,
+        stage_title: roadmap.stage_title,
+        base: roadmap.base,
+      })),
+    );
+
+  /// Which Repo the work would be in, where the list has it — the roadmap's own
+  /// while one is loaded, nothing until one is picked, and nothing while the
+  /// list is still on its way.
   const repo = (): RepoEntry | null =>
-    (repos.data ?? []).find((entry) => entry.id === state().repo) ?? null;
+    (repos.data ?? []).find((entry) => entry.id === on(state())) ?? null;
 
   // And what that repo was last grilled with, which is what a draft created on
   // it would arrive showing. Read the moment one is picked and again whenever it
@@ -141,9 +199,9 @@ function Compose(props: {
   // as from a desk, and every judgement about whether a remembered pairing still
   // runs is made where the profiles and the watched paths are.
   const remembered = useReading(() => ({
-    queryKey: ["repos", state().repo, "pairings"],
-    queryFn: () => loadRepoPairings(state().repo!),
-    enabled: state().repo !== null,
+    queryKey: ["repos", on(state()), "pairings"],
+    queryFn: () => loadRepoPairings(on(state())!),
+    enabled: on(state()) !== null,
 
     // Merged by the id each profile carries, for the pickers below: what a
     // re-read that changed nothing must not do is rebuild a dropdown the human
@@ -179,8 +237,9 @@ function Compose(props: {
 
   /// Whether there is anything to create at all, which is the repo and nothing
   /// else: everything else on this page may stay empty, as it always may while
-  /// a conversation drafts.
-  const ready = () => state().repo !== null;
+  /// a conversation drafts. A roadmap carries its own repo, so a page loaded
+  /// with one is ready by holding it.
+  const ready = () => on(state()) !== null;
 
   const [gone, setGone] = createSignal(false);
 
@@ -211,6 +270,25 @@ function Compose(props: {
     },
   }));
 
+  /// A roadmap loaded into what is being composed, which creates nothing: the
+  /// row that was pressed is written into the compose state, and the press under
+  /// the box is still the first thing that reaches the server.
+  ///
+  /// What is around it is left exactly where it was — the brief that was typed,
+  /// the repo that was picked, the base under it — because clearing the roadmap
+  /// has to give all of it back. The one thing that goes is a companion that has
+  /// just become the work's own Repo: nothing is ever a companion of itself,
+  /// which is what a switch onto another Repo does with one too.
+  const load = (held: Adopting) =>
+    setState((was) => ({
+      ...was,
+      adopting: held,
+      companions: was.companions.filter((row) => row.repo_id !== held.repo_id),
+    }));
+
+  /// And unloaded, which puts the page back to composing work of its own.
+  const unload = () => setState((was) => ({ ...was, adopting: null }));
+
   /// Moving what is being composed onto another Repo, which takes the same two
   /// things with it that a switch on a saved draft takes: the base goes back to
   /// the new repository's rule, and a companion that has just become the
@@ -232,7 +310,8 @@ function Compose(props: {
   /// can be picked twice into a list this page can simply read.
   const alongside = (repoId: number) =>
     setState((was) =>
-      was.repo === repoId || was.companions.some((row) => row.repo_id === repoId)
+      on(was) === repoId ||
+      was.companions.some((row) => row.repo_id === repoId)
         ? was
         : {
             ...was,
@@ -266,64 +345,116 @@ function Compose(props: {
 
       <div class={styles.composer}>
         <div class={styles.box}>
-          {/* A copy of what has been typed gives the field its height — see
-              `.grow` in `App.module.css`. */}
-          <div class={app.grow} data-value={state().brief}>
-            <textarea
-              rows="1"
-              aria-label="Brief"
-              placeholder="What is this piece of work?"
-              value={state().brief}
-              onInput={(ev) => change({ brief: ev.currentTarget.value })}
-            />
-          </div>
+          {/* The field, or the roadmap that has been loaded in place of it: an
+              adopted stage's brief is the repository's own and arrives with the
+              adoption, so there is nothing here to write and the box says which
+              stage instead. */}
+          <Show
+            when={adopting()}
+            fallback={
+              // A copy of what has been typed gives the field its height — see
+              // `.grow` in `App.module.css`.
+              <div class={app.grow} data-value={state().brief}>
+                <textarea
+                  rows="1"
+                  aria-label="Brief"
+                  placeholder="What is this piece of work?"
+                  value={state().brief}
+                  onInput={(ev) => change({ brief: ev.currentTarget.value })}
+                />
+              </div>
+            }
+          >
+            {(held) => <Loaded roadmap={held()} clear={() => unload()} />}
+          </Show>
 
           <section class={setup.options} aria-label="Setup">
             {/* The repository first, because everything under it is a fact
                 about the one this picks — which is why the panel holds nothing
                 else until one is picked. */}
             <RepoOptions
-              name={repo()?.name ?? "Select"}
+              name={repo()?.name ?? adopting()?.repo ?? "Select"}
               alongside={state().companions.length}
             >
               {() => (
                 <>
                   <RepoChoice
-                    chosen={state().repo === null ? "" : String(state().repo)}
-                    disabled={make.isPending}
+                    chosen={on(state()) === null ? "" : String(on(state()))}
+                    // Settled while a roadmap is loaded, the way it is settled
+                    // once a branch has been cut: the stage is in the repository
+                    // the roadmap is written in, and moving the work off it
+                    // would be moving it away from what it is adopting.
+                    disabled={make.isPending || adopting() !== null}
                     pick={(repoId) => moveTo(repoId)}
                   >
+                    {/* Nothing to attach a Conversation to, so the only thing
+                        to offer is the page that fixes that — which is what the
+                        menu this page replaced said in the same words. Under the
+                        picker rather than instead of it: the picker is the
+                        control that is empty, and this says why. */}
+                    <Show when={repos.data?.length === 0}>
+                      <Empty class={setup.nothing}>
+                        No repos are registered yet —{" "}
+                        <A href="/settings">register one</A> to start a
+                        conversation.
+                      </Empty>
+                    </Show>
+
                     {/* Said before the move rather than after, exactly as the
                         composer says it: the base is the one thing here that
                         picking another repo resets. */}
-                    <Show when={ready()}>
+                    <Show when={ready() && adopting() === null}>
                       <Note class={setup.aside}>
                         Moving this onto another repo puts its base back on that
                         repo's default branch. Its branch name, its pairings and
                         the repos it works alongside are kept.
                       </Note>
                     </Show>
+
+                    {/* And what the roadmap has settled, where one is loaded:
+                        the two fields that would have asked are not drawn at
+                        all, so this is where they are answered. */}
+                    <Show when={adopting()}>
+                      {(held) => (
+                        <Note class={setup.aside}>
+                          The stage is worked on its own branch, off{" "}
+                          <Show
+                            when={held().base}
+                            fallback={<>this repo's default branch</>}
+                          >
+                            {(base) => <code>{base()}</code>}
+                          </Show>
+                          . Clear the roadmap to compose work of your own.
+                        </Note>
+                      )}
+                    </Show>
                   </RepoChoice>
 
                   <Show when={repo()}>
-                    {(on) => (
+                    {(chosen) => (
                       <>
-                        <BranchField
-                          id="branch"
-                          label="Branch"
-                          class={setup.branchName!}
-                          placeholder={AUTOMATIC}
-                          value={state().branch}
-                          set={(branch) => change({ branch })}
-                        />
+                        {/* Neither is asked of a page adopting a roadmap: a
+                            stage is worked on its own slug, and the base went
+                            out with the row that loaded it. What a control
+                            cannot do it does not draw. */}
+                        <Show when={adopting() === null}>
+                          <BranchField
+                            id="branch"
+                            label="Branch"
+                            class={setup.branchName!}
+                            placeholder={AUTOMATIC}
+                            value={state().branch}
+                            set={(branch) => change({ branch })}
+                          />
 
-                        <BasePicker
-                          id="base-branch"
-                          label="Base branch"
-                          repo={on()}
-                          chosen={state().base ?? RULE}
-                          pick={(branch) => change({ base: branch })}
-                        />
+                          <BasePicker
+                            id="base-branch"
+                            label="Base branch"
+                            repo={chosen()}
+                            chosen={state().base ?? RULE}
+                            pick={(branch) => change({ base: branch })}
+                          />
+                        </Show>
 
                         {/* The invitation goes back to being the invitation the
                             moment something is picked out of it: an add is done
@@ -407,6 +538,23 @@ function Compose(props: {
             is what the page is arranged for. */}
         <div class={styles.startGrilling}>
           <div class={styles.presses}>
+            {/* The other way work gets into the pipeline, at the near edge of
+                the row and so plainly not one of the two presses: a roadmap
+                somebody staged before Verkstead was driving anything, taken up
+                as it stands. Drawn only when there is one to take up and the box
+                is empty — what it loads stands in place of what would have been
+                written there, and a dropdown offering to replace a half-written
+                brief would be offering to lose it. */}
+            <Show
+              when={
+                roadmaps().length &&
+                state().brief.trim() === "" &&
+                adopting() === null
+              }
+            >
+              <AdoptRoadmap roadmaps={roadmaps()} load={load} />
+            </Show>
+
             <button
               type="button"
               class={styles.draft}
@@ -435,11 +583,23 @@ function Compose(props: {
               <Note>Pick a repo to create this conversation in.</Note>
             }
           >
-            <Note>
-              Starting creates the conversation, its branch and its worktree, and
-              freezes the brief. Saving it as a draft creates it and leaves it to
-              be started.
-            </Note>
+            <Show
+              when={adopting()}
+              fallback={
+                <Note>
+                  Starting creates the conversation, its branch and its worktree,
+                  and freezes the brief. Saving it as a draft creates it and
+                  leaves it to be started.
+                </Note>
+              }
+            >
+              <Note>
+                Starting creates the conversation and adopts the stage: its
+                branch and its worktree are made, and the stage brief becomes the
+                brief. Saving it as a draft creates it and leaves the stage to be
+                adopted. All three pairings have to be chosen before adopting.
+              </Note>
+            </Show>
           </Show>
 
           <Show when={gone()}>
@@ -455,6 +615,127 @@ function Compose(props: {
         </div>
       </div>
     </>
+  );
+}
+
+/// The roadmap this page is loaded with, standing where the brief would be
+/// written.
+///
+/// A card rather than a field, because there is nothing here to write: the
+/// stage's own brief is in the repository and becomes the Conversation's Brief
+/// at the moment the stage is adopted, which is what an adopting draft's box
+/// says on the composer beside this one. So what the box holds is the roadmap
+/// named, the stage that would be started, and the way back out.
+///
+/// Everything on it was read off the row that loaded it. Nothing is asked of the
+/// server to draw this: the stage brief is not on this device, and a page that
+/// fetched it to show it would be reading a document nobody can edit here.
+function Loaded(props: {
+  roadmap: Adopting;
+  /// Unload it, which puts the box back to the brief this device was holding.
+  clear: () => void;
+}): JSX.Element {
+  return (
+    <div class={styles.loaded}>
+      <p class={styles.roadmapLine}>
+        <code>{props.roadmap.roadmap}</code>
+        <Show when={props.roadmap.title}>
+          {(title) => <span class={styles.roadmapTitle}>{title()}</span>}
+        </Show>
+        {/* A mark rather than a word, as the companion rows' own is: the card
+            beside it is what says which roadmap is being put down. The screen
+            reader gets the sentence. */}
+        <button
+          type="button"
+          class={styles.clear}
+          aria-label={`Clear ${props.roadmap.roadmap}`}
+          onClick={() => props.clear()}
+        >
+          ×
+        </button>
+      </p>
+
+      <p class={styles.stage}>
+        Stage {props.roadmap.stage}: {props.roadmap.stage_title}
+      </p>
+
+      <Note>
+        The stage's own brief becomes this conversation's brief when the stage is
+        adopted, and the work is done on the branch the stage is named for.
+      </Note>
+    </div>
+  );
+}
+
+/// The roadmaps nothing is driving, and the dropdown that loads one.
+///
+/// An action with a chevron rather than a label over a value: the options along
+/// the box's edge say what the work *is*, and this says what to put in the box —
+/// which is why it stands under the box with the presses rather than in the row
+/// inside it.
+///
+/// Pressing a row creates nothing. It writes the roadmap into what this device
+/// is holding, and the dropdown goes with the load: there is one roadmap on a
+/// page at a time, and the way to another is to clear the one in the box.
+///
+/// Each row is worded the way the sidebar's menu worded it, this being where
+/// those rows moved to: the roadmap, the Repo it is in — the list is flat, and
+/// two repositories may each hold an `mvp` — the stage that would be started,
+/// and where the roadmap was found when that is somewhere other than the
+/// default branch.
+function AdoptRoadmap(props: {
+  roadmaps: Adopting[];
+  load: (roadmap: Adopting) => void;
+}): JSX.Element {
+  // The menu's own way to shut, so a press that has done its work takes the
+  // card back and hands the focus to the trigger it came from.
+  let shut = (): void => {};
+
+  return (
+    <Menu
+      class={styles.adopt!}
+      name="Adopt a roadmap"
+      closer={(close) => (shut = close)}
+      trigger={
+        <>
+          Adopt a roadmap
+          {/* Which way the menu will go, and no part of what the button
+              says. */}
+          <Icon of={faChevronDown} />
+        </>
+      }
+    >
+      {() => (
+        <For each={props.roadmaps}>
+          {(held) => (
+            <button
+              type="button"
+              role="menuitem"
+              class={styles.roadmapRow}
+              onClick={() => {
+                shut();
+                props.load(held);
+              }}
+            >
+              <span class={styles.what}>
+                <code>{held.roadmap}</code>
+                <span class={styles.in}>in {held.repo}</span>
+              </span>
+              <span class={styles.next}>
+                next is stage {held.stage}: {held.stage_title}
+              </span>
+              <Show when={held.base}>
+                {(base) => (
+                  <span class={styles.found}>
+                    on <code>{base()}</code>
+                  </span>
+                )}
+              </Show>
+            </button>
+          )}
+        </For>
+      )}
+    </Menu>
   );
 }
 

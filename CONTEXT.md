@@ -31,14 +31,14 @@ out, the Repo dropdown on its composer moves it onto another. Its files stay the
 source of truth for task lists (`.tasks/`) and roadmaps (`docs/roadmaps/`) —
 Verkstead parses and renders them, and never owns them.
 **Registering one can be taken back, and that is an unregistering rather than a
-delete**: Verkstead stops offering it for new work — the settings list, the New
-conversation menu, the roadmaps waiting to be adopted — while every Conversation
-ever worked in it goes on naming it, because a record that could not say which
-repository its work was done in would be no record. The directory is untouched
-either way. Refused while a Conversation that is neither Done nor Closed is on
-it, the way removing an Agent Profile a Conversation is set to run under is; and
-registering the same path again brings the same Repo back rather than making a
-second one.
+delete**: Verkstead stops offering it for new work — the settings list, the Repo
+dropdown on the compose page, the roadmaps waiting to be adopted — while every
+Conversation ever worked in it goes on naming it, because a record that could
+not say which repository its work was done in would be no record. The directory
+is untouched either way. Refused while a Conversation that is neither Done nor
+Closed is on it, the way removing an Agent Profile a Conversation is set to run
+under is; and registering the same path again brings the same Repo back rather
+than making a second one.
 One thing about a registered Repo is configured rather than read off the
 repository: its **resolution strategy**, where its conflicts are to be resolved
 differently from every other Repo's.
@@ -346,15 +346,28 @@ Repo is dropped — a Conversation is never a companion of itself — and the br
 name and the Pairings are left exactly where the human left them.
 
 **And the same composer with nothing behind it is the compose page**, reached
-from *New conversation* at the head of the sidebar: the same box, the same row
-along its edge and the same press, over what this device is holding rather than
-over a record. It is kept per device the way a half-filled answer sheet is, so a
-reload loses nothing, and nothing exists on the server until a press — **Start**
-creates the Conversation, puts every field the human touched on it through the
-endpoints the composer uses and kicks the work off, and **Save as draft** stops
-after the fields. Either way the page lands in the Conversation it made and this
-device stops holding anything. A field the server refuses leaves the rest of the
-work on that draft, and the refusal is said on the draft's own composer.
+from *New conversation* at the head of the sidebar — which is the whole of what
+that pane offers beyond the list: the same box, the same row along its edge and
+the same press, over what this device is holding rather than over a record. It is
+kept per device the way a half-filled answer sheet is, so a reload loses nothing,
+and nothing exists on the server until a press — **Start** creates the
+Conversation, puts every field the human touched on it through the endpoints the
+composer uses and kicks the work off, and **Save as draft** stops after the
+fields. Either way the page lands in the Conversation it made and this device
+stops holding anything. A field the server refuses leaves the rest of the work on
+that draft, and the refusal is said on the draft's own composer.
+
+**Adopting a roadmap is that page too**, from an **Adopt a roadmap** dropdown
+under the box, at the near edge of the row the two presses are at the far edge
+of — drawn only where there is a roadmap to adopt and nothing written in the box,
+since what it loads stands in place of what would have been written there.
+Picking one creates nothing: the roadmap is loaded into what the device is
+holding, the box locks to a card naming it and the Stage that would be started,
+the Repo and the base commit are the roadmap's own, and what is still the
+human's is the Pairings and the repos the work runs alongside. A clear control
+puts it down and gives the box back what was in it. **Start** then creates the
+adopting Conversation and adopts the Stage; **Save as draft** creates it and
+leaves the adopting to the press on its own page.
 
 Every one of those freezes at the same moment the Brief does, so once grilling
 starts none of it is drawn; on a later round the branch and the base commit are
@@ -922,11 +935,16 @@ Take a roadmap the Repo already holds — written by the old tools, by hand, by
 anything that was not this Verkstead — into the pipeline, by starting its next
 Stage as a Conversation. The human's press stands in for the Stage before it
 that would otherwise have started it, so there is no grilling and no Brief to
-write: what they settle is the Pairings and the base commit, and the stage
-brief becomes the Brief. One Stage is the whole of what adopting starts, and all
-it has to start — that Stage's own plan commit writes to the roadmap, so when it
-settles the Stage after it begins the ordinary unattended way, and an adopted
-roadmap is a staged one from there on. Never stacks: there is no predecessor
+write: what they settle is the Pairings, the base commit and the repos the work
+runs alongside, and the stage brief becomes the Brief. **Taken up on the compose
+page**, from the dropdown under its box: the roadmap loads into the composer, and
+the press under it creates the Conversation and adopts the Stage together — the
+same two presses every other piece of work is composed with, the quieter of which
+stops at a draft, for the adopting to be pressed on its own pane. One Stage is
+the whole of what adopting starts, and all it has to start — that Stage's own
+plan commit writes to the roadmap, so when it settles the Stage after it begins
+the ordinary unattended way, and an adopted roadmap is a staged one from there
+on. Never stacks: there is no predecessor
 Conversation to stack on, and building on an unmerged branch is the human's
 move, made by picking that branch as the base.
 _Avoid_: import, attach, resume, take over, migrate
@@ -940,9 +958,11 @@ still exists, and the Stage's own branch not taken. A roadmap that is
 finished, one already in flight and one whose next brief is missing are each not
 abandoned and each draw nothing, because what the human can do something about
 is the only thing worth saying. Read from the repositories every time it is
-drawn and never stored, like the pinned stage lists — and with nothing to
-dismiss one by, a roadmap's score being the repository's to keep: an unwanted
-notice is silenced there, by ticking the box or annotating the stage.
+drawn and never stored, like the pinned stage lists — and drawn where work is
+composed rather than anywhere waiting on the human, since taking one up is
+something to do rather than something to answer. With nothing to dismiss one by,
+a roadmap's score being the repository's to keep: an unwanted row is silenced in
+the repository, by ticking the box or annotating the stage.
 _Avoid_: stale, orphaned, dormant, unmanaged, needs attention
 
 **Stopped**:

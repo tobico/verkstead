@@ -683,8 +683,8 @@ async fn a_repo_that_was_removed_cannot_be_opened() {
 }
 
 /// A Repo taken off the registry is off every list that offers Repos for new
-/// work — this one, the New conversation menu behind it, and the roadmap notice,
-/// all of which are the same read.
+/// work — this one, the compose page's Repo dropdown behind it, and the
+/// roadmaps there are to adopt, all of which are the same read.
 #[tokio::test]
 async fn a_removed_repo_is_off_the_list() {
     let watched = tempfile::tempdir().unwrap();
