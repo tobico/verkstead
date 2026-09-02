@@ -61,11 +61,13 @@ import type {
 } from "../api/types";
 import app from "../App.module.css";
 import { PaneSticky } from "../Panes";
-import { Empty, ErrorLine, Note } from "../notices";
+import shell from "../Panes.module.css";
+import { Empty, ErrorLine } from "../notices";
 import { Adoption } from "./Adoption";
 import styles from "./Composer.module.css";
 import { refusedOnCreate } from "./composing";
 import { PaneHead } from "./PaneHead";
+import { DRAFT, chosen } from "./naming";
 import { NoSessions, noSessions } from "./sessions";
 import { Setup, SetupNotes } from "./Setup";
 import { keeping } from "./settling";
@@ -111,10 +113,17 @@ export function Composer(props: {
   return (
     <>
       <PaneSticky>
-        <PaneHead back={props.back} title="Brief" />
+        {/* The branch the work will be done on, which is what this draft is
+            called everywhere else it is named — and *Draft* until somebody has
+            named it, the invented name being nothing to read. The same reading
+            the branch field inside the panel stands on: see `naming.ts`. */}
+        <PaneHead
+          back={props.back}
+          title={chosen(props.conversation) || DRAFT}
+        />
       </PaneSticky>
 
-      <div class={styles.composer}>
+      <div class={`${styles.composer} ${shell.paneComposer}`}>
         {/* The box, which is the whole of what there is to fill in: the Brief
             inside it, and the setup as a row of dropdowns along the inside of
             its bottom edge. */}
@@ -254,8 +263,9 @@ function Written(props: {
         }
       >
         {/* A copy of what has been typed gives the field its height — see
-            `.grow` in `App.module.css`. */}
-        <div class={app.grow} data-value={text()}>
+            `.grow` in `App.module.css`, and `.field` in this pane's own module
+            for the three lines it starts at. */}
+        <div class={`${app.grow} ${styles.field}`} data-value={text()}>
           <textarea
             rows="1"
             aria-label="Brief"
@@ -289,15 +299,22 @@ function Written(props: {
   );
 }
 
+/// What an unready start is waiting on, said in its tooltip.
+const MISSING = "This needs a brief, and every role picked and working.";
+
 /// The button that gives a Conversation somewhere to work.
 ///
 /// Drawn whenever there is something to start, ready or not. `ready_to_grill`
 /// decides how it *behaves* rather than whether it is there: an unready button
-/// looks inert and, pressed, says what is missing instead of starting. So it is
-/// `aria-disabled` rather than `disabled` — a truly disabled button takes no
-/// press to answer, and its only way of explaining itself is a `title` that a
-/// phone will never show. The explanation is on hover as well, for whoever has a
-/// pointer to hover with.
+/// looks inert, answers a press with nothing, and carries what is missing in a
+/// `title` for whoever has a pointer to read it with.
+///
+/// `aria-disabled` rather than `disabled` all the same, and for the tooltip:
+/// a truly disabled button is one a browser will not hover, so the one way it
+/// had of explaining itself would go with the press it never takes. What it
+/// costs is that a phone reads nothing here — which was decided over keeping a
+/// line of prose under the button for it, that line being read once and read
+/// past forever after.
 ///
 /// The server checks every one of the conditions again regardless — the page's
 /// copy is only as fresh as its last read.
@@ -311,13 +328,7 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 
   const [refused, setRefused] = createSignal<GrillingStarted | null>(null);
 
-  // Whether the explanation is out: pressed, it stays out, because it was asked
-  // for; hovered, it comes and goes with the pointer.
-  const [asked, setAsked] = createSignal(false);
-  const [hovered, setHovered] = createSignal(false);
-
   const ready = () => props.conversation.ready_to_grill;
-  const missing = () => !ready() && (asked() || hovered());
 
   const start = useMutation(() => ({
     mutationFn: () => startGrilling(props.conversation.id),
@@ -348,27 +359,15 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
           class={styles.start}
           classList={{ [styles.inert!]: !ready() }}
           // Only ever `disabled` for a press already in flight. Not being ready
-          // is the other thing entirely: that press has an answer to give.
+          // is the other thing entirely: the button is still hoverable, which is
+          // what carries the explanation.
           disabled={start.isPending}
           aria-disabled={!ready()}
-          onClick={() => (ready() ? start.mutate() : setAsked(true))}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
+          title={ready() ? undefined : MISSING}
+          onClick={() => ready() && start.mutate()}
         >
           {start.isPending ? "Starting…" : "Start work"}
         </button>
-        <Show
-          when={ready()}
-          fallback={
-            <Show when={missing()}>
-              <Note>This needs a brief, and every role picked and working.</Note>
-            </Show>
-          }
-        >
-          <Note>
-            This creates the branch and its worktree, and freezes the brief.
-          </Note>
-        </Show>
 
         <Show when={refused()}>
           {(outcome) => (

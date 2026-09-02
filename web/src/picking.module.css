@@ -38,6 +38,17 @@
   opacity: 0.65;
 }
 
+/* The reading on the closed control: a mark and the words beside it, on a line
+   of its own so that a label above it and the caret beside both have somewhere
+   to be laid out around. In a control with no label it is the whole of what is
+   inside one, and a line of one thing lays out as it always did. */
+.line {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
 /* The words of whichever row is being drawn. They take what the mark beside them
    leaves, and the closed control is the one place they can be cut: the rows
    under it are as wide as it is and wrap instead, a reading being what the human
@@ -52,8 +63,40 @@
   text-overflow: ellipsis;
 }
 
+/* The control's own label, where the caller draws one inside the handle rather
+   than above it — the composer's setup row, and nowhere else. Where it sits is
+   this module's and what it looks like is the caller's, which is the same seam
+   the anchor's `class` stands on: a dimmed label over a value is the row's own
+   look rather than this control's. */
+.heading {
+  grid-area: 1 / 1;
+}
+
+/* And the control it turns into: two lines rather than one, with the caret
+   beside both. A grid, because the caret is level with the pair of them rather
+   than with either — it says which way the rows come down, and what they come
+   down from is the whole handle. */
+.control.headed {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.control.headed .line {
+  grid-area: 2 / 1;
+}
+
+.control.headed .arrow {
+  grid-row: 1 / 3;
+  grid-column: 2;
+  align-self: center;
+  margin-left: 0;
+}
+
 /* Which way the rows come down. Quiet, and at the far end from the words: it is
-   the one part of the control that is not what the control says. */
+   the one part of the control that is not what the control says. Sized in `em`
+   as the glyph it replaced was — see `Icon.module.css`, where an icon is made to
+   follow the line it was put on. */
 .arrow {
   flex: none;
   margin-left: auto;
@@ -61,14 +104,34 @@
   color: var(--ink-soft);
 }
 
-/* What a press away from the rows lands on. Transparent, unlike a menu's: this
-   is a field being filled in rather than a card opened over what the human was
-   reading, and a wash over the page every time a pairing is picked would read as
-   far more than the choice it is. */
+/* What a press away from the rows lands on, and the wash a popover comes down
+   over: what these rows are is a card opened in front of the page, the same 20%
+   a menu's backdrop carries, and rows that came down over an unchanged page
+   read as less than they are. `Menu.module.css` is where the same wash is
+   written for the same reason. */
 .backdrop {
   position: fixed;
   inset: 0;
   z-index: 2;
+  background: rgb(0 0 0 / 20%);
+}
+
+/* Except under the one set of rows that is not a popover: the browse field's,
+   in `PathField.tsx`, where the typing goes on while they are down. A page
+   dimmed under a field somebody is still writing in would be dimming the thing
+   they are looking at. */
+.backdrop.clear {
+  background: none;
+}
+
+/* And except inside the modal, where there is no page behind the rows to wash.
+   A `dialog` opened with `showModal` is in the top layer with a backdrop of its
+   own already over the page, and this one — fixed, and painted above everything
+   in the card that is not positioned over it — would land on the card being
+   filled in rather than behind it. So the dimming there is the dialog's, said
+   once, and these rows come down over a card that stays lit. */
+dialog .backdrop {
+  background: none;
 }
 
 /* The rows, hung under the control and as wide as it — they are its own list
@@ -135,7 +198,12 @@
 
 /* The control being picked from, which is no pointer's doing either: the border
    says which of the fields the choice is going into, and it stays said for as
-   long as the rows are down. */
+   long as the rows are down.
+
+   Wherever the control is a field, which is four of the five places it stands.
+   Inside the composer box it is not one — there is no border there to paint —
+   and what says the focus instead is the label in the handle lighting up, in
+   `workbench/Setup.module.css`, where the rest of that trigger's paint is. */
 .control:focus-visible,
 .control[aria-expanded="true"] {
   border-color: var(--accent);

@@ -17,7 +17,7 @@
 //! profile with no model beside it is not a pairing, and the pickers draw it as
 //! nothing chosen.
 
-import { reading } from "./agents";
+import { briefly, reading } from "./agents";
 import type {
   PairingView,
   PickedView,
@@ -64,6 +64,24 @@ export function label(
   saved: ProfileEntry[] | undefined,
 ): string {
   return reading(
+    {
+      agent: pairing.profile.account.agent_type,
+      model: pairing.model,
+      profile: pairing.profile.name,
+    },
+    saved,
+  );
+}
+
+/// And what the closed control reads, which is the same reading less the
+/// backend's name — see [`briefly`](./agents.ts). One picker draws both: the
+/// rows say the whole of it, and the trigger says the half that is not already
+/// drawn in the mark beside it.
+export function shown(
+  pairing: { profile: ProfileEntry; model: string | null },
+  saved: ProfileEntry[] | undefined,
+): string {
+  return briefly(
     {
       agent: pairing.profile.account.agent_type,
       model: pairing.model,

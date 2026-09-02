@@ -304,9 +304,16 @@ describe("how a browse ends", () => {
 
     // The listbox's own backdrop, which is what a press anywhere but on the
     // rows lands on.
-    fireEvent.click(
-      field().parentElement!.querySelector<HTMLElement>(`.${chrome.backdrop}`)!,
-    );
+    const backdrop = field().parentElement!.querySelector<HTMLElement>(
+      `.${chrome.backdrop}`,
+    )!;
+
+    // And clear rather than washed, unlike the rows a choice comes out of: the
+    // typing goes on while these are down, so the page under them is the thing
+    // the human is still looking at.
+    expect(backdrop.classList.contains(chrome.clear!)).toBe(true);
+
+    fireEvent.click(backdrop);
 
     expect(browsing(WHERE)).toBe(false);
     expect(held(WHERE)).toBe("/home/ada/src");

@@ -60,4 +60,52 @@ describe("the known models", () => {
     expect(prettify("")).toBe("");
     expect(known("claude-opus-7")).toBe(false);
   });
+
+  /// The short names a harness answers to, which a profile filled in by hand
+  /// holds: read back as the model they are short for, so a pairing picked off
+  /// one does not read as the raw word.
+  it("reads a harness's own short names", () => {
+    expect(prettify("fable")).toBe("Fable 5");
+    expect(prettify("opus")).toBe("Opus 5");
+    expect(prettify("sonnet")).toBe("Sonnet 5");
+    expect(prettify("haiku")).toBe("Haiku 4.5");
+    expect(known("fable")).toBe(true);
+  });
+
+  /// And never offered as picks, which is the whole of why they are not
+  /// entries: a form filled in from this list says which model it meant.
+  it("offers none of them as a pick", () => {
+    const ids = KNOWN_MODELS.map((model) => model.id);
+
+    for (const alias of ["fable", "opus", "sonnet", "haiku"]) {
+      expect(ids).not.toContain(alias);
+    }
+  });
+
+  /// The long context, which is a spelling of a model rather than another
+  /// model: two of them are worth picking off a list, and the rule behind them
+  /// reads the `[1m]` of anything the build can already read.
+  it("reads a long-context variant off whatever its base reads as", () => {
+    expect(prettify("opus[1m]")).toBe("Opus 5 (1M context)");
+    expect(prettify("sonnet[1m]")).toBe("Sonnet 5 (1M context)");
+    expect(prettify("claude-opus-5[1m]")).toBe("Opus 5 (1M context)");
+    expect(prettify("fable[1m]")).toBe("Fable 5 (1M context)");
+    expect(known("claude-opus-5[1m]")).toBe(true);
+
+    // And nothing invented over an id nothing else could read either.
+    expect(prettify("claude-opus-7[1m]")).toBe("claude-opus-7[1m]");
+    expect(known("claude-opus-7[1m]")).toBe(false);
+  });
+
+  /// And spelled out in full where they are offered, like every other entry: a
+  /// pick says exactly which model it meant, and `opus[1m]` is the harness's
+  /// short name for whichever one it calls Opus this month.
+  it("offers the two that are worth a row, in full", () => {
+    const ids = KNOWN_MODELS.map((model) => model.id);
+
+    expect(ids).toContain("claude-opus-5[1m]");
+    expect(ids).toContain("claude-sonnet-5[1m]");
+    expect(ids).not.toContain("opus[1m]");
+    expect(ids).not.toContain("sonnet[1m]");
+  });
 });
