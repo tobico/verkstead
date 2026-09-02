@@ -7,6 +7,16 @@
 //! say about it is which level a narrow window is showing and what goes in each
 //! of the three.
 //!
+//! Two of them, on a Conversation whose record is the one Event. There is
+//! nothing to read on such a Timeline — one card, under a header saying what
+//! the sidebar row beside it already says — so the middle pane is not handed to
+//! the frame at all and the details take its column as well as their own. The
+//! whole pane goes rather than most of it: no strip of what its header carried,
+//! no pins, no status. What is left is the conversations and the composer, and
+//! a narrow window walks between exactly those two — Back from the composer is
+//! Back out of the Conversation, there being no level in between. A second
+//! Event of any kind puts the Timeline back at the width this device left it.
+//!
 //! Which level it is follows the URL: naming a Conversation walks the page into
 //! it, and walking back out to the list takes the name off again. One account of
 //! where the page stands rather than two — left selected behind the list, the
@@ -311,6 +321,42 @@ export function Workbench(): JSX.Element {
     freshness: { reconcile: "id" },
   }));
 
+  /// Whether this Conversation's record is the one Event, which is what takes
+  /// the Timeline away.
+  ///
+  /// A record with nothing on it but the Brief has nothing to read: the pane
+  /// beside the composer would be one card and a header saying what the sidebar
+  /// row already said. So the middle pane is not handed to the frame at all —
+  /// the whole of it, header and pins included, rather than a strip of what it
+  /// held — and the details take the room. A second Event of any kind brings it
+  /// back, at the width this device left it: the frame keeps that width
+  /// untouched while the column is away (see `widths.ts`).
+  ///
+  /// Nothing while the read is still in flight, which is the three-pane frame:
+  /// what a Conversation's record holds is not known until it has arrived, and
+  /// the layout it does not yet call for is the ordinary one.
+  const alone = createMemo(() => conversation.data?.timeline.length === 1);
+
+  /// Which level a narrow window is showing, with the one it cannot be standing
+  /// at taken off: a Timeline that is not drawn is not a level to walk through,
+  /// in either direction. So opening such a Conversation lands on the composer,
+  /// and the way out of it is the way out of the Conversation — see [`leaving`].
+  const showing = (): Pane =>
+    alone() && pane() === "middle" ? "details" : pane();
+
+  /// The way off a details pane: where it goes, and what it is called.
+  ///
+  /// The Timeline ordinarily, that being the level the details were opened
+  /// from — a change of level rather than a navigation, the Conversation being
+  /// where the page still stands. Where the record is the one Event there is no
+  /// Timeline to go back to, so the way out is out of the Conversation
+  /// altogether, which is a navigation exactly as the Timeline's own "←
+  /// Conversations" is.
+  const leaving = () =>
+    alone()
+      ? { to: "Conversations", go: () => navigate("/") }
+      : { to: "Timeline", go: () => setPane("middle") };
+
   // Arriving at a Conversation with nothing open lands on the end of its record:
   // the last Event that has a pane behind it, opened by rewriting the URL to its
   // path with replace. What somebody pressing a Conversation asked for is where
@@ -351,7 +397,7 @@ export function Workbench(): JSX.Element {
 
   return (
     <Panes
-      pane={pane()}
+      pane={showing()}
       middleLabel="Timeline"
       conversations={
         <Conversations
@@ -360,23 +406,28 @@ export function Workbench(): JSX.Element {
         />
       }
       middle={
-        <Show when={open()} keyed>
-          <TimelinePane
-            id={selected()}
-            conversation={conversation}
-            event={event()}
-            select={select}
-            pane={setPane}
-            list={() => navigate("/")}
-          />
-        </Show>
+        // Nothing at all where the record is the one Event: the frame draws no
+        // middle pane when it is handed none, and the details pane takes the
+        // column it would have stood in. See [`alone`].
+        alone() ? undefined : (
+          <Show when={open()} keyed>
+            <TimelinePane
+              id={selected()}
+              conversation={conversation}
+              event={event()}
+              select={select}
+              pane={setPane}
+              list={() => navigate("/")}
+            />
+          </Show>
+        )
       }
       details={
         <Show when={open()} keyed>
           <DetailsPane
             conversation={conversation}
             event={event()}
-            pane={setPane}
+            back={leaving()}
           />
         </Show>
       }
@@ -453,9 +504,19 @@ function DetailsPane(props: {
   /// What is open in it, if anything.
   event: Opening | null;
 
-  /// Which level a narrow window is showing, which is the way back out to the
-  /// Timeline.
-  pane: (pane: Pane) => void;
+  /// The way off whatever pane is drawn, which a narrow window walks out
+  /// through: where it goes and what it is called. Ordinarily the Timeline,
+  /// which is a change of level; on a Conversation whose record is the one
+  /// Event there is no Timeline drawn, so it is the conversations themselves
+  /// and a navigation. Worked out once for the whole pane in `Workbench` above,
+  /// because what decides it is what decided the frame.
+  ///
+  /// Where it goes reaches every pane; what it is called reaches the two a
+  /// record of one Event can open — the composer and the frozen Brief — and the
+  /// rest go on spelling *Timeline* for themselves, that being where they are
+  /// always opened from. Nothing on a record of one Event opens them: the cards
+  /// and the icon that do are the Timeline's, and the Timeline is not drawn.
+  back: { to: string; go: () => void };
 }): JSX.Element {
   /// The Event the details pane is showing, where it is one that has a full
   /// self to show. An id whose Event has gone leaves the pane empty, which is
@@ -545,7 +606,7 @@ function DetailsPane(props: {
           <Match when={props.event === "backlog"}>
             <Backlog
               conversation={conversation()}
-              back={() => props.pane("middle")}
+              back={props.back.go}
             />
           </Match>
           {/* And sharing it, opened by the icon on the Timeline's header
@@ -553,7 +614,7 @@ function DetailsPane(props: {
           <Match when={props.event === "share"}>
             <Share
               conversation={conversation()}
-              back={() => props.pane("middle")}
+              back={props.back.go}
             />
           </Match>
           {/* And which roadmap, a worktree being allowed any number of
@@ -563,7 +624,7 @@ function DetailsPane(props: {
               <Roadmap
                 conversation={conversation()}
                 name={name()}
-                back={() => props.pane("middle")}
+                back={props.back.go}
               />
             )}
           </Match>
@@ -575,7 +636,7 @@ function DetailsPane(props: {
                     <Output
                       conversation={conversation()}
                       output={output()}
-                      back={() => props.pane("middle")}
+                      back={props.back.go}
                     />
                   )}
                 </Match>
@@ -583,7 +644,7 @@ function DetailsPane(props: {
                   {(asked) => (
                     <Asked
                       asked={asked()}
-                      back={() => props.pane("middle")}
+                      back={props.back.go}
                     />
                   )}
                 </Match>
@@ -592,7 +653,7 @@ function DetailsPane(props: {
                     <Commit
                       conversation={conversation()}
                       commit={commit()}
-                      back={() => props.pane("middle")}
+                      back={props.back.go}
                     />
                   )}
                 </Match>
@@ -601,7 +662,7 @@ function DetailsPane(props: {
                     <PullRequest
                       conversation={conversation()}
                       opened={opened()}
-                      back={() => props.pane("middle")}
+                      back={props.back.go}
                     />
                   )}
                 </Match>
@@ -625,14 +686,21 @@ function DetailsPane(props: {
                         <Brief
                           conversation={conversation()}
                           brief={brief()}
-                          back={() => props.pane("middle")}
+                          back={props.back}
                         />
                       }
                     >
+                      {/* The one pane that carries the whole of the way out
+                          rather than the press behind it: it is the pane a
+                          Conversation with nothing else on its record stands
+                          on, so it is the one whose way out is sometimes the
+                          conversations rather than a Timeline, and a button
+                          that said Timeline while it left the Conversation
+                          would be naming somewhere it does not go. */}
                       <Composer
                         conversation={conversation()}
                         brief={brief()}
-                        back={() => props.pane("middle")}
+                        back={props.back}
                       />
                     </Show>
                   )}
@@ -643,7 +711,7 @@ function DetailsPane(props: {
                       heading="Handoff"
                       html={handoff().html}
                       empty="The grilling wrote nothing down."
-                      back={() => props.pane("middle")}
+                      back={props.back.go}
                     />
                   )}
                 </Match>
@@ -663,7 +731,7 @@ function DetailsPane(props: {
                       }
                       html={steer().html ?? ""}
                       empty="Nothing was asked for."
-                      back={() => props.pane("middle")}
+                      back={props.back.go}
                     />
                   )}
                 </Match>
@@ -678,7 +746,7 @@ function DetailsPane(props: {
                       heading="Notice"
                       html={notice().html}
                       empty="Verkstead wrote nothing down."
-                      back={() => props.pane("middle")}
+                      back={props.back.go}
                     />
                   )}
                 </Match>

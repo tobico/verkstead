@@ -78,7 +78,12 @@ export const UNNAMED = "Chosen when the work starts.";
 export function Brief(props: {
   conversation: ConversationView;
   brief: BriefEvent;
-  back: () => void;
+
+  /// The way out of the pane, named as well as pressed — the composer's
+  /// arrangement, and for the composer's reason: this pane is the other thing a
+  /// Conversation whose record is the one Event can open, and such a record has
+  /// no Timeline drawn to go back to. See `Composer.tsx`.
+  back: { to: string; go: () => void };
 
   /// Whether this is a record read out of a file — a share — rather than the
   /// Conversation on the machine it was worked on.
@@ -98,7 +103,7 @@ export function Brief(props: {
   return (
     <>
       <PaneSticky>
-        <PaneHead back={{ to: "Timeline", go: props.back }} title="Brief" />
+        <PaneHead back={props.back} title="Brief" />
       </PaneSticky>
 
       <Show

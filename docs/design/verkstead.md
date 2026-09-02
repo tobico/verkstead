@@ -515,6 +515,19 @@ remembered is read. The details pane caps its content at the 60rem the Set and
 Settings pages are read at and centres it when the pane is wider, so a pane
 dragged to the width of a window is still a pane a line can be read across.
 
+**A Conversation whose record is the one Event has no timeline pane at all**
+(*settled 2026-09-02, building brief-details-view*), which is every draft
+nothing has happened to yet: there is nothing to read on such a record — one
+card, under a header saying what the sidebar row beside it already says — so the
+level is not drawn and the details pane takes its column as well as its own. The
+whole pane goes rather than most of it: no strip of what its head carried, no
+pins and no status. The narrow layout's walk skips it in both directions, so
+opening the Conversation lands on the composer and Back out of the composer is
+Back out of the Conversation. The one border left is the sidebar's own, moving
+the sidebar's own width, and what this device settled the timeline's column at is
+left untouched — a second Event of any kind brings the three panes back exactly
+as they were.
+
 The details pane is the one selected thing and nothing else: with nothing
 selected it is blank, and a narrow layout offers no way to page into it
 (*settled 2026-08-24, building workbench-refit*). That is nearly always an

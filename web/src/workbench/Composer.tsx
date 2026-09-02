@@ -15,6 +15,12 @@
 //! the one thing outside: under the box, against its right edge, because it is
 //! what happens to what is in the box rather than something else to fill in.
 //!
+//! At its measure and in the middle of whatever room the pane has, which is how
+//! it stands in the widened pane too: a Conversation whose record is the one
+//! Event has no Timeline drawn beside this, so the pane is the Timeline's column
+//! and its own — and the box is the same box, centred in the wider room. The
+//! measure is the pane's own doing, in `Panes.module.css`.
+//!
 //! It serves a Conversation *while it drafts*, whatever the Brief's own freeze
 //! — which is three shapes rather than one:
 //!
@@ -89,12 +95,21 @@ export function composing(
 export function Composer(props: {
   conversation: ConversationView;
   brief: BriefEvent;
-  back: () => void;
+
+  /// The way out of the pane, named as well as pressed — which is the one thing
+  /// on this pane that is not the same on every Conversation. A record with
+  /// something on it beyond this Brief is read on a Timeline, and that is what
+  /// a narrow window walks back through; a record that is the Brief alone has
+  /// no Timeline drawn at all, so the way out is the conversations themselves.
+  /// Which of the two it is is the workbench's to say — see `Workbench.tsx`,
+  /// where the same answer decides whether the middle pane is handed to the
+  /// frame in the first place.
+  back: { to: string; go: () => void };
 }): JSX.Element {
   return (
     <>
       <PaneSticky>
-        <PaneHead back={{ to: "Timeline", go: props.back }} title="Brief" />
+        <PaneHead back={props.back} title="Brief" />
       </PaneSticky>
 
       <div class={styles.composer}>

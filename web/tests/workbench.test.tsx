@@ -356,17 +356,17 @@ function unopened(conversation: { id: number }): string {
   return `/conversations/${conversation.id}/events/0`;
 }
 
-/// Walk into the composer, the way the human does: press the Brief card, which
-/// selects it and takes a narrow window on to the details level.
+/// The composer, waited for where the Conversation opens on it.
 ///
-/// Which level is showing matters to a test that asks about roles rather than
-/// classes: the frame draws one pane at a time and the rest are `display: none`,
-/// and an accessible name is only found in the one being shown.
+/// Every fixture the tests below open is a Draft whose record is the Brief and
+/// nothing else, so there is no Timeline drawn to press a card on: the landing
+/// opens the composer and a narrow window is already standing at it. Which
+/// level is showing matters to a test that asks about roles rather than
+/// classes — the frame draws one pane at a time and the rest are
+/// `display: none`, and an accessible name is only found in the one being
+/// shown. Pressing a Brief card to open this pane is a record with more on it
+/// than the Brief, and is asked where that is the question.
 async function openComposer(container: ParentNode): Promise<HTMLElement> {
-  fireEvent.click(
-    await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`),
-  );
-
   return drawn(container, `.${shell.detailsPane} .${composer.composer}`);
 }
 
@@ -2435,15 +2435,14 @@ describe("a conversation's timeline", () => {
   });
 
   it("is a list of events rather than a brief with a page around it", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await drawn(container, `.${timeline.timeline}`);
 
-    // One kind of Event so far, drawn as one entry of the list the stages after
-    // this one add to.
+    // An entry per Event, drawn as the list the stages after this one add to.
     expect(container.querySelectorAll(`.${timeline.timeline} > .${timeline.timelineEvent}`)).toHaveLength(
-      OPEN.timeline.length,
+      RECORDED.timeline.length,
     );
   });
 
@@ -2452,7 +2451,7 @@ describe("a conversation's timeline", () => {
   /// card says them, so the card and the header of the pane it opens read as
   /// the one name said twice.
   it("says the repo understated beside the branch it is titled by", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const head = await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
@@ -2478,7 +2477,7 @@ describe("a conversation's timeline", () => {
   /// And on a Draft above all, where the title is the word *Draft* and the Repo
   /// is the whole of what tells this header from the next draft's.
   it("says it on a draft too, where the title is the word Draft", async () => {
-    theWorkbenchWith({ branch_named: false, state: "Draft" });
+    theRecordedWith({ branch_named: false, state: "Draft" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const head = await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
@@ -2879,9 +2878,13 @@ describe("the composer pane", () => {
   /// The button was under the record, at the end of everything that had
   /// happened. It is under the setup now, and the timeline draws nothing of it:
   /// the pane is its only home.
+  ///
+  /// Asked over a record with something else on it, so that there is a timeline
+  /// to have taken the button off — a Conversation whose record is the Brief
+  /// alone draws no timeline pane at all.
   it("takes the start button off the foot of the timeline", async () => {
-    theWorkbench();
-    const { container } = mount(`/conversations/${OPEN.id}`);
+    theRecordedWith();
+    const { container } = mount(COMPOSING);
 
     const start = await drawn(
       container,
@@ -3215,11 +3218,19 @@ describe("writing the brief", () => {
   /// every time the world was read again could never be finished.
   it("lives through the page reading the conversation again", async () => {
     // The read that lands while the field is being typed into comes back with
-    // something else about the Conversation changed — the branch renamed from
-    // another device — so the test can wait for it to have landed rather than
+    // something else about the Conversation changed — the repository renamed
+    // in the settings — so the test can wait for it to have landed rather than
     // sleep until it has. What is asked here is what a read does to the field,
     // and it does the same whether or not anything came back different.
-    const RENAMED: ConversationView = { ...OPEN, branch: "work/renamed-away" };
+    //
+    // The Repo's name rather than the branch, because this Conversation's
+    // record is the Brief alone: there is no Timeline pane and so no header
+    // titled by the branch, and what the composer says out loud about the
+    // Conversation is the repository the Repo option is labelled with.
+    const RENAMED: ConversationView = {
+      ...OPEN,
+      repo: { ...OPEN.repo, name: "renamed-away" },
+    };
     let standing = OPEN;
     const fetching = serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
@@ -3228,19 +3239,19 @@ describe("writing the brief", () => {
       whenever("/api/ui/profiles", json(PROFILES)),
       whenever(READING, () => json(standing)()),
     );
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
 
     fireEvent.input(field(), { target: { value: "# Half a thought" } });
 
     standing = RENAMED;
     readAgain();
-    // The header is called by both of the things it says — the branch and the
-    // Repo understated beside it — so waiting on the new name waits on both.
     await waitFor(() =>
-      screen.getByRole("heading", {
-        name: `${RENAMED.branch} ${OPEN.repo.name}`,
-      }),
+      expect(
+        container.querySelector(
+          `.${setup.repoOption} .${setup.optionValue}`,
+        )!.textContent,
+      ).toContain(RENAMED.repo.name),
     );
 
     // The read landed, and what was typed is still in the field.
@@ -3418,8 +3429,8 @@ describe("a conversation's setup", () => {
   /// what leaving it empty means, and the pane is headed by what the
   /// Conversation is — a draft.
   it("leaves the branch field empty where the name is Verkstead's own", async () => {
-    theWorkbenchWith({ branch_named: false });
-    const { container } = mount(`/conversations/${OPEN.id}`);
+    theRecordedWith({ branch_named: false });
+    const { container } = mount(COMPOSING);
     await openRepo(container);
 
     const field = screen.getByLabelText("Branch") as HTMLInputElement;
@@ -3437,7 +3448,7 @@ describe("a conversation's setup", () => {
   /// the name is the first session's to replace. The card has gone by then, so
   /// there is no field left to say anything about — only the title.
   it("heads the pane Draft until the branch has been named", async () => {
-    theWorkbenchWith({
+    theRecordedWith({
       branch_named: false,
       naming: true,
       state: "Grilling",
@@ -3454,7 +3465,7 @@ describe("a conversation's setup", () => {
   /// And says the branch the moment nobody is waiting on the name — the session
   /// renamed it, or ended and left it. Nothing reads Draft for ever.
   it("heads the pane with the branch once the naming is over", async () => {
-    theWorkbenchWith({
+    theRecordedWith({
       branch_named: false,
       naming: false,
       state: "Grilling",
@@ -4746,8 +4757,12 @@ describe("a conversation's pairings", () => {
 });
 
 describe("the panes on a narrow window", () => {
+  /// Asked over a record with something on it beyond the Brief, which is what
+  /// makes three levels to walk: a Conversation whose record is the one Event
+  /// draws no Timeline at all, and the walk skips it — see *the one-event
+  /// layout* below.
   it("starts on the conversations and walks in and back out", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
@@ -4759,11 +4774,10 @@ describe("the panes on a narrow window", () => {
       expect(frame(container).dataset.pane).toBe("middle"),
     );
 
-    // The third level is the open Event's own, and a Draft opens on the
-    // composer its Brief is written in — so there is something to page into,
-    // and the way on is offered.
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
-    expect(screen.getByRole("button", { name: "Details →" })).toBeTruthy();
+    // The third level is the open Event's own, and the landing opens the newest
+    // thing on the record — so there is something to page into, and the way on
+    // is offered.
+    await waitFor(() => screen.getByRole("button", { name: "Details →" }));
 
     // The way back out is a navigation — it takes the Conversation off the URL
     // — so the level changes when the router has moved rather than when the
@@ -4779,7 +4793,7 @@ describe("the panes on a narrow window", () => {
   /// rather than a navigation to where the page already stands — which is what
   /// pages a phone forward into it a second time.
   it("walks back in to the conversation it just came out of", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container, history } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
@@ -4788,7 +4802,7 @@ describe("the panes on a narrow window", () => {
       expect(frame(container).dataset.pane).toBe("middle"),
     );
     expect(history.get()).toBe(`/conversations/${DRAFTING.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await drawn(container, `.${timeline.timeline}`);
 
     fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
     await waitFor(() =>
@@ -4841,9 +4855,9 @@ describe("the panes on a narrow window", () => {
   /// Opening a Conversation is a navigation, and Back is a way of changing which
   /// one is open that never goes through a click handler.
   it("follows the URL rather than the button that changed it", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container, history } = mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await drawn(container, `.${timeline.timeline}`);
 
     expect(frame(container).dataset.pane).toBe("middle");
 
@@ -5177,6 +5191,45 @@ function theWorkbenchWith(
 }
 
 
+/// A second Event on the opened Conversation's record, and the Conversation
+/// carrying it.
+///
+/// The fixture's own record is the Brief and nothing else, which is the frame
+/// with no Timeline in it at all — see *the one-event layout* below. So what is
+/// about the Timeline pane rather than about the composer is asked over this
+/// instead: the same Conversation with one more Event on it, which is the whole
+/// of what it takes for the three panes to stand again.
+const ASIDE: TimelineEvent = {
+  Notice: {
+    id: 12,
+    at: "2026-08-03T09:07:11.000Z",
+    html: "<p>Verkstead had something to say about this one.</p>\n",
+  },
+};
+
+const RECORDED: ConversationView = {
+  ...OPEN,
+  timeline: [...OPEN.timeline, ASIDE],
+};
+
+/// The workbench with that record open, and with whatever else about the
+/// Conversation the test is asking after.
+///
+/// The second Event is the newest openable thing on the record, so opening the
+/// Conversation by its own path lands on *its* pane rather than on the
+/// composer. A test that wants both panes at once mounts the Brief's own path,
+/// which is a cold load of the composer and leaves the landing nothing to do.
+function theRecordedWith(
+  over: Partial<ConversationView> = {},
+  ...answers: Parameters<typeof serving>
+) {
+  return theWorkbenchWith({ timeline: RECORDED.timeline, ...over }, ...answers);
+}
+
+/// And the Brief's own path on it, which is where a test that wants the
+/// composer beside the record mounts.
+const COMPOSING = `/conversations/${OPEN.id}/events/${BRIEF.id}`;
+
 /// The sidebar's other draft, which is the opened fixture again under its id
 /// and with a Brief of its own.
 ///
@@ -5225,6 +5278,84 @@ function theThree(...answers: Parameters<typeof serving>) {
 /// was holding went on standing over it. What settles it is that the whole of
 /// the reading half of the page is keyed on the id now, so a switch builds it
 /// again from nothing whether or not anything had to be fetched.
+/// A Conversation whose record is the one Event, which is every Draft nothing
+/// has happened to yet: there is nothing to read on such a Timeline — one card,
+/// under a header saying what the sidebar row beside it already says — so the
+/// pane is not drawn and the composer takes its column as well as its own.
+describe("the one-event layout", () => {
+  it("draws the conversations and the composer, and no timeline at all", async () => {
+    expect(OPEN.timeline).toHaveLength(1);
+
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+
+    // The level is not drawn rather than drawn empty: there is no such pane in
+    // the document, and the frame says so by the name it wears.
+    expect(container.querySelector(`.${shell.conversationsPane}`)).toBeTruthy();
+    expect(container.querySelector(`.${shell.middlePane}`)).toBeNull();
+    expect(frame(container).classList.contains(shell.widened!)).toBe(true);
+
+    // And nothing of what its head carried is anywhere else — no title, no
+    // share, no status, no pins, and no record.
+    expect(container.querySelector(`.${timeline.timeline}`)).toBeNull();
+    expect(container.querySelector(`.${timeline.paneTitle}`)).toBeNull();
+    expect(container.querySelector(`.${statusButton.status}`)).toBeNull();
+    expect(container.querySelector(`.${timeline.pinned}`)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
+  });
+
+  /// A second Event of any kind is the whole of what brings it back, and the
+  /// widths it comes back at are the ones this device settled — which is the
+  /// frame's own doing, and asked of it in `tests/sizing.test.tsx`.
+  it("puts the timeline back when a second event lands", async () => {
+    let standing: ConversationView = OPEN;
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(READING, () => json(standing)()),
+    );
+    const { container, client } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+    expect(container.querySelector(`.${shell.middlePane}`)).toBeNull();
+
+    standing = RECORDED;
+    await nudged(client);
+
+    await drawn(container, `.${shell.middlePane} .${timeline.timeline}`);
+    expect(frame(container).classList.contains(shell.widened!)).toBe(false);
+  });
+
+  /// And the walk on a narrow window skips the level that is not there, in
+  /// either direction: opening the Conversation lands on the composer, and the
+  /// way off the composer is the way out of the Conversation.
+  it("lands on the brief pane, and back goes to the conversations", async () => {
+    theWorkbench();
+    const { container, history } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    fireEvent.click(screen.getByText(DRAFTING.branch));
+
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("details"),
+    );
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+
+    // Nothing to page forward into either: the way on is the timeline's, and
+    // there is no timeline.
+    expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+    expect(frame(container).dataset.pane).toBe("conversations");
+  });
+});
+
 describe("switching between conversations", () => {
   /// The field a drafting card is, which is how these tests say which draft is
   /// on screen.
@@ -5366,8 +5497,8 @@ describe("opening a conversation is looking at it", () => {
 
 describe("starting the work", () => {
   it("offers the button under the timeline once the conversation is ready", async () => {
-    theWorkbench();
-    const { container } = mount(`/conversations/${OPEN.id}`);
+    theRecordedWith();
+    const { container } = mount(COMPOSING);
 
     const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
 
@@ -6599,7 +6730,7 @@ describe("the mark of the harness a session ran under", () => {
   /// A line saying nothing is running has no harness to mark, which is the same
   /// nothing its words say.
   it("marks nothing on a line with no session behind it", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const line = await drawn(
@@ -7215,7 +7346,7 @@ describe("closing a conversation", () => {
   /// it, and a line of prose about a press that is no longer offered would be
   /// the only thing in the card that was not a press.
   it("offers nothing to close on one that is closed already", async () => {
-    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
@@ -7260,7 +7391,7 @@ describe("closing and archiving a conversation", () => {
     );
     expect(offered.slice(-2)).toEqual([actions.close, actions.closeAndArchive]);
 
-    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "Closed", ready_to_grill: false });
     const closed = mount(`/conversations/${OPEN.id}`);
 
     await openActions(closed.container);
@@ -7349,7 +7480,7 @@ describe("archiving a conversation", () => {
   });
 
   it("stands where close was, on one that has been closed", async () => {
-    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const menu = await openActions(container);
@@ -7358,7 +7489,7 @@ describe("archiving a conversation", () => {
   });
 
   it("posts to the conversation's own archive route", async () => {
-    const fetching = theWorkbenchWith(
+    const fetching = theRecordedWith(
       { state: "Closed", ready_to_grill: false },
       whenever(
         `/api/ui/conversations/${OPEN.id}/archive`,
@@ -7379,7 +7510,7 @@ describe("archiving a conversation", () => {
   /// What the human is owed before a press that makes something disappear: that
   /// it is the list it goes off, and that nothing of the record goes with it.
   it("says the record stays where it is", async () => {
-    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
@@ -7391,7 +7522,7 @@ describe("archiving a conversation", () => {
   /// A page drawn against a conversation that has since been steered back into
   /// the work: the press is refused, and the refusal opens over the page.
   it("says over the page that there is nothing to put away", async () => {
-    theWorkbenchWith(
+    theRecordedWith(
       { state: "Closed", ready_to_grill: false },
       whenever(
         `/api/ui/conversations/${OPEN.id}/archive`,
@@ -7417,7 +7548,7 @@ describe("unarchiving a conversation", () => {
   /// One row or the other, never both — the two say opposite things about the
   /// same conversation.
   it("stands where archive was, on one already put away", async () => {
-    theWorkbenchWith({
+    theRecordedWith({
       state: "Closed",
       ready_to_grill: false,
       archived: true,
@@ -7432,7 +7563,7 @@ describe("unarchiving a conversation", () => {
   });
 
   it("posts to the conversation's own unarchive route", async () => {
-    const fetching = theWorkbenchWith(
+    const fetching = theRecordedWith(
       { state: "Closed", ready_to_grill: false, archived: true },
       whenever(
         `/api/ui/conversations/${OPEN.id}/unarchive`,
@@ -7453,7 +7584,7 @@ describe("unarchiving a conversation", () => {
   /// What the human is owed before a press that puts something back: that it is
   /// the list it returns to, and that it stays there.
   it("says the conversation goes back on the list", async () => {
-    theWorkbenchWith({
+    theRecordedWith({
       state: "Closed",
       ready_to_grill: false,
       archived: true,
@@ -7470,7 +7601,7 @@ describe("unarchiving a conversation", () => {
   /// The one thing left to refuse: a page drawn against a conversation that has
   /// since gone. Over the page, as every other refusal here goes.
   it("says over the page that the conversation is gone", async () => {
-    theWorkbenchWith(
+    theRecordedWith(
       { state: "Closed", ready_to_grill: false, archived: true },
       whenever(
         `/api/ui/conversations/${OPEN.id}/unarchive`,
@@ -7575,7 +7706,7 @@ describe("a second round", () => {
   /// from here: nothing stands under the timeline, and the steer that opens a
   /// round like this one is in the menu on the header.
   it("offers the steer and nothing else on a finished conversation", async () => {
-    theWorkbenchWith({ state: "Done" });
+    theRecordedWith({ state: "Done" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await drawn(container, `.${timeline.timeline}`);
@@ -10824,7 +10955,7 @@ describe("the pinned task list", () => {
     // the ordinary case: the server pins nothing and there is nothing to draw.
     expect(OPEN.pinned).toEqual([]);
 
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await drawn(container, `.${timeline.timeline}`);
@@ -11972,7 +12103,7 @@ describe("the status button", () => {
   /// which is the point of the move: what there is to do about a Conversation
   /// is reached from the thing that says what it is doing.
   it("opens the conversation's actions when it is pressed", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     fireEvent.click(
@@ -11989,7 +12120,7 @@ describe("the status button", () => {
 
   /// And says so, in the mark every other thing that drops a menu says it in.
   it("carries the chevron that says it opens", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const mark = await drawn(
@@ -12003,7 +12134,7 @@ describe("the status button", () => {
   });
 
   it("leaves the pane no ⋯ of its own", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await drawn(container, `.${statusButton.status}`);
@@ -12057,7 +12188,7 @@ describe("the status button", () => {
   });
 
   it("says nothing is running in every other quiet moment", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     expect(await saidRunning(container)).toBe("No agent running");
@@ -12126,7 +12257,7 @@ describe("a conversation that has stopped", () => {
   it("says nothing about a stop where nothing has stopped", async () => {
     expect(OPEN.blocked_on).toBeNull();
 
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const line = await standing(container);
@@ -13214,7 +13345,7 @@ describe("a wrap-up waiting on its checks", () => {
 /// between them, would be the button reading itself out.
 describe("a conversation that has ended", () => {
   it("says Done where the work reached the end of the ladder", async () => {
-    theWorkbenchWith({ state: "Done" });
+    theRecordedWith({ state: "Done" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const line = await standing(container);
@@ -13225,7 +13356,7 @@ describe("a conversation that has ended", () => {
   });
 
   it("says Closed where the work stopped wherever it was", async () => {
-    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     expect((await standing(container)).word).toBe("Closed");
@@ -13235,7 +13366,7 @@ describe("a conversation that has ended", () => {
   /// nothing is supposed to be driving one either, so there is no status to
   /// say beside the word.
   it("says Draft on one nothing has started", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const line = await standing(container);
@@ -13248,7 +13379,7 @@ describe("a conversation that has ended", () => {
   /// it beside the state rather than instead of it.
   it("says the state beside a status while the work is still going", async () => {
     for (const state of ["Grilling", "Implementing", "Wrapping", "FollowUp"] as const) {
-      theWorkbenchWith({ state, ready_to_resume: true });
+      theRecordedWith({ state, ready_to_resume: true });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
 
       const line = await standing(container);
@@ -13697,7 +13828,7 @@ describe("the documents on a timeline", () => {
   /// opens it. What it opens is the composer rather than the read-only pane —
   /// the whole of the document, and under it the setup and the start.
   it("clamps the drafting brief too, and opens the composer", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const brief = await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);

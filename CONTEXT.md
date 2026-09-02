@@ -360,6 +360,13 @@ of the workbench. Everything Verkstead and its agents do lands here as an
 Event; nothing happens off it. It records the work rather than the watching:
 looking at a session's Screen leaves no Event, and neither does typing into one
 — the record keeps what was built rather than who was there.
+
+**A record of one Event is not drawn at all**, which is every draft nothing has
+happened to yet: there is nothing to read on it, so the pane goes — the whole of
+it, header and pins included — and the composer beside it takes the column as
+well as its own. A narrow window walks straight from the conversations to the
+composer and straight back out. A second Event of any kind puts the pane back,
+at the width this device left it.
 _Avoid_: feed, log, history, activity stream
 
 **Event**:
