@@ -21,6 +21,14 @@
 //! profile form offers a Claude Code account the Claude models and no others,
 //! and the reading in [`./agents.ts`](./agents.ts) drops a backend's name from
 //! a model whose own name has already said it.
+//!
+//! **And an id is not only ever a pick.** A harness answers to short names of
+//! its own — `opus`, `fable` — and to a suffix on either spelling asking for the
+//! long context, so a profile filled in by hand holds ids no list of picks would
+//! have offered. Two readings stand beside the entries for that: the aliases
+//! below, which are recognised and never offered, and the `[1m]` rule, which
+//! reads a variant off whatever its base reads as. Both recognise rather than
+//! guess — an id neither of them knows still degrades to itself.
 
 import type { AgentType } from "./agents";
 
@@ -48,6 +56,12 @@ export const KNOWN_MODELS: KnownModel[] = [
   { id: "claude-fable-5", name: "Fable 5", agent: "Claude" },
   { id: "claude-sonnet-5", name: "Sonnet 5", agent: "Claude" },
   { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5", agent: "Claude" },
+  // The two the long context is worth a row of its own for. Not every Claude
+  // model in a second spelling: this list is what a profile is ordinarily
+  // filled in from, and one that offered each model twice would be twice as
+  // long to read for the sake of the two rows anybody asks for.
+  { id: "opus[1m]", name: "Opus 5 (1M context)", agent: "Claude" },
+  { id: "sonnet[1m]", name: "Sonnet 5 (1M context)", agent: "Claude" },
   { id: "gpt-5-codex", name: "GPT-5 Codex", agent: "Codex" },
   { id: "grok-4.6", name: "Grok 4.6", agent: "Grok" },
   { id: "grok-4.5", name: "Grok 4.5", agent: "Grok" },
@@ -60,10 +74,52 @@ const NAMES: Map<string, string> = new Map(
   KNOWN_MODELS.map((model) => [model.id, model.name]),
 );
 
-/// Whether the list knows this id at all — which is what says an id came in by
-/// hand rather than off a pick.
+/// The short names a harness answers to, and what each of them is short for.
+///
+/// Recognised and never offered, which is the whole of why they are here rather
+/// than among the entries: that list is what a profile form is filled in from,
+/// and a pick that sent `opus` would be sending the name of whichever model the
+/// harness calls Opus this month, where every other pick says exactly which one
+/// was meant. A profile that already holds one is the other matter entirely —
+/// somebody typed it, the sessions run under it, and what the viewer owes it is
+/// a legible reading rather than an argument.
+const ALIASES: Map<string, string> = new Map([
+  ["opus", "Opus 5"],
+  ["fable", "Fable 5"],
+  ["sonnet", "Sonnet 5"],
+  ["haiku", "Haiku 4.5"],
+]);
+
+/// The suffix a long-context variant is spelled with, and the words it adds.
+///
+/// A rule rather than a row apiece, so that recognition outlives the list:
+/// whatever `claude-opus-9` comes to read as one day, the `[1m]` of it reads as
+/// that and this note after it. The words are the harness's own.
+const WIDE = "[1m]";
+const WIDER = " (1M context)";
+
+/// What one id reads as, or nothing where none of the three ways of knowing it
+/// answers: the entries, the aliases, and the `[1m]` of either.
+function reads(id: string): string | undefined {
+  const straight = NAMES.get(id) ?? ALIASES.get(id);
+
+  if (straight !== undefined) {
+    return straight;
+  }
+
+  if (!id.endsWith(WIDE)) {
+    return undefined;
+  }
+
+  const base = reads(id.slice(0, -WIDE.length));
+
+  return base === undefined ? undefined : `${base}${WIDER}`;
+}
+
+/// Whether this build can read the id at all — which is what says one came in by
+/// hand and out of nothing the viewer recognises.
 export function known(id: string): boolean {
-  return NAMES.has(id);
+  return reads(id) !== undefined;
 }
 
 /// One model id, as it is written where a human reads it.
@@ -72,5 +128,5 @@ export function known(id: string): boolean {
 /// this is the fallback the staleness of the list is carried on, so it degrades
 /// to legible rather than to empty.
 export function prettify(id: string): string {
-  return NAMES.get(id) ?? id;
+  return reads(id) ?? id;
 }
