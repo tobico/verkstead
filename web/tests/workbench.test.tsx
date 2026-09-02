@@ -361,8 +361,9 @@ async function openActions(container: ParentNode): Promise<HTMLElement> {
   return drawn(container, `.${actions.conversationActions} > .${dropdown.drop}`);
 }
 
-/// The status button's first line, in its two parts: the status word and the
-/// state understated beside it.
+/// The status button's first line, in its parts: the status word, the state
+/// understated beside it, and the word for what a Cleanup took where one has
+/// been through the record.
 ///
 /// Where there is no status word to say — a Draft, a Done or a Closed
 /// conversation — the state takes the bold and stands alone, so `word` is the
@@ -371,6 +372,7 @@ async function openActions(container: ParentNode): Promise<HTMLElement> {
 async function standing(container: ParentNode): Promise<{
   word: string | null;
   state: string | null;
+  trimmed: string | null;
   attention: boolean;
 }> {
   const line = await drawn(
@@ -381,6 +383,8 @@ async function standing(container: ParentNode): Promise<{
   return {
     word: line.querySelector(`.${statusButton.title}`)?.textContent ?? null,
     state: line.querySelector(`.${statusButton.state}`)?.textContent ?? null,
+    trimmed:
+      line.querySelector(`.${statusButton.trimmed}`)?.textContent ?? null,
     attention: line.classList.contains(statusButton.attention!),
   };
 }
@@ -4765,6 +4769,31 @@ function theGrillingOutput(
   );
 }
 
+/// The same conversation after a Cleanup has been through it: every card where
+/// it was, and the session's own output taken out from under the one that opens
+/// on it.
+///
+/// Which is exactly what the server hands over once a trim has run — the
+/// Transcript has no lines left to read and the Capture has no chunks — so what
+/// this stands up is the shape the pane really meets rather than a shape
+/// invented for it.
+function theTrimmed(...answers: Parameters<typeof serving>) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${GRILLING.id}`,
+      json({ ...GRILLING, state: "Closed", archived: true, trimmed: true }),
+    ),
+    whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+    whenever(CAPTURE_OF_IT, json({ ...CAPTURE, text: "" })),
+    whenever(SCREEN_OF_IT, json(SCREEN)),
+    ...answers,
+  );
+}
+
 /// Where a browser would have found an element, for the one assertion that
 /// reads a measurement back: jsdom has no layout, so every element on the page
 /// is at nothing and nothing wide, and a mark measured off two of them would
@@ -5396,6 +5425,78 @@ describe("a session's output on the timeline", () => {
 
     expect(shown.textContent).toBe(CAPTURE.text);
     expect(askedFor(fetching, CAPTURE_OF_IT)).toBeGreaterThan(0);
+  });
+
+  /// And where a Cleanup has taken that record, the pane says so.
+  ///
+  /// The loss explaining itself. Trimmed, the Transcript comes back with no
+  /// turns and the Capture with no bytes, which is the same nothing a session
+  /// that never printed leaves — and drawn as that nothing it reads as a pane
+  /// that has failed. The card above it is untouched: the summary the Timeline
+  /// draws survived the trim, and this is the drill-down under it saying where
+  /// the rest went.
+  it("says the detail was trimmed rather than opening on nothing", async () => {
+    theTrimmed();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    const said = await drawn(container, `.${shell.detailsPane} .${outputPane.trimmed}`);
+
+    expect(said.textContent).toContain("trimmed");
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${outputPane.capture}`),
+      "and nothing standing empty where the record was",
+    ).toBeNull();
+
+    // The summary that survived, still drawn over it: what is gone is the
+    // drill-down rather than the card.
+    const summary = await drawn(container, `.${shell.detailsPane} .${outputPane.captureSummary}`);
+    expect(summary.querySelector(`.${outputPane.turns}`)!.textContent).toBe(
+      `${OUTPUT.turns} turns`,
+    );
+  });
+
+  /// The other half of the switch says the same thing, and asks the server for
+  /// nothing: the grid is replayed from the bytes the trim took, so what a
+  /// request would come back with is an empty terminal.
+  it("says the same of the screen, and asks for no grid", async () => {
+    const fetching = theTrimmed();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+    await drawn(container, `.${shell.detailsPane} .${outputPane.trimmed}`);
+
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
+
+    const said = await drawn(container, `.${shell.detailsPane} .${outputPane.trimmed}`);
+
+    expect(said.textContent).toContain("trimmed");
+    expect(askedFor(fetching, SCREEN_OF_IT)).toBe(0);
+  });
+
+  /// And a session that simply printed nothing says what it always said: the
+  /// word is about a cleanup that happened, so a conversation no sweep has
+  /// reached never sees it.
+  it("still says a quiet session printed nothing where no cleanup ran", async () => {
+    theGrilling(whenever(CAPTURE_OF_IT, json({ ...CAPTURE, text: "" })));
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    // Waited for rather than read once: the same notice says the pane is
+    // loading while the two records are on their way, and what this is about is
+    // the words it settles on.
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${notices.empty}`)
+          ?.textContent,
+      ).toBe("This session has printed nothing yet."),
+    );
+
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${outputPane.trimmed}`),
+    ).toBeNull();
   });
 
   /// The pane opens on what the session said rather than on how it looked: the
@@ -12843,6 +12944,42 @@ describe("a conversation that has ended", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     expect((await standing(container)).word).toBe("Closed");
+  });
+
+  /// And the one thing a Cleanup leaves on the page: the word for what it took,
+  /// beside the word for where the work got to.
+  ///
+  /// A word rather than a banner, and only ever about a trim that has already
+  /// happened — nothing anywhere says one is coming.
+  it("names a trimmed conversation Trimmed beside its state", async () => {
+    theWorkbenchWith({
+      state: "Closed",
+      ready_to_grill: false,
+      archived: true,
+      trimmed: true,
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const line = await standing(container);
+
+    expect(line.word).toBe("Closed");
+    expect(line.trimmed).toBe("Trimmed");
+  });
+
+  /// And says nothing of the kind on one no sweep has reached, which is nearly
+  /// every conversation there is: the line is exactly what it was.
+  it("says nothing about trimming on one no cleanup has been through", async () => {
+    theWorkbenchWith({
+      state: "Closed",
+      ready_to_grill: false,
+      archived: true,
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const line = await standing(container);
+
+    expect(line.word).toBe("Closed");
+    expect(line.trimmed).toBeNull();
   });
 
   /// And a Draft is the third of them, for the other half of the same reason:

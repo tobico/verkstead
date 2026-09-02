@@ -179,6 +179,31 @@ pub async fn trim_conversation(pool: &SqlitePool, id: i64) -> Result<Trimming> {
     Ok(Trimming::Trimmed)
 }
 
+/// Whether one Conversation has had its bulk taken.
+///
+/// What the Conversation's own page asks, so that the record can say **Trimmed**
+/// and a card whose drill-down is gone can say why — the reading beside
+/// [`archived`](super::archived), which is the fact this one sits under.
+///
+/// The mark's presence and nothing else: it says the bulk of some life of this
+/// Conversation is gone, which is true from the trim onwards whatever happens
+/// next. That is deliberately not [`trimmable`]'s comparison read backwards. One
+/// unarchived has no clock and is still missing what was taken; one archived a
+/// second time is trimmable again and is *also* still missing it, and a page
+/// that called that untrimmed would be a page explaining the first life's
+/// missing output as breakage.
+pub async fn trimmed(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT conversation_id FROM trimmed_conversations WHERE conversation_id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading whether Conversation {id} has been trimmed"))?;
+
+    Ok(row.is_some())
+}
+
 /// One event-keyed table emptied of one Conversation's rows, reported under
 /// `what` where it fails.
 ///

@@ -1279,6 +1279,23 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And whether the Cleanup has been through it since, which is the other
+    // sidecar beside the archivings — read the same way and for the same kind
+    // of reason: the page has to be able to say why a session's drill-down is
+    // missing.
+    //
+    // A read that fails reads as *not trimmed*, which is the way round that
+    // says nothing rather than the way round that says something untrue: the
+    // record is drawn as it always was, and the worst of it is a card that
+    // opens on nothing with no word for why.
+    let trimmed = match store::trimmed(&state.pool, id).await {
+        Ok(trimmed) => trimmed,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation was trimmed failed");
+            false
+        }
+    };
+
     // And where the latest share of it was published, where anybody has
     // published one — the link the workbench draws beside the Share row. Read
     // the way the archive mark is: a row beside the Conversation rather than a
@@ -1347,6 +1364,7 @@ pub(crate) async fn conversation_view(
         waiting_on_checks: narrowed_to_checks && writing.is_none(),
         resets,
         archived,
+        trimmed,
         shared,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where

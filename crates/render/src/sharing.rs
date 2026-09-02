@@ -248,6 +248,15 @@ pub fn shared(
             // another would be handing on a URL nobody meant to give them.
             shared: None,
 
+            // And whether a Cleanup has been through the record, which is a
+            // fact about what the *workbench* still holds. A share never
+            // carried a line of what a trim takes, so the file is the file it
+            // always was and there is nothing on it for the word to explain —
+            // said as nothing here, so that sharing a Conversation the sweep
+            // has been through hands over exactly what sharing it the day the
+            // work finished would have.
+            trimmed: false,
+
             // And the machine this was worked on, said as nothing. Where a
             // checkout is, and which account and model wrote the work, are the
             // human's own arrangements rather than anything a colleague reading

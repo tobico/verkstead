@@ -23,7 +23,7 @@ use verkstead_store::{
     create_profile, load_response, open_database, pick_direction, record_backlog, record_commit,
     record_pull_request, register_repo, save_brief, session_id, start_capture, start_conversation,
     start_grilling, start_implementing, submit_response, timeline, transcript, trim_conversation,
-    trimmable, unarchive_conversation,
+    trimmable, trimmed, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -404,5 +404,75 @@ async fn a_conversation_archived_again_is_trimmable_again() {
         capture(&pool, worked.id, again).await.unwrap(),
         Some(String::new()),
         "and it is the second session's output that has been taken",
+    );
+}
+
+/// The mark the Conversation's page reads, which stays where it is once it has
+/// been written.
+///
+/// Deliberately not the sweep's rule read backwards. The sweep asks whether
+/// there is a trim to *do*, which a fresh archiving makes true again; this asks
+/// whether a trim has been *done*, which is what a page has to know to explain
+/// a session's missing drill-down — and that is true from the trim onwards, an
+/// unarchiving and a second archiving included. What was taken is gone whatever
+/// the Conversation does next.
+#[tokio::test]
+async fn the_trimmed_mark_outlasts_the_clock_it_was_written_under() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let worked = worked(&pool, "rate-limiting").await;
+    archived_days_ago(&pool, worked.id, 10).await;
+
+    assert!(
+        !trimmed(&pool, worked.id).await.unwrap(),
+        "nothing has been taken out of it yet",
+    );
+
+    trim_conversation(&pool, worked.id).await.unwrap();
+    // Put back with the archiving it was made under, so that the second life
+    // below is a life the comparison can tell from the first.
+    trimmed_days_ago(&pool, worked.id, 9).await;
+
+    assert!(
+        trimmed(&pool, worked.id).await.unwrap(),
+        "and now something has",
+    );
+
+    // Back on the list, which stops the clock and leaves the mark: the page
+    // still has a Capture with no chunks under it to account for.
+    unarchive_conversation(&pool, worked.id).await.unwrap();
+
+    assert!(
+        trimmed(&pool, worked.id).await.unwrap(),
+        "an unarchiving gives nothing back",
+    );
+
+    // And put away again, which makes it trimmable a second time — the one
+    // state where the sweep's question and this one part company.
+    archive_conversation(&pool, worked.id).await.unwrap();
+    archived_days_ago(&pool, worked.id, 4).await;
+
+    assert_eq!(
+        trimmable(&pool, 3).await.unwrap(),
+        [worked.id],
+        "there is a trim to do on it again",
+    );
+    assert!(
+        trimmed(&pool, worked.id).await.unwrap(),
+        "and its first life is still missing what the first trim took",
+    );
+}
+
+/// And a Conversation nobody has swept says so, whatever else is true of it.
+#[tokio::test]
+async fn a_conversation_no_cleanup_has_reached_is_not_trimmed() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let worked = worked(&pool, "rate-limiting").await;
+
+    assert!(!trimmed(&pool, worked.id).await.unwrap());
+    assert!(
+        !trimmed(&pool, 404).await.unwrap(),
+        "and so does one that is not there at all",
     );
 }
