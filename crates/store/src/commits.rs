@@ -374,23 +374,40 @@ pub async fn recorded_commits(
     Ok(rows.into_iter().map(|(sha,)| sha).collect())
 }
 
-/// How many commits a Conversation has landed, in every repository it is being
-/// worked in.
+/// Where a Conversation's commits stand: the newest commit Event on its
+/// Timeline, in every repository it is being worked in, and `0` where it has
+/// none.
 ///
-/// What the runner counts before a session and again after it, to say whether
-/// the session committed anything at all. Across the repositories rather than
-/// per Repo, because that is the question: a session that committed only in a
+/// What the runner reads before a session and again after it, to say whether the
+/// session committed anything at all. Across the repositories rather than per
+/// Repo, because that is the question: a session that committed only in a
 /// read-write companion has done work, and a run told otherwise would call it a
 /// session that came to nothing.
-pub async fn commits_landed(pool: &SqlitePool, conversation_id: i64) -> Result<usize> {
-    let (landed,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM commits WHERE conversation_id = ?")
+///
+/// **The newest Event rather than how many there are**, because a sweep
+/// subtracts as well as adds — see [`forget_commit`]. A branch that was rebased
+/// or amended carries the same work under new shas, so the sweep forgets as many
+/// commits as it records and a count comes back to where it started: a
+/// resolution session on a Repo that rebases would read as one that committed
+/// nothing, and the runner would go on waiting for a number that never moves.
+///
+/// An Event id moves under that, because `timeline_events` autoincrements and so
+/// never hands an id out twice: whatever a sweep records is numbered above
+/// everything the Conversation was already holding, and a rewrite records. It is
+/// a marker rather than a number to do arithmetic on — every reader holds one
+/// from before the session and compares it with one from after, and nothing
+/// counts anything.
+pub async fn commits_landed(pool: &SqlitePool, conversation_id: i64) -> Result<i64> {
+    let (landed,): (Option<i64>,) =
+        sqlx::query_as("SELECT max(event_id) FROM commits WHERE conversation_id = ?")
             .bind(conversation_id)
             .fetch_one(pool)
             .await
-            .with_context(|| format!("counting the commits of Conversation {conversation_id}"))?;
+            .with_context(|| {
+                format!("reading where the commits of Conversation {conversation_id} stand")
+            })?;
 
-    Ok(landed.max(0) as usize)
+    Ok(landed.unwrap_or(0))
 }
 
 /// The commit one of a Conversation's Events is, or `None` where that

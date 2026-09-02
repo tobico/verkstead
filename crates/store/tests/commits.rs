@@ -14,8 +14,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Commit, Event, add_companion, commit, commit_repo, forget_commit, open_database, record_commit,
-    recorded_commits, register_repo, start_conversation, timeline,
+    Commit, Event, add_companion, commit, commit_repo, commits_landed, forget_commit,
+    open_database, record_commit, recorded_commits, register_repo, start_conversation, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -689,5 +689,75 @@ async fn forgetting_one_conversations_commit_leaves_anothers_alone() {
         recorded_commits(&pool, id, askance).await.unwrap(),
         vec!["a1b2c3d".to_owned()],
         "the companion's commit is another repository's history",
+    );
+}
+
+/// Where a Conversation's commits stand is what the runner reads before a
+/// session and again after it, and it has to move for work a sweep *replaced*
+/// rather than added.
+///
+/// A branch that was rebased or amended carries the same work under new shas, so
+/// the sweep forgets as many commits as it records. Counted, that comes back to
+/// the number it started at and the session reads as one that committed nothing
+/// — which is exactly the resolution session on a Repo that rebases.
+#[tokio::test]
+async fn where_commits_stand_moves_when_a_sweep_replaces_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    assert_eq!(
+        commits_landed(&pool, id).await.unwrap(),
+        0,
+        "a Conversation with nothing on its Timeline stands at nothing",
+    );
+
+    record_commit(&pool, id, repo, &landed("a1b2c3d", "feat: rate limitting"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let before = commits_landed(&pool, id).await.unwrap();
+    assert!(before > 0, "and one with a commit on it stands past that");
+
+    // The amend, as a sweep does it: the sha the branch stopped carrying comes
+    // off, and the one it carries now goes on. One commit either side of it.
+    forget_commit(&pool, id, repo, "a1b2c3d").await.unwrap();
+    record_commit(&pool, id, repo, &landed("9f8e7d6", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        on_the_timeline(&pool, id).await.len(),
+        1,
+        "the Timeline holds what it held, which is what a count would read",
+    );
+    assert!(
+        commits_landed(&pool, id).await.unwrap() > before,
+        "and where those commits stand has moved, because the sweep recorded",
+    );
+}
+
+/// And a sweep that only forgets moves it the other way, which is a session that
+/// committed nothing however far the Timeline has been rewound.
+#[tokio::test]
+async fn where_commits_stand_never_reads_a_reset_as_a_commit() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    for (sha, subject) in [("a1b2c3d", "feat: one"), ("9f8e7d6", "feat: two")] {
+        record_commit(&pool, id, repo, &landed(sha, subject))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    let before = commits_landed(&pool, id).await.unwrap();
+
+    forget_commit(&pool, id, repo, "9f8e7d6").await.unwrap();
+
+    assert!(
+        commits_landed(&pool, id).await.unwrap() < before,
+        "a branch reset to where it was is nothing committed",
     );
 }
