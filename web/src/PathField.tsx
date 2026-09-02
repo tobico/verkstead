@@ -43,7 +43,15 @@
 //! Which scope an ask is made in is the caller's, because it is a fact about the
 //! field rather than about the dropdown: a value the server would refuse outside
 //! the Watched Paths browses inside them, and a value it says nothing about
-//! browses anywhere.
+//! browses anywhere. A browse bounded by them stops at those roots on the way
+//! back out as well: above one is outside the boundary, and a row leading
+//! somewhere the server would refuse is a row nobody should be offered.
+//!
+//! So is what the field is looking *for*. One of them is looking for a
+//! repository — the Repos' form, which is the only place a `.git` means
+//! anything — and there a repository draws marked and is where the browse
+//! stops. Every other field says nothing about one and treats it as the
+//! directory it also is.
 
 import {
   For,
@@ -69,8 +77,16 @@ import { clipping } from "./picking";
 import chrome from "./picking.module.css";
 
 /// One row of the dropdown: what it reads as, what a tap on it writes into the
-/// field, and whether it is the way back up rather than somewhere to go into.
-type Row = { label: string; path: string; back: boolean };
+/// field, whether it is the way back up rather than somewhere to go into, and
+/// whether it is the thing this field is looking for — a repository, in the one
+/// field that is looking for one, which draws marked and is where a browse
+/// stops.
+type Row = {
+  label: string;
+  path: string;
+  back: boolean;
+  found: boolean;
+};
 
 /// What a listing came back holding, or `null` where it came back as one of the
 /// refusals instead.
@@ -127,6 +143,15 @@ export function PathField(props: {
   id: string;
   /// Where this field's value may be, which is what says where it may browse.
   scope: BrowseScope;
+  /// Whether a repository is what this field is looking for.
+  ///
+  /// The one git-aware behaviour there is here, and it is the Repos' form's: a
+  /// repository draws marked, because it is what that form is being filled in
+  /// with, and it is a leaf — a tap writes it into the field like any other row
+  /// and does not open it, there being nothing under it this field is after.
+  /// Every other field leaves this off and treats a repository as the directory
+  /// it also is.
+  repositories?: boolean;
   /// What the field holds, and how it comes to hold something else — typed into
   /// or tapped together, which the caller cannot tell apart and has no reason
   /// to.
@@ -194,6 +219,34 @@ export function PathField(props: {
     freshness: { reconcile: "path" },
   }));
 
+  /// The roots a browse bounded by the Watched Paths begins at, read only where
+  /// it is bounded by them.
+  ///
+  /// What the way back out stops at: above a root is outside the boundary, and
+  /// the server would refuse it. The same read the empty field makes and under
+  /// the same key, so a browse that started at the roots has already paid for
+  /// this one.
+  const boundary = useReading(() => ({
+    queryKey: ["directories", "watched", null],
+    queryFn: () => listDirectory("watched", null),
+    enabled: open() && props.scope === "watched",
+    freshness: { reconcile: "path" },
+  }));
+
+  /// Whether a directory is as far out as this field's browse goes.
+  ///
+  /// Only the bounded scope has a ceiling: the other one's is `/`, which has
+  /// nothing above it to offer anyway. Roots not yet read count as one — a way
+  /// out missing for the moment the read takes is better than one offered and
+  /// then refused.
+  const ceiling = (path: string): boolean => {
+    if (props.scope !== "watched") return false;
+
+    const roots = listed(boundary.data);
+
+    return roots === null || roots.entries.some((root) => root.path === path);
+  };
+
   /// The entries as this field shows them: directories, which is what these
   /// fields name, and none of the dotfiles the endpoint always lists — showing
   /// those is the field's decision rather than the server's, and a browse is not
@@ -224,14 +277,18 @@ export function PathField(props: {
   /// reaches everywhere else.
   const rows = (): Row[] => {
     const answer = listed(listing.data);
-    const up = answer?.path == null ? null : above(answer.path);
+    const at = answer?.path ?? null;
+    const up = at === null || ceiling(at) ? null : above(at);
 
     return [
-      ...(up === null ? [] : [{ label: `Up to ${up}`, path: up, back: true }]),
+      ...(up === null
+        ? []
+        : [{ label: `Up to ${up}`, path: up, back: true, found: false }]),
       ...shown().map((entry) => ({
         label: entry.name,
         path: entry.path,
         back: false,
+        found: props.repositories === true && entry.kind === "Repository",
       })),
     ];
   };
@@ -272,8 +329,15 @@ export function PathField(props: {
   /// Both, which is the whole interaction — there is nothing else a row does.
   /// The rows stay down afterwards, because a browse ends when the human says it
   /// does rather than when they have gone somewhere.
+  ///
+  /// Except the row that is what the field was looking for, which is written and
+  /// not opened: a repository is where the Repos' form's browse was going, and
+  /// there is nothing under it that form is after. Nothing is drilled, so the
+  /// text steers again — the field now names that repository, which is the level
+  /// above it filtered to its own name, and the row the human took is the row
+  /// left standing. Closing is still theirs, as it is everywhere else here.
   const take = (row: Row): void => {
-    setDrilled(row.path);
+    setDrilled(row.found ? null : row.path);
     setWalked(0);
     props.write(row.path);
   };
@@ -375,10 +439,14 @@ export function PathField(props: {
 
   return (
     <div class={styles.field}>
+      {/* The keyboard is the Repos' form's, which asked for a URL's before this
+          component existed and now every path field has one: a path is typed
+          with slashes in it, and nothing about it wants a capital. */}
       <input
         id={props.id}
         ref={field}
         type="text"
+        inputmode="url"
         autocapitalize="off"
         autocorrect="off"
         autocomplete="off"
@@ -460,7 +528,14 @@ export function PathField(props: {
                       </span>
                     </Show>
                     <span class={chrome.words}>{row.label}</span>
-                    <Show when={!row.back}>
+                    {/* And the row that is what this field is looking for,
+                        which says so in a word rather than a mark: it is the
+                        one row here that goes nowhere, and a screen reader
+                        reading the list should hear which that was. */}
+                    <Show when={row.found}>
+                      <span class={styles.repository}>repository</span>
+                    </Show>
+                    <Show when={!row.back && !row.found}>
                       <span class={chrome.arrow} aria-hidden="true">
                         ›
                       </span>

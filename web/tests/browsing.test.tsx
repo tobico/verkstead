@@ -20,6 +20,12 @@
 //! - **How a browse ends.** The human closes it and the field keeps whatever it
 //!   holds. There is no picking here, so a close that changed the field would
 //!   be the one way to leave with something nobody typed or tapped.
+//! - **What a bounded field offers.** A browse inside the Watched Paths begins
+//!   at their roots and stops there on the way back out: a row above one leads
+//!   somewhere the server refuses, and offering it would be offering a dead end.
+//! - **What a field looking for a repository does with one.** It marks it and
+//!   stops there — the Repos' form is being filled in with a repository, so one
+//!   is the end of that browse rather than another level of it.
 //!
 //! The listing of `/home/ada/src` is the fixture the server's own tests wrote,
 //! so what the rows are drawn from is the shape the endpoint really answers
@@ -33,7 +39,7 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PathField } from "../src/PathField";
-import type { DirectoryListing } from "../src/api/types";
+import type { BrowseScope, DirectoryListing } from "../src/api/types";
 import chrome from "../src/picking.module.css";
 import {
   browse,
@@ -41,6 +47,7 @@ import {
   held,
   listed,
   listingAt as at,
+  marked,
   offered,
   pathField,
   rows,
@@ -49,6 +56,7 @@ import {
 } from "./fields";
 import { askedFor, json, serving, whenever } from "./serving";
 import listing from "./fixtures/directories.json" with { type: "json" };
+import roots from "./fixtures/directories-roots.json" with { type: "json" };
 
 /// `/home/ada/src` as the server answered for it: two directories, one of them
 /// a repository, and the file and the dotfile a field showing directories
@@ -68,6 +76,12 @@ const HOME: DirectoryListing = {
     ],
   },
 };
+
+/// And where a browse bounded by the Watched Paths begins, as the server's own
+/// tests wrote it: the roots themselves, which is the one listing with no
+/// directory above it. The same Verkstead as the listing above — its watched
+/// path is the directory that listing is of.
+const ROOTS = roots as DirectoryListing;
 
 /// And the top of the anywhere scope, which is what an empty field asks for.
 const ROOT: DirectoryListing = {
@@ -94,8 +108,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/// The field, with its value held where a form would hold it.
-function mounted(at = "") {
+/// The field, with its value held where a form would hold it — and as whichever
+/// kind of field the test is about: where its value may be, and whether a
+/// repository is what it is looking for.
+function mounted(
+  at = "",
+  how: { scope?: BrowseScope; repositories?: boolean } = {},
+) {
   const [value, setValue] = createSignal(at);
 
   const queries = new QueryClient({
@@ -107,7 +126,8 @@ function mounted(at = "") {
       <label for="where">Where</label>
       <PathField
         id="where"
-        scope="anywhere"
+        scope={how.scope ?? "anywhere"}
+        repositories={how.repositories}
         value={value()}
         write={setValue}
       />
@@ -376,5 +396,123 @@ describe("what the server said instead of rows", () => {
     browse(WHERE);
 
     await waitFor(() => screen.getByText(/Could not read that directory/));
+  });
+});
+
+describe("a browse bounded by the watched paths", () => {
+  /// The one root that Verkstead watches, and what is under it — the two
+  /// fixtures the server's own tests wrote, which are the same Verkstead seen
+  /// from its boundary and from inside it.
+  const EMPTY: DirectoryListing = {
+    Listed: { path: "/home/ada/src/assets", entries: [] },
+  };
+
+  function theBoundary(...also: Array<ReturnType<typeof whenever>>) {
+    return serving(
+      whenever(at(null, "watched"), json(ROOTS)),
+      whenever(at("/home/ada/src", "watched"), json(SRC)),
+      whenever(at("/home/ada/src/assets", "watched"), json(EMPTY)),
+      ...also,
+    );
+  }
+
+  /// Where a bounded browse begins: the roots themselves, which is the listing
+  /// with nothing above it.
+  it("offers the watched roots to a field standing empty", async () => {
+    theBoundary();
+    mounted("", { scope: "watched" });
+    await browsed();
+
+    expect(rows(WHERE)).toEqual(["src"]);
+  });
+
+  /// And where it stops going back: above a root is outside the boundary, and
+  /// the server would answer that row with a refusal.
+  it("offers no way above a root it has drilled into", async () => {
+    theBoundary();
+    const { value } = mounted("", { scope: "watched" });
+    await browsed();
+
+    tap(WHERE, "src");
+
+    expect(value()).toBe("/home/ada/src");
+    await waitFor(() => expect(rows(WHERE)).toContain("assets"));
+
+    // The directories under it, and nothing leading out of it: the way back is
+    // a row only while there is somewhere this field may go back to.
+    expect(rows(WHERE)).toEqual(["assets", "verkstead"]);
+
+    tap(WHERE, "assets");
+    await waitFor(() => expect(rows(WHERE)).toEqual(["Up to /home/ada/src"]));
+  });
+});
+
+describe("a field looking for a repository", () => {
+  function theBoundary(...also: Array<ReturnType<typeof whenever>>) {
+    return serving(
+      whenever(at(null, "watched"), json(ROOTS)),
+      whenever(at("/home/ada/src", "watched"), json(SRC)),
+      ...also,
+    );
+  }
+
+  /// Marked, because it is the thing the Repos' form is being filled in with:
+  /// the row a human is looking for should not read as one more directory.
+  it("draws a repository marked and the directories beside it plain", async () => {
+    theBoundary();
+    mounted("/home/ada/src/", { scope: "watched", repositories: true });
+    await browsed();
+
+    expect(rows(WHERE)).toEqual(["assets", "verkstead"]);
+    expect(marked(WHERE)).toEqual(["verkstead"]);
+  });
+
+  /// And a leaf: the browse was going here, so a tap writes it and stops rather
+  /// than asking the server what is inside a repository nobody wants to see.
+  it("writes a repository into the field without opening it", async () => {
+    const fetching = theBoundary();
+    const { value } = mounted("/home/ada/src/", {
+      scope: "watched",
+      repositories: true,
+    });
+    await browsed();
+
+    tap(WHERE, "verkstead");
+
+    expect(value()).toBe("/home/ada/src/verkstead");
+    expect(askedFor(fetching, at("/home/ada/src/verkstead", "watched"))).toBe(0);
+
+    // Still on the directory holding it, and still down: closing is the
+    // human's here as it is everywhere else in this dropdown.
+    expect(rows(WHERE)).toEqual(["verkstead"]);
+    expect(browsing(WHERE)).toBe(true);
+  });
+
+  /// And nowhere else: a field with nothing to say about a `.git` treats a
+  /// repository as the directory it also is, and drills into it.
+  it("leaves a repository a plain directory in a field not looking for one", async () => {
+    theFilesystem(
+      whenever(
+        at("/home/ada/src/verkstead"),
+        json({
+          Listed: {
+            path: "/home/ada/src/verkstead",
+            entries: [
+              { name: "crates", path: "/home/ada/src/verkstead/crates", kind: "Directory" },
+            ],
+          },
+        }),
+      ),
+    );
+    mounted("/home/ada/src/");
+    await browsed();
+
+    expect(marked(WHERE)).toEqual([]);
+
+    tap(WHERE, "verkstead");
+
+    await waitFor(() =>
+      expect(rows(WHERE)).toEqual(["Up to /home/ada/src", "crates"]),
+    );
   });
 });

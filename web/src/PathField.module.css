@@ -72,3 +72,15 @@
   padding: 0.7rem 0.6rem;
   font-size: 0.9rem;
 }
+
+/* And the mark on the row a field looking for a repository has found. A word
+   rather than a badge: the rows are a list of names, and a coloured pill on one
+   of them would read as a state something is in rather than as what the row is.
+   At the far end, where the way further in would have been — which is exactly
+   what this row does not have. */
+.repository {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.8em;
+  color: var(--ink-soft);
+}

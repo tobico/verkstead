@@ -18,6 +18,7 @@
 import { fireEvent, screen } from "@solidjs/testing-library";
 
 import type { BrowseScope } from "../src/api/types";
+import field from "../src/PathField.module.css";
 import styles from "../src/picking.module.css";
 
 /// The box itself, by the label that names it.
@@ -86,6 +87,16 @@ export function walked(label: string): string {
   }
 
   return words(row);
+}
+
+/// The rows drawn marked as a repository, by the words they read as.
+///
+/// The mark rather than the kind the server sent: what is asked here is what the
+/// human is shown, and only the field looking for a repository shows it.
+export function marked(label: string): string[] {
+  return offered(label)
+    .filter((row) => row.querySelector(`.${field.repository}`) !== null)
+    .map(words);
 }
 
 /// Tap the row that reads as `reading`.
