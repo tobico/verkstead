@@ -1,5 +1,5 @@
-//! What a Cleanup takes out of an archived Conversation, and what it leaves
-//! behind.
+//! What a Cleanup takes out of an archived Conversation, what it leaves behind,
+//! and what is left when it takes the whole of it.
 //!
 //! The rule is the card: what a Timeline card draws survives a trim, and what
 //! only a drill-down shows does not. So the Timeline itself is what most of
@@ -12,18 +12,29 @@
 //! a fresh archiving is left alone, that an unarchived Conversation has no clock
 //! at all, and that one archived a second time has its new bulk taken as well as
 //! its old.
+//!
+//! A delete has no boundary to draw and so asserts the other way about: that
+//! nothing is left anywhere. What *anywhere* is comes out of the schema rather
+//! than out of a list written here — see [`a_conversations_tables`], which is
+//! what makes this a test a table added next year has to answer to.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_schema::{QuestionSet, Response};
 use verkstead_store::{
-    Account, Ask, Commit, Pairing, ProfileFacts, PullRequest, Settlements, Summary, Trimming,
-    append_capture, append_transcript, archive_conversation, ask, capture, close_conversation,
-    create_profile, load_response, open_database, pick_direction, record_backlog, record_commit,
-    record_pull_request, register_repo, save_brief, session_id, start_capture, start_conversation,
-    start_grilling, start_implementing, submit_response, timeline, transcript, trim_conversation,
-    trimmable, trimmed, unarchive_conversation,
+    Account, Adding, Ask, Commit, CompanionWorktree, Decision, Deletion, Merging, Pairing,
+    ProfileFacts, PullRequest, Rollup, Settlements, Standing, Summary, Trimming, WaitingOn,
+    add_companion, append_capture, append_transcript, archive_conversation, ask, capture,
+    close_conversation, create_profile, deletable, delete_conversation, deleted_tables,
+    load_conversation, load_response, lock_set, nothing_else, open_database, pick_direction,
+    place_conversations, record_addressed_comments, record_backlog, record_check_rollup,
+    record_commit, record_conflict_fix_attempt, record_fix_attempt, record_merging,
+    record_pull_request, record_share, record_share_comment, record_standing, register_repo,
+    save_brief, session_id, set_grilling_pairing, settle_wrap_up, skip_review, stamp_unseen,
+    start_capture, start_conversation, start_grilling, start_implementing, stop, submit_response,
+    timeline, transcript, trim_conversation, trimmable, trimmed, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -474,5 +485,462 @@ async fn a_conversation_no_cleanup_has_reached_is_not_trimmed() {
     assert!(
         !trimmed(&pool, 404).await.unwrap(),
         "and so does one that is not there at all",
+    );
+}
+
+/// The whole of what the store holds about one Conversation, for the delete to
+/// be held against: a row in every table the schema says is a Conversation's.
+///
+/// Deliberately more than [`worked`], and deliberately not shared with it — the
+/// trim's tests are about a boundary between two kinds of row, and this is about
+/// there being nothing left anywhere. What it is filling is checked rather than
+/// trusted: the test below asserts that every table the schema names has a row
+/// in it before the delete, so a fixture that stopped filling one is a failing
+/// test rather than a delete nobody is checking.
+async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
+    let repo = repo(pool).await;
+
+    let companion = register_repo(pool, Path::new("/watched/askance"), "askance", "main")
+        .await
+        .unwrap()
+        .map(|repo| repo.id)
+        .unwrap_or(2);
+
+    let id = start_conversation(pool, repo, branch)
+        .await
+        .unwrap()
+        .expect("the Repo is registered");
+
+    save_brief(pool, id, "# Rate limiting\n").await.unwrap();
+
+    // While it is still a draft, which is the only time these are settled: the
+    // other repository it is worked in, the model one role runs on, and the role
+    // that runs no session at all.
+    assert_eq!(
+        add_companion(pool, id, companion).await.unwrap(),
+        Adding::Added
+    );
+
+    let profile = create_profile(
+        pool,
+        &ProfileFacts {
+            name: format!("{branch}-grilling"),
+            account: Account::Codex {
+                home: PathBuf::from("/watched/accounts/work/.codex"),
+            },
+            models: vec!["gpt-5".to_owned()],
+        },
+    )
+    .await
+    .unwrap()
+    .expect("nothing is called that yet");
+
+    set_grilling_pairing(pool, id, profile.id, Some("gpt-5"))
+        .await
+        .unwrap();
+    skip_review(pool, id).await.unwrap();
+
+    let event = printed(pool, id, branch, "the session said a great deal").await;
+
+    // Three Sets, because a Set can end three ways and each way is its own row:
+    // answered, stored for nobody, and locked unanswered.
+    let set = ask(pool, id, &asked(), Ask::Blocking)
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from")
+        .id;
+
+    // Answered with Nothing else, which is what writes the mark saying the round
+    // is over.
+    submit_response(
+        pool,
+        &Settlements::new(4),
+        set,
+        &Response {
+            nothing_else: true,
+            ..Response::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        nothing_else(pool, id).await.unwrap(),
+        "the round is marked as over",
+    );
+
+    ask(pool, id, &asked(), Ask::Deferred).await.unwrap();
+
+    let unanswered = ask(pool, id, &asked(), Ask::Blocking)
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from")
+        .id;
+
+    lock_set(pool, &Settlements::new(4), unanswered)
+        .await
+        .unwrap();
+
+    start_grilling(
+        pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        &PathBuf::from("/state/worktrees").join(branch),
+        &[CompanionWorktree {
+            repo_id: companion,
+            path: PathBuf::from("/state/worktrees").join(format!("{branch}-askance")),
+            base_commit: Some("0b7c2e91f4a8d3c5b6e7f10a9c6d4b82d41f8a3b".to_owned()),
+        }],
+    )
+    .await
+    .unwrap();
+
+    pick_direction(pool, id, verkstead_schema::Direction::TaskList)
+        .await
+        .unwrap();
+    record_backlog(pool, id).await.unwrap();
+    start_implementing(pool, id).await.unwrap();
+
+    record_commit(
+        pool,
+        id,
+        repo,
+        &Commit {
+            sha: "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8".to_owned(),
+            subject: "feat: count the requests".to_owned(),
+            files: 7,
+            insertions: 412,
+            deletions: 3,
+            summary: Some("The counter moves out of the process.".to_owned()),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    record_pull_request(
+        pool,
+        id,
+        repo,
+        &PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // What GitHub last said about it, and how far the wrap-up got.
+    record_check_rollup(pool, id, Rollup::Passed).await.unwrap();
+    record_merging(pool, id, repo, Merging::Cleanly)
+        .await
+        .unwrap();
+    record_standing(pool, id, repo, Standing::Open)
+        .await
+        .unwrap();
+    settle_wrap_up(pool, id, WaitingOn::Review).await.unwrap();
+    record_fix_attempt(pool, id, repo, "build").await.unwrap();
+    record_conflict_fix_attempt(pool, id, repo).await.unwrap();
+    record_addressed_comments(pool, id, repo, &["IC_kwDO".to_owned()])
+        .await
+        .unwrap();
+
+    // What was shared of it, where it sits, and that nobody has read it.
+    record_share(pool, id, "https://share.example/rate-limiting")
+        .await
+        .unwrap();
+    record_share_comment(pool, id).await.unwrap();
+    place_conversations(pool, &[id]).await.unwrap();
+    stamp_unseen(pool, id).await.unwrap();
+
+    // And the stop, whose Notice is the one row pointing back the other way: the
+    // Conversation names an Event of its own, so a delete that took the Events
+    // first would be one SQLite refused.
+    stop(
+        pool,
+        id,
+        Decision::Verkstead,
+        "the account is out of window\n",
+        None,
+    )
+    .await
+    .unwrap();
+
+    close_conversation(pool, id).await.unwrap();
+    archive_conversation(pool, id).await.unwrap();
+
+    // Trimmed, and then lived in again: the mark is a row a delete has to take
+    // as well, and the bulk it took has to be back for the assertions to mean
+    // anything.
+    trim_conversation(pool, id).await.unwrap();
+    unarchive_conversation(pool, id).await.unwrap();
+    printed(pool, id, "second-session", "and said a great deal more").await;
+    archive_conversation(pool, id).await.unwrap();
+
+    written_straight_in(pool, id, companion, event).await;
+
+    Worked { id, event, set }
+}
+
+/// The six rows no press could leave where this fixture ends, written straight
+/// in.
+///
+/// Two are a Verkstead of before — an open Pause is how an account out of window
+/// was recorded before there were stops. Two belong to starts this Conversation
+/// did not have: a stage's branch, and the roadmap an adoption is of. And two
+/// are the worktrees, which closing sweeps away, so an archived Conversation
+/// never really has them.
+///
+/// Which is the point of writing them in rather than leaving them out. The walk
+/// takes every row naming a Conversation, and *this cannot happen* is not
+/// something it is entitled to assume about a table it has to empty: a row that
+/// got there somehow is a row the delete has to survive.
+async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: i64) {
+    sqlx::query(
+        "INSERT INTO pauses (event_id, conversation_id, profile, said, resets_at)
+         VALUES (?, ?, 'work', 'the account is out of window', NULL)",
+    )
+    .bind(event)
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::query("INSERT INTO stage_branches (conversation_id, stacks_on) VALUES (?, NULL)")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO adoptions (conversation_id, roadmap) VALUES (?, 'missing-roles')")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "INSERT INTO wrap_up_narrowings (conversation_id, at)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, '/state/worktrees/x')")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "INSERT INTO companion_worktrees (conversation_id, repo_id, path, base_commit)
+         VALUES (?, ?, '/state/worktrees/x-askance', NULL)",
+    )
+    .bind(id)
+    .bind(companion)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Every table this database says holds rows belonging to a Conversation, read
+/// out of the schema rather than written down.
+///
+/// The walk down is the foreign keys: a table naming `conversations` is a
+/// Conversation's, a table naming one of those is one too, and so on until
+/// nothing more joins. Which is why `repos` and `profiles` are not caught by it
+/// — a Conversation names *them*, not the other way about, and shared things are
+/// exactly the things it points at.
+///
+/// One link is seeded rather than followed, and it is the only one the schema
+/// cannot say the direction of: a Question Set is asked from a Conversation, and
+/// what says so is `set_events`, which names both. So `question_sets` is put in
+/// at the start and everything hanging off it — the Response, the lock, the
+/// deferral, the ending — is found from there.
+async fn a_conversations_tables(pool: &SqlitePool) -> BTreeSet<String> {
+    let tables: Vec<(String,)> = sqlx::query_as(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+
+    let mut points_at: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+
+    for (table,) in &tables {
+        let named: Vec<(String,)> = sqlx::query_as(&format!(
+            "SELECT \"table\" FROM pragma_foreign_key_list('{table}')"
+        ))
+        .fetch_all(pool)
+        .await
+        .unwrap();
+
+        points_at.insert(table.clone(), named.into_iter().map(|(at,)| at).collect());
+    }
+
+    let mut owned = BTreeSet::from(["conversations".to_owned(), "question_sets".to_owned()]);
+
+    loop {
+        let joined: Vec<String> = points_at
+            .iter()
+            .filter(|(table, at)| {
+                !owned.contains(*table) && at.iter().any(|named| owned.contains(named))
+            })
+            .map(|(table, _)| table.clone())
+            .collect();
+
+        if joined.is_empty() {
+            return owned;
+        }
+
+        owned.extend(joined);
+    }
+}
+
+/// How many rows one table holds, the store being one Conversation's here.
+async fn rows(pool: &SqlitePool, table: &str) -> i64 {
+    let (rows,): (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM {table}"))
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    rows
+}
+
+/// A delete leaves no row anywhere naming the Conversation, and the schema is
+/// what says where to look.
+///
+/// Three assertions in one, because they are three halves of the same promise.
+/// The walk covers every table SQLite says is a Conversation's — a table added
+/// next year and not joined to it fails here rather than years later. The
+/// fixture fills every one of them — a table joined to the walk but never
+/// written in a test is a walk nobody has run. And after the delete they are
+/// empty, this store having held one Conversation and nothing else.
+#[tokio::test]
+async fn a_delete_leaves_no_row_anywhere_that_names_the_conversation() {
+    let (_dir, pool) = fresh_pool().await;
+    let worked = owning(&pool, "rate-limiting").await;
+
+    // What makes the rest of this a test of the order as well as of the
+    // coverage: with the keys enforced, a walk that took a row something still
+    // pointed at would fail rather than leave a mess nobody looked for.
+    let (keys,): (i64,) = sqlx::query_as("PRAGMA foreign_keys")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(keys, 1, "this database enforces its foreign keys");
+
+    let theirs = a_conversations_tables(&pool).await;
+    let walked: BTreeSet<String> = deleted_tables().into_iter().map(str::to_owned).collect();
+
+    let missed: Vec<&String> = theirs.difference(&walked).collect();
+
+    assert!(
+        missed.is_empty(),
+        "these tables name a Conversation and the delete's walk does not reach \
+         them: {missed:?}",
+    );
+
+    for table in &theirs {
+        assert!(
+            rows(&pool, table).await > 0,
+            "the fixture leaves nothing in {table}, so the delete of it is \
+             something this test never sees happen",
+        );
+    }
+
+    assert_eq!(
+        delete_conversation(&pool, worked.id).await.unwrap(),
+        Deletion::Deleted
+    );
+
+    for table in &theirs {
+        assert_eq!(
+            rows(&pool, table).await,
+            0,
+            "{table} still holds a row of the Conversation that was deleted",
+        );
+    }
+
+    assert!(
+        load_conversation(&pool, worked.id).await.unwrap().is_none(),
+        "and there is no Conversation of that id to load at all",
+    );
+}
+
+/// A Conversation nobody archived is refused, for the trim's reason: the
+/// archiving is what authorises the loss, and a delete is the whole of it.
+#[tokio::test]
+async fn what_was_never_archived_is_not_deleted() {
+    let (_dir, pool) = fresh_pool().await;
+    let worked = worked(&pool, "rate-limiting").await;
+
+    unarchive_conversation(&pool, worked.id).await.unwrap();
+
+    assert_eq!(
+        delete_conversation(&pool, worked.id).await.unwrap(),
+        Deletion::NotArchived
+    );
+
+    assert!(
+        load_conversation(&pool, worked.id).await.unwrap().is_some(),
+        "and it is where it was, a refusal being a refusal",
+    );
+
+    assert_eq!(
+        delete_conversation(&pool, 404).await.unwrap(),
+        Deletion::NoSuchConversation
+    );
+}
+
+/// What is there to delete is what has been archived for longer than the days,
+/// and a trim in its past says nothing about it either way.
+///
+/// The trim's list asks after the mark because a trim can be owed twice; this
+/// one does not, because the row the mark lives in is one of the rows a delete
+/// takes.
+#[tokio::test]
+async fn what_is_deletable_is_what_has_been_archived_for_long_enough() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let old = worked(&pool, "rate-limiting").await;
+    archived_days_ago(&pool, old.id, 31).await;
+
+    let fresh = worked(&pool, "usage-limits").await;
+
+    let back = worked(&pool, "window-rollover").await;
+    archived_days_ago(&pool, back.id, 31).await;
+    unarchive_conversation(&pool, back.id).await.unwrap();
+
+    let cleaned = worked(&pool, "counter-reset").await;
+    archived_days_ago(&pool, cleaned.id, 31).await;
+    trim_conversation(&pool, cleaned.id).await.unwrap();
+
+    assert_eq!(
+        deletable(&pool, 30).await.unwrap(),
+        [old.id, cleaned.id],
+        "the two archived a month ago, one of them trimmed on the way past",
+    );
+
+    assert!(
+        !deletable(&pool, 30).await.unwrap().contains(&fresh.id),
+        "one archived a moment ago is not old enough to go",
+    );
+    assert!(
+        !deletable(&pool, 30).await.unwrap().contains(&back.id),
+        "and one the human has taken back out has no clock running at all",
+    );
+
+    delete_conversation(&pool, old.id).await.unwrap();
+    delete_conversation(&pool, cleaned.id).await.unwrap();
+
+    assert!(
+        deletable(&pool, 30).await.unwrap().is_empty(),
+        "and once they are gone there is nothing left to do",
     );
 }

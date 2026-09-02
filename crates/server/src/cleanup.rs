@@ -1,5 +1,6 @@
 //! The sweep that lets go of what the human has finished looking at: the
-//! Cleanup, which trims an archived Conversation some days after the archiving.
+//! Cleanup, which trims an archived Conversation some days after the archiving
+//! and, where the human has asked for it, deletes it some days after that.
 //!
 //! Everything else in Verkstead keeps what it was given, and a Conversation the
 //! human archived a fortnight ago is still holding every byte of every session
@@ -8,18 +9,25 @@
 //! leaves is the record: every card on the Timeline, and a Share exactly as it
 //! was. See [`crate::store::trim_conversation`], where that boundary is drawn.
 //!
-//! **One clock, and it starts at the archiving.** Not at the close, and not at
-//! the last thing that happened: archiving is the human saying they are finished
-//! looking, which is the only moment in the record that means what a cleanup
-//! needs it to mean. So an unarchiving stops the clock by taking the archiving
-//! away, and a second archiving starts a new one over whatever has been printed
-//! since.
+//! **And a delete takes the whole of it**, which is the one thing in Verkstead
+//! that forgets: every row the Conversation owns, and nothing outside the store
+//! — see [`crate::store::delete_conversation`]. It is **off** until somebody
+//! turns it on, and that is what makes it a feature rather than a hazard.
+//!
+//! **One clock each, and both start at the archiving.** Not at the close, and
+//! not at the last thing that happened: archiving is the human saying they are
+//! finished looking, which is the only moment in the record that means what a
+//! cleanup needs it to mean. So an unarchiving stops both by taking the
+//! archiving away, and a second archiving starts them again over whatever has
+//! been printed since. Neither waits on the other — a delete set sooner than a
+//! trim simply takes a Conversation that was never trimmed.
 //!
 //! **Hourly, over a threshold of days.** The pace is [`crate::Pace::cleanup`]
-//! and the threshold is the settings' — [`crate::settings::Cleanup`], whose
-//! fallback where nobody has typed one is [`TRIMMED_AFTER`]. An hour is plenty
-//! for a clock counted in days, and it is what decides how soon after a
-//! threshold is crossed rather than whether it is noticed at all.
+//! and the thresholds are the settings' — [`crate::settings::Cleanup`], whose
+//! fallbacks where nobody has typed one are [`TRIMMED_AFTER`] and
+//! [`DELETED_AFTER`]. An hour is plenty for a clock counted in days, and it is
+//! what decides how soon after a threshold is crossed rather than whether it is
+//! noticed at all.
 //!
 //! **And the settings are read on every pass**, like everything else out of
 //! `config.yaml`: a switch turned off from a phone stops the next sweep, a
@@ -28,14 +36,17 @@
 //!
 //! **The backlog goes on the first pass.** There is nothing here that only
 //! looks at what was archived since it shipped: every Conversation already past
-//! the threshold is trimmed the first time this runs, which is the deliberate
-//! reading of *a cleanup, three days after the archiving*.
+//! a threshold is cleaned the first time this runs, which is the deliberate
+//! reading of *a cleanup, three days after the archiving* — and the reading of
+//! the delete switch being turned on, which is a human saying what should
+//! happen to what they have already put away.
 //!
 //! **And it says what it did in the log and nowhere else.** Nothing is refused
-//! and nothing comes back. A trim writes no Timeline Event, sends no Nudge and
-//! puts nothing in front of the human — a card that said *this was cleaned up*
-//! would be the record growing where it was supposed to shrink, and the mark
-//! the Conversation's own page draws is the record of it.
+//! and nothing comes back. A cleanup writes no Timeline Event, sends no Nudge
+//! and puts nothing in front of the human — a card that said *this was cleaned
+//! up* would be the record growing where it was supposed to shrink, and the mark
+//! the Conversation's own page draws is the record of a trim. A delete leaves no
+//! mark at all, there being nothing left for one to be on.
 
 use std::time::Duration;
 
@@ -102,9 +113,9 @@ pub(crate) fn sweeping(state: &AppState) {
 /// said again: this runs unattended with nobody watching, and what it has to
 /// say it says in the log.
 ///
-/// Listed first and then trimmed one at a time, rather than done in the query
-/// that finds them: each trim is its own transaction, so a Conversation
-/// unarchived from a phone while this is walking the list is one the trim
+/// Both halves listed first and then done one at a time, rather than done in
+/// the query that finds them: each is its own transaction, so a Conversation
+/// unarchived from a phone while this is walking the list is one the store
 /// itself refuses. Which is what the outcome is read for — the sweep asked for
 /// something the record had moved on from, and the record is right.
 async fn sweep(state: &AppState) {
@@ -115,6 +126,61 @@ async fn sweep(state: &AppState) {
     let config = state.settings.config();
     let cleanup = config.cleanup();
 
+    // The delete first, and it is worth a sentence. The two clocks are
+    // independent, so a Conversation can be past both at once — and a pass that
+    // trimmed it and then deleted it would have taken the bulk out of something
+    // it was about to take altogether, and said so twice in the log. Deleting
+    // first leaves the trim nothing but what is staying.
+    deleting(state, cleanup).await;
+    trimming(state, cleanup).await;
+}
+
+/// The delete half of one pass: what has been archived longer than the delete's
+/// days, gone.
+///
+/// **Off unless the human has turned it on**, which is the whole of why this is
+/// safe to have written at all — see [`crate::settings::Cleanup::deletes`]. And
+/// when they do turn it on, everything already past the threshold goes on the
+/// next pass, exactly as the trim's backlog does: *a delete, thirty days after
+/// the archiving* is a rule about the record rather than about what has happened
+/// since somebody found the settings page.
+async fn deleting(state: &AppState, cleanup: &crate::settings::Cleanup) {
+    if !cleanup.deletes() {
+        tracing::debug!("the Cleanup's delete is switched off, so nothing is deleted");
+        return;
+    }
+
+    let delete_after = cleanup.delete_after();
+
+    let waiting = match store::deletable(&state.pool, delete_after).await {
+        Ok(waiting) => waiting,
+        Err(error) => {
+            tracing::error!(error = ?error, "listing the archived Conversations to delete failed");
+            return;
+        }
+    };
+
+    for conversation_id in waiting {
+        match store::delete_conversation(&state.pool, conversation_id).await {
+            Ok(store::Deletion::Deleted) => tracing::info!(
+                conversation_id,
+                archived_for = delete_after,
+                "an archived Conversation has been deleted",
+            ),
+            Ok(outcome) => tracing::debug!(
+                conversation_id,
+                outcome = ?outcome,
+                "an archived Conversation moved on before the sweep reached it",
+            ),
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, "deleting an archived Conversation failed");
+            }
+        }
+    }
+}
+
+/// And the trim half, which is the same shape a step earlier.
+async fn trimming(state: &AppState, cleanup: &crate::settings::Cleanup) {
     if !cleanup.trims() {
         tracing::debug!("the Cleanup's trim is switched off, so nothing is trimmed");
         return;

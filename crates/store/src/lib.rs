@@ -58,7 +58,10 @@ pub use archives::{
     unarchive_conversation,
 };
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
-pub use cleanup::{Trimming, trim_conversation, trimmable, trimmed};
+pub use cleanup::{
+    Deletion, Trimming, deletable, delete_conversation, deleted_tables, trim_conversation,
+    trimmable, trimmed,
+};
 pub use commits::{Commit, commit, commit_repo, commits_landed, record_commit, recorded_commits};
 pub use companions::{
     Adding, Change, Companion, CompanionMode, CompanionWorktree, Configured, Joining, Opening,

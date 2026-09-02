@@ -11884,6 +11884,139 @@ async fn the_cleanup_goes_by_what_the_settings_say_at_the_time() {
     pool.close().await;
 }
 
+/// And the Cleanup deletes what has been archived for longer than the delete's
+/// days — but only once the human has said so.
+///
+/// Two stretches on one running server, because the switch is the whole subject.
+/// In the first nothing is deleted however old it is, and the trim goes on
+/// taking bulk beside it: off is a Verkstead that forgets nothing. In the second
+/// the switch is on, and what was already past the threshold goes on the next
+/// pass — the backlog reading the trim's own rule follows.
+///
+/// Three Conversations, the other two being what *only the old one* means: one
+/// archived a moment ago, and one the human has taken back off the archive.
+#[tokio::test]
+async fn the_cleanup_deletes_what_was_archived_long_enough_ago() {
+    let bench = bench_at_pace(
+        tempfile::tempdir().unwrap(),
+        PRINTS_AND_STOPS,
+        PULL_REQUEST,
+        *CLEANING,
+        None,
+    )
+    .await;
+
+    // The branch the work is on, made in the repository itself. A delete is the
+    // store's and nothing else's: the branch outlives the record of it, closing
+    // having already chosen to keep it.
+    git(&bench.repo, &["branch", "rate-limiting"]);
+
+    let pool = open_database(&bench.database).await.unwrap();
+    let repo = bench.repo_id;
+
+    // Archived a month ago, which is past the thirty a delete keeps.
+    let old = archived_printing(&pool, repo, "rate-limiting").await;
+    aged(&pool, "archived_conversations", "archived_at", old.id, 31).await;
+
+    // And archived just now, which is not.
+    let fresh = archived_printing(&pool, repo, "usage-limits").await;
+
+    // And one back on the sidebar, which has no clock running on it at all.
+    let living = archived_printing(&pool, repo, "burst-allowance").await;
+    aged(
+        &pool,
+        "archived_conversations",
+        "archived_at",
+        living.id,
+        31,
+    )
+    .await;
+    verkstead_store::unarchive_conversation(&pool, living.id)
+        .await
+        .unwrap();
+
+    // The trim reaching it is what says the sweep is running and has had this
+    // one in its hands.
+    until_trimmed(&pool, old.id, old.event).await;
+
+    // Long enough for many more passes at a Conversation a Verkstead nobody has
+    // configured will not delete.
+    tokio::time::sleep(CLEANING.cleanup * 8).await;
+
+    assert!(
+        still_there(&pool, old.id).await,
+        "the delete is switched off, so a month-old archive is trimmed and kept",
+    );
+
+    // Turned on, and left to say nothing about the days: thirty is what a
+    // Verkstead told only that it should delete goes by.
+    cleaning_up(&bench, "cleanup:\n  delete:\n    enabled: true\n");
+
+    until_deleted(&pool, old.id).await;
+
+    // Long enough for many more passes, so that what is still there is held
+    // against a sweep that has had every chance at it.
+    tokio::time::sleep(CLEANING.cleanup * 8).await;
+
+    assert!(
+        still_there(&pool, fresh.id).await,
+        "one archived a moment ago is not old enough to go",
+    );
+    assert!(
+        still_there(&pool, living.id).await,
+        "and one back on the sidebar has no clock running on it at all",
+    );
+
+    let (status, body) = fetch(
+        &bench.app,
+        Request::builder()
+            .uri(format!("/api/ui/conversations/{}", old.id))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "opening what was deleted says there is no such Conversation: {body}",
+    );
+
+    assert!(
+        git(&bench.repo, &["branch", "--list", "rate-limiting"]).contains("rate-limiting"),
+        "and the branch is where it was: no git operation belongs on this path",
+    );
+
+    pool.close().await;
+}
+
+/// Whether the store still has a Conversation of that id at all.
+async fn still_there(pool: &SqlitePool, id: i64) -> bool {
+    verkstead_store::load_conversation(pool, id)
+        .await
+        .unwrap()
+        .is_some()
+}
+
+/// Wait for the sweep to delete one Conversation, which is the store no longer
+/// having it.
+async fn until_deleted(pool: &SqlitePool, id: i64) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        if !still_there(pool, id).await {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the cleanup never deleted Conversation {id}",
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
 /// Say what the Cleanup is to do, in the Data Directory the running server reads
 /// its settings out of.
 ///

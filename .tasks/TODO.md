@@ -20,4 +20,4 @@ no advance notice drawn in the workbench.
 - [x] 01: Trim, swept — [details](01-trim-swept.md)
 - [x] 02: The Trimmed mark — [details](02-trimmed-mark.md)
 - [x] 03: The Cleanup settings card — [details](03-cleanup-settings-card.md)
-- [ ] 04: Delete, swept — [details](04-delete-swept.md)
+- [x] 04: Delete, swept — [details](04-delete-swept.md)
