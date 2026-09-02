@@ -17,8 +17,14 @@
 //! something measures it against the thing it is a share of — and because the
 //! minimums under the widths are lengths, which are worth nothing as shares
 //! until the frame they are shares of has a width to be one of.
+//!
+//! The last block is about the frame's height rather than its widths, which is
+//! one question and has never been a comfortable one: the page must never scroll
+//! behind the panes. It is here because it is the same frame — and it is asked
+//! twice, of the stylesheet where jsdom can lay no page out, and of the page
+//! itself where the answer is a cascade rather than a geometry.
 
-import { fireEvent, render, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The terminal's own scroller, which is the one thing here still written beside
@@ -44,7 +50,19 @@ import {
   type Frame,
   type Widths,
 } from "../src/widths";
+import type { ConversationView } from "../src/api/types";
 import { drawn, mount, theWorkbench } from "./bench";
+import { json, whenever } from "./serving";
+import roadmap from "./fixtures/conversation-roadmap.json" with { type: "json" };
+import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
+
+/// The two conversations with something pinned above their record: a task list
+/// and a roadmap. Both are here for one reason — each draws a list of rows whose
+/// done state is written twice, as a box to look at and as a word to hear, and
+/// the word is taken out of the layout by being positioned. Which is the
+/// element that put a scrollbar down the side of the workbench.
+const TASKED = tasks as ConversationView;
+const STAGED = roadmap as ConversationView;
 
 /// Where the widths are kept, asked for by the names a browser would find them
 /// under rather than through the module that writes them.
@@ -629,6 +647,171 @@ describe("the rules the widths are read by", () => {
     expect(screenCss).toMatch(
       /\.screen \.terminalHost \{[^}]*overscroll-behavior: contain;/,
     );
+  });
+
+  /// And the half of that clip which is not an `overflow` at all: the frame and
+  /// each pane are containing blocks, so that there is nothing for the clip to
+  /// miss.
+  ///
+  /// An `overflow` reaches an absolutely positioned descendant only where the
+  /// box carrying it is what that descendant is laid out from. Positioned, both
+  /// boxes are; static, neither is, and such an element is laid out against the
+  /// document instead — which is the one thing in the app no clip and no height
+  /// can reach.
+  it("is what everything inside it is laid out from", () => {
+    expect(stylesheet).toContain(".panes {\n  position: relative;\n");
+    expect(stylesheet).toContain(".pane {\n  position: relative;\n");
+  });
+});
+
+/// And the same thing asked of the page rather than of the stylesheet: whatever
+/// the workbench draws, nothing in it is laid out against the document.
+///
+/// This is the rule the frame's own height and its `overscroll-behavior` cannot
+/// state. Both are about boxes standing in the flow, and an absolutely
+/// positioned element with no positioned ancestor is in nobody's flow: it is
+/// placed where its pane has scrolled to, measured from the top of the document,
+/// and it makes the document that tall. A span a screen reader is meant to find
+/// and nobody is meant to see is enough — which is what put a scrollbar down the
+/// side of the whole workbench, outside every pane, and pushed the frame off the
+/// screen when it was used.
+///
+/// jsdom lays nothing out, and this needs no layout: what is asked is which box
+/// each element would be laid out *from*, and that is the cascade rather than
+/// the geometry. So the walk below is the browser's own — up the ancestors to
+/// the first that is positioned — over the real page, with the real stylesheets
+/// behind it.
+describe("what the frame is laid out from", () => {
+  /// The box an absolutely positioned element is laid out from: the nearest
+  /// ancestor that is positioned, or `null` where the walk reaches the top of
+  /// the frame without finding one — which is the document, and the whole of
+  /// what must never happen.
+  function laidOutFrom(element: Element, frame: Element): Element | null {
+    for (let at = element.parentElement; at !== null; at = at.parentElement) {
+      if (positioned(at)) {
+        return at;
+      }
+      if (at === frame) {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  /// Whether a box is one the next thing down may be laid out from.
+  ///
+  /// Said as the four values that are rather than as everything that is not
+  /// `static`, because jsdom answers for a property nothing declared with the
+  /// empty string rather than with its initial value — and read the other way
+  /// round, every element on the page would be a containing block and the walk
+  /// above would stop on the first one it met.
+  function positioned(element: Element): boolean {
+    return ["relative", "absolute", "fixed", "sticky"].includes(
+      getComputedStyle(element).position,
+    );
+  }
+
+  /// How an element is named when it is the one at fault, there being nothing
+  /// else to call it: its tag and whatever classes it is wearing.
+  function named(element: Element): string {
+    return `${element.tagName.toLowerCase()}.${[...element.classList].join(".")}`;
+  }
+
+  /// Everything the page has drawn that is absolutely positioned, which is what
+  /// the question is about — and what makes an empty answer worth having.
+  function loose(frame: Element): Element[] {
+    return [...frame.querySelectorAll("*")].filter(
+      (element) => getComputedStyle(element).position === "absolute",
+    );
+  }
+
+  /// The page, with a pane opened over each of the fixtures that draws one of
+  /// these. Every one of them is the workbench: the frame is where the rule is
+  /// written, so the pages that stand in it are what has to hold it.
+  async function drawnPage(at?: string) {
+    windowIs("three panes");
+    theWorkbench(
+      whenever(`/api/ui/conversations/${TASKED.id}`, json(TASKED)),
+      whenever(`/api/ui/conversations/${STAGED.id}`, json(STAGED)),
+    );
+
+    const { container } = mount(at);
+    const frame = await drawn<HTMLElement>(container, `.${shell.panes}`);
+
+    // Nothing is asked of a page that has not finished arriving: the pinned
+    // lists are the last thing on it and the whole of what two of these mount.
+    await waitFor(() =>
+      expect(frame.querySelectorAll(`.${shell.pane} *`).length).toBeGreaterThan(
+        20,
+      ),
+    );
+
+    return frame;
+  }
+
+  /// The three pages: the conversation the fixtures open, and the two carrying
+  /// a pinned list — a task list and a roadmap, which are where the spans that
+  /// broke this are drawn.
+  ///
+  /// Swept together rather than one test each, because the sweep only says
+  /// something where it found something: a page drawing nothing positioned is
+  /// worth walking and is no evidence on its own, and it is the three of them
+  /// between them that make an empty answer mean anything.
+  const PAGES = [
+    undefined,
+    `/conversations/${TASKED.id}`,
+    `/conversations/${STAGED.id}`,
+  ];
+
+  /// Every absolutely positioned element the three pages draw, with the box it
+  /// is laid out from and the pane it stands in.
+  async function swept() {
+    const found = [];
+
+    for (const at of PAGES) {
+      const frame = await drawnPage(at);
+      for (const element of loose(frame)) {
+        found.push({
+          element,
+          from: laidOutFrom(element, frame),
+          pane: element.closest(`.${shell.pane}`),
+        });
+      }
+      cleanup();
+    }
+
+    // A sweep that found nothing to ask about would pass while saying nothing.
+    expect(
+      found.length,
+      "the pages should be drawing something absolutely positioned",
+    ).toBeGreaterThan(0);
+
+    return found;
+  }
+
+  it("lays nothing out against the document", async () => {
+    expect(
+      (await swept())
+        .filter((one) => one.from === null)
+        .map((one) => named(one.element)),
+    ).toEqual([]);
+  });
+
+  /// And the stronger reading of the same rule, which is what the pane's own
+  /// `position` buys over the frame's: a stray position stays inside the pane it
+  /// was written in. The frame clips only above the first breakpoint; a pane is
+  /// the box that scrolls at every width, so a pane is where a mistake belongs.
+  it("keeps what a pane holds inside it", async () => {
+    expect(
+      (await swept())
+        .filter(
+          (one) =>
+            one.pane !== null &&
+            (one.from === null || !one.pane.contains(one.from)),
+        )
+        .map((one) => named(one.element)),
+    ).toEqual([]);
   });
 });
 
