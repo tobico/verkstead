@@ -24,6 +24,13 @@
 //! rust_build_cache:
 //!   enabled: true
 //!   size: 30G
+//! cleanup:
+//!   trim:
+//!     enabled: true
+//!     days: 3
+//!   delete:
+//!     enabled: false
+//!     days: 30
 //! conflict_resolution: merge
 //! share_on_done: false
 //! sandbox_binds:
@@ -57,6 +64,13 @@
 //! because it is the one sandbox control the human may reasonably want to reach
 //! from a phone — see [`RustBuildCache`], and
 //! [`crate::build_cache`] for what it switches.
+//!
+//! `cleanup` is written that way as well, and it is the one section here whose
+//! two halves fall back the two different ways: the trim is on at three days
+//! with nothing said, because what it takes is what nobody opens twice, and the
+//! delete is off at thirty, because it is the one thing in Verkstead that
+//! forgets — see [`Cleanup`], and [`crate::cleanup`] for the sweep that reads
+//! it on every pass.
 //!
 //! `conflict_resolution` is written that way too, and the default it falls back
 //! to is the safe half of the choice: a conflicted pull request has its base
@@ -374,6 +388,18 @@ pub struct Config {
     #[serde(default)]
     rust_build_cache: RustBuildCache,
 
+    /// And what the Cleanup does to an archived Conversation, and how long
+    /// after the archiving it does it: the trim that takes the bulk, and the
+    /// delete that takes the whole of it — see [`Cleanup`], and
+    /// [`crate::cleanup`] for the sweep that reads this.
+    ///
+    /// Two switches and two durations, every one of them optional, and the two
+    /// halves default the opposite ways about: a trim is on at three days
+    /// because what it takes is what nobody opens twice, and a delete is off at
+    /// thirty because it is the one thing here that forgets.
+    #[serde(default)]
+    cleanup: Cleanup,
+
     /// And how a pull request that will not merge is resolved: the base merged
     /// in, which is what nobody choosing anything gets, or the branch rebased
     /// onto the base and force-pushed.
@@ -484,6 +510,10 @@ impl Config {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
             },
+            // Nothing to tidy on the way in: a switch is a switch, and a
+            // duration that is not a whole number of days never became one —
+            // see [`CleanupStep`].
+            cleanup: config.cleanup,
             conflict_resolution: config.conflict_resolution,
             share_on_done: config.share_on_done,
             sandbox_binds: entries_written(config.sandbox_binds),
@@ -493,9 +523,15 @@ impl Config {
     }
 
     /// The config a settings page has just been told.
+    ///
+    /// One argument per section, which is what the file is: the page saves the
+    /// whole of it in one request, so a constructor taking fewer would be one a
+    /// caller could leave a section out of.
+    #[allow(clippy::too_many_arguments)]
     pub fn of(
         git_author: GitAuthor,
         rust_build_cache: RustBuildCache,
+        cleanup: Cleanup,
         conflict_resolution: ConflictResolution,
         share_on_done: bool,
         sandbox_binds: Vec<String>,
@@ -505,6 +541,11 @@ impl Config {
         Config {
             git_author,
             rust_build_cache,
+            // As the page set it: both switches written down, and each duration
+            // only where somebody typed one — see [`CleanupStep::of`], where an
+            // empty box is the default asked for back rather than a duration of
+            // nothing.
+            cleanup,
             // Written down as it stands rather than left out where it is the
             // default, the way the build cache's switch is: what the page sends
             // is where the setting is to sit, and a key that appeared only for
@@ -532,6 +573,12 @@ impl Config {
     /// nobody has said otherwise.
     pub fn rust_build_cache(&self) -> &RustBuildCache {
         &self.rust_build_cache
+    }
+
+    /// And what the Cleanup is to do after an archiving, which is a trim at
+    /// three days and no delete at all where nobody has said otherwise.
+    pub fn cleanup(&self) -> &Cleanup {
+        &self.cleanup
     }
 
     /// And how a conflict is resolved where the Repo it is in says nothing,
@@ -627,6 +674,122 @@ impl RustBuildCache {
     pub fn size_configured(&self) -> Option<&str> {
         self.size.as_deref()
     }
+}
+
+/// What the Cleanup does to an archived Conversation, and how long after the
+/// archiving it does it.
+///
+/// Two steps on two clocks, each counted from `archived_at` and neither waiting
+/// on the other — see [`crate::cleanup`]. A **trim** takes the bulk: the full
+/// agent output, the Transcripts and the session names, which is everything a
+/// Share never carried. A **delete** takes the whole Conversation.
+///
+/// The two default the opposite ways about, and that is the whole shape of the
+/// section. A trim is **on**, at [`crate::cleanup::TRIMMED_AFTER`] days: what it
+/// takes is what nobody opens twice, and a human should not be keeping gigabytes
+/// of session output for never having found this page. A delete is **off**, at
+/// [`crate::cleanup::DELETED_AFTER`] days where it is turned on: it is the one
+/// thing in Verkstead that forgets, and forgetting is not something to start
+/// doing to somebody who has never said it should.
+///
+/// A delete sooner than a trim is not refused and is nothing to fix: the two
+/// clocks are independent, so the Conversation is simply deleted before it was
+/// ever trimmed, which is the reading of the two numbers a human typed.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct Cleanup {
+    #[serde(default)]
+    trim: CleanupStep,
+
+    #[serde(default)]
+    delete: CleanupStep,
+}
+
+impl Cleanup {
+    /// What a settings page has just been told: the two rows, in the order they
+    /// are read down.
+    pub fn of(trim: CleanupStep, delete: CleanupStep) -> Cleanup {
+        Cleanup { trim, delete }
+    }
+
+    /// Whether an archived Conversation has its bulk taken. Nothing configured
+    /// is **on**.
+    pub fn trims(&self) -> bool {
+        self.trim.enabled.unwrap_or(true)
+    }
+
+    /// And how many days after the archiving, which is
+    /// [`crate::cleanup::TRIMMED_AFTER`] where nobody has typed one.
+    pub fn trim_after(&self) -> u32 {
+        self.trim.days.unwrap_or(crate::cleanup::TRIMMED_AFTER)
+    }
+
+    /// And the days exactly as they are written down, and `None` where nobody
+    /// has written any: what a settings page draws as a placeholder rather than
+    /// as a value somebody chose.
+    pub fn trim_after_configured(&self) -> Option<u32> {
+        self.trim.days
+    }
+
+    /// Whether an archived Conversation is deleted for good in the end. Nothing
+    /// configured is **off**.
+    pub fn deletes(&self) -> bool {
+        self.delete.enabled.unwrap_or(false)
+    }
+
+    /// And how many days after the archiving, which is
+    /// [`crate::cleanup::DELETED_AFTER`] where nobody has typed one.
+    pub fn delete_after(&self) -> u32 {
+        self.delete.days.unwrap_or(crate::cleanup::DELETED_AFTER)
+    }
+
+    /// And the days as they are written down, read the way the trim's are and
+    /// drawn the same way.
+    pub fn delete_after_configured(&self) -> Option<u32> {
+        self.delete.days
+    }
+}
+
+/// One of the Cleanup's two steps as the human left it: whether it happens, and
+/// how long after the archiving.
+///
+/// Both halves optional and both absent on a machine nobody has been to the
+/// settings page of, because what either of them falls back to is the *step's*
+/// business rather than this type's — a trim and a delete are the same shape
+/// and different answers, and [`Cleanup`] is where the two are told apart.
+///
+/// The days are a whole number of them and nothing else. A hand-edit that wrote
+/// prose there leaves the duration unmade rather than the file unread, which is
+/// this module's rule about everything it is told.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct CleanupStep {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    days: Option<u32>,
+}
+
+impl CleanupStep {
+    /// What a settings page has just been told: the switch, and the days where
+    /// a number was typed.
+    ///
+    /// An empty box is no duration configured, the way an empty build cache
+    /// size is: clearing it is how the human asks for the default back. So is
+    /// anything that is not a whole number of days — the page sends what was
+    /// typed, and a duration nobody can read is a duration nobody set.
+    pub fn of(enabled: bool, days: Option<String>) -> CleanupStep {
+        CleanupStep {
+            enabled: Some(enabled),
+            days: days.and_then(days_typed),
+        }
+    }
+}
+
+/// The whole number of days a field holds, or `None` where it holds anything
+/// else — an empty box, a space, a word, a fraction, a number of days nobody
+/// could wait.
+fn days_typed(days: String) -> Option<u32> {
+    blank_is_nothing(days)?.parse().ok()
 }
 
 /// The name and the email address a session's commits are by.
@@ -882,8 +1045,8 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::{
-        Config, ConflictResolution, GitAuthor, IgnoreRule, RuleTrouble, RustBuildCache, Secrets,
-        Settings,
+        Cleanup, CleanupStep, Config, ConflictResolution, GitAuthor, IgnoreRule, RuleTrouble,
+        RustBuildCache, Secrets, Settings,
     };
 
     #[test]
@@ -1047,6 +1210,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Rebase,
                 false,
                 vec![],
@@ -1064,6 +1228,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -1142,6 +1307,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 true,
                 vec![],
@@ -1156,6 +1322,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -1168,6 +1335,171 @@ mod tests {
             !Settings::in_data_dir(dir.path()).config().share_on_done(),
             "a switch that could only be turned on would be one nobody could undo",
         );
+    }
+
+    /// The Cleanup is four values in two rows, and this is that they are read.
+    #[test]
+    fn the_cleanup_is_what_the_config_file_says() {
+        let config = Config::read(
+            "cleanup:\n  trim:\n    enabled: false\n    days: 5\n  delete:\n    enabled: true\n    days: 90\n",
+        )
+        .unwrap();
+        let cleanup = config.cleanup();
+
+        assert!(!cleanup.trims());
+        assert_eq!(cleanup.trim_after(), 5);
+        assert!(cleanup.deletes());
+        assert_eq!(cleanup.delete_after(), 90);
+    }
+
+    /// And the shape of the section, which is the one here whose two halves
+    /// fall back the two different ways: nothing configured trims at three days
+    /// and deletes never.
+    ///
+    /// An absent key, an absent file and one nothing can parse all say it. The
+    /// trim is on for the reason the build cache is — a human should not be
+    /// keeping gigabytes of session output for never having found this page —
+    /// and the delete is off for the reason sharing on Done is: it is the one
+    /// thing here that forgets.
+    #[test]
+    fn a_cleanup_nobody_has_said_anything_about_trims_and_never_deletes() {
+        for text in ["", "git_author:\n  name: Tobias Cohen\n", "cleanup:\n"] {
+            let config = Config::read(text).unwrap();
+            let cleanup = config.cleanup();
+
+            assert!(cleanup.trims(), "nothing said here trims: {text:?}");
+            assert_eq!(cleanup.trim_after(), crate::cleanup::TRIMMED_AFTER);
+            assert!(!cleanup.deletes(), "and deletes nothing: {text:?}");
+            assert_eq!(cleanup.delete_after(), crate::cleanup::DELETED_AFTER);
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        assert!(
+            settings.config().cleanup().trims(),
+            "and so is a Data Directory with no config file in it at all",
+        );
+
+        std::fs::write(settings.config_path(), "cleanup: [oh\n").unwrap();
+
+        assert!(
+            !settings.config().cleanup().deletes(),
+            "and so is a file nothing can parse",
+        );
+    }
+
+    /// A duration nobody has typed is the default *and says so*, which is what
+    /// the page draws as a placeholder rather than as a value somebody chose.
+    #[test]
+    fn a_cleanup_duration_says_whether_anybody_chose_it() {
+        let unset = Config::read("cleanup:\n  trim:\n    enabled: true\n").unwrap();
+
+        assert_eq!(unset.cleanup().trim_after(), crate::cleanup::TRIMMED_AFTER);
+        assert_eq!(unset.cleanup().trim_after_configured(), None);
+        assert_eq!(unset.cleanup().delete_after_configured(), None);
+
+        let typed =
+            Config::read("cleanup:\n  trim:\n    days: 3\n  delete:\n    days: 30\n").unwrap();
+
+        assert_eq!(
+            typed.cleanup().trim_after_configured(),
+            Some(3),
+            "the same number a human typed is a number they typed",
+        );
+        assert_eq!(typed.cleanup().delete_after_configured(), Some(30));
+    }
+
+    /// And a duration that is not a whole number of days is nothing configured
+    /// rather than anything to report — the page sends what was typed, and this
+    /// module refuses nothing it is told.
+    #[test]
+    fn a_cleanup_duration_that_is_not_days_is_no_duration() {
+        for days in ["", "   ", "a fortnight", "3.5", "-1"] {
+            let step = CleanupStep::of(true, Some(days.to_owned()));
+            let cleanup = Cleanup::of(step, CleanupStep::default());
+
+            assert_eq!(
+                cleanup.trim_after_configured(),
+                None,
+                "nothing readable in {days:?}",
+            );
+            assert_eq!(cleanup.trim_after(), crate::cleanup::TRIMMED_AFTER);
+        }
+    }
+
+    /// The two rows a save writes are the ones the next read finds, a delete
+    /// sooner than the trim included: the clocks run from the archiving
+    /// independently, so there is nothing here to refuse.
+    #[test]
+    fn a_saved_cleanup_is_what_the_next_read_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                Cleanup::of(
+                    CleanupStep::of(false, Some("14".to_owned())),
+                    CleanupStep::of(true, Some("2".to_owned())),
+                ),
+                ConflictResolution::Merge,
+                false,
+                vec![],
+                vec![],
+                vec![],
+            ))
+            .unwrap();
+
+        let config = Settings::in_data_dir(dir.path()).config();
+        let cleanup = config.cleanup();
+
+        assert!(!cleanup.trims());
+        assert_eq!(cleanup.trim_after(), 14);
+        assert!(cleanup.deletes());
+        assert_eq!(
+            cleanup.delete_after(),
+            2,
+            "a delete sooner than the trim is saved as it was typed",
+        );
+    }
+
+    /// And a duration cleared is the default back, rather than a number of
+    /// nothing written down: the field standing empty is how the human asks for
+    /// it — see [`CleanupStep::of`].
+    #[test]
+    fn clearing_a_cleanup_duration_puts_the_default_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of(
+                GitAuthor::default(),
+                RustBuildCache::default(),
+                Cleanup::of(
+                    CleanupStep::of(true, Some(String::new())),
+                    CleanupStep::of(false, Some("  ".to_owned())),
+                ),
+                ConflictResolution::Merge,
+                false,
+                vec![],
+                vec![],
+                vec![],
+            ))
+            .unwrap();
+
+        let written = std::fs::read_to_string(settings.config_path()).unwrap();
+
+        assert!(
+            !written.contains("days"),
+            "a duration nobody typed is not in the file: {written}"
+        );
+
+        let config = Settings::in_data_dir(dir.path()).config();
+
+        assert_eq!(config.cleanup().trim_after(), crate::cleanup::TRIMMED_AFTER);
+        assert_eq!(config.cleanup().trim_after_configured(), None);
     }
 
     /// Where the share viewer is hosted used to be said here, and a file
@@ -1341,6 +1673,7 @@ mod tests {
                     Some("tobi@tobico.net".to_owned()),
                 ),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -1373,6 +1706,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -1403,6 +1737,7 @@ mod tests {
                     Some("tobi@tobico.net".to_owned()),
                 ),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -1426,6 +1761,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), Some(String::new())),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -1468,6 +1804,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -1495,6 +1832,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -1558,6 +1896,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec!["/var/cache/verkstead-node".to_owned()],
@@ -1577,6 +1916,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -1625,6 +1965,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],
@@ -1702,6 +2043,7 @@ mod tests {
             .save_config(&Config::of(
                 GitAuthor::default(),
                 RustBuildCache::default(),
+                Cleanup::default(),
                 ConflictResolution::Merge,
                 false,
                 vec![],

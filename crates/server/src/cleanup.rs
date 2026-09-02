@@ -16,10 +16,15 @@
 //! since.
 //!
 //! **Hourly, over a threshold of days.** The pace is [`crate::Pace::cleanup`]
-//! and the threshold is [`TRIMMED_AFTER`] — a constant here, and the settings'
-//! from the stage that adds the Cleanup card. An hour is plenty for a clock
-//! counted in days, and it is what decides how soon after a threshold is
-//! crossed rather than whether it is noticed at all.
+//! and the threshold is the settings' — [`crate::settings::Cleanup`], whose
+//! fallback where nobody has typed one is [`TRIMMED_AFTER`]. An hour is plenty
+//! for a clock counted in days, and it is what decides how soon after a
+//! threshold is crossed rather than whether it is noticed at all.
+//!
+//! **And the settings are read on every pass**, like everything else out of
+//! `config.yaml`: a switch turned off from a phone stops the next sweep, a
+//! duration typed there is what the one after it goes by, and neither waits for
+//! a restart.
 //!
 //! **The backlog goes on the first pass.** There is nothing here that only
 //! looks at what was archived since it shipped: every Conversation already past
@@ -37,14 +42,24 @@ use std::time::Duration;
 use crate::AppState;
 use crate::store;
 
-/// How long a Conversation is archived before its bulk is taken, as
-/// [`crate::Pace`]'s sweep will find it.
+/// How long a Conversation is archived before its bulk is taken, where nobody
+/// has typed a number of their own — see
+/// [`crate::settings::Cleanup::trim_after`], which is what the sweep reads.
 ///
 /// Three days: long enough that a human who archived one by mistake, or wants
 /// one more look at what a session printed, has a working day or two to say so;
 /// short enough that the thing being kept for is a thing they would remember
 /// wanting.
 pub(crate) const TRIMMED_AFTER: u32 = 3;
+
+/// And how long before the whole of it goes, where nobody has typed one either
+/// — see [`crate::settings::Cleanup::delete_after`].
+///
+/// Thirty days, and only ever the fallback of a switch that is **off** until
+/// somebody turns it on: a delete is the one thing in Verkstead that forgets,
+/// so the number here is the one a human turning it on would have chosen
+/// anyway rather than one that ever runs unasked.
+pub(crate) const DELETED_AFTER: u32 = 30;
 
 /// How often the archived Conversations are looked over, as [`crate::Pace`] has
 /// it by default.
@@ -93,7 +108,21 @@ pub(crate) fn sweeping(state: &AppState) {
 /// itself refuses. Which is what the outcome is read for — the sweep asked for
 /// something the record had moved on from, and the record is right.
 async fn sweep(state: &AppState) {
-    let waiting = match store::trimmable(&state.pool, TRIMMED_AFTER).await {
+    // Read off the file on every pass rather than held from startup, which is
+    // what makes a switch flipped on a phone take effect on the next one. One
+    // small file, read here rather than on a blocking thread for
+    // [`crate::comments`]'s reason: a pass an hour is not a hot path.
+    let config = state.settings.config();
+    let cleanup = config.cleanup();
+
+    if !cleanup.trims() {
+        tracing::debug!("the Cleanup's trim is switched off, so nothing is trimmed");
+        return;
+    }
+
+    let trim_after = cleanup.trim_after();
+
+    let waiting = match store::trimmable(&state.pool, trim_after).await {
         Ok(waiting) => waiting,
         Err(error) => {
             tracing::error!(error = ?error, "listing the archived Conversations to clean up failed");
@@ -105,7 +134,7 @@ async fn sweep(state: &AppState) {
         match store::trim_conversation(&state.pool, conversation_id).await {
             Ok(store::Trimming::Trimmed) => tracing::info!(
                 conversation_id,
-                archived_for = TRIMMED_AFTER,
+                archived_for = trim_after,
                 "an archived Conversation has been trimmed",
             ),
             Ok(outcome) => tracing::debug!(

@@ -11,8 +11,8 @@
 //! session does with a Repo can be pushed, then the shared Rust build cache
 //! every session builds into, then where the share viewer is hosted, then the
 //! paths Verkstead may work inside at all, then how a conflicted pull request
-//! is resolved, then the Agent Profiles and the Repos a Conversation is settled
-//! against.
+//! is resolved, then what becomes of a Conversation once it is archived, then
+//! the Agent Profiles and the Repos a Conversation is settled against.
 //!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
@@ -53,6 +53,7 @@ import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
 import { BuildCacheCard, BuildCachePane } from "./BuildCache";
+import { CleanupCard, CleanupPane } from "./Cleanup";
 import { ConflictsCard, ConflictsPane } from "./Conflicts";
 import { GithubCard, GithubPane } from "./Credentials";
 import { PathsCard, PathsPane } from "./Paths";
@@ -240,6 +241,15 @@ function Settings(props: {
           open={props.opening === "conflicts"}
           press={() => props.select("conflicts")}
         />
+        {/* And what becomes of a Conversation once the human has archived it:
+            the trim that takes its bulk, and the delete that takes the whole of
+            it. Beside the one above because it is the other setting nobody has
+            to read — and the one section on this page about the record rather
+            than about the machine it is kept on. */}
+        <CleanupCard
+          open={props.opening === "cleanup"}
+          press={() => props.select("cleanup")}
+        />
         {/* Told which of its own things is open rather than the whole opening:
             where a Profile's pane stands is this page's arithmetic, and a
             section that knew the settings' paths would be a second opinion
@@ -309,6 +319,9 @@ function Details(props: {
       </Match>
       <Match when={props.opening === "conflicts"}>
         <ConflictsPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "cleanup"}>
+        <CleanupPane back={props.back} />
       </Match>
       {/* The Repos' two panes are two components rather than one asked about a
           Repo that does not exist yet, the way the Profiles' one form is: what

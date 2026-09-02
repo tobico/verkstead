@@ -89,6 +89,13 @@ git_author:
 rust_build_cache:
   enabled: true
   size: 30G
+cleanup:
+  trim:
+    enabled: true
+    days: 3
+  delete:
+    enabled: false
+    days: 30
 conflict_resolution: merge
 share_on_done: false
 sandbox_binds:
@@ -123,12 +130,17 @@ what the settings page saves through:
 $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-   "compiles_cached":true},"conflict_resolution":"Merge",
+   "compiles_cached":true},
+ "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
+   "delete":{"enabled":false,"days":30,"days_configured":false}},
+ "conflict_resolution":"Merge",
  "share_on_done":false,"paths":{"watched":[],"binds":[]}}
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
          "rust_build_cache":{"enabled":true,"size":""},
+         "cleanup":{"trim":{"enabled":true,"days":""},
+           "delete":{"enabled":false,"days":""}},
          "conflict_resolution":"Merge",
          "share_on_done":false,
          "watched_paths":["/home/tobi/src"],
@@ -138,6 +150,8 @@ $ curl -X POST -H 'Content-Type: application/json' \
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
     "compiles_cached":true},
+  "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
+    "delete":{"enabled":false,"days":30,"days_configured":false}},
   "conflict_resolution":"Merge",
   "share_on_done":false,
   "paths":{"watched":[{"path":"/home/tobi/src","source":"Settings",
@@ -203,6 +217,26 @@ wherever a comment lands, the Share pane's press and the settle alike, and never
 deleted. So a conversation shared by hand stays quiet, and a share that failed
 wrote no row and is tried again at the next settle. A failure is a Notice on the
 timeline naming it; a share that worked writes nothing there.
+
+`"cleanup"` is what becomes of a conversation the human has archived: a **trim**
+that takes its bulk — the full agent output, the transcripts and the session
+records, which is everything a share never carried — and a **delete** that takes
+the whole conversation. Each is a switch and a number of days, each clock counts
+from the archiving, and unarchiving stops both. The two default the opposite
+ways about, and an absent key, an absent file and one nothing can parse all say
+it: the trim is **on** at three days, because what it takes is what nobody opens
+twice, and the delete is **off** at thirty, because it is the one thing here
+that forgets. A duration that is not a whole number of days — an empty field
+included — is no duration configured, which is how the default is asked for
+back; `"days_configured"` beside the number is what says which of the two is
+being shown, and the settings page draws the default as a placeholder. Nothing
+here is refused, a delete sooner than the trim included: the clocks are
+independent, so the conversation is simply deleted before it was ever trimmed.
+The sweep reads the file on every pass, an hour apart, so a switch flipped from
+a phone is in force on the next one without a restart. It says what it did in
+the log and nowhere else — no timeline card, no notice — and it touches nothing
+outside Verkstead's own record: the git branch stays, and a published share
+stays published.
 
 `"conflict_resolution"` is what a session sent at a pull request that will not
 merge is told to do about it: `"Merge"`, which merges the base branch into the

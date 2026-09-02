@@ -24,6 +24,13 @@
 //! fact about it travels one way only: whether the server found an sccache to
 //! compile through, which is its own environment and nobody's setting.
 //!
+//! The Cleanup is the build cache's shape twice over: two rows, each a switch
+//! and a duration, each read back with the flag that says whether the duration
+//! is one somebody typed. What is different is that the two rows fall back the
+//! two different ways — the trim is on with nothing configured and the delete
+//! is off — and that neither is ever refused: a delete sooner than a trim is
+//! two independent clocks doing exactly what they were told.
+//!
 //! Sharing to the pull request is plainer still: one switch, written and read
 //! back as itself. It is the one setting here that is **off** with nothing
 //! configured — what it turns on writes to GitHub under the human's own
@@ -71,6 +78,10 @@ pub struct SettingsView {
 
     /// And how the shared Rust build cache stands.
     pub rust_build_cache: BuildCacheView,
+
+    /// And what the Cleanup does to an archived Conversation, and how long
+    /// after the archiving it does it.
+    pub cleanup: CleanupView,
 
     /// And how a conflicted pull request is resolved in every Repo that has not
     /// said otherwise.
@@ -247,6 +258,70 @@ pub struct BuildCacheView {
     pub compiles_cached: bool,
 }
 
+/// The Cleanup as the settings page draws it: the two things that happen to an
+/// archived Conversation, and when.
+///
+/// Two rows of the same shape and two different answers with nothing
+/// configured, which is what the page has to draw: the trim is on at three
+/// days, and the delete is off at thirty.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CleanupView {
+    /// The bulk taken out of an archived Conversation: the full agent output,
+    /// the Transcripts and the session names, which is everything a Share never
+    /// carried.
+    pub trim: CleanupStepView,
+
+    /// And the whole of it taken away, which is the one thing here that
+    /// forgets.
+    pub delete: CleanupStepView,
+}
+
+/// One of those two: whether it happens, and how long after the archiving.
+///
+/// The switch is never null, the way the build cache's is not: what comes back
+/// is where the switch *sits* rather than whether anybody has touched it. The
+/// days are always a number for the same reason, with the flag beside them
+/// saying whether it is one somebody chose — which is what lets the field draw
+/// the default as a placeholder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CleanupStepView {
+    pub enabled: bool,
+
+    /// How many days after the archiving, counted from the archiving itself
+    /// rather than from the other step: the two clocks are independent, so a
+    /// delete sooner than a trim is a Conversation deleted before it was ever
+    /// trimmed rather than anything to put right.
+    pub days: u32,
+
+    /// Whether those days are ones somebody typed, rather than the default
+    /// being shown.
+    pub days_configured: bool,
+}
+
+/// And the Cleanup as the human has just set it.
+///
+/// The days are a string because that is what a form holds, and an empty one is
+/// *no duration configured* rather than a duration of nothing — which is what
+/// clearing the field means and what puts the default back. So is anything that
+/// is not a whole number of days: the page sends what was typed, and nothing
+/// here is refused over it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CleanupEdit {
+    pub trim: CleanupStepEdit,
+    pub delete: CleanupStepEdit,
+}
+
+/// One row of it: the switch, and the days as they were typed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CleanupStepEdit {
+    pub enabled: bool,
+    pub days: String,
+}
+
 /// Who a session's commits are by.
 ///
 /// Two strings rather than two optionals, empty where nothing is configured:
@@ -289,6 +364,11 @@ pub struct SettingsEdit {
     /// there is nothing secret about either, so a save says where they are to
     /// stand and the server writes that down.
     pub rust_build_cache: BuildCacheEdit,
+
+    /// And what the Cleanup is to do after an archiving, as values for that
+    /// reason again: two switches and two durations, and a save says where each
+    /// of them is to stand.
+    pub cleanup: CleanupEdit,
 
     /// And how a conflicted pull request is resolved where its Repo says
     /// nothing, as a value for the same reason: there are two answers and a save

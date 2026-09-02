@@ -160,6 +160,12 @@ describe("the pane", () => {
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
         rust_build_cache: { enabled: UNSET.rust_build_cache.enabled, size: "" },
+        // And the Cleanup where nobody has been: the trim on and the delete
+        // off, with neither duration typed — see [`heldCleanup`].
+        cleanup: {
+          trim: { enabled: true, days: "" },
+          delete: { enabled: false, days: "" },
+        },
         watched_paths: [],
         sandbox_binds: [],
         conflict_resolution: "Rebase",

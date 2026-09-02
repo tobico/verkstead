@@ -11822,6 +11822,83 @@ async fn the_cleanup_trims_what_was_archived_long_enough_ago() {
     pool.close().await;
 }
 
+/// And it goes by what the settings say at the moment of the pass: the switch
+/// off is a sweep that takes nothing, and the days are what it counts as old.
+///
+/// One Conversation and one running server, told three different things in
+/// turn. Nothing is restarted between them, which is the point: the settings are
+/// read off the file on every pass, so a switch flipped from a phone is in force
+/// on the next one.
+#[tokio::test]
+async fn the_cleanup_goes_by_what_the_settings_say_at_the_time() {
+    let bench = bench_at_pace(
+        tempfile::tempdir().unwrap(),
+        PRINTS_AND_STOPS,
+        PULL_REQUEST,
+        *CLEANING,
+        None,
+    )
+    .await;
+
+    // Switched off before there is anything to take, so that what the first
+    // stretch asserts is a sweep that had every chance and declined.
+    cleaning_up(&bench, "cleanup:\n  trim:\n    enabled: false\n");
+
+    let pool = open_database(&bench.database).await.unwrap();
+
+    // Archived four days ago, which is past the three a Verkstead nobody has
+    // configured keeps.
+    let old = archived_printing(&pool, bench.repo_id, "rate-limiting").await;
+    aged(&pool, "archived_conversations", "archived_at", old.id, 4).await;
+
+    // Long enough for many passes, so that what it still holds is held against a
+    // sweep that has had every chance at it.
+    tokio::time::sleep(CLEANING.cleanup * 8).await;
+
+    assert!(
+        !held(&pool, old.id, old.event).await.is_empty(),
+        "the trim is switched off, so the sweep takes nothing at all",
+    );
+
+    // Back on, and told to wait ten days — which this one, at four, has not.
+    cleaning_up(
+        &bench,
+        "cleanup:\n  trim:\n    enabled: true\n    days: 10\n",
+    );
+
+    tokio::time::sleep(CLEANING.cleanup * 8).await;
+
+    assert!(
+        !held(&pool, old.id, old.event).await.is_empty(),
+        "four days is not the ten the settings now say to wait",
+    );
+
+    // And down to two, which it is past. No restart anywhere in any of this.
+    cleaning_up(
+        &bench,
+        "cleanup:\n  trim:\n    enabled: true\n    days: 2\n",
+    );
+
+    until_trimmed(&pool, old.id, old.event).await;
+
+    pool.close().await;
+}
+
+/// Say what the Cleanup is to do, in the Data Directory the running server reads
+/// its settings out of.
+///
+/// Written over the author every sandbox is configured out of rather than beside
+/// it, the way [`configure`] does, and through a rename rather than in place: a
+/// sweep reading the file half-written would read a Verkstead that had been told
+/// nothing, which is precisely the answer these tests are telling it apart from.
+fn cleaning_up(bench: &Bench, said: &str) {
+    let path = bench.state.path().join("config.yaml");
+    let writing = path.with_extension("yaml.writing");
+
+    std::fs::write(&writing, format!("{THE_AUTHOR}{said}")).unwrap();
+    std::fs::rename(&writing, &path).unwrap();
+}
+
 /// A stub that prints once and stops, for a fixture whose sessions never start:
 /// [`bench_at_pace`] wants an agent, and nothing here launches one.
 const PRINTS_AND_STOPS: &str = r#"printf 'nothing to do\n'"#;

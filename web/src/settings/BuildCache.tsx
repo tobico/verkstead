@@ -46,7 +46,7 @@ import type { BuildCacheView, SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldPaths } from "./held";
+import { heldCleanup, heldPaths } from "./held";
 import styles from "./BuildCache.module.css";
 
 /// The settings as they stand, read once for the two panes that draw them.
@@ -184,8 +184,11 @@ export function BuildCachePane(props: {
         // here to stop.
         github_token: "Keep",
         rust_build_cache: edit,
-        // And so is how a conflict is resolved, which is the last section on
-        // the page.
+        // And what becomes of an archived Conversation, likewise — see
+        // [`heldCleanup`].
+        cleanup: heldCleanup(told()),
+        // And so is how a conflict is resolved, which is the section under it
+        // on the page.
         conflict_resolution: told()?.conflict_resolution ?? "Merge",
         // And the switch on the GitHub section, likewise.
         share_on_done: told()?.share_on_done ?? false,
